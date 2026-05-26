@@ -200,12 +200,45 @@ describe("useIssueActions", () => {
     });
 
     act(() => {
+      result.current.openCreateIssueFromCurrent();
+    });
+    expect(mockOpenModal).toHaveBeenLastCalledWith("create-issue", {
+      title: "Example",
+      description: "",
+      parent_issue_id: "issue-1",
+      parent_issue_identifier: "TES-1",
+      block_issue_id_on_create: "issue-1",
+    });
+
+    act(() => {
       result.current.openDeleteConfirm({ onDeletedNavigateTo: "/test/issues" });
     });
     expect(mockOpenModal).toHaveBeenLastCalledWith("issue-delete-confirm", {
       issueId: "issue-1",
       identifier: "TES-1",
       onDeletedNavigateTo: "/test/issues",
+    });
+  });
+
+  it("openCreateIssueFromCurrent forwards description and project context", () => {
+    const issue = {
+      ...mockIssue,
+      description: "Existing body",
+      project_id: "project-1",
+    } as Issue;
+    const { result } = renderHook(() => useIssueActions(issue), { wrapper });
+
+    act(() => {
+      result.current.openCreateIssueFromCurrent();
+    });
+
+    expect(mockOpenModal).toHaveBeenCalledWith("create-issue", {
+      title: "Example",
+      description: "Existing body",
+      parent_issue_id: "issue-1",
+      parent_issue_identifier: "TES-1",
+      block_issue_id_on_create: "issue-1",
+      project_id: "project-1",
     });
   });
 

@@ -123,8 +123,20 @@ export function ManualCreatePanel({
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const modalTitle =
+    typeof data?.title === "string" ? data.title : undefined;
+  const modalDescription =
+    typeof data?.description === "string" ? data.description : undefined;
+  const shouldPersistTitleDraft = modalTitle === undefined;
+  const shouldPersistDescriptionDraft = modalDescription === undefined;
+  const initialTitle = modalTitle ?? draft.title;
+  const initialDescription = modalDescription ?? draft.description;
+  const blockIssueIdOnCreate =
+    typeof data?.block_issue_id_on_create === "string"
+      ? data.block_issue_id_on_create
+      : undefined;
 
-  const [title, setTitle] = useState(draft.title);
+  const [title, setTitle] = useState(initialTitle);
   const [formResetKey, setFormResetKey] = useState(0);
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
@@ -233,7 +245,10 @@ export function ManualCreatePanel({
   }, [t, uploadWithToast]);
 
   // Sync field changes to draft store
-  const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
+  const updateTitle = (v: string) => {
+    setTitle(v);
+    if (shouldPersistTitleDraft) setDraft({ title: v });
+  };
   const updateStatus = (v: IssueStatus) => { setStatus(v); setDraft({ status: v }); };
   const updatePriority = (v: IssuePriority) => { setPriority(v); setDraft({ priority: v }); };
   const updateAssignee = (type?: IssueAssigneeType, id?: string) => {
@@ -395,6 +410,22 @@ export function ManualCreatePanel({
                   failed,
                   total: childIssues.length,
                 }),
+          );
+        }
+      }
+
+      if (blockIssueIdOnCreate) {
+        try {
+          await updateIssueMutation.mutateAsync({
+            id: blockIssueIdOnCreate,
+            status: "blocked",
+          });
+        } catch (err) {
+          console.error("[create-issue] source issue block failed", err);
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.create_issue.toast_block_source_failed),
           );
         }
       }
@@ -601,7 +632,7 @@ export function ManualCreatePanel({
               <TitleEditor
                 key={formResetKey}
                 autoFocus
-                defaultValue={draft.title}
+                defaultValue={title}
                 placeholder={t(($) => $.create_issue.title_placeholder)}
                 className="text-lg font-semibold"
                 onChange={(v) => updateTitle(v)}
@@ -613,9 +644,11 @@ export function ManualCreatePanel({
             <div {...descDropZoneProps} className="relative flex flex-1 min-h-0 overflow-y-auto px-5">
               <ContentEditor
                 ref={descEditorRef}
-                defaultValue={draft.description}
+                defaultValue={initialDescription}
                 placeholder={t(($) => $.create_issue.description_placeholder)}
-                onUpdate={(md) => setDraft({ description: md })}
+                onUpdate={(md) => {
+                  if (shouldPersistDescriptionDraft) setDraft({ description: md });
+                }}
                 onUploadFile={handleUpload}
                 debounceMs={500}
               />

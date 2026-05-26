@@ -143,6 +143,7 @@
     "toast_duplicate_view": "View existing issue",
     "toast_link_subissues_all_failed": "Failed to link sub-issues",
     "toast_link_subissues_partial": "Failed to link {{failed}} of {{total}} sub-issues",
+    "toast_block_source_failed": "Issue created, but failed to mark the original issue as blocked.",
     "switch_to_agent": "Switch to Agent",
     "switch_to_agent_tooltip": "Switch to create with agent — describe in one line and let the agent file it",
     "switch_to_manual": "Switch to Manual",

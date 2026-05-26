@@ -8,6 +8,7 @@ import {
   ArrowUp,
   Calendar,
   CalendarClock,
+  CopyPlus,
   FolderOpen,
   Link2,
   MoreHorizontal,
@@ -101,6 +102,7 @@ export function IssueActionsMenuItems({
     updateField,
     togglePin,
     copyLink,
+    openCreateIssueFromCurrent,
     openCreateSubIssue,
     openSetParent,
     openAddChild,
@@ -271,11 +273,15 @@ export function IssueActionsMenuItems({
         <FolderOpen className="h-3.5 w-3.5" />
         {t(($) => $.actions.copy_workdir_path)}
       </P.Item>
+      <P.Item onClick={openCreateIssueFromCurrent}>
+        <CopyPlus className="h-3.5 w-3.5" />
+        {t(($) => $.actions.create_from_issue)}
+      </P.Item>
 
       <P.Separator />
 
-      {/* Relationship actions live under "More" — they're lower-frequency and
-          will grow (blocks, duplicates, related) as we add more relation types. */}
+      {/* Lower-frequency relationship actions live under "More" and will grow
+          (blocks, duplicates, related) as we add more relation types. */}
       <P.Sub>
         <P.SubTrigger>
           <MoreHorizontal className="h-3.5 w-3.5" />

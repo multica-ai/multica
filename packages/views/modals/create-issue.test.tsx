@@ -21,6 +21,7 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
+const mockUpdateIssue = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
@@ -116,7 +117,7 @@ vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
 
 vi.mock("@multica/core/issues/mutations", () => ({
   useCreateIssue: () => ({ mutateAsync: mockCreateIssue }),
-  useUpdateIssue: () => ({ mutate: vi.fn() }),
+  useUpdateIssue: () => ({ mutate: vi.fn(), mutateAsync: mockUpdateIssue }),
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
@@ -434,6 +435,7 @@ describe("CreateIssueModal", () => {
       title: "Ship create issue regression coverage",
       status: "todo",
     });
+    mockUpdateIssue.mockResolvedValue({});
     mockUploadWithToast.mockResolvedValue(null);
     mockUploadState.uploading = false;
   });
@@ -483,6 +485,116 @@ describe("CreateIssueModal", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/TES-123");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
+  });
+
+  it("prefills title and description from modal data without writing them to the draft", () => {
+    renderModal(
+      <CreateIssueModal
+        onClose={vi.fn()}
+        data={{
+          title: "Original issue title",
+          description: "Original issue body",
+          project_id: "proj-1",
+          parent_issue_id: "issue-parent",
+        }}
+      />,
+    );
+
+    expect(screen.getByPlaceholderText("Issue title")).toHaveValue("Original issue title");
+    expect(screen.getByPlaceholderText("Add description...")).toHaveValue("Original issue body");
+    expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project-id", "proj-1");
+    expect(mockSetDraft).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Original issue title",
+      }),
+    );
+    expect(mockSetDraft).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Original issue body",
+      }),
+    );
+  });
+
+  it("creates from modal data as a child issue and blocks the source issue after create", async () => {
+    const user = userEvent.setup();
+
+    renderModal(
+      <CreateIssueModal
+        onClose={vi.fn()}
+        data={{
+          title: "Original issue title",
+          description: "Original issue body",
+          project_id: "proj-1",
+          parent_issue_id: "issue-parent",
+          block_issue_id_on_create: "issue-parent",
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Original issue title",
+          description: "Original issue body",
+          project_id: "proj-1",
+          parent_issue_id: "issue-parent",
+        }),
+      );
+    });
+    expect(mockUpdateIssue).toHaveBeenCalledWith({
+      id: "issue-parent",
+      status: "blocked",
+    });
+  });
+
+  it("does not block the source issue when create fails", async () => {
+    const user = userEvent.setup();
+    mockCreateIssue.mockRejectedValue(new Error("create failed"));
+
+    renderModal(
+      <CreateIssueModal
+        onClose={vi.fn()}
+        data={{
+          title: "Original issue title",
+          project_id: "proj-1",
+          parent_issue_id: "issue-parent",
+          block_issue_id_on_create: "issue-parent",
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("create failed"));
+    expect(mockUpdateIssue).not.toHaveBeenCalled();
+  });
+
+  it("shows a warning when blocking the source issue fails after create succeeds", async () => {
+    const user = userEvent.setup();
+    mockUpdateIssue.mockRejectedValue(new Error("block failed"));
+
+    renderModal(
+      <CreateIssueModal
+        onClose={vi.fn()}
+        data={{
+          title: "Original issue title",
+          project_id: "proj-1",
+          parent_issue_id: "issue-parent",
+          block_issue_id_on_create: "issue-parent",
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalled());
+    expect(mockUpdateIssue).toHaveBeenCalledWith({
+      id: "issue-parent",
+      status: "blocked",
+    });
+    expect(mockToastError).toHaveBeenCalledWith("block failed");
   });
 
   it("keeps manual mode open and clears content when create another is enabled", async () => {
