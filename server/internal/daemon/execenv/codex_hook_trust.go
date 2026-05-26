@@ -13,35 +13,53 @@ type codexHookTrustBlock struct {
 	body   []string
 }
 
+type codexHookTrustSyncResult struct {
+	SharedHooksCount int
+	MappedHooksCount int
+	StaleHooksCount  int
+	Changed          bool
+}
+
 var hooksStateTableHeaderRe = regexp.MustCompile(`^\s*\[\s*hooks\s*\.\s*state\s*\.\s*"((?:\\.|[^"\\])*)"\s*\]\s*(?:#.*)?$`)
 
 // syncCodexHookTrustState maps trusted shared ~/.codex/hooks.json handlers
 // into the per-task CODEX_HOME/hooks.json source IDs that Codex actually
 // evaluates at startup.
 func syncCodexHookTrustState(sharedConfigPath, taskConfigPath, sharedHooksPath, taskHooksPath string) error {
+	_, err := syncCodexHookTrustStateWithResult(sharedConfigPath, taskConfigPath, sharedHooksPath, taskHooksPath)
+	return err
+}
+
+func syncCodexHookTrustStateWithResult(sharedConfigPath, taskConfigPath, sharedHooksPath, taskHooksPath string) (codexHookTrustSyncResult, error) {
+	var result codexHookTrustSyncResult
+
 	taskData, err := os.ReadFile(taskConfigPath)
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read per-task config.toml: %w", err)
+		return result, fmt.Errorf("read per-task config.toml: %w", err)
 	}
 	originalTaskContent := string(taskData)
-	taskContent := removeHooksStateBlocks(originalTaskContent, taskHooksPath)
+	taskContent, staleCount := removeHooksStateBlocksWithCount(originalTaskContent, taskHooksPath)
+	result.StaleHooksCount = staleCount
 
 	if regularFileExists(sharedHooksPath) && regularFileExists(taskHooksPath) {
 		sharedData, err := os.ReadFile(sharedConfigPath)
 		if err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("read shared config.toml: %w", err)
+			return result, fmt.Errorf("read shared config.toml: %w", err)
 		}
 		blocks := extractHooksStateBlocks(string(sharedData), sharedHooksPath)
+		result.SharedHooksCount = len(blocks)
+		result.MappedHooksCount = len(blocks)
 		taskContent = appendMappedHooksStateBlocks(taskContent, taskHooksPath, blocks)
 	}
 
 	if taskContent == originalTaskContent {
-		return nil
+		return result, nil
 	}
 	if err := os.WriteFile(taskConfigPath, []byte(taskContent), 0o644); err != nil {
-		return fmt.Errorf("write per-task config.toml: %w", err)
+		return result, fmt.Errorf("write per-task config.toml: %w", err)
 	}
-	return nil
+	result.Changed = true
+	return result, nil
 }
 
 func regularFileExists(path string) bool {
@@ -75,9 +93,15 @@ func extractHooksStateBlocks(content, sourcePath string) []codexHookTrustBlock {
 }
 
 func removeHooksStateBlocks(content, sourcePath string) string {
+	updated, _ := removeHooksStateBlocksWithCount(content, sourcePath)
+	return updated
+}
+
+func removeHooksStateBlocksWithCount(content, sourcePath string) (string, int) {
 	prefix := sourcePath + ":"
 	lines := splitLinesKeepingEndings(content)
 	out := make([]string, 0, len(lines))
+	removed := 0
 	for i := 0; i < len(lines); {
 		key, ok := hooksStateKey(lines[i])
 		if !ok || !strings.HasPrefix(key, prefix) {
@@ -86,12 +110,13 @@ func removeHooksStateBlocks(content, sourcePath string) string {
 			continue
 		}
 
+		removed++
 		i++
 		for i < len(lines) && !isTOMLTableHeader(lines[i]) {
 			i++
 		}
 	}
-	return strings.Join(out, "")
+	return strings.Join(out, ""), removed
 }
 
 func appendMappedHooksStateBlocks(content, taskHooksPath string, blocks []codexHookTrustBlock) string {
