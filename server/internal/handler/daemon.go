@@ -1122,6 +1122,11 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 	}
 	m.UpdateMs = time.Since(updateStart).Milliseconds()
 
+	// CEREBRO-PATCH(capability-register-heartbeat-mirror): FIR-2284 keep the
+	// runtime's tool inventory loaded continuously in the capability register the
+	// unified tool table reads. Throttled + detached, so it adds no heartbeat latency.
+	h.maybeMirrorRuntimeCapabilitySnapshot(rt.ID, rt.WorkspaceID, rt.Capabilities)
+
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
 
 	ack := &protocol.DaemonHeartbeatAckPayload{

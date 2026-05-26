@@ -76,6 +76,24 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		return nil, err
 	}
 
+	// When a runtime is in scope (a runtime page, or an agent page where the
+	// agent's runtime is known) the table must show what THAT runtime can do —
+	// not every tool in the workspace. The capability register records which
+	// runtime reported/owns each tool in cerebro_capability_subject, so we keep
+	// only capabilities tied to the queried runtime. Without a runtime in scope
+	// (Valid=false → $2 is NULL, which the EXISTS never matches) we fall back to
+	// the full workspace universe rather than returning nothing.
+	runtimeFilter := ""
+	if in.RuntimeID.Valid {
+		runtimeFilter = `
+		 AND EXISTS (
+		   SELECT 1 FROM cerebro_capability_subject sub
+		   WHERE sub.capability_id = c.id
+		     AND sub.subject_type = 'runtime'
+		     AND sub.subject_id = $2
+		 )`
+	}
+
 	// One row per (tool, matching policy layer). The LEFT JOIN keeps tools with
 	// no settings (NULL layer), and the subject predicates mirror
 	// ListCerebroToolPolicyForContext so an absent (Valid=false) subject id —
@@ -93,7 +111,7 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		   (p.layer = 'user'    AND p.subject_id = $4) OR
 		   (p.layer = 'group'   AND p.subject_id = ANY($5::uuid[]))
 		 )
-		WHERE c.workspace_id = $1
+		WHERE c.workspace_id = $1`+runtimeFilter+`
 		ORDER BY c.category, lower(c.title), c.capability_key
 	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs)
 	if err != nil {

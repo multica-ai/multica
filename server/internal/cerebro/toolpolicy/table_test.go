@@ -37,6 +37,23 @@ func addCap(t *testing.T, s *Store, key, title, category, source string) {
 	}
 }
 
+// addCapSubject ties a capability to a subject (e.g. the runtime that reported
+// it) so the runtime-scoped table filter keeps it. Looks the capability id up
+// by its workspace+key. relation is one of reporter/owner/user.
+func addCapSubject(t *testing.T, s *Store, capKey, subjectType string, subjectID pgtype.UUID, relation string) {
+	t.Helper()
+	if _, err := s.pool.Exec(context.Background(), `
+		INSERT INTO cerebro_capability_subject
+			(capability_id, workspace_id, subject_type, subject_id, relation, metadata, first_seen_at, last_seen_at)
+		SELECT c.id, c.workspace_id, $3, $4, $5, '{}', now(), now()
+		FROM cerebro_capability c
+		WHERE c.workspace_id = $1 AND c.capability_key = $2
+		ON CONFLICT (capability_id, subject_type, subject_id, relation) DO NOTHING
+	`, tpTestWorkspaceID, capKey, subjectType, subjectID, relation); err != nil {
+		t.Fatalf("attach subject %s to %q: %v", subjectType, capKey, err)
+	}
+}
+
 func findRow(rows []TableRow, key string) (TableRow, bool) {
 	for _, r := range rows {
 		if r.ToolKey == key {
@@ -113,6 +130,8 @@ func TestTable_RuntimeViewIgnoresOtherSubjects(t *testing.T) {
 
 	runtime, otherAgent := uuidByte(1), uuidByte(7)
 	addCap(t, s, "deploy_restart", "Restart deploy", "Deploy", "builtin")
+	// The runtime reported this tool, so it survives the runtime-scoped filter.
+	addCapSubject(t, s, "deploy_restart", "runtime", runtime, "reporter")
 
 	if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: "deploy_restart", Layer: LayerRuntime, SubjectID: runtime, Setting: SettingAsk}); err != nil {
 		t.Fatalf("set runtime: %v", err)
@@ -138,6 +157,48 @@ func TestTable_RuntimeViewIgnoresOtherSubjects(t *testing.T) {
 	}
 	if row.Effective.Setting != SettingAsk || row.Effective.DecidedBy != LayerRuntime {
 		t.Fatalf("effective = %q by %q, want ask/runtime", row.Effective.Setting, row.Effective.DecidedBy)
+	}
+}
+
+// TestTable_RuntimeViewShowsOnlyThatRuntimesTools proves the runtime-scoped
+// table lists only the tools the queried runtime reported — a tool another
+// runtime reported must not bleed onto this runtime's page (FIR-2284: "open a
+// runtime, see what IT can do"). Without a runtime in scope the full workspace
+// universe still shows.
+func TestTable_RuntimeViewShowsOnlyThatRuntimesTools(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	runtimeA, runtimeB := uuidByte(20), uuidByte(21)
+	addCap(t, s, "bash", "Bash", "tools", "runtime_report")
+	addCap(t, s, "firtal_bq_query", "firtal_bq_query", "tools", "scan")
+	// runtimeA reported Bash; runtimeB reported the bq query tool.
+	addCapSubject(t, s, "bash", "runtime", runtimeA, "reporter")
+	addCapSubject(t, s, "firtal_bq_query", "runtime", runtimeB, "reporter")
+
+	rowsA, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, RuntimeID: runtimeA})
+	if err != nil {
+		t.Fatalf("table runtimeA: %v", err)
+	}
+	if _, ok := findRow(rowsA, "bash"); !ok {
+		t.Fatal("runtimeA page missing its own tool bash")
+	}
+	if _, leaked := findRow(rowsA, "firtal_bq_query"); leaked {
+		t.Fatalf("runtimeB's tool leaked onto runtimeA page: %d rows", len(rowsA))
+	}
+	if len(rowsA) != 1 {
+		t.Fatalf("runtimeA page got %d rows, want 1 (only its own tool)", len(rowsA))
+	}
+
+	// No runtime in scope → full workspace universe (both tools).
+	rowsAll, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID})
+	if err != nil {
+		t.Fatalf("table no-runtime: %v", err)
+	}
+	if len(rowsAll) != 2 {
+		t.Fatalf("workspace view got %d rows, want 2 (full universe)", len(rowsAll))
 	}
 }
 

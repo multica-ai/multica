@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -143,6 +145,12 @@ func (h *Handler) ReportCapabilities(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) persistRuntimeCapabilitySnapshot(r *http.Request, rtID, workspaceID pgtype.UUID, snapshot json.RawMessage) {
+	h.persistRuntimeCapabilitySnapshotCtx(r.Context(), rtID, workspaceID, snapshot)
+}
+
+// persistRuntimeCapabilitySnapshotCtx is the context-based core so callers off
+// the HTTP request (e.g. the throttled heartbeat mirror below) can reuse it.
+func (h *Handler) persistRuntimeCapabilitySnapshotCtx(ctx context.Context, rtID, workspaceID pgtype.UUID, snapshot json.RawMessage) {
 	if h.capabilityRegister == nil {
 		return
 	}
@@ -167,7 +175,41 @@ func (h *Handler) persistRuntimeCapabilitySnapshot(r *http.Request, rtID, worksp
 			Users:    []CapabilitySubject{reporter},
 		})
 	}
-	_, _ = h.capabilityRegister.Report(r.Context(), workspaceID, reporter, reports)
+	_, _ = h.capabilityRegister.Report(ctx, workspaceID, reporter, reports)
+}
+
+// CEREBRO-PATCH(capability-register-heartbeat-mirror): FIR-2284 — load each
+// runtime's tools continuously. The register-time mirror only fires on daemon
+// (re)register or CLI-version drift, so a runtime that registered before this
+// bridge existed — or that simply never changes version — never lands its tools
+// in the register the unified table reads, and its runtime page shows none of
+// its own tools. The snapshot already lives on agent_runtime.capabilities, so
+// re-mirror it on the heartbeat: throttled per runtime, and run detached so it
+// never adds latency to the heartbeat ack. Best-effort, like the mirrors above.
+const runtimeCapabilitySnapshotMirrorInterval = 5 * time.Minute
+
+// runtimeCapabilitySnapshotMirroredAt debounces the heartbeat mirror per runtime
+// within this process. Prod is single-instance; a missed beat just retries on
+// the next interval. The key set is bounded by the number of runtimes.
+var runtimeCapabilitySnapshotMirroredAt sync.Map // runtimeID string -> time.Time
+
+func (h *Handler) maybeMirrorRuntimeCapabilitySnapshot(rtID, workspaceID pgtype.UUID, snapshot json.RawMessage) {
+	if h.capabilityRegister == nil || len(snapshot) == 0 {
+		return
+	}
+	key := uuidToString(rtID)
+	now := time.Now()
+	if prev, ok := runtimeCapabilitySnapshotMirroredAt.Load(key); ok {
+		if last, ok := prev.(time.Time); ok && now.Sub(last) < runtimeCapabilitySnapshotMirrorInterval {
+			return
+		}
+	}
+	runtimeCapabilitySnapshotMirroredAt.Store(key, now)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		h.persistRuntimeCapabilitySnapshotCtx(ctx, rtID, workspaceID, snapshot)
+	}()
 }
 
 func capabilityItemsFromSnapshot(snapshot map[string]json.RawMessage) []capabilityReportItem {

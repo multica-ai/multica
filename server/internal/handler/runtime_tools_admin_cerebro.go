@@ -241,6 +241,13 @@ func (h *Handler) RequestRuntimeToolScan(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	h.DaemonHub.RequestToolScan(uuidToString(rtID))
+	// CEREBRO-PATCH(runtime-tools-scan-now-snapshot-mirror): FIR-2284 — the daemon
+	// push above only scans external MCP servers (tools_config.mcpServers); a
+	// local daemon with none reports nothing, so "Scan now" looked like it did
+	// nothing. Mirror the runtime's stored built-in snapshot into the register
+	// now so the runtime's own tools surface in the unified table immediately;
+	// any MCP tools the async scan finds are added on top when it reports back.
+	h.persistRuntimeCapabilitySnapshot(r, rt.ID, rt.WorkspaceID, rt.Capabilities)
 	w.WriteHeader(http.StatusAccepted)
 }
 
