@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Clipboard,
-  Image,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -73,6 +72,7 @@ import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { uploadMobileAsset, type MobileUploadAsset } from "../../platform/upload";
 import { colors, radii, spacing } from "../../theme/tokens";
+import { ImagePreviewModal } from "./image-preview-modal";
 import {
   createDraftCommentAttachment,
   type DraftCommentAttachment,
@@ -111,6 +111,8 @@ type CommentListRow =
   | { key: string; kind: "footer"; rootId: string };
 type AttachmentPreviewState = {
   attachment: Attachment;
+  imageAttachments?: Attachment[];
+  imageIndex?: number;
   textContent?: string;
   error?: string;
   loading?: boolean;
@@ -513,12 +515,14 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     setAttachmentPreview(null);
   }, []);
 
-  const openAttachmentPreview = useCallback(async (attachment: Attachment) => {
+  const openAttachmentPreview = useCallback(async (attachment: Attachment, attachmentGroup: Attachment[] = [attachment]) => {
     previewAbortRef.current?.abort();
     previewAbortRef.current = null;
 
     if (isImageAttachment(attachment)) {
-      setAttachmentPreview({ attachment });
+      const imageAttachments = attachmentGroup.filter(isImageAttachment);
+      const imageIndex = Math.max(0, imageAttachments.findIndex((item) => item.id === attachment.id));
+      setAttachmentPreview({ attachment, imageAttachments, imageIndex });
       return;
     }
 
@@ -1609,7 +1613,7 @@ const TimelineItem = memo(function TimelineItem({
   onChangeEdit?: (content: string) => void;
   onCopyComment?: (content: string) => void;
   onDelete?: (commentId: string) => void;
-  onOpenAttachment?: (attachment: Attachment) => void;
+  onOpenAttachment?: (attachment: Attachment, attachmentGroup: Attachment[]) => void;
   onIssueMentionPress?: (issueId: string) => void;
   onReply?: (commentId: string) => void;
   onSaveEdit?: (commentId: string) => void;
@@ -1911,7 +1915,7 @@ function AttachmentList({
 }: {
   attachments: Attachment[];
   compact?: boolean;
-  onOpen: (attachment: Attachment) => void;
+  onOpen: (attachment: Attachment, attachmentGroup: Attachment[]) => void;
   onRemove?: (attachmentId: string) => void;
   removingAttachmentId?: string | null;
 }) {
@@ -1926,7 +1930,7 @@ function AttachmentList({
       {attachments.map((attachment) => (
         <Pressable
           key={attachment.id}
-          onPress={() => onOpen(attachment)}
+          onPress={() => onOpen(attachment, attachments)}
           style={({ pressed }) => [
             styles.attachmentRow,
             pressed && styles.buttonPressed,
@@ -1935,7 +1939,7 @@ function AttachmentList({
           <View style={styles.attachmentContent}>
             <Text style={styles.attachmentName}>{attachment.filename}</Text>
             <Text style={styles.attachmentMeta}>
-              {formatBytes(attachment.size_bytes)} / {attachment.content_type || t("issues.file")} / {attachmentPreviewLabel(attachment, t)}
+              {attachmentMetaLabel(attachment, t)}
             </Text>
           </View>
           {onRemove ? (
@@ -2015,73 +2019,85 @@ function AttachmentPreviewModal({
   const url = attachment ? attachment.download_url || attachment.url : "";
   const canPreviewImage = Boolean(attachment && isImageAttachment(attachment));
   const canPreviewText = Boolean(attachment && isTextPreviewAttachment(attachment));
+  const imageAttachments = useMemo(() => (
+    preview?.imageAttachments?.length ? preview.imageAttachments : attachment && canPreviewImage ? [attachment] : []
+  ), [attachment, canPreviewImage, preview?.imageAttachments]);
+
+  if (canPreviewImage) {
+    return (
+      <ImagePreviewModal
+        imageAttachments={imageAttachments}
+        initialIndex={preview?.imageIndex ?? 0}
+        onClose={onClose}
+        open={open}
+      />
+    );
+  }
 
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={open}>
-      <View style={styles.previewModal}>
-        <View style={styles.previewHeader}>
-          <View style={styles.previewTitleGroup}>
-            <Text numberOfLines={1} style={styles.previewTitle}>
-              {attachment?.filename ?? t("issues.attachment")}
-            </Text>
-            {attachment ? (
-              <Text style={styles.previewMeta}>
-                {formatBytes(attachment.size_bytes)} / {attachment.content_type || t("issues.file")}
+      <View style={styles.previewModalRoot}>
+        <View style={styles.previewModal}>
+          <View style={styles.previewHeader}>
+            <View style={styles.previewTitleGroup}>
+              <Text numberOfLines={1} style={styles.previewTitle}>
+                {attachment?.filename ?? t("issues.attachment")}
               </Text>
+              {attachment ? (
+                <Text style={styles.previewMeta}>
+                  {formatBytes(attachment.size_bytes)} / {attachment.content_type || t("issues.file")}
+                </Text>
+              ) : null}
+            </View>
+            {attachment ? (
+              <View style={styles.previewActions}>
+                <Button onPress={() => void Linking.openURL(url)} variant="secondary">
+                  {t("common.open")}
+                </Button>
+                <Button onPress={onClose} variant="ghost">
+                  {t("common.close")}
+                </Button>
+              </View>
             ) : null}
           </View>
-          {attachment ? (
-            <View style={styles.previewActions}>
-              <Button onPress={() => void Linking.openURL(url)} variant="secondary">
-                {t("common.open")}
-              </Button>
-              <Button onPress={onClose} variant="ghost">
-                {t("common.close")}
-              </Button>
-            </View>
-          ) : null}
-        </View>
 
-        <View style={styles.previewBody}>
-          {attachment && canPreviewImage ? (
-            <Image resizeMode="contain" source={{ uri: url }} style={styles.previewImage} />
-          ) : null}
+          <View style={styles.previewBody}>
+            {attachment && canPreviewText ? (
+              preview?.loading ? (
+                <View style={styles.previewCentered}>
+                  <ActivityIndicator />
+                  <Text style={styles.attachmentMeta}>{t("issues.loading_preview")}</Text>
+                </View>
+              ) : (
+                <ScrollView contentContainerStyle={styles.previewTextContent}>
+                  <Text selectable style={styles.previewText}>
+                    {preview?.error ?? preview?.textContent ?? t("issues.no_preview_available")}
+                  </Text>
+                </ScrollView>
+              )
+            ) : null}
 
-          {attachment && canPreviewText ? (
-            preview?.loading ? (
+            {attachment && !canPreviewText ? (
               <View style={styles.previewCentered}>
-                <ActivityIndicator />
-                <Text style={styles.attachmentMeta}>{t("issues.loading_preview")}</Text>
-              </View>
-            ) : (
-              <ScrollView contentContainerStyle={styles.previewTextContent}>
-                <Text selectable style={styles.previewText}>
-                  {preview?.error ?? preview?.textContent ?? t("issues.no_preview_available")}
+                <Text style={styles.previewUnsupportedTitle}>{t("issues.preview_unavailable")}</Text>
+                <Text style={styles.previewUnsupportedBody}>
+                  {t("issues.preview_unsupported_body")}
                 </Text>
-              </ScrollView>
-            )
-          ) : null}
+                <Button onPress={() => void Linking.openURL(url)} variant="secondary">
+                  {t("issues.open_externally")}
+                </Button>
+              </View>
+            ) : null}
 
-          {attachment && !canPreviewImage && !canPreviewText ? (
-            <View style={styles.previewCentered}>
-              <Text style={styles.previewUnsupportedTitle}>{t("issues.preview_unavailable")}</Text>
-              <Text style={styles.previewUnsupportedBody}>
-                {t("issues.preview_unsupported_body")}
-              </Text>
-              <Button onPress={() => void Linking.openURL(url)} variant="secondary">
-                {t("issues.open_externally")}
-              </Button>
-            </View>
-          ) : null}
-
-          {attachment && preview?.error && !canPreviewText ? (
-            <View style={styles.previewCentered}>
-              <Text style={styles.errorText}>{preview.error}</Text>
-              <Button onPress={() => void Linking.openURL(url)} variant="secondary">
-                {t("issues.open_externally")}
-              </Button>
-            </View>
-          ) : null}
+            {attachment && preview?.error && !canPreviewText ? (
+              <View style={styles.previewCentered}>
+                <Text style={styles.errorText}>{preview.error}</Text>
+                <Button onPress={() => void Linking.openURL(url)} variant="secondary">
+                  {t("issues.open_externally")}
+                </Button>
+              </View>
+            ) : null}
+          </View>
         </View>
       </View>
     </Modal>
@@ -2346,6 +2362,12 @@ function attachmentPreviewLabel(attachment: Attachment, t: Translate) {
   if (isImageAttachment(attachment)) return t("issues.tap_to_view");
   if (isTextPreviewAttachment(attachment)) return t("issues.tap_to_preview");
   return t("issues.tap_to_open");
+}
+
+function attachmentMetaLabel(attachment: Attachment, t: Translate) {
+  const fileInfo = `${formatBytes(attachment.size_bytes)} / ${attachment.content_type || t("issues.file")}`;
+  if (isImageAttachment(attachment)) return fileInfo;
+  return `${fileInfo} / ${attachmentPreviewLabel(attachment, t)}`;
 }
 
 function formatDocumentPickerError(err: unknown, t: Translate) {
@@ -3141,6 +3163,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "500",
   },
+  previewModalRoot: {
+    flex: 1,
+  },
   previewModal: {
     backgroundColor: colors.background,
     flex: 1,
@@ -3176,11 +3201,6 @@ const styles = StyleSheet.create({
   },
   previewBody: {
     flex: 1,
-  },
-  previewImage: {
-    flex: 1,
-    height: "100%",
-    width: "100%",
   },
   previewCentered: {
     alignItems: "center",
