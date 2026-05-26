@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
-import { Virtuoso } from "react-virtuoso";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, Fragment } from "react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -56,6 +56,7 @@ import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
+import { IssueJumpFab } from "./issue-jump-fab";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
@@ -720,7 +721,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso prop would never receive the element. Callback ref + state fixes
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [jumpScrollAction, setJumpScrollAction] = useState<"to-comment-box" | "to-top" | null>(null);
+  const jumpScrollRafRef = useRef<number | null>(null);
+  const jumpAutoDismissTimeoutRef = useRef<number | null>(null);
+  const lastJumpScrollTopRef = useRef(0);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -1066,6 +1072,116 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [allChildrenSelected, childIssueIds, deselectIds, selectIds]);
 
   const loading = issueLoading;
+
+  const clearJumpAutoDismissTimeout = useCallback(() => {
+    if (jumpAutoDismissTimeoutRef.current === null) return;
+    window.clearTimeout(jumpAutoDismissTimeoutRef.current);
+    jumpAutoDismissTimeoutRef.current = null;
+  }, []);
+
+  const updateJumpScrollState = useCallback(() => {
+    if (!scrollContainerEl) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainerEl;
+    const maxScrollTop = scrollHeight - clientHeight;
+    const distanceFromBottom = maxScrollTop - scrollTop;
+    const lastScrollTop = lastJumpScrollTopRef.current;
+    const scrolledDown = scrollTop > lastScrollTop;
+    const scrolledUp = scrollTop < lastScrollTop;
+    lastJumpScrollTopRef.current = scrollTop;
+
+    if (maxScrollTop <= 0) {
+      clearJumpAutoDismissTimeout();
+      setJumpScrollAction(null);
+      return;
+    }
+
+    if (distanceFromBottom <= 120) {
+      clearJumpAutoDismissTimeout();
+      setJumpScrollAction("to-top");
+      return;
+    }
+
+    if (scrolledDown) {
+      clearJumpAutoDismissTimeout();
+      setJumpScrollAction(null);
+      return;
+    }
+
+    if (scrolledUp && distanceFromBottom > 300) {
+      setJumpScrollAction("to-comment-box");
+      clearJumpAutoDismissTimeout();
+      jumpAutoDismissTimeoutRef.current = window.setTimeout(() => {
+        setJumpScrollAction(null);
+        jumpAutoDismissTimeoutRef.current = null;
+      }, 3000);
+    }
+  }, [clearJumpAutoDismissTimeout, scrollContainerEl]);
+
+  const scheduleJumpScrollStateUpdate = useCallback(() => {
+    if (jumpScrollRafRef.current !== null) return;
+    jumpScrollRafRef.current = window.requestAnimationFrame(() => {
+      jumpScrollRafRef.current = null;
+      updateJumpScrollState();
+    });
+  }, [updateJumpScrollState]);
+
+  useLayoutEffect(() => {
+    if (!scrollContainerEl) return;
+
+    updateJumpScrollState();
+    scrollContainerEl.addEventListener("scroll", scheduleJumpScrollStateUpdate, { passive: true });
+    window.addEventListener("resize", scheduleJumpScrollStateUpdate);
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(scheduleJumpScrollStateUpdate);
+      resizeObserver.observe(scrollContainerEl);
+      if (scrollContainerEl.firstElementChild) {
+        resizeObserver.observe(scrollContainerEl.firstElementChild);
+      }
+    }
+
+    const timeout = window.setTimeout(updateJumpScrollState, 250);
+
+    return () => {
+      scrollContainerEl.removeEventListener("scroll", scheduleJumpScrollStateUpdate);
+      window.removeEventListener("resize", scheduleJumpScrollStateUpdate);
+      resizeObserver?.disconnect();
+      if (jumpScrollRafRef.current !== null) {
+        window.cancelAnimationFrame(jumpScrollRafRef.current);
+        jumpScrollRafRef.current = null;
+      }
+      clearJumpAutoDismissTimeout();
+      window.clearTimeout(timeout);
+    };
+  }, [clearJumpAutoDismissTimeout, scrollContainerEl, scheduleJumpScrollStateUpdate, updateJumpScrollState, items.length]);
+
+  const handleJumpScroll = useCallback(() => {
+    if (!scrollContainerEl) return;
+
+    clearJumpAutoDismissTimeout();
+
+    if (jumpScrollAction === "to-top") {
+      scrollContainerEl.scrollTo({ top: 0, behavior: "smooth" });
+      setJumpScrollAction(null);
+      return;
+    }
+
+    if (virtuosoRef.current && items.length > 0) {
+      virtuosoRef.current.scrollToIndex({
+        index: items.length - 1,
+        align: "end",
+        behavior: "smooth",
+      });
+      setJumpScrollAction(null);
+      return;
+    }
+
+    const maxScrollTop = scrollContainerEl.scrollHeight - scrollContainerEl.clientHeight;
+    scrollContainerEl.scrollTo({ top: maxScrollTop, behavior: "smooth" });
+    setJumpScrollAction(null);
+  }, [clearJumpAutoDismissTimeout, items.length, jumpScrollAction, scrollContainerEl]);
 
   // Deep-link landing. Semantically equivalent to navigating to
   // `#comment-${id}`: find the element with that id, scrollIntoView it.
@@ -1634,7 +1750,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       : [];
 
   const detailContent = (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div className="relative flex h-full min-w-0 flex-1 flex-col">
         <BreadcrumbHeader
           segments={breadcrumbSegments}
           leaf={
@@ -1732,6 +1848,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <div
           ref={setScrollContainerEl}
           data-tab-scroll-root
+          data-testid="issue-detail-scroll-container"
           className="relative flex-1 overflow-y-auto"
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
@@ -1991,6 +2108,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 ) : (
                   <div className="mt-4">
                     <Virtuoso
+                      ref={virtuosoRef}
                       key={`${wsId}:${id}`}
                       customScrollParent={scrollContainerEl}
                       data={items}
@@ -2028,6 +2146,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>
         </div>
         </div>
+        {jumpScrollAction && (
+          <IssueJumpFab
+            direction={jumpScrollAction === "to-top" ? "up" : "down"}
+            position={jumpScrollAction === "to-top" ? "top" : "bottom"}
+            onClick={handleJumpScroll}
+            label={
+              jumpScrollAction === "to-top"
+                ? t(($) => $.detail.jump_to_top)
+                : t(($) => $.detail.jump_to_comment_box)
+            }
+          />
+        )}
       </div>
   );
 
