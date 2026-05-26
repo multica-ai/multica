@@ -115,9 +115,11 @@
 
 /* CEREBRO-PATCH(todo-list-editor): custom checkbox design — replaces the cheap,
    OS-native control with a design-token toggle that clearly reads as clickable,
-   so it is obvious how an item is marked done. One selector pair styles both the
-   editor (TaskItem: label > input) and readonly (GFM: bare input) render paths. */
-.rich-text-editor li[data-type="taskItem"],
+   so it is obvious how an item is marked done. Tiptap renders the task list as
+   <ul data-type="taskList"><li data-checked="..."> (data-type lives on the UL,
+   not the LI — FIR-2297 follow-up). GFM readonly renders <li class="task-list-item">.
+   Both render paths share the same look. */
+.rich-text-editor ul[data-type="taskList"] > li,
 .rich-text-editor li.task-list-item {
   align-items: flex-start;
   display: flex;
@@ -125,7 +127,7 @@
   margin: 0.125rem 0;
 }
 
-.rich-text-editor li[data-type="taskItem"] > label {
+.rich-text-editor ul[data-type="taskList"] > li > label {
   align-items: center;
   display: inline-flex;
   flex: 0 0 auto;
@@ -134,7 +136,7 @@
   user-select: none;
 }
 
-.rich-text-editor li[data-type="taskItem"] > label > input[type="checkbox"],
+.rich-text-editor ul[data-type="taskList"] > li > label > input[type="checkbox"],
 .rich-text-editor li.task-list-item > input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
@@ -161,20 +163,20 @@
   margin-top: 0.1875rem;
 }
 
-.rich-text-editor li[data-type="taskItem"] > label > input[type="checkbox"]:hover:not(:disabled),
+.rich-text-editor ul[data-type="taskList"] > li > label > input[type="checkbox"]:hover:not(:disabled),
 .rich-text-editor li.task-list-item > input[type="checkbox"]:hover:not(:disabled) {
   border-color: var(--brand);
   background-color: color-mix(in oklab, var(--brand) 10%, var(--background));
 }
 
-.rich-text-editor li[data-type="taskItem"] > label > input[type="checkbox"]:checked,
+.rich-text-editor ul[data-type="taskList"] > li > label > input[type="checkbox"]:checked,
 .rich-text-editor li.task-list-item > input[type="checkbox"]:checked {
   border-color: var(--brand);
   background-color: var(--brand);
   background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%20fill='none'%20stroke='white'%20stroke-width='2.5'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3.5%208.5l3%203%206-6'/%3E%3C/svg%3E");
 }
 
-.rich-text-editor li[data-type="taskItem"] > label > input[type="checkbox"]:focus-visible,
+.rich-text-editor ul[data-type="taskList"] > li > label > input[type="checkbox"]:focus-visible,
 .rich-text-editor li.task-list-item > input[type="checkbox"]:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 1px;
@@ -182,17 +184,17 @@
 
 /* Disabled (readonly) checkboxes stay fully legible — only the cursor changes,
    so a done/not-done state reads clearly in comments. */
-.rich-text-editor li[data-type="taskItem"] > label > input[type="checkbox"]:disabled,
+.rich-text-editor ul[data-type="taskList"] > li > label > input[type="checkbox"]:disabled,
 .rich-text-editor li.task-list-item > input[type="checkbox"]:disabled {
   cursor: default;
 }
 
-.rich-text-editor li[data-type="taskItem"] > div {
+.rich-text-editor ul[data-type="taskList"] > li > div {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.rich-text-editor li[data-type="taskItem"][data-checked="true"] > div,
+.rich-text-editor ul[data-type="taskList"] > li[data-checked="true"] > div,
 .rich-text-editor li.task-list-item:has(> input[type="checkbox"]:checked) {
   color: var(--muted-foreground);
   text-decoration: line-through;
