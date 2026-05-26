@@ -158,6 +158,8 @@ type Handler struct {
 	runtimeToolsScan RuntimeToolsScanService
 	// CEREBRO-PATCH(handler-capability-register): FIR-2129 normalized capability register.
 	capabilityRegister CapabilityRegisterService
+	// CEREBRO-PATCH(handler-cloud-runtime-tool-scan): FIR-2284 server-side scan for cloud runtimes.
+	cloudRuntimeToolScanner CloudRuntimeToolScanner
 }
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime

@@ -117,5 +117,9 @@ func (h *Handler) IngestRuntimeToolScan(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "record scan: "+err.Error())
 		return
 	}
+	// CEREBRO-PATCH(runtime-tools-scan-capability-bridge): FIR-2284 — the legacy
+	// RecordScan above only fills cerebro_runtime_tool; mirror the scanned MCP
+	// tools into the capability register so they show up in the unified table.
+	h.persistScannedToolsToCapabilityRegister(r, rt.ID, rt.WorkspaceID, body.Servers)
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -99,6 +99,20 @@ func (h *Handler) SetRuntimeToolsAdmin(svc RuntimeToolsAdminService) {
 	h.runtimeToolsAdmin = svc
 }
 
+// CloudRuntimeToolScanner runs an immediate, server-side tool inventory scan for
+// cloud (firtal-gateway) runtimes. Those runtimes have no daemon connected to
+// the daemon websocket, so the daemon-push "Scan now" path returns 502; this
+// seam lets the handler enumerate their built-in tool surface in-process
+// instead. Wired in cmd/server (FIR-2284).
+type CloudRuntimeToolScanner interface {
+	Scan(ctx context.Context, runtimeID, workspaceID pgtype.UUID) error
+}
+
+// SetCloudRuntimeToolScanner wires the cloud-runtime scanner into the handler.
+func (h *Handler) SetCloudRuntimeToolScanner(s CloudRuntimeToolScanner) {
+	h.cloudRuntimeToolScanner = s
+}
+
 // loadRuntimeForAdmin is the auth gate for the runtime-tool admin endpoints.
 // Resolves the runtime, then requires the caller to be an owner/admin in the
 // runtime's workspace.
@@ -196,6 +210,26 @@ func (h *Handler) RequestRuntimeToolScan(w http.ResponseWriter, r *http.Request)
 	}
 	rtID, _, ok := h.loadRuntimeForAdmin(w, r)
 	if !ok {
+		return
+	}
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), rtID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+	// CEREBRO-PATCH(runtime-tools-scan-now-cloud): FIR-2284 — cloud (firtal-gateway)
+	// runtimes run server-side and never connect to the daemon websocket, so the
+	// daemon-push path below always 502s for them. Scan them in-process instead.
+	if rt.RuntimeMode == "cloud" || rt.Provider == "firtal-gateway" {
+		if h.cloudRuntimeToolScanner == nil {
+			writeError(w, http.StatusServiceUnavailable, "cloud runtime scanner not enabled")
+			return
+		}
+		if err := h.cloudRuntimeToolScanner.Scan(r.Context(), rt.ID, rt.WorkspaceID); err != nil {
+			writeError(w, http.StatusInternalServerError, "cloud runtime scan: "+err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
 		return
 	}
 	if h.DaemonHub == nil {

@@ -59,6 +59,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 	// CEREBRO-PATCH(router-capability-register): FIR-2129 capability register service.
 	cerebrocapabilityregistry "github.com/multica-ai/multica/server/internal/cerebro/capabilityregistry"
+	// CEREBRO-PATCH(router-cloud-runtime-tool-scan): FIR-2284 server-side cloud-runtime tool scan.
+	"github.com/multica-ai/multica/server/internal/cerebro/cloudtoolscan"
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler import
 	cerebrotasks "github.com/multica-ai/multica/server/internal/cerebro/tasks"
 	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler import
@@ -328,7 +330,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.SetRuntimeToolsAdmin(newRuntimeToolsAdminAdapter(runtimeToolsSvc))
 	h.SetRuntimeToolsScan(newRuntimeToolsScanAdapter(runtimeToolsSvc))
 	// CEREBRO-PATCH(router-capability-register): FIR-2129 wire capability register API.
-	h.SetCapabilityRegister(newCapabilityRegisterAdapter(cerebrocapabilityregistry.New(pool)))
+	capabilityRegisterSvc := cerebrocapabilityregistry.New(pool)
+	h.SetCapabilityRegister(newCapabilityRegisterAdapter(capabilityRegisterSvc))
+	// CEREBRO-PATCH(router-cloud-runtime-tool-scan): FIR-2284 — server-side "Scan now"
+	// for cloud runtimes (no daemon): record the gateway's callable built-in tool
+	// surface into the capability register (the unified table's source) + legacy inventory.
+	h.SetCloudRuntimeToolScanner(cloudtoolscan.New(capabilityRegisterSvc, runtimeToolsSvc, callableCloudToolMeta()))
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
 	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler

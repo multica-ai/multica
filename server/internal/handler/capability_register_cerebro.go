@@ -195,6 +195,59 @@ func capabilityItemsFromSnapshot(snapshot map[string]json.RawMessage) []capabili
 	return items
 }
 
+// CEREBRO-PATCH(capability-register-scan-bridge): FIR-2284 — a daemon MCP
+// tools/list scan ("Scan now") lands in the legacy cerebro_runtime_tool list,
+// but the unified FIR-2230 tool-policy table reads the capability register
+// (cerebro_capability). Mirror the scanned MCP tools into the register so a
+// scan actually surfaces them in the table the admin screen renders — the same
+// bridge persistRuntimeCapabilitySnapshot does for the heartbeat snapshot.
+// Best-effort: a register failure must not fail the daemon's scan ingest, so
+// the error is swallowed exactly like the heartbeat mirror above.
+func (h *Handler) persistScannedToolsToCapabilityRegister(r *http.Request, rtID, workspaceID pgtype.UUID, servers []RuntimeToolScanServer) {
+	if h.capabilityRegister == nil {
+		return
+	}
+	reporter := CapabilitySubject{Type: "runtime", ID: uuidToString(rtID)}
+	reports := scannedMCPToolCapabilityReports(servers, reporter)
+	if len(reports) == 0 {
+		return
+	}
+	_, _ = h.capabilityRegister.Report(r.Context(), workspaceID, reporter, reports)
+}
+
+// scannedMCPToolCapabilityReports maps a daemon tools/list scan payload to
+// capability-register reports. The capability key is the namespaced MCP action
+// "<server>.<tool>" (e.g. "bigquery.query") — the shape the tool-policy resolver
+// keys on (see toolpolicy/table.go) — so an Allow/Ask/Deny an admin sets on a
+// scanned row binds to the real call. Servers the daemon could not reach
+// (non-empty Error) and blank names are skipped, mirroring RecordScan, so a
+// transient scan failure never injects empty rows.
+func scannedMCPToolCapabilityReports(servers []RuntimeToolScanServer, reporter CapabilitySubject) []CapabilityReportInput {
+	reports := make([]CapabilityReportInput, 0)
+	for _, srv := range servers {
+		serverName := strings.TrimSpace(srv.Name)
+		if srv.Error != "" || serverName == "" {
+			continue
+		}
+		for _, t := range srv.Tools {
+			toolName := strings.TrimSpace(t.Name)
+			if toolName == "" {
+				continue
+			}
+			reports = append(reports, CapabilityReportInput{
+				Key:         serverName + "." + toolName,
+				Title:       toolName,
+				Category:    serverName,
+				Description: t.Description,
+				Source:      "scan",
+				Owners:      []CapabilitySubject{reporter},
+				Users:       []CapabilitySubject{reporter},
+			})
+		}
+	}
+	return reports
+}
+
 func (h *Handler) capabilityWorkspace(w http.ResponseWriter, r *http.Request) (string, pgtype.UUID, bool) {
 	wsID := r.URL.Query().Get("workspace_id")
 	wsUUID, ok := parseUUIDOrBadRequest(w, wsID, "workspace_id")
