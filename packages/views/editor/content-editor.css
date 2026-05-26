@@ -123,15 +123,20 @@
 .rich-text-editor li.task-list-item {
   align-items: flex-start;
   display: flex;
-  gap: 0.5rem;
-  margin: 0.125rem 0;
+  gap: 0.625rem;
+  margin: 0.25rem 0;
+  list-style: none;
+}
+
+.rich-text-editor ul[data-type="taskList"] {
+  padding-left: 0;
 }
 
 .rich-text-editor ul[data-type="taskList"] > li > label {
   align-items: center;
   display: inline-flex;
   flex: 0 0 auto;
-  height: 1.5rem;
+  height: 1.625rem;
   margin: 0;
   user-select: none;
 }
@@ -142,31 +147,33 @@
   -webkit-appearance: none;
   box-sizing: border-box;
   flex: 0 0 auto;
-  width: 1rem;
-  height: 1rem;
+  width: 1.125rem;
+  height: 1.125rem;
   margin: 0;
-  border: 1.5px solid color-mix(in oklab, var(--foreground) 28%, transparent);
-  border-radius: 0.25rem;
+  border: 1.5px solid color-mix(in oklab, var(--foreground) 40%, transparent);
+  border-radius: 9999px;
   background-color: transparent;
   background-position: center;
   background-repeat: no-repeat;
-  background-size: 0.7rem 0.7rem;
+  background-size: 0.75rem 0.75rem;
   cursor: pointer;
   transition:
     background-color 0.12s ease,
-    border-color 0.12s ease;
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
 }
 
 /* Readonly (comments) has no <label> wrapper to centre the box, so nudge the
    bare input down to align with the first line of text. */
 .rich-text-editor li.task-list-item > input[type="checkbox"] {
-  margin-top: 0.1875rem;
+  margin-top: 0.25rem;
 }
 
 .rich-text-editor ul[data-type="taskList"] > li > label > input[type="checkbox"]:hover:not(:disabled),
 .rich-text-editor li.task-list-item > input[type="checkbox"]:hover:not(:disabled) {
   border-color: var(--brand);
-  background-color: color-mix(in oklab, var(--brand) 10%, var(--background));
+  background-color: color-mix(in oklab, var(--brand) 12%, var(--background));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 10%, transparent);
 }
 
 .rich-text-editor ul[data-type="taskList"] > li > label > input[type="checkbox"]:checked,
