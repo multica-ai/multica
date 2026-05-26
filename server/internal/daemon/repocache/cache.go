@@ -136,7 +136,7 @@ func gitCloneBare(url, dest string) error {
 	}
 	// Ensure fetch refspec is configured so `git fetch` updates local branches.
 	// `git clone --bare` doesn't set this by default.
-	cmd = exec.Command("git", "-C", dest, "config", "remote.origin.fetch", "+refs/heads/*:refs/heads/*")
+	cmd = exec.Command("git", "--git-dir="+dest, "config", "remote.origin.fetch", "+refs/heads/*:refs/heads/*")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("configure fetch refspec: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -144,7 +144,7 @@ func gitCloneBare(url, dest string) error {
 }
 
 func gitFetch(barePath string) error {
-	cmd := exec.Command("git", "-C", barePath, "fetch", "origin")
+	cmd := exec.Command("git", "--git-dir="+barePath, "fetch", "origin")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git fetch: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -224,7 +224,7 @@ func createWorktree(gitRoot, worktreePath, branchName, baseRef string) error {
 }
 
 func runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef string) error {
-	cmd := exec.Command("git", "-C", gitRoot, "worktree", "add", "-b", branchName, worktreePath, baseRef)
+	cmd := exec.Command("git", "--git-dir="+gitRoot, "worktree", "add", "-b", branchName, worktreePath, baseRef)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -235,7 +235,7 @@ func runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef string) error {
 // Tries HEAD, then falls back to "main", then "master".
 func getRemoteDefaultBranch(barePath string) string {
 	// In a bare repo, HEAD points to the default branch.
-	cmd := exec.Command("git", "-C", barePath, "symbolic-ref", "HEAD")
+	cmd := exec.Command("git", "--git-dir="+barePath, "symbolic-ref", "HEAD")
 	if out, err := cmd.Output(); err == nil {
 		ref := strings.TrimSpace(string(out))
 		// ref looks like "refs/heads/main" — return just the branch name.
@@ -246,12 +246,12 @@ func getRemoteDefaultBranch(barePath string) string {
 	}
 
 	// Fallback: check if main branch exists.
-	cmd = exec.Command("git", "-C", barePath, "rev-parse", "--verify", "main")
+	cmd = exec.Command("git", "--git-dir="+barePath, "rev-parse", "--verify", "main")
 	if err := cmd.Run(); err == nil {
 		return "main"
 	}
 
-	cmd = exec.Command("git", "-C", barePath, "rev-parse", "--verify", "master")
+	cmd = exec.Command("git", "--git-dir="+barePath, "rev-parse", "--verify", "master")
 	if err := cmd.Run(); err == nil {
 		return "master"
 	}

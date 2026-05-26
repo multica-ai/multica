@@ -11,6 +11,9 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// Worklog remains a legacy issue-bound duration model.
+// Phase 1 time recording flows must use time_entry instead of adding new
+// user-facing behavior here.
 type WorklogResponse struct {
 	ID              string  `json:"id"`
 	IssueID         string  `json:"issue_id"`

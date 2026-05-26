@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -208,9 +209,10 @@ func (h *PomodoroHandler) PausePomodoro(w http.ResponseWriter, r *http.Request) 
 
 // completePomodoroRequest is the optional JSON body for POST /api/pomodoro/complete.
 type completePomodoroRequest struct {
-	IssueID        *string `json:"issue_id,omitempty"`
-	Note           *string `json:"note,omitempty"`
-	LongBreakAfter int     `json:"long_break_after"` // how many pomodoros before a long break; default 4
+	IssueID        *string  `json:"issue_id,omitempty"`
+	Note           *string  `json:"note,omitempty"`
+	LabelIDs       []string `json:"label_ids,omitempty"`
+	LongBreakAfter int      `json:"long_break_after"` // how many pomodoros before a long break; default 4
 }
 
 // CompletePomodoro handles POST /api/pomodoro/complete.
@@ -272,7 +274,7 @@ func (h *PomodoroHandler) CompletePomodoro(w http.ResponseWriter, r *http.Reques
 		}
 
 		stopTime := pgtype.Timestamptz{Time: time.Now(), Valid: true}
-		_, teErr := h.queries.CreateTimeEntry(ctx, db.CreateTimeEntryParams{
+		entry, teErr := h.queries.CreateTimeEntry(ctx, db.CreateTimeEntryParams{
 			WorkspaceID:     workspaceID,
 			UserID:          userID,
 			IssueID:         issueID,
@@ -285,6 +287,31 @@ func (h *PomodoroHandler) CompletePomodoro(w http.ResponseWriter, r *http.Reques
 		if teErr != nil {
 			// Non-fatal — log but continue with phase transition.
 			slog.Warn("pomodoro complete: failed to create time entry", append(logger.RequestAttrs(r), "error", teErr)...)
+		} else {
+			// Best-effort label attachment for the generated pomodoro time entry.
+			for _, labelID := range req.LabelIDs {
+				trimmedID := strings.TrimSpace(labelID)
+				if trimmedID == "" {
+					continue
+				}
+
+				labelUUID := parseUUID(trimmedID)
+				if !labelUUID.Valid {
+					continue
+				}
+				if _, err := h.queries.GetTimeEntryLabelInWorkspace(ctx, db.GetTimeEntryLabelInWorkspaceParams{
+					ID:          labelUUID,
+					WorkspaceID: workspaceID,
+				}); err != nil {
+					continue
+				}
+				if err := h.queries.AddTimeEntryLabel(ctx, db.AddTimeEntryLabelParams{
+					TimeEntryID: entry.ID,
+					LabelID:     labelUUID,
+				}); err != nil {
+					slog.Warn("pomodoro complete: failed to add label", append(logger.RequestAttrs(r), "error", err, "label_id", trimmedID)...)
+				}
+			}
 		}
 
 		// Increment the pomodoro count and decide next break length.

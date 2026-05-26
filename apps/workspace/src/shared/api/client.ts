@@ -49,8 +49,12 @@ import type {
   AISettingsResponse,
   UpdateAISettingsRequest,
   TimeEntry,
+  TimeEntryLabel,
   CreateTimeEntryRequest,
+  SwitchTimeEntryRequest,
   UpdateTimeEntryRequest,
+  TimeEntryOverlapConflict,
+  TimeEntryOverlapErrorPayload,
   TeamTimeStats,
   DailyReview,
   DailyPlan,
@@ -83,6 +87,17 @@ export class BulkCreateApiError extends Error {
   constructor(errors: BulkCreateIssueError[]) {
     super("Some rows have validation errors");
     this.errors = errors;
+  }
+}
+
+export class TimeEntryOverlapApiError extends Error {
+  code = "time_entry_overlap" as const;
+  conflicts: TimeEntryOverlapConflict[];
+
+  constructor(payload: TimeEntryOverlapErrorPayload) {
+    super(payload.error);
+    this.conflicts = payload.conflicts;
+    Object.setPrototypeOf(this, TimeEntryOverlapApiError.prototype);
   }
 }
 
@@ -128,14 +143,15 @@ export class ApiClient {
     }
   }
 
-  private async parseErrorMessage(res: Response, fallback: string): Promise<string> {
+  private async parseErrorPayload(
+    res: Response,
+  ): Promise<{ error?: string; code?: string; conflicts?: TimeEntryOverlapConflict[] } | null> {
     try {
-      const data = await res.json() as { error?: string };
-      if (typeof data.error === "string" && data.error) return data.error;
+      return await res.json() as { error?: string; code?: string; conflicts?: TimeEntryOverlapConflict[] };
     } catch {
       // Ignore non-JSON error bodies.
     }
-    return fallback;
+    return null;
   }
 
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -159,8 +175,16 @@ export class ApiClient {
     });
 
     if (!res.ok) {
+      const data = await this.parseErrorPayload(res);
+      if (res.status === 409 && data?.code === "time_entry_overlap") {
+        throw new TimeEntryOverlapApiError({
+          error: typeof data.error === "string" && data.error ? data.error : "time entry overlaps an existing entry",
+          code: "time_entry_overlap",
+          conflicts: Array.isArray(data.conflicts) ? data.conflicts : [],
+        });
+      }
       if (res.status === 401) this.handleUnauthorized();
-      const message = await this.parseErrorMessage(res, `API error: ${res.status} ${res.statusText}`);
+      const message = typeof data?.error === "string" && data.error ? data.error : `API error: ${res.status} ${res.statusText}`;
       this.logger.error(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
       throw new Error(message);
     }
@@ -286,7 +310,8 @@ export class ApiClient {
           throw new Error("Validation failed");
         }
       }
-      const message = await this.parseErrorMessage(res, `API error: ${res.status} ${res.statusText}`);
+      const payload = await this.parseErrorPayload(res);
+      const message = payload?.error ?? `API error: ${res.status} ${res.statusText}`;
       throw new Error(message);
     }
     return res.json() as Promise<BulkCreateIssuesResponse>;
@@ -803,7 +828,8 @@ export class ApiClient {
 
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized();
-      const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
+      const payload = await this.parseErrorPayload(res);
+      const message = payload?.error ?? `Upload failed: ${res.status}`;
       this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
       throw new Error(message);
     }
@@ -845,6 +871,15 @@ export class ApiClient {
   /** Start a live timer or create a manual time entry. */
   async startTimeEntry(data: CreateTimeEntryRequest): Promise<TimeEntry> {
     return this.fetch("/api/time-entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  /** Switch from the current timer to a new context. */
+  async switchTimeEntry(data: SwitchTimeEntryRequest): Promise<TimeEntry> {
+    return this.fetch("/api/time-entries/switch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -901,6 +936,60 @@ export class ApiClient {
   async getTeamTimeStats(params: { since: string; until: string }): Promise<TeamTimeStats> {
     const search = new URLSearchParams({ since: params.since, until: params.until });
     return this.fetch(`/api/time-entries/team-stats?${search}`);
+  }
+
+  /** List workspace-scoped labels for time entries. */
+  async listTimeEntryLabels(): Promise<TimeEntryLabel[]> {
+    const res = await this.fetch<{ labels: TimeEntryLabel[] }>("/api/time-entry-labels");
+    return res.labels;
+  }
+
+  /** Create or reuse a workspace-scoped time-entry label. */
+  async createTimeEntryLabel(data: { name: string; color?: string }): Promise<TimeEntryLabel> {
+    return this.fetch("/api/time-entry-labels", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  /** Update a workspace-scoped time-entry label. */
+  async updateTimeEntryLabel(id: string, data: { name: string; color: string }): Promise<TimeEntryLabel> {
+    return this.fetch(`/api/time-entry-labels/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  /** Delete a workspace-scoped time-entry label. */
+  async deleteTimeEntryLabel(id: string): Promise<void> {
+    await this.fetch(`/api/time-entry-labels/${id}`, { method: "DELETE" });
+  }
+
+  /** Add one label to a time entry. */
+  async addTimeEntryLabel(entryId: string, data: { label_id?: string; name?: string; color?: string }): Promise<TimeEntry> {
+    return this.fetch(`/api/time-entries/${entryId}/labels`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  /** Replace all labels on a time entry. */
+  async setTimeEntryLabels(entryId: string, data: { label_ids: string[] }): Promise<TimeEntry> {
+    return this.fetch(`/api/time-entries/${entryId}/labels`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  }
+
+  /** Remove one label from a time entry. */
+  async removeTimeEntryLabel(entryId: string, labelId: string): Promise<TimeEntry> {
+    return this.fetch(`/api/time-entries/${entryId}/labels/${labelId}`, {
+      method: "DELETE",
+    });
   }
 
   /** Get total time spent for a project (all time, all members). */

@@ -2,17 +2,19 @@
 
 import { useMemo, useState, useRef } from "react";
 import { Link } from "@tanstack/react-router";
-import { Clock, Play, Square, Pencil, CalendarDays } from "lucide-react";
+import { Clock, Play, Square, Pencil, CalendarDays, Plus } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { TimeEntry } from "@/shared/types";
 import {
   useCurrentTimerQuery,
   useTimeEntriesQuery,
-  useStartTimerMutation,
   useStopTimerMutation,
 } from "../hooks/use-time-tracking";
+import { useTimeEntryActions } from "../hooks/use-time-entry-actions";
 import { LiveDuration, formatDuration } from "../components/LiveDuration";
 import { TimeEntryEditSheet } from "../components/TimeEntryEditSheet";
+import { TimeEntryCreateSheet } from "../components/TimeEntryCreateSheet";
+import { ConfirmTimerSwitchDialog } from "../components/ConfirmTimerSwitchDialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -71,45 +73,77 @@ function sumDuration(entries: TimeEntry[]): number {
  * Inline bar at the top of My Time page that lets users kick off a new timer.
  * Hidden while a timer is already running.
  */
-function StartTimerBar() {
+function StartTimerBar({ currentEntry }: { currentEntry: TimeEntry | null }) {
   const [description, setDescription] = useState("");
+  const [isStarting, setIsStarting] = useState(false);
+  const [isSwitching, setIsSwitching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const startMutation = useStartTimerMutation();
+  const { requestStart, pendingSwitch, confirmSwitch, setPendingSwitch } = useTimeEntryActions({ currentEntry });
 
-  const handleStart = () => {
+  const handleStart = async () => {
+    if (isStarting) return;
     const now = new Date().toISOString();
-    startMutation.mutate(
-      { description: description.trim() || undefined, start_time: now },
-      {
-        onSuccess: () => setDescription(""),
-        onError: () => toast.error("Failed to start timer"),
-      },
-    );
+    setIsStarting(true);
+    try {
+      const result = await requestStart({
+        description: description.trim() || undefined,
+        start_time: now,
+      });
+      // Only clear input if the timer actually started (not just staged for confirmation)
+      if (result !== null) {
+        setDescription("");
+      }
+    } catch (error) {
+      toast.error("Failed to start timer");
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  const handleConfirmSwitch = async () => {
+    setIsSwitching(true);
+    try {
+      await confirmSwitch();
+      setDescription("");
+    } catch (error) {
+      toast.error("Failed to switch timer");
+    } finally {
+      setIsSwitching(false);
+    }
   };
 
   return (
-    <div className="flex items-center gap-2 rounded-lg border bg-card px-4 py-3">
-      <Play className="size-4 shrink-0 text-muted-foreground" />
-      <Input
-        ref={inputRef}
-        placeholder="What are you working on? (press Enter to start)"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") handleStart();
-        }}
-        className="h-8 flex-1 border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
+    <>
+      <div className="flex items-center gap-2 rounded-lg border bg-card px-4 py-3">
+        <Play className="size-4 shrink-0 text-muted-foreground" />
+        <Input
+          ref={inputRef}
+          placeholder="What are you working on? (press Enter to start)"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleStart();
+          }}
+          className="h-8 flex-1 border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
+        />
+        <Button
+          size="sm"
+          className="shrink-0"
+          disabled={isStarting}
+          onClick={handleStart}
+        >
+          <Play className="mr-1.5 size-3.5" />
+          Start
+        </Button>
+      </div>
+
+      <ConfirmTimerSwitchDialog
+        open={!!pendingSwitch}
+        isLoading={isSwitching}
+        onCancel={() => setPendingSwitch(null)}
+        onConfirm={handleConfirmSwitch}
       />
-      <Button
-        size="sm"
-        className="shrink-0"
-        disabled={startMutation.isPending}
-        onClick={handleStart}
-      >
-        <Play className="mr-1.5 size-3.5" />
-        Start
-      </Button>
-    </div>
+    </>
   );
 }
 
@@ -171,13 +205,29 @@ function EntryRow({
       aria-label="Edit time entry"
     >
       <div className="min-w-0 flex-1">
-        {entry.description ? (
-          <span className="text-foreground">{entry.description}</span>
-        ) : (
-          <span className="text-muted-foreground italic">No description</span>
-        )}
-        {entry.type === "pomodoro" && (
-          <span className="ml-1.5 text-xs" title="Pomodoro">🍅</span>
+        <div className="flex min-w-0 items-center gap-1.5">
+          {entry.description ? (
+            <span className="truncate text-foreground">{entry.description}</span>
+          ) : (
+            <span className="text-muted-foreground italic">No description</span>
+          )}
+          {entry.type === "pomodoro" && (
+            <span className="text-xs" title="Pomodoro">🍅</span>
+          )}
+        </div>
+        {entry.labels && entry.labels.length > 0 && (
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {entry.labels.map((label) => (
+              <Badge
+                key={label.id}
+                variant="outline"
+                className="h-5 px-1.5 text-[10px]"
+                style={{ borderColor: label.color, color: label.color }}
+              >
+                {label.name}
+              </Badge>
+            ))}
+          </div>
         )}
       </div>
       {isRunning ? (
@@ -213,6 +263,8 @@ export function MyTimePage() {
 
   // Controls which entry is open in the edit sheet.
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
+  // Controls the create sheet visibility.
+  const [createSheetOpen, setCreateSheetOpen] = useState(false);
 
   // API returns TimeEntry[] directly
   const entries: TimeEntry[] = listData ?? [];
@@ -240,10 +292,20 @@ export function MyTimePage() {
           <Clock className="size-5 text-muted-foreground" />
           <h1 className="text-lg font-semibold">My Time</h1>
         </div>
-        <Link to="/my-time/calendar" className={buttonVariants({ variant: "outline", size: "sm" })}>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCreateSheetOpen(true)}
+          >
+            <Plus className="mr-1.5 size-3.5" />
+            Add entry
+          </Button>
+          <Link to="/my-time/calendar" className={buttonVariants({ variant: "outline", size: "sm" })}>
             <CalendarDays className="mr-1.5 size-3.5" />
             Calendar
           </Link>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
@@ -258,7 +320,7 @@ export function MyTimePage() {
           {currentEntry ? (
             <RunningTimerCard entry={currentEntry} />
           ) : (
-            <StartTimerBar />
+            <StartTimerBar currentEntry={currentEntry ?? null} />
           )}
 
           {/* Entry history */}
@@ -312,6 +374,12 @@ export function MyTimePage() {
       <TimeEntryEditSheet
         entry={editingEntry}
         onClose={() => setEditingEntry(null)}
+      />
+
+      {/* Time entry create sheet */}
+      <TimeEntryCreateSheet
+        open={createSheetOpen}
+        onClose={() => setCreateSheetOpen(false)}
       />
     </div>
   );

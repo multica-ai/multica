@@ -1,17 +1,42 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page, type TestInfo } from "@playwright/test";
 import { loginAsDefault, createTestApi } from "./helpers";
 import type { TestApiClient } from "./fixtures";
 
-test.describe("Time tracking", () => {
-  let api: TestApiClient;
+function scopeForTest(testInfo: TestInfo): string {
+  return `time-tracking-${testInfo.line}`;
+}
 
-  test.beforeEach(async ({ page }) => {
-    api = await createTestApi("time-tracking");
-    await loginAsDefault(page, "time-tracking");
+function formatLocalTime(date: Date): string {
+  return date.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+async function setDateTimePicker(page: Page, triggerName: string, date: Date) {
+  await page.getByRole("button", { name: triggerName }).click();
+  const timeInput = page.getByPlaceholder("HH:mm:ss");
+  await expect(timeInput).toBeVisible();
+  await timeInput.fill(formatLocalTime(date));
+  await page.getByRole("button", { name: "Apply" }).click();
+}
+
+test.describe("Time tracking", () => {
+  let api: TestApiClient | undefined;
+
+  test.beforeEach(async ({ page }, testInfo) => {
+    const scope = scopeForTest(testInfo);
+    api = await createTestApi(scope);
+    await loginAsDefault(page, scope);
   });
 
   test.afterEach(async () => {
-    await api.cleanup();
+    if (api) {
+      await api.cleanup();
+      api = undefined;
+    }
   });
 
   // ── My Time page ───────────────────────────────────────────────────────────
@@ -122,7 +147,10 @@ test.describe("Time tracking", () => {
     await expect(page.getByText("E2E linked entry")).toBeVisible({ timeout: 5000 });
 
     // Total badge should be visible (non-zero).
-    await expect(page.locator("text=10:00").or(page.locator("[class*=badge]").filter({ hasText: /\d+:\d+/ }))).toBeVisible({ timeout: 5000 });
+    // Use .first() to avoid strict mode — there may be multiple time displays on the page.
+    await expect(
+      page.locator("text=10:00").or(page.locator("[class*=badge]").filter({ hasText: /\d+:\d+/ })).first()
+    ).toBeVisible({ timeout: 5000 });
   });
 
   // ── Switch timer flow ──────────────────────────────────────────────────────
@@ -143,36 +171,118 @@ test.describe("Time tracking", () => {
     await api.stopTimer(running.id as string);
   });
 
-  // ── Delete entry ───────────────────────────────────────────────────────────
+  // ── Historical overlap warning ─────────────────────────────────────────────
 
-  test("can delete a time entry from the My Time page", async ({ page }) => {
+  test("historical overlap shows a warning and requires confirmation", async ({ page }) => {
+    const sourceStart = new Date();
+    sourceStart.setHours(9, 0, 0, 0);
+    const sourceStop = new Date(sourceStart);
+    sourceStop.setHours(10, 0, 0, 0);
+    const overlapStart = new Date(sourceStart);
+    overlapStart.setMinutes(30, 0, 0);
+    const overlapStop = new Date(sourceStop);
+    overlapStop.setMinutes(30, 0, 0);
+
+    await api.createTimeEntry({
+      start_time: sourceStart.toISOString(),
+      stop_time: sourceStop.toISOString(),
+      description: "Existing overlap source",
+    });
+
+    await page.goto("/my-time");
+    await page.getByRole("button", { name: /add entry/i }).click();
+    await page.getByLabel(/description/i).fill("Potential overlap");
+    await setDateTimePicker(page, "Pick start time", overlapStart);
+    await setDateTimePicker(page, "Pick stop time", overlapStop);
+    await page.getByRole("button", { name: /save entry/i }).click();
+
+    await expect(page.getByText(/may overlap with an existing entry/i)).toBeVisible();
+    await page.getByRole("button", { name: /save anyway/i }).click();
+    await expect(
+      page
+        .locator('button[aria-label="Edit time entry"]')
+        .filter({ hasText: "Potential overlap" })
+        .first()
+    ).toBeVisible();
+  });
+
+  // ── Delete with confirmation and undo ──────────────────────────────────────
+
+  test("delete requires confirmation and supports undo", async ({ page }) => {
     const now = new Date();
     const start = new Date(now.getTime() - 5 * 60 * 1000);
     const entry = await api.createTimeEntry({
       start_time: start.toISOString(),
       stop_time: now.toISOString(),
-      description: "E2E delete me",
+      description: "E2E undo delete target",
     });
 
     await page.goto("/my-time");
+    const targetEntryRow = page
+      .locator('button[aria-label="Edit time entry"]')
+      .filter({ hasText: "E2E undo delete target" })
+      .first();
+    await expect(targetEntryRow).toBeVisible({ timeout: 5000 });
 
-    await expect(page.getByText("E2E delete me")).toBeVisible({ timeout: 5000 });
+    // Open edit sheet by clicking the entry.
+    await targetEntryRow.click();
 
-    // Open the entry options menu.
-    const row = page.locator("[data-testid='time-entry-row']", { hasText: "E2E delete me" })
-      .or(page.locator(".group", { hasText: "E2E delete me" }));
-    await row.hover();
-    await row.getByRole("button", { name: /options/i }).click();
+    // Click delete button in the edit sheet.
+    await page.getByRole("button", { name: /^delete$/i }).click();
 
-    // Click Delete.
-    await page.getByRole("menuitem", { name: /delete/i }).click();
+    // Confirmation dialog should appear.
+    await expect(page.getByRole("dialog", { name: /delete time entry/i })).toBeVisible();
+    await page.getByRole("button", { name: /confirm delete/i }).click();
 
-    // Entry should be gone.
-    await expect(page.getByText("E2E delete me")).not.toBeVisible({ timeout: 5000 });
+    // Dialog should close and a toast with undo should appear.
+    await expect(page.getByRole("dialog", { name: /delete time entry/i })).not.toBeVisible();
 
-    // Prevent double-cleanup.
+    // Look for undo button in toast.
+    const undoButton = page.getByRole("button", { name: /undo/i });
+    await expect(undoButton).toBeVisible({ timeout: 5000 });
+
+    // Click undo.
+    await undoButton.click();
+
+    // Entry should be restored.
+    await expect(targetEntryRow).toBeVisible({ timeout: 5000 });
+
+    // Prevent double-cleanup since we restored.
     api["createdTimeEntryIds"] = (api["createdTimeEntryIds"] as string[]).filter(
       (id) => id !== entry.id,
     );
+  });
+
+  // ── Switch confirmation ────────────────────────────────────────────────────
+
+  test("switching from another issue asks for confirmation before replacing the current timer", async ({ page }) => {
+    const issue1 = await api.createIssue("Switch source");
+    const issue2 = await api.createIssue("Switch target");
+    await api.startTimer({ issue_id: issue1.id, description: "Original timer" });
+
+    await page.goto(`/issues/${issue2.id}`);
+    await page.getByRole("button", { name: /switch timer/i }).click();
+    await page.getByRole("textbox", { name: /what are you working on\?/i }).fill("Replacement timer");
+    await page.getByRole("button", { name: /switch & start/i }).click();
+    await expect(page.getByRole("dialog", { name: /switch timer/i })).toBeVisible();
+    await page.getByRole("button", { name: /confirm switch/i }).click();
+    await expect(page.getByRole("button", { name: /^stop$/i })).toBeVisible();
+  });
+
+  // ── Historical entry creation ──────────────────────────────────────────────
+
+  test("can create a historical time entry without an issue link", async ({ page }) => {
+    const start = new Date();
+    start.setHours(9, 0, 0, 0);
+    const stop = new Date(start);
+    stop.setMinutes(45, 0, 0);
+
+    await page.goto("/my-time");
+    await page.getByRole("button", { name: /add entry/i }).click();
+    await page.getByLabel(/description/i).fill("Historical admin work");
+    await setDateTimePicker(page, "Pick start time", start);
+    await setDateTimePicker(page, "Pick stop time", stop);
+    await page.getByRole("button", { name: /save entry/i }).click();
+    await expect(page.getByText("Historical admin work")).toBeVisible();
   });
 });

@@ -58,7 +58,7 @@ start:
 	@echo "Using env file: $(ENV_FILE)"
 	@echo "Backend/API: http://localhost:$(PORT)"
 	@echo "Workspace: http://localhost:$(FRONTEND_PORT)"
-	@bash scripts/check-postgres.sh "$(ENV_FILE)"
+	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	@bash scripts/check-dev-ports.sh "$(ENV_FILE)" backend workspace
 	@echo "Starting backend and workspace SPA..."
 	@trap 'kill 0' EXIT; \
@@ -76,7 +76,7 @@ stop:
 	@echo "Stopping services..."
 	@-lsof -ti:$(PORT) | xargs kill -9 2>/dev/null
 	@-lsof -ti:$(FRONTEND_PORT) | xargs kill -9 2>/dev/null
-	@echo "✓ App processes stopped. Shared PostgreSQL is still running on localhost:5432."
+	@echo "✓ App processes stopped. PostgreSQL is still running on the configured local port."
 
 # Full verification: typecheck + unit tests + Go tests + E2E
 check:
@@ -133,7 +133,7 @@ check-worktree:
 # Go server
 dev:
 	$(REQUIRE_ENV)
-	@bash scripts/check-postgres.sh "$(ENV_FILE)"
+	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	cd server && go run ./cmd/server
 
 daemon:

@@ -1,13 +1,19 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type TestInfo } from "@playwright/test";
 import { loginAsDefault, createTestApi } from "./helpers";
 import type { TestApiClient } from "./fixtures";
+
+function scopeForPomodoroTest(testInfo: TestInfo): string {
+  return `pomodoro-${testInfo.line}`;
+}
 
 test.describe("Pomodoro", () => {
   let api: TestApiClient;
 
-  test.beforeEach(async ({ page }) => {
-    api = await createTestApi("pomodoro");
-    await loginAsDefault(page, "pomodoro");
+  test.beforeEach(async ({ page }, testInfo) => {
+    const scope = scopeForPomodoroTest(testInfo);
+    api = await createTestApi(scope);
+    await api.clearPomodoroHistory();
+    await loginAsDefault(page, scope);
     // Reset any leftover session from a previous test so each test starts clean.
     await api.resetPomodoroSession().catch(() => {});
   });
@@ -26,22 +32,29 @@ test.describe("Pomodoro", () => {
 
   // ── Empty state ─────────────────────────────────────────────────────────────
 
-  test("Pomodoro history page shows empty state when there are no sessions", async ({ page }) => {
+  test("Pomodoro page renders the focus-first layout even with no sessions", async ({ page }) => {
     await page.goto("/pomodoro");
-    await expect(page.getByText(/no pomodoro sessions yet/i)).toBeVisible({ timeout: 8000 });
-    await expect(page.getByText(/start your first one/i)).toBeVisible();
+    // Focus-first shell is always present regardless of session history.
+    await expect(page.getByRole("heading", { name: "Pomodoro" })).toBeVisible({ timeout: 8000 });
+    await expect(page.getByText("Focus mode first. History stays below.")).toBeVisible();
+    await expect(page.getByText("Recent sessions")).toBeVisible();
   });
 
   // ── Timer widget ────────────────────────────────────────────────────────────
 
   test("Pomodoro timer widget shows work phase by default", async ({ page }) => {
     await page.goto("/issues");
+    // Switch to pomodoro mode — the sidebar widget defaults to normal timer mode.
+    await page.getByText("番茄钟").click();
     // The timer widget is rendered in the sidebar. "专注" is the work-phase label.
     await expect(page.getByText("专注")).toBeVisible({ timeout: 8000 });
   });
 
   test("can start and pause the pomodoro timer via the sidebar widget", async ({ page }) => {
     await page.goto("/issues");
+
+    // Switch to pomodoro mode — the sidebar widget defaults to normal timer mode.
+    await page.getByText("番茄钟").click();
 
     // Wait for the widget to finish loading the session from the server.
     const startBtn = page.getByRole("button", { name: "开始番茄钟" });
@@ -68,6 +81,9 @@ test.describe("Pomodoro", () => {
 
     await page.goto("/issues");
 
+    // Switch to pomodoro mode — the sidebar widget defaults to normal timer mode.
+    await page.getByText("番茄钟").click();
+
     // The reset button should be visible.
     const resetBtn = page.getByRole("button", { name: "重置番茄钟" });
     await expect(resetBtn).toBeVisible({ timeout: 8000 });
@@ -81,6 +97,9 @@ test.describe("Pomodoro", () => {
   test("document title updates while the timer is running", async ({ page }) => {
     await page.goto("/issues");
 
+    // Switch to pomodoro mode — the sidebar widget defaults to normal timer mode.
+    await page.getByText("番茄钟").click();
+
     const startBtn = page.getByRole("button", { name: "开始番茄钟" });
     await expect(startBtn).toBeVisible({ timeout: 8000 });
     await startBtn.click();
@@ -92,41 +111,46 @@ test.describe("Pomodoro", () => {
     await page.getByRole("button", { name: "暂停番茄钟" }).click();
   });
 
+  // ── Focus-first layout ──────────────────────────────────────────────────────
+
+  test("pomodoro page shows the focus-first hero before history", async ({ page }) => {
+    await api.startPomodoroSession();
+    await page.goto("/pomodoro");
+
+    await expect(page.getByRole("heading", { name: "Pomodoro" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Current session" })).toBeVisible();
+    await expect(page.getByText("Quick capture")).toBeVisible();
+    await expect(page.getByText("Recent sessions")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Expand full history" })).toBeVisible();
+  });
+
   // ── History & stats ─────────────────────────────────────────────────────────
 
-  test("completed pomodoro appears in the history page", async ({ page }) => {
+  test("completed pomodoro appears in the recent sessions list", async ({ page }) => {
     // Create a pomodoro entry: start → complete (backend writes type=pomodoro time_entry).
     await api.startPomodoroSession();
     await api.completePomodoroSession({ note: "E2E pomodoro test" });
 
     await page.goto("/pomodoro");
 
-    // The history section should now render — entry is shown with the 🍅 emoji row.
-    await expect(page.getByText("History")).toBeVisible({ timeout: 8000 });
+    // The recent sessions section should now render — entry is shown in the list.
+    await expect(page.getByText("Recent sessions")).toBeVisible({ timeout: 8000 });
     await expect(page.getByText("E2E pomodoro test")).toBeVisible({ timeout: 5000 });
   });
 
-  test("today stats card increments after completing a pomodoro", async ({ page }) => {
-    // Complete a fresh pomodoro session via the API.
+  test("today summary increments after completing a pomodoro", async ({ page }) => {
+    // Complete a fresh pomodoro session via the API so there is exactly 1 done entry for today.
     await api.startPomodoroSession();
     await api.completePomodoroSession();
 
     await page.goto("/pomodoro");
 
-    // The "Today" stat card should show at least 1.
-    await expect(
-      page.locator(".rounded-lg.border", { hasText: "Today" }).getByText(/^[1-9]\d*$/)
-    ).toBeVisible({ timeout: 8000 });
-  });
-
-  test("Pomodoro history shows Today and This Week stat cards", async ({ page }) => {
-    await page.goto("/pomodoro");
-
-    // Stat cards are always rendered (showing 0 when no data).
-    await expect(page.getByText("Today")).toBeVisible({ timeout: 8000 });
-    await expect(page.getByText("This Week")).toBeVisible();
-    await expect(page.getByText("Total Focus")).toBeVisible();
-    await expect(page.getByText(/\dd$/)).toBeVisible(); // Streak card (e.g. "0d")
+    // The Today summary card must be visible and its "Done today" counter must read "1".
+    const todaySection = page.locator('[aria-label="Today"]');
+    await expect(todaySection).toBeVisible({ timeout: 8000 });
+    // Locate the stat cell that is labelled "Done today" and verify the count value.
+    const doneTodayCell = todaySection.locator("div").filter({ hasText: /^Done today/ }).first();
+    await expect(doneTodayCell.locator("p").last()).toHaveText("1", { timeout: 8000 });
   });
 
   // ── Settings ────────────────────────────────────────────────────────────────

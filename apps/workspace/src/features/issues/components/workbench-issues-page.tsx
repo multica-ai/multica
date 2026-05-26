@@ -192,7 +192,7 @@ function WorkbenchIssuesPageContent({
           {workspace?.name ?? "Workspace"}
         </span>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className="text-sm font-medium">{breadcrumbLabel}</span>
+        <span className="text-sm font-medium text-foreground">{breadcrumbLabel}</span>
       </div>
 
       <IssuesHeader

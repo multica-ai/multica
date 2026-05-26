@@ -152,7 +152,12 @@ func TestSyncFetchesExisting(t *testing.T) {
 
 func gitHead(t *testing.T, repoPath string) string {
 	t.Helper()
-	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "HEAD")
+	var cmd *exec.Cmd
+	if isBareRepo(repoPath) {
+		cmd = exec.Command("git", "--git-dir="+repoPath, "rev-parse", "HEAD")
+	} else {
+		cmd = exec.Command("git", "-C", repoPath, "rev-parse", "HEAD")
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git rev-parse HEAD failed in %s: %v", repoPath, err)
@@ -177,11 +182,11 @@ func TestWorktreeFromCache(t *testing.T) {
 
 	// Create a worktree from the bare cache — this is the actual use case.
 	worktreeDir := filepath.Join(t.TempDir(), "work")
-	cmd := exec.Command("git", "-C", barePath, "worktree", "add", "-b", "test-branch", worktreeDir, "HEAD")
+	cmd := exec.Command("git", "--git-dir="+barePath, "worktree", "add", "-b", "test-branch", worktreeDir, "HEAD")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("worktree add failed: %s: %v", out, err)
 	}
-	defer exec.Command("git", "-C", barePath, "worktree", "remove", "--force", worktreeDir).Run()
+	defer exec.Command("git", "--git-dir="+barePath, "worktree", "remove", "--force", worktreeDir).Run()
 
 	// Verify worktree exists and is on the right branch.
 	cmd = exec.Command("git", "-C", worktreeDir, "branch", "--show-current")

@@ -20,6 +20,7 @@ export class TestApiClient {
   private token: string | null = null;
   private workspaceId: string | null = null;
   private createdIssueIds: string[] = [];
+  private createdIssueLabelIds: string[] = [];
   private createdProjectIds: string[] = [];
   private createdTimeEntryIds: string[] = [];
   private user: Record<string, unknown> | null = null;
@@ -108,6 +109,18 @@ export class TestApiClient {
     const issue = await res.json();
     this.createdIssueIds.push(issue.id);
     return issue;
+  }
+
+  async createIssueLabel(name: string, color = "#3b82f6") {
+    const res = await this.authedFetch("/api/labels", {
+      method: "POST",
+      body: JSON.stringify({ name, color }),
+    });
+    const label = await res.json();
+    if (res.status === 201 && label?.id) {
+      this.createdIssueLabelIds.push(label.id);
+    }
+    return label;
   }
 
   async getIssue(id: string) {
@@ -252,6 +265,10 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
+  async deleteIssueLabel(id: string) {
+    await this.authedFetch(`/api/labels/${id}`, { method: "DELETE" });
+  }
+
   // ── Time entry helpers ─────────────────────────────────────────────────────
 
   /** Start a live timer (no stop_time). Returns the created TimeEntry. */
@@ -355,6 +372,28 @@ export class TestApiClient {
     return res.json();
   }
 
+  /** Delete all pomodoro-generated time entries for the current user/workspace. */
+  async clearPomodoroHistory(): Promise<void> {
+    const userId = typeof this.user?.id === "string" ? this.user.id : null;
+    if (!userId || !this.workspaceId) {
+      throw new Error("Missing user or workspace for pomodoro cleanup");
+    }
+
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      await client.query(
+        `DELETE FROM time_entry
+         WHERE workspace_id = $1
+           AND user_id = $2
+           AND type = 'pomodoro'`,
+        [this.workspaceId, userId],
+      );
+    } finally {
+      await client.end();
+    }
+  }
+
   /** Clean up all issues created during this test. */
   async cleanup() {
     for (const id of this.createdIssueIds) {
@@ -365,6 +404,15 @@ export class TestApiClient {
       }
     }
     this.createdIssueIds = [];
+
+    for (const id of this.createdIssueLabelIds) {
+      try {
+        await this.deleteIssueLabel(id);
+      } catch {
+        /* ignore — may already be deleted */
+      }
+    }
+    this.createdIssueLabelIds = [];
 
     for (const id of this.createdProjectIds) {
       try {

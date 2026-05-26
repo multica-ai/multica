@@ -140,6 +140,66 @@ func (q *Queries) GetTimeEntryByID(ctx context.Context, arg GetTimeEntryByIDPara
 	return i, err
 }
 
+const listOverlappingStoppedTimeEntries = `-- name: ListOverlappingStoppedTimeEntries :many
+SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type
+FROM time_entry
+WHERE workspace_id = $1
+  AND user_id = $2
+  AND stop_time IS NOT NULL
+  AND ($3::uuid IS NULL OR id <> $3)
+  AND (
+    tstzrange(start_time, stop_time, '[)') &&
+    tstzrange($4::timestamptz, $5::timestamptz, '[)')
+  )
+ORDER BY start_time DESC
+`
+
+type ListOverlappingStoppedTimeEntriesParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	ExcludeID   pgtype.UUID        `json:"exclude_id"`
+	RangeStart  pgtype.Timestamptz `json:"range_start"`
+	RangeStop   pgtype.Timestamptz `json:"range_stop"`
+}
+
+func (q *Queries) ListOverlappingStoppedTimeEntries(ctx context.Context, arg ListOverlappingStoppedTimeEntriesParams) ([]TimeEntry, error) {
+	rows, err := q.db.Query(ctx, listOverlappingStoppedTimeEntries,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.ExcludeID,
+		arg.RangeStart,
+		arg.RangeStop,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TimeEntry{}
+	for rows.Next() {
+		var i TimeEntry
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.IssueID,
+			&i.Description,
+			&i.StartTime,
+			&i.StopTime,
+			&i.DurationSeconds,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Type,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTimeEntriesByIssue = `-- name: ListTimeEntriesByIssue :many
 SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type FROM time_entry
 WHERE issue_id = $1 AND workspace_id = $2

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Bot,
   Inbox,
   CalendarDays,
   CalendarRange,
@@ -15,8 +16,9 @@ import {
 } from "lucide-react";
 
 export const primaryNav = [
-  { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/issues", label: "Issues", icon: ListTodo },
+  { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/board", label: "Board", icon: Columns3 },
   { href: "/backlog", label: "Backlog", icon: ListTodo },
   { href: "/today", label: "Today", icon: CalendarDays },

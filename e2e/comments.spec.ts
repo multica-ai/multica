@@ -22,7 +22,9 @@ test.describe("Comments", () => {
     await page.goto(`/issues/${issue.id}`);
     await page.waitForURL(new RegExp(`/issues/${issue.id}$`));
     await expect(page.getByRole("button", { name: "Workspace menu" })).toBeVisible();
-    await expect(page.getByText("Properties")).toBeVisible();
+    // Use .last() to target the desktop right sidebar — the first Properties
+    // button is inside a mobile-only md:hidden container.
+    await expect(page.getByText("Properties").last()).toBeVisible();
 
     const commentText = "E2E comment " + Date.now();
     const commentInput = page.getByLabel("Leave a comment...");
@@ -39,7 +41,9 @@ test.describe("Comments", () => {
     await page.goto(`/issues/${issue.id}`);
     await page.waitForURL(new RegExp(`/issues/${issue.id}$`));
     await expect(page.getByRole("button", { name: "Workspace menu" })).toBeVisible();
-    await expect(page.getByText("Properties")).toBeVisible();
+    // Use .last() to target the desktop right sidebar — the first Properties
+    // button is inside a mobile-only md:hidden container.
+    await expect(page.getByText("Properties").last()).toBeVisible();
 
     const submitBtn = page.getByRole("button", { name: "Post comment" });
     await expect(submitBtn).toBeDisabled();

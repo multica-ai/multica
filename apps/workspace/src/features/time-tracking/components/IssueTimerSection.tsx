@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Play, Trash2, Clock, X, RefreshCw } from "lucide-react";
+import { Play, Trash2, Clock, X, RefreshCw, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,11 +17,13 @@ import type { TimeEntry } from "@/shared/types";
 import {
   useCurrentTimerQuery,
   useIssueTimeEntriesQuery,
-  useStartTimerMutation,
   useStopTimerMutation,
-  useDeleteTimeEntryMutation,
 } from "../hooks/use-time-tracking";
+import { useTimeEntryActions } from "../hooks/use-time-entry-actions";
 import { LiveDuration, formatDuration } from "./LiveDuration";
+import { ConfirmTimerSwitchDialog } from "./ConfirmTimerSwitchDialog";
+import { TimeEntryCreateSheet } from "./TimeEntryCreateSheet";
+import { TimeEntryDeleteDialog } from "./TimeEntryDeleteDialog";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -107,26 +109,24 @@ interface IssueTimerSectionProps {
   issueId: string;
 }
 
-/**
- * Displays the time tracking section inside an issue detail panel.
- *
- * Shows:
- * - Total time badge (live if a timer is running for this issue)
- * - "Start tracking" / "Stop" button wired to the global timer
- * - List of all past time entries for this issue
- */
 export function IssueTimerSection({ issueId }: IssueTimerSectionProps) {
   const [showAll, setShowAll] = useState(false);
   // Controls the inline description-input form before starting a timer.
   const [expanded, setExpanded] = useState(false);
   const [description, setDescription] = useState("");
+  const [isStarting, setIsStarting] = useState(false);
+  const [isSwitching, setIsSwitching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Controls the create sheet visibility.
+  const [createSheetOpen, setCreateSheetOpen] = useState(false);
+  // Controls the delete dialog.
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [entryToDelete, setEntryToDelete] = useState<TimeEntry | null>(null);
 
   const { data: entriesData, isLoading } = useIssueTimeEntriesQuery(issueId);
   const { data: currentEntry } = useCurrentTimerQuery();
-  const startMutation = useStartTimerMutation();
+  const { requestStart, pendingSwitch, confirmSwitch, setPendingSwitch, requestDelete } = useTimeEntryActions({ currentEntry });
   const stopMutation = useStopTimerMutation();
-  const deleteMutation = useDeleteTimeEntryMutation();
 
   // entriesData is TimeEntry[] (API returns array directly)
   const entries: TimeEntry[] = entriesData ?? [];
@@ -161,12 +161,39 @@ export function IssueTimerSection({ issueId }: IssueTimerSectionProps) {
   const displayedEntries = showAll ? allEntries : allEntries.slice(0, DISPLAY_LIMIT);
   const totalSeconds = computeTotalSeconds(allEntries);
 
-  const handleStart = () => {
+  const handleStart = async () => {
+    if (isStarting) return;
     const now = new Date().toISOString();
-    startMutation.mutate(
-      { issue_id: issueId, description: description.trim() || undefined, start_time: now },
-      { onError: () => toast.error("Failed to start timer") },
-    );
+    setIsStarting(true);
+    try {
+      const result = await requestStart({
+        issue_id: issueId,
+        description: description.trim() || undefined,
+        start_time: now,
+      });
+      // Only clear input and collapse if the timer actually started (not just staged)
+      if (result !== null) {
+        setDescription("");
+        setExpanded(false);
+      }
+    } catch (error) {
+      toast.error("Failed to start timer");
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  const handleConfirmSwitch = async () => {
+    setIsSwitching(true);
+    try {
+      await confirmSwitch();
+      setDescription("");
+      setExpanded(false);
+    } catch (error) {
+      toast.error("Failed to switch timer");
+    } finally {
+      setIsSwitching(false);
+    }
   };
 
   const handleStop = () => {
@@ -177,10 +204,16 @@ export function IssueTimerSection({ issueId }: IssueTimerSectionProps) {
   };
 
   const handleDelete = (entry: TimeEntry) => {
-    deleteMutation.mutate(
-      { id: entry.id, issueId },
-      { onError: () => toast.error("Failed to delete entry") },
-    );
+    setEntryToDelete(entry);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = () => {
+    if (!entryToDelete) return;
+
+    requestDelete(entryToDelete, issueId);
+    setDeleteDialogOpen(false);
+    setEntryToDelete(null);
   };
 
   return (
@@ -197,40 +230,52 @@ export function IssueTimerSection({ issueId }: IssueTimerSectionProps) {
           )}
         </div>
 
-        {/* Start / Stop button */}
-        {isTrackingThisIssue ? (
+        <div className="flex items-center gap-1.5">
+          {/* Add entry button */}
           <Button
-            size="sm"
-            variant="outline"
-            className="h-7 gap-1.5 text-xs border-destructive text-destructive hover:bg-destructive/10"
-            disabled={stopMutation.isPending}
-            onClick={handleStop}
+            size="icon"
+            variant="ghost"
+            className="size-7 shrink-0"
+            onClick={() => setCreateSheetOpen(true)}
+            title="Add historical entry"
           >
-            <span className="inline-block size-2 rounded-sm bg-destructive" />
-            Stop
+            <Plus className="size-3.5" />
           </Button>
-        ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 gap-1.5 text-xs"
-            disabled={startMutation.isPending}
-            title={isAnotherIssueRunning ? "Switch timer to this issue" : "Start tracking time"}
-            onClick={() => setExpanded((v) => !v)}
-          >
-            {isAnotherIssueRunning ? (
-              <>
-                <RefreshCw className="size-3" />
-                Switch timer
-              </>
-            ) : (
-              <>
-                <Play className="size-3 fill-current" />
-                Start
-              </>
-            )}
-          </Button>
-        )}
+
+          {/* Start / Stop button */}
+          {isTrackingThisIssue ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1.5 text-xs border-destructive text-destructive hover:bg-destructive/10"
+              disabled={stopMutation.isPending}
+              onClick={handleStop}
+            >
+              <span className="inline-block size-2 rounded-sm bg-destructive" />
+              Stop
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1.5 text-xs"
+              title={isAnotherIssueRunning ? "Switch timer to this issue" : "Start tracking time"}
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {isAnotherIssueRunning ? (
+                <>
+                  <RefreshCw className="size-3" />
+                  Switch timer
+                </>
+              ) : (
+                <>
+                  <Play className="size-3 fill-current" />
+                  Start
+                </>
+              )}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Inline description form — shown when expanded and not already tracking this issue */}
@@ -256,7 +301,7 @@ export function IssueTimerSection({ issueId }: IssueTimerSectionProps) {
             <Button
               size="sm"
               className="h-7 flex-1 text-xs"
-              disabled={startMutation.isPending}
+              disabled={isStarting}
               onClick={handleStart}
             >
               <Play className="mr-1 size-3 fill-current" />
@@ -305,6 +350,31 @@ export function IssueTimerSection({ issueId }: IssueTimerSectionProps) {
           )}
         </div>
       )}
+
+      {/* Switch confirmation dialog */}
+      <ConfirmTimerSwitchDialog
+        open={!!pendingSwitch}
+        isLoading={isSwitching}
+        onCancel={() => setPendingSwitch(null)}
+        onConfirm={handleConfirmSwitch}
+      />
+
+      {/* Historical entry creation sheet */}
+      <TimeEntryCreateSheet
+        open={createSheetOpen}
+        defaultIssueId={issueId}
+        onClose={() => setCreateSheetOpen(false)}
+      />
+
+      {/* Delete confirmation dialog */}
+      <TimeEntryDeleteDialog
+        open={deleteDialogOpen}
+        onCancel={() => {
+          setDeleteDialogOpen(false);
+          setEntryToDelete(null);
+        }}
+        onConfirm={handleDeleteConfirm}
+      />
     </div>
   );
 }

@@ -15,6 +15,7 @@ import { LabelsTab } from "./labels-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { AutomationTab } from "@/features/automation";
 import { PomodoroSettingsTab } from "./pomodoro-settings-tab";
+import { TimeEntryLabelsTab } from "./time-entry-labels-tab";
 
 const accountTabs = [
   { value: "profile", label: "Profile", icon: User },
@@ -29,6 +30,7 @@ const workspaceTabs = [
   { value: "repositories", label: "Repositories", icon: FolderGit2 },
   { value: "members", label: "Members", icon: Users },
   { value: "labels", label: "Labels", icon: Tag },
+  { value: "time-labels", label: "Time Labels", icon: Tag },
   { value: "ai", label: "AI", icon: Bot },
   { value: "automation", label: "Automation", icon: Zap },
 ];
@@ -116,6 +118,7 @@ export default function SettingsPage() {
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
           <TabsContent value="labels"><LabelsTab /></TabsContent>
+          <TabsContent value="time-labels"><TimeEntryLabelsTab /></TabsContent>
           <TabsContent value="ai"><AITab /></TabsContent>
           <TabsContent value="notifications"><NotificationsTab /></TabsContent>
           <TabsContent value="pomodoro"><PomodoroSettingsTab /></TabsContent>
