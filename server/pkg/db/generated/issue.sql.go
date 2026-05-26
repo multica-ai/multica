@@ -105,6 +105,11 @@ WHERE i.workspace_id = $1
   AND ($8::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND ($9::jsonb IS NULL OR i.metadata @> $9::jsonb)
   AND (
+    $11::timestamptz IS NULL
+    OR i.status NOT IN ('done', 'cancelled')
+    OR i.updated_at > $11::timestamptz
+  )
+  AND (
     $10::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
@@ -139,16 +144,17 @@ WHERE i.workspace_id = $1
 `
 
 type CountIssuesParams struct {
-	WorkspaceID    pgtype.UUID   `json:"workspace_id"`
-	Status         pgtype.Text   `json:"status"`
-	Priority       pgtype.Text   `json:"priority"`
-	AssigneeID     pgtype.UUID   `json:"assignee_id"`
-	AssigneeIds    []pgtype.UUID `json:"assignee_ids"`
-	CreatorID      pgtype.UUID   `json:"creator_id"`
-	ProjectID      pgtype.UUID   `json:"project_id"`
-	Scheduled      pgtype.Bool   `json:"scheduled"`
-	MetadataFilter []byte        `json:"metadata_filter"`
-	InvolvesUserID pgtype.UUID   `json:"involves_user_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Status         pgtype.Text        `json:"status"`
+	Priority       pgtype.Text        `json:"priority"`
+	AssigneeID     pgtype.UUID        `json:"assignee_id"`
+	AssigneeIds    []pgtype.UUID      `json:"assignee_ids"`
+	CreatorID      pgtype.UUID        `json:"creator_id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	Scheduled      pgtype.Bool        `json:"scheduled"`
+	MetadataFilter []byte             `json:"metadata_filter"`
+	InvolvesUserID pgtype.UUID        `json:"involves_user_id"`
+	UpdatedAfter   pgtype.Timestamptz `json:"updated_after"`
 }
 
 // See ListIssues for the semantics of involves_user_id.
@@ -164,6 +170,7 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 		arg.Scheduled,
 		arg.MetadataFilter,
 		arg.InvolvesUserID,
+		arg.UpdatedAfter,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -688,6 +695,11 @@ WHERE i.workspace_id = $1
   AND ($10::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND ($11::jsonb IS NULL OR i.metadata @> $11::jsonb)
   AND (
+    $13::timestamptz IS NULL
+    OR i.status NOT IN ('done', 'cancelled')
+    OR i.updated_at > $13::timestamptz
+  )
+  AND (
     $12::uuid IS NULL
     -- (1) assignee is an agent owned by the user
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
@@ -732,18 +744,19 @@ LIMIT $2 OFFSET $3
 `
 
 type ListIssuesParams struct {
-	WorkspaceID    pgtype.UUID   `json:"workspace_id"`
-	Limit          int32         `json:"limit"`
-	Offset         int32         `json:"offset"`
-	Status         pgtype.Text   `json:"status"`
-	Priority       pgtype.Text   `json:"priority"`
-	AssigneeID     pgtype.UUID   `json:"assignee_id"`
-	AssigneeIds    []pgtype.UUID `json:"assignee_ids"`
-	CreatorID      pgtype.UUID   `json:"creator_id"`
-	ProjectID      pgtype.UUID   `json:"project_id"`
-	Scheduled      pgtype.Bool   `json:"scheduled"`
-	MetadataFilter []byte        `json:"metadata_filter"`
-	InvolvesUserID pgtype.UUID   `json:"involves_user_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Limit          int32              `json:"limit"`
+	Offset         int32              `json:"offset"`
+	Status         pgtype.Text        `json:"status"`
+	Priority       pgtype.Text        `json:"priority"`
+	AssigneeID     pgtype.UUID        `json:"assignee_id"`
+	AssigneeIds    []pgtype.UUID      `json:"assignee_ids"`
+	CreatorID      pgtype.UUID        `json:"creator_id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	Scheduled      pgtype.Bool        `json:"scheduled"`
+	MetadataFilter []byte             `json:"metadata_filter"`
+	InvolvesUserID pgtype.UUID        `json:"involves_user_id"`
+	UpdatedAfter   pgtype.Timestamptz `json:"updated_after"`
 }
 
 type ListIssuesRow struct {
@@ -788,6 +801,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 		arg.Scheduled,
 		arg.MetadataFilter,
 		arg.InvolvesUserID,
+		arg.UpdatedAfter,
 	)
 	if err != nil {
 		return nil, err

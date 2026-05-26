@@ -13,6 +13,7 @@ import { BOARD_STATUSES } from "./config";
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
   list: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
+  boardList: (wsId: string) => [...issueKeys.list(wsId), "board"] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
@@ -91,11 +92,26 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
   return out;
 }
 
-async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesCache> {
+async function fetchFirstPages(
+  filter: MyIssuesFilter = {},
+  terminalUpdatedAfter?: string,
+): Promise<ListIssuesCache> {
   const responses = await Promise.all(
-    PAGINATED_STATUSES.map((status) =>
-      api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...filter }),
-    ),
+    PAGINATED_STATUSES.map((status) => {
+      const params: ListIssuesParams = {
+        status,
+        limit: ISSUE_PAGE_SIZE,
+        offset: 0,
+        ...filter,
+      };
+      if (
+        terminalUpdatedAfter &&
+        (status === "done" || status === "cancelled")
+      ) {
+        params.updated_after = terminalUpdatedAfter;
+      }
+      return api.listIssues(params);
+    }),
   );
   const byStatus: ListIssuesCache["byStatus"] = {};
   PAGINATED_STATUSES.forEach((status, i) => {
@@ -214,6 +230,30 @@ export function issueListOptions(wsId: string) {
   return queryOptions({
     queryKey: issueKeys.list(wsId),
     queryFn: () => fetchFirstPages(),
+    select: flattenIssueBuckets,
+  });
+}
+
+/** Number of days after which done / cancelled issues are hidden from the board by default. */
+export const BOARD_OLD_DONE_CUTOFF_DAYS = 14;
+
+export function getTerminalUpdatedAfter(): string {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - BOARD_OLD_DONE_CUTOFF_DAYS);
+  cutoff.setHours(0, 0, 0, 0);
+  return cutoff.toISOString();
+}
+
+/**
+ * Board-specific issue list. When `showOldDone` is false (default), done /
+ * cancelled items older than {@link BOARD_OLD_DONE_CUTOFF_DAYS} days are
+ * excluded. Uses a separate cache key so the unfiltered workspace list
+ * (used by detail pages, etc.) is untouched.
+ */
+export function boardIssueListOptions(wsId: string, showOldDone = false) {
+  return queryOptions({
+    queryKey: [...issueKeys.boardList(wsId), showOldDone ? "all" : "filtered"],
+    queryFn: () => fetchFirstPages({}, showOldDone ? undefined : getTerminalUpdatedAfter()),
     select: flattenIssueBuckets,
   });
 }

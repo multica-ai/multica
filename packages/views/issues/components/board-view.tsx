@@ -21,6 +21,7 @@ import type { Issue, IssueAssigneeGroup, IssueAssigneeType, IssueStatus, UpdateI
 import { Button } from "@multica/ui/components/ui/button";
 import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { AssigneeGroupedIssuesFilter, MyIssuesFilter } from "@multica/core/issues/queries";
+import { getTerminalUpdatedAfter } from "@multica/core/issues/queries";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -223,6 +224,7 @@ export function BoardView({
   myIssuesScope,
   myIssuesFilter,
   projectId,
+  boardQueryKey,
 }: {
   issues: Issue[];
   assigneeGroups?: IssueAssigneeGroup[];
@@ -237,6 +239,8 @@ export function BoardView({
   myIssuesFilter?: MyIssuesFilter;
   /** When set, the per-column "+" pre-fills the project on the create form. */
   projectId?: string;
+  /** Query key for the board-specific issue list (hides old done / cancelled items). */
+  boardQueryKey?: QueryKey;
 }) {
   const { t } = useT("issues");
   const sortBy = useViewStore((s) => s.sortBy);
@@ -483,6 +487,7 @@ export function BoardView({
                 childProgressMap={childProgressMap}
                 myIssuesOpts={myIssuesOpts}
                 projectId={projectId}
+                boardQueryKey={boardQueryKey}
               />
             ) : (
               assigneeGroupQueryKey && assigneeGroupFilter ? (
@@ -515,6 +520,7 @@ export function BoardView({
           <HiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
             myIssuesOpts={myIssuesOpts}
+            boardQueryKey={boardQueryKey}
           />
         )}
       </div>
@@ -580,6 +586,7 @@ function PaginatedBoardColumn({
   childProgressMap,
   myIssuesOpts,
   projectId,
+  boardQueryKey,
 }: {
   group: BoardColumnGroup & { status: IssueStatus };
   issueIds: string[];
@@ -587,10 +594,18 @@ function PaginatedBoardColumn({
   childProgressMap?: Map<string, ChildProgress>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   projectId?: string;
+  boardQueryKey?: QueryKey;
 }) {
+  const boardShowOldDone = useViewStore((s) => s.boardShowOldDone);
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     group.status,
     myIssuesOpts,
+    boardQueryKey
+      ? {
+          queryKey: boardQueryKey,
+          terminalUpdatedAfter: boardShowOldDone ? undefined : getTerminalUpdatedAfter(),
+        }
+      : undefined,
   );
   return (
     <BoardColumn
@@ -612,9 +627,11 @@ function PaginatedBoardColumn({
 function HiddenColumnsPanel({
   hiddenStatuses,
   myIssuesOpts,
+  boardQueryKey,
 }: {
   hiddenStatuses: IssueStatus[];
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  boardQueryKey?: QueryKey;
 }) {
   const { t } = useT("issues");
   return (
@@ -630,6 +647,7 @@ function HiddenColumnsPanel({
             key={status}
             status={status}
             myIssuesOpts={myIssuesOpts}
+            boardQueryKey={boardQueryKey}
           />
         ))}
       </div>
@@ -640,13 +658,25 @@ function HiddenColumnsPanel({
 function HiddenColumnRow({
   status,
   myIssuesOpts,
+  boardQueryKey,
 }: {
   status: IssueStatus;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  boardQueryKey?: QueryKey;
 }) {
   const { t } = useT("issues");
   const viewStoreApi = useViewStoreApi();
-  const { total } = useLoadMoreByStatus(status, myIssuesOpts);
+  const boardShowOldDone = useViewStore((s) => s.boardShowOldDone);
+  const { total } = useLoadMoreByStatus(
+    status,
+    myIssuesOpts,
+    boardQueryKey
+      ? {
+          queryKey: boardQueryKey,
+          terminalUpdatedAfter: boardShowOldDone ? undefined : getTerminalUpdatedAfter(),
+        }
+      : undefined,
+  );
   return (
     <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
       <div className="flex items-center gap-2">

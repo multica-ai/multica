@@ -52,6 +52,7 @@
   "display": {
     "tooltip": "显示设置",
     "grouping_section": "分组",
+    "show_old_done": "显示旧的已完成事项",
     "ordering_section": "排序",
     "card_properties_section": "卡片属性",
     "ascending_title": "升序",

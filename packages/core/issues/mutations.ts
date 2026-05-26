@@ -30,6 +30,7 @@ import type {
   CreateIssueRequest,
   UpdateIssueRequest,
   ListIssuesCache,
+  ListIssuesParams,
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
@@ -55,21 +56,26 @@ export type ToggleIssueReactionVars = {
 // ---------------------------------------------------------------------------
 
 /**
- * Paginate one status column into the cache. Works for both the workspace
- * issue list and per-scope My Issues lists (pass `myIssues` to target the
- * latter).
+ * Paginate one status column into the cache. Works for the workspace
+ * issue list, the board list, and per-scope My Issues lists.
  */
 export function useLoadMoreByStatus(
   status: IssueStatus,
   myIssues?: { scope: string; filter: MyIssuesFilter },
+  opts?: {
+    queryKey?: QueryKey;
+    terminalUpdatedAfter?: string;
+  },
 ) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [isLoading, setIsLoading] = useState(false);
 
-  const queryKey = myIssues
-    ? issueKeys.myList(wsId, myIssues.scope, myIssues.filter)
-    : issueKeys.list(wsId);
+  const queryKey = opts?.queryKey ?? (
+    myIssues
+      ? issueKeys.myList(wsId, myIssues.scope, myIssues.filter)
+      : issueKeys.list(wsId)
+  );
   const cache = qc.getQueryData<ListIssuesCache>(queryKey);
   const bucket = cache?.byStatus[status];
   const loaded = bucket?.issues.length ?? 0;
@@ -80,12 +86,19 @@ export function useLoadMoreByStatus(
     if (isLoading || !hasMore) return;
     setIsLoading(true);
     try {
-      const res = await api.listIssues({
+      const params: ListIssuesParams = {
         status,
         limit: ISSUE_PAGE_SIZE,
         offset: loaded,
         ...myIssues?.filter,
-      });
+      };
+      if (
+        opts?.terminalUpdatedAfter &&
+        (status === "done" || status === "cancelled")
+      ) {
+        params.updated_after = opts.terminalUpdatedAfter;
+      }
+      const res = await api.listIssues(params);
       qc.setQueryData<ListIssuesCache>(queryKey, (old) => {
         if (!old) return old;
         const prev = getBucket(old, status);
@@ -99,7 +112,16 @@ export function useLoadMoreByStatus(
     } finally {
       setIsLoading(false);
     }
-  }, [qc, queryKey, status, loaded, hasMore, isLoading, myIssues?.filter]);
+  }, [
+    qc,
+    queryKey,
+    status,
+    loaded,
+    hasMore,
+    isLoading,
+    myIssues?.filter,
+    opts?.terminalUpdatedAfter,
+  ]);
 
   return { loadMore, hasMore, isLoading, total };
 }

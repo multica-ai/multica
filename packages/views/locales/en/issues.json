@@ -53,6 +53,7 @@
   "display": {
     "tooltip": "Display settings",
     "grouping_section": "Grouping",
+    "show_old_done": "Show old done items",
     "ordering_section": "Ordering",
     "card_properties_section": "Card properties",
     "ascending_title": "Ascending",
