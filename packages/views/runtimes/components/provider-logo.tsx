@@ -205,6 +205,8 @@ export function ProviderLogo({
       return <KimiLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
+    case "grok":
+      return <Monitor className={className} />;
     case "gemini":
       return <GeminiLogo className={className} />;
     default:

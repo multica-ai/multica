@@ -63,6 +63,17 @@ func TestDetectVersionFailsForMissingBinary(t *testing.T) {
 	}
 }
 
+func TestNewReturnsGrokBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("grok", Config{ExecutablePath: "/nonexistent/grok"})
+	if err != nil {
+		t.Fatalf("New(grok) error: %v", err)
+	}
+	if _, ok := b.(*grokBackend); !ok {
+		t.Fatalf("expected *grokBackend, got %T", b)
+	}
+}
+
 func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	t.Parallel()
 
@@ -72,7 +83,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
 		"claude", "codex", "copilot", "cursor", "gemini",
-		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
+		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "grok",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {

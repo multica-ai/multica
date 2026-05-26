@@ -281,6 +281,7 @@ type ProviderName =
   | "hermes"
   | "kimi"
   | "kiro"
+  | "grok"
   | "pi"
   | "copilot"
   | "cursor";

@@ -122,6 +122,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
 		})
+	case "grok":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverGrokModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -493,6 +497,16 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 		defaultBin:   "kiro-cli",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kiro-discovery-",
+	})
+}
+
+// discoverGrokModels spins up a throwaway `grok agent stdio` process and parses
+// the models block Grok returns from session/new.
+func discoverGrokModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "grok",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-grok-discovery-",
 	})
 }
 
