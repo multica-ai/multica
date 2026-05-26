@@ -229,6 +229,20 @@ function formatNextRunAbsolute(date: Date, timezone: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Webhook event-filter dirty detection
+// ---------------------------------------------------------------------------
+
+// serializeEventFilters returns a stable JSON string so the edit-mode dirty
+// check can compare the current filters against the snapshot taken on open
+// without depending on reference equality. Normalizes empty Actions to []
+// so omitted-vs-explicit-empty doesn't show as a phantom change.
+function serializeEventFilters(filters: WebhookEventFilter[]): string {
+  return JSON.stringify(
+    filters.map((f) => ({ event: f.event, actions: f.actions ?? [] })),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Live "now" ticker for countdown
 // ---------------------------------------------------------------------------
 
@@ -298,15 +312,18 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   })();
   const [triggerKind, setTriggerKind] = useState<"schedule" | "webhook">(initialKind);
 
-  const [eventFilters, setEventFilters] = useState<WebhookEventFilter[]>(
-    !isCreate && props.triggers[0]?.event_filters ? props.triggers[0].event_filters : [],
-  );
+  const initialEventFilters: WebhookEventFilter[] =
+    !isCreate && props.triggers[0]?.event_filters ? props.triggers[0].event_filters : [];
+  const [eventFilters, setEventFilters] = useState<WebhookEventFilter[]>(initialEventFilters);
 
   const initialCronRef = useRef(toCronExpression(initialCfg));
   const initialTimezoneRef = useRef(initialCfg.timezone);
+  const initialEventFiltersRef = useRef(serializeEventFilters(initialEventFilters));
   const scheduleDirty =
     toCronExpression(triggerConfig) !== initialCronRef.current ||
     triggerConfig.timezone !== initialTimezoneRef.current;
+  const eventFiltersDirty =
+    serializeEventFilters(eventFilters) !== initialEventFiltersRef.current;
 
   const firstTriggerIdRef = useRef(
     !isCreate && props.triggers[0] ? props.triggers[0].id : null,
@@ -411,8 +428,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           assignee_id: assigneeId,
           execution_mode: executionMode,
         });
-        let scheduleOk = true;
-        let scheduleErrMessage: string | null = null;
+        let triggerOk = true;
+        let triggerErrMessage: string | null = null;
         // Skip the schedule sync when the autopilot's first trigger is a
         // webhook — there's no cron to update there, and the schedule
         // panel isn't even rendered for webhook autopilots.
@@ -435,16 +452,38 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               });
             }
           } catch (err) {
-            scheduleOk = false;
-            scheduleErrMessage =
+            triggerOk = false;
+            triggerErrMessage =
+              err instanceof Error && err.message ? err.message : null;
+          }
+        }
+        // Webhook autopilots have no schedule, but the user can still edit
+        // event_filters from the same dialog. PATCH only when the snapshot
+        // taken on open differs from the live state. Sending an explicit
+        // empty array clears filters server-side (tri-state semantics — see
+        // UpdateAutopilotTriggerRequest in autopilot.go).
+        if (
+          triggerKind === "webhook" &&
+          eventFiltersDirty &&
+          firstTriggerIdRef.current
+        ) {
+          try {
+            await updateTrigger.mutateAsync({
+              autopilotId: props.autopilotId,
+              triggerId: firstTriggerIdRef.current,
+              event_filters: eventFilters,
+            });
+          } catch (err) {
+            triggerOk = false;
+            triggerErrMessage =
               err instanceof Error && err.message ? err.message : null;
           }
         }
         onOpenChange(false);
-        if (scheduleOk) {
+        if (triggerOk) {
           toast.success(t(($) => $.dialog.toast_updated));
         } else {
-          toast.error(formatSchedulePartialFailureToast(t, "update", scheduleErrMessage));
+          toast.error(formatSchedulePartialFailureToast(t, "update", triggerErrMessage));
         }
       }
     } catch (err) {

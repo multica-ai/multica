@@ -261,6 +261,58 @@ func TestWebhookEventAllowedByTriggerScope_AnyActionWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestWebhookEventAllowedByTriggerScope_MultipleFiltersSameEvent pins the
+// fix for PR #3231 review: the matcher used to return false as soon as it
+// hit the first event-name match whose actions didn't line up, which made
+// later filters covering the same event but different actions unreachable
+// (order-dependent silent drops). The fix is to keep scanning and only
+// short-circuit on a positive match.
+func TestWebhookEventAllowedByTriggerScope_MultipleFiltersSameEvent(t *testing.T) {
+	filters := []byte(`[
+		{"event":"workflow_run","actions":["completed"]},
+		{"event":"workflow_run","actions":["requested"]}
+	]`)
+
+	completed := WebhookEnvelope{
+		Event:        "github.workflow_run.completed",
+		EventPayload: json.RawMessage(`{"action":"completed"}`),
+	}
+	if !webhookEventAllowedByTriggerScope(filters, completed) {
+		t.Fatal("workflow_run.completed should match the first filter")
+	}
+
+	requested := WebhookEnvelope{
+		Event:        "github.workflow_run.requested",
+		EventPayload: json.RawMessage(`{"action":"requested"}`),
+	}
+	if !webhookEventAllowedByTriggerScope(filters, requested) {
+		t.Fatal("workflow_run.requested should match the second filter — pre-fix this silently dropped")
+	}
+
+	inProgress := WebhookEnvelope{
+		Event:        "github.workflow_run.in_progress",
+		EventPayload: json.RawMessage(`{"action":"in_progress"}`),
+	}
+	if webhookEventAllowedByTriggerScope(filters, inProgress) {
+		t.Fatal("workflow_run.in_progress is in neither filter and should be filtered out")
+	}
+}
+
+// TestWebhookEventAllowedByTriggerScope_MalformedDenies pins the
+// fail-closed behavior for corrupted rows. Strict write-time validation
+// (validateWebhookEventFilters) is the primary defense; this is the
+// defense-in-depth check for "what if a malformed row somehow exists".
+func TestWebhookEventAllowedByTriggerScope_MalformedDenies(t *testing.T) {
+	corrupt := []byte(`{not a json array}`)
+	env := WebhookEnvelope{
+		Event:        "github.workflow_run.completed",
+		EventPayload: json.RawMessage(`{"action":"completed"}`),
+	}
+	if webhookEventAllowedByTriggerScope(corrupt, env) {
+		t.Fatal("malformed event_filters must fail closed (deny), never widen the allowlist")
+	}
+}
+
 func TestWebhookEventAllowedByTriggerScope_MultipleFilters(t *testing.T) {
 	filters := []byte(`[{"event":"workflow_run","actions":["completed"]},{"event":"check_suite","actions":["completed","failure"]}]`)
 

@@ -617,6 +617,45 @@ type WebhookEventFilter struct {
 	Actions []string `json:"actions,omitempty"`
 }
 
+// validateWebhookEventFilters enforces the contract at the HTTP boundary so
+// that malformed shapes never reach the database. The matcher (read path)
+// trusts whatever is stored — see webhookEventAllowedByTriggerScope.
+func validateWebhookEventFilters(filters []WebhookEventFilter) error {
+	for i, f := range filters {
+		if strings.TrimSpace(f.Event) == "" {
+			return fmt.Errorf("event_filters[%d].event must not be empty", i)
+		}
+		for j, a := range f.Actions {
+			if strings.TrimSpace(a) == "" {
+				return fmt.Errorf("event_filters[%d].actions[%d] must not be empty", i, j)
+			}
+		}
+	}
+	return nil
+}
+
+// encodeWebhookEventFilters returns the JSONB bytes to persist for a CREATE.
+// nil/empty input maps to nil bytes (column stays NULL → matcher allows
+// every event), so we never write an explicit `[]` on create.
+func encodeWebhookEventFilters(filters []WebhookEventFilter) ([]byte, error) {
+	if len(filters) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(filters)
+}
+
+// encodeWebhookEventFiltersAlways always returns non-nil bytes, even for an
+// empty slice (`[]byte("[]")`). The UPDATE handler uses this so an explicit
+// empty array in the PATCH body can overwrite (via COALESCE) the existing
+// row to a cleared state — passing nil would be indistinguishable from
+// "field omitted, leave alone".
+func encodeWebhookEventFiltersAlways(filters []WebhookEventFilter) ([]byte, error) {
+	if filters == nil {
+		filters = []WebhookEventFilter{}
+	}
+	return json.Marshal(filters)
+}
+
 // webhookEventAllowedByTriggerScope returns true when the trigger has no
 // filters (NULL / empty) or when the incoming envelope matches at least one
 // declared filter.
@@ -626,10 +665,13 @@ func webhookEventAllowedByTriggerScope(eventFilters []byte, envelope WebhookEnve
 	}
 	var filters []WebhookEventFilter
 	if err := json.Unmarshal(eventFilters, &filters); err != nil {
-		// Malformed filter JSON is treated as "allow all" so a bad UI save
-		// doesn't silently brick the trigger.
-		slog.Warn("webhook: malformed event_filters, allowing all", "error", err)
-		return true
+		// Strict write-time validation should prevent malformed bytes
+		// from ever reaching this branch. If a corrupt row somehow
+		// exists, fail closed — silently widening the allowlist on a
+		// "only allow X" policy is worse than dropping events until an
+		// operator notices.
+		slog.Warn("webhook: malformed event_filters, denying", "error", err)
+		return false
 	}
 	if len(filters) == 0 {
 		return true
@@ -650,7 +692,12 @@ func webhookEventAllowedByTriggerScope(eventFilters []byte, envelope WebhookEnve
 				}
 			}
 		}
-		return false
+		// Intentionally do NOT return false here: the UI allows several
+		// filters that share the same event name (e.g. two workflow_run
+		// rows covering disjoint actions). Earlier code short-circuited
+		// on the first event-name hit, which made one row silently shadow
+		// the others depending on iteration order — see PR #3231 review.
+		// Keep scanning so any later filter still gets its chance.
 	}
 	return false
 }
