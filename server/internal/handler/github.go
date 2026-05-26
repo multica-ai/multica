@@ -523,6 +523,10 @@ func (h *Handler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		h.handlePullRequestEvent(ctx, body)
 	case "check_suite":
 		h.handleCheckSuiteEvent(ctx, body)
+	case "pull_request_review_comment":
+		h.handlePRReviewCommentEvent(ctx, body)
+	case "issue_comment":
+		h.handleIssueCommentEvent(ctx, body)
 	default:
 		// Acknowledge every event so GitHub doesn't mark the endpoint failing,
 		// but ignore types we don't model.
@@ -1071,6 +1075,182 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 		"creator_id":     uuidToString(issue.CreatorID),
 		"source":         "github_pr_merged",
 	})
+}
+
+// ── PR review comment / issue comment → agent trigger ──────────────────────
+
+type ghRepo struct {
+	Name     string `json:"name"`
+	FullName string `json:"full_name"`
+	Owner    struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+}
+
+type ghReviewCommentPayload struct {
+	Action       string `json:"action"`
+	Comment      struct {
+		Body string `json:"body"`
+		User struct {
+			Login string `json:"login"`
+			Type  string `json:"type"`
+		} `json:"user"`
+	} `json:"comment"`
+	PullRequest struct {
+		Number int32  `json:"number"`
+		Head   struct {
+			Ref string `json:"ref"`
+		} `json:"head"`
+	} `json:"pull_request"`
+	Repository   ghRepo `json:"repository"`
+	Installation struct {
+		ID int64 `json:"id"`
+	} `json:"installation"`
+}
+
+type ghIssueCommentPayload struct {
+	Action  string `json:"action"`
+	Comment struct {
+		Body string `json:"body"`
+		User struct {
+			Login string `json:"login"`
+			Type  string `json:"type"`
+		} `json:"user"`
+	} `json:"comment"`
+	Issue struct {
+		Number      int32 `json:"number"`
+		PullRequest *struct {
+			URL string `json:"url"`
+		} `json:"pull_request"`
+	} `json:"issue"`
+	Repository   ghRepo `json:"repository"`
+	Installation struct {
+		ID int64 `json:"id"`
+	} `json:"installation"`
+}
+
+func (h *Handler) handlePRReviewCommentEvent(ctx context.Context, body []byte) {
+	var p ghReviewCommentPayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		slog.Warn("github: bad review_comment payload", "err", err)
+		return
+	}
+	if p.Action != "created" {
+		return
+	}
+	if p.Comment.User.Login == "github-actions" || p.Comment.User.Login == "github-actions[bot]" || p.Comment.User.Type == "Bot" {
+		return
+	}
+	h.triggerAgentForPRComment(ctx, p.Installation.ID, p.Repository, p.PullRequest.Number, p.PullRequest.Head.Ref, p.Comment.Body, p.Comment.User.Login)
+}
+
+func (h *Handler) handleIssueCommentEvent(ctx context.Context, body []byte) {
+	var p ghIssueCommentPayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		slog.Warn("github: bad issue_comment payload", "err", err)
+		return
+	}
+	if p.Action != "created" {
+		return
+	}
+	// Only handle comments on PRs (issues with pull_request field)
+	if p.Issue.PullRequest == nil {
+		return
+	}
+	if p.Comment.User.Login == "github-actions" || p.Comment.User.Login == "github-actions[bot]" || p.Comment.User.Type == "Bot" {
+		return
+	}
+	h.triggerAgentForPRComment(ctx, p.Installation.ID, p.Repository, p.Issue.Number, "", p.Comment.Body, p.Comment.User.Login)
+}
+
+func (h *Handler) triggerAgentForPRComment(ctx context.Context, installationID int64, repo ghRepo, prNumber int32, branchName string, commentBody string, commentAuthor string) {
+	// Look up workspace: try installation ID first (GitHub App webhook),
+	// then fall back to repo match (repo-level webhook).
+	var wsID pgtype.UUID
+	if installationID != 0 {
+		inst, err := h.Queries.GetGitHubInstallationByInstallationID(ctx, installationID)
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				slog.Warn("github: lookup installation for comment trigger", "err", err)
+			}
+			return
+		}
+		wsID = inst.WorkspaceID
+	} else {
+		// Repo-level webhook: find PR by repo owner/name across all workspaces
+		prs, err := h.Queries.FindPullRequestByRepo(ctx, db.FindPullRequestByRepoParams{
+			RepoOwner: repo.Owner.Login,
+			RepoName:  repo.Name,
+			PrNumber:  prNumber,
+		})
+		if err != nil || len(prs) == 0 {
+			slog.Info("github: pr not found for repo webhook", "repo", repo.Owner.Login+"/"+repo.Name, "pr", prNumber)
+			return
+		}
+		wsID = prs[0].WorkspaceID
+	}
+
+	// Find the PR in our DB
+	pr, err := h.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+		WorkspaceID: wsID,
+		RepoOwner:   repo.Owner.Login,
+		RepoName:    repo.Name,
+		PrNumber:    prNumber,
+	})
+	if err != nil {
+		slog.Info("github: pr not found for comment trigger", "repo", repo.FullName, "pr", prNumber, "err", err)
+		return
+	}
+
+	// Get linked issues
+	issueIDs, err := h.Queries.ListIssueIDsForPullRequest(ctx, pr.ID)
+	if err != nil || len(issueIDs) == 0 {
+		slog.Info("github: no linked issues for pr comment", "repo", repo.FullName, "pr", prNumber)
+		return
+	}
+
+	for _, issueID := range issueIDs {
+		issue, err := h.Queries.GetIssue(ctx, issueID)
+		if err != nil {
+			continue
+		}
+		// Only trigger if issue has an agent assignee
+		if issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
+			continue
+		}
+		// Skip if issue is done/cancelled
+		if issue.Status == "done" || issue.Status == "cancelled" {
+			continue
+		}
+
+		// Create a comment on the Multica issue with the PR review feedback
+		prURL := fmt.Sprintf("https://github.com/%s/pull/%d", repo.FullName, prNumber)
+		content := fmt.Sprintf("**GitHub PR review comment** from @%s on [#%d](%s):\n\n%s", commentAuthor, prNumber, prURL, commentBody)
+		comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			AuthorType:  "member",
+			AuthorID:    issue.AssigneeID,
+			Content:     content,
+			Type:        "comment",
+		})
+		if err != nil {
+			slog.Warn("github: create comment for pr review failed", "err", err, "issue_id", uuidToString(issue.ID))
+			continue
+		}
+
+		// Enqueue task for the assigned agent
+		if _, err := h.TaskService.EnqueueTaskForIssue(ctx, issue, comment.ID); err != nil {
+			slog.Warn("github: enqueue task for pr review comment failed", "err", err, "issue_id", uuidToString(issue.ID))
+		} else {
+			slog.Info("github: triggered agent for pr review comment",
+				"issue_id", uuidToString(issue.ID),
+				"pr", prNumber,
+				"repo", repo.FullName,
+				"comment_author", commentAuthor,
+			)
+		}
+	}
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

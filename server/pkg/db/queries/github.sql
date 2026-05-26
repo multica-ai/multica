@@ -205,3 +205,10 @@ ON CONFLICT (issue_id, pull_request_id) DO NOTHING;
 -- name: UnlinkIssueFromPullRequest :exec
 DELETE FROM issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2;
+
+-- name: FindPullRequestByRepo :many
+-- Looks up a PR by repo owner/name/number without requiring workspace_id.
+-- Used by repo-level webhooks that don't include installation context.
+SELECT * FROM github_pull_request
+WHERE repo_owner = $1 AND repo_name = $2 AND pr_number = $3
+LIMIT 1;

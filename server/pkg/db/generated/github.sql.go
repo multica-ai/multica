@@ -637,3 +637,38 @@ func (q *Queries) UpsertPullRequestCheckSuite(ctx context.Context, arg UpsertPul
 	)
 	return err
 }
+
+const findPullRequestByRepo = `-- name: FindPullRequestByRepo :many
+SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files FROM github_pull_request
+WHERE repo_owner = $1 AND repo_name = $2 AND pr_number = $3
+LIMIT 1
+`
+
+type FindPullRequestByRepoParams struct {
+RepoOwner string `json:"repo_owner"`
+RepoName  string `json:"repo_name"`
+PrNumber  int32  `json:"pr_number"`
+}
+
+func (q *Queries) FindPullRequestByRepo(ctx context.Context, arg FindPullRequestByRepoParams) ([]GithubPullRequest, error) {
+rows, err := q.db.Query(ctx, findPullRequestByRepo, arg.RepoOwner, arg.RepoName, arg.PrNumber)
+if err != nil {
+return nil, err
+}
+defer rows.Close()
+items := []GithubPullRequest{}
+for rows.Next() {
+var i GithubPullRequest
+if err := rows.Scan(
+&i.ID, &i.WorkspaceID, &i.InstallationID, &i.RepoOwner, &i.RepoName,
+&i.PrNumber, &i.Title, &i.State, &i.HtmlUrl, &i.Branch,
+&i.AuthorLogin, &i.AuthorAvatarUrl, &i.MergedAt, &i.ClosedAt,
+&i.PrCreatedAt, &i.PrUpdatedAt, &i.CreatedAt, &i.UpdatedAt,
+&i.HeadSha, &i.MergeableState, &i.Additions, &i.Deletions, &i.ChangedFiles,
+); err != nil {
+return nil, err
+}
+items = append(items, i)
+}
+return items, rows.Err()
+}
