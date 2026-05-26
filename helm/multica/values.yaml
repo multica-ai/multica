@@ -160,5 +160,24 @@ ingress:
   enabled: false
   className: ""
   annotations: {}
+  # Example: subpath deployment with separate routes for web and backend
+  # hosts:
+  #   - host: zgsmtest.cn
+  #     paths:
+  #       - path: /multica-web
+  #         pathType: Prefix
+  #         service: web
+  #       - path: /auth
+  #         pathType: Prefix
+  #         service: backend
+  #       - path: /api
+  #         pathType: Prefix
+  #         service: backend
+  #       - path: /ws
+  #         pathType: Prefix
+  #         service: backend
+  #       - path: /uploads
+  #         pathType: Prefix
+  #         service: backend
   hosts: []
   tls: []
