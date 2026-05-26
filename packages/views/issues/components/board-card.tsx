@@ -98,16 +98,15 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   const showPriority = storeProperties.priority;
   const showDescription = storeProperties.description && issue.description;
-  const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
+  const showAssigneeSection = storeProperties.assignee;
+  const hasAssignee = !!issue.assignee_type && !!issue.assignee_id;
   const showStartDate = storeProperties.startDate && issue.start_date;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showLabels = storeProperties.labels && labels.length > 0;
 
-  // Dates need the horizontal space; compact child progress can share the row
-  // with assignee identity.
-  const showAssigneeName = !!showAssignee && !showStartDate && !showDueDate;
+  const showAssigneeName = showAssigneeSection && hasAssignee && !showStartDate && !showDueDate;
   const showUpdatedHint = showAssigneeName && !showChildProgress;
   const { getActorName } = useActorName();
   const assigneeName =
@@ -146,7 +145,7 @@ export const BoardCardContent = memo(function BoardCardContent({
     ? "flex min-w-0 max-w-full items-center"
     : "inline-flex items-center";
 
-  const assigneeInner = showAssignee ? (
+  const assigneeInner = hasAssignee ? (
     <span className="flex min-w-0 max-w-full items-center gap-1.5">
       <ActorAvatar
         actorType={issue.assignee_type!}
@@ -159,16 +158,18 @@ export const BoardCardContent = memo(function BoardCardContent({
         <span className="min-w-0 truncate text-xs text-foreground">{assigneeName}</span>
       )}
     </span>
-  ) : null;
+  ) : (
+    <span className="text-xs text-muted-foreground">{t(($) => $.pickers.assignee.trigger_unassigned)}</span>
+  );
 
-  const assigneeNode = showAssignee ? (
+  const assigneeNode = showAssigneeSection ? (
     editable ? (
       <PickerWrapper className={assigneeContainerClass}>
         <AssigneePicker
           assigneeType={issue.assignee_type}
           assigneeId={issue.assignee_id}
           onUpdate={handleUpdate}
-          trigger={assigneeInner!}
+          trigger={assigneeInner}
         />
       </PickerWrapper>
     ) : (
@@ -176,7 +177,7 @@ export const BoardCardContent = memo(function BoardCardContent({
     )
   ) : null;
 
-  const showMetaRow = showAssignee || showStartDate || showDueDate || showChildProgress;
+  const showMetaRow = showAssigneeSection || showStartDate || showDueDate || showChildProgress;
   const showRightMeta = !!showStartDate || !!showDueDate || !!showChildProgress || showUpdatedHint;
 
   return (
@@ -223,7 +224,7 @@ export const BoardCardContent = memo(function BoardCardContent({
       {/* Meta row: assignee (left), start date, due date, child progress (right) */}
       {showMetaRow && (
         <div className="mt-2 flex items-center justify-between gap-2">
-          {showAssignee && (
+          {showAssigneeSection && (
             <div className="min-w-0 flex-1">
               {assigneeNode}
             </div>
