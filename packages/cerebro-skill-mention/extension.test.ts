@@ -1,7 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import Mention from "@tiptap/extension-mention";
 import type { SkillSummary } from "@multica/core/types";
-import { createSkillSuggestion } from "./extension";
+import { createSkillSuggestion, createSkillMentionExtension } from "./extension";
 
 const listSkillsMock = vi.hoisted(() => vi.fn());
 
@@ -64,5 +65,19 @@ describe("createSkillSuggestion", () => {
         description: "Draft customer-facing release notes",
       },
     ]);
+  });
+
+  // Regression: FIR-2301. While the `/` popup is open, Enter must insert the
+  // highlighted skill — not submit the chat. The chat composer's submitShortcut
+  // extension binds Enter at the default priority (100). Tiptap runs the plugins
+  // of higher-priority extensions first and the first handleKeyDown that returns
+  // true wins, so this extension must sit at >= the upstream `@` mention's
+  // priority (101) to intercept Enter before submitShortcut. At the default
+  // priority Enter submitted the chat as raw text instead of selecting the skill.
+  it("matches @ mention priority so the / popup wins Enter over submit-shortcut", () => {
+    const qc = new QueryClient();
+    const ext = createSkillMentionExtension(qc);
+    expect(ext.config.priority).toBe(Mention.config.priority);
+    expect(ext.config.priority).toBeGreaterThan(100);
   });
 });

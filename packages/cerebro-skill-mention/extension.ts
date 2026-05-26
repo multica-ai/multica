@@ -188,6 +188,17 @@ export function createSkillMentionExtension(qc: QueryClient) {
   return Extension.create({
     name: "skillMention",
 
+    // Match @tiptap/extension-mention's priority (101). Tiptap processes the
+    // plugins of higher-priority extensions first, and the first plugin whose
+    // handleKeyDown returns true wins the event. The chat composer's
+    // `submitShortcut` extension binds Enter at the default priority (100); at
+    // the default priority this suggestion plugin would sit *after* it, so a
+    // bare Enter submitted the chat instead of inserting the highlighted skill
+    // while the `/` popup was open (FIR-2301). Bumping to 101 — the same value
+    // the upstream `@` mention uses to win Enter — puts the suggestion plugin
+    // ahead of submitShortcut so Enter selects the skill.
+    priority: 101,
+
     addProseMirrorPlugins() {
       return [
         Suggestion({
