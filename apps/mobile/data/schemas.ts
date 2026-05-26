@@ -383,7 +383,16 @@ export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   // so downstream truthy checks (`if (task.failure_reason)`) don't have to
   // special-case both null/undefined AND "".
   failure_reason: z
-    .enum(["agent_error", "timeout", "runtime_offline", "runtime_recovery", "manual", ""])
+    .enum([
+      "agent_error",
+      "agent_transient",
+      "timeout",
+      "codex_semantic_inactivity",
+      "runtime_offline",
+      "runtime_recovery",
+      "manual",
+      "",
+    ])
     .optional()
     .catch("")
     .transform((v) => (v === "" ? undefined : v)),

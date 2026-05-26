@@ -2091,7 +2091,13 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		taskLog.Error("task failed", "error", err)
 		// runTask returned without a TaskResult, so we don't have a SessionID
 		// to forward — best we can do is record the failure.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "agent_error"); failErr != nil {
+		failureReason := "agent_error"
+		if reason, ok := classifyPoisonedError(err.Error()); ok {
+			failureReason = reason
+		} else if reason, ok := classifyTransientError(err.Error()); ok {
+			failureReason = reason
+		}
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", failureReason); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 		return
@@ -2711,9 +2717,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// classifier a corrupt image or oversized payload baked into the
 		// conversation permanently blocks the issue: every follow-up
 		// task resumes the same poisoned session and hits the same 400.
-		failureReason, _ := classifyPoisonedError(errMsg)
-		if failureReason != "" {
+		failureReason, poisoned := classifyPoisonedError(errMsg)
+		if poisoned {
 			taskLog.Warn("agent failed with poisoned API error, classifying as blocked",
+				"failure_reason", failureReason,
+			)
+		} else if reason, ok := classifyTransientError(errMsg); ok {
+			failureReason = reason
+			taskLog.Warn("agent failed with transient infrastructure error, classifying as retryable",
 				"failure_reason", failureReason,
 			)
 		}

@@ -359,7 +359,7 @@ func taskFailureReason(task db.AgentTaskQueue) string {
 
 func taskErrorType(reason string) string {
 	switch reason {
-	case "runtime_offline", "runtime_recovery":
+	case "runtime_offline", "runtime_recovery", "agent_transient":
 		return "runtime"
 	case "timeout", "codex_semantic_inactivity":
 		return "timeout"
@@ -1278,14 +1278,15 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 }
 
 // retryableReasons enumerates failure reasons that the auto-retry path is
-// allowed to act on. Agent-side errors (compile failures, model rejections,
-// etc.) are intentionally excluded — those are real problems that the user
-// should see, not infrastructure flakiness.
+// allowed to act on. Permanent agent-side errors (compile failures, model
+// rejections, etc.) are intentionally excluded — those are real problems that
+// the user should see, not infrastructure flakiness.
 var retryableReasons = map[string]bool{
 	"runtime_offline":           true,
 	"runtime_recovery":          true,
 	"timeout":                   true,
 	"codex_semantic_inactivity": true,
+	"agent_transient":           true,
 }
 
 func resumeUnsafeFailureReason(reason string) bool {

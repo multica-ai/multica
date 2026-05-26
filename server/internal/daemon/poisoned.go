@@ -29,6 +29,7 @@ const (
 	FailureReasonAgentFallbackMsg        = "agent_fallback_message"
 	FailureReasonAPIInvalidRequest       = "api_invalid_request"
 	FailureReasonCodexSemanticInactivity = "codex_semantic_inactivity"
+	FailureReasonAgentTransient          = "agent_transient"
 )
 
 // poisonedOutputMaxLen caps how long an output can be and still be
@@ -104,6 +105,104 @@ func classifyPoisonedError(errMsg string) (string, bool) {
 	// the request body — i.e. the conversation history — is the problem.
 	if strings.Contains(lowered, "invalid_request_error") && strings.Contains(lowered, "400") {
 		return FailureReasonAPIInvalidRequest, true
+	}
+	return "", false
+}
+
+// permanentErrorPatterns are terminal failure shapes that must not become
+// retryable even when the message also contains a generic transient-looking
+// word. Keep this list conservative: false negatives surface to users, while
+// false positives can create noisy retry loops.
+var permanentErrorPatterns = []string{
+	"authentication_error",
+	"invalid api key",
+	"unauthorized",
+	"forbidden",
+	"permission denied",
+	"not permitted",
+	"configuration error",
+	"not configured",
+	"missing api key",
+	"content policy",
+	"content_policy",
+	"content blocked",
+	"invalid_request_error",
+	"invalid request",
+	"bad request",
+}
+
+// transientErrorPatterns are infrastructure/provider interruption markers.
+// Some strings come from external CLI stdout/stderr rather than Go literals
+// in this repository, so absence from ripgrep is not enough to delete them.
+var transientErrorPatterns = []string{
+	"database is locked",
+	"database locked",
+	"sqlite busy",
+	"sqlite_busy",
+	"context deadline exceeded",
+	"i/o timeout",
+	"timed out",
+	"timeout exceeded",
+	"deadline exceeded",
+	"returned empty output",
+	"empty output",
+	"empty response",
+	"no output from",
+	"produced no output",
+	"no parseable output",
+	"stream interrupted",
+	"stream closed",
+	"connection reset",
+	"connection refused",
+	"connection aborted",
+	"broken pipe",
+	"unexpected eof",
+	"temporary failure",
+	"temporarily unavailable",
+	"try again",
+	"rate limit",
+	"rate_limit",
+	"too many requests",
+	"api error: 429",
+	"status 429",
+	" 429 ",
+	"api error: 502",
+	"status 502",
+	" 502 ",
+	"api error: 503",
+	"status 503",
+	" 503 ",
+	"api error: 504",
+	"status 504",
+	" 504 ",
+	"overloaded_error",
+	"overloaded",
+	"service unavailable",
+	"bad gateway",
+	"gateway timeout",
+}
+
+// classifyTransientError reports whether an agent error is retryable
+// infrastructure/provider flakiness. It intentionally excludes auth,
+// permission, configuration, content-policy, and invalid-request failures.
+func classifyTransientError(errMsg string) (string, bool) {
+	trimmed := strings.TrimSpace(errMsg)
+	if trimmed == "" {
+		return "", false
+	}
+	if _, ok := classifyPoisonedError(trimmed); ok {
+		return "", false
+	}
+	lowered := strings.ToLower(trimmed)
+	for _, marker := range permanentErrorPatterns {
+		if strings.Contains(lowered, marker) {
+			return "", false
+		}
+	}
+	for _, marker := range transientErrorPatterns {
+		if strings.Contains(lowered, marker) {
+			return FailureReasonAgentTransient, true
+		}
 	}
 	return "", false
 }

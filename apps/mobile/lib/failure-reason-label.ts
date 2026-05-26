@@ -14,6 +14,7 @@ import type { TaskFailureReason } from "@multica/core/types";
 
 const LABELS: Record<TaskFailureReason, string> = {
   agent_error: "Agent execution error",
+  agent_transient: "Transient agent error",
   timeout: "Task timed out",
   codex_semantic_inactivity: "Codex semantic inactivity timeout",
   runtime_offline: "Daemon offline",
