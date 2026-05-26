@@ -1,13 +1,13 @@
 ---
-title: 创建和配置智能体
-description: 创建一个智能体的最小字段，以及所有可选配置项——系统指令、环境变量、可见性、并发上限，和归档机制。
+title: 创建和配置数字员工
+description: 创建一个数字员工的最小字段，以及所有可选配置项——系统指令、环境变量、可见性、并发上限，和归档机制。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
 创建一个 [智能体](/agents) 只要两件事：**名字** 和 **选一款 [AI 编程工具](/providers)**。其他全部可选——系统指令、模型、环境变量、命令行参数、可见性、并发上限——默认值都能用，先跑起来再慢慢调，所有字段随时能改。
 
-## 创建一个智能体
+## 创建一个数字员工
 
 前置条件：你本机已经装好至少一款受支持的 [AI 编程工具](/providers)（Claude Code、Codex 等），并跑着 [守护进程](/daemon-runtimes)。如果还没走到这一步，先看 [Cloud 快速开始](/cloud-quickstart) 或 [自部署快速开始](/self-host-quickstart)。
 
@@ -38,7 +38,7 @@ multica agent create
 **系统指令**（`instructions`）会被拼在每次任务最前面，告诉这个智能体它扮演什么角色、遵守什么规则：
 
 ```text
-你是一个前端代码审查智能体。拿到 issue 先读 diff，只关注：
+你是一个前端代码审查数字员工。拿到 issue 先读 diff，只关注：
 - 样式问题（tailwind 类名、盒模型）
 - 可访问性（a11y）
 不改代码，只在评论里给建议。
@@ -64,9 +64,9 @@ ANTHROPIC_BASE_URL = https://my-proxy.example.com
 系统关键变量不能被覆盖：`PATH`、`HOME`、`USER`、`SHELL`、`TERM`、`CODEX_HOME`，以及任何 `MULTICA_*` 开头的 key 都会被守护进程静默忽略（日志里有 warn，不会报错）。
 
 <Callout type="warning">
-**`custom_env` 的值在 Multica 服务器的数据库里是明文存储的。** agent list/get 接口不再返回任何 env 值——只返回键的数量。读取真实值需要 workspace owner / admin 调用专用且会审计的 `GET /api/agents/{id}/env`（CLI: `multica agent env get <id>`）。正在执行任务的智能体即便宿主是 owner，也无法借此读取其它智能体的 env——这个接口拒绝 agent-actor 会话。数据库备份、DB 审计里仍然能看到真实值。
+**`custom_env` 的值在 Multica 服务器的数据库里是明文存储的。** agent list/get 接口不再返回任何 env 值——只返回键的数量。读取真实值需要 workspace owner / admin 调用专用且会审计的 `GET /api/agents/{id}/env`（CLI: `multica agent env get <id>`）。正在执行任务的数字员工即便宿主是 owner，也无法借此读取其它智能体的 env——这个接口拒绝 agent-actor 会话。数据库备份、DB 审计里仍然能看到真实值。
 
-**不要把高价值 secret 放进 `custom_env`**（生产数据库密码、root 级 token 等）。给智能体用**独立的、有限权限的凭证**（只读 API key、单 scope 的 PAT），定期轮换。
+**不要把高价值 secret 放进 `custom_env`**（生产数据库密码、root 级 token 等）。给数字员工用**独立的、有限权限的凭证**（只读 API key、单 scope 的 PAT），定期轮换。
 </Callout>
 
 ## 自定义命令行参数（custom_args）
@@ -92,11 +92,11 @@ claude --model <model> --max-turns 100 --append-system-prompt "always respond in
 ## 可见性
 
 - **工作区可见**（`workspace`）—— 工作区里任何成员都能分配
-- **私有**（`private`）—— 只有工作区的 owner、admin，或智能体的创建者能分配
+- **私有**（`private`）—— 只有工作区的 owner、admin，或数字员工的创建者能分配
 
 新建默认 `private`。
 
-**私有不等于隐藏**——列表里所有成员都能看到私有智能体的名字和描述，只是看不到敏感配置（env 值从不会出现在 agent list/get 响应里；MCP 配置对非 owner 会被打码）。完整含义见 [智能体 → 谁能把智能体分配出去](/agents#谁能把智能体分配出去)。
+**私有不等于隐藏**——列表里所有成员都能看到私有数字员工的名字和描述，只是看不到敏感配置（env 值从不会出现在 agent list/get 响应里；MCP 配置对非 owner 会被打码）。完整含义见 [智能体 → 谁能把数字员工分配出去](/agents#谁能把数字员工分配出去)。
 
 ## 并发上限
 
@@ -108,20 +108,20 @@ claude --model <model> --max-turns 100 --append-system-prompt "always respond in
 
 ## 挂专业知识：Skill
 
-创建好的智能体可以挂 **Skill**——一种**专业知识包**（`SKILL.md` + 支持文件），任务执行时自动送到对应的 AI 编程工具。可以新建、从 GitHub / ClawHub 导入、或从你本机已有的 skill 目录扫入。详见 [Skills](/skills)。
+创建好的数字员工可以挂 **Skill**——一种**专业知识包**（`SKILL.md` + 支持文件），任务执行时自动送到对应的 AI 编程工具。可以新建、从 GitHub / ClawHub 导入、或从你本机已有的 skill 目录扫入。详见 [Skills](/skills)。
 
 ## 归档和恢复
 
-不再用的智能体可以**归档**——它从日常视图里消失，但历史数据（跑过的任务、发过的评论）全部保留。想重新用时**恢复**即可。
+不再用的数字员工可以**归档**——它从日常视图里消失，但历史数据（跑过的任务、发过的评论）全部保留。想重新用时**恢复**即可。
 
 <Callout type="warning">
 **归档会立刻取消这个智能体所有未结束的任务**——正在跑的、已派发的、还在排队的都会被标为 `cancelled`，不会继续执行。如果有重要任务在跑，先让它完成再归档。
 </Callout>
 
-已归档的智能体无法被分配新任务。
+已归档的数字员工无法被分配新任务。
 
 ## 下一步
 
-- [Skills](/skills) —— 给智能体挂专业知识包
+- [Skills](/skills) —— 给数字员工挂专业知识包
 - [AI 编程工具对照](/providers) —— 11 款工具的完整能力差别
-- [把 issue 分配给智能体](/assigning-issues) —— 创建完之后怎么用起来
+- [把 issue 分配给数字员工](/assigning-issues) —— 创建完之后怎么用起来

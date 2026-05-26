@@ -1,6 +1,6 @@
 ---
 title: Multica 是怎么工作的
-description: 三个核心组件（server / 守护进程 / AI 编程工具）怎么协同完成一次智能体工作。
+description: 三个核心组件（server / 守护进程 / AI 编程工具）怎么协同完成一次数字员工工作。
 ---
 
 import { ArchitectureDiagram } from "@/components/architecture-diagram";
@@ -19,7 +19,7 @@ Multica 是一个**分布式**平台。你看到的 Web 界面只是前台——
 
 ## 一个任务从创建到完成会经历什么
 
-以"你把一个 issue 分配给某个智能体"这个最常见的场景为例：
+以"你把一个 issue 分配给某个数字员工"这个最常见的场景为例：
 
 1. 你在 Web 上点击分配。浏览器发 HTTP 请求到 Multica 服务器。
 2. 服务器把这条 issue 的 assignee 改成那个智能体，**同时**在任务队列里创建一条执行任务，状态 `queued`。
@@ -30,14 +30,14 @@ Multica 是一个**分布式**平台。你看到的 Web 界面只是前台——
 
 详细机制见 [守护进程与运行时](/daemon-runtimes) 和 [执行任务](/tasks)。
 
-## 让智能体开工的四种方式
+## 让数字员工开工的四种方式
 
 不只是"分配 issue"——Multica 有 4 种触发方式，对应不同协作场景：
 
 | 方式 | 典型场景 | 文档 |
 |---|---|---|
-| **分配 issue** | 最常见。把一条 issue 指派给智能体，它自动开工 | [分配 issue](/assigning-issues) |
-| **在评论里 @智能体** | "这条你帮我看一下"——不改 assignee、不改状态，用一条评论触发 | [在评论里 @智能体](/mentioning-agents) |
+| **分配 issue** | 最常见。把一条 issue 指派给数字员工，它自动开工 | [分配 issue](/assigning-issues) |
+| **在评论里 @数字员工** | "这条你帮我看一下"——不改 assignee、不改状态，用一条评论触发 | [在评论里 @数字员工](/mentioning-agents) |
 | **直接聊天** | 独立对话，不绑 issue——问问题、让它帮起草任务 | [聊天](/chat) |
 | **Autopilots（定时）** | 长期指令——每周一早上做 standup 总结之类 | [Autopilots](/autopilots) |
 

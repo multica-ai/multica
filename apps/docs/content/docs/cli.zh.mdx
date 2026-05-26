@@ -54,11 +54,11 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 | `multica issue get <id>` | 查看单条 issue（接受 issue key 或 UUID） |
 | `multica issue create --title "..."` | 创建新 issue |
 | `multica issue update <id> ...` | 修改 issue（状态、优先级、分配人等） |
-| `multica issue assign <id> --agent <slug>` | 分配给智能体（立即触发任务） |
+| `multica issue assign <id> --agent <slug>` | 分配给数字员工（立即触发任务） |
 | `multica issue status <id> --set <status>` | 快捷改状态 |
 | `multica issue search <query>` | 关键字搜索 |
 | `multica issue runs <id>` | 查看 issue 上智能体跑过的任务 |
-| `multica issue rerun <id>` | 给该 issue 当前的智能体分配人重新创建一条任务 |
+| `multica issue rerun <id>` | 给该 issue 当前的数字员工分配人重新创建一条任务 |
 | `multica issue comment <id> ...` | 嵌套：看 / 发评论 |
 | `multica issue subscriber <id> ...` | 嵌套：订阅 / 取消订阅 |
 | `multica project list/get/create/update/delete/status` | Project CRUD |
@@ -67,12 +67,12 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 
 | 命令 | 用途 |
 |---|---|
-| `multica agent list` | 列出工作区的智能体 |
-| `multica agent get <slug>` | 查看智能体配置 |
-| `multica agent create ...` | 创建智能体 |
+| `multica agent list` | 列出工作区的数字员工 |
+| `multica agent get <slug>` | 查看数字员工配置 |
+| `multica agent create ...` | 创建数字员工 |
 | `multica agent update <slug> ...` | 修改智能体 |
 | `multica agent archive <slug>` | 归档 |
-| `multica agent restore <slug>` | 恢复归档的智能体 |
+| `multica agent restore <slug>` | 恢复归档的数字员工 |
 | `multica agent tasks <slug>` | 查看智能体的任务历史 |
 | `multica agent skills ...` | 嵌套：挂载 / 卸载 Skill |
 | `multica skill list/get/create/update/delete` | Skill CRUD |
@@ -89,7 +89,7 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 | `multica squad update <id> ...` | 修改名字、描述、instructions、队长、头像 |
 | `multica squad delete <id>` | 归档（软删除）—— 同时把分配给小队的 issue 转给队长 |
 | `multica squad member list/add/remove <squad-id>` | 管理小队成员 |
-| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | 队长智能体每轮结束时调用，记录 evaluation |
+| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | 队长数字员工每轮结束时调用，记录 evaluation |
 
 完整模型见 [小队](/squads)。
 
@@ -144,4 +144,4 @@ v2 会给每条命令一个独立的详细 reference 页。
 
 - [认证与令牌](/auth-tokens) —— PAT / JWT / Daemon Token 的区别
 - [守护进程与运行时](/daemon-runtimes) —— `daemon` 命令背后的工作机制
-- [创建和配置智能体](/agents-create) —— `multica agent create` 的完整选项
+- [创建和配置数字员工](/agents-create) —— `multica agent create` 的完整选项

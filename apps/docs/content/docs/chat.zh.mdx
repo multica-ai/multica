@@ -1,28 +1,28 @@
 ---
 title: 对话
-description: 和智能体一对一独立聊天——完全沙盒，智能体看不到 issue、改不了 issue，也没人能看到你的对话。
+description: 和数字员工一对一独立聊天——完全沙盒，智能体看不到 issue、改不了 issue，也没人能看到你的对话。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-**对话（Chat）是你和 [智能体](/agents) 的一对一独立沟通**——跳出 [issue](/issues) 看板，智能体看不到任何 issue、也改不了 issue，整段对话**完全私人**（[工作区](/workspaces) 里其他人、包括 admin 都看不到）。适合和智能体讨论方案、做 brainstorming、问一个不属于任何 issue 的问题。
+**对话（Chat）是你和 [智能体](/agents) 的一对一独立沟通**——跳出 [issue](/issues) 看板，智能体看不到任何 issue、也改不了 issue，整段对话**完全私人**（[工作区](/workspaces) 里其他人、包括 admin 都看不到）。适合和数字员工讨论方案、做 brainstorming、问一个不属于任何 issue 的问题。
 
-## 为什么不用 @ 智能体就够
+## 为什么不用 @ 数字员工就够
 
-[@ 提及](/mentioning-agents) 把智能体**拉进** issue 的上下文——它会读 issue 的描述和所有历史评论，也能改 issue。对话反过来：**把你拉出** issue——智能体只看得到这一次对话，不知道 issue 存在，也没有修改 issue 的入口。
+[@ 提及](/mentioning-agents) 把数字员工**拉进** issue 的上下文——它会读 issue 的描述和所有历史评论，也能改 issue。对话反过来：**把你拉出** issue——智能体只看得到这一次对话，不知道 issue 存在，也没有修改 issue 的入口。
 
 两条判据：
 
 - 要智能体基于某个具体 issue 的上下文给反馈 → [@ 提及](/mentioning-agents)
-- 要和智能体聊一个不属于任何 issue 的话题（或不想让任何人看到讨论）→ 对话
+- 要和数字员工聊一个不属于任何 issue 的话题（或不想让任何人看到讨论）→ 对话
 
 ## 开始一次对话
 
-从侧边栏的 **Chat** 入口进，选一个智能体，开一段新对话。界面和普通聊天软件一样：你发消息，智能体回复。每条消息都会在后台触发一次执行（入队一个 `task`），所以回复可能要等几秒。
+从侧边栏的 **Chat** 入口进，选一个数字员工，开一段新对话。界面和普通聊天软件一样：你发消息，智能体回复。每条消息都会在后台触发一次执行（入队一个 `task`），所以回复可能要等几秒。
 
-## 智能体在对话里能做什么、不能做什么
+## 数字员工在对话里能做什么、不能做什么
 
-智能体在对话里跑在**完全沙盒**下。
+数字员工在对话里跑在**完全沙盒**下。
 
 **能做的**：
 
@@ -33,10 +33,10 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 **不能做的**：
 
-- **看到任何 issue**——智能体收到的提示里没有 issue ID，`multica issue list` 之类命令对它返回空
+- **看到任何 issue**——数字员工收到的提示里没有 issue ID，`multica issue list` 之类命令对它返回空
 - **改任何 issue**——没有 issue 上下文，API 调用会被权限 check 拦截
 - **看到别的对话**——对话之间完全隔离
-- **@ 任何人或智能体**——对话是私人空间，没有通知别人的路径
+- **@ 任何人或数字员工**——对话是私人空间，没有通知别人的路径
 
 ## 多轮对话怎么保留上下文
 
@@ -59,5 +59,5 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 下一步
 
-- [**Autopilots**](/autopilots) —— 让智能体定时自动开工
-- [**分配 issue 给智能体**](/assigning-issues) —— 把话题放回 issue 看板上
+- [**Autopilots**](/autopilots) —— 让数字员工定时自动开工
+- [**分配 issue 给数字员工**](/assigning-issues) —— 把话题放回 issue 看板上

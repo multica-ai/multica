@@ -154,9 +154,9 @@ multica.example.com {
 
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) 也是不错的选择——它直接给一个公开域名 + TLS，host 上不用对外暴露任何端口。Nginx 也能做（分 `app.` / `api.` 两个域名 + `proxy_set_header Upgrade` 转 WebSocket），关键就是终结 TLS、并在 `/ws` 上转发 `Upgrade` 头。
 
-## 6. 创建智能体 + 分配第一个任务
+## 6. 创建数字员工 + 分配第一个任务
 
-流程和 Cloud 一样——见 [Cloud 快速上手 → 5-6 步](/cloud-quickstart#5-创建智能体)。
+流程和 Cloud 一样——见 [Cloud 快速上手 → 5-6 步](/cloud-quickstart#5-创建数字员工)。
 
 ## Kubernetes 部署（替代方案）
 
