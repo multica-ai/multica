@@ -24,6 +24,7 @@
     "@react-navigation/core": "catalog:",
     "@react-navigation/native": "catalog:",
     "@react-navigation/native-stack": "catalog:",
+    "@shopify/flash-list": "^2.3.1",
     "@tanstack/react-query": "catalog:",
     "expo": "^55.0.17",
     "expo-constants": "^55.0.15",
