@@ -259,6 +259,14 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 	}, nil)
 }
 
+func (c *Client) CreateSystemComment(ctx context.Context, issueID, content, parentID string) error {
+	body := map[string]any{"content": content}
+	if parentID != "" {
+		body["parent_id"] = parentID
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/issues/%s/comments", issueID), body, nil)
+}
+
 func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string) error {
 	body := map[string]any{"output": output}
 	if branchName != "" {
@@ -491,6 +499,7 @@ type RegisterResponse struct {
 	Repos        []RepoData      `json:"repos"`
 	ReposVersion string          `json:"repos_version"`
 	Settings     json.RawMessage `json:"settings,omitempty"`
+	DaemonToken  string          `json:"daemon_token,omitempty"`
 }
 
 func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterResponse, error) {
