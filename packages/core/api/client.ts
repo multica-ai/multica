@@ -2203,7 +2203,8 @@ export class ApiClient {
   }
 
   // CEREBRO-PATCH(active-issue-tasks-status): extended response with per-task status for run-state pip (JEH-1332)
-  async listActiveIssueTasks(): Promise<{ issue_ids: string[]; tasks?: { issue_id: string; status: string }[] }> {
+  // CEREBRO-PATCH(active-issue-tasks-parent): FIR-2326 — parent_issue_id surfaces a running sub-issue on its parent row.
+  async listActiveIssueTasks(): Promise<{ issue_ids: string[]; tasks?: { issue_id: string; status: string; parent_issue_id?: string | null }[] }> {
     return this.fetch("/api/inbox/active-issue-tasks");
   }
 

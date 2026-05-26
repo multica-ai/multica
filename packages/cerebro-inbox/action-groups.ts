@@ -51,6 +51,8 @@ export interface InboxActionContext {
   userId: string;
   /** Issue ids with an in-flight agent run. */
   issueRunStates: ReadonlyMap<string, unknown>;
+  /** Parent issue ids that have an in-flight agent run on a sub-issue (FIR-2326). */
+  subIssueRunStates: ReadonlyMap<string, unknown>;
   /** Chat session ids with an in-flight agent run. */
   chatRunStates: ReadonlyMap<string, unknown>;
   /** Channel ids with an unread @mention for the viewing user. */
@@ -69,7 +71,10 @@ function classifyNotif(item: InboxItem, ctx: InboxActionContext): InboxActionCat
 
   // 2. An agent is actively working the issue — watch, don't act. Checked
   //    before "waiting" so a running thread isn't mistaken for a stalled one.
-  if (item.issue_id && ctx.issueRunStates.has(item.issue_id)) return "watching";
+  //    FIR-2326: a parent whose sub-issue is running counts as watching too,
+  //    so the umbrella surfaces in Running even when its own row is idle.
+  if (item.issue_id && (ctx.issueRunStates.has(item.issue_id) || ctx.subIssueRunStates.has(item.issue_id)))
+    return "watching";
 
   // 3. Done is also literal for issue notifications. A read item on an open
   //    issue is still follow-up, not done.

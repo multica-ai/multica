@@ -523,7 +523,8 @@ WHERE iss.workspace_id = $1
 -- started, while still showing a queued signal before a runtime claims it.
 SELECT DISTINCT ON (atq.issue_id)
   atq.issue_id,
-  atq.status
+  atq.status,
+  iss.parent_issue_id -- CEREBRO-PATCH(active-issue-task-parent): FIR-2326 surface running sub-issues on the parent row
 FROM agent_task_queue atq
 JOIN issue iss ON iss.id = atq.issue_id
 WHERE iss.workspace_id = $1

@@ -1704,7 +1704,8 @@ func (q *Queries) ListActiveIssueIDsInWorkspace(ctx context.Context, workspaceID
 const listActiveIssueTaskStatusesInWorkspace = `-- name: ListActiveIssueTaskStatusesInWorkspace :many
 SELECT DISTINCT ON (atq.issue_id)
   atq.issue_id,
-  atq.status
+  atq.status,
+  iss.parent_issue_id -- CEREBRO-PATCH(active-issue-task-parent): FIR-2326 surface running sub-issues on the parent row
 FROM agent_task_queue atq
 JOIN issue iss ON iss.id = atq.issue_id
 WHERE iss.workspace_id = $1
@@ -1720,8 +1721,9 @@ ORDER BY atq.issue_id,
 `
 
 type ListActiveIssueTaskStatusesInWorkspaceRow struct {
-	IssueID pgtype.UUID `json:"issue_id"`
-	Status  string      `json:"status"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	Status        string      `json:"status"`
+	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
 }
 
 // CEREBRO-PATCH(active-issue-task-statuses): per-issue task status for active vs queued run-pip (JEH-1332)
@@ -1737,7 +1739,7 @@ func (q *Queries) ListActiveIssueTaskStatusesInWorkspace(ctx context.Context, wo
 	items := []ListActiveIssueTaskStatusesInWorkspaceRow{}
 	for rows.Next() {
 		var i ListActiveIssueTaskStatusesInWorkspaceRow
-		if err := rows.Scan(&i.IssueID, &i.Status); err != nil {
+		if err := rows.Scan(&i.IssueID, &i.Status, &i.ParentIssueID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

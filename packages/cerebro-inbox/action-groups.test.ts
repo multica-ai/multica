@@ -14,6 +14,7 @@ function ctx(overrides: Partial<InboxActionContext> = {}): InboxActionContext {
   return {
     userId: USER,
     issueRunStates: new Map(),
+    subIssueRunStates: new Map(),
     chatRunStates: new Map(),
     mentionedChannels: new Set(),
     ...overrides,
@@ -66,6 +67,15 @@ describe("classifyInboxAction — notifications", () => {
       classifyInboxAction(
         notif({ severity: "attention", issue_id: "issue-9", read: true }),
         ctx({ issueRunStates: new Map([["issue-9", "active"]]) }),
+      ),
+    ).toBe("watching");
+  });
+
+  it("puts a parent under Watching when a sub-issue has an in-flight run (FIR-2326)", () => {
+    expect(
+      classifyInboxAction(
+        notif({ issue_id: "parent-1", read: true, issue_status: "in_progress" }),
+        ctx({ subIssueRunStates: new Map([["parent-1", "active"]]) }),
       ),
     ).toBe("watching");
   });

@@ -282,10 +282,16 @@ func (h *Handler) ListActiveIssueTasks(w http.ResponseWriter, r *http.Request) {
 	for _, task := range tasks {
 		issueID := util.UUIDToString(task.IssueID)
 		ids = append(ids, issueID)
-		out = append(out, map[string]string{
+		row := map[string]string{
 			"issue_id": issueID,
 			"status":   task.Status,
-		})
+		}
+		// FIR-2326: parent_issue_id lets the inbox surface a running sub-issue
+		// on its parent row (orange "sub-issue is running" pip + Running bucket).
+		if task.ParentIssueID.Valid {
+			row["parent_issue_id"] = util.UUIDToString(task.ParentIssueID)
+		}
+		out = append(out, row)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issue_ids": ids,

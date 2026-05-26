@@ -227,6 +227,19 @@ export function InboxPage() {
       ),
     [activeIssueTasksData],
   );
+  // CEREBRO-PATCH(inbox-sub-issue-run-pip): FIR-2326 — parent issue ids whose
+  // sub-issue currently has an in-flight run. "active" wins over "queued" when a
+  // parent has several sub-issues running, so the parent row shows the strongest
+  // signal. Drives the orange "sub" pip and the Running bucket on the parent row.
+  const subIssueRunStates = useMemo(() => {
+    const map = new Map<string, "active" | "queued">();
+    for (const task of activeIssueTasksData?.tasks ?? []) {
+      if (!task.parent_issue_id) continue;
+      if (map.get(task.parent_issue_id) === "active") continue;
+      map.set(task.parent_issue_id, taskStatusToRunState(task.status));
+    }
+    return map;
+  }, [activeIssueTasksData]);
   const { data: pendingChatTasksData } = useQuery(pendingChatTasksOptions(wsId));
   const chatRunStates = useMemo(
     () => new Map((pendingChatTasksData?.tasks ?? []).map((task) => [task.chat_session_id, taskStatusToRunState(task.status)])),
@@ -903,7 +916,12 @@ export function InboxPage() {
       );
     }
     const item = entry.item;
-    const agentRunState = item.issue_id ? issueRunStates.get(item.issue_id) : undefined;
+    // CEREBRO-PATCH(inbox-sub-issue-run-pip): FIR-2326 — the issue's own run wins;
+    // otherwise an orange "sub" pip flags a running sub-issue on the parent row.
+    const agentRunState = item.issue_id
+      ? issueRunStates.get(item.issue_id) ??
+        (subIssueRunStates.has(item.issue_id) ? "sub" : undefined)
+      : undefined;
     return (
       <InboxListItem
         key={`notif:${item.id}`}
@@ -925,7 +943,7 @@ export function InboxPage() {
     (mode: GroupByMode, entry: MergedEntry): { key: string; label: string; isFallback: boolean; order?: number } => {
       // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — action buckets live in cerebro-inbox
       if (mode === "action")
-        return bucketizeInboxAction(entry, { userId, issueRunStates, chatRunStates, mentionedChannels }, actionGroupLabels);
+        return bucketizeInboxAction(entry, { userId, issueRunStates, subIssueRunStates, chatRunStates, mentionedChannels }, actionGroupLabels);
       if (mode === "project") {
         if (entry.kind === "notif" && entry.item.project_id) {
           const proj = projectMap.get(entry.item.project_id);
@@ -998,7 +1016,7 @@ export function InboxPage() {
       return { key: "__none__", label: "", isFallback: true };
     },
     // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — action bucketing reads run-state + mention signals
-    [projectMap, agentMap, typeLabels, userId, issueRunStates, chatRunStates, mentionedChannels, actionGroupLabels],
+    [projectMap, agentMap, typeLabels, userId, issueRunStates, subIssueRunStates, chatRunStates, mentionedChannels, actionGroupLabels],
   );
 
   type Group = {
