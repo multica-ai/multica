@@ -11,6 +11,7 @@ const mockNavigationReplace = vi.hoisted(() => vi.fn());
 const mockNavigationSearchParams = vi.hoisted(() => ({
   current: new URLSearchParams(),
 }));
+const mockEventSources = vi.hoisted(() => [] as EventSourceMock[]);
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
@@ -281,6 +282,11 @@ const mockApiObj = vi.hoisted(() => ({
   addIssueReaction: vi.fn(),
   removeIssueReaction: vi.fn(),
   listAttachments: vi.fn().mockResolvedValue([]),
+  listRuntimes: vi.fn().mockResolvedValue([]),
+  listLocalPreviews: vi.fn().mockResolvedValue({ previews: [] }),
+  getLocalPreviewStreamUrl: vi.fn((healthPort: number) => `http://127.0.0.1:${healthPort}/preview/stream`),
+  stopLocalPreview: vi.fn(),
+  getLocalPreviewLogs: vi.fn(),
   addCommentReaction: vi.fn(),
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
@@ -556,6 +562,78 @@ if (typeof window !== "undefined" && !window.ResizeObserver) {
   });
 }
 
+class EventSourceMock {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSED = 2;
+
+  readonly CONNECTING = 0;
+  readonly OPEN = 1;
+  readonly CLOSED = 2;
+  readonly url: string | URL;
+  readonly withCredentials = false;
+  readyState = EventSourceMock.CONNECTING;
+  onerror: ((this: EventSource, ev: Event) => any) | null = null;
+  onmessage: ((this: EventSource, ev: MessageEvent) => any) | null = null;
+  onopen: ((this: EventSource, ev: Event) => any) | null = null;
+  private listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+
+  constructor(url: string | URL) {
+    this.url = url;
+    mockEventSources.push(this);
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    const listeners = this.listeners.get(type) ?? new Set<EventListenerOrEventListenerObject>();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  close() {
+    this.readyState = EventSourceMock.CLOSED;
+  }
+
+  dispatch(type: string, data: unknown) {
+    const event = new MessageEvent(type, { data: JSON.stringify(data) });
+    for (const listener of this.listeners.get(type) ?? []) {
+      if (typeof listener === "function") {
+        listener.call(this as unknown as EventSource, event);
+      } else {
+        listener.handleEvent(event);
+      }
+    }
+  }
+
+  dispatchEvent(event: Event) {
+    for (const listener of this.listeners.get(event.type) ?? []) {
+      if (typeof listener === "function") {
+        listener.call(this as unknown as EventSource, event);
+      } else {
+        listener.handleEvent(event);
+      }
+    }
+    return true;
+  }
+}
+
+Object.defineProperty(globalThis, "EventSource", {
+  configurable: true,
+  writable: true,
+  value: EventSourceMock,
+});
+
+if (typeof window !== "undefined") {
+  Object.defineProperty(window, "EventSource", {
+    configurable: true,
+    writable: true,
+    value: EventSourceMock,
+  });
+}
+
 function createTestQueryClient() {
   return new QueryClient({
     defaultOptions: {
@@ -649,10 +727,16 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
     mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
     mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.listRuntimes.mockResolvedValue([]);
+    mockApiObj.listLocalPreviews.mockResolvedValue({ previews: [] });
+    mockApiObj.getLocalPreviewStreamUrl.mockImplementation((healthPort: number) => `http://127.0.0.1:${healthPort}/preview/stream`);
+    mockApiObj.stopLocalPreview.mockResolvedValue(undefined);
+    mockApiObj.getLocalPreviewLogs.mockResolvedValue({ id: "preview-1", log_path: "preview.log", logs: "" });
     mockApiObj.listMembers.mockResolvedValue([
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
+    mockEventSources.length = 0;
     window.getSelection()?.removeAllRanges();
     mockApiObj.getProject.mockReset();
     useActiveIssueContextStore.setState({ current: null });
@@ -1027,6 +1111,52 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("Created by")).toBeInTheDocument();
     expect(screen.getByText("Created")).toBeInTheDocument();
     expect(screen.getByText("Updated")).toBeInTheDocument();
+  });
+
+  it("renders local previews from the daemon preview stream", async () => {
+    mockApiObj.listRuntimes.mockResolvedValue([
+      {
+        id: "runtime-1",
+        workspace_id: "ws-1",
+        runtime_mode: "local",
+        status: "online",
+        metadata: { health_port: 20038 },
+      },
+    ]);
+    mockApiObj.listLocalPreviews.mockResolvedValue({ previews: [] });
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(mockEventSources).toHaveLength(1);
+    });
+
+    mockEventSources[0]!.dispatch("ready", {
+      previews: [
+        {
+          id: "preview-1",
+          workspace_id: "ws-1",
+          issue_id: "issue-1",
+          visibility: "private",
+          cwd: "/tmp/app",
+          command: ["npm", "run", "dev"],
+          pid: 123,
+          port: 5173,
+          url: "http://127.0.0.1:5173/",
+          health_url: "http://127.0.0.1:5173/",
+          log_path: "/tmp/preview.log",
+          status: "running",
+          started_at: "2026-05-25T00:00:00Z",
+        },
+      ],
+    });
+
+    expect(await screen.findByText("Local Preview")).toBeInTheDocument();
+    expect(await screen.findByText("running · :5173")).toBeInTheDocument();
+    expect(mockApiObj.getLocalPreviewStreamUrl).toHaveBeenCalledWith(20038, {
+      workspace_id: "ws-1",
+      issue_id: "issue-1",
+    });
   });
 
   it("shows 'not found' message when issue does not exist", async () => {

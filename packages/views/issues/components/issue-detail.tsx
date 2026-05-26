@@ -116,6 +116,8 @@ import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
 
+type PreviewWithPort = LocalPreview & { healthPort: number };
+
 function SubscriberPopoverContent({
   members,
   agents,
@@ -1149,20 +1151,87 @@ export function IssueDetail({
     }
     return Array.from(ports);
   }, [localRuntimes]);
-  const { data: localPreviews = [], refetch: refetchLocalPreviews } = useQuery({
+  const [localPreviewsByPort, setLocalPreviewsByPort] = useState<Record<number, PreviewWithPort[]>>({});
+  const { refetch: refetchLocalPreviews } = useQuery({
     queryKey: ["local-previews", wsId, resolvedId, localPreviewPorts.join(",")],
-    queryFn: async (): Promise<Array<LocalPreview & { healthPort: number }>> => {
+    queryFn: async (): Promise<PreviewWithPort[]> => {
       const results = await Promise.allSettled(
         localPreviewPorts.map(async (healthPort) => {
           const response = await api.listLocalPreviews(healthPort, { workspace_id: wsId, issue_id: resolvedId });
           return response.previews.map((preview) => ({ ...preview, healthPort }));
         }),
       );
+      const nextByPort: Record<number, PreviewWithPort[]> = {};
+      for (const result of results) {
+        if (result.status !== "fulfilled") continue;
+        for (const preview of result.value) {
+          nextByPort[preview.healthPort] = [...(nextByPort[preview.healthPort] ?? []), preview];
+        }
+      }
+      setLocalPreviewsByPort(nextByPort);
       return results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
     },
     enabled: !!resolvedId && localPreviewPorts.length > 0,
-    refetchInterval: 15_000,
   });
+  useEffect(() => {
+    if (!resolvedId || localPreviewPorts.length === 0) {
+      setLocalPreviewsByPort({});
+      return;
+    }
+
+    const portSet = new Set(localPreviewPorts);
+    setLocalPreviewsByPort((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([port]) => portSet.has(Number(port))),
+      ) as Record<number, PreviewWithPort[]>;
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+
+    const sources = localPreviewPorts.map((healthPort) => {
+      const source = new EventSource(api.getLocalPreviewStreamUrl(healthPort, { workspace_id: wsId, issue_id: resolvedId }));
+      let fallbackTimer: number | undefined;
+      const handleSnapshot = (event: Event) => {
+        try {
+          const payload = JSON.parse((event as MessageEvent).data) as { previews?: LocalPreview[] };
+          const previews = Array.isArray(payload.previews) ? payload.previews : [];
+          setLocalPreviewsByPort((prev) => ({
+            ...prev,
+            [healthPort]: previews.map((preview) => ({ ...preview, healthPort })),
+          }));
+        } catch {
+          // Ignore malformed local daemon events; the initial fetch remains as fallback.
+        }
+      };
+      const handleError = () => {
+        source.close();
+        void refetchLocalPreviews();
+        if (!fallbackTimer) {
+          fallbackTimer = window.setInterval(() => {
+            void refetchLocalPreviews();
+          }, 15_000);
+        }
+      };
+
+      source.addEventListener("ready", handleSnapshot);
+      source.addEventListener("snapshot", handleSnapshot);
+      source.addEventListener("error", handleError);
+      return { source, fallbackTimer: () => fallbackTimer };
+    });
+
+    return () => {
+      for (const { source, fallbackTimer } of sources) {
+        source.close();
+        const timer = fallbackTimer();
+        if (timer) {
+          window.clearInterval(timer);
+        }
+      }
+    };
+  }, [localPreviewPorts, refetchLocalPreviews, resolvedId, wsId]);
+  const localPreviews = useMemo(
+    () => Object.values(localPreviewsByPort).flat(),
+    [localPreviewsByPort],
+  );
   const issueLocalPreviews = useMemo(() => (
     localPreviews.filter((preview) => (
       preview.workspace_id === wsId &&
@@ -1171,11 +1240,11 @@ export function IssueDetail({
       preview.status !== "stopped"
     ))
   ), [localPreviews, resolvedId, wsId]);
-  const handleStopLocalPreview = useCallback(async (preview: LocalPreview & { healthPort: number }) => {
+  const handleStopLocalPreview = useCallback(async (preview: PreviewWithPort) => {
     await api.stopLocalPreview(preview.healthPort, preview.id);
     await refetchLocalPreviews();
   }, [refetchLocalPreviews]);
-  const handleShowLocalPreviewLogs = useCallback(async (preview: LocalPreview & { healthPort: number }) => {
+  const handleShowLocalPreviewLogs = useCallback(async (preview: PreviewWithPort) => {
     const logs = await api.getLocalPreviewLogs(preview.healthPort, preview.id);
     setPreviewLogs({
       title: logs.log_path,

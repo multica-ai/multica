@@ -1239,6 +1239,17 @@ export class ApiClient {
     return res.json() as Promise<LocalPreviewLogs>;
   }
 
+  getLocalPreviewStreamUrl(
+    healthPort: number,
+    params?: { workspace_id?: string; issue_id?: string },
+  ): string {
+    const search = new URLSearchParams();
+    if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
+    if (params?.issue_id) search.set("issue_id", params.issue_id);
+    const suffix = search.toString() ? `?${search}` : "";
+    return `http://127.0.0.1:${healthPort}/preview/stream${suffix}`;
+  }
+
   getLocalTaskTraceStreamUrl(
     healthPort: number,
     taskId: string,
