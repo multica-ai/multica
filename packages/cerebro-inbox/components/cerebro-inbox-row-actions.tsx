@@ -30,15 +30,23 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@multica/ui/components/ui/drawer";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
-import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { Calendar } from "@multica/ui/components/ui/calendar";
+import { TimeInput } from "@multica/ui/components/ui/time-input";
 import { useMarkInboxRead } from "@multica/core/inbox/mutations";
 import type { InboxItem } from "@multica/core/types";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useMuteInbox, useUnmuteInbox, useMarkInboxUnread } from "../mutations";
 import {
   addHours,
+  fromDateTimeLocalValue,
   isMuted,
   nextBusinessDayNineAm,
   nextMondayNineAm,
@@ -187,6 +195,7 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
           )}
         />
         <ReminderSheet
+          isMobile
           customReminder={customReminder}
           open={reminderOpen}
           strings={strings}
@@ -209,6 +218,7 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
         unread={!item.read}
       />
       <ReminderSheet
+        isMobile={false}
         customReminder={customReminder}
         open={reminderOpen}
         strings={strings}
@@ -682,7 +692,16 @@ function MobileRowActions({
   );
 }
 
+/**
+ * "Remind me" surface. Mobile renders a vaul bottom-sheet (Drawer); desktop
+ * renders a centered Dialog — the Drawer's `inset-x-0` bottom variant
+ * stretches edge-to-edge on wide screens, which looked broken (FIR-2313).
+ * Both share the same body: quick presets + a custom date/time picker built
+ * from the shared Calendar + TimeInput, replacing the raw native
+ * `datetime-local` input that had no styled picker.
+ */
 function ReminderSheet({
+  isMobile,
   customReminder,
   open,
   strings,
@@ -690,6 +709,7 @@ function ReminderSheet({
   onOpenChange,
   onSchedule,
 }: {
+  isMobile: boolean;
   customReminder: string;
   open: boolean;
   strings: ReturnType<typeof useCerebroInboxStrings>;
@@ -697,6 +717,7 @@ function ReminderSheet({
   onOpenChange: (open: boolean) => void;
   onSchedule: (mutedUntil: Date) => void;
 }) {
+  const now = new Date();
   const reminderOptions = [
     { label: strings.remind_one_hour, date: addHours(1) },
     { label: strings.remind_three_hours, date: addHours(3) },
@@ -704,52 +725,135 @@ function ReminderSheet({
     { label: strings.remind_monday, date: nextMondayNineAm() },
   ];
 
+  const planned = fromDateTimeLocalValue(customReminder);
+  const canSave = planned !== null && planned.getTime() > now.getTime();
+
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const planned = new Date(customReminder);
-    if (Number.isNaN(planned.getTime()) || planned.getTime() <= Date.now()) return;
+    if (!planned || planned.getTime() <= Date.now()) return;
     onSchedule(planned);
   };
 
-  return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent>
-        <DrawerHeader>
-          <DrawerTitle>{strings.remind_title}</DrawerTitle>
-        </DrawerHeader>
-        <div className="grid grid-cols-2 gap-2 px-4 pb-3">
-          {reminderOptions.map((option) => (
-            <Button
-              key={option.label}
-              type="button"
-              variant="outline"
-              className="justify-start"
-              onClick={() => onSchedule(option.date)}
-            >
-              {option.label}
-            </Button>
-          ))}
+  const body = (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        {reminderOptions.map((option) => (
+          <Button
+            key={option.label}
+            type="button"
+            variant="outline"
+            className="justify-start"
+            onClick={() => onSchedule(option.date)}
+          >
+            {option.label}
+          </Button>
+        ))}
+      </div>
+      <form className="space-y-3" onSubmit={handleSubmit}>
+        <div className="space-y-1.5">
+          <Label>{strings.remind_custom}</Label>
+          <CustomReminderPicker
+            value={customReminder}
+            min={now}
+            onChange={onCustomReminderChange}
+          />
         </div>
-        <form className="space-y-3 px-4 pb-6" onSubmit={handleSubmit}>
-          <div className="space-y-1.5">
-            <Label htmlFor="inbox-row-reminder-custom">{strings.remind_custom}</Label>
-            <Input
-              id="inbox-row-reminder-custom"
-              type="datetime-local"
-              value={customReminder}
-              min={toDateTimeLocalValue(new Date())}
-              onChange={(e) => onCustomReminderChange(e.currentTarget.value)}
-            />
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              {strings.remind_cancel}
-            </Button>
-            <Button type="submit">{strings.remind_save}</Button>
-          </div>
-        </form>
-      </DrawerContent>
-    </Drawer>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+            {strings.remind_cancel}
+          </Button>
+          <Button type="submit" disabled={!canSave}>
+            {strings.remind_save}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={onOpenChange}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>{strings.remind_title}</DrawerTitle>
+          </DrawerHeader>
+          <div className="overflow-y-auto px-4 pb-6">{body}</div>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{strings.remind_title}</DialogTitle>
+        </DialogHeader>
+        {body}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Custom date + time picker for the reminder "Choose time" field. Replaces the
+ * native `datetime-local` input with the shared Calendar (date) + TimeInput
+ * (HH:MM). The value is kept in `datetime-local` string form so the parent
+ * state and submit logic stay unchanged; this component just parses it into a
+ * Date to drive the controls and serializes back on every edit.
+ */
+function CustomReminderPicker({
+  value,
+  min,
+  onChange,
+}: {
+  value: string;
+  /** Earliest selectable moment; days before its date are disabled. */
+  min: Date;
+  onChange: (value: string) => void;
+}) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const selected = fromDateTimeLocalValue(value) ?? min;
+  const timeValue = `${pad(selected.getHours())}:${pad(selected.getMinutes())}`;
+
+  // Disable calendar days before today so the user can't pick a past date.
+  const minDay = new Date(min);
+  minDay.setHours(0, 0, 0, 0);
+
+  const handleDateSelect = (day: Date | undefined) => {
+    if (!day) return;
+    const next = new Date(selected);
+    next.setFullYear(day.getFullYear(), day.getMonth(), day.getDate());
+    onChange(toDateTimeLocalValue(next));
+  };
+
+  const handleTimeChange = (time: string) => {
+    const [hh, mm] = time.split(":");
+    const next = new Date(selected);
+    next.setHours(Number(hh), Number(mm), 0, 0);
+    onChange(toDateTimeLocalValue(next));
+  };
+
+  return (
+    <div className="rounded-lg border">
+      <Calendar
+        mode="single"
+        selected={selected}
+        onSelect={handleDateSelect}
+        disabled={{ before: minDay }}
+        className="mx-auto"
+      />
+      <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
+        <span className="text-sm text-muted-foreground">
+          {selected.toLocaleDateString(undefined, {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+          })}
+        </span>
+        <TimeInput value={timeValue} onChange={handleTimeChange} />
+      </div>
+    </div>
   );
 }
 

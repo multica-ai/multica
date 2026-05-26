@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addHours,
   formatMutedUntilTime,
+  fromDateTimeLocalValue,
   isMuted,
   nextBusinessDayNineAm,
   nextLocalEightAm,
@@ -78,6 +79,30 @@ describe("nextBusinessDayNineAm", () => {
   it("formats datetime-local values without timezone conversion", () => {
     const got = toDateTimeLocalValue(new Date(2026, 4, 25, 9, 5));
     expect(got).toBe("2026-05-25T09:05");
+  });
+});
+
+describe("fromDateTimeLocalValue", () => {
+  it("parses a datetime-local string into a local-time Date", () => {
+    const got = fromDateTimeLocalValue("2026-05-25T09:05");
+    expect(got).not.toBeNull();
+    expect(got!.getFullYear()).toBe(2026);
+    expect(got!.getMonth()).toBe(4); // May (0-indexed)
+    expect(got!.getDate()).toBe(25);
+    expect(got!.getHours()).toBe(9);
+    expect(got!.getMinutes()).toBe(5);
+  });
+
+  it("round-trips with toDateTimeLocalValue", () => {
+    const original = new Date(2026, 4, 25, 9, 5);
+    const got = fromDateTimeLocalValue(toDateTimeLocalValue(original));
+    expect(got!.getTime()).toBe(original.getTime());
+  });
+
+  it("returns null for malformed input", () => {
+    expect(fromDateTimeLocalValue("")).toBeNull();
+    expect(fromDateTimeLocalValue("not-a-date")).toBeNull();
+    expect(fromDateTimeLocalValue("2026-05-25")).toBeNull();
   });
 });
 

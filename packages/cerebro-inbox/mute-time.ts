@@ -84,3 +84,25 @@ export function toDateTimeLocalValue(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
+
+/**
+ * Inverse of {@link toDateTimeLocalValue}: parse a `YYYY-MM-DDTHH:mm` string
+ * back into a Date in the user's local timezone. Returns `null` for malformed
+ * input so callers can fall back to a default instead of rendering an
+ * Invalid Date.
+ */
+export function fromDateTimeLocalValue(value: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value ?? "");
+  if (!m) return null;
+  const [, y, mo, d, hh, mm] = m;
+  const date = new Date(
+    Number(y),
+    Number(mo) - 1,
+    Number(d),
+    Number(hh),
+    Number(mm),
+    0,
+    0,
+  );
+  return Number.isNaN(date.getTime()) ? null : date;
+}
