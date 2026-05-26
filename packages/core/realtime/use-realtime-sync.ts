@@ -62,6 +62,8 @@ import type {
   TaskMessagePayload,
   TaskQueuedPayload,
   TaskDispatchPayload,
+  TaskRunningPayload,
+  TaskWaitingLocalDirectoryPayload,
   TaskCompletedPayload,
   TaskFailedPayload,
   TaskCancelledPayload,
@@ -785,6 +787,43 @@ export function useRealtimeSync(
       );
     });
 
+    // task:running fires when the daemon transitions a previously-parked task
+    // (waiting_local_directory) back into the run phase. The dispatch→running
+    // path is collapsed in the handler above, so this handler exists mainly to
+    // clear a stale `waiting_local_directory` pill — without it, the pill
+    // would stay parked even after the daemon resumed work.
+    const unsubTaskRunning = ws.on("task:running", (p) => {
+      const payload = p as TaskRunningPayload;
+      if (!payload.chat_session_id) return;
+      qc.setQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(payload.chat_session_id),
+        (old) => {
+          if (!old || old.task_id !== payload.task_id) return old;
+          return { ...old, status: "running" };
+        },
+      );
+    });
+
+    // task:waiting_local_directory fires when the daemon dequeues a task but
+    // can't acquire the local_directory path lock — another task on this
+    // daemon is in the same directory. Write the status so TaskStatusPill
+    // can render the "Waiting for local directory" stage instead of pinning
+    // a stale "Starting / Thinking" frame.
+    const unsubTaskWaitingLocalDir = ws.on(
+      "task:waiting_local_directory",
+      (p) => {
+        const payload = p as TaskWaitingLocalDirectoryPayload;
+        if (!payload.chat_session_id) return;
+        qc.setQueryData<ChatPendingTask>(
+          chatKeys.pendingTask(payload.chat_session_id),
+          (old) => {
+            if (!old || old.task_id !== payload.task_id) return old;
+            return { ...old, status: "waiting_local_directory" };
+          },
+        );
+      },
+    );
+
     // task:cancelled reaches us when:
     //   1. handleStop already cleared the cache locally (this is a no-op confirm)
     //   2. another tab / admin / system cancels — this is the only path that
@@ -926,6 +965,8 @@ export function useRealtimeSync(
       unsubChatDone();
       unsubTaskQueued();
       unsubTaskDispatch();
+      unsubTaskRunning();
+      unsubTaskWaitingLocalDir();
       unsubTaskCancelled();
       unsubTaskCompleted();
       unsubTaskFailed();

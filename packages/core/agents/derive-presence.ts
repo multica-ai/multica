@@ -62,7 +62,14 @@ export function deriveWorkloadDetail(tasks: readonly AgentTask[]): WorkloadDetai
   for (const t of tasks) {
     if (t.status === "running") {
       runningCount += 1;
-    } else if (t.status === "queued" || t.status === "dispatched") {
+    } else if (
+      t.status === "queued" ||
+      t.status === "dispatched" ||
+      // The daemon parked this task on a busy local_directory path. It's
+      // still on the agent's plate (counts toward "queued" presence), but
+      // it hasn't reached the run phase yet.
+      t.status === "waiting_local_directory"
+    ) {
       queuedCount += 1;
     }
     // Terminal statuses (completed / failed / cancelled) intentionally
