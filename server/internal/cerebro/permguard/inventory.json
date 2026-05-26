@@ -209,6 +209,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "DELETE /api/workspaces/{id}/tool-policy",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "DELETE /api/workspaces/{id}/invitations/{invitationId}",
       "gate": "workspace_admin"
     },
@@ -761,6 +765,10 @@
       "gate": "cerebro_runtime_access"
     },
     {
+      "id": "POST /api/runtimes/{runtimeId}/tools/scan-now",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "POST /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
       "gate": "workspace_admin"
     },
@@ -1042,6 +1050,10 @@
     },
     {
       "id": "PUT /api/workspaces/{id}/feature-flags/{key}",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "PUT /api/workspaces/{id}/tool-policy",
       "gate": "workspace_admin"
     }
   ],
