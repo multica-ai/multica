@@ -674,24 +674,26 @@ type WorkflowNode struct {
 }
 
 type WorkflowNodeRun struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkflowRunID  pgtype.UUID        `json:"workflow_run_id"`
-	WorkflowNodeID pgtype.UUID        `json:"workflow_node_id"`
-	NodeTitle      string             `json:"node_title"`
-	Status         string             `json:"status"`
-	RetryCount     int32              `json:"retry_count"`
-	WorkerType     string             `json:"worker_type"`
-	WorkerID       pgtype.UUID        `json:"worker_id"`
-	WorkerOutput   []byte             `json:"worker_output"`
-	CriticType     string             `json:"critic_type"`
-	CriticID       pgtype.UUID        `json:"critic_id"`
-	CriticOutput   []byte             `json:"critic_output"`
-	CriticComment  pgtype.Text        `json:"critic_comment"`
-	AgentTaskID    pgtype.UUID        `json:"agent_task_id"`
-	StartedAt      pgtype.Timestamptz `json:"started_at"`
-	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ID                pgtype.UUID        `json:"id"`
+	WorkflowRunID     pgtype.UUID        `json:"workflow_run_id"`
+	WorkflowNodeID    pgtype.UUID        `json:"workflow_node_id"`
+	NodeTitle         string             `json:"node_title"`
+	Status            string             `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	WorkerType        string             `json:"worker_type"`
+	WorkerID          pgtype.UUID        `json:"worker_id"`
+	WorkerOutput      []byte             `json:"worker_output"`
+	CriticType        string             `json:"critic_type"`
+	CriticID          pgtype.UUID        `json:"critic_id"`
+	CriticOutput      []byte             `json:"critic_output"`
+	CriticComment     pgtype.Text        `json:"critic_comment"`
+	AgentTaskID       pgtype.UUID        `json:"agent_task_id"`
+	StartedAt         pgtype.Timestamptz `json:"started_at"`
+	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	WorkerAgentTaskID pgtype.UUID        `json:"worker_agent_task_id"`
+	CriticAgentTaskID pgtype.UUID        `json:"critic_agent_task_id"`
 }
 
 type WorkflowRun struct {

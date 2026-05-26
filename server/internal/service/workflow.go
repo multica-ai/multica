@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -246,8 +247,14 @@ func (s *WorkflowService) StartRun(ctx context.Context, workflow db.Workflow, tr
 		return nil, err
 	}
 
-	// Kick off root nodes after tx commits: format_checking -> format_ok -> dispatch
-	nodeRuns, _ := s.Queries.ListWorkflowNodeRunsByRun(ctx, run.ID)
+	return &run, nil
+}
+
+// DispatchRootNodeRuns kicks off root node runs after the run is created.
+// format_checking -> format_ok -> dispatchWorker.
+// Must be called after sub-issues exist so DispatchAgentTask can link issue_id.
+func (s *WorkflowService) DispatchRootNodeRuns(ctx context.Context, runID pgtype.UUID) {
+	nodeRuns, _ := s.Queries.ListWorkflowNodeRunsByRun(ctx, runID)
 	for _, nr := range nodeRuns {
 		if nr.Status == NodeRunStatusFormatChecking {
 			if _, err := s.TransitionNodeRun(ctx, nr, NodeRunStatusFormatOk); err != nil {
@@ -255,7 +262,7 @@ func (s *WorkflowService) StartRun(ctx context.Context, workflow db.Workflow, tr
 			}
 		}
 	}
-	nodeRuns, _ = s.Queries.ListWorkflowNodeRunsByRun(ctx, run.ID)
+	nodeRuns, _ = s.Queries.ListWorkflowNodeRunsByRun(ctx, runID)
 	for _, nr := range nodeRuns {
 		if nr.Status == NodeRunStatusFormatOk {
 			if err := s.dispatchWorker(ctx, nr); err != nil {
@@ -263,8 +270,6 @@ func (s *WorkflowService) StartRun(ctx context.Context, workflow db.Workflow, tr
 			}
 		}
 	}
-
-	return &run, nil
 }
 
 // StartRunForIssue creates a workflow run from an issue assignment and returns
@@ -588,18 +593,20 @@ func (s *WorkflowService) ReviewNodeRun(ctx context.Context, nodeRunID pgtype.UU
 					return fmt.Errorf("block node run: %w", err)
 				}
 				nodeRun = updated
-				return nil // Blocked is terminal; skip re-dispatch.
+				return nil // Blocked is terminal; handled after tx.
 			}
 
 			nodeRun = updated
 
 			// Re-dispatch to format_ok for the next retry.
-			if _, err := qtx.UpdateWorkflowNodeRunStatus(ctx, db.UpdateWorkflowNodeRunStatusParams{
+			u, err := qtx.UpdateWorkflowNodeRunStatus(ctx, db.UpdateWorkflowNodeRunStatusParams{
 				ID:     updated.ID,
 				Status: NodeRunStatusFormatOk,
-			}); err != nil {
+			})
+			if err != nil {
 				return fmt.Errorf("re-dispatch after rework: %w", err)
 			}
+			nodeRun = u
 		}
 		return nil
 	}); err != nil {
@@ -611,7 +618,17 @@ func (s *WorkflowService) ReviewNodeRun(ctx context.Context, nodeRunID pgtype.UU
 		return s.dispatchWorker(ctx, nodeRun)
 	}
 
+	if nodeRun.Status == NodeRunStatusBlocked {
+		if s.OnNodeStatusChanged != nil {
+			s.OnNodeStatusChanged(ctx, nodeRun)
+		}
+		return s.OnNodeRunCompleted(ctx, nodeRunID)
+	}
+
 	if nodeRun.Status == NodeRunStatusCompleted {
+		if s.OnNodeStatusChanged != nil {
+			s.OnNodeStatusChanged(ctx, nodeRun)
+		}
 		return s.OnNodeRunCompleted(ctx, nodeRunID)
 	}
 
@@ -648,11 +665,11 @@ func (s *WorkflowService) dispatchWorker(ctx context.Context, nodeRun db.Workflo
 			return fmt.Errorf("dispatch agent task: %w", err)
 		}
 		// Link the task to the node run.
-		if _, err := s.Queries.LinkNodeRunAgentTask(ctx, db.LinkNodeRunAgentTaskParams{
-			ID:          nodeRun.ID,
-			AgentTaskID: task.ID,
+		if _, err := s.Queries.LinkNodeRunWorkerTask(ctx, db.LinkNodeRunWorkerTaskParams{
+			ID:                nodeRun.ID,
+			WorkerAgentTaskID: task.ID,
 		}); err != nil {
-			return fmt.Errorf("link agent task: %w", err)
+			return fmt.Errorf("link worker task: %w", err)
 		}
 		_, err = s.TransitionNodeRun(ctx, nodeRun, NodeRunStatusWorking)
 		return err
@@ -683,9 +700,15 @@ func (s *WorkflowService) dispatchCritic(ctx context.Context, nodeRun db.Workflo
 		if !agentID.Valid {
 			return fmt.Errorf("no agent resolved for critic")
 		}
-		_, err := s.DispatchAgentTask(ctx, nodeRun, "critic")
+		task, err := s.DispatchAgentTask(ctx, nodeRun, "critic")
 		if err != nil {
 			return fmt.Errorf("dispatch critic task: %w", err)
+		}
+		if _, err := s.Queries.LinkNodeRunCriticTask(ctx, db.LinkNodeRunCriticTaskParams{
+			ID:                nodeRun.ID,
+			CriticAgentTaskID: task.ID,
+		}); err != nil {
+			return fmt.Errorf("link critic task: %w", err)
 		}
 		_, err = s.TransitionNodeRun(ctx, nodeRun, NodeRunStatusCriticReviewing)
 		return err
@@ -772,6 +795,18 @@ func (s *WorkflowService) DispatchAgentTask(ctx context.Context, nodeRun db.Work
 		return nil, fmt.Errorf("marshal context: %w", err)
 	}
 
+	// Look up the sub-issue linked to this node run so the daemon processes it
+	// as a normal issue task (with issue_id) while still driving the workflow.
+	var issueID pgtype.UUID
+	subIssue, err := s.Queries.GetIssueByOrigin(ctx, db.GetIssueByOriginParams{
+		WorkspaceID: workflow.WorkspaceID,
+		OriginType:  pgtype.Text{String: "workflow", Valid: true},
+		OriginID:    nodeRun.ID,
+	})
+	if err == nil {
+		issueID = subIssue.ID
+	}
+
 	// Create workflow-bound agent task directly.
 	task, err := s.Queries.CreateWorkflowAgentTask(ctx, db.CreateWorkflowAgentTaskParams{
 		AgentID:            agentID,
@@ -779,6 +814,7 @@ func (s *WorkflowService) DispatchAgentTask(ctx context.Context, nodeRun db.Work
 		Priority:           2, // medium
 		Context:            contextJSON,
 		WorkflowNodeRunID:  nodeRun.ID,
+		IssueID:            issueID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create workflow agent task: %w", err)
@@ -993,19 +1029,28 @@ func (s *WorkflowService) HandleWorkflowTaskCompletion(ctx context.Context, task
 		if nodeRun.Status == NodeRunStatusCriticReviewing {
 			// Parse the agent's output for approve/rework decision.
 			var output struct {
-				Approved bool   `json:"approved"`
+				Approved *bool  `json:"approved"`
 				Comment  string `json:"comment"`
+				Output   string `json:"output"`
 			}
 			if len(task.Result) > 0 {
 				if err := json.Unmarshal(task.Result, &output); err != nil {
-					// Default to approve on unparseable output.
-					output.Approved = true
+					t := true
+					output.Approved = &t
 				}
 			} else {
-				output.Approved = true
+				t := true
+				output.Approved = &t
 			}
-
-			return s.ReviewNodeRun(ctx, nodeRun.ID, output.Approved, output.Comment)
+			approved := true
+			if output.Approved != nil {
+				approved = *output.Approved
+			} else if output.Output != "" {
+				// Agent didn't include approved field — infer from output text.
+				approved = !strings.Contains(strings.ToLower(output.Output), "不通过") &&
+					!strings.Contains(strings.ToLower(output.Output), "reject")
+			}
+			return s.ReviewNodeRun(ctx, nodeRun.ID, approved, output.Comment)
 		}
 	}
 

@@ -2020,6 +2020,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 								slog.Warn("failed to create sub-issue for node run", "node_run_id", uuidToString(nr.ID), "error", err)
 							}
 						}
+						// Dispatch after sub-issues exist so tasks can link issue_id.
+							h.WorkflowService.DispatchRootNodeRuns(ctx, run.ID)
 						_, err = h.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
 							ID:            issue.ID,
 							AssigneeType:  issue.AssigneeType,
@@ -2313,6 +2315,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 							slog.Warn("failed to create sub-issue for node run", "node_run_id", uuidToString(nr.ID), "error", cerr)
 						}
 					}
+				h.WorkflowService.DispatchRootNodeRuns(ctx, run.ID)
 					_, cerr := h.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
 						ID:            issue.ID,
 						AssigneeType:  issue.AssigneeType,
