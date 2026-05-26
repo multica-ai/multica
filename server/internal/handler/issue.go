@@ -3147,8 +3147,8 @@ func (h *Handler) ClearIssueHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !roleAllowed(member.Role, "owner", "admin") {
-		writeError(w, http.StatusForbidden, "only workspace owner or admin can clear issue history")
+	if !roleAllowed(member.Role, "owner", "admin") && uuidToString(issue.CreatorID) != uuidToString(member.UserID) {
+		writeError(w, http.StatusForbidden, "only workspace owner, admin, or issue creator can clear issue history")
 		return
 	}
 
