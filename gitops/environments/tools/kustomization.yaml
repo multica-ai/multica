@@ -24,6 +24,6 @@ patches:
       name: agentfarm-backend
 images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
-    newTag: "da0c1981"
+    newTag: "2d23407b"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newTag: "da0c1981"
