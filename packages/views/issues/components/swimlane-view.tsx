@@ -165,9 +165,12 @@ export function SwimLaneView({
 }: {
   issues: Issue[];
   /**
-   * Status-unfiltered companion set used for lane discovery and status
-   * totals — without it, children whose parent sits in a hidden status
-   * would vanish and hidden-column counts would always read 0.
+   * Status-unfiltered companion set used for parent metadata lookup and
+   * status totals. Lane discovery still drives off the visible `issues`
+   * set so that parents whose children are all in hidden statuses don't
+   * produce empty rows, but header chrome (identifier, title, issue ref
+   * for the Open-parent link) and hidden-column counts read from here so
+   * a parent in a hidden status still surfaces its label correctly.
    */
   unfilteredIssues?: Issue[];
   visibleStatuses?: IssueStatus[];
@@ -334,11 +337,16 @@ export function SwimLaneView({
     return ids;
   }, [parentGroups, sortedStatuses]);
 
-  // Drives both visible status-header counts AND hidden-column panel rows,
-  // so both sides agree on a single semantic. Counts what would render as a
-  // card — every issue minus those promoted to lane headers. Children
-  // whose parent isn't loaded still count because they land in the
-  // "Other parents" fallback lane.
+  // Drives both visible status-header counts AND hidden-column panel rows.
+  // Known limitation: `parentIssueIds` is derived from lanes that exist
+  // in the current render (only parents with ≥1 visible child). A parent
+  // whose children are all hidden doesn't get a lane, so it counts as a
+  // card here. When the user un-hides that status the parent gets
+  // promoted to a lane header and the count for that status drops by 1.
+  // The visible-column total and the "would-see-if-unhidden" total are
+  // therefore subtly different aggregates — fixing this requires a
+  // second parentIssueIds set built from laneSourceIssues rather than
+  // the rendered parentGroups. Tracked as a follow-up.
   const statusTotals = useMemo(() => {
     const totals = new Map<IssueStatus, number>();
     for (const issue of laneSourceIssues) {
@@ -925,10 +933,14 @@ function SwimLaneCell({
    */
   readOnly?: boolean;
 }) {
-  // Hook is called unconditionally (rules of hooks), but readOnly cells
-  // discard the ref so dnd-kit never registers them — no `isOver`
-  // affordance, no collision detection target.
-  const { setNodeRef, isOver } = useDroppable({ id: cId, disabled: readOnly });
+  // The orphan cell stays enabled in the collision graph so that drops
+  // onto its whitespace area are absorbed here instead of falling through
+  // to the nearest real cell. The ORPHAN_LANE_KEY guards in
+  // handleDragOver / handleDragEnd reject the actual move.
+  const { setNodeRef, isOver: droppableIsOver } = useDroppable({ id: cId });
+  // Never show the hover highlight on a readOnly cell — the guards will
+  // reject the drop, so visual confirmation would be misleading.
+  const isOver = readOnly ? false : droppableIsOver;
   const { t } = useT("issues");
   const cfg = STATUS_CONFIG[status];
 
