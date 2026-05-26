@@ -565,6 +565,39 @@ func TestCopilotEventLoopSeedModelFromOpts(t *testing.T) {
 	}
 }
 
+func TestCopilotEventLoopMergesFlatResultUsageSnapshot(t *testing.T) {
+	t.Parallel()
+	lines := []string{
+		fixtureSessionStart,
+		fixtureAssistantMessage, // outputTokens=5 from assistant.message.
+		`{"type":"result","sessionId":"final-id","exitCode":0,"usage":{"input_tokens":123,"output_tokens":7,"cached_input_tokens":11,"cache_creation_input_tokens":13,"premiumRequests":1}}`,
+	}
+
+	_, sessionID, _, usage := simulateCopilotEventLoop(t, lines)
+
+	if sessionID != "final-id" {
+		t.Fatalf("expected result session id to win, got %q", sessionID)
+	}
+	u := usage["claude-sonnet-4"]
+	if u.InputTokens != 123 || u.OutputTokens != 7 || u.CacheReadTokens != 11 || u.CacheWriteTokens != 13 {
+		t.Fatalf("usage = %+v, want input=123 output=7 cache_read=11 cache_write=13", u)
+	}
+}
+
+func TestCopilotEventLoopMergesModelResultUsage(t *testing.T) {
+	t.Parallel()
+	lines := []string{
+		`{"type":"result","sessionId":"final-id","exitCode":0,"usage":{"modelUsage":{"claude-opus-4.6":{"inputTokens":200,"outputTokens":80,"cacheReadTokens":30}}}}`,
+	}
+
+	_, _, _, usage := simulateCopilotEventLoop(t, lines)
+
+	u := usage["claude-opus-4.6"]
+	if u.InputTokens != 200 || u.OutputTokens != 80 || u.CacheReadTokens != 30 {
+		t.Fatalf("usage = %+v, want input=200 output=80 cache_read=30", u)
+	}
+}
+
 func TestCopilotEventLoopReasoning(t *testing.T) {
 	t.Parallel()
 	lines := []string{

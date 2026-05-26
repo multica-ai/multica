@@ -46,6 +46,23 @@ func TestBuildGeminiArgsWithModel(t *testing.T) {
 	}
 }
 
+func TestGeminiAccumulateUsageFallsBackToTopLevelStats(t *testing.T) {
+	t.Parallel()
+
+	b := &geminiBackend{cfg: Config{Logger: slog.Default()}}
+	usage := make(map[string]TokenUsage)
+
+	b.accumulateUsage(usage, &geminiStreamStats{
+		InputTokens:  123,
+		OutputTokens: 45,
+	})
+
+	u := usage["gemini"]
+	if u.InputTokens != 123 || u.OutputTokens != 45 {
+		t.Fatalf("usage = %+v, want input=123 output=45", u)
+	}
+}
+
 func TestBuildGeminiArgsWithResume(t *testing.T) {
 	t.Parallel()
 

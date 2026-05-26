@@ -83,6 +83,7 @@ while IFS= read -r line; do
     *'"method":"thread/message"'*)
       printf '{"type":"response_start","response_id":"thread-fake-123:1"}\n'
       printf '{"type":"response_delta","response_id":"thread-fake-123:1","delta":"Hello from DeepSeek!"}\n'
+      printf '{"type":"usage_update","usage":{"input_tokens":25,"output_tokens":7,"cached_input_tokens":3}}\n'
       printf '{"type":"response_end","response_id":"thread-fake-123:1"}\n'
       printf '{"jsonrpc":"2.0","id":%s,"result":{"thread_id":"thread-fake-123","status":"accepted","events":[]}}\n' "$id"
       ;;
@@ -157,6 +158,10 @@ func TestDeepseekBackendNativeProtocol(t *testing.T) {
 		}
 		if !strings.Contains(result.Output, "Hello from DeepSeek!") {
 			t.Errorf("expected output to contain 'Hello from DeepSeek!', got %q", result.Output)
+		}
+		usage := result.Usage["unknown"]
+		if usage.InputTokens != 25 || usage.OutputTokens != 7 || usage.CacheReadTokens != 3 {
+			t.Errorf("usage = %+v, want input=25 output=7 cache_read=3", usage)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
