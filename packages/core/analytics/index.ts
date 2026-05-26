@@ -12,7 +12,7 @@
 // keeps self-hosted Docker images from leaking our project key — their
 // backend returns an empty key and this module stays inert.
 
-import posthog from "posthog-js";
+import posthog from "./posthog";
 
 export const EVENT_SCHEMA_VERSION = 2;
 

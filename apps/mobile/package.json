@@ -30,6 +30,7 @@
     "expo-document-picker": "^55.0.13",
     "expo-file-system": "^55.0.21",
     "expo-image-picker": "^55.0.19",
+    "expo-linear-gradient": "~55.0.14",
     "expo-linking": "^55.0.14",
     "expo-media-library": "^55.0.17",
     "expo-notifications": "^55.0.20",
