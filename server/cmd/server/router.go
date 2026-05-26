@@ -497,6 +497,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceMember(queries))
 
+			r.With(middleware.RequireUserScope).Get("/api/agents/backfill-avatars", cerebroAgentAvatarHandler.BackfillStatus) // CEREBRO-PATCH(agent-avatar-backfill): keep static GET before /api/agents/{id}.
 			r.With(middleware.AllowTaskScopeForAgent("id")).Get("/api/agents/{id}", h.GetAgent)
 
 			// Issue routes registered flat (not via r.Route) so they
@@ -944,8 +945,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/from-template", h.CreateAgentFromTemplate)
 				// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation endpoint
 				r.Post("/generate-avatar", cerebroAgentAvatarHandler.Generate)
-				r.Get("/backfill-avatars", cerebroAgentAvatarHandler.BackfillStatus) // CEREBRO-PATCH(agent-avatar-backfill): admin progress endpoint.
-				r.Post("/backfill-avatars", cerebroAgentAvatarHandler.Backfill)      // CEREBRO-PATCH(agent-avatar-backfill): async workspace avatar backfill.
+				r.Post("/backfill-avatars", cerebroAgentAvatarHandler.Backfill) // CEREBRO-PATCH(agent-avatar-backfill): async workspace avatar backfill.
 				r.Route("/{id}", func(r chi.Router) {
 					// GET is registered in the task-allowlist group above
 					// so agents can read their own configuration.
