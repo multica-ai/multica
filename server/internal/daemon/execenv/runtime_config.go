@@ -461,6 +461,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- For content longer than ~60 characters, prefer a bulleted list — it is more readable on mobile\n")
 	b.WriteString("- Use `<br>` inside a cell to add intentional line breaks when a table is still the right format\n\n")
 
+	// CEREBRO-PATCH(agent-todo-checklist): teach agents how to read and complete markdown checklists in descriptions/comments (FIR-2297)
+	b.WriteString("## Todo Checklists\n\n")
+	b.WriteString("Descriptions and comments can contain markdown checklists: `- [ ]` is an open item, `- [x]` is done. The platform renders each line as a checkbox.\n\n")
+	b.WriteString("- When a checklist tracks work you are doing, mark an item done the moment you finish it — change that line's `- [ ]` to `- [x]`.\n")
+	b.WriteString("- It persists only when you save the whole field: read the current description (`multica issue get <id> --output json`), flip just the relevant line(s), and write it back with `multica issue update <id> --description-stdin`. The update replaces the entire description, so resend every other line unchanged.\n")
+	b.WriteString("- Only check off items that already exist; do not invent or restructure a checklist unless you were asked to.\n\n")
+
 	b.WriteString("## Output\n\n")
 	switch {
 	case ctx.AutopilotRunID != "":
