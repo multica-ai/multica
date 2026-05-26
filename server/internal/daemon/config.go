@@ -201,8 +201,11 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
+	if e, ok := probe("MULTICA_CSC_PATH", "csc", "MULTICA_CSC_MODEL"); ok {
+		agents["csc"] = e
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or csc and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -538,6 +541,7 @@ func shellArgsFromEnv(name string) ([]string, error) {
 var defaultAgentCommandNames = []string{
 	"claude", "codex", "opencode", "openclaw", "hermes",
 	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
+	"csc",
 }
 
 // loginShellResolveTimeout caps how long the daemon will wait for the user's
