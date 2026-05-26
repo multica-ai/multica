@@ -28,6 +28,7 @@
       "preferences": "偏好设置",
       "notifications": "通知",
       "tokens": "API Token",
+      "model_pricing": "模型定价",
       "general": "通用",
       "repositories": "代码仓库",
       "github": "GitHub",
@@ -118,6 +119,30 @@
       "copy_tooltip": "复制 token",
       "done": "完成"
     }
+  },
+  "model_pricing": {
+    "title": "模型定价",
+    "description": "覆盖内置价格，或为内置目录里没有维护价格的模型添加自定义价格。",
+    "builtin_section": "内置定价",
+    "custom_section": "自定义定价",
+    "no_custom": "暂无自定义定价。",
+    "add_model": "添加模型",
+    "model_name_placeholder": "模型名称（例如 mimo-v2.5-pro）",
+    "field_input": "输入",
+    "field_output": "输出",
+    "field_cache_read": "缓存读取",
+    "field_cache_write": "缓存写入",
+    "unit_hint": "所有费率为每百万 token 的美元价格。",
+    "validation_required": "请输入非负的输入、输出和缓存读取费率。缓存写入留空时会复用输出价格。",
+    "save": "保存",
+    "cancel": "取消",
+    "edit_aria": "编辑自定义定价",
+    "delete_aria": "移除自定义定价",
+    "table_model": "模型",
+    "table_input": "输入",
+    "table_output": "输出",
+    "table_cache_read": "缓存读取",
+    "table_cache_write": "缓存写入"
   },
   "workspace": {
     "section_general": "通用",

@@ -305,7 +305,7 @@
       "field_output": "Output",
       "field_cache_read": "Cache read",
       "field_cache_write": "Cache write",
-      "unit_hint": "All rates are USD per 1M tokens. Leave every field blank to remove an override.",
+      "unit_hint": "All rates are USD per 1M tokens. Leave cache write blank to reuse output; leave every field blank to remove an override.",
       "remove_aria": "Remove custom price",
       "cancel": "Cancel",
       "save": "Save"

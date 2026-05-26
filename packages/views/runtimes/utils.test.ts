@@ -412,10 +412,9 @@ describe("user-supplied custom pricing", () => {
     ).toBeCloseTo(5, 5);
   });
 
-  it("does NOT shadow the maintained catalog when both define the same model", () => {
-    // Catalog wins so a user can't accidentally over-charge themselves for
-    // a model we already track (and so a stale local override doesn't
-    // silently disagree with what the dashboard shows everyone else).
+  it("lets custom pricing override the maintained catalog for the same model", () => {
+    // Local overrides win so teams can reflect provider-specific rates or
+    // negotiated discounts even when the app ships a maintained default.
     useCustomPricingStore.getState().setCustomPricing("claude-sonnet-4-6", {
       input: 999,
       output: 999,
@@ -428,7 +427,7 @@ describe("user-supplied custom pricing", () => {
         model: "claude-sonnet-4-6",
         input_tokens: 1_000_000,
       }),
-    ).toBeCloseTo(3, 5); // maintained input rate, not the 999 override
+    ).toBeCloseTo(999, 5);
   });
 
   it("falls back to a stripped dated snapshot in the custom store", () => {
@@ -483,13 +482,11 @@ describe("user-supplied custom pricing", () => {
         agent_count: 1,
       },
     ];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const byModel = aggregateCostByModel(rows as any);
     const sonnet = byModel.find((r) => r.key === "claude-sonnet-4-6");
     const fictional = byModel.find((r) => r.key === "fictional-model-x");
     expect(sonnet?.cost).toBeCloseTo(3, 5);
     expect(fictional?.cost).toBe(0);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(collectUnmappedModels(rows as any)).toEqual(["fictional-model-x"]);
   });
 
@@ -508,7 +505,6 @@ describe("user-supplied custom pricing", () => {
         agent_count: 1,
       },
     ];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const before = aggregateCostByModel(rows as any);
     expect(before[0]?.cost).toBe(0);
 
@@ -518,7 +514,6 @@ describe("user-supplied custom pricing", () => {
       cacheRead: 0.2,
       cacheWrite: 2,
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const after = aggregateCostByModel(rows as any);
     expect(after[0]?.cost).toBeCloseTo(2, 5);
   });

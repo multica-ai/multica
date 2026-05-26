@@ -28,6 +28,7 @@
       "preferences": "Preferences",
       "notifications": "Notifications",
       "tokens": "API Tokens",
+      "model_pricing": "Model Pricing",
       "general": "General",
       "repositories": "Repositories",
       "github": "GitHub",
@@ -118,6 +119,30 @@
       "copy_tooltip": "Copy token",
       "done": "Done"
     }
+  },
+  "model_pricing": {
+    "title": "Model Pricing",
+    "description": "Override built-in prices or add custom prices for models missing from the built-in catalog.",
+    "builtin_section": "Built-in Pricing",
+    "custom_section": "Custom Pricing",
+    "no_custom": "No custom pricing set yet.",
+    "add_model": "Add model",
+    "model_name_placeholder": "Model name (e.g. mimo-v2.5-pro)",
+    "field_input": "Input",
+    "field_output": "Output",
+    "field_cache_read": "Cache read",
+    "field_cache_write": "Cache write",
+    "unit_hint": "All rates are USD per 1M tokens.",
+    "validation_required": "Enter non-negative input, output, and cache-read rates. Leave cache write blank to reuse output.",
+    "save": "Save",
+    "cancel": "Cancel",
+    "edit_aria": "Edit custom pricing",
+    "delete_aria": "Remove custom pricing",
+    "table_model": "Model",
+    "table_input": "Input",
+    "table_output": "Output",
+    "table_cache_read": "Cache Read",
+    "table_cache_write": "Cache Write"
   },
   "workspace": {
     "section_general": "General",
