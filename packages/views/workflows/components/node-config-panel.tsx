@@ -9,10 +9,10 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useUpdateNode, useDeleteNode } from "@multica/core/workflows/queries";
+import { useDeleteNode } from "@multica/core/workflows/queries";
 import { useWorkflowEditorStore } from "@multica/core/workflows/store";
 import { AssigneePicker } from "../../issues/components/pickers/assignee-picker";
-import type { WorkflowNode, WorkerType, CriticType, UpdateNodeRequest } from "@multica/core/types";
+import type { WorkflowNode, WorkerType, CriticType } from "@multica/core/types";
 import type { IssueAssigneeType } from "@multica/core/types/issue";
 
 function toAssigneeType(t: string): IssueAssigneeType | null {
@@ -44,61 +44,35 @@ interface NodeConfigPanelProps {
 export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelProps) {
   const { t } = useT("workflows");
   const wsId = useWorkspaceId();
-  const updateMutation = useUpdateNode(wsId, workflowId);
   const deleteMutation = useDeleteNode(wsId, workflowId);
   const editorMode = useWorkflowEditorStore((s) => s.mode);
+  const nodeEdits = useWorkflowEditorStore((s) => s.nodeEdits);
+  const cacheNodeEdits = useWorkflowEditorStore((s) => s.cacheNodeEdits);
   const isEditing = editorMode === "edit";
 
-  const [title, setTitle] = useState(node.title);
-  const [description, setDescription] = useState(node.description);
-  const [formatSchema, setFormatSchema] = useState(
-    node.format_schema ? JSON.stringify(node.format_schema, null, 2) : ""
+  const saved = nodeEdits[node.id];
+  const [title, setTitle] = useState(saved?.title ?? node.title);
+  const [description, setDescription] = useState(saved?.description ?? node.description);
+  const [formatSchema, setFormatSchema] = useState<string>(
+    (saved?.format_schema as string | undefined) ?? (node.format_schema ? JSON.stringify(node.format_schema, null, 2) : "")
   );
-  const [workerType, setWorkerType] = useState(node.worker_type);
-  const [workerId, setWorkerId] = useState<string | null>(node.worker_id ?? null);
-  const [criticType, setCriticType] = useState(node.critic_type);
-  const [criticId, setCriticId] = useState<string | null>(node.critic_id ?? null);
-  const [criticApiUrl, setCriticApiUrl] = useState(node.critic_api_url ?? "");
+  const [workerType, setWorkerType] = useState(saved?.worker_type ?? node.worker_type);
+  const [workerId, setWorkerId] = useState<string | null>(saved?.worker_id ?? node.worker_id ?? null);
+  const [criticType, setCriticType] = useState(saved?.critic_type ?? node.critic_type);
+  const [criticId, setCriticId] = useState<string | null>(saved?.critic_id ?? node.critic_id ?? null);
+  const [criticApiUrl, setCriticApiUrl] = useState(saved?.critic_api_url ?? node.critic_api_url ?? "");
 
   useEffect(() => {
-    setTitle(node.title);
-    setDescription(node.description);
-    setFormatSchema(node.format_schema ? JSON.stringify(node.format_schema, null, 2) : "");
-    setWorkerType(node.worker_type);
-    setWorkerId(node.worker_id ?? null);
-    setCriticType(node.critic_type);
-    setCriticId(node.critic_id ?? null);
-    setCriticApiUrl(node.critic_api_url ?? "");
+    const s = nodeEdits[node.id];
+    setTitle(s?.title ?? node.title);
+    setDescription(s?.description ?? node.description);
+    setFormatSchema(((s?.format_schema as string | undefined) ?? (node.format_schema ? JSON.stringify(node.format_schema, null, 2) : "")) as string);
+    setWorkerType(s?.worker_type ?? node.worker_type);
+    setWorkerId(s?.worker_id ?? node.worker_id ?? null);
+    setCriticType(s?.critic_type ?? node.critic_type);
+    setCriticId(s?.critic_id ?? node.critic_id ?? null);
+    setCriticApiUrl(s?.critic_api_url ?? node.critic_api_url ?? "");
   }, [node]);
-
-  const handleSave = async () => {
-    let formatSchemaParsed: unknown = null;
-    if (formatSchema.trim()) {
-      try {
-        formatSchemaParsed = JSON.parse(formatSchema);
-      } catch {
-        return;
-      }
-    }
-
-    const req: UpdateNodeRequest = {
-      title,
-      description,
-      format_schema: formatSchemaParsed,
-      worker_type: workerType,
-      worker_id: workerId,
-      critic_type: criticType,
-      critic_id: criticId,
-      critic_api_url: criticApiUrl || null,
-    };
-
-    try {
-      await updateMutation.mutateAsync({ nodeId: node.id, ...req });
-      toast.success(t(($) => $.node.toast_saved));
-    } catch {
-      toast.error(t(($) => $.node.toast_save_failed));
-    }
-  };
 
   const handleDelete = async () => {
     try {
@@ -128,9 +102,10 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
           <Label className="text-sm">{t(($) => $.node.title)}</Label>
           <Input
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => { setTitle(e.target.value); cacheNodeEdits(node.id, { title: e.target.value }); }}
             placeholder={t(($) => $.node.title_placeholder)}
             className="h-8 text-sm"
+            disabled={!isEditing}
           />
         </div>
 
@@ -139,9 +114,10 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
           <Label className="text-sm">{t(($) => $.node.description)}</Label>
           <Textarea
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => { setDescription(e.target.value); cacheNodeEdits(node.id, { description: e.target.value }); }}
             placeholder={t(($) => $.node.description_placeholder)}
             className="min-h-[60px] text-sm"
+            disabled={!isEditing}
             rows={2}
           />
         </div>
@@ -151,9 +127,10 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
           <Label className="text-sm">{t(($) => $.node.format_schema_label)}</Label>
           <Textarea
             value={formatSchema}
-            onChange={(e) => setFormatSchema(e.target.value)}
+            onChange={(e) => { setFormatSchema(e.target.value); cacheNodeEdits(node.id, { format_schema: e.target.value }); }}
             placeholder="{}"
             className="min-h-[80px] text-sm font-mono"
+            disabled={!isEditing}
             rows={4}
           />
           <p className="text-[11px] text-muted-foreground">{t(($) => $.node.format_schema_hint)}</p>
@@ -167,15 +144,20 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
 
           <div className="space-y-1.5">
             <Label className="text-sm">{t(($) => $.node.worker_type_label)}</Label>
-            <AssigneePicker
-              assigneeType={toAssigneeType(workerType)}
-              assigneeId={workerId}
-              onUpdate={(u) => {
-                setWorkerType(fromAssigneeType(u.assignee_type ?? null));
-                setWorkerId(u.assignee_id ?? null);
-              }}
-              align="start"
-            />
+            <div className={!isEditing ? "pointer-events-none opacity-60" : ""}>
+              <AssigneePicker
+                assigneeType={toAssigneeType(workerType)}
+                assigneeId={workerId}
+                onUpdate={(u) => {
+                  const wt = fromAssigneeType(u.assignee_type ?? null);
+                  const wid = u.assignee_id ?? null;
+                  setWorkerType(wt);
+                  setWorkerId(wid);
+                  cacheNodeEdits(node.id, { worker_type: wt, worker_id: wid });
+                }}
+                align="start"
+              />
+            </div>
           </div>
 
         </div>
@@ -188,15 +170,20 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
 
           <div className="space-y-1.5">
             <Label className="text-sm">{t(($) => $.node.critic_type_label)}</Label>
-            <AssigneePicker
-              assigneeType={toAssigneeType(criticType)}
-              assigneeId={criticId}
-              onUpdate={(u) => {
-                setCriticType(fromAssigneeTypeCritic(u.assignee_type ?? null));
-                setCriticId(u.assignee_id ?? null);
-              }}
-              align="start"
-            />
+            <div className={!isEditing ? "pointer-events-none opacity-60" : ""}>
+              <AssigneePicker
+                assigneeType={toAssigneeType(criticType)}
+                assigneeId={criticId}
+                onUpdate={(u) => {
+                  const ct = fromAssigneeTypeCritic(u.assignee_type ?? null);
+                  const cid = u.assignee_id ?? null;
+                  setCriticType(ct);
+                  setCriticId(cid);
+                  cacheNodeEdits(node.id, { critic_type: ct, critic_id: cid });
+                }}
+                align="start"
+              />
+            </div>
           </div>
 
           {criticType === "api" && (
@@ -204,7 +191,7 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
               <Label className="text-sm">{t(($) => $.node.critic_api_url_label)}</Label>
               <Input
                 value={criticApiUrl}
-                onChange={(e) => setCriticApiUrl(e.target.value)}
+                onChange={(e) => { setCriticApiUrl(e.target.value); cacheNodeEdits(node.id, { critic_api_url: e.target.value }); }}
                 placeholder="https://..."
                 className="h-8 text-sm"
                 disabled={!isEditing}
@@ -217,25 +204,19 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
         </div>
       </div>
 
-      <div className="flex flex-col gap-2 px-4 py-3 border-t shrink-0">
-        <Button
-          size="sm"
-          className="w-full"
-          onClick={handleSave}
-          disabled={updateMutation.isPending}
-        >
-          {updateMutation.isPending ? t(($) => $.node.saving) : t(($) => $.node.save)}
-        </Button>
-        <Button
-          size="sm"
-          variant="destructive"
-          className="w-full"
-          onClick={handleDelete}
-          disabled={deleteMutation.isPending}
-        >
-          <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-          {deleteMutation.isPending ? t(($) => $.node.saving) : t(($) => $.node.delete)}
-        </Button>
+      <div className="px-4 py-3 border-t shrink-0">
+        {isEditing && (
+          <Button
+            size="sm"
+            variant="destructive"
+            className="w-full"
+            onClick={handleDelete}
+            disabled={deleteMutation.isPending}
+          >
+            <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+            {deleteMutation.isPending ? t(($) => $.node.saving) : t(($) => $.node.delete)}
+          </Button>
+        )}
       </div>
     </div>
   );

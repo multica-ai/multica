@@ -27,6 +27,7 @@ import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage } from "@multica/views/settings";
 import { WorkflowsPage } from "@multica/views/workflows/components";
 import { WorkflowDetailPage } from "./pages/workflow-detail-page";
+import { WorkflowRunsPage } from "./pages/workflow-runs-page";
 import { WorkflowRunPage } from "./pages/workflow-run-page";
 import { useT } from "@multica/views/i18n";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
@@ -220,6 +221,11 @@ export const appRoutes: RouteObject[] = [
             path: "workflows/:id",
             element: <WorkflowDetailPage />,
             handle: { title: "Workflow" },
+          },
+          {
+            path: "workflows/:id/runs",
+            element: <WorkflowRunsPage />,
+            handle: { title: "Workflow Runs" },
           },
           {
             path: "workflows/:id/runs/:runId",

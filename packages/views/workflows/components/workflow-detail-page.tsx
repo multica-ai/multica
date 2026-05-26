@@ -3,13 +3,12 @@
 import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Save, Plus, Wand, Trash2, Power } from "lucide-react";
+import { Plus, Wand, Trash2, Power } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   workflowDetailOptions,
   workflowNodesOptions,
   workflowEdgesOptions,
-  workflowRunsOptions,
   useCreateNode,
   useUpdateNode,
   useCreateEdge,
@@ -42,11 +41,12 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   const selectedNodeId = useWorkflowEditorStore((s) => s.selectedNodeId);
   const mode = useWorkflowEditorStore((s) => s.mode);
   const setMode = useWorkflowEditorStore((s) => s.setMode);
+  const nodeEdits = useWorkflowEditorStore((s) => s.nodeEdits);
+  const clearNodeEdits = useWorkflowEditorStore((s) => s.clearNodeEdits);
 
   const { data: workflow, isLoading } = useQuery(workflowDetailOptions(wsId, id!));
   const { data: nodes = [] } = useQuery(workflowNodesOptions(wsId, id!));
   const { data: edges = [] } = useQuery(workflowEdgesOptions(wsId, id!));
-  const { data: runs = [] } = useQuery(workflowRunsOptions(wsId, id!));
 
   const createNodeMutation = useCreateNode(wsId, id!);
   const updateNodeMutation = useUpdateNode(wsId, id!);
@@ -90,6 +90,11 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
     if (!workflow) return;
     try {
       await updateWorkflowMutation.mutateAsync({ id: id!, title: workflow.title, description: workflow.description });
+      // Save all pending node edits
+      for (const [nodeId, edits] of Object.entries(nodeEdits)) {
+        updateNodeMutation.mutate({ nodeId, ...edits });
+        clearNodeEdits(nodeId);
+      }
       toast.success(t(($) => $.detail.toast_saved));
     } catch {
       toast.error(t(($) => $.detail.toast_save_failed));
@@ -182,7 +187,10 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
             variant={mode === "view" ? "outline" : "secondary"}
             size="sm"
             className="h-8 text-sm px-3"
-            onClick={() => setMode(mode === "view" ? "edit" : "view")}
+            onClick={async () => {
+              if (mode === "edit") await handleSave();
+              setMode(mode === "view" ? "edit" : "view");
+            }}
           >
             {mode === "view" ? t(($) => $.detail.toolbar.edit) : "Done"}
           </Button>
@@ -197,9 +205,6 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
               >
                 <Wand className="h-3.5 w-3.5" />
               </Button>
-              <Button size="sm" variant="outline" onClick={handleSave}>
-                <Save className="h-3.5 w-3.5" />
-              </Button>
               <Button size="sm" variant="outline" onClick={handleDeleteWorkflow} className="text-destructive hover:text-destructive">
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -212,7 +217,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
             disabled={updateWorkflowMutation.isPending}
           >
             <Power className="h-3.5 w-3.5 mr-1" />
-            {workflow?.status === "active" ? "Active" : "Activate"}
+            {workflow?.status === "active" ? t(($) => $.detail.deactivate) : t(($) => $.detail.activate)}
           </Button>
         </div>
       </PageHeader>
@@ -224,10 +229,10 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
           {nodes.length === 0 ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
               <p className="text-sm text-muted-foreground">{t(($) => $.detail.no_nodes)}</p>
-              <Button size="sm" variant="outline" onClick={handleAddNode}>
+              {mode === "edit" && <Button size="sm" variant="outline" onClick={handleAddNode}>
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 {t(($) => $.detail.add_node)}
-              </Button>
+              </Button>}
             </div>
           ) : (
             <DAGCanvas
@@ -241,7 +246,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
             />
           )}
           {/* Add node button (floating) */}
-          {nodes.length > 0 && (
+          {nodes.length > 0 && mode === "edit" && (
             <Button
               size="icon"
               variant="outline"
@@ -253,52 +258,14 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
           )}
         </div>
 
-        {/* Right sidebar: config panel or run history */}
-        {selectedNode ? (
+        {/* Right sidebar: config panel */}
+        {selectedNode && (
           <div className="w-96 shrink-0 h-full">
             <NodeConfigPanel
               node={selectedNode}
               workflowId={id!}
               onClose={() => useWorkflowEditorStore.getState().selectNode(null)}
             />
-          </div>
-        ) : (
-          <div className="w-96 shrink-0 border-l bg-card hidden lg:flex flex-col">
-            <div className="px-4 py-3 border-b">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                {t(($) => $.detail.section_run_history)}
-              </h3>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3">
-              {runs.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">
-                  {t(($) => $.detail.no_runs)}
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {runs.slice(0, 20).map((run) => (
-                    <button
-                      key={run.id}
-                      type="button"
-                      className="w-full text-left rounded-md border px-3 py-2 text-sm hover:bg-accent/40 transition-colors"
-                      onClick={() => navigation.push(wsPaths.workflowRunDetail(id!, run.id))}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium truncate">
-                          {new Date(run.started_at).toLocaleDateString()}
-                        </span>
-                        <Badge variant="secondary" className="text-[10px] px-1.5 h-4">
-                          {t(($) => ($.run.status as Record<string, string>)[run.status] ?? run.status)}
-                        </Badge>
-                      </div>
-                      <div className="text-muted-foreground mt-0.5">
-                        {new Date(run.started_at).toLocaleTimeString()}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
         )}
       </div>

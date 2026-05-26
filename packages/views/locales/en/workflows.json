@@ -6,7 +6,8 @@
       "name": "Name",
       "status": "Status",
       "nodes": "Nodes",
-      "last_run": "Last run"
+      "last_run": "Last run",
+      "runs": "Runs"
     },
     "last_run_empty": "--",
     "empty": {

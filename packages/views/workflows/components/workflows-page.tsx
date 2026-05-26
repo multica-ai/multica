@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Workflow as WorkflowIcon, Play, Pause, FileText, Archive, Zap } from "lucide-react";
+import { Plus, Workflow as WorkflowIcon, Play, Pause, FileText, Archive, Zap, History } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { workflowListOptions, useCreateWorkflow } from "@multica/core/workflows/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -63,6 +63,13 @@ function WorkflowRow({ workflow }: { workflow: Workflow }) {
         <span className="text-muted-foreground tabular-nums sm:w-16 sm:shrink-0 sm:text-center">
           {workflow.node_count}
         </span>
+        <AppLink
+          href={wsPaths.workflowRuns(workflow.id)}
+          className="shrink-0 w-16 flex justify-center p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+          title="Run history"
+        >
+          <History className="h-3.5 w-3.5" />
+        </AppLink>
       </div>
     </div>
   );
@@ -148,6 +155,7 @@ export function WorkflowsPage() {
               <span className="min-w-0 flex-1">{t(($) => $.page.table.name)}</span>
               <span className="w-20 text-center shrink-0">{t(($) => $.page.table.status)}</span>
               <span className="w-16 text-center shrink-0">{t(($) => $.page.table.nodes)}</span>
+              <span className="w-16 shrink-0 text-center">{t(($) => $.page.table.runs)}</span>
             </div>
             <div className="flex gap-1 px-5 py-2 border-b">
               {(["all", "active", "draft", "paused", "archived"] as const).map((s) => (
