@@ -49,6 +49,7 @@ import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
+import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
@@ -2017,6 +2018,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">
+              <LocalDirectoryHint projectId={issue?.project_id} />
               {/* key={id}: web's /issues/[id] route doesn't remount on
                   issueId change, so without an explicit key the editor
                   keeps the previous issue's in-memory content and the

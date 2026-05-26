@@ -98,6 +98,7 @@
       "offline": "离线",
       "reconnecting": "重连中",
       "queued": "排队中",
+      "waiting_for_directory_release": "等待本地目录释放",
       "starting_up": "启动中",
       "thinking": "思考中",
       "typing": "输入中"
