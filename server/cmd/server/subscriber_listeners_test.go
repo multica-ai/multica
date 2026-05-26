@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/autosubscribe"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -82,6 +83,28 @@ func subscriberCount(t *testing.T, queries *db.Queries, issueID string) int {
 	return len(subs)
 }
 
+func setAutoSubscribePreference(t *testing.T, queries *db.Queries, userID string, prefs autosubscribe.Preferences) {
+	t.Helper()
+	_, err := queries.UpsertAutoSubscribePreference(context.Background(), db.UpsertAutoSubscribePreferenceParams{
+		WorkspaceID:             util.MustParseUUID(testWorkspaceID),
+		UserID:                  util.MustParseUUID(userID),
+		IssueCreator:            prefs.IssueCreator,
+		IssueAssignee:           prefs.IssueAssignee,
+		CommentAuthor:           prefs.CommentAuthor,
+		IssueDescriptionMention: prefs.IssueDescriptionMention,
+		CommentMention:          prefs.CommentMention,
+		QuickCreateRequester:    prefs.QuickCreateRequester,
+	})
+	if err != nil {
+		t.Fatalf("UpsertAutoSubscribePreference: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `
+			DELETE FROM auto_subscribe_preference WHERE workspace_id = $1 AND user_id = $2
+		`, testWorkspaceID, userID)
+	})
+}
+
 func TestSubscriberIssueCreated_CreatorSubscribed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
@@ -114,6 +137,40 @@ func TestSubscriberIssueCreated_CreatorSubscribed(t *testing.T) {
 	}
 	if count := subscriberCount(t, queries, issueID); count != 1 {
 		t.Fatalf("expected 1 subscriber, got %d", count)
+	}
+}
+
+func TestSubscriberIssueCreated_CreatorPreferenceDisabled(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+	prefs := autosubscribe.NewUserDefaults()
+	prefs.IssueCreator = false
+	setAutoSubscribePreference(t, queries, testUserID, prefs)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+			},
+		},
+	})
+
+	if isSubscribed(t, queries, issueID, "member", testUserID) {
+		t.Fatal("creator should not be subscribed when issue_creator is disabled")
 	}
 }
 
@@ -158,6 +215,47 @@ func TestSubscriberIssueCreated_CreatorAndAssignee(t *testing.T) {
 	}
 	if count := subscriberCount(t, queries, issueID); count != 2 {
 		t.Fatalf("expected 2 subscribers, got %d", count)
+	}
+}
+
+func TestSubscriberIssueCreated_AssigneePreferenceDisabled(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	assigneeEmail := "subscriber-assignee-pref-disabled@multica.ai"
+	assigneeID := createTestUser(t, assigneeEmail)
+	t.Cleanup(func() { cleanupTestUser(t, assigneeEmail) })
+	prefs := autosubscribe.NewUserDefaults()
+	prefs.IssueAssignee = false
+	setAutoSubscribePreference(t, queries, assigneeID, prefs)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	assigneeType := "member"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:           issueID,
+				WorkspaceID:  testWorkspaceID,
+				Title:        "test issue",
+				Status:       "todo",
+				Priority:     "medium",
+				CreatorType:  "member",
+				CreatorID:    testUserID,
+				AssigneeType: &assigneeType,
+				AssigneeID:   &assigneeID,
+			},
+		},
+	})
+
+	if isSubscribed(t, queries, issueID, "member", assigneeID) {
+		t.Fatal("assignee should not be subscribed when issue_assignee is disabled")
 	}
 }
 
@@ -275,6 +373,73 @@ func TestSubscriberIssueUpdated_NoAssigneeChange(t *testing.T) {
 	}
 }
 
+func TestSubscriberIssueUpdated_DescriptionMentionPreference(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	mentionedEmail := "subscriber-description-mention@multica.ai"
+	mentionedID := createTestUser(t, mentionedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mentionedEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+	description := "please check [@Mentioned](mention://member/" + mentionedID + ")"
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				Description: &description,
+			},
+			"description_changed": true,
+		},
+	})
+
+	if isSubscribed(t, queries, issueID, "member", mentionedID) {
+		t.Fatal("description mention should not subscribe missing-row users by default")
+	}
+
+	prefs := autosubscribe.NewUserDefaults()
+	prefs.IssueDescriptionMention = true
+	setAutoSubscribePreference(t, queries, mentionedID, prefs)
+	issueID2 := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID2) })
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID2,
+				WorkspaceID: testWorkspaceID,
+				Title:       "test issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				Description: &description,
+			},
+			"description_changed": true,
+		},
+	})
+
+	if !isSubscribed(t, queries, issueID2, "member", mentionedID) {
+		t.Fatal("description mention should subscribe when issue_description_mention is enabled")
+	}
+}
+
 func TestSubscriberCommentCreated_CommenterSubscribed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
@@ -306,6 +471,104 @@ func TestSubscriberCommentCreated_CommenterSubscribed(t *testing.T) {
 
 	if !isSubscribed(t, queries, issueID, "member", commenterID) {
 		t.Fatal("expected commenter to be subscribed after comment:created")
+	}
+}
+
+func TestSubscriberCommentCreated_CommenterPreferenceDisabled(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	commenterEmail := "subscriber-commenter-pref-disabled@multica.ai"
+	commenterID := createTestUser(t, commenterEmail)
+	t.Cleanup(func() { cleanupTestUser(t, commenterEmail) })
+	prefs := autosubscribe.NewUserDefaults()
+	prefs.CommentAuthor = false
+	setAutoSubscribePreference(t, queries, commenterID, prefs)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     commenterID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000000",
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   commenterID,
+				Content:    "test comment",
+				Type:       "comment",
+			},
+		},
+	})
+
+	if isSubscribed(t, queries, issueID, "member", commenterID) {
+		t.Fatal("commenter should not be subscribed when comment_author is disabled")
+	}
+}
+
+func TestSubscriberCommentCreated_CommentMentionPreference(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	mentionedEmail := "subscriber-comment-mention@multica.ai"
+	mentionedID := createTestUser(t, mentionedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mentionedEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+	content := "ping [@Mentioned](mention://member/" + mentionedID + ")"
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000000",
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   testUserID,
+				Content:    content,
+				Type:       "comment",
+			},
+		},
+	})
+
+	if isSubscribed(t, queries, issueID, "member", mentionedID) {
+		t.Fatal("comment mention should not subscribe missing-row users by default")
+	}
+
+	prefs := autosubscribe.NewUserDefaults()
+	prefs.CommentMention = true
+	setAutoSubscribePreference(t, queries, mentionedID, prefs)
+	issueID2 := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID2) })
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000001",
+				IssueID:    issueID2,
+				AuthorType: "member",
+				AuthorID:   testUserID,
+				Content:    content,
+				Type:       "comment",
+			},
+		},
+	})
+
+	if !isSubscribed(t, queries, issueID2, "member", mentionedID) {
+		t.Fatal("comment mention should subscribe when comment_mention is enabled")
 	}
 }
 
