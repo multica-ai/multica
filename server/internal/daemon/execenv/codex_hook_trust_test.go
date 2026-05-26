@@ -134,6 +134,48 @@ func TestSyncCodexHookTrustStateRefreshesMappedBlocksFromSharedConfig(t *testing
 	}
 }
 
+func TestSyncCodexHookTrustStateReportsCounts(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	sharedHome := filepath.Join(dir, "shared")
+	codexHome := filepath.Join(dir, "task", "codex-home")
+	if err := os.MkdirAll(sharedHome, 0o755); err != nil {
+		t.Fatalf("create shared home: %v", err)
+	}
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatalf("create codex home: %v", err)
+	}
+
+	sharedHooksPath := filepath.Join(sharedHome, "hooks.json")
+	taskHooksPath := filepath.Join(codexHome, "hooks.json")
+	sharedConfigPath := filepath.Join(sharedHome, "config.toml")
+	taskConfigPath := filepath.Join(codexHome, "config.toml")
+	if err := os.WriteFile(sharedHooksPath, []byte(`{"hooks":true}`), 0o644); err != nil {
+		t.Fatalf("write shared hooks.json: %v", err)
+	}
+	if err := os.WriteFile(taskHooksPath, []byte(`{"hooks":true}`), 0o644); err != nil {
+		t.Fatalf("write task hooks.json: %v", err)
+	}
+	sharedConfig := hookStateHeader(sharedHooksPath, ":pre_tool_use:0:0") + "\ntrusted_hash = \"sha256:a\"\n\n" +
+		hookStateHeader(sharedHooksPath, ":post_tool_use:0:0") + "\ntrusted_hash = \"sha256:b\"\n"
+	if err := os.WriteFile(sharedConfigPath, []byte(sharedConfig), 0o644); err != nil {
+		t.Fatalf("write shared config.toml: %v", err)
+	}
+	taskConfig := hookStateHeader(taskHooksPath, ":pre_tool_use:0:0") + "\ntrusted_hash = \"sha256:stale\"\n"
+	if err := os.WriteFile(taskConfigPath, []byte(taskConfig), 0o644); err != nil {
+		t.Fatalf("write task config.toml: %v", err)
+	}
+
+	result, err := syncCodexHookTrustStateWithResult(sharedConfigPath, taskConfigPath, sharedHooksPath, taskHooksPath)
+	if err != nil {
+		t.Fatalf("syncCodexHookTrustStateWithResult: %v", err)
+	}
+	if result.SharedHooksCount != 2 || result.MappedHooksCount != 2 || result.StaleHooksCount != 1 || !result.Changed {
+		t.Fatalf("unexpected sync result: %+v", result)
+	}
+}
+
 func TestSyncCodexHookTrustStateClearsMappedBlocksWhenHooksMissing(t *testing.T) {
 	t.Parallel()
 
