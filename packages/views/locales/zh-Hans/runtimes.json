@@ -28,7 +28,7 @@
     }
   },
   "machine": {
-    "search_placeholder": "搜索机器...",
+    "search_placeholder": "搜索机器或用户名…",
     "filters": {
       "all": "全部",
       "online": "在线",

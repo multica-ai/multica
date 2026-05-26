@@ -1088,10 +1088,11 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
   }
 
-  async listRuntimes(params?: { workspace_id?: string; owner?: "me" }): Promise<AgentRuntime[]> {
+  async listRuntimes(params?: { workspace_id?: string; owner?: "me"; owner_id?: string }): Promise<AgentRuntime[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.owner) search.set("owner", params.owner);
+    if (params?.owner_id) search.set("owner_id", params.owner_id);
     return this.fetch(`/api/runtimes?${search}`);
   }
 

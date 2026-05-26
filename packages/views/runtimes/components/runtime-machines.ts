@@ -129,12 +129,25 @@ export function filterRuntimeMachines(
   machines: RuntimeMachine[],
   query: string,
   filter: RuntimeMachineFilter,
+  /** Map from user ID to display name — enables searching by owner username. */
+  ownerNames?: Map<string, string>,
 ): RuntimeMachine[] {
   const q = query.trim().toLowerCase();
   return machines.filter((machine) => {
     if (filter === "online" && machine.onlineCount === 0) return false;
     if (filter === "issues" && machine.issueCount === 0) return false;
     if (!q) return true;
+
+    // Collect owner names for all runtimes in this machine.
+    const ownerNameParts: string[] = [];
+    if (ownerNames) {
+      for (const runtime of machine.runtimes) {
+        if (runtime.owner_id) {
+          const name = ownerNames.get(runtime.owner_id);
+          if (name) ownerNameParts.push(name);
+        }
+      }
+    }
 
     const haystack = [
       machine.title,
@@ -143,6 +156,7 @@ export function filterRuntimeMachines(
       machine.daemonId,
       machine.providerNames.join(" "),
       machine.runtimes.map((runtime) => runtime.name).join(" "),
+      ...ownerNameParts,
     ]
       .filter(Boolean)
       .join(" ")

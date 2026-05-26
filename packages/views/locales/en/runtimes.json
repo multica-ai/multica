@@ -28,7 +28,7 @@
     }
   },
   "machine": {
-    "search_placeholder": "Search machines…",
+    "search_placeholder": "Search machines or users…",
     "filters": {
       "all": "All",
       "online": "Online",
