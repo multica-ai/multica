@@ -51,7 +51,6 @@ apps/mobile/*.apk
 apps/mobile/*.aab
 apps/mobile/*.ipa
 apps/mobile/**/*.jks
-apps/mobile/**/*.keystore
 apps/mobile/**/*.p8
 apps/mobile/**/*.p12
 apps/mobile/**/*.key
