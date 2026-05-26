@@ -129,7 +129,7 @@ while IFS= read -r line; do
       esac
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"ToolCallUpdate","toolCallId":"tc-current","status":"completed","name":"Shell","parameters":{"command":"echo current"},"output":"current tool output\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"loaded"}}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1,"cacheCreationInputTokens":3}}}\n' "$id"
       exit 0
       ;;
   esac
@@ -297,8 +297,8 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	if result.Output != "loaded" {
 		t.Fatalf("output = %q, want loaded", result.Output)
 	}
-	if usage := result.Usage["unknown"]; usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 0 {
-		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=0", usage)
+	if usage := result.Usage["unknown"]; usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 0 || usage.CacheWriteTokens != 3 {
+		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=0 cache_write=3", usage)
 	}
 	if len(messages) != 3 {
 		t.Fatalf("messages = %+v, want current tool use, tool result, and text only", messages)

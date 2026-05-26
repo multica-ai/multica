@@ -229,7 +229,7 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			// Accumulate token usage from step_finish events.
 			if t := event.Part.Tokens; t != nil {
 				usage.InputTokens += t.Input
-				usage.OutputTokens += t.Output
+				usage.OutputTokens += t.Output + t.Reasoning
 				if t.Cache != nil {
 					usage.CacheReadTokens += t.Cache.Read
 					usage.CacheWriteTokens += t.Cache.Write
@@ -419,9 +419,10 @@ type opencodeEventPart struct {
 
 // opencodeTokens represents token usage in a step_finish event.
 type opencodeTokens struct {
-	Input  int64                `json:"input"`
-	Output int64                `json:"output"`
-	Cache  *opencodeCacheTokens `json:"cache,omitempty"`
+	Input     int64                `json:"input"`
+	Output    int64                `json:"output"`
+	Reasoning int64                `json:"reasoning"`
+	Cache     *opencodeCacheTokens `json:"cache,omitempty"`
 }
 
 type opencodeCacheTokens struct {

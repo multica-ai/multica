@@ -306,8 +306,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					finalError = "kiro cancelled the prompt"
 				}
 				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
+				mergeTokenUsageMax(&c.usage, pr.usage)
 				c.usageMu.Unlock()
 			default:
 			}
@@ -341,7 +340,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		c.usageMu.Unlock()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 {
+		if tokenUsageHasTokens(u) {
 			model := opts.Model
 			if model == "" {
 				model = "unknown"
