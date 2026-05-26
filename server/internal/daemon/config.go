@@ -68,7 +68,7 @@ type Config struct {
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
 	ConfigPath                     string                // explicit config path (empty = profile/default resolution)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	LocalNotificationEnabled       bool                  // enable local system notifications after task completion/failure
@@ -90,6 +90,7 @@ type Config struct {
 	CodexSemanticInactivityTimeout time.Duration
 	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
 	ClaudeArgs                     []string
+	CodeBuddyArgs                  []string
 	CodexArgs                      []string
 	RateLimitConfig                RateLimitConfig
 }
@@ -190,6 +191,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_CLAUDE_PATH", "claude", "MULTICA_CLAUDE_MODEL"); ok {
 		agents["claude"] = e
 	}
+	if e, ok := probe("MULTICA_CODEBUDDY_PATH", "cbc", "MULTICA_CODEBUDDY_MODEL"); ok {
+		agents["codebuddy"] = e
+	}
 	if e, ok := probe("MULTICA_CODEX_PATH", "codex", "MULTICA_CODEX_MODEL"); ok {
 		agents["codex"] = e
 	}
@@ -228,10 +232,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		}
 	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or DeepSeek-TUI (deepseek) and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or DeepSeek-TUI (deepseek) and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
+	if err != nil {
+		return Config{}, err
+	}
+	codebuddyArgs, err := shellArgsFromEnv("MULTICA_CODEBUDDY_ARGS")
 	if err != nil {
 		return Config{}, err
 	}
@@ -451,6 +459,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		AgentIdleWatchdog:              agentIdleWatchdog,
 		ClaudeArgs:                     claudeArgs,
+		CodeBuddyArgs:                  codebuddyArgs,
 		CodexArgs:                      codexArgs,
 		RateLimitConfig:                rateLimitCfg,
 	}, nil
@@ -587,7 +596,7 @@ func shellArgsFromEnv(name string) ([]string, error) {
 // list to pre-fetch canonical paths for every known agent in a single shell
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
-	"claude", "codex", "opencode", "openclaw", "hermes",
+	"claude", "cbc", "codex", "opencode", "openclaw", "hermes",
 	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
 }
 

@@ -60,6 +60,10 @@ func localSkillRootForProvider(provider string) (string, bool, error) {
 	switch provider {
 	case "claude":
 		return filepath.Join(home, ".claude", "skills"), true, nil
+	case "codebuddy":
+		// CodeBuddy follows Claude Code's conventions and reads user-level
+		// skills from ~/.codebuddy/skills/. Verified with a 2.98.1 install.
+		return filepath.Join(home, ".codebuddy", "skills"), true, nil
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 		if codexHome == "" {

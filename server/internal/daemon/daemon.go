@@ -2490,7 +2490,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	requestedRunMode := protocol.ResolveTaskRunMode(task.Context)
 	effectiveRunMode := requestedRunMode
-	if requestedRunMode == protocol.TaskRunModePlan && provider != "claude" {
+	if requestedRunMode == protocol.TaskRunModePlan && !providerSupportsNativePlan(provider) {
 		effectiveRunMode = protocol.TaskRunModeNormal
 	}
 	visibleLanguage := detectVisibleLanguage(task)
@@ -2675,14 +2675,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			rtCfg = task.Agent.RuntimeConfig
 		}
 		policy := protocol.ResolveApprovalPolicy(rtCfg)
-		if provider == "claude" && effectiveRunMode == protocol.TaskRunModePlan {
+		if providerSupportsNativePlan(provider) && effectiveRunMode == protocol.TaskRunModePlan {
 			execOpts.OnApproval = BuildPlanAwareApprovalCallback(policy, task.ID, provider, d.client)
 		} else {
 			execOpts.OnApproval = BuildApprovalCallback(policy, task.ID, provider, d.client)
 		}
 		traceEnabled := protocol.ResolveTraceEnabled(rtCfg)
 		if traceEnabled {
-			if provider == "claude" && effectiveRunMode == protocol.TaskRunModePlan && policy == protocol.ApprovalPolicyAuto {
+			if providerSupportsNativePlan(provider) && effectiveRunMode == protocol.TaskRunModePlan && policy == protocol.ApprovalPolicyAuto {
 				execOpts.OnApproval = WithApprovalTraceFilter(execOpts.OnApproval, d.traceStore, task.ID, traceRunID, provider, func(req agent.ApprovalRequest) bool {
 					return req.Type == protocol.InteractionPlanApproval
 				})
@@ -2691,9 +2691,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 			execOpts.TraceCallback = BuildTraceCallback(d.traceStore, task.ID, traceRunID, provider)
 		}
-		if provider == "claude" {
+		if provider == "claude" || provider == "codebuddy" {
 			execOpts.ClaudePermissionMode = protocol.ResolveClaudePermissionMode(rtCfg)
-			if shouldUseClaudeSDKBridge(effectiveRunMode, policy) {
+			if provider == "claude" && shouldUseClaudeSDKBridge(effectiveRunMode, policy) {
+				// SDK bridge is Anthropic-only; codebuddyBackend forces it
+				// off internally regardless of what we set here, but we
+				// only opt in for claude to keep the daemon log honest.
 				if effectiveRunMode == protocol.TaskRunModePlan {
 					execOpts.ClaudePermissionMode = "plan"
 				}
@@ -3622,10 +3625,27 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 	switch provider {
 	case "claude":
 		args = cfg.ClaudeArgs
+	case "codebuddy":
+		args = cfg.CodeBuddyArgs
 	case "codex":
 		args = cfg.CodexArgs
 	default:
 		return nil
 	}
 	return append([]string(nil), args...)
+}
+
+// providerSupportsNativePlan reports whether the provider speaks Claude
+// Code's `--permission-mode plan` + control_request handshake natively.
+// Currently that's claude and codebuddy (cbc reuses Claude's stream-json
+// protocol verbatim). Centralising the check keeps the four plan-mode
+// guard sites in this file from drifting apart when we add more
+// stream-json-compatible providers.
+func providerSupportsNativePlan(provider string) bool {
+	switch provider {
+	case "claude", "codebuddy":
+		return true
+	default:
+		return false
+	}
 }

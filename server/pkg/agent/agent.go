@@ -1,7 +1,7 @@
 // Package agent provides a unified interface for executing prompts via
-// coding agents (Claude Code, Codex, Copilot, OpenCode, OpenClaw, Hermes,
-// Gemini, Pi, Cursor, Kimi, Kiro, DeepSeek). It mirrors the happy-cli
-// AgentBackend pattern, translated to idiomatic Go.
+// coding agents (Claude Code, Codex, CodeBuddy, Copilot, OpenCode, OpenClaw,
+// Hermes, Gemini, Pi, Cursor, Kimi, Kiro, DeepSeek). It mirrors the
+// happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
 
 import (
@@ -161,7 +161,7 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, DeepSeek-TUI)
+	ExecutablePath string            // path to CLI binary (claude, cbc, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, DeepSeek-TUI)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
@@ -176,7 +176,10 @@ type PlanCapability struct {
 
 func Capabilities(agentType string) PlanCapability {
 	switch agentType {
-	case "claude":
+	case "claude", "codebuddy":
+		// CodeBuddy reuses Claude Code's stream-json + control_request
+		// protocol and exposes the same `--permission-mode plan`
+		// option, so plan/approval/streaming capabilities are identical.
 		return PlanCapability{
 			PromptPlan:          true,
 			NativePlan:          "experimental",
@@ -207,7 +210,7 @@ func Capabilities(agentType string) PlanCapability {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -216,6 +219,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 	switch agentType {
 	case "claude":
 		return &claudeBackend{cfg: cfg}, nil
+	case "codebuddy":
+		return newCodebuddyBackend(cfg), nil
 	case "codex":
 		return &codexBackend{cfg: cfg}, nil
 	case "copilot":
@@ -239,7 +244,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "DeepSeek-TUI":
 		return &deepseekBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI)", agentType)
 	}
 }
 
@@ -255,8 +260,9 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
-	"claude":   "claude (stream-json)",
-	"codex":    "codex app-server",
+	"claude":    "claude (stream-json)",
+	"codebuddy": "codebuddy (stream-json)",
+	"codex":     "codex app-server",
 	"copilot":  "copilot (json)",
 	"cursor":   "cursor-agent (stream-json)",
 	"gemini":   "gemini (stream-json)",
