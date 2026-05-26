@@ -1216,6 +1216,74 @@ func (h *Handler) CreateDaemonSystemComment(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+func (h *Handler) CreateDaemonSystemComment(w http.ResponseWriter, r *http.Request) {
+	if !requireDaemonTokenAuth(w, r) {
+		return
+	}
+
+	issueID := chi.URLParam(r, "issueId")
+	issue, ok := h.loadIssueForDaemon(w, r, issueID)
+	if !ok {
+		return
+	}
+
+	var req CreateCommentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Content == "" {
+		writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+
+	var parentID pgtype.UUID
+	var parentComment *db.Comment
+	if req.ParentID != nil {
+		var parsed pgtype.UUID
+		parsed, ok = parseUUIDOrBadRequest(w, *req.ParentID, "parent_id")
+		if !ok {
+			return
+		}
+		parentID = parsed
+		parent, err := h.Queries.GetComment(r.Context(), parentID)
+		if err != nil || uuidToString(parent.IssueID) != uuidToString(issue.ID) {
+			writeError(w, http.StatusBadRequest, "invalid parent comment")
+			return
+		}
+		parentComment = &parent
+	}
+
+	content := mention.ExpandIssueIdentifiers(r.Context(), h.Queries, issue.WorkspaceID, req.Content)
+	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "system",
+		AuthorID:    pgtype.UUID{Valid: true},
+		Content:     content,
+		Type:        "system",
+		ParentID:    parentID,
+	})
+	if err != nil {
+		slog.Warn("create daemon system comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create comment: "+err.Error())
+		return
+	}
+
+	resp := commentToResponse(comment, nil, nil)
+	slog.Info("daemon system comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
+	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
+		"comment":             resp,
+		"issue_title":         issue.Title,
+		"issue_assignee_type": textToPtr(issue.AssigneeType),
+		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
+		"issue_status":        issue.Status,
+	})
+	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), parentComment, uuidToString(issue.WorkspaceID), "system", "")
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
 func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
