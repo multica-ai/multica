@@ -96,6 +96,8 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		models := claudeStaticModels()
 		annotateClaudeThinking(ctx, models, executablePath)
 		return models, nil
+	case "codebuddy":
+		return codebuddyStaticModels(), nil
 	case "codex":
 		models := codexStaticModels()
 		annotateCodexThinking(ctx, models, executablePath)
@@ -192,6 +194,33 @@ func claudeStaticModels() []Model {
 		{ID: "claude-haiku-4-5-20251001", Label: "Claude Haiku 4.5", Provider: "anthropic"},
 		{ID: "claude-opus-4-6", Label: "Claude Opus 4.6", Provider: "anthropic"},
 		{ID: "claude-sonnet-4-5", Label: "Claude Sonnet 4.5", Provider: "anthropic"},
+	}
+}
+
+// codebuddyStaticModels reflects the models that Tencent CodeBuddy's CLI
+// (`cbc --help`) advertised at the time of integration. CodeBuddy routes
+// these IDs to its own gateway (GLM/Kimi/DeepSeek/MiniMax/Hunyuan), not
+// to Anthropic, so the catalog has no overlap with claudeStaticModels.
+//
+// cbc's model list changes frequently; treat this as a fallback rather
+// than an authoritative source. If a user picks a model not on this list,
+// the daemon still forwards it via `--model` and cbc will either accept
+// it or fail at startup with a clear error.
+func codebuddyStaticModels() []Model {
+	return []Model{
+		{ID: "glm-5.1", Label: "GLM-5.1", Provider: "zhipu", Default: true},
+		{ID: "glm-5.0", Label: "GLM-5.0", Provider: "zhipu"},
+		{ID: "glm-5.0-turbo", Label: "GLM-5.0 Turbo", Provider: "zhipu"},
+		{ID: "glm-5v-turbo", Label: "GLM-5V Turbo", Provider: "zhipu"},
+		{ID: "glm-4.7", Label: "GLM-4.7", Provider: "zhipu"},
+		{ID: "minimax-m2.7", Label: "MiniMax M2.7", Provider: "minimax"},
+		{ID: "minimax-m2.5", Label: "MiniMax M2.5", Provider: "minimax"},
+		{ID: "kimi-k2.6", Label: "Kimi K2.6", Provider: "moonshot"},
+		{ID: "kimi-k2.5", Label: "Kimi K2.5", Provider: "moonshot"},
+		{ID: "hy3-preview", Label: "Hunyuan 3 (preview)", Provider: "tencent"},
+		{ID: "deepseek-v4-pro", Label: "DeepSeek V4 Pro", Provider: "deepseek"},
+		{ID: "deepseek-v4-flash", Label: "DeepSeek V4 Flash", Provider: "deepseek"},
+		{ID: "deepseek-v3-2-volc", Label: "DeepSeek V3.2 (Volcengine)", Provider: "deepseek"},
 	}
 }
 
