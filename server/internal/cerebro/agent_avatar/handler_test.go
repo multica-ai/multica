@@ -61,6 +61,58 @@ func TestBuildPrompt(t *testing.T) {
 			t.Fatalf("expected varied backgrounds across names, got %d distinct", len(seen))
 		}
 	})
+
+	t.Run("gender follows the agent name, not a hash", func(t *testing.T) {
+		// The old code hashed the name to pick man/woman, so "Sara" could come
+		// out male. Now a clearly-gendered first name must drive the subject.
+		women := []string{"Sara", "Mia", "Sofie", "Charlotte - Senior Backend Developer"}
+		for _, n := range women {
+			got := buildPrompt(n, "")
+			if !strings.Contains(got, "portrait of a woman ") {
+				t.Fatalf("%q should render a woman: %s", n, got)
+			}
+		}
+		men := []string{"Lars - Head of Legal", "Preben", "Brian - Senior Developer"}
+		for _, n := range men {
+			got := buildPrompt(n, "")
+			if !strings.Contains(got, "portrait of a man ") {
+				t.Fatalf("%q should render a man: %s", n, got)
+			}
+		}
+	})
+
+	t.Run("unknown name defers gender to the model via the name", func(t *testing.T) {
+		// An unrecognised name must not force a gender; instead the first name is
+		// handed to the model so it can infer the gender itself.
+		got := buildPrompt("Zephyrax", "")
+		if !strings.Contains(got, "portrait of a person ") {
+			t.Fatalf("unknown name should use a neutral subject: %s", got)
+		}
+		if !strings.Contains(got, `first name "Zephyrax"`) {
+			t.Fatalf("unknown name should be passed to the model: %s", got)
+		}
+	})
+}
+
+func TestGenderForName(t *testing.T) {
+	cases := map[string]struct {
+		want  string
+		known bool
+	}{
+		"Sara":                 {"woman", true},
+		"Sara - CTO":           {"woman", true},
+		"Lars - Head of Legal": {"man", true},
+		"philippa - Filip EA":  {"woman", true}, // leading token wins over "Filip"
+		"Zephyrax":             {"", false},
+		"GPT-Boy":              {"", false},
+		"":                     {"", false},
+	}
+	for name, want := range cases {
+		gender, known := genderForName(name)
+		if gender != want.want || known != want.known {
+			t.Fatalf("genderForName(%q) = (%q, %v), want (%q, %v)", name, gender, known, want.want, want.known)
+		}
+	}
 }
 
 type stubWorkspaceLoader struct {

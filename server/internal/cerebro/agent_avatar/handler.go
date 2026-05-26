@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -30,17 +31,22 @@ const gatewayChatCompletionsPath = "/api/ai/proxy/v1/chat/completions"
 // Avatar visual identity is derived deterministically from the agent name so
 // re-generations stay stable without storing a seed. The background colour is
 // the primary way to tell agents apart at a glance (Jesper's requirement:
-// "om ikke andet baggrundsfarver"), so backgrounds carry the distinct hue while
-// clothing stays professionally neutral and the person (gender/hair) varies
-// independently — making every agent read as a different individual.
+// "om ikke andet baggrundsfarver"), so backgrounds carry a bold, clearly
+// distinct hue while clothing stays professionally neutral. The person's gender
+// is inferred from the agent's first name (genderForName) rather than hashed, so
+// an agent named "Sara" reads as a woman and "Lars" as a man.
 
-// backgroundColors are the solid studio backdrops behind each portrait. Twelve
-// clearly distinct, muted-professional hues so adjacent agents never share a
-// background.
+// backgroundColors are the solid studio backdrops behind each portrait. These
+// are intentionally vivid and spread right across the colour wheel — Jesper
+// asked for backgrounds that look *much more different* from each other, so the
+// earlier muted-professional palette was replaced with saturated, high-contrast
+// hues no two of which read as the same colour at a glance.
 var backgroundColors = []string{
-	"deep teal", "warm amber", "dusty rose", "slate blue",
-	"muted sage green", "soft plum", "terracotta", "steel grey",
-	"ocean blue", "olive gold", "burgundy red", "warm indigo",
+	"vivid cobalt blue", "bright crimson red", "emerald green",
+	"golden yellow", "vivid orange", "magenta pink",
+	"deep violet purple", "turquoise cyan", "lime green",
+	"royal blue", "hot pink", "amber gold",
+	"teal", "scarlet red", "indigo", "forest green",
 }
 
 // clothingColors stay neutral so the background carries the colour identity and
@@ -50,10 +56,8 @@ var clothingColors = []string{
 	"a black turtleneck", "a crisp white shirt", "a deep navy sweater",
 }
 
-// portraitGenders and hairStyles vary the subject so two agents never look like
-// the same person, while keeping the Scandinavian brief.
-var portraitGenders = []string{"man", "woman"}
-
+// hairStyles vary the subject so two agents never look like the same person,
+// while keeping the Scandinavian brief.
 var hairStyles = []string{
 	"short blond", "light brown", "dark brown",
 	"auburn", "ash grey", "short black",
@@ -360,26 +364,156 @@ func (h *Handler) requireWorkspaceAdmin(w http.ResponseWriter, r *http.Request) 
 
 // buildPrompt returns the generation prompt. A custom prompt is used as-is;
 // otherwise a name-seeded prompt produces a photorealistic Scandinavian
-// headshot with a distinct background colour (the per-agent identifier) and a
-// person that varies by gender/hair so every agent reads as a real, different
-// individual. The closing clause is what keeps the model on photographs rather
-// than the flat illustrations it otherwise drifts to.
+// headshot with a bold, distinct background colour (the per-agent identifier).
+// The subject's gender is taken from the agent's first name so the portrait
+// actually matches the person — "Sara" reads as a woman, "Lars" as a man — and
+// the name is also handed to the model as a reinforcing signal. The closing
+// clause is what keeps the model on photographs rather than the flat
+// illustrations it otherwise drifts to.
 func buildPrompt(agentName, customPrompt string) string {
 	if customPrompt != "" {
 		return customPrompt
 	}
 	background := backgroundColors[nameIndex(agentName, "bg", len(backgroundColors))]
 	clothing := clothingColors[nameIndex(agentName, "clothes", len(clothingColors))]
-	gender := portraitGenders[nameIndex(agentName, "gender", len(portraitGenders))]
 	hair := hairStyles[nameIndex(agentName, "hair", len(hairStyles))]
+
+	first := firstNameToken(agentName)
+	gender, known := genderForName(agentName)
+
+	subject := "a person"
+	var genderClause string
+	switch {
+	case known && first != "":
+		subject = "a " + gender
+		genderClause = fmt.Sprintf(
+			"The subject is a %s — render a clearly %s face and build matching the "+
+				"Scandinavian first name %q. ", gender, genderAdjective(gender), first)
+	case known:
+		subject = "a " + gender
+		genderClause = fmt.Sprintf("The subject is a %s — render a clearly %s face. ", gender, genderAdjective(gender))
+	case first != "":
+		genderClause = fmt.Sprintf(
+			"Depict a real person whose gender and appearance are consistent with the "+
+				"Scandinavian first name %q. ", first)
+	}
+
 	return fmt.Sprintf(
-		"Photorealistic professional headshot portrait of a %s with Scandinavian features, "+
+		"Photorealistic professional headshot portrait of %s with Scandinavian features, "+
 			"%s hair, wearing %s, against a solid %s studio background, "+
 			"soft natural studio lighting, sharp focus, shallow depth of field, "+
 			"high-quality DSLR photograph, square 1:1 format, centered, single person. "+
+			"%s"+
 			"A realistic photo of a real person — not an illustration, cartoon, drawing, or 3D render.",
-		gender, hair, clothing, background,
+		subject, hair, clothing, background, genderClause,
 	)
+}
+
+// genderAdjective turns the "man"/"woman" subject noun into the adjective used
+// for the face/build clause ("male"/"female"), so the prompt stays grammatical.
+func genderAdjective(gender string) string {
+	if gender == "woman" {
+		return "female"
+	}
+	return "male"
+}
+
+// firstNameToken returns the first whitespace-delimited token of an agent name,
+// trimmed of surrounding punctuation. Agent names are often "Sara - CTO" or
+// "Lars - Head of Legal", so only the leading token carries the personal name.
+func firstNameToken(name string) string {
+	fields := strings.Fields(name)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Trim(fields[0], `.,;:!?"'()[]{}`)
+}
+
+// genderForName infers the portrait gender from the agent's first name. Known
+// names map to "man"/"woman"; unknown names return ok=false so the prompt asks
+// the image model (which knows far more names than any baked-in list) to infer
+// the gender from the name itself, instead of forcing a coin-flip that used to
+// make "Sara" come out male.
+func genderForName(name string) (string, bool) {
+	key := normalizeNameKey(firstNameToken(name))
+	if key == "" {
+		return "", false
+	}
+	if g, ok := firstNameGenders[key]; ok {
+		return g, true
+	}
+	return "", false
+}
+
+// normalizeNameKey lowercases a name token and strips everything that is not a
+// letter (handles "GPT-Boy" → "gptboy", keeps Danish æ/ø/å) for map lookup.
+func normalizeNameKey(token string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(token) {
+		if unicode.IsLetter(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// firstNameGenders maps common first names (Danish/Nordic first, then frequent
+// international names and the workspace's named agents) to a portrait gender.
+// Keys are normalised via normalizeNameKey. Unknown names fall through to the
+// model-infers-from-name path in buildPrompt, so this list does not need to be
+// exhaustive — it only has to be correct.
+var firstNameGenders = map[string]string{
+	// Workspace agents with a clear personal name.
+	"sara": "woman", "mia": "woman", "nora": "woman", "nova": "woman",
+	"sofie": "woman", "tine": "woman", "charlotte": "woman", "charlene": "woman",
+	"philippa": "woman", "brian": "man", "finn": "man", "franz": "man",
+	"kristian": "man", "lars": "man", "preben": "man", "larry": "man",
+	"lando": "man", "jarvis": "man", "ultron": "man", "filip": "man",
+
+	// Common Danish/Nordic women.
+	"anne": "woman", "anna": "woman", "ane": "woman", "mette": "woman",
+	"camilla": "woman", "louise": "woman", "katrine": "woman", "line": "woman",
+	"maria": "woman", "marie": "woman", "ida": "woman", "emma": "woman",
+	"clara": "woman", "karla": "woman", "freja": "woman", "alma": "woman",
+	"agnes": "woman", "ella": "woman", "josefine": "woman", "laura": "woman",
+	"caroline": "woman", "julie": "woman", "cecilie": "woman", "amalie": "woman",
+	"signe": "woman", "sofia": "woman", "victoria": "woman", "isabella": "woman",
+	"frederikke": "woman", "rikke": "woman", "pernille": "woman", "helle": "woman",
+	"hanne": "woman", "lene": "woman", "lone": "woman", "susanne": "woman",
+	"bente": "woman", "birgit": "woman", "kirsten": "woman", "gitte": "woman",
+	"dorte": "woman", "jette": "woman", "winnie": "woman", "trine": "woman",
+	"stine": "woman", "nanna": "woman", "astrid": "woman", "ingrid": "woman",
+	"sigrid": "woman", "liv": "woman", "tuva": "woman", "thea": "woman",
+	"naja": "woman", "rebecca": "woman", "sarah": "woman", "amanda": "woman",
+	"michelle": "woman", "nicoline": "woman", "olivia": "woman", "mathilde": "woman",
+	"silje": "woman", "ronja": "woman", "saga": "woman", "vera": "woman",
+
+	// Common Danish/Nordic men.
+	"jesper": "man", "anders": "man", "thomas": "man",
+	"michael": "man", "henrik": "man", "martin": "man", "morten": "man",
+	"jens": "man", "niels": "man", "peter": "man", "per": "man",
+	"søren": "man", "soren": "man", "rasmus": "man", "mads": "man",
+	"mikkel": "man", "frederik": "man", "christian": "man", "jakob": "man",
+	"jacob": "man", "magnus": "man", "oliver": "man", "william": "man",
+	"noah": "man", "victor": "man", "oscar": "man", "carl": "man",
+	"emil": "man", "august": "man", "alexander": "man", "sebastian": "man",
+	"tobias": "man", "elias": "man", "johan": "man", "erik": "man",
+	"bjørn": "man", "bjorn": "man", "gustav": "man", "kasper": "man",
+	"casper": "man", "klaus": "man", "bo": "man", "ole": "man",
+	"poul": "man", "paul": "man", "kim": "man", "flemming": "man",
+	"torben": "man", "bent": "man", "knud": "man", "egon": "man",
+	"verner": "man", "georg": "man", "axel": "man", "viggo": "man",
+	"valdemar": "man", "felix": "man", "benjamin": "man", "daniel": "man",
+	"david": "man", "simon": "man", "andreas": "man", "philip": "man",
+	"philippe": "man", "marcus": "man", "nikolaj": "man", "patrick": "man",
+
+	// Frequent international names.
+	"john": "man", "james": "man", "robert": "man", "richard": "man",
+	"george": "man", "edward": "man", "harry": "man", "jack": "man",
+	"max": "man", "leo": "man", "louis": "man", "arthur": "man",
+	"mary": "woman", "elizabeth": "woman", "jane": "woman", "kate": "woman",
+	"katherine": "woman", "grace": "woman", "lucy": "woman",
+	"emily": "woman", "chloe": "woman", "lily": "woman", "rose": "woman",
 }
 
 // nameIndex deterministically maps an agent name into [0,n) for a given trait
