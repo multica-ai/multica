@@ -713,12 +713,25 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
-	// Re-list active agents inside the transaction. Comparing against the
-	// expected set here closes the dialog-open / user-confirm race: even
-	// if a teammate creates or archives an agent on this runtime while the
+	// Lock the runtime row first. PostgreSQL's FK validation on
+	// agent.runtime_id requires FOR KEY SHARE on the parent runtime row,
+	// which conflicts with FOR UPDATE — so any concurrent INSERT or
+	// UPDATE that would point a new/moved agent at this runtime now
+	// blocks until our tx finishes. This is the "兜底" lock that keeps
+	// new actives from appearing between our snapshot and our archive.
+	if _, err := qtx.LockAgentRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock runtime")
+		return
+	}
+
+	// Re-list active agents inside the transaction, with FOR UPDATE on
+	// each row so a concurrent archive/move of one of those existing
+	// agents also blocks until we commit. Comparing against the expected
+	// set here closes the dialog-open / user-confirm race: even if a
+	// teammate creates or archives an agent on this runtime while the
 	// dialog was open, the user is approving exactly the set the server
 	// is about to archive.
-	currentActive, err := qtx.ListActiveAgentsByRuntime(r.Context(), rt.ID)
+	currentActive, err := qtx.ListActiveAgentsByRuntimeForUpdate(r.Context(), rt.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enumerate active agents")
 		return
@@ -736,12 +749,24 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// 1. Archive every active agent on this runtime. Returns the affected
-	//    rows so the post-commit publish loop can fan out agent:archived
-	//    events per agent.
-	archivedAgents, err := qtx.ArchiveAgentsByRuntime(r.Context(), db.ArchiveAgentsByRuntimeParams{
+	// Build the agent ID list once — it's the explicit allowlist for the
+	// archive UPDATE below and the runtime-or-agent task cancel further
+	// down. By keying the archive off this list (not off runtime_id) we
+	// guarantee that agents not in the user's confirmed set can never
+	// be silently archived, even if the row-level locks above somehow
+	// missed something. Defense in depth.
+	currentActiveIDs := make([]pgtype.UUID, len(currentActive))
+	for i, a := range currentActive {
+		currentActiveIDs[i] = a.ID
+	}
+
+	// 1. Archive every active agent on this runtime, narrowed to the
+	//    user-confirmed expected_active_agent_ids set (which equals
+	//    currentActive at this point). Returns the affected rows so the
+	//    post-commit publish loop can fan out agent:archived per agent.
+	archivedAgents, err := qtx.ArchiveAgentsByIDs(r.Context(), db.ArchiveAgentsByIDsParams{
 		ArchivedBy: member.UserID,
-		RuntimeIds: []pgtype.UUID{rt.ID},
+		AgentIds:   currentActiveIDs,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive agents")

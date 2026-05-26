@@ -27,6 +27,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
+import { useT } from "../../i18n";
 import { isSelfHealingRuntime } from "../utils";
 
 // DeleteRuntimeDialog is the single confirmation surface for runtime
@@ -68,6 +69,7 @@ export function DeleteRuntimeDialog({
   wsId,
   onDeleted,
 }: DeleteRuntimeDialogProps) {
+  const { t } = useT("runtimes");
   // Pull cached workspace data — every consumer page already has these
   // mounted, so this dialog adds zero new fetches when opened.
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -94,7 +96,8 @@ export function DeleteRuntimeDialog({
   const [submitting, setSubmitting] = useState(false);
   // Server-issued message shown above the agent table on plan-changed —
   // tells the user "the list refreshed because something moved" without
-  // re-stating it in the title.
+  // re-stating it in the title. Stored as a localized string (already
+  // translated) so the consumer can just render it.
   const [planChangedNotice, setPlanChangedNotice] = useState<string | null>(null);
 
   // Reset transient state every time the dialog opens. Without this a
@@ -118,7 +121,7 @@ export function DeleteRuntimeDialog({
     // dialog was open should still block the action.
     if (isSelfHealingRuntime(runtime)) {
       toast.error(
-        "This runtime is managed by a running local daemon and will re-register itself.",
+        t(($) => $.detail.delete_dialog.cascade.self_healing_blocked_toast),
       );
       return;
     }
@@ -148,7 +151,10 @@ export function DeleteRuntimeDialog({
             setPlanAgents(conflict.activeAgents);
             setConfirmed(false);
             setPlanChangedNotice(
-              "Active agents were added since you opened this dialog. Review the new plan and confirm.",
+              t(
+                ($) =>
+                  $.detail.delete_dialog.cascade.notice_runtime_has_active_agents,
+              ),
             );
             return;
           }
@@ -164,14 +170,17 @@ export function DeleteRuntimeDialog({
         setPlanAgents(conflict.activeAgents);
         setConfirmed(false);
         setPlanChangedNotice(
-          "The active agent set changed while this dialog was open. Review the new plan and confirm.",
+          t(
+            ($) =>
+              $.detail.delete_dialog.cascade.notice_runtime_delete_plan_changed,
+          ),
         );
         return;
       }
       const message =
         err instanceof Error && err.message
           ? err.message
-          : "Failed to delete runtime";
+          : t(($) => $.detail.delete_dialog.cascade.delete_failed_toast);
       toast.error(message);
     } finally {
       setSubmitting(false);
@@ -243,12 +252,17 @@ function LightBody({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useT("runtimes");
   return (
     <>
       <div className="px-5 pb-4 pt-5">
-        <h2 className="text-base font-semibold">Delete Runtime?</h2>
+        <h2 className="text-base font-semibold">
+          {t(($) => $.detail.delete_dialog.light.title)}
+        </h2>
         <p className="mt-1 text-sm leading-5 text-muted-foreground">
-          {`Are you sure you want to delete "${runtime.name}"? This action cannot be undone.`}
+          {t(($) => $.detail.delete_dialog.light.description, {
+            name: runtime.name,
+          })}
         </p>
       </div>
       <div className="border-t bg-muted/25 px-5 py-3">
@@ -260,7 +274,7 @@ function LightBody({
             onClick={onCancel}
             disabled={submitting}
           >
-            Cancel
+            {t(($) => $.detail.delete_dialog.light.cancel)}
           </Button>
           <Button
             type="button"
@@ -269,7 +283,9 @@ function LightBody({
             onClick={onConfirm}
             disabled={submitting}
           >
-            {submitting ? "Deleting..." : "Delete runtime"}
+            {submitting
+              ? t(($) => $.detail.delete_dialog.light.submitting)
+              : t(($) => $.detail.delete_dialog.light.confirm)}
           </Button>
         </div>
       </div>
@@ -308,16 +324,19 @@ function CascadeBody({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useT("runtimes");
   const count = agents.length;
 
   return (
     <>
       <div className="px-5 pb-4 pt-5">
         <h2 className="text-base font-semibold">
-          {`Archive ${count} ${count === 1 ? "agent" : "agents"} and delete this Runtime?`}
+          {t(($) => $.detail.delete_dialog.cascade.title, { count })}
         </h2>
         <p className="mt-1 text-sm leading-5 text-muted-foreground">
-          {`Delete "${runtime.name}". The agents below will be archived and removed from active workflows; their queued or running tasks will be cancelled, and then the Runtime will be deleted.`}
+          {t(($) => $.detail.delete_dialog.cascade.description, {
+            name: runtime.name,
+          })}
         </p>
 
         {/* Destructive banner — keep the user's eye on the irreversible
@@ -327,10 +346,7 @@ function CascadeBody({
           className="mt-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive"
         >
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-          <span>
-            This is destructive. Archived agents will be removed from active
-            workflows and their queued or running tasks will be cancelled.
-          </span>
+          <span>{t(($) => $.detail.delete_dialog.cascade.warning)}</span>
         </div>
 
         {planChangedNotice && (
@@ -359,9 +375,7 @@ function CascadeBody({
             disabled={submitting}
           />
           <span className="leading-5">
-            {`I understand these ${count} ${
-              count === 1 ? "agent" : "agents"
-            } will be archived and any queued or running tasks will be cancelled.`}
+            {t(($) => $.detail.delete_dialog.cascade.checkbox, { count })}
           </span>
         </label>
         <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -372,7 +386,7 @@ function CascadeBody({
             onClick={onCancel}
             disabled={submitting}
           >
-            Cancel
+            {t(($) => $.detail.delete_dialog.cascade.cancel)}
           </Button>
           <Button
             type="button"
@@ -382,8 +396,8 @@ function CascadeBody({
             disabled={!confirmed || submitting}
           >
             {submitting
-              ? "Archiving and deleting..."
-              : `Archive ${count} ${count === 1 ? "agent" : "agents"} and delete runtime`}
+              ? t(($) => $.detail.delete_dialog.cascade.submitting)
+              : t(($) => $.detail.delete_dialog.cascade.confirm, { count })}
           </Button>
         </div>
       </div>
@@ -406,6 +420,7 @@ function AgentPlanTable({
   presenceMap: Map<string, AgentPresenceDetail>;
   currentUserId: string | null;
 }) {
+  const { t } = useT("runtimes");
   const memberById = useMemo(() => {
     const map = new Map<string, MemberWithUser>();
     for (const m of members) map.set(m.user_id, m);
@@ -415,11 +430,13 @@ function AgentPlanTable({
   return (
     <div className="mt-3 overflow-hidden rounded-md border">
       <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)] gap-3 border-b bg-muted/40 px-3 py-2 text-[11px] uppercase tracking-wide text-muted-foreground">
-        <span>Agent</span>
-        <span>Owner</span>
-        <span>Status</span>
-        <span>Visibility</span>
-        <span>Model</span>
+        <span>{t(($) => $.detail.delete_dialog.cascade.table.header_agent)}</span>
+        <span>{t(($) => $.detail.delete_dialog.cascade.table.header_owner)}</span>
+        <span>{t(($) => $.detail.delete_dialog.cascade.table.header_status)}</span>
+        <span>
+          {t(($) => $.detail.delete_dialog.cascade.table.header_visibility)}
+        </span>
+        <span>{t(($) => $.detail.delete_dialog.cascade.table.header_model)}</span>
       </div>
       <div className="max-h-[240px] overflow-y-auto divide-y">
         {agents.map((agent) => {
@@ -428,9 +445,9 @@ function AgentPlanTable({
             : null;
           const ownerLabel = ownerMember
             ? ownerMember.user_id === currentUserId
-              ? "You"
+              ? t(($) => $.detail.delete_dialog.cascade.table.owner_self)
               : ownerMember.name
-            : "—";
+            : t(($) => $.detail.delete_dialog.cascade.table.owner_unassigned);
           const presence = presenceMap.get(agent.id);
           return (
             <div
@@ -463,7 +480,8 @@ function AgentPlanTable({
               <PresenceCell presence={presence} />
               <VisibilityCell visibility={agent.visibility} />
               <span className="truncate text-muted-foreground">
-                {agent.model || "—"}
+                {agent.model ||
+                  t(($) => $.detail.delete_dialog.cascade.table.model_unset)}
               </span>
             </div>
           );
@@ -474,8 +492,13 @@ function AgentPlanTable({
 }
 
 function PresenceCell({ presence }: { presence: AgentPresenceDetail | undefined }) {
+  const { t } = useT("runtimes");
   if (!presence) {
-    return <span className="text-muted-foreground/60">—</span>;
+    return (
+      <span className="text-muted-foreground/60">
+        {t(($) => $.detail.delete_dialog.cascade.table.presence_unknown)}
+      </span>
+    );
   }
   const av = availabilityConfig[presence.availability];
   const wl = workloadConfig[presence.workload];
@@ -491,15 +514,19 @@ function PresenceCell({ presence }: { presence: AgentPresenceDetail | undefined 
     <span className="inline-flex min-w-0 items-center gap-1.5">
       <span className={`size-1.5 shrink-0 rounded-full ${av.dotClass}`} />
       <span className={av.textClass}>
-        {presence.workload === "idle" ? "Idle" : null}
+        {presence.workload === "idle"
+          ? t(($) => $.detail.delete_dialog.cascade.table.workload_idle)
+          : null}
         {presence.workload === "working" && (
           <wl.icon className={`mr-1 inline size-3 align-[-2px] animate-spin ${wl.textClass}`} />
         )}
         {presence.workload === "queued" && (
           <wl.icon className={`mr-1 inline size-3 align-[-2px] ${wl.textClass}`} />
         )}
-        {presence.workload === "working" && "Working"}
-        {presence.workload === "queued" && "Queued"}
+        {presence.workload === "working" &&
+          t(($) => $.detail.delete_dialog.cascade.table.workload_working)}
+        {presence.workload === "queued" &&
+          t(($) => $.detail.delete_dialog.cascade.table.workload_queued)}
       </span>
       {counts && (
         <span className="font-mono tabular-nums text-muted-foreground/80">
@@ -511,18 +538,23 @@ function PresenceCell({ presence }: { presence: AgentPresenceDetail | undefined 
 }
 
 function VisibilityCell({ visibility }: { visibility: string }) {
+  const { t } = useT("runtimes");
   if (visibility === "public" || visibility === "workspace") {
     return (
       <span className="inline-flex items-center gap-1 text-muted-foreground">
         <Globe className="size-3" />
-        <span>Workspace</span>
+        <span>
+          {t(($) => $.detail.delete_dialog.cascade.table.visibility_workspace)}
+        </span>
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-1 text-muted-foreground">
       <Lock className="size-3" />
-      <span>Private</span>
+      <span>
+        {t(($) => $.detail.delete_dialog.cascade.table.visibility_private)}
+      </span>
     </span>
   );
 }

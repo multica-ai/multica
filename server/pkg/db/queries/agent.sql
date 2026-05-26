@@ -86,6 +86,20 @@ SET archived_at = now(), archived_by = @archived_by, updated_at = now()
 WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND archived_at IS NULL
 RETURNING *;
 
+-- name: ArchiveAgentsByIDs :many
+-- Narrow archive that only touches the explicit ID list. Used by the
+-- cascade-delete endpoint so the user's expected_active_agent_ids list
+-- is the authoritative bound on what gets archived: any agent that
+-- appeared on the runtime after the user opened the dialog is filtered
+-- out here so it can't be silently archived even in the (vanishingly
+-- rare) case where a row-level race slips past the runtime FOR UPDATE
+-- lock. Returns the affected rows so the caller can broadcast
+-- agent:archived per agent.
+UPDATE agent
+SET archived_at = now(), archived_by = @archived_by, updated_at = now()
+WHERE id = ANY(@agent_ids::uuid[]) AND archived_at IS NULL
+RETURNING *;
+
 -- name: ListActiveAgentsByRuntime :many
 -- Returns every non-archived agent bound to a runtime. Backs the cascade
 -- delete dialog: when DELETE /api/runtimes/:id refuses with
@@ -96,6 +110,20 @@ RETURNING *;
 SELECT * FROM agent
 WHERE runtime_id = $1 AND archived_at IS NULL
 ORDER BY name ASC;
+
+-- name: ListActiveAgentsByRuntimeForUpdate :many
+-- FOR UPDATE variant used inside the cascade-delete transaction. Locks
+-- each currently-active agent row so a concurrent archive/move of one
+-- of those rows blocks until our transaction commits. Pair with
+-- LockAgentRuntime, which holds the runtime row exclusively to also
+-- block FK-validated INSERTs / runtime_id updates that would otherwise
+-- add a new agent to the runtime mid-cascade. Together they guarantee
+-- that the set we compared against expected_active_agent_ids is exactly
+-- the set ArchiveAgentsByIDs will operate on — no race window.
+SELECT * FROM agent
+WHERE runtime_id = $1 AND archived_at IS NULL
+ORDER BY name ASC
+FOR UPDATE;
 
 -- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
