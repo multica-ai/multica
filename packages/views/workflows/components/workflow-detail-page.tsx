@@ -111,8 +111,9 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
     const newStatus = workflow.status === "active" ? "draft" : "active";
     try {
       await updateWorkflowMutation.mutateAsync({ id: id!, status: newStatus as WorkflowStatus });
-    } catch {
-      // silent
+      toast.success(newStatus === "active" ? "Workflow activated" : "Workflow deactivated");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to update workflow status");
     }
   };
 
@@ -177,47 +178,33 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
           </Badge>
         </div>
         <div className="flex items-center gap-1">
-          <div className="flex items-center gap-0.5 border rounded-md mr-1">
-            <Button
-              variant={mode === "view" ? "secondary" : "ghost"}
-              size="sm"
-              className="h-8 text-sm px-3 rounded-r-none"
-              onClick={() => setMode("view")}
-            >
-              {t(($) => $.detail.toolbar.view)}
-            </Button>
-            <Button
-              variant={mode === "edit" ? "secondary" : "ghost"}
-              size="sm"
-              className="h-8 text-sm px-3 rounded-none"
-              onClick={() => setMode("edit")}
-            >
-              {t(($) => $.detail.toolbar.edit)}
-            </Button>
-            <Button
-              variant={mode === "connect" ? "secondary" : "ghost"}
-              size="sm"
-              className="h-8 text-sm px-3 rounded-l-none"
-              onClick={() => setMode("connect")}
-            >
-              {t(($) => $.detail.toolbar.connect)}
-            </Button>
-          </div>
           <Button
+            variant={mode === "view" ? "outline" : "secondary"}
             size="sm"
-            variant="outline"
-            onClick={handleAutoLayout}
-            className="gap-1"
-            title="Auto layout"
+            className="h-8 text-sm px-3"
+            onClick={() => setMode(mode === "view" ? "edit" : "view")}
           >
-            <Wand className="h-3.5 w-3.5" />
+            {mode === "view" ? t(($) => $.detail.toolbar.edit) : "Done"}
           </Button>
-          <Button size="sm" variant="outline" onClick={handleSave}>
-            <Save className="h-3.5 w-3.5" />
-          </Button>
-          <Button size="sm" variant="outline" onClick={handleDeleteWorkflow} className="text-destructive hover:text-destructive">
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+          {mode === "edit" && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleAutoLayout}
+                className="gap-1"
+                title="Auto layout"
+              >
+                <Wand className="h-3.5 w-3.5" />
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleSave}>
+                <Save className="h-3.5 w-3.5" />
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleDeleteWorkflow} className="text-destructive hover:text-destructive">
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          )}
           <Button
             size="sm"
             variant={workflow?.status === "active" ? "secondary" : "default"}

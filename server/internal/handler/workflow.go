@@ -3,7 +3,9 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -298,6 +300,32 @@ func (h *Handler) UpdateWorkflow(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+
+	// Validate all nodes have worker and critic assigned when activating.
+	if req.Status != nil && *req.Status == "active" {
+		nodes, err := h.Queries.ListWorkflowNodes(r.Context(), wf.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list nodes")
+			return
+		}
+		var nodeNames []string
+		for _, n := range nodes {
+			var missingRoles []string
+			if n.WorkerType == "" || (!n.WorkerID.Valid && n.WorkerType == "agent") {
+				missingRoles = append(missingRoles, "worker")
+			}
+			if n.CriticType == "" || (!n.CriticID.Valid && n.CriticType == "agent") {
+				missingRoles = append(missingRoles, "critic")
+			}
+			if len(missingRoles) > 0 {
+				nodeNames = append(nodeNames, fmt.Sprintf("%s (%s)", n.Title, strings.Join(missingRoles, ", ")))
+			}
+		}
+		if len(nodeNames) > 0 {
+			writeError(w, http.StatusBadRequest, "These nodes need assignees: "+strings.Join(nodeNames, ", "))
+			return
+		}
 	}
 
 	params := db.UpdateWorkflowParams{

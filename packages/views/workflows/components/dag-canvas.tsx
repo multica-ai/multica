@@ -101,13 +101,26 @@ export function DAGCanvas({
     e.stopPropagation();
     e.preventDefault();
 
+    const isEdgeMode = mode === "edit" || mode === "connect";
+    if (isEdgeMode && pendingEdgeSource) {
+      if (pendingEdgeSource !== nodeId) {
+        onEdgeCreate?.(pendingEdgeSource, nodeId);
+        setPendingEdgeSource(null);
+      }
+      return;
+    }
+
+    // In edit/connect mode, first click sets pending edge source (Shift+click to connect).
+    if (mode === "edit" && e.shiftKey) {
+      if (!pendingEdgeSource) {
+        setPendingEdgeSource(nodeId);
+      }
+      return;
+    }
     if (mode === "connect") {
       if (!pendingEdgeSource) {
         setPendingEdgeSource(nodeId);
         selectNode(null);
-      } else if (pendingEdgeSource !== nodeId) {
-        onEdgeCreate?.(pendingEdgeSource, nodeId);
-        setPendingEdgeSource(null);
       }
       return;
     }

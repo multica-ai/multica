@@ -10,6 +10,7 @@ import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useUpdateNode, useDeleteNode } from "@multica/core/workflows/queries";
+import { useWorkflowEditorStore } from "@multica/core/workflows/store";
 import { AssigneePicker } from "../../issues/components/pickers/assignee-picker";
 import type { WorkflowNode, WorkerType, CriticType, UpdateNodeRequest } from "@multica/core/types";
 import type { IssueAssigneeType } from "@multica/core/types/issue";
@@ -45,6 +46,8 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
   const wsId = useWorkspaceId();
   const updateMutation = useUpdateNode(wsId, workflowId);
   const deleteMutation = useDeleteNode(wsId, workflowId);
+  const editorMode = useWorkflowEditorStore((s) => s.mode);
+  const isEditing = editorMode === "edit";
 
   const [title, setTitle] = useState(node.title);
   const [description, setDescription] = useState(node.description);
@@ -204,6 +207,7 @@ export function NodeConfigPanel({ node, workflowId, onClose }: NodeConfigPanelPr
                 onChange={(e) => setCriticApiUrl(e.target.value)}
                 placeholder="https://..."
                 className="h-8 text-sm"
+                disabled={!isEditing}
               />
               <p className="text-[11px] text-muted-foreground">{t(($) => $.node.critic_api_url_hint)}</p>
             </div>
