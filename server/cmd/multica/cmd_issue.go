@@ -1002,7 +1002,10 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("list comments: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "Showing %d comments.\n", len(comments))
+	output, _ := cmd.Flags().GetString("output")
+	if output != "json" {
+		fmt.Fprintf(os.Stderr, "Showing %d comments.\n", len(comments))
+	}
 	// The server emits the next-page cursor in headers when there is likely
 	// an older page. Surface it on stderr so an operator (and the agent
 	// prompt update that follows this PR) can scroll deeper without having
@@ -1019,7 +1022,6 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, comments)
 	}

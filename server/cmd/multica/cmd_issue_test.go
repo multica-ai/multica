@@ -62,6 +62,47 @@ func (c *stderrCapture) read() string {
 	return c.out.String()
 }
 
+type stdoutCapture struct {
+	t       *testing.T
+	orig    *os.File
+	r, w    *os.File
+	out     strings.Builder
+	doneCh  chan struct{}
+	stopped bool
+}
+
+func captureStdout(t *testing.T) *stdoutCapture {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	c := &stdoutCapture{t: t, orig: os.Stdout, r: r, w: w, doneCh: make(chan struct{})}
+	os.Stdout = w
+	go func() {
+		buf, _ := io.ReadAll(r)
+		c.out.Write(buf)
+		close(c.doneCh)
+	}()
+	return c
+}
+
+func (c *stdoutCapture) restore() {
+	if c.stopped {
+		return
+	}
+	c.stopped = true
+	os.Stdout = c.orig
+	_ = c.w.Close()
+	<-c.doneCh
+	_ = c.r.Close()
+}
+
+func (c *stdoutCapture) read() string {
+	c.restore()
+	return c.out.String()
+}
+
 // pipeStdin replaces os.Stdin with a pipe seeded by the given body for the
 // duration of fn, so resolveTextFlag's --content-stdin / --description-stdin
 // branch can be exercised in unit tests without spawning a subprocess.
@@ -1558,6 +1599,113 @@ func newIssueCommentListTestCmd() *cobra.Command {
 	cmd.Flags().String("before", "", "")
 	cmd.Flags().String("before-id", "", "")
 	return cmd
+}
+
+func TestRunIssueCommentListOutputJSONSuppressesHumanPreamble(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments") {
+			w.Header().Set("X-Multica-Next-Before", "2026-01-01T00:00:00.000000001Z")
+			w.Header().Set("X-Multica-Next-Before-Id", "00000000-0000-0000-0000-000000000999")
+			json.NewEncoder(w).Encode([]map[string]any{
+				{
+					"id":      "comment-1",
+					"content": "hello",
+				},
+			})
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	stdout := captureStdout(t)
+	defer stdout.restore()
+	stderr := captureStderr(t)
+	defer stderr.restore()
+
+	cmd := newIssueCommentListTestCmd()
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	out := stdout.read()
+	if !json.Valid([]byte(out)) {
+		t.Fatalf("stdout is not valid JSON: %q", out)
+	}
+	if strings.Contains(out, "Showing") {
+		t.Fatalf("stdout contains human preamble: %q", out)
+	}
+
+	errOut := stderr.read()
+	if strings.Contains(errOut, "Showing") {
+		t.Fatalf("stderr contains human preamble in JSON mode: %q", errOut)
+	}
+	if !strings.Contains(errOut, "Next thread cursor: --before 2026-01-01T00:00:00.000000001Z --before-id 00000000-0000-0000-0000-000000000999") {
+		t.Fatalf("stderr missing cursor hint: %q", errOut)
+	}
+}
+
+func TestRunIssueCommentListTableOutputKeepsHumanPreamble(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode([]map[string]any{
+				{
+					"id":      "comment-1",
+					"content": "hello",
+				},
+				{
+					"id":      "comment-2",
+					"content": "world",
+				},
+			})
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	stdout := captureStdout(t)
+	defer stdout.restore()
+	stderr := captureStderr(t)
+	defer stderr.restore()
+
+	cmd := newIssueCommentListTestCmd()
+	if err := cmd.Flags().Set("output", "table"); err != nil {
+		t.Fatalf("set output: %v", err)
+	}
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+	_ = stdout.read()
+
+	errOut := stderr.read()
+	if !strings.Contains(errOut, "Showing 2 comments.") {
+		t.Fatalf("stderr missing human preamble in table mode: %q", errOut)
+	}
 }
 
 // TestRunIssueCommentListFlagGuards locks the CLI-side flag combination
