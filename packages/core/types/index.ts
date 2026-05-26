@@ -107,6 +107,10 @@ export type {
   CompleteGoogleBindingResponse,
   BindOpenclawWeixinRequest,
   BindOpenclawWeixinResponse,
+  AutoSubscribePreferenceKey,
+  AutoSubscribePreferences,
+  AutoSubscribePreferenceResponse,
+  UpdateAutoSubscribePreferenceRequest,
 } from "./notification";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";

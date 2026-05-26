@@ -763,6 +763,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.GetNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
 			})
+
+			r.Get("/api/auto-subscribe-preferences", h.GetMyAutoSubscribePreferences)
+			r.Patch("/api/auto-subscribe-preferences", h.UpdateMyAutoSubscribePreferences)
 		})
 	})
 

@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentTemplate,
   AgentTemplateSummary,
+  AutoSubscribePreferenceResponse,
   Attachment,
   CreateAgentFromTemplateResponse,
   GroupedIssuesResponse,
@@ -233,6 +234,39 @@ const SubscriberSchema = z.object({
 }).passthrough();
 
 export const SubscribersListSchema = z.array(SubscriberSchema);
+
+const AutoSubscribePreferencesSchema = z.object({
+  issue_creator: z.boolean().default(true),
+  issue_assignee: z.boolean().default(true),
+  comment_author: z.boolean().default(true),
+  issue_description_mention: z.boolean().default(false),
+  comment_mention: z.boolean().default(false),
+  quick_create_requester: z.boolean().default(true),
+}).passthrough();
+
+export const AutoSubscribePreferenceResponseSchema = z.object({
+  workspace_id: z.string().default(""),
+  preferences: AutoSubscribePreferencesSchema.default({
+    issue_creator: true,
+    issue_assignee: true,
+    comment_author: true,
+    issue_description_mention: false,
+    comment_mention: false,
+    quick_create_requester: true,
+  }),
+}).passthrough();
+
+export const EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE: AutoSubscribePreferenceResponse = {
+  workspace_id: "",
+  preferences: {
+    issue_creator: true,
+    issue_assignee: true,
+    comment_author: true,
+    issue_description_mention: false,
+    comment_mention: false,
+    quick_create_requester: true,
+  },
+};
 
 export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),

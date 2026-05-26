@@ -2,6 +2,14 @@ export type NotificationChannel = "notification_trigger" | "inbox" | "dingtalk" 
 export type NotificationEventType = "channel_enabled" | "mentioned" | "issue_assigned" | "subscribed_issue_updated" | "task_completed" | "task_failed" | "replied";
 export type NotificationRenderMode = "auto" | "compact" | "detail";
 export type ExternalAccountBindingStatus = "active" | "expired" | "revoked" | "error";
+export type AutoSubscribePreferenceKey =
+  | "issue_creator"
+  | "issue_assignee"
+  | "comment_author"
+  | "issue_description_mention"
+  | "comment_mention"
+  | "quick_create_requester";
+export type AutoSubscribePreferences = Record<AutoSubscribePreferenceKey, boolean>;
 
 export interface ExternalAccountBinding {
   id: string;
@@ -36,6 +44,15 @@ export interface UpdateNotificationPreferenceRequest {
   event_type: NotificationEventType;
   enabled?: boolean;
   render_mode?: NotificationRenderMode;
+}
+
+export interface AutoSubscribePreferenceResponse {
+  workspace_id: string;
+  preferences: AutoSubscribePreferences;
+}
+
+export interface UpdateAutoSubscribePreferenceRequest {
+  preferences: Partial<AutoSubscribePreferences>;
 }
 
 export interface NotificationWebhook {

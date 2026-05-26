@@ -99,11 +99,13 @@ import type {
   ListNotificationPreferencesResponse,
   NotificationChannelPreference,
   NotificationWebhook,
+  AutoSubscribePreferenceResponse,
   ListNotificationWebhooksResponse,
   CreateNotificationWebhookRequest,
   UpdateNotificationWebhookRequest,
   TestNotificationWebhookResponse,
   UpdateNotificationPreferenceRequest,
+  UpdateAutoSubscribePreferenceRequest,
   StartDingTalkBindingRequest,
   StartDingTalkBindingResponse,
   CompleteDingTalkBindingResponse,
@@ -168,6 +170,7 @@ import {
   CloudRuntimeNodeListSchema,
   CloudRuntimeNodeSchema,
   CreateAgentFromTemplateResponseSchema,
+  AutoSubscribePreferenceResponseSchema,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
   DashboardLocalRunTimeByRunnerListSchema,
@@ -181,6 +184,7 @@ import {
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_ATTACHMENT,
+  EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
@@ -668,6 +672,31 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+  }
+
+  async getAutoSubscribePreferences(): Promise<AutoSubscribePreferenceResponse> {
+    const raw = await this.fetch<unknown>("/api/auto-subscribe-preferences");
+    return parseWithFallback(
+      raw,
+      AutoSubscribePreferenceResponseSchema,
+      EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE,
+      { endpoint: "GET /api/auto-subscribe-preferences" },
+    );
+  }
+
+  async updateAutoSubscribePreferences(
+    preferences: UpdateAutoSubscribePreferenceRequest["preferences"],
+  ): Promise<AutoSubscribePreferenceResponse> {
+    const raw = await this.fetch<unknown>("/api/auto-subscribe-preferences", {
+      method: "PATCH",
+      body: JSON.stringify({ preferences }),
+    });
+    return parseWithFallback(
+      raw,
+      AutoSubscribePreferenceResponseSchema,
+      EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE,
+      { endpoint: "PATCH /api/auto-subscribe-preferences" },
+    );
   }
 
   // Issues

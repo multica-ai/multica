@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/autosubscribe"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -2245,31 +2246,33 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 	// is the semantic creator from a UX perspective — without this they
 	// only see the one-shot completion inbox and miss everything after.
 	// Best-effort: log on failure but don't block the inbox notification.
-	if err := s.Queries.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
-		IssueID:  issue.ID,
-		UserType: "member",
-		UserID:   requesterID,
-		Reason:   "creator",
-	}); err != nil {
-		slog.Warn("quick-create completion: subscribe requester failed",
-			"task_id", util.UUIDToString(task.ID),
-			"issue_id", util.UUIDToString(issue.ID),
-			"requester_id", qc.RequesterID,
-			"error", err,
-		)
-	} else {
-		s.Bus.Publish(events.Event{
-			Type:        protocol.EventSubscriberAdded,
-			WorkspaceID: qc.WorkspaceID,
-			ActorType:   "agent",
-			ActorID:     util.UUIDToString(task.AgentID),
-			Payload: map[string]any{
-				"issue_id":  util.UUIDToString(issue.ID),
-				"user_type": "member",
-				"user_id":   qc.RequesterID,
-				"reason":    "creator",
-			},
-		})
+	if autosubscribe.ShouldSubscribe(ctx, s.Queries, qc.WorkspaceID, "member", qc.RequesterID, autosubscribe.SourceQuickCreateRequester) {
+		if err := s.Queries.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
+			IssueID:  issue.ID,
+			UserType: "member",
+			UserID:   requesterID,
+			Reason:   "creator",
+		}); err != nil {
+			slog.Warn("quick-create completion: subscribe requester failed",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+				"requester_id", qc.RequesterID,
+				"error", err,
+			)
+		} else {
+			s.Bus.Publish(events.Event{
+				Type:        protocol.EventSubscriberAdded,
+				WorkspaceID: qc.WorkspaceID,
+				ActorType:   "agent",
+				ActorID:     util.UUIDToString(task.AgentID),
+				Payload: map[string]any{
+					"issue_id":  util.UUIDToString(issue.ID),
+					"user_type": "member",
+					"user_id":   qc.RequesterID,
+					"reason":    "creator",
+				},
+			})
+		}
 	}
 	prefix := s.getIssuePrefix(workspaceID)
 	identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)

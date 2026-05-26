@@ -6,6 +6,8 @@ const apiMock = vi.hoisted(() => ({
   listNotificationBindings: vi.fn(),
   listNotificationPreferences: vi.fn(),
   listNotificationWebhooks: vi.fn(),
+  getAutoSubscribePreferences: vi.fn(),
+  updateAutoSubscribePreferences: vi.fn(),
   createNotificationWebhook: vi.fn(),
   deleteNotificationWebhook: vi.fn(),
   testNotificationWebhook: vi.fn(),
@@ -26,6 +28,8 @@ vi.mock("sonner", () => ({
 }));
 
 import { NotificationsTab } from "./notifications-tab";
+
+const openclawWeixinBindPrompt = "先执行 `curl -fsSL https://multica.wujieai.com/install.sh | sh -s -- --restart` 将 multica cli 更新到最新版并重启 daemon，然后用 multica notify bind-wechat 绑定微信通知";
 
 function makePreference(
   channel: string,
@@ -71,6 +75,17 @@ function makeDefaultPreferences() {
   ];
 }
 
+function makeDefaultAutoSubscribePreferences() {
+  return {
+    issue_creator: true,
+    issue_assignee: true,
+    comment_author: true,
+    issue_description_mention: false,
+    comment_mention: false,
+    quick_create_requester: true,
+  };
+}
+
 describe("NotificationsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -79,6 +94,17 @@ describe("NotificationsTab", () => {
     apiMock.listNotificationPreferences.mockResolvedValue({
       preferences: makeDefaultPreferences(),
     });
+    apiMock.getAutoSubscribePreferences.mockResolvedValue({
+      workspace_id: "workspace-1",
+      preferences: makeDefaultAutoSubscribePreferences(),
+    });
+    apiMock.updateAutoSubscribePreferences.mockImplementation(async (preferences) => ({
+      workspace_id: "workspace-1",
+      preferences: {
+        ...makeDefaultAutoSubscribePreferences(),
+        ...preferences,
+      },
+    }));
     apiMock.listRuntimes.mockResolvedValue([]);
     apiMock.updateNotificationPreference.mockImplementation(async (payload) => ({
       ...payload,
@@ -222,6 +248,32 @@ describe("NotificationsTab", () => {
     });
   });
 
+  it("renders and updates auto-subscribe preferences independently", async () => {
+    const user = userEvent.setup();
+    render(<NotificationsTab />);
+
+    expect(await screen.findByText("自动关注")).toBeInTheDocument();
+    expect(screen.getByText("这些开关只决定是否把你加入 Issue 关注者列表，不会关闭 @ 提醒本身。")).toBeInTheDocument();
+
+    const descriptionMention = screen.getByRole("switch", {
+      name: "Toggle auto subscribe 正文/描述中 @我",
+    });
+    const triggerMention = screen.getByRole("switch", {
+      name: "Toggle trigger 被 @提及时",
+    });
+    expect(descriptionMention).toHaveAttribute("aria-checked", "false");
+    expect(triggerMention).toHaveAttribute("aria-checked", "true");
+
+    await user.click(descriptionMention);
+
+    await waitFor(() => {
+      expect(apiMock.updateAutoSubscribePreferences).toHaveBeenCalledWith({
+        issue_description_mention: true,
+      });
+    });
+    expect(apiMock.updateNotificationPreference).not.toHaveBeenCalled();
+  });
+
   it("copies the concise OpenClaw WeChat bind prompt", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -236,11 +288,11 @@ describe("NotificationsTab", () => {
     render(<NotificationsTab />);
 
     expect(await screen.findByText("发送下面这句话给你的 OpenClaw 助手")).toBeInTheDocument();
-    expect(screen.getByText("帮我绑定 Multica 微信通知")).toBeInTheDocument();
+    expect(screen.getByText(openclawWeixinBindPrompt)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "复制微信绑定指令" }));
 
-    expect(writeText).toHaveBeenCalledWith("帮我绑定 Multica 微信通知");
+    expect(writeText).toHaveBeenCalledWith(openclawWeixinBindPrompt);
     expect(screen.getByText("发送后刷新此页面即可看到绑定结果")).toBeInTheDocument();
   });
 

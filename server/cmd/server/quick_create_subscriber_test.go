@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/autosubscribe"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -83,6 +84,79 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 
 	if !isSubscribed(t, queries, util.UUIDToString(issue.ID), "member", testUserID) {
 		t.Fatal("expected requester to be subscribed after quick-create completion")
+	}
+}
+
+func TestQuickCreateCompletion_RequesterPreferenceDisabled(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	prefs := autosubscribe.NewUserDefaults()
+	prefs.QuickCreateRequester = false
+	setAutoSubscribePreference(t, queries, testUserID, prefs)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	task, err := taskSvc.EnqueueQuickCreateTask(ctx,
+		parseUUID(testWorkspaceID),
+		parseUUID(testUserID),
+		parseUUID(agentID),
+		pgtype.UUID{},
+		"please file another bug",
+		pgtype.UUID{},
+	)
+	if err != nil {
+		t.Fatalf("EnqueueQuickCreateTask: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, task.ID)
+	})
+
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = now() WHERE id = $1`,
+		task.ID,
+	); err != nil {
+		t.Fatalf("dispatch task: %v", err)
+	}
+	if _, err := queries.StartAgentTask(ctx, task.ID); err != nil {
+		t.Fatalf("StartAgentTask: %v", err)
+	}
+
+	number, err := queries.IncrementIssueCounter(ctx, parseUUID(testWorkspaceID))
+	if err != nil {
+		t.Fatalf("IncrementIssueCounter: %v", err)
+	}
+	issue, err := queries.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Title:       "agent-filed bug without requester subscribe",
+		Status:      "todo",
+		Priority:    "none",
+		CreatorType: "agent",
+		CreatorID:   parseUUID(agentID),
+		Number:      number,
+		OriginType:  pgtype.Text{String: "quick_create", Valid: true},
+		OriginID:    task.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateIssueWithOrigin: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issue.ID)
+	})
+
+	if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", ""); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+
+	if isSubscribed(t, queries, util.UUIDToString(issue.ID), "member", testUserID) {
+		t.Fatal("requester should not be subscribed when quick_create_requester is disabled")
 	}
 }
 

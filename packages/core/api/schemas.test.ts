@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   AgentRunDashboardSchema,
   AgentRunDashboardRunDetailSchema,
+  AutoSubscribePreferenceResponseSchema,
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   DuplicateIssueErrorBodySchema,
   EMPTY_AGENT_RUN_DASHBOARD,
   EMPTY_AGENT_RUN_DETAIL,
+  EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE,
   EMPTY_USER,
   ListIssuesResponseSchema,
   RuntimeHourlyActivityListSchema,
@@ -165,6 +167,42 @@ describe("UserSchema timezone drift", () => {
       { endpoint: "GET /api/me" },
     );
     expect(parsed).toBe(EMPTY_USER);
+  });
+});
+
+describe("AutoSubscribePreferenceResponseSchema drift", () => {
+  it("defaults missing preference keys to the product defaults", () => {
+    const parsed = AutoSubscribePreferenceResponseSchema.parse({
+      workspace_id: "workspace-1",
+      preferences: {
+        issue_description_mention: true,
+      },
+    });
+
+    expect(parsed.preferences).toMatchObject({
+      issue_creator: true,
+      issue_assignee: true,
+      comment_author: true,
+      issue_description_mention: true,
+      comment_mention: false,
+      quick_create_requester: true,
+    });
+  });
+
+  it("falls back when a preference value has the wrong type", () => {
+    const parsed = parseWithFallback(
+      {
+        workspace_id: "workspace-1",
+        preferences: {
+          issue_creator: "yes",
+        },
+      },
+      AutoSubscribePreferenceResponseSchema,
+      EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE,
+      { endpoint: "GET /api/auto-subscribe-preferences" },
+    );
+
+    expect(parsed).toBe(EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE);
   });
 });
 
