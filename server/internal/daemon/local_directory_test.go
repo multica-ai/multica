@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -173,6 +177,59 @@ func TestValidateLocalPath(t *testing.T) {
 			t.Errorf("expected error for read-only directory")
 		}
 	})
+
+	t.Run("rejects a symlink pointing at the user home", func(t *testing.T) {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			t.Skip("no home dir")
+		}
+		link := filepath.Join(dir, "home-link")
+		if err := os.Symlink(home, link); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		// The literal cleaned path is dir/home-link, which is NOT in the
+		// blacklist. Without the realpath check this used to pass.
+		err = validateLocalPath(link)
+		if err == nil {
+			t.Fatal("expected error for symlink pointing at $HOME")
+		}
+		if !strings.Contains(err.Error(), "user's home directory") {
+			t.Errorf("error %q did not flag the home-dir reason", err.Error())
+		}
+	})
+
+	t.Run("rejects a symlink pointing at a system root", func(t *testing.T) {
+		link := filepath.Join(dir, "root-link")
+		// Pick a banned system root that's predictably present on the
+		// host. /Users on macOS; /home on Linux. Fall back to /etc which
+		// is in the blacklist and exists on both.
+		target := "/etc"
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		err := validateLocalPath(link)
+		if err == nil {
+			t.Fatal("expected error for symlink pointing at a system root")
+		}
+		if !strings.Contains(err.Error(), "protected system root") {
+			t.Errorf("error %q did not flag the system-root reason", err.Error())
+		}
+	})
+
+	t.Run("accepts a symlink to a non-blacklisted directory", func(t *testing.T) {
+		target := filepath.Join(dir, "real-proj")
+		if err := os.Mkdir(target, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		link := filepath.Join(dir, "proj-link")
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		if err := validateLocalPath(link); err != nil {
+			t.Errorf("symlink to a regular directory should pass, got %v", err)
+		}
+	})
+
 }
 
 func TestLocalPathLockerSerializes(t *testing.T) {
@@ -294,3 +351,111 @@ func errorsNew(msg string) error { return &waiterError{msg: msg} }
 type waiterError struct{ msg string }
 
 func (e *waiterError) Error() string { return e.msg }
+
+// TestAcquireLocalDirectoryLock_CancelDuringWait covers the gap between
+// dispatch and StartTask: while the path mutex is contended, the main
+// per-task cancellation watcher hasn't started yet. If the issue is
+// cancelled (or the task row is reassigned / deleted) during the wait,
+// the daemon must notice promptly and bail — otherwise the slot stays
+// pinned by a phantom waiter for the full lifetime of the holder.
+func TestAcquireLocalDirectoryLock_CancelDuringWait(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir() // valid, writable, non-blacklisted
+	// Pre-claim must use the same key the production path computes, which
+	// is the symlink-resolved realpath. On macOS, /tmp/... resolves to
+	// /private/tmp/..., so a literal preclaim with `dir` would miss the
+	// production key and the new acquire would win on the fast path.
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("evalsymlinks: %v", err)
+	}
+
+	// Server-side state for the fake. Mark the task cancelled only after
+	// we've seen the daemon call wait-local-directory, so the test can
+	// assert the watcher reacted to the post-park cancel rather than
+	// reading stale state on the very first poll.
+	var (
+		parked   atomic.Bool
+		waitCall atomic.Int32
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/wait-local-directory"):
+			waitCall.Add(1)
+			parked.Store(true)
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			w.Header().Set("Content-Type", "application/json")
+			if parked.Load() {
+				_, _ = w.Write([]byte(`{"status":"cancelled"}`))
+			} else {
+				_, _ = w.Write([]byte(`{"status":"running"}`))
+			}
+		default:
+			// We don't expect /fail in the cancel path — assert that
+			// by failing loud if it gets called.
+			t.Errorf("unexpected daemon call: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	const daemonID = "d-test"
+	const heldByTaskID = "task-holder"
+	const newTaskID = "task-waiter"
+
+	locker := NewLocalPathLocker()
+	// Pre-claim the lock so the new task has to wait. Use the resolved
+	// realpath as the key to match findLocalDirectoryAssignment.
+	release, err := locker.Acquire(context.Background(), realDir, heldByTaskID, nil)
+	if err != nil {
+		t.Fatalf("preclaim acquire: %v", err)
+	}
+	t.Cleanup(release)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.Default(),
+		localPathLocks:     locker,
+		cancelPollInterval: 10 * time.Millisecond,
+		cfg:                Config{DaemonID: daemonID},
+	}
+
+	ref, err := json.Marshal(localDirectoryRef{LocalPath: dir, DaemonID: daemonID})
+	if err != nil {
+		t.Fatalf("marshal ref: %v", err)
+	}
+	task := Task{
+		ID: newTaskID,
+		ProjectResources: []ProjectResourceData{
+			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: ref},
+		},
+	}
+
+	type result struct {
+		release func()
+		abort   bool
+	}
+	done := make(chan result, 1)
+	go func() {
+		rel, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), task, slog.Default())
+		done <- result{release: rel, abort: abort}
+	}()
+
+	select {
+	case got := <-done:
+		if !got.abort {
+			t.Fatal("expected abort=true after server-side cancel, got abort=false")
+		}
+		if got.release != nil {
+			t.Fatal("expected nil release on cancel, got a non-nil callback")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("acquireLocalDirectoryLockIfNeeded blocked past 2s — cancel was not observed during wait")
+	}
+
+	if got := waitCall.Load(); got != 1 {
+		t.Errorf("wait-local-directory calls = %d, want 1", got)
+	}
+}

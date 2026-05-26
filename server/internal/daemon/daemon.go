@@ -2195,6 +2195,24 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		return nil, true
 	}
 
+	// While the lock is contended the daemon would otherwise sit blocked on
+	// the path mutex with no signal back from the server — the main
+	// per-task watcher only starts after StartTask. If the user cancels
+	// the issue or it gets reassigned during the wait, we need to notice
+	// promptly so the daemon slot isn't pinned by a phantom waiter. We
+	// spin up the cancellation watcher lazily inside onWait so the
+	// no-contention fast path still costs nothing.
+	waitCtx, waitCancel := context.WithCancel(ctx)
+	defer waitCancel()
+	pollInterval := d.cancelPollInterval
+	if pollInterval == 0 {
+		pollInterval = 5 * time.Second
+	}
+	var (
+		watcherOnce     sync.Once
+		cancelledByPoll <-chan struct{}
+	)
+
 	onWait := func(holder string) {
 		reason := fmt.Sprintf("local_directory %s", assignment.AbsPath)
 		if holder != "" {
@@ -2207,9 +2225,37 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			// The UI just won't see the explicit "waiting" badge.
 			taskLog.Warn("local_directory: mark waiting status failed", "error", waitErr)
 		}
+		// Start polling once we actually park. shouldInterruptAgent inside
+		// watchTaskCancellation already handles both server-side cancel
+		// (status=cancelled) and the row-deleted reassignment case (404),
+		// which is the full set of "this task shouldn't run anymore"
+		// signals we need to react to during the wait.
+		watcherOnce.Do(func() {
+			cancelledByPoll = d.watchTaskCancellation(waitCtx, task.ID, pollInterval, taskLog)
+			go func() {
+				select {
+				case <-cancelledByPoll:
+					waitCancel()
+				case <-waitCtx.Done():
+				}
+			}()
+		})
 	}
-	release, err = d.localPathLocks.Acquire(ctx, assignment.RealPath, task.ID, onWait)
+	release, err = d.localPathLocks.Acquire(waitCtx, assignment.RealPath, task.ID, onWait)
 	if err != nil {
+		// If the wait was cut short because the server cancelled the task
+		// (or deleted the row), the row is already in a terminal state —
+		// return silently the same way the run-phase poller does at
+		// lines ~2104. Issuing FailTask here would be a no-op at best
+		// and a confusing redundant log line at worst.
+		if cancelledByPoll != nil {
+			select {
+			case <-cancelledByPoll:
+				taskLog.Info("local_directory: wait aborted by server-side cancel")
+				return nil, true
+			default:
+			}
+		}
 		taskLog.Error("local_directory: lock acquire failed", "error", err)
 		failureReason := "local_directory_error"
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

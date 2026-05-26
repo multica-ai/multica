@@ -26,7 +26,7 @@ type StageKey =
   | "offline"
   | "reconnecting"
   | "queued"
-  | "waiting_for_directory_release"
+  | "waiting_local_directory"
   | "starting_up"
   | "thinking"
   | "typing";
@@ -79,8 +79,8 @@ export function pickStageKeys(
   // this status string when it dequeues a task but can't acquire the path
   // lock; the renderer surfaces a dedicated label so the user understands
   // why a queued task isn't moving.
-  if (status === "waiting_for_directory_release") {
-    return { stageKey: "waiting_for_directory_release", static: true };
+  if (status === "waiting_local_directory") {
+    return { stageKey: "waiting_local_directory", static: true };
   }
   if (status === "queued") return { stageKey: "queued" };
   if (status === "dispatched") return { stageKey: "starting_up" };
