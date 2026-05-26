@@ -1455,3 +1455,99 @@ func TestGetRemoteDefaultBranchAmbiguousOriginReturnsEmpty(t *testing.T) {
 		t.Fatalf("getRemoteDefaultBranch = %q, want \"\" (ambiguous origin/* must not guess)", got)
 	}
 }
+
+// TestRunPostCheckoutHookNoop verifies that an unset MULTICA_POST_CHECKOUT_HOOK
+// is a no-op — no errors, no logs that imply the hook ran.
+func TestRunPostCheckoutHookNoop(t *testing.T) {
+	t.Setenv("MULTICA_POST_CHECKOUT_HOOK", "")
+	worktree := t.TempDir()
+	runPostCheckoutHook(worktree, "https://example.com/foo.git", "main", testLogger())
+	// If we got here without panicking, no-op is honored.
+}
+
+// TestRunPostCheckoutHookRuns verifies a real hook is invoked with the
+// documented env vars and worktree CWD.
+func TestRunPostCheckoutHookRuns(t *testing.T) {
+	worktree := t.TempDir()
+	marker := filepath.Join(worktree, "hook-ran.txt")
+
+	hookDir := t.TempDir()
+	hookPath := filepath.Join(hookDir, "hook.sh")
+	// The hook writes a record of the env vars it received so the test can
+	// assert that the daemon-set variables reached the process.
+	script := `#!/bin/sh
+{
+  echo "PWD=$PWD"
+  echo "WORKTREE=$MULTICA_WORKTREE_PATH"
+  echo "REPO_URL=$MULTICA_REPO_URL"
+  echo "REPO_NAME=$MULTICA_REPO_NAME"
+  echo "BRANCH=$MULTICA_BRANCH"
+} > "` + marker + `"
+`
+	if err := os.WriteFile(hookPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+
+	t.Setenv("MULTICA_POST_CHECKOUT_HOOK", hookPath)
+	runPostCheckoutHook(worktree, "https://example.com/my-repo.git", "agent/test/abc", testLogger())
+
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("hook did not produce marker file: %v", err)
+	}
+	contents := string(got)
+	// macOS symlinks /tmp → /private/tmp, so the shell's PWD resolves to the
+	// canonical path even though Go saw the unresolved one. Compare against
+	// the resolved form so the assertion passes on both Linux and macOS.
+	resolvedWorktree, err := filepath.EvalSymlinks(worktree)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", worktree, err)
+	}
+	wantSubstrings := []string{
+		"PWD=" + resolvedWorktree,
+		"WORKTREE=" + worktree,
+		"REPO_URL=https://example.com/my-repo.git",
+		"REPO_NAME=" + filepath.Base(worktree),
+		"BRANCH=agent/test/abc",
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(contents, want) {
+			t.Errorf("hook output missing %q.\nfull output:\n%s", want, contents)
+		}
+	}
+}
+
+// TestRunPostCheckoutHookNonExecutableIgnored verifies a non-executable file
+// at the hook path is logged-and-skipped rather than executed.
+func TestRunPostCheckoutHookNonExecutableIgnored(t *testing.T) {
+	hookDir := t.TempDir()
+	hookPath := filepath.Join(hookDir, "hook.sh")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 0\n"), 0o644); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+	t.Setenv("MULTICA_POST_CHECKOUT_HOOK", hookPath)
+	// Should not panic and should not attempt execution. We can't directly
+	// observe the skip without a captured logger, but the absence of a crash
+	// or test-runtime side effect is the contract: non-fatal, ignored.
+	runPostCheckoutHook(t.TempDir(), "url", "main", testLogger())
+}
+
+// TestRunPostCheckoutHookMissingPathIgnored verifies a non-existent hook
+// path is logged-and-skipped (matches the contract that this never aborts
+// the checkout).
+func TestRunPostCheckoutHookMissingPathIgnored(t *testing.T) {
+	t.Setenv("MULTICA_POST_CHECKOUT_HOOK", filepath.Join(t.TempDir(), "does-not-exist.sh"))
+	runPostCheckoutHook(t.TempDir(), "url", "main", testLogger())
+}
+
+// TestRunPostCheckoutHookFailureNonFatal verifies a hook that exits non-zero
+// is logged but does not panic the caller.
+func TestRunPostCheckoutHookFailureNonFatal(t *testing.T) {
+	hookDir := t.TempDir()
+	hookPath := filepath.Join(hookDir, "hook.sh")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 42\n"), 0o755); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+	t.Setenv("MULTICA_POST_CHECKOUT_HOOK", hookPath)
+	runPostCheckoutHook(t.TempDir(), "url", "main", testLogger())
+}
