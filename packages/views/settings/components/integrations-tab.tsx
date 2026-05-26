@@ -225,6 +225,7 @@ export function IntegrationsTab() {
                   {t(($) => $.integrations.feishu_project_description)}
                 </p>
               </div>
+              {canManage && <Switch checked={feishuEnabled} onCheckedChange={setFeishuEnabled} />}
             </div>
 
             {canManage ? (
@@ -341,21 +342,12 @@ export function IntegrationsTab() {
                       </div>
 
                       <div className="space-y-2">
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="space-y-1">
-                            <p className="text-xs font-medium">
-                              {t(($) => $.integrations.feishu_project_reverse_mapping)}
-                            </p>
-                            <p className="text-[11px] text-muted-foreground">
-                              {t(($) => $.integrations.feishu_project_status_writeback_hint)}
-                            </p>
-                          </div>
-                          <Switch
-                            checked={feishuEnabled}
-                            onCheckedChange={setFeishuEnabled}
-                            aria-label={t(($) => $.integrations.feishu_project_status_writeback)}
-                          />
-                        </div>
+                        <p className="text-xs font-medium">
+                          {t(($) => $.integrations.feishu_project_reverse_mapping)}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {t(($) => $.integrations.feishu_project_reverse_mapping_disable_hint)}
+                        </p>
                         <div className="overflow-hidden rounded-md border border-border/70">
                           {MULTICA_STATUS_OPTIONS.map((status) => {
                             const current = reverseStatusMapping[status];
