@@ -17,6 +17,8 @@ catalog:
   zustand: "^5.0.0"
   "@tanstack/react-query": "^5.96.2"
   "@tanstack/react-table": "^8.21.3"
+  "@tanstack/react-hotkeys": "^0.10.0"
+  "@tanstack/hotkeys": "^0.8.0"
 
   # Runtime schema validation (defensive boundary against API drift —
   # see CLAUDE.md "API Response Compatibility")

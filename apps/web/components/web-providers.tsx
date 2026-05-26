@@ -12,6 +12,7 @@ import {
   clearLoggedInCookie,
 } from "@/features/auth/auth-cookie";
 import { PageviewTracker } from "./pageview-tracker";
+import { HotkeysProvider } from "@tanstack/react-hotkeys";
 
 // Legacy token in localStorage → keep this session in token mode so users who
 // logged in before the cookie-auth migration stay authed. They migrate to
@@ -87,7 +88,9 @@ export function WebProviders({
       <Suspense fallback={null}>
         <PageviewTracker />
       </Suspense>
-      <WebNavigationProvider>{children}</WebNavigationProvider>
+      <WebNavigationProvider>
+            <HotkeysProvider>{children}</HotkeysProvider>
+          </WebNavigationProvider>
     </CoreProvider>
   );
 }

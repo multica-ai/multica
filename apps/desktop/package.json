@@ -45,6 +45,7 @@
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
+    "@tanstack/react-hotkeys": "catalog:",
     "@tanstack/react-query": "catalog:",
     "electron-updater": "^6.8.3",
     "fix-path": "^5.0.0",

@@ -18,6 +18,7 @@ import { UpdateNotification } from "./components/update-notification";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
+import { HotkeysProvider } from "@tanstack/react-hotkeys";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { RESOURCES } from "@multica/views/locales";
 
@@ -333,7 +334,9 @@ export default function App() {
           resources={resources}
           localeAdapter={localeAdapter}
         >
-          <AppContent />
+          <HotkeysProvider>
+            <AppContent />
+          </HotkeysProvider>
         </CoreProvider>
       ) : (
         <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
