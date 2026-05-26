@@ -15,6 +15,10 @@ on:
         description: "Next.js basePath for subpath deployment (e.g. /multica-web). Leave empty for root deployment."
         required: false
         default: ""
+      next_public_api_url:
+        description: "API base path for subpath deployment (e.g. /multica-backend). Leave empty for root deployment."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -262,6 +266,7 @@ jobs:
             REMOTE_API_URL=http://backend:8080
             NEXT_PUBLIC_APP_VERSION=${{ needs.prepare.outputs.tag_name }}
             NEXT_PUBLIC_BASE_PATH=${{ github.event.inputs.next_public_base_path }}
+            NEXT_PUBLIC_API_URL=${{ github.event.inputs.next_public_api_url }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ needs.prepare.outputs.repo_owner_lower }}/multica-web,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
