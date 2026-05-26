@@ -73,6 +73,12 @@ type Config struct {
 	// return 503 instead of attempting to dial a hard-coded private service.
 	CloudRuntimeFleetURL     string
 	CloudRuntimeFleetTimeout time.Duration
+	// Version is the server build version surfaced on the public
+	// /api/config endpoint so clients (notably the iOS app) can display
+	// which Multica release a server is running. Empty when the binary
+	// was built without ldflags (e.g. `go run`); callers must treat the
+	// field as optional.
+	Version string
 }
 
 type cloudRuntimeProxy interface {

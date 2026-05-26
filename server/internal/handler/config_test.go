@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -47,5 +48,39 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 	if cfg.AnalyticsEnvironment != "dev" {
 		t.Fatalf("analytics_environment: want dev, got %q", cfg.AnalyticsEnvironment)
+	}
+}
+
+func TestGetConfigSurfacesVersionWhenSet(t *testing.T) {
+	origCfg := testHandler.cfg
+	testHandler.cfg.Version = "v9.9.9"
+	defer func() { testHandler.cfg = origCfg }()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d", w.Code)
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.Version != "v9.9.9" {
+		t.Fatalf("version: want v9.9.9, got %q", cfg.Version)
+	}
+}
+
+func TestGetConfigOmitsEmptyVersion(t *testing.T) {
+	origCfg := testHandler.cfg
+	testHandler.cfg.Version = ""
+	defer func() { testHandler.cfg = origCfg }()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+
+	if got := w.Body.String(); strings.Contains(got, `"version"`) {
+		t.Fatalf("expected version to be omitted when empty, body: %s", got)
 	}
 }

@@ -23,6 +23,13 @@ type AppConfig struct {
 	PosthogKey           string `json:"posthog_key"`
 	PosthogHost          string `json:"posthog_host"`
 	AnalyticsEnvironment string `json:"analytics_environment"`
+
+	// Version is the server build version (set via ldflags at release
+	// time). Surfaced unauthenticated so mobile/desktop clients can show
+	// which Multica release a server is running on their server list.
+	// Omitted when unset so older clients that don't know about the field
+	// — and self-hosted dev builds running `go run` — keep working.
+	Version string `json:"version,omitempty"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -33,6 +40,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
 		AllowSignup:    os.Getenv("ALLOW_SIGNUP") != "false",
 		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"),
+		Version:        h.cfg.Version,
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()
