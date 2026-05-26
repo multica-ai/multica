@@ -9,7 +9,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  SectionList,
   StyleSheet,
   Text,
   TextInput,
@@ -23,6 +22,7 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MoreHorizontal } from "lucide-react-native";
@@ -82,28 +82,19 @@ import {
 } from "../../i18n/format";
 
 type Props = NativeStackScreenProps<RootStackParamList, "IssueDetail">;
+type TimelineProps = NativeStackScreenProps<RootStackParamList, "IssueTimeline">;
+type TaskRunsProps = NativeStackScreenProps<RootStackParamList, "IssueTaskRuns">;
 type DocumentPickerModule = typeof import("expo-document-picker");
 declare const require: (moduleName: string) => unknown;
 const emptyTimeline: TimelineEntry[] = [];
-type DetailListItem = {
-  key: string;
-  node: React.ReactElement;
-} | CommentListRow;
-type DetailSection = {
-  key: string;
-  title?: string;
-  count?: number;
-  collapsed?: boolean;
-  onToggle?: () => void;
-  data: DetailListItem[];
-};
+type DetailListItem = CommentListRow | { key: string; kind: "error"; message: string };
 type CommentThread = {
   root: TimelineEntry;
   replies: TimelineEntry[];
 };
 type CommentListRow =
-  | { key: string; kind: "root"; entry: TimelineEntry; rootId: string }
-  | { key: string; kind: "reply"; entry: TimelineEntry; rootId: string; isLastReply: boolean }
+  | { key: string; kind: "root"; entry: TimelineEntry; rootId: string; expanded: boolean }
+  | { key: string; kind: "reply"; entry: TimelineEntry; rootId: string; expanded: boolean; isLastReply: boolean }
   | { key: string; kind: "footer"; rootId: string };
 type AttachmentPreviewState = {
   attachment: Attachment;
@@ -187,6 +178,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const deleteComment = useDeleteComment(issueId);
   const updateIssue = useUpdateIssue();
   const titleInputRef = useRef<TextInput | null>(null);
+  const listRef = useRef<FlashListRef<DetailListItem> | null>(null);
   const [comment, setComment] = useState("");
   const [commentAttachments, setCommentAttachments] = useState<DraftCommentAttachment[]>([]);
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
@@ -202,8 +194,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const [commentError, setCommentError] = useState<string | null>(null);
   const [issueMenuOpen, setIssueMenuOpen] = useState(false);
   const [commentSheetOpen, setCommentSheetOpen] = useState(false);
-  const [commentsCollapsed, setCommentsCollapsed] = useState(false);
-  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const [liveTaskError, setLiveTaskError] = useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreviewState | null>(null);
   const previewAbortRef = useRef<AbortController | null>(null);
@@ -235,16 +225,18 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     [timeline],
   );
   const commentThreads = useMemo(() => buildCommentThreads(comments), [comments]);
-  const commentRows = useMemo(() => buildCommentRows(commentThreads), [commentThreads]);
+  const baseCommentRows = useMemo(() => buildCommentRows(commentThreads), [commentThreads]);
+  const [commentRows, setCommentRows] = useState<CommentListRow[]>([]);
   const activities = useMemo(
     () => timeline
       .filter((entry: TimelineEntry) => entry.type === "activity")
       .sort((a: TimelineEntry, b: TimelineEntry) => a.created_at.localeCompare(b.created_at)),
     [timeline],
   );
-  const renderSectionHeader = useCallback(({ section }: { section: DetailSection }) => (
-    section.title ? <StickySectionHeader section={section} /> : null
-  ), []);
+
+  useEffect(() => {
+    setCommentRows((currentRows) => mergeCommentRows(currentRows, baseCommentRows));
+  }, [baseCommentRows]);
 
   const openCommentComposer = useCallback(() => {
     setReplyTargetId(null);
@@ -570,43 +562,63 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     }
   }, [t]);
 
+  const expandCommentRow = useCallback((commentId: string) => {
+    setCommentRows((rows) => rows.map((row) => {
+      if (row.kind === "footer" || row.entry.id !== commentId || row.expanded) return row;
+      return { ...row, expanded: true };
+    }));
+  }, []);
+
   const renderListItem = useCallback(({ item }: { item: DetailListItem }) => {
-    if ("node" in item) return item.node;
+    if (item.kind === "error") {
+      return (
+        <View style={styles.commentRowThreadStart}>
+          <Text style={styles.errorText}>{item.message}</Text>
+        </View>
+      );
+    }
 
     if (item.kind === "footer") {
       return (
-        <ThreadReplyFooter
-          onReply={() => openReplyComposer(item.rootId)}
-        />
+        <View style={styles.commentRowThreadContinuation}>
+          <ThreadReplyFooter
+            onReply={() => openReplyComposer(item.rootId)}
+          />
+        </View>
       );
     }
 
     const isEditingEntry = editingCommentId === item.entry.id;
     return (
-      <TimelineItem
-        entry={item.entry}
-        editingCommentId={isEditingEntry ? editingCommentId : null}
-        editingContent={isEditingEntry ? editingContent : ""}
-        onOpenAttachment={openAttachmentPreview}
-        onCancelEdit={cancelCommentEdit}
-        onChangeEdit={setEditingContent}
-        onDelete={deleteCommentById}
-        onReply={item.kind === "root" ? openReplyComposer : undefined}
-        onSaveEdit={saveCommentEditById}
-        onStartEdit={startCommentEdit}
-        onCopyComment={copyCommentByContent}
-        onIssueMentionPress={openIssueMention}
-        resolveActorName={getActorName}
-        userId={userId}
-        mentionTargets={mentionTargets}
-        issueMentionTargets={issueMentionTargets}
-        variant={item.kind === "root" ? "threadRoot" : "reply"}
-        isLastReply={item.kind === "reply" ? item.isLastReply : false}
-      />
+      <View style={item.kind === "root" ? styles.commentRowThreadStart : styles.commentRowThreadContinuation}>
+        <TimelineItem
+          entry={item.entry}
+          editingCommentId={isEditingEntry ? editingCommentId : null}
+          editingContent={isEditingEntry ? editingContent : ""}
+          onOpenAttachment={openAttachmentPreview}
+          onCancelEdit={cancelCommentEdit}
+          onChangeEdit={setEditingContent}
+          onDelete={deleteCommentById}
+          onReply={item.kind === "root" ? openReplyComposer : undefined}
+          onSaveEdit={saveCommentEditById}
+          onStartEdit={startCommentEdit}
+          onCopyComment={copyCommentByContent}
+          onIssueMentionPress={openIssueMention}
+          resolveActorName={getActorName}
+          userId={userId}
+          mentionTargets={mentionTargets}
+          issueMentionTargets={issueMentionTargets}
+          expanded={item.expanded}
+          onExpandComment={expandCommentRow}
+          variant={item.kind === "root" ? "threadRoot" : "reply"}
+          isLastReply={item.kind === "reply" ? item.isLastReply : false}
+        />
+      </View>
     );
   }, [
     editingCommentId,
     editingContent,
+    expandCommentRow,
     getActorName,
     mentionTargets,
     issueMentionTargets,
@@ -621,11 +633,14 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     userId,
   ]);
 
-  const overviewItems = useMemo<DetailListItem[]>(() => {
-    if (!issue) return [];
-    return [{
-      key: "issue-summary",
-      node: (
+  const scrollToLatestComment = useCallback(() => {
+    listRef.current?.scrollToEnd({ animated: true });
+  }, []);
+
+  const listHeader = useMemo(() => {
+    if (!issue) return null;
+    return (
+      <View style={styles.listHeader}>
         <View style={styles.section}>
           {editingTitle ? (
             <TextInput
@@ -700,20 +715,30 @@ export function IssueDetailScreen({ navigation, route }: Props) {
                 {isSubscribed ? t("issues.subscribed") : t("issues.subscribe")}
               </Text>
             </Pressable>
+            <IssueShortcutButton
+              count={activities.length}
+              label={t("issues.timeline")}
+              onPress={() => navigation.navigate("IssueTimeline", { issueId })}
+            />
+            <IssueShortcutButton
+              count={taskRuns.length}
+              label={t("issues.agent_transcript")}
+              onPress={() => navigation.navigate("IssueTaskRuns", { issueId })}
+            />
           </View>
         </View>
-      ),
-    },
-    {
-      key: "attachments",
-      node: (
+
         <View style={[styles.section, styles.sectionSeparated]}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{t("issues.attachments")}</Text>
+          <View style={[styles.sectionHeader, styles.sectionHeaderSurface]}>
+            <View style={styles.sectionTitleGroup}>
+              <View style={styles.sectionTitleAccent} />
+              <Text style={styles.sectionTitle}>{t("issues.attachments")}</Text>
+            </View>
             <View style={styles.inlineActions}>
               <Button
                 disabled={uploading}
                 onPress={() => void pickImage("issue")}
+                style={styles.sectionHeaderActionButton}
                 variant="secondary"
               >
                 {t("issues.image")}
@@ -721,6 +746,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
               <Button
                 disabled={uploading}
                 onPress={() => void pickDocument("issue")}
+                style={styles.sectionHeaderActionButton}
                 variant="secondary"
               >
                 {t("issues.file")}
@@ -728,25 +754,52 @@ export function IssueDetailScreen({ navigation, route }: Props) {
             </View>
           </View>
           {uploadError ? <Text style={styles.errorText}>{uploadError}</Text> : null}
-          <AttachmentList attachments={attachments} onOpen={openAttachmentPreview} />
+          <View style={styles.attachmentSectionPanel}>
+            <AttachmentList attachments={attachments} onOpen={openAttachmentPreview} />
+          </View>
         </View>
-      ),
-    }];
+
+        <View style={styles.sectionSeparated}>
+          <View style={[styles.commentListHeader, styles.sectionHeaderSurface]}>
+            <View style={styles.stickySectionTitleGroup}>
+              <View style={styles.sectionTitleAccent} />
+              <Text style={styles.sectionTitle}>{t("issues.comments")}</Text>
+              <Text style={styles.stickySectionCount}>{comments.length}</Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={scrollToLatestComment}
+              style={({ pressed }) => [
+                styles.jumpToLatestButton,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={styles.metadataToggle}>{t("issues.jump_to_latest_comment")}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    );
   }, [
+    activities.length,
     attachments,
+    comments.length,
     editingTitle,
     issue,
     issueEditError,
     isSubscribed,
+    issueId,
     navigation,
     openAttachmentPreview,
     openDescriptionEditor,
     pickDocument,
     pickImage,
     saveTitleEdit,
+    scrollToLatestComment,
     startTitleEdit,
     subscribersLoading,
     t,
+    taskRuns.length,
     titleDraft,
     toggleSubscribe,
     togglingSubscription,
@@ -757,50 +810,14 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   ]);
 
   const commentItems = useMemo<DetailListItem[]>(() => {
-    if (commentsCollapsed) return [];
     const items: DetailListItem[] = commentError
-      ? [{ key: "comments-error", node: <Text style={styles.errorText}>{commentError}</Text> }]
+      ? [{ key: "comments-error", kind: "error", message: commentError }]
       : [];
     if (comments.length === 0) return items;
     items.push(...commentRows);
     return items;
-  }, [commentError, commentRows, comments.length, commentsCollapsed]);
+  }, [commentError, commentRows, comments.length]);
 
-  const timelineItems = useMemo<DetailListItem[]>(() => (
-    timelineCollapsed
-      ? []
-      : activities.map((entry: TimelineEntry) => ({
-          key: entry.id,
-          node: (
-            <TimelineItem
-              entry={entry}
-              resolveActorName={getActorName}
-            />
-          ),
-        }))
-  ), [activities, getActorName, timelineCollapsed]);
-
-  const transcriptItems = useMemo<DetailListItem[]>(() => (
-    taskRuns.length === 0
-      ? []
-      : taskRuns.map((task, taskIndex) => ({
-        key: `task-${task.id}`,
-        node: (
-          <TaskRunHeader
-            onPress={() => navigation.push("IssueTaskTranscript", { issueId, taskId: task.id })}
-            showTitle={taskIndex === 0}
-            task={task}
-          />
-        ),
-      }))
-  ), [issueId, navigation, taskRuns]);
-
-  const toggleCommentsCollapsed = useCallback(() => {
-    setCommentsCollapsed((collapsed) => !collapsed);
-  }, []);
-  const toggleTimelineCollapsed = useCallback(() => {
-    setTimelineCollapsed((collapsed) => !collapsed);
-  }, []);
   const openIssueProperties = useCallback(() => {
     setIssueMenuOpen(false);
     navigation.navigate("IssueProperties", { issueId });
@@ -813,53 +830,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       parentIssueIdentifier: issue.identifier,
     });
   }, [issue, navigation]);
-
-  const sections = useMemo<DetailSection[]>(() => {
-    const nextSections: DetailSection[] = [
-      { key: "overview", data: overviewItems },
-    ];
-
-    if (comments.length > 0 || commentError) {
-      nextSections.push({
-        key: "comments",
-        title: t("issues.comments"),
-        count: comments.length,
-        collapsed: commentsCollapsed,
-        onToggle: toggleCommentsCollapsed,
-        data: commentItems,
-      });
-    }
-
-    if (activities.length > 0) {
-      nextSections.push({
-        key: "timeline",
-        title: t("issues.timeline"),
-        count: activities.length,
-        collapsed: timelineCollapsed,
-        onToggle: toggleTimelineCollapsed,
-        data: timelineItems,
-      });
-    }
-
-    if (transcriptItems.length > 0) {
-      nextSections.push({ key: "transcript", data: transcriptItems });
-    }
-
-    return nextSections;
-  }, [
-    activities.length,
-    commentError,
-    commentItems,
-    comments.length,
-    commentsCollapsed,
-    overviewItems,
-    timelineCollapsed,
-    timelineItems,
-    toggleCommentsCollapsed,
-    toggleTimelineCollapsed,
-    transcriptItems,
-    t,
-  ]);
 
   if (isLoading) return <LoadingState />;
   if (isError || !issue) return <EmptyState title={t("issues.unable_to_load")} />;
@@ -899,22 +869,22 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         keyboardVerticalOffset={0}
         style={styles.keyboardAvoidingContent}
       >
-        <SectionList
+        <FlashList
           automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
           contentContainerStyle={[
-            styles.content,
+            styles.issueDetailContent,
             editingCommentId && styles.contentEditingComment,
           ]}
+          data={commentItems}
+          drawDistance={1200}
+          getItemType={getDetailListItemType}
           keyboardShouldPersistTaps="handled"
           keyExtractor={(item) => item.key}
-          maxToRenderPerBatch={8}
+          ListEmptyComponent={<Text style={styles.emptyText}>{t("issues.no_comments")}</Text>}
+          ListHeaderComponent={listHeader}
+          ref={listRef}
           removeClippedSubviews={Platform.OS === "android"}
           renderItem={renderListItem}
-          renderSectionHeader={renderSectionHeader}
-          sections={sections}
-          updateCellsBatchingPeriod={50}
-          windowSize={7}
-          stickySectionHeadersEnabled
         />
 
         {!editingCommentId ? (
@@ -977,6 +947,70 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   );
 }
 
+export function IssueTimelineScreen({ navigation, route }: TimelineProps) {
+  const { t } = useTranslation();
+  const { issueId } = route.params;
+  const { workspace } = useMobileWorkspace();
+  const { getActorName } = useActorName();
+  const { data: timelineData, isError, isLoading } = useIssueTimelineEntries(workspace.id, issueId);
+  const activities = useMemo(
+    () => (Array.isArray(timelineData) ? timelineData : emptyTimeline)
+      .filter((entry: TimelineEntry) => entry.type === "activity")
+      .sort((a: TimelineEntry, b: TimelineEntry) => a.created_at.localeCompare(b.created_at)),
+    [timelineData],
+  );
+
+  if (isLoading) return <LoadingState />;
+  if (isError) return <EmptyState title={t("issues.unable_to_load_timeline")} />;
+
+  return (
+    <Screen padded={false} safeArea={false}>
+      <ScreenTitleBar onBack={() => navigation.goBack()} title={t("issues.issue_timeline")} />
+      <FlashList
+        contentContainerStyle={styles.content}
+        data={activities}
+        ItemSeparatorComponent={ListItemSeparator}
+        keyExtractor={(item) => item.id}
+        ListEmptyComponent={<Text style={styles.emptyText}>{t("issues.no_timeline_events")}</Text>}
+        renderItem={({ item }) => (
+          <TimelineItem
+            entry={item}
+            resolveActorName={getActorName}
+          />
+        )}
+      />
+    </Screen>
+  );
+}
+
+export function IssueTaskRunsScreen({ navigation, route }: TaskRunsProps) {
+  const { t } = useTranslation();
+  const { issueId } = route.params;
+  const { workspace } = useMobileWorkspace();
+  const { data: taskRuns = [], isError, isLoading } = useIssueTaskRuns(workspace.id, issueId);
+
+  if (isLoading) return <LoadingState />;
+  if (isError) return <EmptyState title={t("transcript.unable_to_load")} />;
+
+  return (
+    <Screen padded={false} safeArea={false}>
+      <ScreenTitleBar onBack={() => navigation.goBack()} title={t("issues.issue_agent_runs")} />
+      <FlashList
+        contentContainerStyle={styles.content}
+        data={taskRuns}
+        ItemSeparatorComponent={ListItemSeparator}
+        keyExtractor={(item) => item.id}
+        ListEmptyComponent={<Text style={styles.emptyText}>{t("issues.no_agent_runs")}</Text>}
+        renderItem={({ item }) => (
+          <TaskRunHeader
+            onPress={() => navigation.push("IssueTaskTranscript", { issueId, taskId: item.id })}
+            task={item}
+          />
+        )}
+      />
+    </Screen>
+  );
+}
 
 function IssueActionsMenu({
   onClose,
@@ -1008,6 +1042,34 @@ function IssueActionsMenu({
       </View>
     </Modal>
   );
+}
+
+function IssueShortcutButton({
+  count,
+  label,
+  onPress,
+}: {
+  count: number;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.issueShortcutButton,
+        pressed && styles.buttonPressed,
+      ]}
+    >
+      <Text style={styles.issueShortcutLabel}>{label}</Text>
+      <Text style={styles.issueShortcutCount}>{count}</Text>
+    </Pressable>
+  );
+}
+
+function ListItemSeparator() {
+  return <View style={styles.listItemSeparator} />;
 }
 
 function CommentSheet({
@@ -1191,30 +1253,6 @@ function DescriptionEditSheet({
         </View>
       </View>
     </Modal>
-  );
-}
-
-function StickySectionHeader({ section }: { section: DetailSection }) {
-  const { t } = useTranslation();
-  if (!section.title || !section.onToggle) return null;
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={section.onToggle}
-      style={({ pressed }) => [
-        styles.stickySectionHeader,
-        pressed && styles.buttonPressed,
-      ]}
-    >
-      <View style={styles.stickySectionTitleGroup}>
-        <Text style={styles.sectionTitle}>{section.title}</Text>
-        {typeof section.count === "number" ? (
-          <Text style={styles.stickySectionCount}>{section.count}</Text>
-        ) : null}
-      </View>
-      <Text style={styles.metadataToggle}>{section.collapsed ? t("issues.show") : t("issues.hide")}</Text>
-    </Pressable>
   );
 }
 
@@ -1536,12 +1574,14 @@ function buildCommentRows(threads: CommentThread[]): CommentListRow[] {
       key: `${thread.root.id}:root`,
       kind: "root" as const,
       entry: thread.root,
+      expanded: false,
       rootId: thread.root.id,
     },
     ...thread.replies.map((reply, index) => ({
       key: `${reply.id}:reply`,
       kind: "reply" as const,
       entry: reply,
+      expanded: false,
       rootId: thread.root.id,
       isLastReply: index === thread.replies.length - 1,
     })),
@@ -1551,6 +1591,35 @@ function buildCommentRows(threads: CommentThread[]): CommentListRow[] {
       rootId: thread.root.id,
     },
   ]);
+}
+
+function mergeCommentRows(currentRows: CommentListRow[], nextRows: CommentListRow[]): CommentListRow[] {
+  if (currentRows.length === 0) return nextRows;
+
+  const currentByCommentId = new Map<string, Extract<CommentListRow, { entry: TimelineEntry }>>();
+  for (const row of currentRows) {
+    if (row.kind !== "footer") currentByCommentId.set(row.entry.id, row);
+  }
+
+  return nextRows.map((row) => {
+    if (row.kind === "footer") return row;
+    const current = currentByCommentId.get(row.entry.id);
+    if (!current?.expanded) return row;
+    return { ...row, expanded: true };
+  });
+}
+
+function getDetailListItemType(item: DetailListItem) {
+  switch (item.kind) {
+    case "root":
+      return "comment-root";
+    case "reply":
+      return "comment-reply";
+    case "footer":
+      return "comment-footer";
+    case "error":
+      return "comment-error";
+  }
 }
 
 function shouldCollapseComment(content: string) {
@@ -1629,11 +1698,13 @@ const TimelineItem = memo(function TimelineItem({
   editingCommentId,
   editingContent,
   entry,
+  expanded = false,
   isLastReply,
   onCancelEdit,
   onChangeEdit,
   onCopyComment,
   onDelete,
+  onExpandComment,
   onOpenAttachment,
   onIssueMentionPress,
   onReply,
@@ -1648,10 +1719,12 @@ const TimelineItem = memo(function TimelineItem({
   editingCommentId?: string | null;
   editingContent?: string;
   entry: TimelineEntry;
+  expanded?: boolean;
   onCancelEdit?: () => void;
   onChangeEdit?: (content: string) => void;
   onCopyComment?: (content: string) => void;
   onDelete?: (commentId: string) => void;
+  onExpandComment?: (commentId: string) => void;
   onOpenAttachment?: (attachment: Attachment, attachmentGroup: Attachment[]) => void;
   onIssueMentionPress?: (issueId: string) => void;
   onReply?: (commentId: string) => void;
@@ -1670,7 +1743,6 @@ const TimelineItem = memo(function TimelineItem({
   const isEditing = editingCommentId === entry.id;
   const [openMenu, setOpenMenu] = useState<"actions" | null>(null);
   const [actionsMenuAnchor, setActionsMenuAnchor] = useState<{ x: number; y: number } | null>(null);
-  const [expanded, setExpanded] = useState(false);
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const body = entry.type === "comment"
     ? entry.content
@@ -1685,10 +1757,6 @@ const TimelineItem = memo(function TimelineItem({
     () => isCommentCollapsed ? createCommentPreview(commentContent) : commentContent,
     [commentContent, isCommentCollapsed],
   );
-
-  useEffect(() => {
-    setExpanded(false);
-  }, [entry.id, commentContent]);
 
   function openActionsMenuAtPress(event: GestureResponderEvent) {
     if (!isComment || isEditing || !hasCommentActions) return;
@@ -1835,7 +1903,7 @@ const TimelineItem = memo(function TimelineItem({
               <Pressable
                 accessibilityLabel={t("issues.expand_comment")}
                 accessibilityRole="button"
-                onPress={() => setExpanded(true)}
+                onPress={() => onExpandComment?.(entry.id)}
                 style={({ pressed }) => [
                   styles.expandCommentButton,
                   pressed && styles.buttonPressed,
@@ -2274,11 +2342,9 @@ function LiveElapsed({ task }: { task: AgentTask }) {
 
 const TaskRunHeader = memo(function TaskRunHeader({
   onPress,
-  showTitle,
   task,
 }: {
   onPress: () => void;
-  showTitle: boolean;
   task: AgentTask;
 }) {
   const { t } = useTranslation();
@@ -2288,7 +2354,6 @@ const TaskRunHeader = memo(function TaskRunHeader({
       onPress={onPress}
       style={({ pressed }) => [styles.taskCard, pressed && styles.buttonPressed]}
     >
-      {showTitle ? <Text style={styles.sectionTitle}>{t("issues.agent_transcript")}</Text> : null}
       <View style={styles.timelineHeader}>
         <Text style={styles.timelineActor}>{t("issues.run_title", { id: task.id.slice(0, 8) })}</Text>
         <Text style={styles.timelineDate}>{formatAgentTaskStatus(t, task.status)}</Text>
@@ -2423,7 +2488,13 @@ function formatActivity(
 
 const styles = StyleSheet.create({
   content: {
-    gap: spacing.xl,
+    padding: spacing.lg,
+    paddingBottom: 96,
+  },
+  listItemSeparator: {
+    height: spacing.md,
+  },
+  issueDetailContent: {
     padding: spacing.lg,
     paddingBottom: 96,
   },
@@ -2437,19 +2508,47 @@ const styles = StyleSheet.create({
   keyboardAvoidingContent: {
     flex: 1,
   },
+  listHeader: {
+    gap: spacing.xl,
+  },
   section: {
     gap: spacing.sm,
   },
   sectionSeparated: {
     borderTopColor: colors.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: spacing.lg,
+    borderTopWidth: 1,
+    paddingTop: spacing.xl,
   },
   sectionHeader: {
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.md,
     justifyContent: "space-between",
+  },
+  sectionHeaderSurface: {
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    minHeight: 58,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  sectionHeaderActionButton: {
+    minHeight: 32,
+    paddingHorizontal: spacing.sm,
+  },
+  sectionTitleGroup: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 32,
+  },
+  sectionTitleAccent: {
+    backgroundColor: colors.foreground,
+    borderRadius: 2,
+    height: 18,
+    width: 3,
   },
   stickySectionHeader: {
     alignItems: "center",
@@ -2471,9 +2570,31 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   stickySectionCount: {
-    color: colors.mutedForeground,
+    backgroundColor: colors.muted,
+    borderRadius: 10,
+    color: colors.foreground,
     fontSize: 12,
-    fontWeight: "500",
+    fontWeight: "600",
+    minWidth: 22,
+    overflow: "hidden",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    textAlign: "center",
+  },
+  commentListHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+  },
+  jumpToLatestButton: {
+    alignItems: "center",
+    backgroundColor: colors.muted,
+    borderRadius: radii.sm,
+    justifyContent: "center",
+    minHeight: 32,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
   inlineActions: {
     alignItems: "center",
@@ -2543,6 +2664,7 @@ const styles = StyleSheet.create({
   issueEngagementRow: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: spacing.sm,
   },
   subscribeButton: {
@@ -2552,7 +2674,6 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     borderWidth: StyleSheet.hairlineWidth,
     justifyContent: "center",
-    marginLeft: "auto",
     minHeight: 36,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -2571,6 +2692,28 @@ const styles = StyleSheet.create({
   },
   subscribeButtonTextActive: {
     color: colors.primaryForeground,
+  },
+  issueShortcutButton: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 36,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  issueShortcutLabel: {
+    color: colors.foreground,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  issueShortcutCount: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontWeight: "600",
   },
   errorText: {
     color: colors.destructive,
@@ -2849,8 +2992,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: colors.foreground,
-    fontSize: 16,
-    fontWeight: "500",
+    fontSize: 17,
+    fontWeight: "700",
   },
   childRow: {
     backgroundColor: colors.card,
@@ -2873,6 +3016,12 @@ const styles = StyleSheet.create({
   relationList: {
     gap: spacing.sm,
   },
+  commentRowThreadStart: {
+    marginTop: spacing.md,
+  },
+  commentRowThreadContinuation: {
+    marginTop: 0,
+  },
   timelineItem: {
     backgroundColor: colors.card,
     borderColor: colors.border,
@@ -2892,7 +3041,6 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     borderWidth: StyleSheet.hairlineWidth,
     borderTopWidth: StyleSheet.hairlineWidth,
-    marginTop: -spacing.lg,
     padding: spacing.md,
   },
   threadReplyButton: {
@@ -2921,7 +3069,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 0,
-    marginTop: -spacing.lg,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
@@ -3141,6 +3288,13 @@ const styles = StyleSheet.create({
   attachmentList: {
     gap: spacing.sm,
   },
+  attachmentSectionPanel: {
+    backgroundColor: colors.muted,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: spacing.sm,
+  },
   attachmentRow: {
     alignItems: "center",
     backgroundColor: colors.card,
@@ -3150,7 +3304,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing.md,
     justifyContent: "space-between",
+    minHeight: 64,
     padding: spacing.md,
+    shadowColor: "#000000",
+    shadowOffset: { height: 1, width: 0 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
   },
   attachmentContent: {
     flex: 1,
@@ -3159,8 +3319,8 @@ const styles = StyleSheet.create({
   },
   attachmentName: {
     color: colors.foreground,
-    fontSize: 14,
-    fontWeight: "500",
+    fontSize: 15,
+    fontWeight: "600",
   },
   attachmentMeta: {
     color: colors.mutedForeground,

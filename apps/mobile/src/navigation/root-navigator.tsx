@@ -19,7 +19,11 @@ import { useMobileLogout } from "../auth/use-mobile-logout";
 import { Button, EmptyState, LoadingState, Screen } from "../components/ui/primitives";
 import { LoginScreen } from "../screens/auth/login-screen";
 import { CreateIssueScreen } from "../screens/issues/create-issue-screen";
-import { IssueDetailScreen } from "../screens/issues/issue-detail-screen";
+import {
+  IssueDetailScreen,
+  IssueTaskRunsScreen,
+  IssueTimelineScreen,
+} from "../screens/issues/issue-detail-screen";
 import { IssuePropertiesScreen } from "../screens/issues/issue-properties-screen";
 import { IssueTaskTranscriptScreen } from "../screens/issues/issue-task-transcript-screen";
 import { IssuesScreen } from "../screens/issues/issues-screen";
@@ -39,6 +43,8 @@ export type RootStackParamList = {
   Main: undefined;
   IssueDetail: { issueId: string };
   IssueProperties: { issueId: string };
+  IssueTimeline: { issueId: string };
+  IssueTaskRuns: { issueId: string };
   IssueTaskTranscript: { issueId: string; taskId: string };
   CreateIssue: { parentIssueId?: string; parentIssueIdentifier?: string } | undefined;
   Search: undefined;
@@ -134,6 +140,8 @@ function AuthenticatedNavigator() {
             <Stack.Screen component={MainTabs} name="Main" />
             <Stack.Screen component={IssueDetailScreen} name="IssueDetail" />
             <Stack.Screen component={IssuePropertiesScreen} name="IssueProperties" />
+            <Stack.Screen component={IssueTimelineScreen} name="IssueTimeline" />
+            <Stack.Screen component={IssueTaskRunsScreen} name="IssueTaskRuns" />
             <Stack.Screen component={IssueTaskTranscriptScreen} name="IssueTaskTranscript" />
             <Stack.Screen component={CreateIssueScreen} name="CreateIssue" />
             <Stack.Screen component={SearchScreen} name="Search" />
