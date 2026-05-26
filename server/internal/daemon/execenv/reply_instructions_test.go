@@ -31,6 +31,7 @@ func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
 		"<<'COMMENT'",
 		"Do NOT write literal `\\n` escapes to simulate line breaks",
 		"do NOT reuse --parent values from previous turns",
+		"--require-task-token",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("codex/linux reply instructions missing %q\n---\n%s", want, got)
@@ -71,6 +72,7 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 					"Always use `--content-stdin`",
 					"do NOT reuse --parent values from previous turns",
 					"If you decide to reply",
+					"--require-task-token",
 				} {
 					if !strings.Contains(got, want) {
 						t.Errorf("%s reply instructions missing %q\n---\n%s", name, want, got)
@@ -114,6 +116,7 @@ func TestBuildCommentReplyInstructionsWindowsUsesContentFile(t *testing.T) {
 				"Do NOT pipe via `--content-stdin`",
 				"silently drops non-ASCII",
 				"$OutputEncoding",
+				"--require-task-token",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("%s reply instructions missing %q\n---\n%s", provider, want, got)
@@ -173,6 +176,7 @@ func TestInjectRuntimeConfigCommentTriggerUsesHelper(t *testing.T) {
 		triggerID,
 		"multica issue comment add " + issueID + " --parent " + triggerID,
 		"do NOT reuse --parent values from previous turns",
+		"--require-task-token",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q", want)

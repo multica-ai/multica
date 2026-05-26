@@ -65,6 +65,48 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 	return ok
 }
 
+// requireDaemonTokenAuth rejects the PAT/JWT fallback accepted by the broader
+// daemon API. System-authored daemon comments are a privileged platform action;
+// allowing user-token fallback would recreate the "background script posted as
+// a member" failure mode this path is meant to avoid.
+func requireDaemonTokenAuth(w http.ResponseWriter, r *http.Request) bool {
+	if middleware.DaemonAuthPathFromContext(r.Context()) != middleware.DaemonAuthPathDaemonToken {
+		writeError(w, http.StatusForbidden, "daemon token required")
+		return false
+	}
+	return true
+}
+
+func (h *Handler) loadIssueForDaemon(w http.ResponseWriter, r *http.Request, issueID string) (db.Issue, bool) {
+	workspaceID := middleware.DaemonWorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		writeError(w, http.StatusForbidden, "daemon token required")
+		return db.Issue{}, false
+	}
+
+	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
+		return issue, true
+	}
+
+	issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue_id")
+	if !ok {
+		return db.Issue{}, false
+	}
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return db.Issue{}, false
+	}
+	issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+		ID:          issueUUID,
+		WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return db.Issue{}, false
+	}
+	return issue, true
+}
+
 // requireDaemonRuntimeAccess looks up a runtime and verifies the caller owns its workspace.
 //
 // Only pgx.ErrNoRows is treated as a real "runtime gone" 404 — the daemon uses
@@ -189,6 +231,8 @@ type daemonWorkspaceReposResponse struct {
 	ReposVersion string          `json:"repos_version"`
 	Settings     json.RawMessage `json:"settings,omitempty"`
 }
+
+const daemonTokenTTL = 30 * 24 * time.Hour
 
 func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
 	if len(repos) == 0 {
@@ -415,13 +459,53 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	})
 
 	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings)
+	daemonToken, ok := h.issueDaemonToken(w, r, wsUUID, req.DaemonID)
+	if !ok {
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"runtimes":      resp,
 		"repos":         repoResp.Repos,
 		"repos_version": repoResp.ReposVersion,
 		"settings":      repoResp.Settings,
+		"daemon_token":  daemonToken,
 	})
+}
+
+func (h *Handler) issueDaemonToken(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, daemonID string) (string, bool) {
+	if err := h.Queries.DeleteExpiredDaemonTokens(r.Context()); err != nil {
+		slog.Warn("daemon token cleanup failed", "daemon_id", daemonID, "error", err)
+	}
+	if hashes, err := h.Queries.DeleteDaemonTokensByWorkspaceAndDaemons(r.Context(), db.DeleteDaemonTokensByWorkspaceAndDaemonsParams{
+		WorkspaceID: workspaceID,
+		DaemonIds:   []string{daemonID},
+	}); err != nil {
+		slog.Warn("daemon token rotation cleanup failed", "daemon_id", daemonID, "error", err)
+	} else {
+		for _, hash := range hashes {
+			h.DaemonTokenCache.Invalidate(r.Context(), hash)
+		}
+	}
+
+	rawToken, err := auth.GenerateDaemonToken()
+	if err != nil {
+		slog.Warn("generate daemon token failed", "daemon_id", daemonID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to generate daemon token")
+		return "", false
+	}
+	expiresAt := time.Now().Add(daemonTokenTTL)
+	if _, err := h.Queries.CreateDaemonToken(r.Context(), db.CreateDaemonTokenParams{
+		TokenHash:   auth.HashToken(rawToken),
+		WorkspaceID: workspaceID,
+		DaemonID:    daemonID,
+		ExpiresAt:   pgtype.Timestamptz{Time: expiresAt, Valid: true},
+	}); err != nil {
+		slog.Warn("create daemon token failed", "daemon_id", daemonID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create daemon token")
+		return "", false
+	}
+	return rawToken, true
 }
 
 // mergeLegacyRuntimes folds every runtime row keyed on a prior hostname-derived

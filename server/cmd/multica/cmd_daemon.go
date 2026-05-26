@@ -71,6 +71,20 @@ var daemonDiskUsageCmd = &cobra.Command{
 	RunE: runDaemonDiskUsage,
 }
 
+var daemonCommentCmd = &cobra.Command{
+	Use:   "comment",
+	Short: "Post daemon-authenticated system comments",
+}
+
+var daemonCommentAddCmd = &cobra.Command{
+	Use:   "add <issue-id>",
+	Short: "Post a system comment using a daemon token",
+	Long: "Post a system comment using MULTICA_DAEMON_TOKEN. Local daemon tasks receive this token in their environment; " +
+		"background scripts can keep it and call this command after the task-scoped MULTICA_TOKEN expires.",
+	Args: cobra.ExactArgs(1),
+	RunE: runDaemonCommentAdd,
+}
+
 func init() {
 	f := daemonStartCmd.Flags()
 	f.Bool("foreground", false, "Run in the foreground instead of background")
@@ -111,12 +125,20 @@ func init() {
 	df.String("output", "table", "Output format: table or json")
 	df.String("workspaces-root", "", "Override the workspaces root path (default: same as the daemon)")
 
+	daemonCommentAddCmd.Flags().String("content", "", "Comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
+	daemonCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
+	daemonCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file")
+	daemonCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
+	daemonCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
+
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonDiskUsageCmd)
+	daemonCommentCmd.AddCommand(daemonCommentAddCmd)
+	daemonCmd.AddCommand(daemonCommentCmd)
 }
 
 // daemonDirForProfile returns the state directory for the given profile.
@@ -135,6 +157,54 @@ func daemonPIDPathForProfile(profile string) string {
 
 func daemonLogPathForProfile(profile string) string {
 	return filepath.Join(daemonDirForProfile(profile), "daemon.log")
+}
+
+func runDaemonCommentAdd(cmd *cobra.Command, args []string) error {
+	content, hasContent, err := resolveTextFlag(cmd, "content")
+	if err != nil {
+		return err
+	}
+	if !hasContent {
+		return fmt.Errorf("--content, --content-stdin, or --content-file is required")
+	}
+
+	token, err := resolveDaemonCommentToken()
+	if err != nil {
+		return err
+	}
+	serverURL := resolveServerURL(cmd)
+	client := cli.NewAPIClient(serverURL, "", token)
+
+	body := map[string]any{"content": content}
+	if parentID, _ := cmd.Flags().GetString("parent"); parentID != "" {
+		body["parent_id"] = parentID
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/daemon/issues/"+args[0]+"/comments", body, &result); err != nil {
+		return fmt.Errorf("add daemon system comment: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "System comment added to issue %s.\n", args[0])
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func resolveDaemonCommentToken() (string, error) {
+	token := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_TOKEN"))
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("MULTICA_TOKEN"))
+	}
+	if !strings.HasPrefix(token, "mdt_") {
+		return "", fmt.Errorf("daemon comment add requires MULTICA_DAEMON_TOKEN or MULTICA_TOKEN to contain an mdt_ daemon token")
+	}
+	return token, nil
 }
 
 // healthPortForProfile returns the health check port for the given profile.

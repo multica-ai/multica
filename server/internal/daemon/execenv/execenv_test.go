@@ -4106,7 +4106,7 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 			t.Fatalf("metadata list step missing\n---\n%s", s)
 		}
 		// ...AND the codex-specific stdin-only rule is still emitted.
-		if !strings.Contains(s, "always use `--content-stdin` with a HEREDOC") {
+		if !strings.Contains(s, "always use `--content-stdin --require-task-token` with a HEREDOC") {
 			t.Fatalf("codex linux HEREDOC rule missing\n---\n%s", s)
 		}
 		// ...AND the per-turn reply instruction still points at this
