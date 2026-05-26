@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-05-23
+// Snapshot: 2026-05-26
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -65,12 +65,12 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   "deepseek-chat": { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0.14 },
   "deepseek-reasoner": { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0.14 },
-  "deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0.14 },
-  "deepseek-v4-pro": { input: 1.74, output: 3.48, cacheRead: 0.145, cacheWrite: 1.74 },
+  "deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
+  "deepseek-v4-pro": { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0.435 },
   "deepseek/deepseek-chat": { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0.14 },
   "deepseek/deepseek-reasoner": { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0.14 },
-  "deepseek/deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0.14 },
-  "deepseek/deepseek-v4-pro": { input: 1.74, output: 3.48, cacheRead: 0.145, cacheWrite: 1.74 },
+  "deepseek/deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
+  "deepseek/deepseek-v4-pro": { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0.435 },
   "gemini-2.0-flash": { input: 0.1, output: 0.4, cacheRead: 0.025, cacheWrite: 0.1 },
   "gemini-2.0-flash-lite": { input: 0.075, output: 0.3, cacheRead: 0.075, cacheWrite: 0.075 },
   "gemini-2.5-flash": { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
