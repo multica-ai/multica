@@ -225,6 +225,7 @@ export const FeishuProjectIntegrationSchema = z.object({
   mql_filter: z.string().default(""),
   status_mapping: z.record(z.string(), z.string()).default({}),
   reverse_status_mapping: z.record(z.string(), z.string()).default({}),
+  assign_open_items_to_owner_agent: z.boolean().default(false),
   last_synced_at: z.string().nullable().default(null),
   last_error: z.string().nullable().default(null),
   created_at: z.string().optional(),
@@ -243,6 +244,7 @@ export const EMPTY_FEISHU_PROJECT_INTEGRATION: FeishuProjectIntegration = {
   mql_filter: "",
   status_mapping: {},
   reverse_status_mapping: {},
+  assign_open_items_to_owner_agent: false,
   last_synced_at: null,
   last_error: null,
 };

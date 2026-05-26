@@ -540,7 +540,7 @@ export function LoginPage({
                   fill="#fff"
                 />
               </svg>
-              Continue with Feishu
+              {t(($) => $.signin.feishu)}
             </Button>
           )}
           {extra && <div className="w-full pt-1 text-center">{extra}</div>}

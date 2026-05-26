@@ -38,6 +38,7 @@ const (
 	feishuProjectAttachmentMaxSize     = 5 << 20
 	feishuProjectSyncWorkers           = 20
 	feishuProjectSlowItemLogAfter      = 500 * time.Millisecond
+	feishuProjectAPIRetryAttempts      = 4
 	feishuProjectDownloadRetryAttempts = 3
 )
 
@@ -174,6 +175,7 @@ func (s *FeishuProjectSyncService) SyncWithRunAndOptions(ctx context.Context, cf
 	var summaryMu sync.Mutex
 	var syncErr error
 	fullSync := trigger == "manual"
+	skipExisting := fullSync && strings.TrimSpace(opts.WorkItemID) == ""
 	totalCount := 0
 	for _, typ := range enabledFeishuProjectTypes(cfg) {
 		err := s.Client.QueryWorkItemPagesWithOptions(ctx, cfg, typ, fullSync, opts, func(page FeishuProjectWorkItemPage) error {
@@ -198,7 +200,7 @@ func (s *FeishuProjectSyncService) SyncWithRunAndOptions(ctx context.Context, cf
 						if ctx.Err() != nil {
 							continue
 						}
-						result, attachErrs, err := s.syncWorkItem(ctx, cfg, item, fullSync)
+						result, attachErrs, err := s.syncWorkItem(ctx, cfg, item, skipExisting)
 						summaryMu.Lock()
 						if err != nil {
 							summary.Errors++
@@ -348,15 +350,13 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 	if item.ID == "" || item.Title == "" {
 		return "skipped", 0, nil
 	}
-	status := mapFeishuStatus(cfg.StatusMapping, item.Type, item.Status)
+	mappedStatus := mapFeishuStatus(cfg.StatusMapping, item.Type, item.Status)
+	status := mappedStatus
 	if status == "" {
 		status = "todo"
 	}
-	phaseStarted := time.Now()
-	assigneeType, assigneeID := s.resolveOwner(ctx, cfg.WorkspaceID, item.OwnerEmail, status)
-	timing.ownerLookup += time.Since(phaseStarted)
 
-	phaseStarted = time.Now()
+	phaseStarted := time.Now()
 	binding, err := s.Queries.GetFeishuProjectIssueBindingByExternal(ctx, db.GetFeishuProjectIssueBindingByExternalParams{
 		IntegrationID: cfg.ID,
 		WorkItemType:  item.Type,
@@ -374,6 +374,9 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			return "skipped", 0, nil
 		}
 		phaseStarted = time.Now()
+		assigneeType, assigneeID := s.resolveAssignee(ctx, cfg, item, mappedStatus, issue.AssigneeType, issue.AssigneeID)
+		timing.ownerLookup += time.Since(phaseStarted)
+		phaseStarted = time.Now()
 		attachmentMarkdown, attachErr := s.syncExternalAttachments(ctx, cfg, issue.ID, item, timing)
 		timing.attachments += time.Since(phaseStarted)
 		if attachErr != nil {
@@ -381,7 +384,8 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		}
 		nextDesc := externalDescription(item, attachmentMarkdown)
 		nextTitle := externalTitle(item)
-		if issue.Title == nextTitle && issue.Description.String == nextDesc && issue.Status == status && sameIssueAssignee(issue, assigneeType, assigneeID) {
+		if issue.Title == nextTitle && issue.Description.String == nextDesc && issue.Status == status &&
+			sameNullableText(issue.AssigneeType, assigneeType) && sameNullableUUID(issue.AssigneeID, assigneeID) {
 			s.reconcileSyncedIssueTasks(ctx, issue, issue)
 			return "skipped", 0, nil
 		}
@@ -412,6 +416,9 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 	if !cfg.CreatedByID.Valid {
 		return "skipped", 0, fmt.Errorf("feishu project integration has no creator")
 	}
+	phaseStarted = time.Now()
+	assigneeType, assigneeID := s.resolveAssignee(ctx, cfg, item, mappedStatus, pgtype.Text{}, pgtype.UUID{})
+	timing.ownerLookup += time.Since(phaseStarted)
 	phaseStarted = time.Now()
 	tx, err := s.Tx.Begin(ctx)
 	if err != nil {
@@ -486,7 +493,7 @@ func (s *FeishuProjectSyncService) reconcileSyncedIssueTasks(ctx context.Context
 		}
 		return
 	}
-	if !sameIssueAssignee(prevIssue, issue.AssigneeType, issue.AssigneeID) {
+	if !sameNullableText(prevIssue.AssigneeType, issue.AssigneeType) || !sameNullableUUID(prevIssue.AssigneeID, issue.AssigneeID) {
 		if err := s.TaskService.CancelTasksForIssue(ctx, issue.ID); err != nil {
 			slog.Warn("Feishu Project sync previous assignee task cancel failed", "issue_id", UUIDString(issue.ID), "error", err)
 			return
@@ -515,11 +522,17 @@ func (s *FeishuProjectSyncService) enqueueSyncedIssueIfNeeded(ctx context.Contex
 	}
 }
 
-func sameIssueAssignee(issue db.Issue, assigneeType pgtype.Text, assigneeID pgtype.UUID) bool {
-	return issue.AssigneeType == assigneeType && issue.AssigneeID == assigneeID
+func (s *FeishuProjectSyncService) resolveAssignee(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, localStatus string, currentType pgtype.Text, currentID pgtype.UUID) (pgtype.Text, pgtype.UUID) {
+	if cfg.AssignOpenItemsToOwnerAgent {
+		if !isFeishuProjectOwnerAgentAssignableStatus(item.Status, localStatus) {
+			return currentType, currentID
+		}
+		return s.resolveOwnerAgent(ctx, cfg.WorkspaceID, item.OwnerEmail)
+	}
+	return s.resolveOwnerMember(ctx, cfg.WorkspaceID, item.OwnerEmail)
 }
 
-func (s *FeishuProjectSyncService) resolveOwner(ctx context.Context, workspaceID pgtype.UUID, email, status string) (pgtype.Text, pgtype.UUID) {
+func (s *FeishuProjectSyncService) resolveOwnerMember(ctx context.Context, workspaceID pgtype.UUID, email string) (pgtype.Text, pgtype.UUID) {
 	if strings.TrimSpace(email) == "" {
 		return pgtype.Text{}, pgtype.UUID{}
 	}
@@ -530,16 +543,52 @@ func (s *FeishuProjectSyncService) resolveOwner(ctx context.Context, workspaceID
 	if _, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: user.ID, WorkspaceID: workspaceID}); err != nil {
 		return pgtype.Text{}, pgtype.UUID{}
 	}
-	if status == "todo" {
-		agent, err := s.Queries.GetAgentByOwnerInWorkspace(ctx, db.GetAgentByOwnerInWorkspaceParams{
-			WorkspaceID: workspaceID,
-			OwnerID:     user.ID,
-		})
-		if err == nil {
-			return pgtype.Text{String: "agent", Valid: true}, agent.ID
-		}
-	}
 	return pgtype.Text{String: "member", Valid: true}, user.ID
+}
+
+func (s *FeishuProjectSyncService) resolveOwnerAgent(ctx context.Context, workspaceID pgtype.UUID, email string) (pgtype.Text, pgtype.UUID) {
+	if strings.TrimSpace(email) == "" {
+		return pgtype.Text{}, pgtype.UUID{}
+	}
+	user, err := s.Queries.GetUserByEmail(ctx, strings.ToLower(strings.TrimSpace(email)))
+	if err != nil {
+		return pgtype.Text{}, pgtype.UUID{}
+	}
+	if _, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: user.ID, WorkspaceID: workspaceID}); err != nil {
+		return pgtype.Text{}, pgtype.UUID{}
+	}
+	agent, err := s.Queries.GetFirstAgentByOwnerInWorkspace(ctx, db.GetFirstAgentByOwnerInWorkspaceParams{
+		WorkspaceID: workspaceID,
+		OwnerID:     user.ID,
+	})
+	if err != nil {
+		return pgtype.Text{}, pgtype.UUID{}
+	}
+	return pgtype.Text{String: "agent", Valid: true}, agent.ID
+}
+
+func isFeishuProjectOwnerAgentAssignableStatus(externalStatus, localStatus string) bool {
+	return strings.TrimSpace(localStatus) == "todo"
+}
+
+func sameNullableText(a, b pgtype.Text) bool {
+	if a.Valid != b.Valid {
+		return false
+	}
+	if !a.Valid {
+		return true
+	}
+	return a.String == b.String
+}
+
+func sameNullableUUID(a, b pgtype.UUID) bool {
+	if a.Valid != b.Valid {
+		return false
+	}
+	if !a.Valid {
+		return true
+	}
+	return a.Bytes == b.Bytes
 }
 
 func bindingParams(cfg db.FeishuProjectIntegration, issueID pgtype.UUID, item FeishuProjectWorkItem) db.UpsertFeishuProjectIssueBindingParams {
@@ -1164,37 +1213,102 @@ func (c *FeishuProjectClient) openAPI(ctx context.Context, cfg db.FeishuProjectI
 	if err != nil {
 		return nil, err
 	}
-	var reader io.Reader
+	var rawBody []byte
 	if body != nil {
-		raw, _ := json.Marshal(body)
-		reader = bytes.NewReader(raw)
+		rawBody, _ = json.Marshal(body)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, reader)
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for attempt := 1; attempt <= feishuProjectAPIRetryAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, bytes.NewReader(rawBody))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-PLUGIN-TOKEN", token)
+		if cfg.ActorUserKey.Valid {
+			req.Header.Set("X-USER-KEY", cfg.ActorUserKey.String)
+		}
+		resp, err := c.httpClient().Do(req)
+		if err != nil {
+			lastErr = err
+			if attempt < feishuProjectAPIRetryAttempts && feishuProjectRetryDelay(ctx, attempt) {
+				continue
+			}
+			return nil, err
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			lastErr = fmt.Errorf("Feishu Project API %s %s http %d: %s", method, path, resp.StatusCode, string(raw))
+			if attempt < feishuProjectAPIRetryAttempts && feishuProjectRetryableHTTPStatus(resp.StatusCode) && feishuProjectRetryDelay(ctx, attempt) {
+				slog.Warn("Feishu Project API retrying",
+					"method", method,
+					"path", path,
+					"status", resp.StatusCode,
+					"attempt", attempt,
+					"max_attempts", feishuProjectAPIRetryAttempts,
+					"body", string(raw),
+				)
+				continue
+			}
+			return nil, lastErr
+		}
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return nil, err
+		}
+		if msg := feishuProjectAPIError(out); msg != "" {
+			lastErr = fmt.Errorf("Feishu Project API %s %s failed: %s", method, path, msg)
+			if attempt < feishuProjectAPIRetryAttempts && feishuProjectRetryableAPIError(out) && feishuProjectRetryDelay(ctx, attempt) {
+				slog.Warn("Feishu Project API retrying",
+					"method", method,
+					"path", path,
+					"attempt", attempt,
+					"max_attempts", feishuProjectAPIRetryAttempts,
+					"error", msg,
+				)
+				continue
+			}
+			return nil, lastErr
+		}
+		return out, nil
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-PLUGIN-TOKEN", token)
-	if cfg.ActorUserKey.Valid {
-		req.Header.Set("X-USER-KEY", cfg.ActorUserKey.String)
+	return nil, lastErr
+}
+
+func feishuProjectRetryDelay(ctx context.Context, attempt int) bool {
+	delay := time.Duration(attempt) * time.Second
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return nil, err
+}
+
+func feishuProjectRetryableHTTPStatus(status int) bool {
+	switch status {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("Feishu Project API %s %s http %d: %s", method, path, resp.StatusCode, string(raw))
+}
+
+func feishuProjectRetryableAPIError(payload map[string]any) bool {
+	code, _ := feishuProjectInt(payload["err_code"])
+	if code == 0 {
+		if errMap, _ := payload["err"].(map[string]any); errMap != nil {
+			code, _ = feishuProjectInt(errMap["code"])
+		}
 	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
+	if code == 50007 {
+		return true
 	}
-	if msg := feishuProjectAPIError(out); msg != "" {
-		return nil, fmt.Errorf("Feishu Project API %s %s failed: %s", method, path, msg)
-	}
-	return out, nil
+	msg := strings.ToLower(strings.TrimSpace(fmt.Sprint(payload["err_msg"]) + " " + fmt.Sprint(payload["msg"])))
+	return strings.Contains(msg, "gateway timeout") || strings.Contains(msg, "try again later")
 }
 
 func (c *FeishuProjectClient) callTool(ctx context.Context, cfg db.FeishuProjectIntegration, name string, args map[string]any) (map[string]any, error) {
@@ -1551,7 +1665,11 @@ func feishuProjectMQLCount(payload map[string]any) (int, bool) {
 
 func feishuProjectOpenAPITotal(payload map[string]any) (int, bool) {
 	pagination, _ := payload["pagination"].(map[string]any)
-	switch v := pagination["total"].(type) {
+	return feishuProjectInt(pagination["total"])
+}
+
+func feishuProjectInt(value any) (int, bool) {
+	switch v := value.(type) {
 	case float64:
 		return int(v), true
 	case int:
@@ -1616,19 +1734,57 @@ func parseFeishuProjectSearch(payload map[string]any, typ, projectKey string) []
 		description, descriptionAttachments := normalizeFeishuProjectDescription(record["description"])
 		attachments = append(attachments, descriptionAttachments...)
 		updatedAt, _ := time.Parse(time.RFC3339Nano, record["updated_at"])
+		ownerEmail := feishuProjectOwnerEmail(record, feishuProjectUserEmails(row))
 		out = append(out, FeishuProjectWorkItem{
 			ID:          id,
 			Type:        typ,
 			Title:       firstNonEmpty(record["name"], record["title"]),
 			Description: description,
 			Status:      firstNonEmpty(record["work_item_status"], record["sub_stage"], record["status"]),
-			OwnerEmail:  extractEmail(firstNonEmpty(record["current_status_operator"], record["owner"], record["operator"])),
+			OwnerEmail:  ownerEmail,
 			UpdatedAt:   updatedAt,
 			URL:         fmt.Sprintf("https://project.feishu.cn/%s/%s/detail/%s", projectKey, typ, id),
 			Attachments: dedupeFeishuProjectAttachments(attachments),
 		})
 	}
 	return out
+}
+
+func feishuProjectUserEmails(row map[string]any) map[string]string {
+	rows, _ := row["user_details"].([]any)
+	out := make(map[string]string, len(rows))
+	for _, rowAny := range rows {
+		user, _ := rowAny.(map[string]any)
+		email := extractEmail(fmt.Sprint(user["email"]))
+		if email == "" {
+			continue
+		}
+		for _, key := range []string{
+			fmt.Sprint(user["user_key"]),
+			fmt.Sprint(user["key"]),
+			fmt.Sprint(user["username"]),
+		} {
+			key = strings.TrimSpace(key)
+			if key != "" && key != "<nil>" {
+				out[key] = email
+			}
+		}
+	}
+	return out
+}
+
+func feishuProjectOwnerEmail(record map[string]string, userEmails map[string]string) string {
+	for _, raw := range []string{record["current_status_operator"], record["owner"], record["operator"]} {
+		if email := extractEmail(raw); email != "" {
+			return email
+		}
+		for _, token := range strings.Split(raw, ",") {
+			if email := userEmails[strings.TrimSpace(token)]; email != "" {
+				return email
+			}
+		}
+	}
+	return ""
 }
 
 func parseFeishuProjectStatusOptions(payload map[string]any) []FeishuProjectStatusOption {

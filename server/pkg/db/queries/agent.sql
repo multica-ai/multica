@@ -16,10 +16,10 @@ WHERE id = $1;
 SELECT * FROM agent
 WHERE id = $1 AND workspace_id = $2;
 
--- name: GetAgentByOwnerInWorkspace :one
+-- name: GetFirstAgentByOwnerInWorkspace :one
 SELECT * FROM agent
 WHERE workspace_id = $1 AND owner_id = $2 AND archived_at IS NULL
-ORDER BY updated_at DESC, created_at DESC
+ORDER BY created_at ASC
 LIMIT 1;
 
 -- name: CreateAgent :one

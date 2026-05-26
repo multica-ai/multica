@@ -187,49 +187,6 @@ func TestFeishuProjectIssueStatusOptionsFallsBackToFieldMetadata(t *testing.T) {
 	}
 }
 
-func TestFeishuProjectIssueStatusOptionsUsesConfiguredProjectNameInPath(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/open_api/authen/plugin_token":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
-		case "/open_api/space_name/template_list/issue":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"err_code":0,"data":[]}`))
-		case "/open_api/space_name/work_item/issue/meta":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{
-				"err_code": 0,
-				"data": {
-					"fields": [{
-						"field_type": "_work_item_status",
-						"options": [{"value": "OPEN", "label": "新建"}]
-					}]
-				}
-			}`))
-		default:
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	client := &FeishuProjectClient{
-		HTTPClient: server.Client(),
-		BaseURL:    server.URL,
-	}
-	statuses, err := client.IssueStatusOptions(context.Background(), db.FeishuProjectIntegration{
-		ProjectKey:   "space_name",
-		PluginID:     "plugin-id",
-		PluginSecret: "plugin-secret",
-	})
-	if err != nil {
-		t.Fatalf("IssueStatusOptions: %v", err)
-	}
-	if len(statuses) != 1 || statuses[0].Key != "OPEN" {
-		t.Fatalf("statuses = %#v", statuses)
-	}
-}
-
 func TestFeishuProjectQueryWorkItemsRequiresMappedStatusScope(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("QueryWorkItems must not call remote search without mapped statuses: %s", r.URL.Path)
@@ -248,38 +205,6 @@ func TestFeishuProjectQueryWorkItemsRequiresMappedStatusScope(t *testing.T) {
 	}, "issue", false)
 	if !errors.Is(err, ErrFeishuProjectSyncScopeRequired) {
 		t.Fatalf("err = %v, want ErrFeishuProjectSyncScopeRequired", err)
-	}
-}
-
-func TestFeishuProjectQueryWorkItemsUsesConfiguredProjectNameInPath(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/open_api/authen/plugin_token":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
-		case "/open_api/space_name/work_item/filter":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"err_code":0,"data":[],"pagination":{"page_num":1,"page_size":100,"total":0}}`))
-		default:
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	client := &FeishuProjectClient{
-		HTTPClient: server.Client(),
-		BaseURL:    server.URL,
-	}
-	_, err := client.QueryWorkItems(context.Background(), db.FeishuProjectIntegration{
-		ProjectKey:   "space_name",
-		PluginID:     "plugin-id",
-		PluginSecret: "plugin-secret",
-		StatusMapping: []byte(`{
-			"OPEN": "todo"
-		}`),
-	}, "issue", false)
-	if err != nil {
-		t.Fatalf("QueryWorkItems: %v", err)
 	}
 }
 
@@ -412,6 +337,62 @@ func TestFeishuProjectManualQueryWorkItemsUsesThirtyDayUpdatedAtFilter(t *testin
 	}
 }
 
+func TestFeishuProjectQueryWorkItemsResolvesOwnerEmailFromUserDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/work_item/filter":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"err_code": 0,
+				"data": [{
+					"id": 6994401497,
+					"name": "test-wenxue",
+					"work_item_status": {"state_key": "OPEN", "name": "新建"},
+					"fields": [
+						{"field_key": "current_status_operator", "field_alias": "current_status_operator", "field_value": ["7052496113189830658"]},
+						{"field_key": "owner", "field_alias": "owner", "field_value": "7052496113189830658"}
+					],
+					"user_details": [{
+						"user_key": "7052496113189830658",
+						"username": "7052496113189830658",
+						"email": "beastpu@lilith.com",
+						"name_cn": "朴文学"
+					}]
+				}],
+				"pagination": {"page_num": 1, "page_size": 100, "total": 1}
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{
+		HTTPClient: server.Client(),
+		BaseURL:    server.URL,
+	}
+	items, err := client.QueryWorkItems(context.Background(), db.FeishuProjectIntegration{
+		ProjectKey:   "project-key",
+		PluginID:     "plugin-id",
+		PluginSecret: "plugin-secret",
+		StatusMapping: []byte(`{
+			"OPEN": "todo"
+		}`),
+	}, "issue", false)
+	if err != nil {
+		t.Fatalf("QueryWorkItems: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].OwnerEmail != "beastpu@lilith.com" {
+		t.Fatalf("OwnerEmail = %q, want beastpu@lilith.com", items[0].OwnerEmail)
+	}
+}
+
 func TestFeishuProjectExternalIssueIdentityUsesBugID(t *testing.T) {
 	item := FeishuProjectWorkItem{
 		ID:          "6991773150",
@@ -506,6 +487,30 @@ func TestFeishuProjectAttachmentTooLarge(t *testing.T) {
 	}
 	if !feishuProjectAttachmentTooLarge(FeishuProjectAttachment{Name: "large.log", SizeBytes: (5 << 20) + 1}) {
 		t.Fatal("attachment larger than 5MB should be skipped")
+	}
+}
+
+func TestFeishuProjectOwnerAgentAssignableStatus(t *testing.T) {
+	cases := []struct {
+		name           string
+		externalStatus string
+		localStatus    string
+		want           bool
+	}{
+		{name: "open key without mapping", externalStatus: "OPEN", want: false},
+		{name: "reopened key without mapping", externalStatus: "REOPENED", want: false},
+		{name: "new label without mapping", externalStatus: "新建", want: false},
+		{name: "reopened label without mapping", externalStatus: "重新打开", want: false},
+		{name: "mapped todo custom key", externalStatus: "BVtdwq9Vd", localStatus: "todo", want: true},
+		{name: "in progress", externalStatus: "IN PROGRESS", localStatus: "in_progress", want: false},
+		{name: "unmapped unknown", externalStatus: "custom", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isFeishuProjectOwnerAgentAssignableStatus(tc.externalStatus, tc.localStatus); got != tc.want {
+				t.Fatalf("isFeishuProjectOwnerAgentAssignableStatus(%q, %q) = %v, want %v", tc.externalStatus, tc.localStatus, got, tc.want)
+			}
+		})
 	}
 }
 

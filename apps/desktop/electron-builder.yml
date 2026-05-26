@@ -89,13 +89,18 @@ win:
     - nsis
   artifactName: multica-desktop-${version}-windows-${arch}.${ext}
 publish:
-  provider: github
-  owner: multica-ai
-  repo: multica
-  # Align with our CLI release flow which pre-creates a *published* GitHub
-  # Release via `gh release create`. The electron-builder default of
-  # `releaseType: draft` conflicts with `existingType=release` and causes
-  # uploads of the DMG/ZIP/blockmaps/latest-mac.yml to be silently skipped,
-  # which breaks electron-updater auto-update on installed clients.
-  releaseType: release
+  # Lilith fork serves its own update channel through the Go server's
+  # OSS-backed proxy (server/internal/handler/downloads.go); upstream
+  # multica-ai/multica on GitHub Releases is no longer the update source.
+  # `generic` makes electron-updater fetch:
+  #   <url>/latest-mac.yml         (macOS)
+  #   <url>/latest.yml             (Windows x64)
+  #   <url>/latest-arm64.yml       (Windows arm64; channel pinned in
+  #                                 src/main/updater.ts + package.mjs)
+  #   <url>/latest-linux.yml       (Linux)
+  # Those YML files reference the dmg/exe/AppImage at sibling paths under
+  # the same prefix; CI uploads both alongside on every tag (see
+  # .github/workflows/lilith-desktop-release.yml).
+  provider: generic
+  url: https://multica.lilithgames.com/api/downloads
 npmRebuild: false

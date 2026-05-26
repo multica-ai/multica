@@ -1,20 +1,30 @@
 # GitLab CI for the internal Lilith Multica fork.
 #
-# This config exists ONLY to fire release-notification cards into the Feishu
-# group when a semver tag (NN.NN.NN) lands on main. Day-to-day testing /
-# build / lint runs in GitHub Actions (.github/workflows/ci.yml) — not here.
+# Active responsibility (fires only on semver tag pushes):
+#   - `mirror-to-github` — push the tag (and main HEAD) to the
+#     `CopilotDemo/multica` mirror on GitHub. That mirror's
+#     `.github/workflows/lilith-desktop-release.yml` does the
+#     desktop build + Aliyun OSS publish on its own runners.
 #
-# Runner requirement: the CI is wired for a SHELL executor on a Linux VM.
-# The runner host must have these tools on $PATH for the runner user
-# (`gitlab-runner` by default):
+# Temporarily disabled (kept commented in place — search for
+# "TEMPORARILY DISABLED" to re-enable):
+#   - `notify-release` — would post a release card to the Feishu
+#     group so the team knows the tag shipped.
+#
+# Day-to-day testing / build / lint runs on the GitHub mirror's
+# `.github/workflows/ci.yml`, not here.
+#
+# Runner requirement: SHELL executor on a Linux VM with these tools
+# on $PATH for the runner user (`gitlab-runner` by default):
 #   - bash >= 4
 #   - git
-#   - curl
-#   - jq
-# (apt: `apt-get install -y curl jq git`; yum/dnf: same; apk: same.)
+#   - ssh + ssh-keyscan          (mirror-to-github)
+#   - curl + jq                  (notify-release, currently disabled)
+# (apt: `apt-get install -y curl jq git openssh-client`;
+#  yum/dnf: same; apk: `apk add bash curl jq git openssh-client`.)
 #
-# To switch to a docker executor later, add `image: alpine:3.21` to the
-# job below and put `apk add --no-cache bash curl jq git` back in
+# To switch to a docker executor later, add `image: alpine:3.21` to a
+# job and put `apk add --no-cache bash curl jq git openssh-client` in
 # before_script — both are valid configs.
 
 workflow:
@@ -23,31 +33,66 @@ workflow:
     - if: '$CI_COMMIT_TAG'
 
 stages:
-  - notify
+  - mirror
+  # TEMPORARILY DISABLED: Feishu notification stage. Re-enable
+  # together with the `notify-release` job at the bottom of this file.
+  # Sequential ordering (mirror → notify) keeps the Feishu card from
+  # firing for a release that failed to mirror to GitHub.
+  # - notify
 
-notify-release:
-  stage: notify
-  # Match the runner registered for this project. The runner has both
-  # "Run untagged jobs" enabled AND tag `multica`, but pinning the job
-  # explicitly here removes any ambiguity in the dispatch rules and
-  # survives admins flipping the runner's "untagged" flag later.
-  tags:
-    - multica
-  rules:
-    # Only semver release tags trigger the notification (NN.NN.NN). The
-    # script also re-checks "tag must be reachable from main" and "tag must
-    # be annotated" so noise from non-release tags is double-guarded.
-    - if: '$CI_COMMIT_TAG =~ /^[0-9]+\.[0-9]+\.[0-9]+$/'
+# Shared release-tag rule. Accept both `vN.N.N` and `N.N.N` because the
+# repo's tag history has both styles — see `git tag | grep '\.'`.
+.semver-tag-rule: &semver_tag_rule
+  - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+$/'
+
+# Shared runner pin. The project has one registered runner tagged
+# `multica`; pinning here keeps dispatch unambiguous even if the
+# runner's "Run untagged jobs" toggle flips.
+.multica-runner: &multica_runner
+  - multica
+
+# Shared variables. Full history is required by the jobs:
+#   - mirror-to-github explicitly fetches `refs/heads/main` so it can
+#     force-push GitLab's current main to the mirror (instead of
+#     whatever HEAD points at, which on a hotfix-tagged commit might
+#     not be main).
+#   - notify-release (disabled below) would use `git merge-base`
+#     against main and the previous-tag commit range when rendering
+#     the card.
+.full-clone-vars: &full_clone_vars
+  GIT_DEPTH: "0"
+  GIT_STRATEGY: "clone"
+
+mirror-to-github:
+  stage: mirror
+  tags: *multica_runner
+  rules: *semver_tag_rule
   variables:
-    # Without GIT_DEPTH=0 the runner shallow-clones and the merge-base check
-    # against main fails (or the previous-tag commit-range lookup, if we
-    # ever re-add the commit list section to the card).
-    GIT_DEPTH: "0"
-    GIT_STRATEGY: "clone"
+    <<: *full_clone_vars
   before_script:
-    # Fail fast with a readable message if the host is missing one of the
-    # tools the script depends on. This is far less confusing than the
-    # generic "command not found" the script would emit later.
-    - for tool in bash git curl jq; do command -v "$tool" >/dev/null || { echo "❌ Runner host is missing '$tool' — install it (apt/yum/apk) and retry."; exit 1; }; done
+    - for tool in bash git ssh ssh-keyscan; do command -v "$tool" >/dev/null || { echo "❌ Runner host is missing '$tool' — install it (apt/yum/apk) and retry."; exit 1; }; done
+    # GITHUB_MIRROR_DEPLOY_KEY must be configured under
+    # Project Settings → CI/CD → Variables. Either a "Variable" type
+    # holding the SSH private key body, or a "File" type pointing at a
+    # path. See scripts/mirror-to-github.sh for the contract.
+    - test -n "${GITHUB_MIRROR_DEPLOY_KEY:-}" || { echo "❌ GITHUB_MIRROR_DEPLOY_KEY not set — see scripts/mirror-to-github.sh header."; exit 1; }
   script:
-    - bash scripts/notify-feishu-release.sh
+    - bash scripts/mirror-to-github.sh
+
+# TEMPORARILY DISABLED — uncomment this block (and the `- notify` line
+# in `stages:` above) to bring the Feishu release notification back.
+# scripts/notify-feishu-release.sh is left in the repo, ready to use.
+#
+# notify-release:
+#   stage: notify
+#   tags: *multica_runner
+#   rules: *semver_tag_rule
+#   variables:
+#     <<: *full_clone_vars
+#   before_script:
+#     # Fail fast with a readable message if the host is missing one of the
+#     # tools the script depends on. This is far less confusing than the
+#     # generic "command not found" the script would emit later.
+#     - for tool in bash git curl jq; do command -v "$tool" >/dev/null || { echo "❌ Runner host is missing '$tool' — install it (apt/yum/apk) and retry."; exit 1; }; done
+#   script:
+#     - bash scripts/notify-feishu-release.sh

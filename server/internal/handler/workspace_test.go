@@ -36,6 +36,30 @@ func TestCreateWorkspace_RejectsReservedSlug(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspace_DisabledByEnv(t *testing.T) {
+	t.Setenv("ALLOW_WORKSPACE_CREATE", "false")
+
+	const slug = "handler-disabled-workspace-create"
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces", map[string]any{
+		"name": "Disabled Workspace Create",
+		"slug": slug,
+	})
+	testHandler.CreateWorkspace(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateWorkspace: expected 403 when disabled, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM workspace WHERE slug = $1`, slug).Scan(&count); err != nil {
+		t.Fatalf("CreateWorkspace: check workspace count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("CreateWorkspace: expected no workspace row when disabled, got %d", count)
+	}
+}
+
 // TestCreateWorkspace_DoesNotMarkOnboarded guards the onboarding
 // contract: creating a workspace MUST leave user.onboarded_at NULL so
 // the route guard in apps/web/app/[workspaceSlug]/layout.tsx (and the

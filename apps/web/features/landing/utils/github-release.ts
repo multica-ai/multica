@@ -1,26 +1,21 @@
 import {
   parseReleaseAssets,
   type DownloadAssets,
+  type GitHubAsset,
 } from "./parse-release-assets";
 
 /**
- * Server-side fetcher for the latest Multica release, designed to
- * run inside a Next.js server component. Response is cached by the
- * Next.js fetch cache for 5 minutes (Vercel ISR) so hitting /download
- * costs at most one GitHub API call per region per 5 minutes.
+ * Lilith fork: instead of fetching the upstream GitHub Releases API,
+ * read the electron-updater manifests (`latest-mac.yml`, `latest.yml`,
+ * `latest-linux.yml`) the desktop release pipeline already writes to
+ * our private OSS bucket, served via `/api/downloads/<file>`.
  *
- * Desktop assets don't all land at the same time: CI uploads Linux
- * and Windows within a minute of each other, but macOS is packaged
- * manually (notarization credentials aren't wired into CI yet) and
- * lands tens of minutes later. To avoid showing the half-filled
- * mid-flight state on /download, the fetcher pulls the two most
- * recent releases and falls back to the previous one for the first
- * hour after publish. Empirically full desktop uploads complete in
- * ~20 min; 1 h gives 3x buffer for commonly-variable manual steps.
+ * The button hrefs come back as RELATIVE paths under `/api/downloads/`,
+ * so the same code works for multica-test.lilithgames.com and
+ * multica.lilithgames.com without env-specific wiring.
  *
- * On any failure (network, rate limit, malformed payload) returns a
- * `null`-shaped result and logs — the page degrades to a "version
- * unavailable" view rather than 500ing.
+ * On any failure (network, missing manifest, parse error) the page
+ * degrades to a "version unavailable" view rather than 500ing.
  */
 
 export interface LatestRelease {
@@ -30,66 +25,51 @@ export interface LatestRelease {
   assets: DownloadAssets;
 }
 
-const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/multica-ai/multica/releases?per_page=2";
-
+const MANIFESTS = ["latest-mac.yml", "latest.yml", "latest-linux.yml"] as const;
 const REVALIDATE_SECONDS = 300;
 
-const FRESH_RELEASE_WINDOW_MS = 60 * 60 * 1000;
-
-interface GitHubReleasePayload {
-  tag_name?: string;
-  published_at?: string;
-  html_url?: string;
-  prerelease?: boolean;
-  draft?: boolean;
-  assets?: Array<{ name: string; browser_download_url: string }>;
-}
-
 export async function fetchLatestRelease(): Promise<LatestRelease> {
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
-  // Optional PAT for local development and self-hosted deploys where
-  // the shared outbound IP keeps hitting the 60-requests/hour
-  // unauthenticated limit. Vercel's fetch cache is shared across all
-  // regions so production rarely needs this — but the env var lets
-  // anyone running the site locally avoid the rate-limit dance. Never
-  // prefix this with `NEXT_PUBLIC_`; the token must stay server-side.
-  const token = process.env.GITHUB_TOKEN;
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
+  const base = downloadsBaseURL();
   try {
-    const res = await fetch(GITHUB_RELEASES_URL, {
-      next: { revalidate: REVALIDATE_SECONDS },
-      headers,
-    });
-    if (!res.ok) {
-      throw new Error(`GitHub API responded ${res.status}`);
-    }
-    const data = (await res.json()) as GitHubReleasePayload[];
+    const responses = await Promise.all(
+      MANIFESTS.map(async (name) => {
+        const res = await fetch(`${base}/api/downloads/${name}`, {
+          next: { revalidate: REVALIDATE_SECONDS },
+          headers: { Accept: "text/yaml" },
+        });
+        // Missing manifest = platform skipped on this release; the
+        // matrix UI greys out unavailable formats automatically.
+        if (!res.ok) return null;
+        return res.text();
+      }),
+    );
 
-    // Defensive filter — Multica doesn't publish prereleases or drafts
-    // today, but the endpoint returns them if that ever changes. A
-    // prerelease shadowing a stable version on /download would be a
-    // regression.
-    const stable = data.filter((r) => !r.prerelease && !r.draft);
-    const latest = stable[0];
-    if (!latest) {
+    const filenames = new Set<string>();
+    let version: string | null = null;
+    for (const text of responses) {
+      if (!text) continue;
+      const manifest = parseManifest(text);
+      if (manifest.version && !version) version = manifest.version;
+      for (const f of manifest.files) filenames.add(f);
+    }
+
+    if (!version && filenames.size === 0) {
       return emptyRelease();
     }
-    const previous = stable[1];
-    const chosen =
-      previous && isWithinFreshWindow(latest) ? previous : latest;
+
+    // Reuse parseReleaseAssets's filename → platform/arch/format
+    // classifier by wrapping each filename in a GitHubAsset-shaped
+    // object whose `browser_download_url` is our local proxy path.
+    const fakeAssets: GitHubAsset[] = Array.from(filenames).map((name) => ({
+      name,
+      browser_download_url: `/api/downloads/${name}`,
+    }));
 
     return {
-      version: chosen.tag_name ?? null,
-      publishedAt: chosen.published_at ?? null,
-      htmlUrl: chosen.html_url ?? null,
-      assets: parseReleaseAssets(chosen.assets ?? []),
+      version: version ? prefixVersion(version) : null,
+      publishedAt: null,
+      htmlUrl: "/changelog",
+      assets: parseReleaseAssets(fakeAssets),
     };
   } catch (err) {
     console.warn("[download] fetchLatestRelease failed:", err);
@@ -97,11 +77,61 @@ export async function fetchLatestRelease(): Promise<LatestRelease> {
   }
 }
 
-function isWithinFreshWindow(release: GitHubReleasePayload): boolean {
-  if (!release.published_at) return false;
-  const publishedAt = Date.parse(release.published_at);
-  if (Number.isNaN(publishedAt)) return false;
-  return Date.now() - publishedAt < FRESH_RELEASE_WINDOW_MS;
+function downloadsBaseURL(): string {
+  // In the Next.js container REMOTE_API_URL points at the in-cluster
+  // backend service (e.g. http://multica-server:8080). Local dev
+  // (`pnpm dev:web`) falls through to the local backend.
+  const base = process.env.REMOTE_API_URL || "http://localhost:8080";
+  return base.replace(/\/$/, "");
+}
+
+// Minimal electron-updater YML parser. The files have a fixed shape:
+//   version: 0.2.40
+//   files:
+//     - url: <filename>
+//       sha512: ...
+//       size: 123
+//   path: <primary>
+//   releaseDate: '...'
+// Only `version:` at the top level and `url:` inside `files:` matter
+// for our purposes; everything else (sha512, size, blockMapSize,
+// releaseDate, path) is electron-updater plumbing the download page
+// has no use for. Hand-rolled to avoid pulling in a YAML dependency.
+interface ParsedManifest {
+  version: string | null;
+  files: string[];
+}
+
+function parseManifest(text: string): ParsedManifest {
+  const out: ParsedManifest = { version: null, files: [] };
+  for (const rawLine of text.split(/\r?\n/)) {
+    const versionMatch = /^version:\s*(\S+)/.exec(rawLine);
+    if (versionMatch && versionMatch[1]) {
+      out.version = stripQuotes(versionMatch[1]);
+      continue;
+    }
+    // Match `  - url: foo.zip` (the leading dash version) and
+    // `    url: foo.zip` (continuation lines inside a file entry).
+    const urlMatch = /^\s*(?:-\s*)?url:\s*(\S+)/.exec(rawLine);
+    if (urlMatch && urlMatch[1]) {
+      out.files.push(stripQuotes(urlMatch[1]));
+    }
+  }
+  return out;
+}
+
+function stripQuotes(s: string): string {
+  if (
+    (s.startsWith("'") && s.endsWith("'")) ||
+    (s.startsWith('"') && s.endsWith('"'))
+  ) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+
+function prefixVersion(v: string): string {
+  return v.startsWith("v") ? v : `v${v}`;
 }
 
 function emptyRelease(): LatestRelease {

@@ -13,9 +13,9 @@ commonAnnotations:
 #     lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-web=...:${GIT_SHA}
 images:
   - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-server
-    newTag: 0.0.4
+    newTag: "0.2.45"
   - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-web
-    newTag: 0.0.4
+    newTag: "0.2.45"
 
 replicas:
   - name: multica-server

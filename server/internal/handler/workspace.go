@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 
@@ -138,6 +139,10 @@ type CreateWorkspaceRequest struct {
 func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
+		return
+	}
+	if os.Getenv("ALLOW_WORKSPACE_CREATE") == "false" {
+		writeError(w, http.StatusForbidden, "workspace creation is disabled")
 		return
 	}
 

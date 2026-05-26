@@ -1,14 +1,20 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  # Disabled on the Lilith mirror — CI runs on GitLab (.gitlab-ci.yml).
+  # Keep workflow_dispatch so this can still be triggered manually if needed.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+# Opt into Node 24 for any JavaScript-based actions still pinned at Node 20
+# (pnpm/action-setup@v4, etc.). Node 20 is being removed from GitHub runners
+# on 2026-09-16; this avoids the deprecation warning today and shakes out any
+# Node 24 compatibility issues before the forced switchover on 2026-06-02.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   frontend:

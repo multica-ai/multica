@@ -416,7 +416,8 @@ export function MembersTab() {
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  <Mail className="inline h-3 w-3 mr-1" /> By email
+                  <Mail className="inline h-3 w-3 mr-1" />
+                  {t(($) => $.members.invite_mode_email)}
                 </button>
                 <button
                   type="button"
@@ -427,7 +428,8 @@ export function MembersTab() {
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  <Link2 className="inline h-3 w-3 mr-1" /> Shareable link
+                  <Link2 className="inline h-3 w-3 mr-1" />
+                  {t(($) => $.members.invite_mode_link)}
                 </button>
               </div>
 
@@ -461,7 +463,7 @@ export function MembersTab() {
               ) : (
                 <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
                   <div className="flex items-center text-xs text-muted-foreground">
-                    Generates a URL you can share in Feishu / Slack. Anyone with the link who signs in can join.
+                    {t(($) => $.members.invite_link_description)}
                   </div>
                   <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
                     <SelectTrigger size="sm">
@@ -473,7 +475,9 @@ export function MembersTab() {
                     </SelectContent>
                   </Select>
                   <Button onClick={handleInviteMember} disabled={inviteLoading}>
-                    {inviteLoading ? "Creating..." : "Generate link"}
+                    {inviteLoading
+                      ? t(($) => $.members.generating_link)
+                      : t(($) => $.members.generate_link_button)}
                   </Button>
                 </div>
               )}

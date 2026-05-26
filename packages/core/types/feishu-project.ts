@@ -12,6 +12,7 @@ export interface FeishuProjectIntegration {
   mql_filter: string;
   status_mapping: Record<string, string>;
   reverse_status_mapping: Record<string, string>;
+  assign_open_items_to_owner_agent: boolean;
   last_synced_at: string | null;
   last_error: string | null;
   created_at?: string;
@@ -30,6 +31,7 @@ export interface UpdateFeishuProjectIntegrationRequest {
   mql_filter: string;
   status_mapping: Record<string, string>;
   reverse_status_mapping: Record<string, string>;
+  assign_open_items_to_owner_agent: boolean;
 }
 
 export interface FeishuProjectSyncResponse {
