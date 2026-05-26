@@ -570,18 +570,41 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stdout, "%s:      running (pid %v, uptime %v)\n", label, health["pid"], health["uptime"])
+	printDaemonStatusReport(os.Stdout, label, health)
+	return nil
+}
+
+// printDaemonStatusReport renders a key/value summary of the daemon health
+// response. The value column is aligned to the widest label so the dynamic
+// "Daemon [profile]" row stays in step with the static rows below it.
+func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
+	type row struct{ key, value string }
+	rows := []row{
+		{label, fmt.Sprintf("running (pid %v, uptime %v)", health["pid"], health["uptime"])},
+	}
+	if version, ok := health["cli_version"].(string); ok && version != "" {
+		rows = append(rows, row{"Version", version})
+	}
 	if agents, ok := health["agents"].([]any); ok && len(agents) > 0 {
 		parts := make([]string, len(agents))
 		for i, a := range agents {
 			parts[i] = fmt.Sprint(a)
 		}
-		fmt.Fprintf(os.Stdout, "Agents:      %s\n", strings.Join(parts, ", "))
+		rows = append(rows, row{"Agents", strings.Join(parts, ", ")})
 	}
 	if ws, ok := health["workspaces"].([]any); ok {
-		fmt.Fprintf(os.Stdout, "Workspaces:  %d\n", len(ws))
+		rows = append(rows, row{"Workspaces", strconv.Itoa(len(ws))})
 	}
-	return nil
+
+	keyWidth := 0
+	for _, r := range rows {
+		if n := len(r.key); n > keyWidth {
+			keyWidth = n
+		}
+	}
+	for _, r := range rows {
+		fmt.Fprintf(w, "%-*s  %s\n", keyWidth+1, r.key+":", r.value)
+	}
 }
 
 // --- daemon logs ---

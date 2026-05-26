@@ -171,6 +171,16 @@ func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTas
 		s.taskAnalyticsContext(ctx, task),
 		taskDurationMS(task),
 	))
+	// Revoke any mat_ task tokens minted for this task. Cancellation is
+	// a terminal transition, so the running agent process no longer
+	// needs to call back; eagerly deleting the token closes the
+	// window where a compromised process could keep authenticating
+	// against the API until the 24h expiry. Failure is non-fatal — the
+	// expiry / FK cascade are the durable guards. MUL-2600.
+	if err := s.Queries.DeleteTaskTokensByTask(ctx, task.ID); err != nil {
+		slog.Warn("cancel task: failed to revoke task tokens",
+			"task_id", util.UUIDToString(task.ID), "error", err)
+	}
 }
 
 func (s *TaskService) captureTaskEvent(ctx context.Context, event analytics.Event) {

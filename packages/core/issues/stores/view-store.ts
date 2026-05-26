@@ -9,7 +9,7 @@ import { ALL_STATUSES } from "../config";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type ViewMode = "board" | "list" | "gantt";
+export type ViewMode = "board" | "list" | "gantt" | "swimlane";
 export type GanttZoom = "day" | "week" | "month";
 export type IssueGrouping = "status" | "assignee";
 export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
@@ -79,6 +79,8 @@ export interface IssueViewState {
   listCollapsedStatuses: IssueStatus[];
   ganttZoom: GanttZoom;
   ganttShowCompleted: boolean;
+  swimlaneOrder: string[];
+  collapsedSwimlanes: string[];
   setViewMode: (mode: ViewMode) => void;
   setGanttZoom: (zoom: GanttZoom) => void;
   toggleGanttShowCompleted: () => void;
@@ -99,6 +101,8 @@ export interface IssueViewState {
   setSortDirection: (dir: SortDirection) => void;
   toggleCardProperty: (key: keyof CardProperties) => void;
   toggleListCollapsed: (status: IssueStatus) => void;
+  setSwimlaneOrder: (order: string[]) => void;
+  toggleSwimlaneCollapsed: (key: string) => void;
 }
 
 export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): IssueViewState => ({
@@ -128,6 +132,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   listCollapsedStatuses: [],
   ganttZoom: "week",
   ganttShowCompleted: false,
+  swimlaneOrder: [],
+  collapsedSwimlanes: [],
 
   setViewMode: (mode) => set({ viewMode: mode }),
   setGanttZoom: (zoom) => set({ ganttZoom: zoom }),
@@ -233,6 +239,13 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.listCollapsedStatuses.filter((s) => s !== status)
         : [...state.listCollapsedStatuses, status],
     })),
+  setSwimlaneOrder: (order) => set({ swimlaneOrder: order }),
+  toggleSwimlaneCollapsed: (key) =>
+    set((state) => ({
+      collapsedSwimlanes: state.collapsedSwimlanes.includes(key)
+        ? state.collapsedSwimlanes.filter((k) => k !== key)
+        : [...state.collapsedSwimlanes, key],
+    })),
 });
 
 export const viewStorePersistOptions = (name: string) => ({
@@ -259,6 +272,8 @@ export const viewStorePersistOptions = (name: string) => ({
     listCollapsedStatuses: state.listCollapsedStatuses,
     ganttZoom: state.ganttZoom,
     ganttShowCompleted: state.ganttShowCompleted,
+    swimlaneOrder: state.swimlaneOrder,
+    collapsedSwimlanes: state.collapsedSwimlanes,
   }),
   // Default Zustand merge is shallow, so a persisted `cardProperties` snapshot
   // saved before a new toggle was introduced wins entirely and the new key is

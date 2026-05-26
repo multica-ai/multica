@@ -58,6 +58,17 @@ UPDATE agent SET mcp_config = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateAgentCustomEnv :one
+-- Replaces an agent's custom_env map wholesale. Used by the dedicated
+-- env-management endpoint (POST/PUT /api/agents/{id}/env), which is the
+-- only post-creation write path for env. UpdateAgent has been stripped
+-- of custom_env handling so all env mutations flow through here and the
+-- handler's audit-log + **** sentinel guard.
+UPDATE agent
+SET custom_env = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: ArchiveAgent :one
 UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
@@ -72,6 +83,45 @@ UPDATE agent
 SET archived_at = now(), archived_by = @archived_by, updated_at = now()
 WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND archived_at IS NULL
 RETURNING *;
+
+-- name: ArchiveAgentsByIDs :many
+-- Narrow archive that only touches the explicit ID list. Used by the
+-- cascade-delete endpoint so the user's expected_active_agent_ids list
+-- is the authoritative bound on what gets archived: any agent that
+-- appeared on the runtime after the user opened the dialog is filtered
+-- out here so it can't be silently archived even in the (vanishingly
+-- rare) case where a row-level race slips past the runtime FOR UPDATE
+-- lock. Returns the affected rows so the caller can broadcast
+-- agent:archived per agent.
+UPDATE agent
+SET archived_at = now(), archived_by = @archived_by, updated_at = now()
+WHERE id = ANY(@agent_ids::uuid[]) AND archived_at IS NULL
+RETURNING *;
+
+-- name: ListActiveAgentsByRuntime :many
+-- Returns every non-archived agent bound to a runtime. Backs the cascade
+-- delete dialog: when DELETE /api/runtimes/:id refuses with
+-- runtime_has_active_agents, the response carries this list so the front-end
+-- can render exactly the agents that will be archived if the user confirms,
+-- and so the cascade endpoint's expected_active_agent_ids check has a stable
+-- snapshot to compare against. Ordered by name for a deterministic display.
+SELECT * FROM agent
+WHERE runtime_id = $1 AND archived_at IS NULL
+ORDER BY name ASC;
+
+-- name: ListActiveAgentsByRuntimeForUpdate :many
+-- FOR UPDATE variant used inside the cascade-delete transaction. Locks
+-- each currently-active agent row so a concurrent archive/move of one
+-- of those rows blocks until our transaction commits. Pair with
+-- LockAgentRuntime, which holds the runtime row exclusively to also
+-- block FK-validated INSERTs / runtime_id updates that would otherwise
+-- add a new agent to the runtime mid-cascade. Together they guarantee
+-- that the set we compared against expected_active_agent_ids is exactly
+-- the set ArchiveAgentsByIDs will operate on — no race window.
+SELECT * FROM agent
+WHERE runtime_id = $1 AND archived_at IS NULL
+ORDER BY name ASC
+FOR UPDATE;
 
 -- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()

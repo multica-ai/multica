@@ -2333,8 +2333,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
 	// per-agent. When one daemon hosts multiple agents, slots index shared
 	// daemon-level resources such as GPUs.
+	// MULTICA_TOKEN is the credential the agent process will use to call the
+	// Multica API. Prefer the task-scoped token the server minted at claim
+	// time — that token is bound to (agent, task) and the auth middleware
+	// rejects it on owner-only endpoints (e.g. `/api/agents/{id}/env`), so
+	// the agent cannot use it to read another agent's secrets. Falls back
+	// to the daemon's own credential only when the server returned no
+	// auth_token (older server, or cloud / system runtime with no owner) —
+	// in that legacy mode lateral-movement protection relies on the
+	// runtime not handing the daemon a workspace-owner PAT in the first
+	// place. See MUL-2600.
+	agentToken := task.AuthToken
+	if agentToken == "" {
+		agentToken = d.client.Token()
+	}
 	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        d.client.Token(),
+		"MULTICA_TOKEN":        agentToken,
 		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
 		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
 		"MULTICA_WORKSPACE_ID": task.WorkspaceID,

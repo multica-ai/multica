@@ -298,6 +298,8 @@ To roll back if an upgrade goes sideways:
 helm -n multica rollback multica
 ```
 
+> **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** Same migration guard as the Docker path — see [Usage Dashboard Rollup → Option C](#option-c--backfill-history-first-then-schedule). Run the backfill against the same database the chart is using (`kubectl -n multica exec deploy/multica-backend -- ./backfill_task_usage_hourly --sleep-between-slices=2s`), then restart the backend deployment to re-apply migrations.
+
 ### Tearing down
 
 ```bash
@@ -309,6 +311,57 @@ kubectl delete namespace multica
 ```
 
 ---
+
+## Usage Dashboard Rollup (Required)
+
+Starting with `v0.3.5`, the Usage / Runtime dashboards read from a derived `task_usage_hourly` table rather than directly from `task_usage`. Raw `task_usage` rows are written by the backend on every task, but the dashboard only sees data after `rollup_task_usage_hourly()` runs and aggregates them into `task_usage_hourly`.
+
+**The bundled `pgvector/pgvector:pg17` image does NOT include `pg_cron`.** If nothing schedules the rollup, the dashboard will stay at zero forever even though `task_usage` is populated. You have three supported options — pick one before relying on the dashboard.
+
+> **Upgrading from `v0.3.4` to `v0.3.5+`** with existing `task_usage` history: migration `103` is fail-closed and will abort `migrate up` with `refusing to drop legacy daily rollups: …`. Run `backfill_task_usage_hourly` first (Option C below), then re-run the upgrade. **Fresh installs** are exempted by that guard and migrate cleanly — but the dashboard will still stay at zero until you pick Option A or Option B.
+
+### Option A — External cron / systemd-timer (simplest)
+
+Schedule a 5-minute job that calls `rollup_task_usage_hourly()`. It is idempotent and watermark-driven, so a missed tick catches up on the next run.
+
+```bash
+# /etc/cron.d/multica-rollup — every 5 minutes
+*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
+  exec -T postgres psql -U multica -d multica \
+  -c "SELECT rollup_task_usage_hourly();" >/dev/null
+```
+
+Or as a systemd timer + service if you prefer that surface. The function returns the number of (upserted + deleted-empty) rows; it's safe to call concurrently with itself (an advisory lock makes overlapping runs no-op) and safe to call alongside `backfill_task_usage_hourly`.
+
+### Option B — Swap Postgres for an image that ships `pg_cron`
+
+If you'd rather have Postgres schedule itself, replace `pgvector/pgvector:pg17` in `docker-compose.selfhost.yml` with an image that bundles both `pgvector` and `pg_cron` (e.g. `supabase/postgres`, or your own build of `pgvector/pgvector` with `pg_cron` added and `shared_preload_libraries=pg_cron` set on the server). Then, once:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+SELECT cron.schedule(
+  'rollup_task_usage_hourly',
+  '*/5 * * * *',
+  $$SELECT rollup_task_usage_hourly()$$
+);
+```
+
+`shared_preload_libraries` requires a Postgres restart to take effect — set it in `postgresql.conf` (or via the image's documented mechanism) before bringing the container up.
+
+### Option C — Backfill history first, then schedule
+
+If you're upgrading from `v0.3.4 → v0.3.5+` and already have `task_usage` rows (or you just want the dashboard to show historical data on a fresh install that you've been running for a while), run the bundled backfill command once before scheduling the rollup:
+
+```bash
+# Backfills task_usage_hourly from all historical task_usage rows and stamps
+# the rollup watermark. Idempotent — safe to re-run.
+docker compose -f docker-compose.selfhost.yml exec backend \
+  ./backfill_task_usage_hourly --sleep-between-slices=2s
+```
+
+On a database with years of data this can scan tens of millions of rows; `--sleep-between-slices=2s` throttles the read pressure. Use `--months-back N` (plus `--force-partial`) if you only want the last N months. Once it finishes, set up Option A or Option B so new buckets keep flowing.
+
+After upgrading, re-run `migrate up` (or restart the backend container — migrations run automatically on startup) to apply migration `103` cleanly.
 
 ## Stopping Services
 
@@ -349,6 +402,8 @@ docker compose -f docker-compose.selfhost.yml up -d
 
 Pin `MULTICA_IMAGE_TAG` in `.env` to an exact version like `v0.2.4` if you want to stay on a specific release. Migrations run automatically on backend startup.
 If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` or `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
+
+> **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** That's migration `103`'s fail-closed guard: it requires `task_usage_hourly` to be seeded before the legacy daily rollups are dropped. Run `backfill_task_usage_hourly` first, then re-run the upgrade. Full instructions in [Usage Dashboard Rollup → Option C](#option-c--backfill-history-first-then-schedule).
 
 ---
 

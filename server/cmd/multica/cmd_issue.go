@@ -124,8 +124,10 @@ var issueAssignCmd = &cobra.Command{
 var issueStatusCmd = &cobra.Command{
 	Use:   "status <id> <status>",
 	Short: "Change issue status",
-	Args:  exactArgs(2),
-	RunE:  runIssueStatus,
+	Long: "Change an issue's status. Valid statuses: " +
+		"backlog, todo, in_progress, in_review, done, blocked, cancelled.",
+	Args: exactArgs(2),
+	RunE: runIssueStatus,
 }
 
 // Comment subcommands.

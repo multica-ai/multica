@@ -293,7 +293,29 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
-        version: "0.3.7",
+        version: "0.3.9",
+        date: "2026-05-26",
+        title: "Swimlanes & More Predictable Issues",
+        changes: [],
+        features: [
+          "Issues now support a swimlane view, letting teams review parent work and status columns together when large projects have many subtasks",
+          "Issue lists now support drag-and-drop ordering, sticky group headers, and stable ordering when more results load",
+        ],
+        improvements: [
+          "The CLI now shows the local service version in status output and uses cleaner status fields",
+          "Self-hosting guidance now explains the hourly usage rollup required for accurate usage views, with updated English and Chinese troubleshooting notes",
+          "Agent skill settings were simplified before release so unsupported local-skill controls no longer appear in the product",
+          "Dependency checks are stricter, helping missing packages surface earlier before builds or desktop runs",
+        ],
+        fixes: [
+          "GitHub PRs now finish linked Issues only when the PR clearly says it closes them, so reference-only links no longer close work by accident",
+          "Parent/child Issue automation waits for dependency checks before starting queued follow-up work, and agent-driven status changes trigger the right assignee",
+          "Issue threads and list pages keep their order when loading more content, and board drag positions stay stable",
+          "Chat resize behavior, board-card assignee rows, and XML parsing security received smaller stability fixes",
+        ],
+      },
+      {
+        version: "0.3.8",
         date: "2026-05-25",
         title: "Multica for iOS, Helm Self-Hosting & Smoother Collaboration",
         changes: [],

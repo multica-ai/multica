@@ -52,6 +52,69 @@ func (q *Queries) ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Age
 	return i, err
 }
 
+const archiveAgentsByIDs = `-- name: ArchiveAgentsByIDs :many
+UPDATE agent
+SET archived_at = now(), archived_by = $1, updated_at = now()
+WHERE id = ANY($2::uuid[]) AND archived_at IS NULL
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level
+`
+
+type ArchiveAgentsByIDsParams struct {
+	ArchivedBy pgtype.UUID   `json:"archived_by"`
+	AgentIds   []pgtype.UUID `json:"agent_ids"`
+}
+
+// Narrow archive that only touches the explicit ID list. Used by the
+// cascade-delete endpoint so the user's expected_active_agent_ids list
+// is the authoritative bound on what gets archived: any agent that
+// appeared on the runtime after the user opened the dialog is filtered
+// out here so it can't be silently archived even in the (vanishingly
+// rare) case where a row-level race slips past the runtime FOR UPDATE
+// lock. Returns the affected rows so the caller can broadcast
+// agent:archived per agent.
+func (q *Queries) ArchiveAgentsByIDs(ctx context.Context, arg ArchiveAgentsByIDsParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, archiveAgentsByIDs, arg.ArchivedBy, arg.AgentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const archiveAgentsByRuntime = `-- name: ArchiveAgentsByRuntime :many
 UPDATE agent
 SET archived_at = now(), archived_by = $1, updated_at = now()
@@ -1515,6 +1578,119 @@ func (q *Queries) LinkTaskToIssue(ctx context.Context, arg LinkTaskToIssueParams
 	return err
 }
 
+const listActiveAgentsByRuntime = `-- name: ListActiveAgentsByRuntime :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level FROM agent
+WHERE runtime_id = $1 AND archived_at IS NULL
+ORDER BY name ASC
+`
+
+// Returns every non-archived agent bound to a runtime. Backs the cascade
+// delete dialog: when DELETE /api/runtimes/:id refuses with
+// runtime_has_active_agents, the response carries this list so the front-end
+// can render exactly the agents that will be archived if the user confirms,
+// and so the cascade endpoint's expected_active_agent_ids check has a stable
+// snapshot to compare against. Ordered by name for a deterministic display.
+func (q *Queries) ListActiveAgentsByRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listActiveAgentsByRuntime, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveAgentsByRuntimeForUpdate = `-- name: ListActiveAgentsByRuntimeForUpdate :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level FROM agent
+WHERE runtime_id = $1 AND archived_at IS NULL
+ORDER BY name ASC
+FOR UPDATE
+`
+
+// FOR UPDATE variant used inside the cascade-delete transaction. Locks
+// each currently-active agent row so a concurrent archive/move of one
+// of those rows blocks until our transaction commits. Pair with
+// LockAgentRuntime, which holds the runtime row exclusively to also
+// block FK-validated INSERTs / runtime_id updates that would otherwise
+// add a new agent to the runtime mid-cascade. Together they guarantee
+// that the set we compared against expected_active_agent_ids is exactly
+// the set ArchiveAgentsByIDs will operate on — no race window.
+func (q *Queries) ListActiveAgentsByRuntimeForUpdate(ctx context.Context, runtimeID pgtype.UUID) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listActiveAgentsByRuntimeForUpdate, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveTasksByIssue = `-- name: ListActiveTasksByIssue :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
@@ -2264,6 +2440,53 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		arg.Model,
 		arg.ThinkingLevel,
 	)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+	)
+	return i, err
+}
+
+const updateAgentCustomEnv = `-- name: UpdateAgentCustomEnv :one
+UPDATE agent
+SET custom_env = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level
+`
+
+type UpdateAgentCustomEnvParams struct {
+	ID        pgtype.UUID `json:"id"`
+	CustomEnv []byte      `json:"custom_env"`
+}
+
+// Replaces an agent's custom_env map wholesale. Used by the dedicated
+// env-management endpoint (POST/PUT /api/agents/{id}/env), which is the
+// only post-creation write path for env. UpdateAgent has been stripped
+// of custom_env handling so all env mutations flow through here and the
+// handler's audit-log + **** sentinel guard.
+func (q *Queries) UpdateAgentCustomEnv(ctx context.Context, arg UpdateAgentCustomEnvParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, updateAgentCustomEnv, arg.ID, arg.CustomEnv)
 	var i Agent
 	err := row.Scan(
 		&i.ID,

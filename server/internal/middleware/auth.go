@@ -30,6 +30,15 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// X-Actor-Source is server-set only — any value supplied by
+			// the client is untrusted and discarded before the auth
+			// branches run. Only the mat_ branch below re-sets it. This
+			// is what prevents a client from sending a normal mul_ PAT
+			// plus a forged `X-Actor-Source: member` (or anything else)
+			// to convince a downstream handler that its request came
+			// from a non-task-token path.
+			r.Header.Del("X-Actor-Source")
+
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
 				slog.Debug("auth: no token found", "path", r.URL.Path)
@@ -41,6 +50,42 @@ func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.
 			if fromCookie && !auth.ValidateCSRF(r) {
 				slog.Debug("auth: CSRF validation failed", "path", r.URL.Path)
 				http.Error(w, `{"error":"CSRF validation failed"}`, http.StatusForbidden)
+				return
+			}
+
+			// Agent task token: "mat_" prefix. Minted by the server at
+			// task-claim time and injected by the daemon into the agent
+			// process. Authoritative for actor identity — the bound
+			// (user_id, agent_id, task_id, workspace_id) triple is
+			// written into request headers here, OVERRIDING whatever the
+			// client sent, so a downstream actor-resolver cannot be
+			// tricked by a client that strips or forges X-Agent-ID /
+			// X-Task-ID. Owner-only endpoints (e.g. agent env
+			// management) reject requests authenticated this way; see
+			// `actorSourceFromRequest`. MUL-2600.
+			if strings.HasPrefix(tokenString, "mat_") {
+				if queries == nil {
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				hash := auth.HashToken(tokenString)
+				tt, err := queries.GetTaskTokenByHash(r.Context(), hash)
+				if err != nil {
+					slog.Warn("auth: invalid task token", "path", r.URL.Path, "error", err)
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				r.Header.Set("X-User-ID", uuidToString(tt.UserID))
+				r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
+				r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
+				r.Header.Set("X-Workspace-ID", uuidToString(tt.WorkspaceID))
+				// X-Actor-Source flags the auth path so resolveActor and
+				// any owner-only handler can deny without re-querying the
+				// token table. The value "task_token" is the only signal
+				// this header is allowed to carry — strip anything else a
+				// client tried to send.
+				r.Header.Set("X-Actor-Source", "task_token")
+				next.ServeHTTP(w, r)
 				return
 			}
 

@@ -18,6 +18,8 @@ export type {
   CreateAgentFromTemplateResponse,
   CreateAgentFromTemplateFailure,
   UpdateAgentRequest,
+  AgentEnvResponse,
+  UpdateAgentEnvRequest,
   Skill,
   SkillSummary,
   AgentSkillSummary,

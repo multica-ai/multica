@@ -388,7 +388,8 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     const members: MemberWithUser[] = qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
     const agents: Agent[] = qc.getQueryData(workspaceKeys.agents(wsId)) ?? [];
     const squads: Squad[] = qc.getQueryData(workspaceKeys.squads(wsId)) ?? [];
-    const cachedResponse = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
+    const listQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+    const cachedResponse = listQueries[0]?.[1];
     const cachedIssues: Issue[] = cachedResponse ? flattenIssueBuckets(cachedResponse) : [];
 
     // Read current user identity imperatively — this factory runs outside

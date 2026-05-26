@@ -833,39 +833,178 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		scheduledFilter = pgtype.Bool{Bool: true, Valid: true}
 	}
 
-	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
-		WorkspaceID:    wsUUID,
-		Limit:          int32(limit),
-		Offset:         int32(offset),
-		Status:         statusFilter,
-		Priority:       priorityFilter,
-		AssigneeID:     assigneeFilter,
-		AssigneeIds:    assigneeIdsFilter,
-		CreatorID:      creatorFilter,
-		ProjectID:      projectFilter,
-		InvolvesUserID: involvesUserFilter,
-		Scheduled:      scheduledFilter,
-		MetadataFilter: metadataFilter,
-	})
+	// Parse sort and direction params for dynamic ORDER BY.
+	// Manual sort (position) is always ASC — direction is ignored because
+	// the user defines order through drag-and-drop, reversing it has no
+	// product meaning.
+	sortCol := "position"
+	if s := r.URL.Query().Get("sort"); s != "" {
+		switch s {
+		case "position", "title", "created_at", "start_date", "due_date":
+			sortCol = s
+		case "priority":
+			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
+		default:
+			writeError(w, http.StatusBadRequest, "invalid sort value")
+			return
+		}
+	}
+	sortDir := "ASC"
+	if sortCol != "position" {
+		if d := r.URL.Query().Get("direction"); d != "" {
+			switch strings.ToLower(d) {
+			case "asc":
+				sortDir = "ASC"
+			case "desc":
+				sortDir = "DESC"
+			default:
+				writeError(w, http.StatusBadRequest, "invalid direction value")
+				return
+			}
+		}
+	}
+
+	// Build dynamic SQL — same approach as ListGroupedIssues.
+	where := []string{"i.workspace_id = $1"}
+	args := []any{wsUUID}
+	addArg := func(v any) string {
+		args = append(args, v)
+		return "$" + strconv.Itoa(len(args))
+	}
+
+	if statusFilter.Valid {
+		where = append(where, fmt.Sprintf("i.status = %s", addArg(statusFilter.String)))
+	}
+	if priorityFilter.Valid {
+		where = append(where, fmt.Sprintf("i.priority = %s", addArg(priorityFilter.String)))
+	}
+	if assigneeFilter.Valid {
+		where = append(where, fmt.Sprintf("i.assignee_id = %s::uuid", addArg(assigneeFilter)))
+	}
+	if len(assigneeIdsFilter) > 0 {
+		where = append(where, fmt.Sprintf("i.assignee_id = ANY(%s::uuid[])", addArg(assigneeIdsFilter)))
+	}
+	if creatorFilter.Valid {
+		where = append(where, fmt.Sprintf("i.creator_id = %s::uuid", addArg(creatorFilter)))
+	}
+	if projectFilter.Valid {
+		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(projectFilter)))
+	}
+	if scheduledFilter.Valid {
+		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
+	}
+	if metadataFilter != nil {
+		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
+	}
+	if involvesUserFilter.Valid {
+		ref := addArg(involvesUserFilter)
+		where = append(where, fmt.Sprintf(`(
+    (i.assignee_type = 'agent' AND i.assignee_id IN (
+       SELECT a.id FROM agent a
+        WHERE a.workspace_id = $1
+          AND a.owner_id     = %[1]s::uuid
+    ))
+    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
+       SELECT sm.squad_id
+         FROM squad_member sm
+         JOIN squad s ON s.id = sm.squad_id
+        WHERE s.workspace_id = $1
+          AND sm.member_type = 'member'
+          AND sm.member_id   = %[1]s::uuid
+       UNION
+       SELECT s.id
+         FROM squad s
+         JOIN agent a ON a.id = s.leader_id
+        WHERE s.workspace_id = $1
+          AND a.workspace_id = $1
+          AND a.owner_id     = %[1]s::uuid
+       UNION
+       SELECT sm.squad_id
+         FROM squad_member sm
+         JOIN squad s ON s.id = sm.squad_id
+         JOIN agent a ON a.id = sm.member_id
+        WHERE s.workspace_id = $1
+          AND sm.member_type = 'agent'
+          AND a.workspace_id = $1
+          AND a.owner_id     = %[1]s::uuid
+    ))
+)`, ref))
+	}
+
+	whereSql := strings.Join(where, " AND ")
+
+	// Build ORDER BY clause.
+	orderBy := sortCol
+	if !strings.HasPrefix(sortCol, "CASE") {
+		orderBy = "i." + sortCol
+	}
+	orderBy += " " + sortDir
+	if sortCol == "start_date" || sortCol == "due_date" {
+		orderBy += " NULLS LAST"
+	}
+	orderBy += ", i.created_at DESC"
+
+	offsetRef := addArg(int64(offset))
+	limitRef := addArg(int64(limit))
+
+	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+FROM issue i
+WHERE %s
+ORDER BY %s
+LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
+
+	rows, err := h.DB.Query(ctx, query, args...)
 	if err != nil {
+		slog.Warn("ListIssues query failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list issues")
+		return
+	}
+	defer rows.Close()
+
+	var issues []db.ListIssuesRow
+	for rows.Next() {
+		var row db.ListIssuesRow
+		if err := rows.Scan(
+			&row.ID,
+			&row.WorkspaceID,
+			&row.Title,
+			&row.Description,
+			&row.Status,
+			&row.Priority,
+			&row.AssigneeType,
+			&row.AssigneeID,
+			&row.CreatorType,
+			&row.CreatorID,
+			&row.ParentIssueID,
+			&row.Position,
+			&row.StartDate,
+			&row.DueDate,
+			&row.CreatedAt,
+			&row.UpdatedAt,
+			&row.Number,
+			&row.ProjectID,
+			&row.Metadata,
+		); err != nil {
+			slog.Warn("ListIssues scan failed", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to list issues")
+			return
+		}
+		issues = append(issues, row)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("ListIssues rows failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
 		return
 	}
 
 	// Get the true total count for pagination awareness.
-	total, err := h.Queries.CountIssues(ctx, db.CountIssuesParams{
-		WorkspaceID:    wsUUID,
-		Status:         statusFilter,
-		Priority:       priorityFilter,
-		AssigneeID:     assigneeFilter,
-		AssigneeIds:    assigneeIdsFilter,
-		CreatorID:      creatorFilter,
-		ProjectID:      projectFilter,
-		InvolvesUserID: involvesUserFilter,
-		Scheduled:      scheduledFilter,
-		MetadataFilter: metadataFilter,
-	})
-	if err != nil {
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM issue i WHERE %s`, whereSql)
+	// Count query uses the same args minus the OFFSET and LIMIT params (last two added).
+	countArgs := args[:len(args)-2]
+	var total int64
+	if err := h.DB.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
 		total = int64(len(issues))
 	}
 
@@ -1194,6 +1333,43 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	sortCol := "position"
+	if s := r.URL.Query().Get("sort"); s != "" {
+		switch s {
+		case "position", "title", "created_at", "start_date", "due_date":
+			sortCol = s
+		case "priority":
+			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
+		default:
+			writeError(w, http.StatusBadRequest, "invalid sort value")
+			return
+		}
+	}
+	sortDir := "ASC"
+	if sortCol != "position" {
+		if d := r.URL.Query().Get("direction"); d != "" {
+			switch strings.ToLower(d) {
+			case "asc":
+				sortDir = "ASC"
+			case "desc":
+				sortDir = "DESC"
+			default:
+				writeError(w, http.StatusBadRequest, "invalid direction value")
+				return
+			}
+		}
+	}
+
+	intraGroupOrder := sortCol
+	if !strings.HasPrefix(sortCol, "CASE") {
+		intraGroupOrder = "i." + sortCol
+	}
+	intraGroupOrder += " " + sortDir
+	if sortCol == "start_date" || sortCol == "due_date" {
+		intraGroupOrder += " NULLS LAST"
+	}
+	intraGroupOrder += ", i.created_at DESC"
+
 	offsetRef := addArg(int64(offset))
 	limitRef := addArg(int64(limit))
 	query := fmt.Sprintf(`
@@ -1206,7 +1382,7 @@ WITH ranked AS (
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
 			PARTITION BY i.assignee_type, i.assignee_id
-			ORDER BY i.position ASC, i.created_at DESC
+			ORDER BY %s
 		) AS rn
 	FROM issue i
 	WHERE %s
@@ -1227,7 +1403,7 @@ ORDER BY
 	END,
 	assignee_type NULLS LAST,
 	assignee_id NULLS LAST,
-	rn`, strings.Join(where, " AND "), offsetRef, offsetRef, limitRef)
+	rn`, intraGroupOrder, strings.Join(where, " AND "), offsetRef, offsetRef, limitRef)
 
 	rows, err := h.DB.Query(ctx, query, args...)
 	if err != nil {
@@ -2239,11 +2415,19 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Trigger the assigned agent when a member moves an issue out of backlog.
-	// Backlog acts as a parking lot — moving to an active status signals the
-	// issue is ready for work.
-	if statusChanged && !assigneeChanged && actorType == "member" &&
-		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
+	// Trigger the assigned agent when an issue moves out of backlog. Backlog
+	// acts as a parking lot — moving to an active status signals the issue is
+	// ready for work. Agent actors are allowed here so the documented
+	// serial sub-task workflow works (parent agent finishes Step 1, then
+	// promotes Step 2 from backlog→todo, regardless of who Step 2 is
+	// assigned to). The only excluded case is the real self-loop: an agent
+	// promoting the same issue its current task is running on. Same-agent,
+	// cross-issue handoff (Agent A finishing one task and promoting another
+	// issue assigned to A) must still fire — that is the documented serial
+	// chain.
+	if statusChanged && !assigneeChanged &&
+		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" &&
+		!h.isAgentRunningOnIssue(r, actorType, issue) {
 		if h.isAgentAssigneeReady(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 		}
@@ -2356,8 +2540,21 @@ func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bo
 // trigger the assigned agent. Fires for any status — comments are
 // conversational and can happen at any stage, including after completion
 // (e.g. follow-up questions on a done issue).
-func (h *Handler) shouldEnqueueOnComment(ctx context.Context, issue db.Issue) bool {
-	if !h.isAgentAssigneeReady(ctx, issue) {
+//
+// Mirrors the private-agent gate that enqueueMentionedAgentTasks applies on the
+// @mention path: once an owner/admin assigns a private agent to an issue, the
+// agent's UUID is "welded" onto the issue and remains visible to every member
+// who can view it. Without this check any of those members could dispatch a new
+// task to the private agent simply by commenting (#3300).
+func (h *Handler) shouldEnqueueOnComment(ctx context.Context, issue db.Issue, actorType, actorID string) bool {
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
+		return false
+	}
+	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
+	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		return false
+	}
+	if !h.canAccessPrivateAgent(ctx, agent, actorType, actorID, uuidToString(issue.WorkspaceID)) {
 		return false
 	}
 	// Coalescing queue: allow enqueue when a task is running (so the agent
@@ -2371,6 +2568,43 @@ func (h *Handler) shouldEnqueueOnComment(ctx context.Context, issue db.Issue) bo
 		return false
 	}
 	return true
+}
+
+// isAgentRunningOnIssue reports whether the calling agent's current task
+// (identified by X-Task-ID) is running for the exact issue being promoted.
+// That is the only true self-loop on backlog→active: the agent flipping
+// the same issue its own task is executing for would immediately re-enqueue
+// itself, complete the run, flip again, and so on.
+//
+// Same-agent cross-issue handoff (Agent A finishing a task on issue I1 then
+// promoting issue I2 — even when I2 is also assigned to A) is NOT a loop
+// and must fire; that is the documented serial sub-task chain. Member
+// actors never match.
+//
+// X-Task-ID is guaranteed to be present and consistent when actorType is
+// "agent": resolveActor demotes the actor to "member" otherwise (handler.go
+// resolveActor). We still recheck defensively — a future caller could pass
+// agent identity through a different path.
+func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue db.Issue) bool {
+	if actorType != "agent" {
+		return false
+	}
+	taskIDStr := r.Header.Get("X-Task-ID")
+	if taskIDStr == "" {
+		return false
+	}
+	taskUUID, err := util.ParseUUID(taskIDStr)
+	if err != nil {
+		return false
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
+	if err != nil {
+		return false
+	}
+	if !task.IssueID.Valid {
+		return false
+	}
+	return uuidToString(task.IssueID) == uuidToString(issue.ID)
 }
 
 // isAgentAssigneeReady checks if an issue is assigned to an active agent
@@ -2667,9 +2901,13 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Trigger agent when moving out of backlog (batch).
-		if statusChanged && !assigneeChanged && actorType == "member" &&
-			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
+		// Trigger agent when moving out of backlog (batch). Mirrors the
+		// single-update path above — agent actors are allowed so serial
+		// sub-task chains work, and the same task-issue self-loop guard
+		// prevents an agent from re-triggering itself on the same issue.
+		if statusChanged && !assigneeChanged &&
+			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" &&
+			!h.isAgentRunningOnIssue(r, actorType, issue) {
 			if h.isAgentAssigneeReady(r.Context(), issue) {
 				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 			}

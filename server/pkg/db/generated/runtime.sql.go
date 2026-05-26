@@ -496,6 +496,49 @@ func (q *Queries) ListArchivedAgentIDsByRuntime(ctx context.Context, runtimeID p
 	return items, nil
 }
 
+const lockAgentRuntime = `-- name: LockAgentRuntime :one
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM agent_runtime
+WHERE id = $1
+FOR UPDATE
+`
+
+// Acquires a row-level exclusive lock on the runtime row. Used at the
+// top of the cascade-delete transaction so that:
+//  1. PostgreSQL's FK validation on agent.runtime_id (FK ... ON DELETE
+//     RESTRICT) needs FOR KEY SHARE on the parent runtime row, which
+//     conflicts with FOR UPDATE — so any concurrent INSERT or UPDATE
+//     that would point a new/moved agent at this runtime blocks until
+//     our transaction finishes; and
+//  2. concurrent UPDATE/DELETE of the runtime row itself (e.g. another
+//     delete attempt) waits for us to commit.
+//
+// Combined with ListActiveAgentsByRuntimeForUpdate (which row-locks the
+// existing active set) this closes the plan-compare → archive race that
+// was possible at read-committed isolation between the snapshot and the
+// bulk archive.
+func (q *Queries) LockAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, lockAgentRuntime, id)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+	)
+	return i, err
+}
+
 const markAgentRuntimeOnline = `-- name: MarkAgentRuntimeOnline :one
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()

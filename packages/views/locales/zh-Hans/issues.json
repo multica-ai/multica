@@ -47,7 +47,8 @@
     "agents_group": "智能体",
     "squads_group": "小队",
     "issue_count_other": "{{count}} 个 issue",
-    "reset": "重置全部筛选"
+    "reset": "重置全部筛选",
+    "active_count_other": "{{count}} 个筛选"
   },
   "display": {
     "tooltip": "显示设置",
@@ -77,10 +78,12 @@
     "tooltip_board": "看板视图",
     "tooltip_list": "列表视图",
     "tooltip_gantt": "甘特图",
+    "tooltip_swimlane": "泳道视图",
     "section": "视图",
     "board": "看板",
     "list": "列表",
-    "gantt": "甘特图"
+    "gantt": "甘特图",
+    "swimlane": "泳道"
   },
   "gantt": {
     "header_issue": "Issue",
@@ -119,13 +122,20 @@
     "empty_status": "无 issue",
     "add_issue_tooltip": "新建 issue"
   },
+  "swimlane": {
+    "no_parent": "无父级",
+    "other_parents": "其他父级",
+    "open_parent": "打开父级 issue",
+    "toggle_collapse": "切换泳道"
+  },
   "board": {
     "hidden_columns_label": "隐藏的列",
     "hide_column": "隐藏列",
     "show_column": "显示列",
     "add_issue_tooltip": "新建 issue",
     "empty_column": "无 issue",
-    "empty_grouping": "没有匹配的 issue"
+    "empty_grouping": "没有匹配的 issue",
+    "ordered_by": "按{{field}}排序"
   },
   "detail": {
     "not_found": "这个 issue 不存在或已在该工作区被删除。",
@@ -235,7 +245,9 @@
     "squad_leader_failed_reason": "评估失败：{{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} 条动态",
-    "activity_count_other": "{{count}} 条动态"
+    "activity_count_other": "{{count}} 条动态",
+    "show_more_activities_one": "展开更早 {{count}} 条动态",
+    "show_more_activities_other": "展开更早 {{count}} 条动态"
   },
   "comment": {
     "delete_title": "删除评论",

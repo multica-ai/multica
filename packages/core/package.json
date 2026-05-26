@@ -110,6 +110,7 @@
     "react": "catalog:"
   },
   "devDependencies": {
+    "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
