@@ -164,10 +164,10 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("Assignee")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
+    expect(screen.getByText("New issue from this")).toBeInTheDocument();
     expect(screen.getByText("More")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
-    // Relationship actions are hidden inside the "More" submenu by default.
-    expect(screen.queryByText("New issue from this")).not.toBeInTheDocument();
+    // Lower-frequency relationship actions are hidden inside the "More" submenu by default.
     expect(screen.queryByText("Create sub-issue")).not.toBeInTheDocument();
     expect(screen.queryByText("Set parent issue...")).not.toBeInTheDocument();
     expect(screen.queryByText("Add sub-issue...")).not.toBeInTheDocument();
