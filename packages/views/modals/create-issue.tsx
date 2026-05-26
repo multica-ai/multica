@@ -60,6 +60,12 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { PillButton } from "../common/pill-button";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
+import {
+  LabelScopeSegment,
+  labelMatchesScope,
+  labelScopeProjectId,
+  type LabelCreateScope,
+} from "../issues/components/label-scope-segment";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -188,6 +194,8 @@ export function ManualCreatePanel({
   const createLabelMutation = useCreateLabel();
   const [labelIds, setLabelIds] = useState<string[]>([]);
   const [labelSearch, setLabelSearch] = useState("");
+  const [labelCreateScope, setLabelCreateScope] = useState<LabelCreateScope>(projectId ? "project" : "workspace");
+  const labelCreateScopeTouchedRef = useRef(false);
 
   // Inherit labels and project from parent issue when creating a sub-issue.
   const parentInheritedRef = useRef(false);
@@ -245,8 +253,12 @@ export function ManualCreatePanel({
   const canCreateLabel = useMemo(() => {
     if (!labelSearchTrimmed || createLabelMutation.isPending) return false;
     const q = labelSearchTrimmed.toLowerCase();
-    return !workspaceLabels.some((label) => label.name.toLowerCase() === q);
-  }, [createLabelMutation.isPending, labelSearchTrimmed, workspaceLabels]);
+    return !workspaceLabels.some(
+      (label) =>
+        label.name.toLowerCase() === q &&
+        labelMatchesScope(label, labelCreateScope, projectId),
+    );
+  }, [createLabelMutation.isPending, labelCreateScope, labelSearchTrimmed, projectId, workspaceLabels]);
 
   useEffect(() => {
     const available = new Set(workspaceLabels.map((label) => label.id));
@@ -256,11 +268,27 @@ export function ManualCreatePanel({
     });
   }, [workspaceLabels]);
 
+  useEffect(() => {
+    if (!projectId && labelCreateScope === "project") {
+      setLabelCreateScope("workspace");
+      labelCreateScopeTouchedRef.current = false;
+      return;
+    }
+    if (projectId && !labelCreateScopeTouchedRef.current && labelCreateScope === "workspace") {
+      setLabelCreateScope("project");
+    }
+  }, [labelCreateScope, projectId]);
+
+  const updateLabelCreateScope = (scope: LabelCreateScope) => {
+    labelCreateScopeTouchedRef.current = true;
+    setLabelCreateScope(scope);
+  };
+
   const createInlineLabel = () => {
     if (!canCreateLabel) return;
     const name = labelSearchTrimmed;
     createLabelMutation.mutate(
-      { name, color: pickInlineLabelColor(name), project_id: projectId ?? null },
+      { name, color: pickInlineLabelColor(name), project_id: labelScopeProjectId(labelCreateScope, projectId) },
       {
         onSuccess: (label) => {
           setLabelIds((prev) => (prev.includes(label.id) ? prev : [...prev, label.id]));
@@ -688,6 +716,24 @@ export function ManualCreatePanel({
                       className="h-8 w-full rounded-md border bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-ring"
                     />
                   </div>
+                  {projectId && (
+                    <>
+                      <div className="px-2 pb-1">
+                        <div className="mb-1 text-xs font-medium text-muted-foreground">
+                          {t(($) => $.create_issue.label_scope_label)}
+                        </div>
+                        <LabelScopeSegment
+                          value={labelCreateScope}
+                          onValueChange={updateLabelCreateScope}
+                          projectLabel={t(($) => $.create_issue.label_scope_project)}
+                          workspaceLabel={t(($) => $.create_issue.label_scope_workspace)}
+                          ariaLabel={t(($) => $.create_issue.label_scope_aria)}
+                          fullWidth
+                        />
+                      </div>
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
                   {canCreateLabel && (
                     <DropdownMenuItem onClick={createInlineLabel}>
                       <span className="truncate">

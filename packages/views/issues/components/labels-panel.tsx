@@ -23,6 +23,12 @@ import type { Label } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
 import { LabelChip } from "../../labels/label-chip";
 import { useT } from "../../i18n";
+import {
+  LabelScopeSegment,
+  labelMatchesScope,
+  labelScopeProjectId,
+  type LabelCreateScope,
+} from "./label-scope-segment";
 
 /** Default color for brand-new labels. Everything else goes through the native picker. */
 const DEFAULT_COLOR_DEFAULT = "#3b82f6";
@@ -35,6 +41,11 @@ export function LabelsPanel({ projectId = null }: { projectId?: string | null })
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const { data: labels = [], isLoading } = useQuery(labelListOptions(wsId, { projectId }));
+  const [scope, setScope] = useState<LabelCreateScope>(projectId ? "project" : "workspace");
+  const activeScope: LabelCreateScope = projectId ? scope : "workspace";
+  const scopedLabels = projectId
+    ? labels.filter((label) => labelMatchesScope(label, activeScope, projectId))
+    : labels;
 
   const create = useCreateLabel();
   const update = useUpdateLabel();
@@ -54,7 +65,7 @@ export function LabelsPanel({ projectId = null }: { projectId?: string | null })
     const name = newName.trim();
     if (!name) return;
     create.mutate(
-      { name, color: newColor, project_id: projectId },
+      { name, color: newColor, project_id: labelScopeProjectId(activeScope, projectId) },
       {
         onSuccess: () => {
           setNewName("");
@@ -105,8 +116,19 @@ export function LabelsPanel({ projectId = null }: { projectId?: string | null })
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
-        {t(($) => $.labels_panel.intro)}
+        {projectId ? t(($) => $.labels_panel.project_intro) : t(($) => $.labels_panel.intro)}
       </p>
+
+      {projectId && (
+        <LabelScopeSegment
+          value={scope}
+          onValueChange={setScope}
+          projectLabel={t(($) => $.labels_panel.scope_project)}
+          workspaceLabel={t(($) => $.labels_panel.scope_workspace)}
+          ariaLabel={t(($) => $.labels_panel.scope_aria)}
+          fullWidth
+        />
+      )}
 
       {/* Create form — color swatch, name, Add button all in one row */}
       <div className="flex items-center gap-2">
@@ -133,10 +155,14 @@ export function LabelsPanel({ projectId = null }: { projectId?: string | null })
       {/* List — scrolls when labels exceed viewport */}
       <div className="space-y-2 max-h-[50vh] overflow-y-auto">
         {isLoading && <p className="text-sm text-muted-foreground">{t(($) => $.labels_panel.loading)}</p>}
-        {!isLoading && labels.length === 0 && (
-          <p className="text-sm text-muted-foreground">{t(($) => $.labels_panel.empty)}</p>
+        {!isLoading && scopedLabels.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            {projectId && activeScope === "project"
+              ? t(($) => $.labels_panel.empty_project)
+              : t(($) => $.labels_panel.empty_workspace)}
+          </p>
         )}
-        {labels.map((label) => {
+        {scopedLabels.map((label) => {
           const isEditing = editingId === label.id;
           const editNameEmpty = isEditing && !editName.trim();
           return (

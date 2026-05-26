@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Tag, Plus, Settings2 } from "lucide-react";
 import { toast } from "sonner";
@@ -16,6 +16,12 @@ import {
 import type { Label } from "@multica/core/types";
 import { LabelChip } from "../../../labels/label-chip";
 import { LabelsPanel } from "../labels-panel";
+import {
+  LabelScopeSegment,
+  labelMatchesScope,
+  labelScopeProjectId,
+  type LabelCreateScope,
+} from "../label-scope-segment";
 import {
   PropertyPicker,
   PickerItem,
@@ -93,6 +99,8 @@ export function LabelPicker({
   const setOpen = onOpenChange ?? setInternalOpen;
   const [filter, setFilter] = useState("");
   const [manageOpen, setManageOpen] = useState(false);
+  const [createScope, setCreateScope] = useState<LabelCreateScope>(projectId ? "project" : "workspace");
+  const createScopeTouchedRef = useRef(false);
 
   // Synchronous lock to prevent double-submit on rapid Enter / click. React
   // state (create.isPending, filter) isn't visible until the next render, so
@@ -122,8 +130,28 @@ export function LabelPicker({
   const query = filter.trim();
   const queryLower = query.toLowerCase();
   const filtered = allLabels.filter((l) => l.name.toLowerCase().includes(queryLower));
-  const exactMatch = allLabels.some((l) => l.name.toLowerCase() === queryLower);
+  const createScopeLabels = useMemo(
+    () => allLabels.filter((label) => labelMatchesScope(label, createScope, projectId)),
+    [allLabels, createScope, projectId],
+  );
+  const exactMatch = createScopeLabels.some((l) => l.name.toLowerCase() === queryLower);
   const canCreate = query.length > 0 && !exactMatch && !create.isPending;
+
+  useEffect(() => {
+    if (!projectId && createScope === "project") {
+      setCreateScope("workspace");
+      createScopeTouchedRef.current = false;
+      return;
+    }
+    if (projectId && !createScopeTouchedRef.current && createScope === "workspace") {
+      setCreateScope("project");
+    }
+  }, [createScope, projectId]);
+
+  const updateCreateScope = (scope: LabelCreateScope) => {
+    createScopeTouchedRef.current = true;
+    setCreateScope(scope);
+  };
 
   const toggle = (labelId: string) => {
     if (attachedIds.has(labelId)) {
@@ -138,7 +166,7 @@ export function LabelPicker({
     creatingRef.current = true;
     const name = query;
     create.mutate(
-      { name, color: pickInlineColor(name), project_id: projectId ?? null },
+      { name, color: pickInlineColor(name), project_id: labelScopeProjectId(createScope, projectId) },
       {
         onSuccess: (label) => {
           attach.mutate(label.id);
@@ -223,14 +251,26 @@ export function LabelPicker({
         footer={
           // Rendered outside the arrow-key listbox so keyboard nav doesn't
           // treat "Manage labels…" as another label option.
-          <button
-            type="button"
-            onClick={openManage}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent transition-colors"
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-            <span>{t(($) => $.pickers.label.manage_action)}</span>
-          </button>
+          <div className="space-y-1">
+            {projectId && (
+              <LabelScopeSegment
+                value={createScope}
+                onValueChange={updateCreateScope}
+                projectLabel={t(($) => $.pickers.label.scope_project)}
+                workspaceLabel={t(($) => $.pickers.label.scope_workspace)}
+                ariaLabel={t(($) => $.pickers.label.scope_aria)}
+                fullWidth
+              />
+            )}
+            <button
+              type="button"
+              onClick={openManage}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent transition-colors"
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              <span>{t(($) => $.pickers.label.manage_action)}</span>
+            </button>
+          </div>
         }
       >
         {filtered.map((label) => {

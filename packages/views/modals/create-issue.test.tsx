@@ -278,6 +278,41 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenuSeparator: () => null,
 }));
 
+vi.mock("../issues/components/label-scope-segment", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../issues/components/label-scope-segment")>();
+  return {
+    ...actual,
+    LabelScopeSegment: ({
+      value,
+      onValueChange,
+      projectLabel,
+      workspaceLabel,
+    }: {
+      value: "project" | "workspace";
+      onValueChange: (value: "project" | "workspace") => void;
+      projectLabel: string;
+      workspaceLabel: string;
+    }) => (
+      <div>
+        <button
+          type="button"
+          aria-pressed={value === "project"}
+          onClick={() => onValueChange("project")}
+        >
+          {projectLabel}
+        </button>
+        <button
+          type="button"
+          aria-pressed={value === "workspace"}
+          onClick={() => onValueChange("workspace")}
+        >
+          {workspaceLabel}
+        </button>
+      </div>
+    ),
+  };
+});
+
 vi.mock("./issue-picker-modal", () => ({
   IssuePickerModal: () => null,
 }));
@@ -654,6 +689,28 @@ describe("CreateIssueModal", () => {
           title: "Issue with new label",
           label_ids: ["label-new"],
         }),
+      );
+    });
+  });
+
+  it("supports creating a workspace label from the project create flow", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Issue with workspace label");
+    await user.click(screen.getByLabelText("Select labels"));
+    await user.click(screen.getByRole("button", { name: "Workspace" }));
+    await user.type(screen.getByPlaceholderText("Search or type a new label"), "global-risk");
+    await user.click(screen.getByRole("button", { name: /Create label "global-risk"/i }));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "global-risk", project_id: null }),
+        expect.any(Object),
+      );
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ label_ids: ["label-new"] }),
       );
     });
   });
