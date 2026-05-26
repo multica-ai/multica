@@ -105,6 +105,7 @@ vi.mock("../../../common/actor-avatar", () => ({
 }));
 
 // Import after mocks.
+import { IssueActionsMenuItems } from "../issue-actions-menu-items";
 import { IssueActionsDropdown } from "../issue-actions-dropdown";
 import { IssueActionsContextMenu } from "../issue-actions-context-menu";
 
@@ -166,6 +167,7 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("More")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
     // Relationship actions are hidden inside the "More" submenu by default.
+    expect(screen.queryByText("New issue from this")).not.toBeInTheDocument();
     expect(screen.queryByText("Create sub-issue")).not.toBeInTheDocument();
     expect(screen.queryByText("Set parent issue...")).not.toBeInTheDocument();
     expect(screen.queryByText("Add sub-issue...")).not.toBeInTheDocument();
@@ -214,6 +216,50 @@ describe("IssueActionsDropdown", () => {
       identifier: "TES-1",
       onDeletedNavigateTo: "/test/issues",
     });
+  });
+});
+
+describe("IssueActionsMenuItems", () => {
+  const primitives = {
+    Item: ({ children, onClick }: any) => (
+      <button type="button" onClick={onClick}>
+        {children}
+      </button>
+    ),
+    Sub: ({ children }: any) => <div>{children}</div>,
+    SubTrigger: ({ children }: any) => <div>{children}</div>,
+    SubContent: ({ children }: any) => <div>{children}</div>,
+    Separator: () => <hr />,
+  };
+
+  it("renders the create-from-issue relationship action", () => {
+    const openCreateIssueFromCurrent = vi.fn();
+
+    render(
+      wrap(
+        <IssueActionsMenuItems
+          issue={mockIssue}
+          primitives={primitives as any}
+          onOpenAssignee={vi.fn()}
+          actions={{
+            isPinned: false,
+            canDelete: true,
+            updateField: vi.fn(),
+            togglePin: vi.fn(),
+            copyLink: vi.fn(),
+            openCreateIssueFromCurrent,
+            openCreateSubIssue: vi.fn(),
+            openSetParent: vi.fn(),
+            openAddChild: vi.fn(),
+            openDeleteConfirm: vi.fn(),
+          }}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByText("New issue from this"));
+
+    expect(openCreateIssueFromCurrent).toHaveBeenCalledTimes(1);
   });
 });
 

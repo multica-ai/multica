@@ -8,6 +8,7 @@ import {
   ArrowUp,
   Calendar,
   CalendarClock,
+  CopyPlus,
   FolderOpen,
   Link2,
   MoreHorizontal,
@@ -101,6 +102,7 @@ export function IssueActionsMenuItems({
     updateField,
     togglePin,
     copyLink,
+    openCreateIssueFromCurrent,
     openCreateSubIssue,
     openSetParent,
     openAddChild,
@@ -282,6 +284,10 @@ export function IssueActionsMenuItems({
           {t(($) => $.actions.more)}
         </P.SubTrigger>
         <P.SubContent>
+          <P.Item onClick={openCreateIssueFromCurrent}>
+            <CopyPlus className="h-3.5 w-3.5" />
+            {t(($) => $.actions.create_from_issue)}
+          </P.Item>
           <P.Item onClick={openCreateSubIssue}>
             <Plus className="h-3.5 w-3.5" />
             {t(($) => $.actions.create_sub_issue)}

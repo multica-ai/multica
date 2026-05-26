@@ -391,6 +391,7 @@
     "copy_link": "Copy link",
     "copy_workdir_path": "Copy local workdir path",
     "more": "More",
+    "create_from_issue": "New issue from this",
     "create_sub_issue": "Create sub-issue",
     "set_parent_issue": "Set parent issue...",
     "add_sub_issue": "Add sub-issue...",

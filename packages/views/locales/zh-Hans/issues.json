@@ -381,6 +381,7 @@
     "copy_link": "复制链接",
     "copy_workdir_path": "复制本地 workdir 路径",
     "more": "更多",
+    "create_from_issue": "基于此 issue 新建",
     "create_sub_issue": "创建子 issue",
     "set_parent_issue": "设置父 issue...",
     "add_sub_issue": "添加子 issue...",

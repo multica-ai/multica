@@ -22,6 +22,7 @@ export interface UseIssueActionsResult {
   updateField: (updates: Partial<UpdateIssueRequest>) => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
+  openCreateIssueFromCurrent: () => void;
   openCreateSubIssue: () => void;
   openSetParent: () => void;
   openAddChild: () => void;
@@ -73,6 +74,8 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const issueId = issue?.id ?? null;
   const issueStatus = issue?.status ?? null;
   const issueIdentifier = issue?.identifier ?? null;
+  const issueTitle = issue?.title ?? "";
+  const issueDescription = issue?.description ?? "";
   const issueProjectId = issue?.project_id ?? null;
 
   const updateField = useCallback(
@@ -133,6 +136,18 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     });
   }, [openModal, issueId, issueIdentifier, issueProjectId]);
 
+  const openCreateIssueFromCurrent = useCallback(() => {
+    if (!issueId) return;
+    openModal("create-issue", {
+      title: issueTitle,
+      description: issueDescription,
+      parent_issue_id: issueId,
+      parent_issue_identifier: issueIdentifier,
+      block_issue_id_on_create: issueId,
+      ...(issueProjectId ? { project_id: issueProjectId } : {}),
+    });
+  }, [openModal, issueId, issueTitle, issueDescription, issueIdentifier, issueProjectId]);
+
   const openSetParent = useCallback(() => {
     if (!issueId) return;
     openModal("issue-set-parent", { issueId });
@@ -161,6 +176,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     updateField,
     togglePin,
     copyLink,
+    openCreateIssueFromCurrent,
     openCreateSubIssue,
     openSetParent,
     openAddChild,
