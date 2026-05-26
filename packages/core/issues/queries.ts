@@ -56,9 +56,12 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "detail", id] as const,
   children: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "children", id] as const,
-  /** Batched children — key includes sorted parent ids for cache stability. */
+  /** Prefix for invalidating all batched-children queries in a workspace. */
+  childrenByParentsAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "children-by-parents"] as const,
+  /** Full key — includes sorted parent ids for cache stability. */
   childrenByParents: (wsId: string, parentIds: readonly string[]) =>
-    [...issueKeys.all(wsId), "children-by-parents", parentIds] as const,
+    [...issueKeys.childrenByParentsAll(wsId), parentIds] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
   /** Full-issue timeline (single TanStack Query, no cursor). */
@@ -444,11 +447,6 @@ export function childrenByParentsOptions(
     queryKey: issueKeys.childrenByParents(wsId, parentIds),
     queryFn: () => fetchAndHydrateChildrenByParents(qc, wsId, parentIds),
     enabled: parentIds.length > 0,
-    // Never auto-refetch: the canonical per-parent data lives in
-    // issueKeys.children entries, kept fresh by mutations + WS events.
-    // The batch key changes whenever new un-cached parents appear, so
-    // there's no stale batch result to worry about.
-    staleTime: Infinity,
   });
 }
 

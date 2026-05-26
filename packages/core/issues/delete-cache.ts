@@ -116,6 +116,7 @@ export function invalidateDeletedIssueParentCaches(
     qc.invalidateQueries({ queryKey: issueKeys.children(wsId, parentId) });
   }
   qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
 }
 
 export function invalidateDeletedIssueDependentCaches(

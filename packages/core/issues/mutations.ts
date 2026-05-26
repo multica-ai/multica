@@ -305,6 +305,9 @@ export function useUpdateIssue() {
         });
         qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
       }
+      if (ctx?.parentId || newParentId) {
+        qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
+      }
     },
   });
 }
