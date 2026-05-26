@@ -22,17 +22,17 @@ import {
   type TextInputSelectionChangeEventData,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { LinearGradient } from "expo-linear-gradient";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MoreHorizontal } from "lucide-react-native";
+import Svg, { Path } from "react-native-svg";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import {
   useCreateComment,
   useDeleteComment,
-  useToggleCommentReaction,
-  useToggleIssueReaction,
   useUpdateComment,
   useUpdateIssue,
 } from "@multica/core/issues/mutations";
@@ -40,7 +40,6 @@ import {
   useIssueAttachments,
   useIssueDetail,
   useIssueList,
-  useIssueReactions,
   useIssueSubscribers,
   useIssueTaskRuns,
   useIssueTimelineEntries,
@@ -59,9 +58,7 @@ import type {
   AgentTask,
   Attachment,
   IssuePriority,
-  IssueReaction,
   IssueStatus,
-  Reaction,
   TaskMessagePayload,
   TimelineEntry,
 } from "@multica/core/types";
@@ -85,7 +82,6 @@ import {
 } from "../../i18n/format";
 
 type Props = NativeStackScreenProps<RootStackParamList, "IssueDetail">;
-type ReactionLike = Pick<Reaction | IssueReaction, "actor_id" | "actor_type" | "emoji">;
 type DocumentPickerModule = typeof import("expo-document-picker");
 declare const require: (moduleName: string) => unknown;
 const emptyTimeline: TimelineEntry[] = [];
@@ -118,11 +114,16 @@ type AttachmentPreviewState = {
   loading?: boolean;
 };
 type Translate = (key: string, options?: Record<string, unknown>) => string;
-const DEFAULT_REACTIONS = ["👍", "👀", "🎉", "❤️"];
 const MAX_MENTION_SUGGESTIONS = 20;
 const SERVER_ISSUE_SEARCH_LIMIT = 20;
 const SERVER_SEARCH_DEBOUNCE_MS = 150;
 const TEXT_PREVIEW_MAX_BYTES = 1_000_000;
+const COLLAPSED_COMMENT_HEIGHT = 160;
+const COMMENT_PREVIEW_MAX_CHARS = 700;
+const COMMENT_COLLAPSE_MIN_CHARS = 420;
+const COMMENT_COLLAPSE_MIN_LINES = 8;
+const COMMENT_CARD_FADE_COLORS = ["rgba(255, 255, 255, 0)", "rgba(255, 255, 255, 0.86)", colors.card] as const;
+const COMMENT_REPLY_FADE_COLORS = ["rgba(241, 241, 240, 0)", "rgba(241, 241, 240, 0.88)", colors.muted] as const;
 
 function useKeyboardHeight(enabled: boolean) {
   const { height: windowHeight } = useWindowDimensions();
@@ -167,7 +168,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     [allIssues],
   );
   const { data: attachments = [], refetch: refetchAttachments } = useIssueAttachments(workspace.id, issueId);
-  const { data: issueReactions = [] } = useIssueReactions(workspace.id, issueId);
   const {
     isSubscribed,
     isToggling: togglingSubscription,
@@ -186,8 +186,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const updateComment = useUpdateComment(issueId);
   const deleteComment = useDeleteComment(issueId);
   const updateIssue = useUpdateIssue();
-  const toggleIssueReaction = useToggleIssueReaction(issueId);
-  const toggleCommentReaction = useToggleCommentReaction(issueId);
   const titleInputRef = useRef<TextInput | null>(null);
   const [comment, setComment] = useState("");
   const [commentAttachments, setCommentAttachments] = useState<DraftCommentAttachment[]>([]);
@@ -414,20 +412,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     }
   }, [uploadAttachment]);
 
-  const handleIssueReaction = useCallback((emoji: string) => {
-    if (!userId) return;
-    const existing = issueReactions.find((reaction) => isOwnReaction(reaction, emoji, userId));
-    toggleIssueReaction.mutate({ emoji, existing });
-  }, [issueReactions, toggleIssueReaction, userId]);
-
-  const handleCommentReaction = useCallback((entry: TimelineEntry, emoji: string) => {
-    if (!userId) return;
-    const existing = (entry.reactions ?? []).find((reaction) =>
-      isOwnReaction(reaction, emoji, userId),
-    );
-    toggleCommentReaction.mutate({ commentId: entry.id, emoji, existing });
-  }, [toggleCommentReaction, userId]);
-
   const startCommentEdit = useCallback((commentId: string, content: string) => {
     setEditingCommentId(commentId);
     setEditingContent(content);
@@ -441,6 +425,27 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       setCommentError(formatClipboardError(err, t));
     }
   }, [t]);
+
+  const cancelCommentEdit = useCallback(() => {
+    setEditingCommentId(null);
+    setEditingContent("");
+  }, []);
+
+  const deleteCommentById = useCallback((commentId: string) => {
+    void removeComment(commentId);
+  }, [removeComment]);
+
+  const saveCommentEditById = useCallback((commentId: string) => {
+    void saveCommentEdit(commentId);
+  }, [saveCommentEdit]);
+
+  const copyCommentByContent = useCallback((content: string) => {
+    void copyCommentContent(content);
+  }, [copyCommentContent]);
+
+  const openIssueMention = useCallback((targetIssueId: string) => {
+    navigation.push("IssueDetail", { issueId: targetIssueId });
+  }, [navigation]);
 
   const startTitleEdit = useCallback(() => {
     if (!issue || updateIssue.isPending) return;
@@ -582,21 +587,15 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         entry={item.entry}
         editingCommentId={isEditingEntry ? editingCommentId : null}
         editingContent={isEditingEntry ? editingContent : ""}
-        onToggleReaction={handleCommentReaction}
         onOpenAttachment={openAttachmentPreview}
-        onCancelEdit={() => {
-          setEditingCommentId(null);
-          setEditingContent("");
-        }}
+        onCancelEdit={cancelCommentEdit}
         onChangeEdit={setEditingContent}
-        onDelete={(commentId) => void removeComment(commentId)}
+        onDelete={deleteCommentById}
         onReply={item.kind === "root" ? openReplyComposer : undefined}
-        onSaveEdit={(commentId) => void saveCommentEdit(commentId)}
+        onSaveEdit={saveCommentEditById}
         onStartEdit={startCommentEdit}
-        onCopyComment={(content) => void copyCommentContent(content)}
-        onIssueMentionPress={(targetIssueId) => {
-          navigation.push("IssueDetail", { issueId: targetIssueId });
-        }}
+        onCopyComment={copyCommentByContent}
+        onIssueMentionPress={openIssueMention}
         resolveActorName={getActorName}
         userId={userId}
         mentionTargets={mentionTargets}
@@ -609,15 +608,15 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     editingCommentId,
     editingContent,
     getActorName,
-    handleCommentReaction,
     mentionTargets,
     issueMentionTargets,
-    navigation,
     openAttachmentPreview,
     openReplyComposer,
-    copyCommentContent,
-    removeComment,
-    saveCommentEdit,
+    cancelCommentEdit,
+    copyCommentByContent,
+    deleteCommentById,
+    openIssueMention,
+    saveCommentEditById,
     startCommentEdit,
     userId,
   ]);
@@ -683,11 +682,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
             )}
           </Pressable>
           <View style={styles.issueEngagementRow}>
-            <ReactionRow
-              onToggle={handleIssueReaction}
-              reactions={issueReactions}
-              userId={userId}
-            />
             <Pressable
               accessibilityRole="button"
               disabled={!userId || subscribersLoading || togglingSubscription}
@@ -740,11 +734,9 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     }];
   }, [
     attachments,
-    handleIssueReaction,
     editingTitle,
     issue,
     issueEditError,
-    issueReactions,
     isSubscribed,
     navigation,
     openAttachmentPreview,
@@ -1561,6 +1553,54 @@ function buildCommentRows(threads: CommentThread[]): CommentListRow[] {
   ]);
 }
 
+function shouldCollapseComment(content: string) {
+  if (content.length > COMMENT_COLLAPSE_MIN_CHARS) return true;
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  if (lines.length > COMMENT_COLLAPSE_MIN_LINES) return true;
+  const denseMarkdownLines = lines.filter((line) => {
+    const trimmed = line.trim();
+    return (
+      trimmed.startsWith("```") ||
+      trimmed.startsWith(">") ||
+      /^#{1,6}\s+/.test(trimmed) ||
+      /^[-*]\s+/.test(trimmed) ||
+      /^\d+[.)]\s+/.test(trimmed)
+    );
+  });
+  return denseMarkdownLines.length > 5;
+}
+
+function createCommentPreview(content: string) {
+  const normalized = content.replace(/\r\n/g, "\n").trimEnd();
+  const lines = normalized.split("\n");
+  const previewLines: string[] = [];
+  let charCount = 0;
+  let openCodeFence = false;
+
+  for (const line of lines) {
+    const nextCount = charCount + line.length + (previewLines.length > 0 ? 1 : 0);
+    if (previewLines.length >= COMMENT_COLLAPSE_MIN_LINES || nextCount > COMMENT_PREVIEW_MAX_CHARS) {
+      break;
+    }
+    previewLines.push(line);
+    charCount = nextCount;
+    if (line.trim().startsWith("```")) {
+      openCodeFence = !openCodeFence;
+    }
+  }
+
+  let preview = previewLines.join("\n").trimEnd();
+  if (!preview) return normalized.slice(0, COMMENT_PREVIEW_MAX_CHARS).trimEnd();
+
+  if (openCodeFence) {
+    preview = `${preview}\n\`\`\``;
+  }
+  if (preview.length < normalized.length) {
+    preview = `${preview}\n...`;
+  }
+  return preview;
+}
+
 
 function ThreadReplyFooter({
   onReply,
@@ -1599,7 +1639,6 @@ const TimelineItem = memo(function TimelineItem({
   onReply,
   onSaveEdit,
   onStartEdit,
-  onToggleReaction,
   resolveActorName,
   userId,
   issueMentionTargets,
@@ -1618,7 +1657,6 @@ const TimelineItem = memo(function TimelineItem({
   onReply?: (commentId: string) => void;
   onSaveEdit?: (commentId: string) => void;
   onStartEdit?: (commentId: string, content: string) => void;
-  onToggleReaction?: (entry: TimelineEntry, emoji: string) => void;
   resolveActorName: (type: string, id: string) => string;
   userId?: string;
   issueMentionTargets?: WorkspaceMentionTarget[];
@@ -1630,29 +1668,27 @@ const TimelineItem = memo(function TimelineItem({
   const actor = resolveActorName(entry.actor_type, entry.actor_id);
   const isOwnComment = entry.type === "comment" && entry.actor_type === "member" && entry.actor_id === userId;
   const isEditing = editingCommentId === entry.id;
-  const [openMenu, setOpenMenu] = useState<"reactions" | "actions" | null>(null);
+  const [openMenu, setOpenMenu] = useState<"actions" | null>(null);
   const [actionsMenuAnchor, setActionsMenuAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const body = entry.type === "comment"
     ? entry.content
     : formatActivity(entry, resolveActorName, t);
   const isComment = entry.type === "comment";
   const hasCommentActions = isComment;
-  const reactionSummary = useMemo(() => {
-    const counts = new Map<string, number>();
-    const own = new Set<string>();
-    for (const reaction of entry.reactions ?? []) {
-      counts.set(reaction.emoji, (counts.get(reaction.emoji) ?? 0) + 1);
-      if (userId && isOwnReaction(reaction, reaction.emoji, userId)) {
-        own.add(reaction.emoji);
-      }
-    }
-    return {
-      counts,
-      options: Array.from(new Set([...DEFAULT_REACTIONS, ...counts.keys()])),
-      own,
-    };
-  }, [entry.reactions, userId]);
+  const commentContent = entry.content ?? "";
+  const fadeColors = variant === "reply" ? COMMENT_REPLY_FADE_COLORS : COMMENT_CARD_FADE_COLORS;
+  const canCollapse = isComment && !isEditing && shouldCollapseComment(commentContent);
+  const isCommentCollapsed = canCollapse && !expanded;
+  const renderedCommentContent = useMemo(
+    () => isCommentCollapsed ? createCommentPreview(commentContent) : commentContent,
+    [commentContent, isCommentCollapsed],
+  );
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [entry.id, commentContent]);
 
   function openActionsMenuAtPress(event: GestureResponderEvent) {
     if (!isComment || isEditing || !hasCommentActions) return;
@@ -1742,55 +1778,23 @@ const TimelineItem = memo(function TimelineItem({
         </View>
         {isComment ? (
           <View style={styles.commentHeaderActions}>
-            <View style={styles.commentHeaderButtonRow}>
-              <HeaderIconButton
-                disabled={!userId}
-                label={t("issues.react")}
-                onPress={() => {
-                  setActionsMenuAnchor(null);
-                  setOpenMenu((menu) => menu === "reactions" ? null : "reactions");
-                }}
-              >
-                ☺
-              </HeaderIconButton>
-              <HeaderIconButton
-                label={t("issues.issue_actions")}
-                disabled={!hasCommentActions}
-                onPress={(event) => {
-                  if (openMenu === "actions") {
-                    closeActionsMenu();
-                    return;
-                  }
-                  setActionsMenuAnchor({
-                    x: event.nativeEvent.pageX,
-                    y: event.nativeEvent.pageY,
-                  });
-                  setOpenMenu("actions");
-                }}
-              >
-                ⋯
-              </HeaderIconButton>
-            </View>
-            {openMenu === "reactions" ? (
-              <View style={styles.commentDropdown}>
-                {reactionSummary.options.map((emoji) => {
-                  const count = reactionSummary.counts.get(emoji) ?? 0;
-                  const active = reactionSummary.own.has(emoji);
-                  return (
-                    <DropdownItem
-                      active={active}
-                      key={emoji}
-                      label={`${emoji}${count > 0 ? ` ${count}` : ""}`}
-                      onPress={() => {
-                        onToggleReaction?.(entry, emoji);
-                        setOpenMenu(null);
-                        setActionsMenuAnchor(null);
-                      }}
-                    />
-                  );
-                })}
-              </View>
-            ) : null}
+            <HeaderIconButton
+              label={t("issues.issue_actions")}
+              disabled={!hasCommentActions}
+              onPress={(event) => {
+                if (openMenu === "actions") {
+                  closeActionsMenu();
+                  return;
+                }
+                setActionsMenuAnchor({
+                  x: event.nativeEvent.pageX,
+                  y: event.nativeEvent.pageY,
+                });
+                setOpenMenu("actions");
+              }}
+            >
+              ⋯
+            </HeaderIconButton>
           </View>
         ) : null}
       </View>
@@ -1817,10 +1821,31 @@ const TimelineItem = memo(function TimelineItem({
           </View>
         </View>
       ) : entry.type === "comment" ? (
-        <MarkdownText
-          content={entry.content ?? ""}
-          onIssueMentionPress={onIssueMentionPress}
-        />
+        <View style={[styles.commentBodyWrap, isCommentCollapsed && styles.commentBodyCollapsed]}>
+          <MarkdownText
+            content={renderedCommentContent}
+            onIssueMentionPress={onIssueMentionPress}
+          />
+          {isCommentCollapsed ? (
+            <LinearGradient
+              colors={fadeColors}
+              pointerEvents="box-none"
+              style={styles.commentFadeOverlay}
+            >
+              <Pressable
+                accessibilityLabel={t("issues.expand_comment")}
+                accessibilityRole="button"
+                onPress={() => setExpanded(true)}
+                style={({ pressed }) => [
+                  styles.expandCommentButton,
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <ExpandCommentIcon />
+              </Pressable>
+            </LinearGradient>
+          ) : null}
+        </View>
       ) : (
         <Text style={styles.timelineBody}>{body}</Text>
       )}
@@ -1883,6 +1908,28 @@ function HeaderIconButton({
         <Text style={styles.headerIconButtonText}>{children}</Text>
       ) : children}
     </Pressable>
+  );
+}
+
+function ExpandCommentIcon() {
+  return (
+    <Svg fill="none" height={22} viewBox="0 0 24 24" width={22}>
+      <Path
+        d="M7 10.5L12 15.5L17 10.5"
+        stroke={colors.foreground}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2.4}
+      />
+      <Path
+        d="M7 5.5L12 10.5L17 5.5"
+        stroke={colors.foreground}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeOpacity={0.72}
+        strokeWidth={2.4}
+      />
+    </Svg>
   );
 }
 
@@ -2250,67 +2297,6 @@ const TaskRunHeader = memo(function TaskRunHeader({
     </Pressable>
   );
 });
-
-const ReactionRow = memo(function ReactionRow({
-  compact,
-  onToggle,
-  reactions,
-  userId,
-}: {
-  compact?: boolean;
-  onToggle: (emoji: string) => void;
-  reactions: ReactionLike[];
-  userId?: string;
-}) {
-  const reactionSummary = useMemo(() => {
-    const counts = new Map<string, number>();
-    const own = new Set<string>();
-    for (const reaction of reactions) {
-      counts.set(reaction.emoji, (counts.get(reaction.emoji) ?? 0) + 1);
-      if (userId && isOwnReaction(reaction, reaction.emoji, userId)) {
-        own.add(reaction.emoji);
-      }
-    }
-    return {
-      counts,
-      emojis: Array.from(new Set([...DEFAULT_REACTIONS, ...counts.keys()])),
-      own,
-    };
-  }, [reactions, userId]);
-
-  return (
-    <View style={styles.reactionRow}>
-      {reactionSummary.emojis.map((emoji) => {
-        const count = reactionSummary.counts.get(emoji) ?? 0;
-        const active = reactionSummary.own.has(emoji);
-        return (
-          <Pressable
-            disabled={!userId}
-            key={emoji}
-            onPress={() => onToggle(emoji)}
-            style={[
-              styles.reactionChip,
-              compact && styles.reactionChipCompact,
-              active && styles.reactionChipActive,
-            ]}
-          >
-            <Text style={[
-              styles.reactionText,
-              compact && styles.reactionTextCompact,
-              active && styles.reactionTextActive,
-            ]}>
-              {emoji}{count > 0 ? ` ${count}` : ""}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-});
-
-function isOwnReaction(reaction: ReactionLike, emoji: string, userId: string) {
-  return reaction.emoji === emoji && reaction.actor_type === "member" && reaction.actor_id === userId;
-}
 
 function formatDate(date: string | null | undefined) {
   if (!date) return "-";
@@ -2980,11 +2966,6 @@ const styles = StyleSheet.create({
     position: "relative",
     zIndex: 10,
   },
-  commentHeaderButtonRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.xs,
-  },
   headerIconButton: {
     alignItems: "center",
     backgroundColor: colors.muted,
@@ -3051,6 +3032,39 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 14,
     lineHeight: 20,
+  },
+  commentBodyWrap: {
+    position: "relative",
+  },
+  commentBodyCollapsed: {
+    height: COLLAPSED_COMMENT_HEIGHT,
+    overflow: "hidden",
+  },
+  commentFadeOverlay: {
+    alignItems: "center",
+    bottom: 0,
+    justifyContent: "flex-end",
+    left: 0,
+    minHeight: 96,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.xs,
+    position: "absolute",
+    right: 0,
+  },
+  expandCommentButton: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 36,
+    justifyContent: "center",
+    shadowColor: "#000000",
+    shadowOffset: { height: 2, width: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    width: 36,
+    elevation: 4,
   },
   editBox: {
     backgroundColor: colors.muted,
@@ -3291,38 +3305,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     gap: spacing.sm,
     padding: spacing.md,
-  },
-  reactionRow: {
-    alignItems: "center",
-    flex: 1,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  reactionChip: {
-    backgroundColor: colors.muted,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  reactionChipCompact: {
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.xs,
-    paddingVertical: spacing.xs,
-  },
-  reactionChipActive: {
-    backgroundColor: colors.primary,
-  },
-  reactionText: {
-    color: colors.foreground,
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  reactionTextCompact: {
-    fontSize: 12,
-  },
-  reactionTextActive: {
-    color: colors.primaryForeground,
   },
   floatingButton: {
     alignItems: "center",

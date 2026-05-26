@@ -12,7 +12,7 @@
  * keep the two in sync when adding a new source or field.
  */
 
-import posthog from "posthog-js";
+import posthog from "./posthog";
 
 import { captureEvent, setPersonProperties } from "./index";
 
