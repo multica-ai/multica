@@ -122,6 +122,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
 		})
+	case "reasonix":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverReasonixModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -494,6 +498,14 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kiro-discovery-",
 	})
+}
+
+// discoverReasonixModels currently returns an empty catalog by design. The
+// upstream ACP session/new response does not advertise available models, and
+// Reasonix does not expose an equivalent machine-readable list in its CLI. The
+// UI falls back to manual model entry when discovery is empty.
+func discoverReasonixModels(_ context.Context, _ string) ([]Model, error) {
+	return []Model{}, nil
 }
 
 // discoverCopilotModels spins up `copilot --acp` and reads the

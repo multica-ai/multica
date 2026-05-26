@@ -258,6 +258,72 @@ func TestLoadConfig_AutoUpdateDefault_SelfHostOff(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_DetectsReasonixViaNPX(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+
+	binDir := t.TempDir()
+	fakeNPX := filepath.Join(binDir, "npx")
+	if err := os.WriteFile(fakeNPX, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake npx: %v", err)
+	}
+
+	t.Setenv("PATH", binDir)
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("MULTICA_REASONIX_MODEL", "deepseek-chat")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	entry, ok := cfg.Agents["reasonix"]
+	if !ok {
+		t.Fatal("expected reasonix agent entry")
+	}
+	if entry.Path != "npx" {
+		t.Fatalf("reasonix path = %q, want npx", entry.Path)
+	}
+	if entry.Model != "deepseek-chat" {
+		t.Fatalf("reasonix model = %q, want deepseek-chat", entry.Model)
+	}
+}
+
+func TestLoadConfig_DetectsReasonixViaWrapperCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+
+	binDir := t.TempDir()
+	fakeNPX := filepath.Join(binDir, "npx")
+	if err := os.WriteFile(fakeNPX, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake npx: %v", err)
+	}
+
+	t.Setenv("PATH", binDir)
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("MULTICA_REASONIX_MODEL", "deepseek-chat")
+	t.Setenv("MULTICA_REASONIX_PATH", "npx dsnix@latest")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	entry, ok := cfg.Agents["reasonix"]
+	if !ok {
+		t.Fatal("expected reasonix agent entry")
+	}
+	if entry.Path != "npx dsnix@latest" {
+		t.Fatalf("reasonix path = %q, want npx dsnix@latest", entry.Path)
+	}
+}
+
 // TestLoadConfig_AutoUpdateDefault_CloudOn confirms the symmetric case: a
 // daemon pointed at Multica's hosted cloud keeps the historical opt-in
 // auto-update default. We pass the WSS form of the URL to also exercise that
