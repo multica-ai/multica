@@ -32,10 +32,19 @@ export function findSkillSuggestionMatch(config: {
   const trigger = match[2] ?? "";
   const queryPart = match[3] ?? "";
 
+  // Anchor the replacement range to the cursor, NOT to the parent node.
+  // `nodeBefore.text` is the run of text ending exactly at the cursor, so it
+  // begins at `$position.pos - text.length`. The previous implementation used
+  // `$position.before() + 1` (the start of the *paragraph*); that was correct
+  // only when the text node happened to start at the paragraph's first
+  // position. As soon as earlier inline content — another mention chip, a
+  // hard break, an emoji node — pushed the text node further in, the computed
+  // `from`/`to` were too small and the selected skill was inserted at a random
+  // earlier offset instead of where the `/` was typed (FIR-2299).
   const matchIndex = (match.index ?? 0) + leadingWs.length;
-  const textFrom = config.$position.before() + 1;
+  const textFrom = config.$position.pos - text.length;
   const from = textFrom + matchIndex;
-  const to = textFrom + text.length;
+  const to = config.$position.pos;
 
   return {
     range: { from, to },
