@@ -917,3 +917,102 @@ func TestProjectResourceLocalDirectoryLabelShadow(t *testing.T) {
 		t.Errorf("in-place rename: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+// TestCreateProjectBundledLocalDirectoryLabelShadow pins the second leg of the
+// label-shadow guard: a single POST /api/projects that bundles two
+// local_directory resources with the same (daemon_id, local_path) but
+// different `label` values must reject with 400 before any DB work, otherwise
+// the DB UNIQUE(project_id, resource_type, resource_ref) constraint would let
+// the duplicate slip past (label lives inside resource_ref).
+func TestCreateProjectBundledLocalDirectoryLabelShadow(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Bundled label shadow",
+		"resources": []map[string]any{
+			{
+				"resource_type": "local_directory",
+				"resource_ref": map[string]any{
+					"local_path": "/Users/foo/work/dup",
+					"daemon_id":  "d-bundle",
+					"label":      "first",
+				},
+			},
+			{
+				"resource_type": "local_directory",
+				"resource_ref": map[string]any{
+					"local_path": "/Users/foo/work/dup",
+					"daemon_id":  "d-bundle",
+					"label":      "second label",
+				},
+			},
+		},
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("bundled label shadow: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Confirm the rollback: no project with the title should exist.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/projects?workspace_id="+testWorkspaceID, nil)
+	testHandler.ListProjects(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListProjects: %d %s", w.Code, w.Body.String())
+	}
+	var list struct {
+		Projects []ProjectResponse `json:"projects"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	for _, p := range list.Projects {
+		if p.Title == "Bundled label shadow" {
+			t.Errorf("expected no project to survive bundled-create rejection, but found %s", p.ID)
+		}
+	}
+
+	// A bundle with distinct (daemon_id, local_path) entries still works, even
+	// with different labels on each row — the dedupe key is the target, not
+	// the label.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Bundled distinct paths",
+		"resources": []map[string]any{
+			{
+				"resource_type": "local_directory",
+				"resource_ref": map[string]any{
+					"local_path": "/Users/foo/work/a",
+					"daemon_id":  "d-bundle",
+					"label":      "A",
+				},
+			},
+			{
+				"resource_type": "local_directory",
+				"resource_ref": map[string]any{
+					"local_path": "/Users/foo/work/b",
+					"daemon_id":  "d-bundle",
+					"label":      "B",
+				},
+			},
+		},
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("distinct-path bundle: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		ID        string                    `json:"id"`
+		Resources []ProjectResourceResponse `json:"resources"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	defer func() {
+		r := newRequest("DELETE", "/api/projects/"+resp.ID, nil)
+		r = withURLParam(r, "id", resp.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), r)
+	}()
+	if len(resp.Resources) != 2 {
+		t.Errorf("distinct-path bundle: expected 2 resources, got %d", len(resp.Resources))
+	}
+}

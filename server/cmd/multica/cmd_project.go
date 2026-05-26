@@ -641,14 +641,16 @@ func runProjectResourceUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Fetch the existing row so per-type shortcuts know which schema to
-	// emit. The server still validates, but doing the dispatch here means
-	// the user gets a clear "what does --url do here?" error before we
-	// round-trip.
+	// emit and which fields to preserve. The server treats resource_ref as
+	// opaque-replace, so a partial edit like `--default-branch-hint` has to
+	// rebuild the full payload here — otherwise the unmentioned `url` would
+	// vanish and the server would 400.
 	var existing map[string]any
 	if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID+"/resources", &existing); err != nil {
 		return fmt.Errorf("list project resources: %w", err)
 	}
 	var resourceType string
+	var existingRef map[string]any
 	if list, ok := existing["resources"].([]any); ok {
 		for _, raw := range list {
 			row, ok := raw.(map[string]any)
@@ -657,6 +659,9 @@ func runProjectResourceUpdate(cmd *cobra.Command, args []string) error {
 			}
 			if strVal(row, "id") == resourceRef.ID {
 				resourceType = strVal(row, "resource_type")
+				if ref, ok := row["resource_ref"].(map[string]any); ok {
+					existingRef = ref
+				}
 				break
 			}
 		}
@@ -671,7 +676,7 @@ func runProjectResourceUpdate(cmd *cobra.Command, args []string) error {
 		}
 		body["resource_ref"] = ref
 	} else {
-		ref, has, err := buildResourceRefFromFlags(cmd, resourceType)
+		ref, has, err := buildResourceRefFromFlags(cmd, resourceType, existingRef)
 		if err != nil {
 			return err
 		}
@@ -718,12 +723,14 @@ func runProjectResourceUpdate(cmd *cobra.Command, args []string) error {
 }
 
 // buildResourceRefFromFlags collects the per-type shortcut flags into a
-// resource_ref payload. Returns (ref, true) only when the caller actually set
-// at least one shortcut flag — that lets the update command tell "no change
-// requested" apart from "change ref to empty object". For local_directory we
-// only emit a partial ref when every required field is present so the server
-// never sees a half-built `{daemon_id: …}` payload.
-func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string) (map[string]any, bool, error) {
+// resource_ref payload, seeding from existingRef so partial edits (only
+// --default-branch-hint, only --ref-label) preserve the unmentioned fields.
+// Returns (ref, true) only when the caller actually set at least one shortcut
+// flag — that lets the update command tell "no change requested" apart from
+// "change ref to empty object". existingRef may be nil for the `add` path,
+// where there is nothing to merge with; in that case partial inputs that miss
+// required fields are still rejected.
+func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existingRef map[string]any) (map[string]any, bool, error) {
 	switch resourceType {
 	case "github_repo":
 		urlSet := cmd.Flags().Changed("url")
@@ -732,6 +739,16 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string) (map[str
 			return nil, false, nil
 		}
 		ref := map[string]any{}
+		// Seed from the existing row so a `--default-branch-hint` edit doesn't
+		// clobber the `url` (server overwrites resource_ref wholesale).
+		if existingRef != nil {
+			if u, ok := existingRef["url"].(string); ok && strings.TrimSpace(u) != "" {
+				ref["url"] = strings.TrimSpace(u)
+			}
+			if h, ok := existingRef["default_branch_hint"].(string); ok && strings.TrimSpace(h) != "" {
+				ref["default_branch_hint"] = strings.TrimSpace(h)
+			}
+		}
 		if urlSet {
 			urlVal, _ := cmd.Flags().GetString("url")
 			urlVal = strings.TrimSpace(urlVal)
@@ -741,8 +758,15 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string) (map[str
 			ref["url"] = urlVal
 		}
 		if hintSet {
-			hint, _ := cmd.Flags().GetString("default-branch-hint")
-			ref["default_branch_hint"] = strings.TrimSpace(hint)
+			hint := strings.TrimSpace(mustString(cmd, "default-branch-hint"))
+			if hint == "" {
+				delete(ref, "default_branch_hint")
+			} else {
+				ref["default_branch_hint"] = hint
+			}
+		}
+		if _, ok := ref["url"]; !ok {
+			return nil, false, fmt.Errorf("github_repo: --url is required (no existing url to merge with)")
 		}
 		return ref, true, nil
 	case "local_directory":
@@ -753,25 +777,44 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string) (map[str
 			return nil, false, nil
 		}
 		ref := map[string]any{}
+		if existingRef != nil {
+			if p, ok := existingRef["local_path"].(string); ok && strings.TrimSpace(p) != "" {
+				ref["local_path"] = strings.TrimSpace(p)
+			}
+			if d, ok := existingRef["daemon_id"].(string); ok && strings.TrimSpace(d) != "" {
+				ref["daemon_id"] = strings.TrimSpace(d)
+			}
+			if l, ok := existingRef["label"].(string); ok && strings.TrimSpace(l) != "" {
+				ref["label"] = strings.TrimSpace(l)
+			}
+		}
 		if pathSet {
-			pathVal, _ := cmd.Flags().GetString("local-path")
-			ref["local_path"] = strings.TrimSpace(pathVal)
+			pathVal := strings.TrimSpace(mustString(cmd, "local-path"))
+			if pathVal == "" {
+				return nil, false, fmt.Errorf("--local-path cannot be empty")
+			}
+			ref["local_path"] = pathVal
 		}
 		if daemonSet {
-			daemonVal, _ := cmd.Flags().GetString("daemon-id")
-			ref["daemon_id"] = strings.TrimSpace(daemonVal)
+			daemonVal := strings.TrimSpace(mustString(cmd, "daemon-id"))
+			if daemonVal == "" {
+				return nil, false, fmt.Errorf("--daemon-id cannot be empty")
+			}
+			ref["daemon_id"] = daemonVal
 		}
 		if labelSet {
-			refLabel, _ := cmd.Flags().GetString("ref-label")
-			ref["label"] = strings.TrimSpace(refLabel)
+			refLabel := strings.TrimSpace(mustString(cmd, "ref-label"))
+			if refLabel == "" {
+				delete(ref, "label")
+			} else {
+				ref["label"] = refLabel
+			}
 		}
-		// The ref must remain self-contained — partial updates would
-		// drop required fields server-side. Refuse early.
-		if _, ok := ref["local_path"]; !ok || !pathSet || strings.TrimSpace(ref["local_path"].(string)) == "" {
-			return nil, false, fmt.Errorf("local_directory --ref edits require --local-path (and --daemon-id)")
+		if v, ok := ref["local_path"].(string); !ok || v == "" {
+			return nil, false, fmt.Errorf("local_directory: --local-path is required (no existing local_path to merge with)")
 		}
-		if _, ok := ref["daemon_id"]; !ok || !daemonSet || strings.TrimSpace(ref["daemon_id"].(string)) == "" {
-			return nil, false, fmt.Errorf("local_directory --ref edits require --daemon-id (and --local-path)")
+		if v, ok := ref["daemon_id"].(string); !ok || v == "" {
+			return nil, false, fmt.Errorf("local_directory: --daemon-id is required (no existing daemon_id to merge with)")
 		}
 		return ref, true, nil
 	default:
@@ -783,6 +826,11 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string) (map[str
 		}
 		return nil, false, nil
 	}
+}
+
+func mustString(cmd *cobra.Command, name string) string {
+	v, _ := cmd.Flags().GetString(name)
+	return v
 }
 
 func runProjectResourceRemove(cmd *cobra.Command, args []string) error {
