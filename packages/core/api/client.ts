@@ -472,6 +472,12 @@ export class ApiClient {
     if (res.status === 204) {
       return undefined as T;
     }
+    // CEREBRO-PATCH(api-client-202-no-body): FIR-2284 — some cerebro endpoints
+    // (POST /api/runtimes/{id}/tools/scan-now) reply 202 Accepted with an empty
+    // body; without this, res.json() throws "Unexpected end of JSON input".
+    if (res.status === 202) {
+      return undefined as T;
+    }
     return res.json() as Promise<T>;
   }
 

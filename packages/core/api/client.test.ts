@@ -322,6 +322,24 @@ describe("ApiClient", () => {
     ).resolves.toMatchObject({ id: "", status: "" });
   });
 
+  // CEREBRO-PATCH(api-client-202-no-body): FIR-2284 — guard against a regression
+  // of the "Scan now" frontend error ("Unexpected end of JSON input"): the
+  // scan-now endpoint replies 202 Accepted with no body, so fetch<T> must not
+  // attempt to JSON-parse it.
+  it("cerebroRequest resolves to undefined for 202 Accepted with no body", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(null, { status: 202 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.cerebroRequest<void>("/api/runtimes/rt-1/tools/scan-now", {
+        method: "POST",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it("deleteCloudRuntimeNode sends DELETE with JSON body containing instance id", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(null, { status: 204 }),
