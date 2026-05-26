@@ -1,0 +1,260 @@
+{
+  "source_issue": "OPE-1581",
+  "generated_at": "2026-05-26T17:32:33+08:00",
+  "selection_mode": "new_updated_impacted",
+  "selection_reason": "current PRD adds the issue-detail action for creating a child issue from the current issue and blocking the source issue after success",
+  "selected_cases": [
+    {
+      "file": "testcase/case/tc-058-create-issue-from-current.md",
+      "relation": "new",
+      "reason": "covers the primary user-visible workflow introduced by OPE-1581"
+    }
+  ],
+  "excluded_cases": [
+    {
+      "file": "testcase/case/tc-001-fixed-verification-code-login.md",
+      "relation": "unchanged",
+      "reason": "authentication flow is not changed by OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-002-custom-webhook-create-and-test.md",
+      "relation": "unchanged",
+      "reason": "custom webhook workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-003-custom-webhook-channel-toggle.md",
+      "relation": "unchanged",
+      "reason": "webhook channel toggling is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-004-auto-set-project-on-new-issue.md",
+      "relation": "unchanged",
+      "reason": "project-page issue creation is not changed by OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-005-dingtalk-login.md",
+      "relation": "unchanged",
+      "reason": "DingTalk login is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-006-google-oauth-login.md",
+      "relation": "unchanged",
+      "reason": "Google OAuth login is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-007-dingtalk-notification-binding.md",
+      "relation": "unchanged",
+      "reason": "notification binding is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-008-email-notification-binding.md",
+      "relation": "unchanged",
+      "reason": "email notification binding is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-009-agent-mine-all-filter.md",
+      "relation": "unchanged",
+      "reason": "agent list filtering is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-010-agent-duplicate.md",
+      "relation": "unchanged",
+      "reason": "agent duplication is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-011-agent-permission-controls.md",
+      "relation": "unchanged",
+      "reason": "agent permission controls are unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-012-agent-defaults-config.md",
+      "relation": "unchanged",
+      "reason": "agent defaults configuration is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-013-workspace-wiki.md",
+      "relation": "unchanged",
+      "reason": "workspace wiki workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-014-invite-link-flow.md",
+      "relation": "unchanged",
+      "reason": "invite link workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-015-clear-issue-history.md",
+      "relation": "unchanged",
+      "reason": "issue history clearing is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-016-comment-draft-preservation.md",
+      "relation": "unchanged",
+      "reason": "comment draft preservation is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-017-mention-agent-filtering.md",
+      "relation": "unchanged",
+      "reason": "mention filtering is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-018-execution-log-features.md",
+      "relation": "unchanged",
+      "reason": "execution log workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-019-retry-agent-comment.md",
+      "relation": "unchanged",
+      "reason": "agent comment retry is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-020-issue-delete-permission.md",
+      "relation": "unchanged",
+      "reason": "issue deletion permission is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-021-autopilot-run-enhancements.md",
+      "relation": "unchanged",
+      "reason": "autopilot workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-022-chat-delete-retry.md",
+      "relation": "unchanged",
+      "reason": "chat delete/retry workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-023-skills-batch-upload.md",
+      "relation": "unchanged",
+      "reason": "skills upload workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-024-issue-identifier-routes.md",
+      "relation": "unchanged",
+      "reason": "issue identifier routing is not changed by OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-025-project-sorting.md",
+      "relation": "unchanged",
+      "reason": "project sorting is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-026-issue-scroll-controls.md",
+      "relation": "unchanged",
+      "reason": "issue scroll controls are unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-027-auto-status-on-comment.md",
+      "relation": "unchanged",
+      "reason": "comment-triggered status updates are unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-028-claude-plan-mode.md",
+      "relation": "unchanged",
+      "reason": "Claude plan mode is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-029-my-issues-includes-unassigned.md",
+      "relation": "unchanged",
+      "reason": "my issues filtering is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-030-comment-copy-link.md",
+      "relation": "unchanged",
+      "reason": "comment copy-link workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-031-auto-block-on-task-fail.md",
+      "relation": "unchanged",
+      "reason": "task-failure auto-block workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-032-timeline-cycle-resilience.md",
+      "relation": "unchanged",
+      "reason": "timeline cycle resilience is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-033-mobile-app-core.md",
+      "relation": "unchanged",
+      "reason": "mobile app workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-034-private-chat-gate.md",
+      "relation": "unchanged",
+      "reason": "private chat gate is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-035-cli-managed-update.md",
+      "relation": "unchanged",
+      "reason": "CLI managed update is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-036-deepseek-tui-runtime.md",
+      "relation": "unchanged",
+      "reason": "runtime provider workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-037-webhook-custom-format.md",
+      "relation": "unchanged",
+      "reason": "webhook custom format workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-038-paste-image-upload.md",
+      "relation": "unchanged",
+      "reason": "image upload workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-039-comment-body-collapse.md",
+      "relation": "unchanged",
+      "reason": "comment body collapse is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-040-weixin-notification-channel.md",
+      "relation": "unchanged",
+      "reason": "Weixin notification channel is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-041-wiki-creator-activity.md",
+      "relation": "unchanged",
+      "reason": "wiki creator activity is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-042-issue-subscription.md",
+      "relation": "unchanged",
+      "reason": "issue subscription is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-043-mobile-issue-labels-parent.md",
+      "relation": "unchanged",
+      "reason": "mobile issue labels and parent display are unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-044-mobile-inbox-batch.md",
+      "relation": "unchanged",
+      "reason": "mobile inbox batch workflow is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-045-mobile-label-filter.md",
+      "relation": "unchanged",
+      "reason": "mobile label filtering is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-046-notification-render-mode-settings.md",
+      "relation": "unchanged",
+      "reason": "notification render-mode settings are unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-047-im-compact-task-notification-delivery.md",
+      "relation": "unchanged",
+      "reason": "IM compact task notification delivery is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-048-workspace-root-blank-page.md",
+      "relation": "unchanged",
+      "reason": "workspace root page behavior is unrelated to OPE-1581"
+    },
+    {
+      "file": "testcase/case/tc-057-mobile-issue-comments-timeline.md",
+      "relation": "unchanged",
+      "reason": "mobile issue comments timeline is unrelated to OPE-1581"
+    }
+  ]
+}
