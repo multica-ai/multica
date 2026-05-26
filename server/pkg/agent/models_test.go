@@ -144,9 +144,9 @@ func TestInferCopilotProvider(t *testing.T) {
 		"raptor-mini":       "",
 		// negative cases: must not be misidentified as OpenAI
 		// reasoning series even though they start with `o`.
-		"opus-fake":         "",
-		"omni":              "",
-		"o":                 "",
+		"opus-fake": "",
+		"omni":      "",
+		"o":         "",
 	}
 	for id, want := range cases {
 		if got := inferCopilotProvider(id); got != want {
@@ -508,6 +508,32 @@ func TestParseHermesSessionNewModels(t *testing.T) {
 	}
 	if models[1].ID != "nous:anthropic/claude-opus-4.7" {
 		t.Errorf("expected current model second: %+v", models[1])
+	}
+}
+
+func TestParseHermesSessionNewModelsSnakeCaseAndUnknownNames(t *testing.T) {
+	raw := []byte(`{
+      "session_id": "ses_123",
+      "models": {
+        "available_models": [
+          {"model_id": "nous:moonshotai/kimi-k2.6", "name": "Unknown", "description": "Provider: Nous"},
+          {"model_id": "nous:anthropic/claude-sonnet-4.6", "name": "unknown", "description": "Provider: Nous"}
+        ],
+        "current_model_id": "nous:moonshotai/kimi-k2.6"
+      }
+    }`)
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d: %+v", len(models), models)
+	}
+	if models[0].Label != "nous:moonshotai/kimi-k2.6" {
+		t.Errorf("Unknown label should fall back to model id, got %+v", models[0])
+	}
+	if !models[0].Default {
+		t.Errorf("snake_case current_model_id should mark default: %+v", models[0])
+	}
+	if models[1].Label != "nous:anthropic/claude-sonnet-4.6" {
+		t.Errorf("lowercase unknown label should fall back to model id, got %+v", models[1])
 	}
 }
 
