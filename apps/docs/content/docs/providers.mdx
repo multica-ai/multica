@@ -1,11 +1,11 @@
 ---
 title: AI coding tools matrix
-description: Multica supports 11 AI coding tools; they implement the same interface, but the capability details diverge significantly.
+description: Multica supports 12 AI coding tools; they implement the same interface, but the capability details diverge significantly.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica ships with built-in support for **11 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
+Multica ships with built-in support for **12 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
 
 For guidance on picking a tool when creating an agent, see [Creating and configuring agents](/agents-create).
 
@@ -21,6 +21,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | **Hermes** | Nous Research | ✅ | ❌ | `.agent_context/skills/` (fallback) | Dynamic discovery |
 | **Kimi** | Moonshot | ✅ | ❌ | `.kimi/skills/` | Dynamic discovery |
 | **Kiro CLI** | Amazon | ✅ | ❌ | `.kiro/skills/` | Dynamic discovery |
+| **Reasonix** | esengine | ❌ | ❌ | `.reasonix/skills/` | Launch flag |
 | **OpenCode** | SST | ✅ | ❌ | `.opencode/skills/` | Dynamic discovery |
 | **OpenClaw** | Open source | ✅ | ❌ | `.agent_context/skills/` (fallback) | Bound to the agent, can't be switched per task |
 | **Pi** | Inflection AI | ✅ (session is a file path) | ❌ | `.pi/skills/` | Dynamic discovery |
@@ -29,7 +30,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 
 ### Claude Code
 
-From Anthropic. **First choice for new users** — the most complete feature set: session resumption actually works, it's the **only one of the 11 that truly reads MCP configuration**, and it supports fine-tuning flags like `--max-turns` and `--append-system-prompt`. Requires an Anthropic API key.
+From Anthropic. **First choice for new users** — the most complete feature set: session resumption actually works, it's the **only one of the 12 that truly reads MCP configuration**, and it supports fine-tuning flags like `--max-turns` and `--append-system-prompt`. Requires an Anthropic API key.
 
 ### Codex
 
@@ -59,6 +60,10 @@ From Moonshot, aimed at the Chinese market. Shares the ACP protocol with Hermes,
 
 From Amazon. Uses ACP over stdio via `kiro-cli acp`. Session resumption works through ACP `session/load`, model selection works through `session/set_model`, and skills are copied into `.kiro/skills/` for native project-level discovery.
 
+### Reasonix
+
+From esengine, focused on DeepSeek-native coding workflows. Multica launches it through `npx reasonix acp` (or a custom `MULTICA_REASONIX_PATH` wrapper such as `npx dsnix@latest`). **Session resumption is not supported** — every task starts a fresh ACP session — but project skills are copied into `.reasonix/skills/` for native discovery and the selected model is passed via the launch-time `--model` flag.
+
 ### OpenCode
 
 From SST, open source. Dynamically discovers available models (scans the CLI's configuration file). Session resumption works. **Suitable for tinkerers who want to customize their model catalog.**
@@ -79,13 +84,13 @@ The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continu
 |---|---|---|
 | ✅ Really works | Claude Code, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi | Pass the resume id and it continues from the previous context |
 | ⚠️ Code exists but unreachable | Codex, Cursor | Resume paths exist in the code but aren't actually reached (Codex silently falls back; Cursor doesn't return session id) — **treat as unsupported** |
-| ❌ None | Gemini | The CLI has no resume mechanism |
+| ❌ None | Gemini, Reasonix | The CLI has no usable resume mechanism |
 
 **For your decision**: if your workflow needs agents to preserve context across tasks (failure retries, manual reruns, conversational iteration), pick only from the ✅ row.
 
 ## MCP configuration: only Claude Code actually reads it
 
-**Of the 11 tools, only Claude Code actually consumes `mcp_config`**. The other 10 accept the field but **completely ignore it** — no error, no warning, the config just has no effect.
+**Of the 12 tools, only Claude Code actually consumes `mcp_config`**. The other 11 accept the field but **completely ignore it** — no error, no warning, the config just has no effect.
 
 <Callout type="warning">
 If you set `mcp_config` in an agent configuration but pick a tool other than Claude Code, your MCP servers have **no effect** on that agent. MCP integration currently covers Claude Code only.
@@ -103,6 +108,7 @@ Each tool uses **its own** skill discovery path. Before a task runs, the Multica
 | Cursor | `.cursor/skills/` | ✅ Native |
 | Kimi | `.kimi/skills/` | ✅ Native |
 | Kiro CLI | `.kiro/skills/` | ✅ Native |
+| Reasonix | `.reasonix/skills/` | ✅ Native |
 | OpenCode | `.opencode/skills/` | ✅ Native |
 | Pi | `.pi/skills/` | ✅ Native |
 | Gemini | `.agent_context/skills/` | ⚠️ Generic fallback |

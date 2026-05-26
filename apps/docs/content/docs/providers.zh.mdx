@@ -1,11 +1,11 @@
 ---
 title: AI 编程工具对照
-description: Multica 支持 11 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
+description: Multica 支持 12 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica 内置支持 **11 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 Multica 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
+Multica 内置支持 **12 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 Multica 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
 
 创建智能体时挑选工具的指引见 [创建和配置智能体](/agents-create)。
 
@@ -21,6 +21,7 @@ Multica 内置支持 **11 款 AI 编程工具**。它们都实现了同一套接
 | **Hermes** | Nous Research | ✅ | ❌ | `.agent_context/skills/` （fallback）| 动态发现 |
 | **Kimi** | Moonshot | ✅ | ❌ | `.kimi/skills/` | 动态发现 |
 | **Kiro CLI** | Amazon | ✅ | ❌ | `.kiro/skills/` | 动态发现 |
+| **Reasonix** | esengine | ❌ | ❌ | `.reasonix/skills/` | 启动参数 |
 | **OpenCode** | SST | ✅ | ❌ | `.opencode/skills/` | 动态发现 |
 | **OpenClaw** | 开源项目 | ✅ | ❌ | `.agent_context/skills/` （fallback）| 绑定在智能体上，不能在任务里切换 |
 | **Pi** | Inflection AI | ✅（session 为文件路径）| ❌ | `.pi/skills/` | 动态发现 |
@@ -29,7 +30,7 @@ Multica 内置支持 **11 款 AI 编程工具**。它们都实现了同一套接
 
 ### Claude Code
 
-Anthropic 出品。**新用户首选**——功能最完整：会话恢复真用，是 **11 款里唯一真读 MCP 配置**的工具，支持 `--max-turns`、`--append-system-prompt` 等细调参数。需要一个 Anthropic API 密钥。
+Anthropic 出品。**新用户首选**——功能最完整：会话恢复真用，是 **12 款里唯一真读 MCP 配置**的工具，支持 `--max-turns`、`--append-system-prompt` 等细调参数。需要一个 Anthropic API 密钥。
 
 ### Codex
 
@@ -59,6 +60,10 @@ Moonshot 出品，中国市场向。和 Hermes 共享 ACP 协议，但 skill 路
 
 Amazon 出品。通过 `kiro-cli acp` 使用 ACP stdio 协议。会话恢复走 ACP `session/load`，模型选择走 `session/set_model`，skill 会复制到 `.kiro/skills/` 让 Kiro 做项目级原生发现。
 
+### Reasonix
+
+esengine 出品，偏向 DeepSeek 原生工作流。Multica 通过 `npx reasonix acp` 拉起它，也支持把 `MULTICA_REASONIX_PATH` 配成自定义 wrapper（例如 `npx dsnix@latest`）。**它不支持会话恢复**——每次任务都会新建一条 ACP 会话——但项目级 skill 会复制到 `.reasonix/skills/` 供 Reasonix 原生发现，模型通过启动时的 `--model` 参数传入。
+
 ### OpenCode
 
 SST 出品，开源。动态发现可用模型（扫 CLI 的配置文件）。会话恢复真用。**适合爱折腾、想自定义模型目录**的开发者。
@@ -79,13 +84,13 @@ Inflection AI 出品，极简主义。**会话恢复机制特殊**——session 
 |---|---|---|
 | ✅ 真用 | Claude Code、Copilot、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi | 传 resume id，会从上次上下文接着继续 |
 | ⚠️ 代码存在但不可达 | Codex、Cursor | 代码里有 resume 路径但实际走不到（Codex 静默回落、Cursor session id 不回传）—— **当作不支持** |
-| ❌ 无 | Gemini | CLI 无 resume 机制 |
+| ❌ 无 | Gemini、Reasonix | CLI 没有可用的 resume 机制 |
 
 **对你的决策**：如果工作流需要智能体在多次任务之间保持上下文（失败重试、手动重跑、对话式迭代），只选 ✅ 那一行的工具。
 
 ## MCP 配置：只有 Claude Code 真的读
 
-**11 款工具里只有 Claude Code 实际消费 `mcp_config`**。其他 10 款会接收这个字段但**完全忽略**——不报错、不警告，只是配置不生效。
+**12 款工具里只有 Claude Code 实际消费 `mcp_config`**。其他 11 款会接收这个字段但**完全忽略**——不报错、不警告，只是配置不生效。
 
 <Callout type="warning">
 如果你在智能体配置里设置了 `mcp_config`，但选了 Claude Code 之外的工具，你的 MCP server 对这个智能体**没有效果**。目前的 MCP 集成只覆盖 Claude Code。
@@ -103,6 +108,7 @@ Inflection AI 出品，极简主义。**会话恢复机制特殊**——session 
 | Cursor | `.cursor/skills/` | ✅ 原生 |
 | Kimi | `.kimi/skills/` | ✅ 原生 |
 | Kiro CLI | `.kiro/skills/` | ✅ 原生 |
+| Reasonix | `.reasonix/skills/` | ✅ 原生 |
 | OpenCode | `.opencode/skills/` | ✅ 原生 |
 | Pi | `.pi/skills/` | ✅ 原生 |
 | Gemini | `.agent_context/skills/` | ⚠️ 通用 fallback |
