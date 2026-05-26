@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ArrowUpDown,
   Bot,
+  ChevronDown,
   ImagePlus,
   Plus,
   RefreshCw,
@@ -46,9 +47,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import { ScrollArea } from "@multica/ui/components/ui/scroll-area";
 import { Input } from "@multica/ui/components/ui/input";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { DataTable } from "@multica/ui/components/ui/data-table";
+import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig, availabilityOrder } from "../presence";
@@ -146,8 +158,9 @@ export function AgentsPage() {
     return members.find((m) => m.user_id === currentUser.id)?.role ?? null;
   }, [members, currentUser]);
   const isWorkspaceAdmin = myRole === "owner" || myRole === "admin";
-  // CEREBRO-PATCH(agent-avatar-backfill): admin progress state for missing avatars.
+  // CEREBRO-PATCH(agent-avatar-backfill): admin progress + regenerate-all dialog state.
   const [isStartingBackfill, setIsStartingBackfill] = useState(false);
+  const [showRegenerate, setShowRegenerate] = useState(false);
   const { data: avatarBackfillStatus } = useQuery({
     queryKey: [...workspaceKeys.agents(wsId), "avatar-backfill"],
     queryFn: () => api.getAgentAvatarBackfillStatus(),
@@ -357,6 +370,35 @@ export function AgentsPage() {
     }
   };
 
+  // CEREBRO-PATCH(agent-avatar-backfill): regenerate all avatars except the kept ones.
+  const handleRegenerateAvatars = async (excludeAgentIds: string[]) => {
+    setIsStartingBackfill(true);
+    try {
+      const status = await api.startAgentAvatarBackfill({
+        mode: "all",
+        excludeAgentIds,
+      });
+      qc.setQueryData(
+        [...workspaceKeys.agents(wsId), "avatar-backfill"],
+        status,
+      );
+      toast.success(
+        t(($) => $.avatar_backfill.regenerate_started_toast, {
+          count: status.total,
+        }),
+      );
+      setShowRegenerate(false);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t(($) => $.avatar_backfill.failed_toast),
+      );
+    } finally {
+      setIsStartingBackfill(false);
+    }
+  };
+
   const handleDuplicate = useCallback((agent: Agent) => {
     setDuplicateTemplate(agent);
     setShowCreate(true);
@@ -468,6 +510,7 @@ export function AgentsPage() {
         backfillStatus={avatarBackfillStatus}
         backfillStarting={isStartingBackfill}
         onBackfill={handleBackfillAvatars}
+        onRegenerateAll={() => setShowRegenerate(true)}
       />
 
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
@@ -539,6 +582,16 @@ export function AgentsPage() {
           onCreate={handleCreate}
         />
       )}
+
+      {/* CEREBRO-PATCH(agent-avatar-backfill): pick which agents to regenerate. */}
+      {showRegenerate && (
+        <RegenerateAvatarsDialog
+          agents={agents.filter((a) => !a.archived_at)}
+          submitting={isStartingBackfill}
+          onCancel={() => setShowRegenerate(false)}
+          onConfirm={handleRegenerateAvatars}
+        />
+      )}
     </div>
   );
 }
@@ -555,6 +608,7 @@ function PageHeaderBar({
   backfillStatus,
   backfillStarting = false,
   onBackfill,
+  onRegenerateAll,
 }: {
   totalCount: number;
   canCreate: boolean;
@@ -563,6 +617,7 @@ function PageHeaderBar({
   backfillStatus?: AgentAvatarBackfillStatus;
   backfillStarting?: boolean;
   onBackfill?: () => void;
+  onRegenerateAll?: () => void;
 }) {
   const { t } = useT("agents");
   const backfillRunning = backfillStatus?.status === "running";
@@ -572,7 +627,7 @@ function PageHeaderBar({
         done: (backfillStatus?.generated ?? 0) + (backfillStatus?.failed ?? 0),
         total: backfillStatus?.total ?? 0,
       })
-    : t(($) => $.avatar_backfill.button);
+    : t(($) => $.avatar_backfill.menu_label);
   return (
     <PageHeader className="justify-between px-5">
       <div className="flex items-center gap-2">
@@ -598,21 +653,42 @@ function PageHeaderBar({
       </div>
       <div className="flex items-center gap-2">
         {canBackfill && onBackfill && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={onBackfill}
-            disabled={backfillStarting || backfillRunning || noMissing}
-            title={noMissing ? t(($) => $.avatar_backfill.none_missing_title) : undefined}
-          >
-            {backfillRunning || backfillStarting ? (
-              <RefreshCw className="h-3 w-3 animate-spin" />
-            ) : (
-              <ImagePlus className="h-3 w-3" />
-            )}
-            {backfillLabel}
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={backfillStarting || backfillRunning}
+                >
+                  {backfillRunning || backfillStarting ? (
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <ImagePlus className="h-3 w-3" />
+                  )}
+                  {backfillLabel}
+                  <ChevronDown className="h-3 w-3" />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                disabled={noMissing}
+                onClick={() => onBackfill()}
+              >
+                {t(($) => $.avatar_backfill.button)}
+                {noMissing
+                  ? ` — ${t(($) => $.avatar_backfill.none_missing_title)}`
+                  : ""}
+              </DropdownMenuItem>
+              {onRegenerateAll && (
+                <DropdownMenuItem onClick={() => onRegenerateAll()}>
+                  {t(($) => $.avatar_backfill.regenerate_all)}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
         {canCreate && (
           <Button type="button" size="sm" onClick={onCreate}>
@@ -622,6 +698,139 @@ function PageHeaderBar({
         )}
       </div>
     </PageHeader>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CEREBRO-PATCH(agent-avatar-backfill): regenerate-avatars picker. Lists every
+// active agent with a checkbox (all selected by default); unchecking an agent
+// (e.g. Mia) keeps its current avatar. Confirm regenerates the selected agents
+// with bold, distinct background colours.
+// ---------------------------------------------------------------------------
+
+function RegenerateAvatarsDialog({
+  agents,
+  submitting,
+  onCancel,
+  onConfirm,
+}: {
+  agents: Agent[];
+  submitting: boolean;
+  onCancel: () => void;
+  onConfirm: (excludeAgentIds: string[]) => void;
+}) {
+  const { t } = useT("agents");
+  const sorted = useMemo(
+    () => [...agents].sort((a, b) => a.name.localeCompare(b.name)),
+    [agents],
+  );
+  // Selected = will be regenerated. Default: everyone.
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(sorted.map((a) => a.id)),
+  );
+  const allSelected = sorted.length > 0 && selected.size === sorted.length;
+
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAll = () =>
+    setSelected(allSelected ? new Set() : new Set(sorted.map((a) => a.id)));
+
+  const handleConfirm = () => {
+    if (selected.size === 0) {
+      toast.error(t(($) => $.avatar_backfill.regenerate_none_selected));
+      return;
+    }
+    const exclude = sorted
+      .filter((a) => !selected.has(a.id))
+      .map((a) => a.id);
+    onConfirm(exclude);
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {t(($) => $.avatar_backfill.regenerate_dialog_title)}
+          </DialogTitle>
+          <DialogDescription>
+            {t(($) => $.avatar_backfill.regenerate_dialog_desc)}
+          </DialogDescription>
+        </DialogHeader>
+
+        <button
+          type="button"
+          onClick={toggleAll}
+          className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm font-medium hover:bg-accent/50"
+        >
+          <Checkbox
+            checked={allSelected}
+            tabIndex={-1}
+            className="pointer-events-none"
+          />
+          {t(($) => $.avatar_backfill.regenerate_select_all)}
+        </button>
+
+        <ScrollArea className="max-h-72">
+          <div className="flex flex-col gap-0.5 pr-2">
+            {sorted.map((agent) => {
+              const isOn = selected.has(agent.id);
+              return (
+                <button
+                  key={agent.id}
+                  type="button"
+                  onClick={() => toggle(agent.id)}
+                  className={cn(
+                    "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors",
+                    isOn ? "bg-accent" : "hover:bg-accent/50",
+                  )}
+                >
+                  <Checkbox
+                    checked={isOn}
+                    tabIndex={-1}
+                    className="pointer-events-none"
+                  />
+                  <span className="truncate text-sm">{agent.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </ScrollArea>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onCancel}
+            disabled={submitting}
+          >
+            {t(($) => $.avatar_backfill.regenerate_cancel)}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleConfirm}
+            disabled={submitting || selected.size === 0}
+          >
+            {submitting && <RefreshCw className="h-3 w-3 animate-spin" />}
+            {t(($) => $.avatar_backfill.regenerate_confirm, {
+              count: selected.size,
+            })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

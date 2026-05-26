@@ -27,7 +27,7 @@ func TestBuildPrompt(t *testing.T) {
 
 	t.Run("auto prompt is photorealistic, not an illustration", func(t *testing.T) {
 		got := strings.ToLower(buildPrompt("Sara", ""))
-		for _, want := range []string{"photorealistic", "scandinavian", "headshot", "studio background"} {
+		for _, want := range []string{"photorealistic", "scandinavian", "headshot"} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("prompt missing %q: %s", want, got)
 			}
@@ -36,6 +36,22 @@ func TestBuildPrompt(t *testing.T) {
 		// cartoons — regressing it reintroduces the "håbløs" avatar.
 		if !strings.Contains(got, "not an illustration") {
 			t.Fatalf("prompt missing anti-illustration clause: %s", got)
+		}
+	})
+
+	t.Run("background is forced bright and flat, not a dark studio backdrop", func(t *testing.T) {
+		// The earlier prompt asked for a "studio background" + "soft studio
+		// lighting", and the model rendered dark, dim backdrops where the colour
+		// barely showed (FIR-2321). The fix forces a flat, saturated, evenly-lit
+		// colour and explicitly forbids the dark studio look.
+		got := strings.ToLower(buildPrompt("Sara", ""))
+		for _, want := range []string{"saturated", "lit bright", "even", "no vignette", "no gradient"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("background clause missing %q: %s", want, got)
+			}
+		}
+		if strings.Contains(got, "studio background") {
+			t.Fatalf("prompt still asks for a studio background (renders dark): %s", got)
 		}
 	})
 
@@ -52,13 +68,20 @@ func TestBuildPrompt(t *testing.T) {
 		seen := map[string]bool{}
 		for _, n := range names {
 			for _, bg := range backgroundColors {
-				if strings.Contains(buildPrompt(n, ""), " solid "+bg+" studio background") {
+				if strings.Contains(buildPrompt(n, ""), "saturated "+bg+",") {
 					seen[bg] = true
 				}
 			}
 		}
 		if len(seen) < 2 {
 			t.Fatalf("expected varied backgrounds across names, got %d distinct", len(seen))
+		}
+	})
+
+	t.Run("explicit background override wins over the name hash", func(t *testing.T) {
+		got := buildPromptWithBackground("Sara", "", "lava orange")
+		if !strings.Contains(got, "saturated lava orange,") {
+			t.Fatalf("override colour not used: %s", got)
 		}
 	})
 
@@ -92,6 +115,28 @@ func TestBuildPrompt(t *testing.T) {
 			t.Fatalf("unknown name should be passed to the model: %s", got)
 		}
 	})
+}
+
+func TestAssignDistinctBackgrounds(t *testing.T) {
+	// The whole point of batch regeneration is distinct colours: every agent up
+	// to the palette size must get a unique background (the name-hash collided —
+	// six agents shared one green across 23 names).
+	n := len(backgroundColors)
+	got := assignDistinctBackgrounds(n)
+	if len(got) != n {
+		t.Fatalf("len = %d, want %d", len(got), n)
+	}
+	seen := map[string]bool{}
+	for _, c := range got {
+		if seen[c] {
+			t.Fatalf("colour %q assigned twice within palette size", c)
+		}
+		seen[c] = true
+	}
+	// Beyond the palette size it wraps rather than panicking.
+	if wrap := assignDistinctBackgrounds(n + 2); len(wrap) != n+2 {
+		t.Fatalf("wrap len = %d, want %d", len(wrap), n+2)
+	}
 }
 
 func TestGenderForName(t *testing.T) {
@@ -390,5 +435,59 @@ func TestBackfillStartsBackgroundJobAndTracksProgress(t *testing.T) {
 	}
 	if status.Status != "done" || status.Generated != 1 || status.Missing != 0 {
 		t.Fatalf("status = %#v", status)
+	}
+}
+
+func TestBackfillForceRegeneratesAllExceptExcluded(t *testing.T) {
+	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("png-bytes"))
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"images": []string{dataURL}}},
+			},
+		})
+	}))
+	defer gateway.Close()
+
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", gateway.URL)
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+
+	ws := util.MustParseUUID("11111111-1111-1111-1111-111111111111")
+	keep := util.MustParseUUID("44444444-4444-4444-4444-444444444444") // "Mia" — excluded
+	// Both agents already have avatars; a default (missing-only) run would skip
+	// both. Force must regenerate everyone except the excluded agent.
+	agents := &fakeAgentStore{agents: []db.Agent{
+		{ID: util.MustParseUUID("22222222-2222-2222-2222-222222222222"), WorkspaceID: ws, Name: "Sara", AvatarUrl: pgtype.Text{String: "https://cdn/old-sara.png", Valid: true}},
+		{ID: util.MustParseUUID("33333333-3333-3333-3333-333333333333"), WorkspaceID: ws, Name: "Lars", AvatarUrl: pgtype.Text{String: "https://cdn/old-lars.png", Valid: true}},
+		{ID: keep, WorkspaceID: ws, Name: "Mia", AvatarUrl: pgtype.Text{String: "https://cdn/keep-mia.png", Valid: true}},
+	}}
+	h := New(&fakeStorage{}, nil)
+	h.agents = agents
+
+	body, _ := json.Marshal(backfillRequest{Mode: "all", ExcludeAgentIDs: []string{util.UUIDToString(keep)}})
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/backfill-avatars", strings.NewReader(string(body)))
+	ctx := middleware.SetMemberContext(req.Context(), "11111111-1111-1111-1111-111111111111", db.Member{Role: "owner"})
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.Backfill(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("Backfill status = %d, body %s", w.Code, w.Body.String())
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(agents.updates) == 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(agents.updates) != 2 {
+		t.Fatalf("updates = %d, want 2 (Sara + Lars, not Mia)", len(agents.updates))
+	}
+	for _, u := range agents.updates {
+		if u.ID == keep {
+			t.Fatalf("excluded agent Mia was regenerated")
+		}
 	}
 }

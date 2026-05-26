@@ -30,13 +30,22 @@
     "offline": "Offline"
   },
   "avatar_backfill": {
-    "_comment": "CEREBRO-PATCH(agent-avatar-backfill): admin action for missing agent avatars.",
+    "_comment": "CEREBRO-PATCH(agent-avatar-backfill): admin action for missing avatars + regenerate-all (FIR-2321).",
     "button": "Generate missing avatars",
     "progress": "Avatars {{done}}/{{total}}",
     "none_missing_title": "All agents already have avatars",
     "none_missing_toast": "All agents already have avatars",
     "started_toast": "Avatar generation started",
-    "failed_toast": "Failed to start avatar generation"
+    "failed_toast": "Failed to start avatar generation",
+    "menu_label": "Avatars",
+    "regenerate_all": "Regenerate all avatars…",
+    "regenerate_dialog_title": "Regenerate avatars",
+    "regenerate_dialog_desc": "New avatars get bold, distinct background colours. Unchecked agents keep their current avatar.",
+    "regenerate_select_all": "Select all",
+    "regenerate_confirm": "Regenerate {{count}} avatars",
+    "regenerate_cancel": "Cancel",
+    "regenerate_started_toast": "Regenerating {{count}} avatars",
+    "regenerate_none_selected": "Select at least one agent"
   },
   "workload": {
     "working": "Working",

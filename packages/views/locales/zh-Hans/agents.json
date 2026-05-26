@@ -30,13 +30,22 @@
     "offline": "离线"
   },
   "avatar_backfill": {
-    "_comment": "CEREBRO-PATCH(agent-avatar-backfill): admin action for missing agent avatars.",
+    "_comment": "CEREBRO-PATCH(agent-avatar-backfill): admin action for missing avatars + regenerate-all (FIR-2321).",
     "button": "生成缺失头像",
     "progress": "头像 {{done}}/{{total}}",
     "none_missing_title": "所有智能体已有头像",
     "none_missing_toast": "所有智能体已有头像",
     "started_toast": "头像生成已开始",
-    "failed_toast": "启动头像生成失败"
+    "failed_toast": "启动头像生成失败",
+    "menu_label": "头像",
+    "regenerate_all": "重新生成所有头像…",
+    "regenerate_dialog_title": "重新生成头像",
+    "regenerate_dialog_desc": "新头像将使用鲜明、各不相同的背景颜色。未勾选的智能体将保留当前头像。",
+    "regenerate_select_all": "全选",
+    "regenerate_confirm": "重新生成 {{count}} 个头像",
+    "regenerate_cancel": "取消",
+    "regenerate_started_toast": "正在重新生成 {{count}} 个头像",
+    "regenerate_none_selected": "请至少选择一个智能体"
   },
   "workload": {
     "working": "处理中",

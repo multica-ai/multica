@@ -36,17 +36,26 @@ const gatewayChatCompletionsPath = "/api/ai/proxy/v1/chat/completions"
 // is inferred from the agent's first name (genderForName) rather than hashed, so
 // an agent named "Sara" reads as a woman and "Lars" as a man.
 
-// backgroundColors are the solid studio backdrops behind each portrait. These
-// are intentionally vivid and spread right across the colour wheel — Jesper
-// asked for backgrounds that look *much more different* from each other, so the
-// earlier muted-professional palette was replaced with saturated, high-contrast
-// hues no two of which read as the same colour at a glance.
+// backgroundColors are the solid colour backdrops behind each portrait. They
+// are vivid and spread evenly right across the colour wheel — Jesper asked for
+// backgrounds that look *much more different* from each other and are easy to
+// tell agents apart by. The earlier 16-colour palette forced collisions (the
+// workspace has 23 agents), so six agents ended up sharing the same green. This
+// 24-hue palette is large enough to give every current agent a unique colour
+// when avatars are regenerated as a batch (assignDistinctBackgrounds), and the
+// hues step ~15° around the wheel so neighbours stay distinguishable.
+//
+// Rendering the colour brightly is on the prompt, not this list: the previous
+// "vivid" names still came out as dark studio backdrops because the prompt
+// asked for "studio background" + "soft studio lighting". buildPromptWithBackground
+// now forces a flat, evenly-lit, frame-filling colour instead.
 var backgroundColors = []string{
-	"vivid cobalt blue", "bright crimson red", "emerald green",
-	"golden yellow", "vivid orange", "magenta pink",
-	"deep violet purple", "turquoise cyan", "lime green",
-	"royal blue", "hot pink", "amber gold",
-	"teal", "scarlet red", "indigo", "forest green",
+	"vivid red", "bright orange", "golden amber", "bright yellow",
+	"chartreuse green", "lime green", "emerald green", "spring green",
+	"teal", "turquoise cyan", "sky blue", "azure blue",
+	"vivid cobalt blue", "royal blue", "deep indigo", "violet purple",
+	"bright magenta", "fuchsia pink", "hot pink", "rose red",
+	"coral", "salmon orange", "mint green", "lavender purple",
 }
 
 // clothingColors stay neutral so the background carries the colour identity and
@@ -153,7 +162,7 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url, err := h.generateAndStore(r.Context(), wsID, req.AgentName, req.CustomPrompt)
+	url, err := h.generateAndStore(r.Context(), wsID, req.AgentName, req.CustomPrompt, "")
 	if err != nil {
 		slog.Error("avatar generation failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "image generation failed")
@@ -172,15 +181,31 @@ func (h *Handler) GenerateForAgent(ctx context.Context, wsID string, agent db.Ag
 	if agent.AvatarUrl.Valid && strings.TrimSpace(agent.AvatarUrl.String) != "" {
 		return agent.AvatarUrl.String, nil
 	}
-	url, err := h.generateAndStore(ctx, wsID, agent.Name, "")
+	return h.storeAvatarForAgent(ctx, wsID, agent, "")
+}
+
+// RegenerateForAgent forces a fresh avatar for an agent even when one already
+// exists, using an explicit background colour. Batch regeneration uses this so
+// it can overwrite the old (dark, colliding) avatars with the new bold,
+// distinct ones.
+func (h *Handler) RegenerateForAgent(ctx context.Context, wsID string, agent db.Agent, background string) (string, error) {
+	if h.agents == nil {
+		return "", fmt.Errorf("agent store is not configured")
+	}
+	return h.storeAvatarForAgent(ctx, wsID, agent, background)
+}
+
+// storeAvatarForAgent generates an avatar with the given background, uploads it,
+// and persists only avatar_url via the COALESCE-based UpdateAgent query.
+func (h *Handler) storeAvatarForAgent(ctx context.Context, wsID string, agent db.Agent, background string) (string, error) {
+	url, err := h.generateAndStore(ctx, wsID, agent.Name, "", background)
 	if err != nil {
 		return "", err
 	}
-	_, err = h.agents.UpdateAgent(ctx, db.UpdateAgentParams{
+	if _, err := h.agents.UpdateAgent(ctx, db.UpdateAgentParams{
 		ID:        agent.ID,
 		AvatarUrl: pgtype.Text{String: url, Valid: true},
-	})
-	if err != nil {
+	}); err != nil {
 		return "", fmt.Errorf("update agent avatar_url: %w", err)
 	}
 	return url, nil
@@ -205,13 +230,33 @@ func (h *Handler) GenerateForAgentAsync(wsID string, agent db.Agent) {
 	}()
 }
 
-// Backfill starts a workspace-scoped background job for agents missing avatars.
+// backfillRequest is the optional body of POST /api/agents/backfill-avatars.
+// An empty body keeps the original behaviour: generate avatars only for agents
+// missing one. mode="all" regenerates every agent (overwriting existing avatars
+// with the new bold, distinct palette), minus any exclude_agent_ids — this is
+// how "regenerate all historical avatars except Mia" is driven.
+type backfillRequest struct {
+	Mode            string   `json:"mode"`
+	ExcludeAgentIDs []string `json:"exclude_agent_ids"`
+}
+
+// Backfill starts a workspace-scoped background job. Default mode regenerates
+// only agents missing an avatar; mode="all" force-regenerates every agent
+// (minus excludes) with distinct background colours.
 func (h *Handler) Backfill(w http.ResponseWriter, r *http.Request) {
 	wsID, ok := h.requireWorkspaceAdmin(w, r)
 	if !ok {
 		return
 	}
-	agents, err := h.missingAvatarAgents(r.Context(), wsID)
+	var req backfillRequest
+	if r.Body != nil {
+		// Body is optional; ignore decode errors for an empty/absent body so the
+		// original no-body "backfill missing" call keeps working.
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	force := req.Mode == "all"
+
+	agents, err := h.targetAgents(r.Context(), wsID, force, req.ExcludeAgentIDs)
 	if err != nil {
 		slog.Warn("list agents for avatar backfill failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to list agents")
@@ -237,8 +282,45 @@ func (h *Handler) Backfill(w http.ResponseWriter, r *http.Request) {
 	resp := backfillResponseLocked(wsID, len(agents), job)
 	h.mu.Unlock()
 
-	go h.runBackfill(wsID, agents, job)
+	go h.runBackfill(wsID, agents, job, force)
 	writeJSON(w, http.StatusAccepted, resp)
+}
+
+// targetAgents resolves the agents a backfill should act on. force=true targets
+// every agent; otherwise only those missing an avatar. Either way, agents whose
+// ID is in exclude are dropped (used to keep Mia's hand-picked avatar).
+func (h *Handler) targetAgents(ctx context.Context, wsID string, force bool, exclude []string) ([]db.Agent, error) {
+	if force {
+		all, err := h.allAgents(ctx, wsID)
+		if err != nil {
+			return nil, err
+		}
+		return filterExcluded(all, exclude), nil
+	}
+	missing, err := h.missingAvatarAgents(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	return filterExcluded(missing, exclude), nil
+}
+
+// filterExcluded drops agents whose ID (canonical UUID string) is in exclude.
+func filterExcluded(agents []db.Agent, exclude []string) []db.Agent {
+	if len(exclude) == 0 {
+		return agents
+	}
+	skip := make(map[string]bool, len(exclude))
+	for _, id := range exclude {
+		skip[strings.TrimSpace(id)] = true
+	}
+	out := make([]db.Agent, 0, len(agents))
+	for _, a := range agents {
+		if skip[util.UUIDToString(a.ID)] {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // BackfillStatus returns current progress for the workspace's backfill job.
@@ -259,12 +341,12 @@ func (h *Handler) BackfillStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *Handler) generateAndStore(ctx context.Context, wsID, agentName, customPrompt string) (string, error) {
+func (h *Handler) generateAndStore(ctx context.Context, wsID, agentName, customPrompt, bgOverride string) (string, error) {
 	cfg := h.gatewayConfig(ctx, wsID)
 	if cfg.baseURL == "" || cfg.apiKey == "" {
 		return "", fmt.Errorf("image generation not configured: data registry AI gateway URL/key unset")
 	}
-	prompt := buildPrompt(agentName, customPrompt)
+	prompt := buildPromptWithBackground(agentName, customPrompt, bgOverride)
 	imgBytes, err := callGateway(ctx, h.httpClient, cfg, prompt)
 	if err != nil {
 		return "", err
@@ -299,10 +381,32 @@ func (h *Handler) missingAvatarAgents(ctx context.Context, wsID string) ([]db.Ag
 	return missing, nil
 }
 
-func (h *Handler) runBackfill(wsID string, agents []db.Agent, job *backfillJob) {
-	for _, agent := range agents {
+func (h *Handler) allAgents(ctx context.Context, wsID string) ([]db.Agent, error) {
+	if h.agents == nil {
+		return nil, fmt.Errorf("agent store is not configured")
+	}
+	workspaceUUID, err := util.ParseUUID(wsID)
+	if err != nil {
+		return nil, err
+	}
+	return h.agents.ListAgents(ctx, workspaceUUID)
+}
+
+func (h *Handler) runBackfill(wsID string, agents []db.Agent, job *backfillJob, force bool) {
+	// On a force run, hand each agent a distinct background colour so the whole
+	// set is easy to tell apart; the missing-only run keeps the name-hashed colour.
+	var backgrounds []string
+	if force {
+		backgrounds = assignDistinctBackgrounds(len(agents))
+	}
+	for i, agent := range agents {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		_, err := h.GenerateForAgent(ctx, wsID, agent)
+		var err error
+		if force {
+			_, err = h.RegenerateForAgent(ctx, wsID, agent, backgrounds[i])
+		} else {
+			_, err = h.GenerateForAgent(ctx, wsID, agent)
+		}
 		cancel()
 
 		h.mu.Lock()
@@ -362,19 +466,36 @@ func (h *Handler) requireWorkspaceAdmin(w http.ResponseWriter, r *http.Request) 
 	return wsID, true
 }
 
-// buildPrompt returns the generation prompt. A custom prompt is used as-is;
-// otherwise a name-seeded prompt produces a photorealistic Scandinavian
-// headshot with a bold, distinct background colour (the per-agent identifier).
+// buildPrompt returns the generation prompt for an agent, choosing the
+// background colour deterministically from the name. Used by single-avatar
+// generation (agent create + the one-off generate endpoint). Batch regeneration
+// uses buildPromptWithBackground directly so it can hand each agent a distinct
+// colour instead of the name-hash (which collides badly across 23 agents).
+func buildPrompt(agentName, customPrompt string) string {
+	return buildPromptWithBackground(agentName, customPrompt, "")
+}
+
+// buildPromptWithBackground builds the generation prompt. A custom prompt is
+// used as-is; otherwise a name-seeded prompt produces a photorealistic
+// Scandinavian headshot. The background colour is the per-agent identifier:
+// bgOverride wins when set (batch regeneration assigns a distinct colour per
+// agent), otherwise it is hashed from the name.
+//
 // The subject's gender is taken from the agent's first name so the portrait
 // actually matches the person — "Sara" reads as a woman, "Lars" as a man — and
-// the name is also handed to the model as a reinforcing signal. The closing
-// clause is what keeps the model on photographs rather than the flat
-// illustrations it otherwise drifts to.
-func buildPrompt(agentName, customPrompt string) string {
+// the name is also handed to the model as a reinforcing signal.
+//
+// The background clause is deliberate: the model otherwise renders a dark,
+// dimly-lit studio backdrop where the colour barely shows (so "vivid cobalt
+// blue" came out almost black). We now force a flat, fully-saturated colour
+// that fills the whole frame and is lit bright and even, with the soft studio
+// lighting scoped to the face only. The closing clause keeps the model on
+// photographs rather than the flat illustrations it otherwise drifts to.
+func buildPromptWithBackground(agentName, customPrompt, bgOverride string) string {
 	if customPrompt != "" {
 		return customPrompt
 	}
-	background := backgroundColors[nameIndex(agentName, "bg", len(backgroundColors))]
+	background := backgroundFor(agentName, bgOverride)
 	clothing := clothingColors[nameIndex(agentName, "clothes", len(clothingColors))]
 	hair := hairStyles[nameIndex(agentName, "hair", len(hairStyles))]
 
@@ -400,13 +521,40 @@ func buildPrompt(agentName, customPrompt string) string {
 
 	return fmt.Sprintf(
 		"Photorealistic professional headshot portrait of %s with Scandinavian features, "+
-			"%s hair, wearing %s, against a solid %s studio background, "+
-			"soft natural studio lighting, sharp focus, shallow depth of field, "+
+			"%s hair, wearing %s. "+
+			"The entire background is one flat, solid, vivid, fully saturated %s, "+
+			"lit bright and perfectly even from edge to edge so the colour reads boldly at first glance — "+
+			"absolutely no dark studio backdrop, no vignette, no gradient and no shadows on the background. "+
+			"Keep the lighting on the face soft and flattering, sharp focus on the eyes, "+
+			"shallow depth of field on the subject only, "+
 			"high-quality DSLR photograph, square 1:1 format, centered, single person. "+
 			"%s"+
 			"A realistic photo of a real person — not an illustration, cartoon, drawing, or 3D render.",
 		subject, hair, clothing, background, genderClause,
 	)
+}
+
+// backgroundFor returns the background colour for an agent: the explicit
+// override when set (batch regeneration), otherwise a name-hashed pick.
+func backgroundFor(agentName, override string) string {
+	if override != "" {
+		return override
+	}
+	return backgroundColors[nameIndex(agentName, "bg", len(backgroundColors))]
+}
+
+// assignDistinctBackgrounds returns one background colour per agent so that a
+// batch regeneration never repeats a colour while agents fit in the palette.
+// This is what actually delivers "easy to tell agents apart": the name-hash
+// collides (six agents shared one green across 23 names), but assigning by
+// position guarantees distinct colours for the first len(backgroundColors)
+// agents and only wraps after that.
+func assignDistinctBackgrounds(count int) []string {
+	out := make([]string, count)
+	for i := 0; i < count; i++ {
+		out[i] = backgroundColors[i%len(backgroundColors)]
+	}
+	return out
 }
 
 // genderAdjective turns the "man"/"woman" subject noun into the adjective used

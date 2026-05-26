@@ -1524,9 +1524,19 @@ export class ApiClient {
     );
   }
 
-  async startAgentAvatarBackfill(): Promise<AgentAvatarBackfillStatus> {
+  // CEREBRO-PATCH(agent-avatar-backfill): mode/exclude regenerates all avatars except kept agents.
+  async startAgentAvatarBackfill(opts?: {
+    mode?: "missing" | "all";
+    excludeAgentIds?: string[];
+  }): Promise<AgentAvatarBackfillStatus> {
     const raw = await this.fetch<unknown>("/api/agents/backfill-avatars", {
       method: "POST",
+      body: opts
+        ? JSON.stringify({
+            mode: opts.mode,
+            exclude_agent_ids: opts.excludeAgentIds,
+          })
+        : undefined,
     });
     return parseWithFallback(
       raw,
