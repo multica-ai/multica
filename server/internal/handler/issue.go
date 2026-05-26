@@ -825,6 +825,19 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		statusFilter = pgtype.Text{String: s, Valid: true}
 	}
 
+	// updated_after hides terminal-status (done / cancelled) issues whose
+	// updated_at is older than the cutoff. Non-terminal statuses are
+	// unaffected so the board’s active columns remain complete.
+	var updatedAfter pgtype.Timestamptz
+	if ua := r.URL.Query().Get("updated_after"); ua != "" {
+		t, err := time.Parse(time.RFC3339, ua)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid updated_after format; expected RFC3339")
+			return
+		}
+		updatedAfter = pgtype.Timestamptz{Time: t, Valid: true}
+	}
+
 	// scheduled=true restricts the result to issues that have at least one of
 	// start_date / due_date set. Used by the Project Gantt view, which only
 	// renders schedulable rows and shouldn't pay for the full project list.
@@ -846,6 +859,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		InvolvesUserID: involvesUserFilter,
 		Scheduled:      scheduledFilter,
 		MetadataFilter: metadataFilter,
+		UpdatedAfter:   updatedAfter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -864,6 +878,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		InvolvesUserID: involvesUserFilter,
 		Scheduled:      scheduledFilter,
 		MetadataFilter: metadataFilter,
+		UpdatedAfter:   updatedAfter,
 	})
 	if err != nil {
 		total = int64(len(issues))

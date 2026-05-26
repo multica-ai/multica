@@ -19,6 +19,11 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
   AND (
+    sqlc.narg('updated_after')::timestamptz IS NULL
+    OR i.status NOT IN ('done', 'cancelled')
+    OR i.updated_at > sqlc.narg('updated_after')::timestamptz
+  )
+  AND (
     sqlc.narg('involves_user_id')::uuid IS NULL
     -- (1) assignee is an agent owned by the user
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
@@ -200,6 +205,11 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
+  AND (
+    sqlc.narg('updated_after')::timestamptz IS NULL
+    OR i.status NOT IN ('done', 'cancelled')
+    OR i.updated_at > sqlc.narg('updated_after')::timestamptz
+  )
   AND (
     sqlc.narg('involves_user_id')::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (

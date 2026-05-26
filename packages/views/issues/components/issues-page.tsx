@@ -14,7 +14,7 @@ import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
+import { issueAssigneeGroupsOptions, issueListOptions, boardIssueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -42,6 +42,7 @@ export function IssuesPage() {
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
   const labelFilters = useIssueViewStore((s) => s.labelFilters);
   const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
+  const boardShowOldDone = useIssueViewStore((s) => s.boardShowOldDone);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
   // Derive the set of issue ids that currently have at least one
@@ -80,6 +81,10 @@ export function IssuesPage() {
     ...issueListOptions(wsId),
     enabled: !usesAssigneeBoard,
   });
+  const boardIssuesQuery = useQuery({
+    ...boardIssueListOptions(wsId, boardShowOldDone),
+    enabled: !usesAssigneeBoard && viewMode === "board",
+  });
   const assigneeGroupsQuery = useQuery({
     ...assigneeGroupsOptions,
     enabled: usesAssigneeBoard,
@@ -88,13 +93,19 @@ export function IssuesPage() {
     () => statusIssuesQuery.data ?? [],
     [statusIssuesQuery.data],
   );
+  const boardIssues = useMemo(
+    () => boardIssuesQuery.data ?? [],
+    [boardIssuesQuery.data],
+  );
   const assigneeIssues = useMemo(
     () => assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [],
     [assigneeGroupsQuery.data],
   );
   const loading = usesAssigneeBoard
     ? assigneeGroupsQuery.isLoading
-    : statusIssuesQuery.isLoading;
+    : viewMode === "board"
+      ? statusIssuesQuery.isLoading || boardIssuesQuery.isLoading
+      : statusIssuesQuery.isLoading;
 
   // Clear filter state when switching between workspaces (URL-driven).
   useClearFiltersOnWorkspaceChange(useIssueViewStore, wsId);
@@ -218,7 +229,7 @@ export function IssuesPage() {
           <div className="flex flex-col flex-1 min-h-0">
             {viewMode === "board" ? (
               <BoardView
-                issues={usesAssigneeBoard ? assigneeIssues : issues}
+                issues={usesAssigneeBoard ? assigneeIssues : boardIssues}
                 assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
                 assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
                 assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
@@ -226,6 +237,7 @@ export function IssuesPage() {
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
+                boardQueryKey={usesAssigneeBoard ? undefined : boardIssueListOptions(wsId).queryKey}
               />
             ) : (
               <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} />

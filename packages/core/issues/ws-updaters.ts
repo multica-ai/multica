@@ -18,6 +18,7 @@ export function onIssueCreated(
   qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
     old ? addIssueToBuckets(old, issue) : old,
   );
+  qc.invalidateQueries({ queryKey: issueKeys.boardList(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
@@ -54,6 +55,7 @@ export function onIssueUpdated(
   qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
     old ? patchIssueInBuckets(old, issue.id, issue) : old,
   );
+  qc.invalidateQueries({ queryKey: issueKeys.boardList(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
@@ -108,6 +110,7 @@ export function onIssueLabelsChanged(
   qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
     old ? patchIssueInBuckets(old, issueId, { labels }) : old,
   );
+  qc.invalidateQueries({ queryKey: issueKeys.boardList(wsId) });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
   );
@@ -151,6 +154,7 @@ export function onIssueMetadataChanged(
   qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
     old ? patchIssueInBuckets(old, issueId, { metadata }) : old,
   );
+  qc.invalidateQueries({ queryKey: issueKeys.boardList(wsId) });
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, metadata } : old,
   );

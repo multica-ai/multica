@@ -64,6 +64,12 @@ export interface ListIssuesParams {
    * majority on the client.
    */
   scheduled?: boolean;
+  /**
+   * When set, done / cancelled issues whose `updated_at` is older than
+   * this RFC3339 timestamp are excluded. Non-terminal statuses are
+   * unaffected.
+   */
+  updated_after?: string;
 }
 
 export interface IssueActorRef {

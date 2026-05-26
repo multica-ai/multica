@@ -599,6 +599,7 @@ export function IssueDisplayControls({
   const sortDirection = useViewStore((s) => s.sortDirection);
   const grouping = useViewStore((s) => s.grouping);
   const cardProperties = useViewStore((s) => s.cardProperties);
+  const boardShowOldDone = useViewStore((s) => s.boardShowOldDone);
   const act = useViewStoreApi().getState();
 
   const counts = useIssueCounts(scopedIssues);
@@ -881,6 +882,20 @@ export function IssueDisplayControls({
                       ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
+                </div>
+              </div>
+            )}
+
+            {viewMode === "board" && grouping === "status" && (
+              <div className="border-b px-3 py-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {t(($) => $.display.show_old_done)}
+                  </span>
+                  <Switch
+                    checked={boardShowOldDone}
+                    onCheckedChange={() => act.toggleBoardShowOldDone()}
+                  />
                 </div>
               </div>
             )}

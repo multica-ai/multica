@@ -79,6 +79,8 @@ export interface IssueViewState {
   listCollapsedStatuses: IssueStatus[];
   ganttZoom: GanttZoom;
   ganttShowCompleted: boolean;
+  /** When false (default), the board hides done / cancelled issues older than 14 days. */
+  boardShowOldDone: boolean;
   setViewMode: (mode: ViewMode) => void;
   setGanttZoom: (zoom: GanttZoom) => void;
   toggleGanttShowCompleted: () => void;
@@ -99,6 +101,7 @@ export interface IssueViewState {
   setSortDirection: (dir: SortDirection) => void;
   toggleCardProperty: (key: keyof CardProperties) => void;
   toggleListCollapsed: (status: IssueStatus) => void;
+  toggleBoardShowOldDone: () => void;
 }
 
 export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): IssueViewState => ({
@@ -128,6 +131,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   listCollapsedStatuses: [],
   ganttZoom: "week",
   ganttShowCompleted: false,
+  boardShowOldDone: false,
 
   setViewMode: (mode) => set({ viewMode: mode }),
   setGanttZoom: (zoom) => set({ ganttZoom: zoom }),
@@ -233,6 +237,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.listCollapsedStatuses.filter((s) => s !== status)
         : [...state.listCollapsedStatuses, status],
     })),
+  toggleBoardShowOldDone: () =>
+    set((state) => ({ boardShowOldDone: !state.boardShowOldDone })),
 });
 
 export const viewStorePersistOptions = (name: string) => ({
