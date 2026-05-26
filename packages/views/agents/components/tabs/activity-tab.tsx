@@ -42,29 +42,29 @@ import { Sparkline } from "../sparkline";
 import { useT, useTimeAgo } from "../../../i18n";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-// Recent work pagination: small initial cohort to keep the section
+// Run history pagination: small initial cohort to keep the section
 // scannable, then "Show more" reveals 20 at a time. Tasks are already
 // fully cached client-side (one listAgentTasks for the whole agent), so
 // "more" is a pure state flip — zero extra fetches.
-const RECENT_INITIAL = 5;
-const RECENT_PAGE = 20;
+const HISTORY_INITIAL = 5;
+const HISTORY_PAGE = 20;
 
 interface ActivityTabProps {
   agent: Agent;
 }
 
 /**
- * Right-pane Activity tab on the agent detail page. Three sections framed
- * around the user's three diagnostic questions, in scan order:
+ * Right-pane Activity tab on the agent detail page. Two sections:
  *
- *   Now           — what's it doing right this second?
- *   Last 7 days   — how has it been doing in aggregate?
- *   Recent work   — what did it just finish?
+ *   Last 30 days  — how has it been doing in aggregate?
+ *   Run History   — flat chronological list of all runs (active + terminal),
+ *                   sorted by execution order descending (newest first),
+ *                   with a visible #N sequence number.
  *
- * All three read from caches the rest of the page already fills (the
- * workspace task snapshot for "Now", per-agent task list for "Recent",
- * the workspace 7d activity buckets for the trend), so opening this tab
- * adds no extra fetches once the page is hydrated.
+ * Both read from caches the rest of the page already fills (the
+ * workspace task snapshot for active status, per-agent task list for
+ * history, the workspace 30d activity buckets for the trend), so opening
+ * this tab adds no extra fetches once the page is hydrated.
  */
 export function ActivityTab({ agent }: ActivityTabProps) {
   const wsId = useWorkspaceId();
@@ -74,7 +74,7 @@ export function ActivityTab({ agent }: ActivityTabProps) {
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
   const activity = activityMap.get(agent.id);
 
-  const [recentDisplayLimit, setRecentDisplayLimit] = useState(RECENT_INITIAL);
+  const [historyDisplayLimit, setHistoryDisplayLimit] = useState(HISTORY_INITIAL);
 
   // Chat tasks are intentionally hidden across every Agent-scoped surface
   // (list / detail / activity). They have their own UI in the chat
@@ -82,42 +82,36 @@ export function ActivityTab({ agent }: ActivityTabProps) {
   // for the team" with "what is this agent doing in private chat".
   const isWorkflowTask = (t: AgentTask) => !t.chat_session_id;
 
-  const activeTasks = useMemo(() => {
-    return snapshot.filter(
-      (t) =>
-        t.agent_id === agent.id &&
-        isWorkflowTask(t) &&
-        (t.status === "running" ||
-          t.status === "queued" ||
-          t.status === "dispatched"),
+  // Build a unified, flat run history: all workflow tasks (active +
+  // terminal) sorted by creation time descending (execution order).
+  // Active tasks from the snapshot are merged in for real-time status.
+  const allRunsOrdered = useMemo(() => {
+    // Start with the per-agent task list (terminal + some active)
+    const taskMap = new Map<string, AgentTask>();
+    for (const t of agentTasks) {
+      if (isWorkflowTask(t)) taskMap.set(t.id, t);
+    }
+    // Overlay active tasks from snapshot for real-time status
+    for (const t of snapshot) {
+      if (t.agent_id === agent.id && isWorkflowTask(t)) {
+        taskMap.set(t.id, t);
+      }
+    }
+    // Sort by created_at descending (execution order, newest first)
+    return [...taskMap.values()].sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
-  }, [snapshot, agent.id]);
+  }, [agentTasks, snapshot, agent.id]);
 
-  // Most recent terminal tasks. Includes cancelled — users searching
-  // "what just happened" want to see cancellations alongside completions
-  // and failures. Chat sessions filtered out for the same reason as above.
-  const recentTasksAll = useMemo(() => {
-    return [...agentTasks]
-      .filter(
-        (t) =>
-          isWorkflowTask(t) &&
-          !!t.completed_at &&
-          (t.status === "completed" ||
-            t.status === "failed" ||
-            t.status === "cancelled"),
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.completed_at!).getTime() -
-          new Date(a.completed_at!).getTime(),
-      );
-  }, [agentTasks]);
+  // Total count for numbering: #1 is the earliest run, #N is the latest.
+  const totalRunCount = allRunsOrdered.length;
 
-  const recentTasks = useMemo(
-    () => recentTasksAll.slice(0, recentDisplayLimit),
-    [recentTasksAll, recentDisplayLimit],
+  const historySlice = useMemo(
+    () => allRunsOrdered.slice(0, historyDisplayLimit),
+    [allRunsOrdered, historyDisplayLimit],
   );
-  const hasMoreRecent = recentTasksAll.length > recentTasks.length;
+  const hasMoreHistory = allRunsOrdered.length > historySlice.length;
 
   const avgDurationMs = useMemo(
     () => deriveAvgDurationLast30d(agentTasks, Date.now()),
@@ -127,16 +121,12 @@ export function ActivityTab({ agent }: ActivityTabProps) {
   // Resolve issue identifiers + titles for any task we'll render. Going
   // through `issueDetailOptions` is the same lookup the rest of the app
   // uses, so the cache is shared and we don't pay for a duplicate request.
-  const displayedTasks = useMemo(
-    () => [...activeTasks, ...recentTasks],
-    [activeTasks, recentTasks],
-  );
   const issueIds = useMemo(
     () =>
       Array.from(
-        new Set(displayedTasks.map((t) => t.issue_id).filter((id) => id !== "")),
+        new Set(historySlice.map((t) => t.issue_id).filter((id) => id !== "")),
       ),
-    [displayedTasks],
+    [historySlice],
   );
   const issueQueries = useQueries({
     queries: issueIds.map((id) => issueDetailOptions(wsId, id)),
@@ -152,52 +142,18 @@ export function ActivityTab({ agent }: ActivityTabProps) {
 
   return (
     <div className="flex flex-col gap-4 p-6">
-      <NowSection tasks={activeTasks} issueMap={issueMap} agent={agent} />
       <Last30dSection activity={activity} avgDurationMs={avgDurationMs} />
-      <RecentWorkSection
-        tasks={recentTasks}
-        totalCount={recentTasksAll.length}
-        hasMore={hasMoreRecent}
+      <RunHistorySection
+        tasks={historySlice}
+        totalCount={totalRunCount}
+        hasMore={hasMoreHistory}
         onShowMore={() =>
-          setRecentDisplayLimit((n) => n + RECENT_PAGE)
+          setHistoryDisplayLimit((n) => n + HISTORY_PAGE)
         }
         issueMap={issueMap}
         agent={agent}
       />
     </div>
-  );
-}
-
-function NowSection({
-  tasks,
-  issueMap,
-  agent,
-}: {
-  tasks: AgentTask[];
-  issueMap: Map<string, Issue>;
-  agent: Agent;
-}) {
-  const { t } = useT("agents");
-  return (
-    <Section
-      title={t(($) => $.tab_body.activity.section_now)}
-      subtitle={
-        tasks.length === 0
-          ? t(($) => $.tab_body.activity.subtitle_no_active)
-          : t(($) => $.tab_body.activity.subtitle_active, { count: tasks.length })
-      }
-    >
-      {tasks.length === 0 ? (
-        <EmptyText>{t(($) => $.tab_body.activity.empty_now)}</EmptyText>
-      ) : (
-        <TaskList
-          tasks={tasks}
-          issueMap={issueMap}
-          timeMode="active"
-          agent={agent}
-        />
-      )}
-    </Section>
   );
 }
 
@@ -249,10 +205,6 @@ function Last30dSection({
               )}
             </div>
           </div>
-          {/* Garnish, not hero — small enough that a sparse 30-day series
-              doesn't read as visually broken. Bottom-aligned with the
-              number so the dense end of the bars sits on the same
-              baseline as the digits. */}
           <Sparkline
             buckets={summary.buckets}
             width={120}
@@ -265,7 +217,7 @@ function Last30dSection({
   );
 }
 
-function RecentWorkSection({
+function RunHistorySection({
   tasks,
   totalCount,
   hasMore,
@@ -295,8 +247,8 @@ function RecentWorkSection({
         <>
           <TaskList
             tasks={tasks}
+            totalCount={totalCount}
             issueMap={issueMap}
-            timeMode="completed"
             agent={agent}
           />
           {hasMore && (
@@ -316,23 +268,24 @@ function RecentWorkSection({
 
 function TaskList({
   tasks,
+  totalCount,
   issueMap,
-  timeMode,
   agent,
 }: {
   tasks: AgentTask[];
+  totalCount: number;
   issueMap: Map<string, Issue>;
-  timeMode: "active" | "completed";
   agent: Agent;
 }) {
   return (
     <div className="space-y-1.5">
-      {tasks.map((task) => (
+      {tasks.map((task, index) => (
         <TaskRow
           key={task.id}
           task={task}
+          // Execution order number: totalCount is the newest, descending
+          runNumber={totalCount - index}
           issueMap={issueMap}
-          timeMode={timeMode}
           agent={agent}
         />
       ))}
@@ -342,13 +295,13 @@ function TaskList({
 
 function TaskRow({
   task,
+  runNumber,
   issueMap,
-  timeMode,
   agent,
 }: {
   task: AgentTask;
+  runNumber: number;
   issueMap: Map<string, Issue>;
-  timeMode: "active" | "completed";
   agent: Agent;
 }) {
   const { t } = useT("agents");
@@ -363,22 +316,18 @@ function TaskRow({
   // Queued tasks have no messages yet — hiding the transcript button avoids
   // a guaranteed "No execution data recorded." dialog open.
   const showTranscript = task.status !== "queued";
-  // Cancel only makes sense for the three active states. Terminal rows
-  // (completed / failed / cancelled) hide the button entirely.
-  const showCancel =
-    timeMode === "active" &&
-    (task.status === "queued" ||
-      task.status === "dispatched" ||
-      task.status === "running");
+  // Cancel makes sense for the three active states.
+  const isActiveStatus =
+    task.status === "queued" ||
+    task.status === "dispatched" ||
+    task.status === "running";
+  const showCancel = isActiveStatus;
 
   const handleCancel = async () => {
     if (cancelling) return;
     setCancelling(true);
     try {
       await api.cancelTaskById(task.id);
-      // No manual invalidate needed — the task:cancelled WS event flows
-      // through useRealtimeSync's `task:` prefix path which already
-      // invalidates snapshot + per-agent + per-issue task lists.
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.tab_body.activity.cancel_failed_toast));
       setCancelling(false);
@@ -416,26 +365,22 @@ function TaskRow({
         ? t(($) => $.tab_body.activity.source_autopilot)
         : t(($) => $.tab_body.activity.source_untracked);
 
-  const timeText =
-    timeMode === "active"
-      ? activeTaskTimeText(task, t, timeAgo)
-      : task.completed_at
-        ? timeAgo(task.completed_at)
-        : "—";
+  // For active tasks show "started/queued X ago"; for terminal show completed time.
+  const timeText = isActiveStatus
+    ? activeTaskTimeText(task, t, timeAgo)
+    : task.completed_at
+      ? timeAgo(task.completed_at)
+      : "—";
 
-  // Failure reason. The back-end emits "" on non-failed tasks (omitempty
-  // strips it on the wire) so the truthy guard is the right shape; the
-  // cast is safe because the back-end only emits one of the enum values.
+  // Failure reason.
   const failureLabel =
     task.status === "failed" && task.failure_reason
       ? failureReasonLabel[task.failure_reason as TaskFailureReason]
       : null;
 
-  // Only show duration for terminal rows. An active row's duration is
-  // inferred from the timeText already ("Started 2m ago") and adding a
-  // second time bubble next to it just clutters the line.
+  // Duration for terminal rows only.
   let durationText: string | null = null;
-  if (timeMode === "completed" && task.started_at && task.completed_at) {
+  if (isTerminalStatus && task.started_at && task.completed_at) {
     const dur =
       new Date(task.completed_at).getTime() -
       new Date(task.started_at).getTime();
@@ -448,6 +393,9 @@ function TaskRow({
 
   return (
     <div className={rowClass}>
+      <span className="shrink-0 w-8 text-right font-mono text-[11px] tabular-nums text-muted-foreground/70">
+        #{runNumber}
+      </span>
       <Icon
         className={`h-4 w-4 shrink-0 ${cfg.color} ${
           isRunning ? "animate-spin" : ""
