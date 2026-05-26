@@ -3,7 +3,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import type { Agent, MemberWithUser, RuntimeDevice } from "@multica/core/types";
+import type {
+  Agent,
+  CopyAgentRequest,
+  CreateAgentRequest,
+  MemberWithUser,
+  RuntimeDevice,
+} from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
@@ -42,7 +48,7 @@ vi.mock("../../common/actor-avatar", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
 }));
 
 import { CreateAgentDialog } from "./create-agent-dialog";
@@ -121,11 +127,19 @@ function makeTemplate(runtimeId: string): Agent {
   };
 }
 
-function renderDialog(runtimes: RuntimeDevice[], template?: Agent) {
+function renderDialog(
+  runtimes: RuntimeDevice[],
+  template?: Agent,
+  overrides?: Partial<{
+    onCreate: (data: CreateAgentRequest) => Promise<Agent | void>;
+    onDuplicate: (id: string, data: CopyAgentRequest) => Promise<Agent | void>;
+  }>,
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  const onCreate = vi.fn().mockResolvedValue(undefined);
+  const onCreate = overrides?.onCreate ?? vi.fn().mockResolvedValue(undefined);
+  const onDuplicate = overrides?.onDuplicate;
   const onClose = vi.fn();
   render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
@@ -139,13 +153,14 @@ function renderDialog(runtimes: RuntimeDevice[], template?: Agent) {
             template={template}
             onClose={onClose}
             onCreate={onCreate}
+            onDuplicate={onDuplicate}
           />
         </NavigationProvider>
         </WorkspaceSlugProvider>
       </QueryClientProvider>
     </I18nProvider>,
   );
-  return { onCreate, onClose };
+  return { onCreate, onClose, onDuplicate };
 }
 
 describe("CreateAgentDialog runtime visibility gate", () => {
@@ -247,7 +262,9 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       visibility: "private",
     });
     const template = makeTemplate("rt-others-private");
-    const { onCreate } = renderDialog([othersPrivate, mine], template);
+    const { onCreate, onDuplicate } = renderDialog([othersPrivate, mine], template, {
+      onDuplicate: vi.fn().mockResolvedValue({ ...template, id: "agent-copy" }),
+    });
 
     expect(
       screen.getByText("My Runtime", { selector: "span.truncate" }),
@@ -259,11 +276,13 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     // Sanity check: with a usable selection seeded, Create should submit.
     fireEvent.click(screen.getByText("Create"));
     await new Promise((r) => setTimeout(r, 0));
-    expect(onCreate).toHaveBeenCalledTimes(1);
-    expect(onCreate.mock.calls[0]?.[0].runtime_id).toBe("rt-mine");
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(onDuplicate).toHaveBeenCalledWith("agent-template", {
+      name: "Template Agent (Copy)",
+    });
   });
 
-  it("disables Create when the selected runtime is locked (template + no usable fallback)", () => {
+  it("duplicate mode can submit through copy even when no usable runtime is available", async () => {
     // Edge case: template points at a locked runtime AND the workspace
     // has no usable alternatives in scope. The defense-in-depth gate on
     // the Create button must keep the user from submitting a 403.
@@ -277,13 +296,18 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     // visible — that's the scope where the selected-but-locked state
     // can persist after the initial seed search returns nothing.
     const template = makeTemplate("rt-only-others-private");
-    renderDialog([onlyOthersPrivate], template);
+    const { onDuplicate } = renderDialog([onlyOthersPrivate], template, {
+      onDuplicate: vi.fn().mockResolvedValue({ ...template, id: "agent-copy" }),
+    });
 
-    // The Create button is rendered by lucide-free CTA text "Create".
     const createBtn = screen
       .getAllByRole("button")
       .find((b) => b.textContent === "Create");
     expect(createBtn).toBeDefined();
-    expect((createBtn as HTMLButtonElement).disabled).toBe(true);
+    expect((createBtn as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(createBtn as HTMLButtonElement);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(onDuplicate).toHaveBeenCalledTimes(1);
   });
 });

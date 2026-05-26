@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Agent, CreateAgentRequest, UpdateAgentRequest } from "@multica/core/types";
+import type { Agent, CopyAgentRequest, UpdateAgentRequest } from "@multica/core/types";
 import {
   agentAllowedPrincipalKeys,
   agentAllowedPrincipalsOptions,
@@ -114,17 +114,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [showDuplicate, setShowDuplicate] = useState(false);
 
-  const handleDuplicate = async (data: CreateAgentRequest) => {
-    const created = await api.createAgent(data);
-    if (agent?.skills.length) {
-      try {
-        await api.setAgentSkills(created.id, {
-          skill_ids: agent.skills.map((s) => s.id),
-        });
-      } catch {
-        // Skills copy is best-effort
-      }
-    }
+  const handleDuplicate = async (sourceAgentId: string, data: CopyAgentRequest) => {
+    const created = await api.copyAgent(sourceAgentId, data);
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     qc.setQueryData(agentDetailKeys.detail(wsId, created.id), created);
     setShowDuplicate(false);
@@ -416,7 +407,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           currentUserId={currentUser?.id ?? null}
           template={agent}
           onClose={() => setShowDuplicate(false)}
-          onCreate={handleDuplicate}
+          onCreate={async () => undefined}
+          onDuplicate={handleDuplicate}
         />
       )}
     </div>
