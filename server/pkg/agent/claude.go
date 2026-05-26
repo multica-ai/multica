@@ -651,7 +651,11 @@ func buildClaudeEnvWith(
 	// from custom_env) before appending the isolated override so the last
 	// entry wins deterministically. Track whether the operator already
 	// pinned OAuth / API-key auth via env so we know whether to add a
-	// keychain-sourced token below.
+	// keychain-sourced token below. "Pinned" means the value is non-empty:
+	// an empty `ANTHROPIC_API_KEY=` / `CLAUDE_CODE_OAUTH_TOKEN=` leaks in
+	// from `os.Environ()` on hosts whose login shell unsets it that way,
+	// and treating that as an explicit auth choice would silently strand
+	// the isolated child at "Not logged in" (MUL-2603 review follow-up).
 	filtered := env[:0]
 	hasOAuthToken := false
 	hasAnthropicKey := false
@@ -659,10 +663,23 @@ func buildClaudeEnvWith(
 		if strings.HasPrefix(entry, "CLAUDE_CONFIG_DIR=") {
 			continue
 		}
-		if strings.HasPrefix(entry, "CLAUDE_CODE_OAUTH_TOKEN=") {
+		if v, ok := strings.CutPrefix(entry, "CLAUDE_CODE_OAUTH_TOKEN="); ok {
+			if v == "" {
+				// Empty `CLAUDE_CODE_OAUTH_TOKEN=` is noise (login-shell
+				// quirk, stale custom_env entry) — drop so it cannot shadow
+				// a keychain-injected token later in the slice on platforms
+				// where the libc env lookup picks the first match.
+				continue
+			}
 			hasOAuthToken = true
 		}
-		if strings.HasPrefix(entry, "ANTHROPIC_API_KEY=") {
+		if v, ok := strings.CutPrefix(entry, "ANTHROPIC_API_KEY="); ok {
+			if v == "" {
+				// Same treatment as the OAuth token: empty `ANTHROPIC_API_KEY=`
+				// must not pose as a pinned API-key auth choice. Drop so the
+				// child does not see a confusing empty value either.
+				continue
+			}
 			hasAnthropicKey = true
 		}
 		filtered = append(filtered, entry)
@@ -681,11 +698,21 @@ func buildClaudeEnvWith(
 	// the access token via CLAUDE_CODE_OAUTH_TOKEN so the child skips
 	// keychain lookup entirely (MUL-2603 follow-up regression).
 	//
+	// Security boundary: CLAUDE_CODE_OAUTH_TOKEN is the host's claude.ai
+	// OAuth access token. We rely on Claude Code itself scrubbing it from
+	// the env it passes to Bash / hook subprocesses — a property we lock
+	// in with TestClaudeCLIScrubsOAuthTokenFromBashSubprocess, which boots
+	// the real CLI with a canary token and asserts `printenv` inside the
+	// model-driven Bash tool returns empty. If that test ever flips
+	// (upstream CLI change), this passthrough must move off env vars
+	// before merging.
+	//
 	// Precedence (highest wins): operator-pinned CLAUDE_CODE_OAUTH_TOKEN
 	// in custom_env, then ANTHROPIC_API_KEY (the user explicitly chose
 	// API-key auth — do not silently override with OAuth), then the
-	// keychain token. The first two leave the keychain alone, which keeps
-	// non-OAuth installs free of macOS prompts on every isolated run.
+	// keychain token. "Pinned" is gated on a non-empty value above so an
+	// empty `KEY=` inherited from os.Environ does not pose as an explicit
+	// choice and disable the keychain reader.
 	if !hasOAuthToken && !hasAnthropicKey && readOAuthToken != nil {
 		token, err := readOAuthToken()
 		if err != nil && logger != nil {
