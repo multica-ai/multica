@@ -472,11 +472,15 @@ export class ApiClient {
     if (res.status === 204) {
       return undefined as T;
     }
-    // CEREBRO-PATCH(api-client-202-no-body): FIR-2284 — some cerebro endpoints
-    // (POST /api/runtimes/{id}/tools/scan-now) reply 202 Accepted with an empty
-    // body; without this, res.json() throws "Unexpected end of JSON input".
+    // CEREBRO-PATCH(api-client-202-no-body): FIR-2284 + FIR-2321 — some cerebro
+    // endpoints (POST /api/runtimes/{id}/tools/scan-now) reply 202 with an empty
+    // body; res.json() would throw "Unexpected end of JSON input". But others
+    // (POST /api/agents/backfill-avatars, FIR-2321) reply 202 WITH a status body
+    // the caller needs, so parse the body when present and only fall back to
+    // undefined for a genuinely empty 202.
     if (res.status === 202) {
-      return undefined as T;
+      const text = await res.text();
+      return (text ? JSON.parse(text) : undefined) as T;
     }
     return res.json() as Promise<T>;
   }
