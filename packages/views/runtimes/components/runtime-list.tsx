@@ -23,7 +23,6 @@ import {
   agentListOptions,
   memberListOptions,
 } from "@multica/core/workspace/queries";
-import { latestCliVersionOptions } from "@multica/core/runtimes";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { DataTable } from "@multica/ui/components/ui/data-table";
@@ -102,7 +101,6 @@ export function RuntimeList({
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
-  const { data: latestCliVersion = null } = useQuery(latestCliVersionOptions());
 
   const currentMember = user
     ? members.find((m) => m.user_id === user.id)
@@ -144,16 +142,16 @@ export function RuntimeList({
     }));
   }, [runtimes, memberById, workloadIndex, isAdmin, user]);
 
+  // CEREBRO-PATCH(runtime-list-account-column): drop latestCliVersion arg — CLI column removed in favor of cerebro Account column (FIR-2308).
   const columns = useMemo(
     () =>
       createRuntimeColumns({
         showOwner,
-        latestCliVersion,
         wsId,
         now,
         t,
       }),
-    [showOwner, latestCliVersion, wsId, now, t],
+    [showOwner, wsId, now, t],
   );
 
   const table = useReactTable({

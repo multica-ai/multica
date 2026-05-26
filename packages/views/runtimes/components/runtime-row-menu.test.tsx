@@ -14,8 +14,8 @@ const TEST_RESOURCES = {
 };
 
 // Stub the workspace queries the columns reach into. None of them feed the
-// row menu directly, but `createRuntimeColumns` wires CliCell + CostCell
-// against the same query client, so we still need useQuery to resolve.
+// row menu directly, but `createRuntimeColumns` wires the Account cell +
+// CostCell against the same query client, so we still need useQuery to resolve.
 vi.mock("@tanstack/react-query", async () => {
   const actual =
     await vi.importActual<typeof import("@tanstack/react-query")>(
@@ -99,7 +99,6 @@ function renderActionsCell(row: RuntimeRow) {
     const { t } = useT("runtimes");
     const columns = createRuntimeColumns({
       showOwner: false,
-      latestCliVersion: null,
       wsId: "ws-1",
       now: Date.now(),
       t,

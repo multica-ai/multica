@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import {
-  ArrowUpCircle,
   Globe,
   MoreHorizontal,
   Trash2,
@@ -17,6 +16,8 @@ import {
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
 import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
+// CEREBRO-PATCH(runtime-list-account-column): swap upstream CLI column for the cerebro Account column (FIR-2308).
+import { RuntimeAccountCell } from "@multica/cerebro-runtime/views";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,7 +48,6 @@ import {
   computeCostInWindow,
   formatLastSeen,
   isSelfHealingRuntime,
-  isVersionNewer,
   pctChange,
 } from "../utils";
 import { useT } from "../../i18n";
@@ -63,7 +63,7 @@ export interface RuntimeRow {
   canDelete: boolean;
 }
 
-// Column widths in px. Name, Health, and CLI grow together until the
+// Column widths in px. Name, Health, and Account grow together until the
 // user resizes them. Their `size` values still flow into table.getTotalSize()
 // to set the table's min-width, giving each grow column a real floor below
 // which the container scrolls horizontally instead of shrinking further.
@@ -78,7 +78,8 @@ const COL_WIDTHS = {
   agents: 100,
   workload: 140,
   cost: 100,
-  cli: 140,
+  // CEREBRO-PATCH(runtime-list-account-column): Account column replaces upstream CLI column (FIR-2308).
+  account: 180,
   // 60 = 16 left padding + 28 kebab + 16 right padding. Keeps the
   // kebab's right edge 16px from the card so it lines up with the
   // toolbar's px-4 right inset.
@@ -89,7 +90,6 @@ type RuntimesT = ReturnType<typeof useT<"runtimes">>["t"];
 
 interface CreateColumnsArgs {
   showOwner: boolean;
-  latestCliVersion: string | null;
   wsId: string;
   now: number;
   t: RuntimesT;
@@ -97,7 +97,6 @@ interface CreateColumnsArgs {
 
 export function createRuntimeColumns({
   showOwner,
-  latestCliVersion,
   wsId,
   now,
   t,
@@ -190,17 +189,13 @@ export function createRuntimeColumns({
       size: COL_WIDTHS.cost,
       cell: ({ row }) => <CostCell runtimeId={row.original.runtime.id} />,
     },
+    // CEREBRO-PATCH(runtime-list-account-column): cerebro Account column replaces upstream CLI column (FIR-2308).
     {
-      id: "cli",
-      header: () => t(($) => $.list.col_cli),
-      size: COL_WIDTHS.cli,
+      id: "account",
+      header: () => t(($) => $.list.col_account),
+      size: COL_WIDTHS.account,
       meta: { grow: true },
-      cell: ({ row }) => (
-        <CliCell
-          runtime={row.original.runtime}
-          latestCliVersion={latestCliVersion}
-        />
-      ),
+      cell: ({ row }) => <RuntimeAccountCell runtime={row.original.runtime} />,
     },
     {
       id: "actions",
@@ -444,64 +439,6 @@ function CostCell({ runtimeId }: { runtimeId: string }) {
         <span className={`text-[11px] tabular-nums ${deltaTone}`}>
           {deltaLabel}
         </span>
-      )}
-    </div>
-  );
-}
-
-function CliCell({
-  runtime,
-  latestCliVersion,
-}: {
-  runtime: AgentRuntime;
-  latestCliVersion: string | null;
-}) {
-  const { t } = useT("runtimes");
-  if (runtime.runtime_mode === "cloud") {
-    return <span className="text-xs text-muted-foreground/50">—</span>;
-  }
-  const meta = runtime.metadata as Record<string, unknown> | null;
-  const cliVersion =
-    meta && typeof meta.cli_version === "string" ? meta.cli_version : null;
-  const launchedBy =
-    meta && typeof meta.launched_by === "string" ? meta.launched_by : null;
-  const isManaged = launchedBy === "desktop";
-
-  if (!cliVersion) {
-    return <span className="text-xs text-muted-foreground/50">—</span>;
-  }
-
-  // Desktop-managed daemons can never self-update from this page (the
-  // Electron app ships and replaces the binary), so the upgrade marker
-  // would lie — suppress regardless of version comparison.
-  const hasUpdate =
-    !isManaged &&
-    !!latestCliVersion &&
-    isVersionNewer(latestCliVersion, cliVersion);
-
-  return (
-    <div className="flex min-w-0 items-center gap-1 text-xs">
-      <span
-        className={`truncate font-mono ${
-          hasUpdate ? "text-warning" : "text-muted-foreground"
-        }`}
-      >
-        {cliVersion}
-      </span>
-      {hasUpdate && latestCliVersion && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <ArrowUpCircle
-                className="h-3 w-3 shrink-0 text-warning"
-                aria-label={t(($) => $.list.cli_update_available_aria)}
-              />
-            }
-          />
-          <TooltipContent>
-            {t(($) => $.list.cli_update_available_tooltip, { version: latestCliVersion })}
-          </TooltipContent>
-        </Tooltip>
       )}
     </div>
   );
