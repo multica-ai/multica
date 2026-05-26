@@ -6,7 +6,9 @@ import type {
   Attachment,
   CreateAgentFromTemplateResponse,
   GroupedIssuesResponse,
+  IssueLabelsResponse,
   ListIssuesResponse,
+  ListLabelsResponse,
   ListWebhookDeliveriesResponse,
   TimelineEntry,
   User,
@@ -167,6 +169,34 @@ const IssueSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
 }).passthrough();
+
+export const LabelSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  project_id: z.string().nullable().default(null),
+  name: z.string(),
+  color: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).passthrough();
+
+export const ListLabelsResponseSchema = z.object({
+  labels: z.array(LabelSchema).default([]),
+  total: z.number().default(0),
+}).passthrough();
+
+export const EMPTY_LIST_LABELS_RESPONSE: ListLabelsResponse = {
+  labels: [],
+  total: 0,
+};
+
+export const IssueLabelsResponseSchema = z.object({
+  labels: z.array(LabelSchema).default([]),
+}).passthrough();
+
+export const EMPTY_ISSUE_LABELS_RESPONSE: IssueLabelsResponse = {
+  labels: [],
+};
 
 export const ListIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),

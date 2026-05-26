@@ -16,7 +16,6 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
     metadata: { cli_version: "0.3.0" },
     owner_id: "user-1",
     visibility: "private",
-    timezone: "UTC",
     last_seen_at: "2026-05-17T11:59:50Z",
     created_at: "2026-05-17T11:00:00Z",
     updated_at: "2026-05-17T11:00:00Z",

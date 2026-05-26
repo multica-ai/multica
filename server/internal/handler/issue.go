@@ -133,15 +133,17 @@ func (h *Handler) labelsByIssue(ctx context.Context, wsUUID pgtype.UUID, issueID
 		return out
 	}
 	for _, r := range rows {
-		issueID := uuidToString(r.IssueID)
-		out[issueID] = append(out[issueID], LabelResponse{
-			ID:          uuidToString(r.ID),
-			WorkspaceID: uuidToString(r.WorkspaceID),
+		label := db.IssueLabel{
+			ID:          r.ID,
+			WorkspaceID: r.WorkspaceID,
+			ProjectID:   r.ProjectID,
 			Name:        r.Name,
 			Color:       r.Color,
-			CreatedAt:   timestampToString(r.CreatedAt),
-			UpdatedAt:   timestampToString(r.UpdatedAt),
-		})
+			CreatedAt:   r.CreatedAt,
+			UpdatedAt:   r.UpdatedAt,
+		}
+		issueID := uuidToString(r.IssueID)
+		out[issueID] = append(out[issueID], labelToResponse(label))
 	}
 	return out
 }
@@ -1870,6 +1872,13 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
+		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID:          id,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			writeError(w, http.StatusBadRequest, "project_id must reference a project in this workspace")
+			return
+		}
 		projectID = id
 	}
 	if req.ParentIssueID != nil {
@@ -1949,16 +1958,25 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	qtx := h.Queries.WithTx(tx)
+	labelRows := make([]db.IssueLabel, 0, len(labelIDs))
 	for _, labelID := range labelIDs {
-		if _, err := qtx.GetLabel(r.Context(), db.GetLabelParams{
+		label, err := qtx.GetLabel(r.Context(), db.GetLabelParams{
 			ID: labelID, WorkspaceID: wsUUID,
-		}); err != nil {
+		})
+		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				writeError(w, http.StatusNotFound, "label not found")
 				return
 			}
 			slog.Warn("GetLabel in CreateIssue failed", append(logger.RequestAttrs(r), "error", err, "label_id", uuidToString(labelID))...)
 			writeError(w, http.StatusInternalServerError, "failed to create issue")
+			return
+		}
+		labelRows = append(labelRows, label)
+	}
+	for _, label := range labelRows {
+		if label.ProjectID.Valid && (!projectID.Valid || label.ProjectID != projectID) {
+			writeError(w, http.StatusBadRequest, "label is not available for this issue's project")
 			return
 		}
 	}
@@ -2330,6 +2348,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+				ID:          projectUUID,
+				WorkspaceID: prevIssue.WorkspaceID,
+			}); err != nil {
+				writeError(w, http.StatusBadRequest, "project_id must reference a project in this workspace")
+				return
+			}
 			params.ProjectID = projectUUID
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
@@ -2353,10 +2378,53 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issue, err := h.Queries.UpdateIssue(r.Context(), params)
+	projectTouched := false
+	if _, ok := rawFields["project_id"]; ok {
+		projectTouched = true
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update issue")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	qtx := h.Queries.WithTx(tx)
+	issue, err := qtx.UpdateIssue(r.Context(), params)
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
+		return
+	}
+	labelsChanged := false
+	var scopedLabels []db.IssueLabel
+	if projectTouched && prevIssue.ProjectID != issue.ProjectID {
+		deleted, err := qtx.DeleteIssueProjectScopedLabels(r.Context(), db.DeleteIssueProjectScopedLabelsParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			ProjectID:   issue.ProjectID,
+		})
+		if err != nil {
+			slog.Warn("delete incompatible project labels failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to update issue")
+			return
+		}
+		labelsChanged = deleted > 0
+		if labelsChanged {
+			scopedLabels, err = qtx.ListLabelsByIssue(r.Context(), db.ListLabelsByIssueParams{
+				IssueID:     issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil {
+				slog.Warn("ListLabelsByIssue after project update failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+				writeError(w, http.StatusInternalServerError, "failed to update issue")
+				return
+			}
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update issue")
 		return
 	}
 
@@ -2366,6 +2434,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
+	if labelsChanged {
+		labels := labelsToResponse(scopedLabels)
+		resp.Labels = &labels
+	}
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
@@ -2402,6 +2474,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
 	})
+	if labelsChanged {
+		h.publish(protocol.EventIssueLabelsChanged, workspaceID, actorType, actorID, map[string]any{
+			"issue_id": uuidToString(issue.ID),
+			"labels":   labelsToResponse(scopedLabels),
+		})
+	}
 
 	// Reconcile task queue when assignee changes.
 	if assigneeChanged {
@@ -2832,6 +2910,12 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					continue
 				}
+				if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+					ID:          projectUUID,
+					WorkspaceID: prevIssue.WorkspaceID,
+				}); err != nil {
+					continue
+				}
 				params.ProjectID = projectUUID
 			} else {
 				params.ProjectID = pgtype.UUID{Valid: false}
@@ -2848,14 +2932,60 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		issue, err := h.Queries.UpdateIssue(r.Context(), params)
+		projectTouched := false
+		if _, ok := rawUpdates["project_id"]; ok {
+			projectTouched = true
+		}
+
+		tx, err := h.TxStarter.Begin(r.Context())
 		if err != nil {
+			slog.Warn("batch update issue tx begin failed", "issue_id", issueID, "error", err)
+			continue
+		}
+		qtx := h.Queries.WithTx(tx)
+		issue, err := qtx.UpdateIssue(r.Context(), params)
+		if err != nil {
+			tx.Rollback(r.Context())
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
+			continue
+		}
+		labelsChanged := false
+		var scopedLabels []db.IssueLabel
+		if projectTouched && prevIssue.ProjectID != issue.ProjectID {
+			deleted, err := qtx.DeleteIssueProjectScopedLabels(r.Context(), db.DeleteIssueProjectScopedLabelsParams{
+				IssueID:     issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+				ProjectID:   issue.ProjectID,
+			})
+			if err != nil {
+				tx.Rollback(r.Context())
+				slog.Warn("batch delete incompatible project labels failed", "issue_id", issueID, "error", err)
+				continue
+			}
+			labelsChanged = deleted > 0
+			if labelsChanged {
+				scopedLabels, err = qtx.ListLabelsByIssue(r.Context(), db.ListLabelsByIssueParams{
+					IssueID:     issue.ID,
+					WorkspaceID: issue.WorkspaceID,
+				})
+				if err != nil {
+					tx.Rollback(r.Context())
+					slog.Warn("batch list labels after project update failed", "issue_id", issueID, "error", err)
+					continue
+				}
+			}
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			slog.Warn("batch update issue commit failed", "issue_id", issueID, "error", err)
 			continue
 		}
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
+		if labelsChanged {
+			labels := labelsToResponse(scopedLabels)
+			resp.Labels = &labels
+		}
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
@@ -2870,6 +3000,12 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			"status_changed":   statusChanged,
 			"priority_changed": priorityChanged,
 		})
+		if labelsChanged {
+			h.publish(protocol.EventIssueLabelsChanged, workspaceID, actorType, actorID, map[string]any{
+				"issue_id": uuidToString(issue.ID),
+				"labels":   labelsToResponse(scopedLabels),
+			})
+		}
 
 		if assigneeChanged {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)

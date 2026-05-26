@@ -185,6 +185,8 @@ import {
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
+  EMPTY_ISSUE_LABELS_RESPONSE,
+  EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
   EMPTY_TIMELINE_ENTRIES,
@@ -192,7 +194,10 @@ import {
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   GroupedIssuesResponseSchema,
+  IssueLabelsResponseSchema,
+  LabelSchema,
   ListIssuesResponseSchema,
+  ListLabelsResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -2234,25 +2239,64 @@ export class ApiClient {
   }
 
   // Labels
-  async listLabels(): Promise<ListLabelsResponse> {
-    return this.fetch(`/api/labels`);
+  async listLabels(params?: { project_id?: string | null }): Promise<ListLabelsResponse> {
+    const search = new URLSearchParams();
+    if (params?.project_id) search.set("project_id", params.project_id);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/labels${qs ? `?${qs}` : ""}`);
+    return parseWithFallback(raw, ListLabelsResponseSchema, EMPTY_LIST_LABELS_RESPONSE, {
+      endpoint: "GET /api/labels",
+    });
   }
 
   async getLabel(id: string): Promise<Label> {
-    return this.fetch(`/api/labels/${id}`);
+    const raw = await this.fetch<unknown>(`/api/labels/${id}`);
+    return parseWithFallback(raw, LabelSchema, {
+      id,
+      workspace_id: "",
+      project_id: null,
+      name: "",
+      color: "#64748b",
+      created_at: "",
+      updated_at: "",
+    }, {
+      endpoint: "GET /api/labels/:id",
+    });
   }
 
   async createLabel(data: CreateLabelRequest): Promise<Label> {
-    return this.fetch(`/api/labels`, {
+    const raw = await this.fetch<unknown>(`/api/labels`, {
       method: "POST",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, LabelSchema, {
+      id: "",
+      workspace_id: "",
+      project_id: data.project_id ?? null,
+      name: data.name,
+      color: data.color,
+      created_at: "",
+      updated_at: "",
+    }, {
+      endpoint: "POST /api/labels",
     });
   }
 
   async updateLabel(id: string, data: UpdateLabelRequest): Promise<Label> {
-    return this.fetch(`/api/labels/${id}`, {
+    const raw = await this.fetch<unknown>(`/api/labels/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, LabelSchema, {
+      id,
+      workspace_id: "",
+      project_id: null,
+      name: data.name ?? "",
+      color: data.color ?? "#64748b",
+      created_at: "",
+      updated_at: "",
+    }, {
+      endpoint: "PUT /api/labels/:id",
     });
   }
 
@@ -2261,19 +2305,28 @@ export class ApiClient {
   }
 
   async listLabelsForIssue(issueId: string): Promise<IssueLabelsResponse> {
-    return this.fetch(`/api/issues/${issueId}/labels`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/labels`);
+    return parseWithFallback(raw, IssueLabelsResponseSchema, EMPTY_ISSUE_LABELS_RESPONSE, {
+      endpoint: "GET /api/issues/:id/labels",
+    });
   }
 
   async attachLabel(issueId: string, labelId: string): Promise<IssueLabelsResponse> {
-    return this.fetch(`/api/issues/${issueId}/labels`, {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/labels`, {
       method: "POST",
       body: JSON.stringify({ label_id: labelId }),
+    });
+    return parseWithFallback(raw, IssueLabelsResponseSchema, EMPTY_ISSUE_LABELS_RESPONSE, {
+      endpoint: "POST /api/issues/:id/labels",
     });
   }
 
   async detachLabel(issueId: string, labelId: string): Promise<IssueLabelsResponse> {
-    return this.fetch(`/api/issues/${issueId}/labels/${labelId}`, {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/labels/${labelId}`, {
       method: "DELETE",
+    });
+    return parseWithFallback(raw, IssueLabelsResponseSchema, EMPTY_ISSUE_LABELS_RESPONSE, {
+      endpoint: "DELETE /api/issues/:id/labels/:labelId",
     });
   }
 

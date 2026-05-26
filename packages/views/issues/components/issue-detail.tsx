@@ -1922,6 +1922,7 @@ export function IssueDetail({
             <PropRow label={t(($) => $.detail.prop_labels)}>
               <LabelPicker
                 issueId={issue.id}
+                projectId={issue.project_id}
                 align="start"
                 defaultOpen={autoOpenProp === "labels"}
               />

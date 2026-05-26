@@ -114,10 +114,14 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
   const { data: members = [] } = useCoreQuery(memberListOptions(workspace.id));
   const { data: agents = [] } = useCoreQuery(agentListOptions(workspace.id));
   const { data: projects = [] } = useProjectList(workspace.id);
-  const { data: allLabels = [] } = useCoreQuery(labelListOptions(workspace.id));
+  const labelListScope = useMemo(
+    () => ({ projectId: issue?.project_id ?? null }),
+    [issue?.project_id],
+  );
+  const { data: allLabels = [] } = useCoreQuery(labelListOptions(workspace.id, labelListScope));
   const { data: attachedLabels = [] } = useCoreQuery(issueLabelsOptions(workspace.id, issueId));
   const updateIssue = useUpdateIssue();
-  const attachLabel = useAttachLabel(issueId);
+  const attachLabel = useAttachLabel(issueId, labelListScope);
   const detachLabel = useDetachLabel(issueId);
   const [assigneePickerOpen, setAssigneePickerOpen] = useState(false);
   const [assigneeError, setAssigneeError] = useState<string | null>(null);

@@ -15,14 +15,16 @@ const attachLabelToIssue = `-- name: AttachLabelToIssue :exec
 INSERT INTO issue_to_label (issue_id, label_id)
 SELECT $1::uuid, $2::uuid
 WHERE EXISTS (
-    SELECT 1 FROM issue i
+    SELECT 1
+    FROM issue i
+    JOIN issue_label l ON l.id = $2::uuid
     WHERE i.id = $1::uuid
       AND i.workspace_id = $3::uuid
-)
-AND EXISTS (
-    SELECT 1 FROM issue_label l
-    WHERE l.id = $2::uuid
       AND l.workspace_id = $3::uuid
+      AND (
+        l.project_id IS NULL
+        OR l.project_id IS NOT DISTINCT FROM i.project_id
+      )
 )
 ON CONFLICT DO NOTHING
 `
@@ -42,19 +44,25 @@ func (q *Queries) AttachLabelToIssue(ctx context.Context, arg AttachLabelToIssue
 }
 
 const createLabel = `-- name: CreateLabel :one
-INSERT INTO issue_label (workspace_id, name, color)
-VALUES ($1, $2, $3)
-RETURNING id, workspace_id, name, color, created_at, updated_at
+INSERT INTO issue_label (workspace_id, project_id, name, color)
+VALUES ($1, $4, $2, $3)
+RETURNING id, workspace_id, name, color, created_at, updated_at, project_id
 `
 
 type CreateLabelParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Name        string      `json:"name"`
 	Color       string      `json:"color"`
+	ProjectID   pgtype.UUID `json:"project_id"`
 }
 
 func (q *Queries) CreateLabel(ctx context.Context, arg CreateLabelParams) (IssueLabel, error) {
-	row := q.db.QueryRow(ctx, createLabel, arg.WorkspaceID, arg.Name, arg.Color)
+	row := q.db.QueryRow(ctx, createLabel,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Color,
+		arg.ProjectID,
+	)
 	var i IssueLabel
 	err := row.Scan(
 		&i.ID,
@@ -63,8 +71,33 @@ func (q *Queries) CreateLabel(ctx context.Context, arg CreateLabelParams) (Issue
 		&i.Color,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ProjectID,
 	)
 	return i, err
+}
+
+const deleteIssueProjectScopedLabels = `-- name: DeleteIssueProjectScopedLabels :execrows
+DELETE FROM issue_to_label itl
+USING issue_label l
+WHERE itl.label_id = l.id
+  AND itl.issue_id = $1::uuid
+  AND l.workspace_id = $2::uuid
+  AND l.project_id IS NOT NULL
+  AND l.project_id IS DISTINCT FROM $3::uuid
+`
+
+type DeleteIssueProjectScopedLabelsParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+}
+
+func (q *Queries) DeleteIssueProjectScopedLabels(ctx context.Context, arg DeleteIssueProjectScopedLabelsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteIssueProjectScopedLabels, arg.IssueID, arg.WorkspaceID, arg.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteLabel = `-- name: DeleteLabel :one
@@ -112,7 +145,7 @@ func (q *Queries) DetachLabelFromIssue(ctx context.Context, arg DetachLabelFromI
 }
 
 const getLabel = `-- name: GetLabel :one
-SELECT id, workspace_id, name, color, created_at, updated_at FROM issue_label
+SELECT id, workspace_id, name, color, created_at, updated_at, project_id FROM issue_label
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -131,12 +164,13 @@ func (q *Queries) GetLabel(ctx context.Context, arg GetLabelParams) (IssueLabel,
 		&i.Color,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ProjectID,
 	)
 	return i, err
 }
 
 const listLabels = `-- name: ListLabels :many
-SELECT id, workspace_id, name, color, created_at, updated_at FROM issue_label
+SELECT id, workspace_id, name, color, created_at, updated_at, project_id FROM issue_label
 WHERE workspace_id = $1
 ORDER BY LOWER(name) ASC
 `
@@ -157,6 +191,7 @@ func (q *Queries) ListLabels(ctx context.Context, workspaceID pgtype.UUID) ([]Is
 			&i.Color,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ProjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -169,7 +204,7 @@ func (q *Queries) ListLabels(ctx context.Context, workspaceID pgtype.UUID) ([]Is
 }
 
 const listLabelsByIssue = `-- name: ListLabelsByIssue :many
-SELECT l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at
+SELECT l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at, l.project_id
 FROM issue_label l
 JOIN issue_to_label il ON il.label_id = l.id
 WHERE il.issue_id = $1::uuid
@@ -200,6 +235,47 @@ func (q *Queries) ListLabelsByIssue(ctx context.Context, arg ListLabelsByIssuePa
 			&i.Color,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLabelsByProject = `-- name: ListLabelsByProject :many
+SELECT id, workspace_id, name, color, created_at, updated_at, project_id FROM issue_label
+WHERE workspace_id = $1::uuid
+  AND (project_id IS NULL OR project_id = $2::uuid)
+ORDER BY LOWER(name) ASC
+`
+
+type ListLabelsByProjectParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+}
+
+func (q *Queries) ListLabelsByProject(ctx context.Context, arg ListLabelsByProjectParams) ([]IssueLabel, error) {
+	rows, err := q.db.Query(ctx, listLabelsByProject, arg.WorkspaceID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueLabel{}
+	for rows.Next() {
+		var i IssueLabel
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Color,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ProjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -212,7 +288,7 @@ func (q *Queries) ListLabelsByIssue(ctx context.Context, arg ListLabelsByIssuePa
 }
 
 const listLabelsForIssues = `-- name: ListLabelsForIssues :many
-SELECT il.issue_id, l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at
+SELECT il.issue_id, l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at, l.project_id
 FROM issue_label l
 JOIN issue_to_label il ON il.label_id = l.id
 WHERE il.issue_id = ANY($1::uuid[])
@@ -233,6 +309,7 @@ type ListLabelsForIssuesRow struct {
 	Color       string             `json:"color"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
 }
 
 // Bulk variant: fetch labels for many issues in one round-trip so the issue
@@ -255,6 +332,7 @@ func (q *Queries) ListLabelsForIssues(ctx context.Context, arg ListLabelsForIssu
 			&i.Color,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ProjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -272,7 +350,7 @@ UPDATE issue_label SET
     color = COALESCE($4, color),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, name, color, created_at, updated_at
+RETURNING id, workspace_id, name, color, created_at, updated_at, project_id
 `
 
 type UpdateLabelParams struct {
@@ -297,6 +375,7 @@ func (q *Queries) UpdateLabel(ctx context.Context, arg UpdateLabelParams) (Issue
 		&i.Color,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ProjectID,
 	)
 	return i, err
 }

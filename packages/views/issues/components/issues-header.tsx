@@ -433,17 +433,19 @@ function ProjectSubContent({
 
 function LabelSubContent({
   counts,
+  projectId,
   selected,
   onToggle,
 }: {
   counts: Map<string, number>;
+  projectId?: string | null;
   selected: string[];
   onToggle: (labelId: string) => void;
 }) {
   const { t } = useT("issues");
   const [search, setSearch] = useState("");
   const wsId = useWorkspaceId();
-  const { data: labels = [] } = useQuery(labelListOptions(wsId));
+  const { data: labels = [] } = useQuery(labelListOptions(wsId, { projectId }));
   const query = search.trim().toLowerCase();
   const filtered = labels.filter((l) => l.name.toLowerCase().includes(query));
 
@@ -499,9 +501,11 @@ function LabelSubContent({
 export function IssuesHeader({
   scopedIssues,
   allowGantt = false,
+  projectId,
 }: {
   scopedIssues: Issue[];
   allowGantt?: boolean;
+  projectId?: string | null;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -570,7 +574,7 @@ export function IssuesHeader({
           onToggle={toggleAgentRunningFilter}
           scopedIssueIds={scopedIssueIds}
         />
-        <IssueDisplayControls scopedIssues={scopedIssues} allowGantt={allowGantt} />
+        <IssueDisplayControls scopedIssues={scopedIssues} allowGantt={allowGantt} projectId={projectId} />
       </div>
     </div>
   );
@@ -580,6 +584,7 @@ export function IssueDisplayControls({
   scopedIssues,
   hideViewToggle = false,
   allowGantt = false,
+  projectId,
 }: {
   scopedIssues: Issue[];
   hideViewToggle?: boolean;
@@ -587,6 +592,7 @@ export function IssueDisplayControls({
   // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
   // fall back to List if the option were exposed there. Keep Gantt opt-in.
   allowGantt?: boolean;
+  projectId?: string | null;
 }) {
   const { t } = useT("issues");
   const viewMode = useViewStore((s) => s.viewMode);
@@ -819,6 +825,7 @@ export function IssueDisplayControls({
               <DropdownMenuSubContent className="w-auto min-w-52 p-0">
                 <LabelSubContent
                   counts={counts.label}
+                  projectId={projectId ?? (projectFilters.length === 1 && !includeNoProject ? projectFilters[0] : null)}
                   selected={labelFilters}
                   onToggle={act.toggleLabelFilter}
                 />

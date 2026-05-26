@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"hash/crc32"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -194,6 +196,162 @@ func TestIssueLabelAttachDetach(t *testing.T) {
 	if len(issueLabels.Labels) != 0 {
 		t.Fatalf("after Detach: expected 0 labels, got %d", len(issueLabels.Labels))
 	}
+}
+
+func TestProjectScopedLabelListAndUniqueness(t *testing.T) {
+	projectA := createTestProject(t, "Label Scope A")
+	projectB := createTestProject(t, "Label Scope B")
+
+	global := createTestLabel(t, "scope-global", "#64748b", nil)
+	projectALabel := createTestLabel(t, "scope-project", "#2563eb", &projectA)
+	projectBLabel := createTestLabel(t, "scope-project", "#16a34a", &projectB)
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/labels?project_id="+projectA, nil)
+	testHandler.ListLabels(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListLabels scoped: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var scoped struct {
+		Labels []LabelResponse `json:"labels"`
+	}
+	json.NewDecoder(w.Body).Decode(&scoped)
+	assertLabelPresent(t, scoped.Labels, global.ID)
+	assertLabelPresent(t, scoped.Labels, projectALabel.ID)
+	assertLabelAbsent(t, scoped.Labels, projectBLabel.ID)
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/labels", nil)
+	testHandler.ListLabels(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListLabels workspace: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var all struct {
+		Labels []LabelResponse `json:"labels"`
+	}
+	json.NewDecoder(w.Body).Decode(&all)
+	assertLabelPresent(t, all.Labels, global.ID)
+	assertLabelPresent(t, all.Labels, projectALabel.ID)
+	assertLabelPresent(t, all.Labels, projectBLabel.ID)
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/labels", map[string]any{
+		"name":       projectALabel.Name,
+		"color":      "#0f172a",
+		"project_id": projectA,
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("duplicate project label: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestProjectScopedLabelAttachAndCreateIssueValidation(t *testing.T) {
+	projectA := createTestProject(t, "Attach Scope A")
+	projectB := createTestProject(t, "Attach Scope B")
+	labelA := createTestLabel(t, "attach-project-a", "#2563eb", &projectA)
+
+	issueB := createTestIssueWithProject(t, "Issue in project B", projectB)
+	t.Cleanup(func() { deleteTestIssue(t, issueB.ID) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueB.ID+"/labels", map[string]any{
+		"label_id": labelA.ID,
+	})
+	req = withURLParam(req, "id", issueB.ID)
+	testHandler.AttachLabel(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("AttachLabel wrong project: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var before int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&before); err != nil {
+		t.Fatalf("count issues before: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      "Create issue with wrong project label",
+		"project_id": projectB,
+		"label_ids":  []string{labelA.ID},
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateIssue wrong project label: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var after int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&after); err != nil {
+		t.Fatalf("count issues after: %v", err)
+	}
+	if after != before {
+		t.Fatalf("CreateIssue wrong project label should not create issue, count before=%d after=%d", before, after)
+	}
+}
+
+func TestUpdateIssueProjectChangeRemovesIncompatibleLabels(t *testing.T) {
+	projectA := createTestProject(t, "Update Scope A")
+	projectB := createTestProject(t, "Update Scope B")
+	global := createTestLabel(t, "update-global", "#64748b", nil)
+	labelA := createTestLabel(t, "update-project-a", "#2563eb", &projectA)
+	issue := createTestIssueWithProjectAndLabels(t, "Update issue project label cleanup", projectA, []string{global.ID, labelA.ID})
+	defer deleteTestIssue(t, issue.ID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
+		"project_id": projectB,
+	})
+	req = withURLParam(req, "id", issue.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue project change: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated IssueResponse
+	json.NewDecoder(w.Body).Decode(&updated)
+	if updated.ProjectID == nil || *updated.ProjectID != projectB {
+		t.Fatalf("UpdateIssue project_id: got %+v, want %s", updated.ProjectID, projectB)
+	}
+	if updated.Labels == nil {
+		t.Fatalf("UpdateIssue expected labels payload after cleanup")
+	}
+	assertLabelPresent(t, *updated.Labels, global.ID)
+	assertLabelAbsent(t, *updated.Labels, labelA.ID)
+
+	labels := listIssueLabels(t, issue.ID)
+	assertLabelPresent(t, labels, global.ID)
+	assertLabelAbsent(t, labels, labelA.ID)
+}
+
+func TestBatchUpdateIssueProjectChangeRemovesIncompatibleLabels(t *testing.T) {
+	projectA := createTestProject(t, "Batch Scope A")
+	projectB := createTestProject(t, "Batch Scope B")
+	global := createTestLabel(t, "batch-global", "#64748b", nil)
+	labelA := createTestLabel(t, "batch-project-a", "#2563eb", &projectA)
+	issue := createTestIssueWithProjectAndLabels(t, "Batch issue project label cleanup", projectA, []string{global.ID, labelA.ID})
+	defer deleteTestIssue(t, issue.ID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{issue.ID},
+		"updates": map[string]any{
+			"project_id": projectB,
+		},
+	})
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BatchUpdateIssues project change: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Updated int `json:"updated"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Updated != 1 {
+		t.Fatalf("BatchUpdateIssues updated: got %d, want 1", resp.Updated)
+	}
+
+	labels := listIssueLabels(t, issue.ID)
+	assertLabelPresent(t, labels, global.ID)
+	assertLabelAbsent(t, labels, labelA.ID)
 }
 
 // TestLabelNotFoundAcrossWorkspaces ensures GET with a foreign workspace
@@ -435,4 +593,120 @@ func createOtherTestWorkspace(t *testing.T) string {
 		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
 	})
 	return wsID
+}
+
+func createTestProject(t *testing.T, title string) string {
+	t.Helper()
+	ctx := context.Background()
+	var projectID string
+	err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("%s %s", title, strings.ReplaceAll(t.Name(), "/", "-"))).Scan(&projectID)
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+	})
+	return projectID
+}
+
+func createTestLabel(t *testing.T, name, color string, projectID *string) LabelResponse {
+	t.Helper()
+	body := map[string]any{
+		"name":  fmt.Sprintf("%s-%08x", name, crc32.ChecksumIEEE([]byte(t.Name()))),
+		"color": color,
+	}
+	if projectID != nil {
+		body["project_id"] = *projectID
+	}
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/labels", body)
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var label LabelResponse
+	json.NewDecoder(w.Body).Decode(&label)
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/labels/"+label.ID, nil)
+		req = withURLParam(req, "id", label.ID)
+		testHandler.DeleteLabel(w, req)
+	})
+	return label
+}
+
+func createTestIssueWithProject(t *testing.T, title, projectID string) IssueResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      title,
+		"status":     "todo",
+		"priority":   "medium",
+		"project_id": projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	return issue
+}
+
+func createTestIssueWithProjectAndLabels(t *testing.T, title, projectID string, labelIDs []string) IssueResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      title,
+		"status":     "todo",
+		"priority":   "medium",
+		"project_id": projectID,
+		"label_ids":  labelIDs,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	return issue
+}
+
+func listIssueLabels(t *testing.T, issueID string) []LabelResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+issueID+"/labels", nil)
+	req = withURLParam(req, "id", issueID)
+	testHandler.ListLabelsForIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListLabelsForIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Labels []LabelResponse `json:"labels"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	return resp.Labels
+}
+
+func assertLabelPresent(t *testing.T, labels []LabelResponse, id string) {
+	t.Helper()
+	for _, label := range labels {
+		if label.ID == id {
+			return
+		}
+	}
+	t.Fatalf("expected label %s to be present in %+v", id, labels)
+}
+
+func assertLabelAbsent(t *testing.T, labels []LabelResponse, id string) {
+	t.Helper()
+	for _, label := range labels {
+		if label.ID == id {
+			t.Fatalf("expected label %s to be absent from %+v", id, labels)
+		}
+	}
 }

@@ -420,16 +420,24 @@
       "manage_action": "Manage labels…",
       "manage_dialog_title": "Manage labels",
       "create_action": "Create",
-      "create_failed": "Failed to create label"
+      "create_failed": "Failed to create label",
+      "scope_aria": "Label creation scope",
+      "scope_project": "Current project",
+      "scope_workspace": "Workspace"
     }
   },
   "labels_panel": {
     "intro": "Create and manage labels to categorize issues across your workspace.",
+    "project_intro": "Create and manage labels for this project or the whole workspace.",
+    "scope_aria": "Label scope",
+    "scope_project": "This project",
+    "scope_workspace": "Workspace",
     "new_placeholder": "New label name…",
     "new_aria": "New label name",
     "add_action": "Add",
     "loading": "Loading…",
-    "empty": "No labels yet.",
+    "empty_workspace": "No workspace labels yet.",
+    "empty_project": "No project labels yet.",
     "name_required": "Label name is required.",
     "color_label": "Color",
     "pick_color_aria": "Pick a color",

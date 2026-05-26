@@ -21,18 +21,20 @@ import (
 // ---------------------------------------------------------------------------
 
 type LabelResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Color       string `json:"color"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	ProjectID   *string `json:"project_id"`
+	Name        string  `json:"name"`
+	Color       string  `json:"color"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 func labelToResponse(l db.IssueLabel) LabelResponse {
 	return LabelResponse{
 		ID:          uuidToString(l.ID),
 		WorkspaceID: uuidToString(l.WorkspaceID),
+		ProjectID:   uuidToPtr(l.ProjectID),
 		Name:        l.Name,
 		Color:       l.Color,
 		CreatedAt:   timestampToString(l.CreatedAt),
@@ -49,8 +51,9 @@ func labelsToResponse(list []db.IssueLabel) []LabelResponse {
 }
 
 type CreateLabelRequest struct {
-	Name  string `json:"name"`
-	Color string `json:"color"`
+	Name      string  `json:"name"`
+	Color     string  `json:"color"`
+	ProjectID *string `json:"project_id"`
 }
 
 type UpdateLabelRequest struct {
@@ -96,13 +99,38 @@ func validateLabelName(raw string) (string, error) {
 	return name, nil
 }
 
+func labelScopeMatchesIssue(label db.IssueLabel, issue db.Issue) bool {
+	return !label.ProjectID.Valid || (issue.ProjectID.Valid && label.ProjectID == issue.ProjectID)
+}
+
 // ---------------------------------------------------------------------------
 // Handlers — label CRUD
 // ---------------------------------------------------------------------------
 
 func (h *Handler) ListLabels(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
-	labels, err := h.Queries.ListLabels(r.Context(), parseUUID(workspaceID))
+	wsUUID := parseUUID(workspaceID)
+	var labels []db.IssueLabel
+	var err error
+	if rawProjectID := r.URL.Query().Get("project_id"); rawProjectID != "" {
+		projectID, ok := parseUUIDOrBadRequest(w, rawProjectID, "project_id")
+		if !ok {
+			return
+		}
+		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID:          projectID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			writeError(w, http.StatusBadRequest, "project_id must reference a project in this workspace")
+			return
+		}
+		labels, err = h.Queries.ListLabelsByProject(r.Context(), db.ListLabelsByProjectParams{
+			WorkspaceID: wsUUID,
+			ProjectID:   projectID,
+		})
+	} else {
+		labels, err = h.Queries.ListLabels(r.Context(), wsUUID)
+	}
 	if err != nil {
 		slog.Warn("ListLabels failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to list labels")
@@ -155,15 +183,33 @@ func (h *Handler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID := parseUUID(workspaceID)
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
 
+	var projectID pgtype.UUID
+	if req.ProjectID != nil && *req.ProjectID != "" {
+		id, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
+		if !ok {
+			return
+		}
+		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID:          id,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			writeError(w, http.StatusBadRequest, "project_id must reference a project in this workspace")
+			return
+		}
+		projectID = id
+	}
+
 	label, err := h.Queries.CreateLabel(r.Context(), db.CreateLabelParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		Name:        name,
 		Color:       color,
+		ProjectID:   projectID,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -351,15 +397,20 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := h.Queries.GetLabel(r.Context(), db.GetLabelParams{
+	label, err := h.Queries.GetLabel(r.Context(), db.GetLabelParams{
 		ID: labelID, WorkspaceID: issue.WorkspaceID,
-	}); err != nil {
+	})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "label not found")
 			return
 		}
 		slog.Warn("GetLabel in AttachLabel failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to attach label")
+		return
+	}
+	if !labelScopeMatchesIssue(label, issue) {
+		writeError(w, http.StatusBadRequest, "label is not available for this issue's project")
 		return
 	}
 

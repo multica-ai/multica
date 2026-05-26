@@ -222,6 +222,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                 <LabelPicker
                   issueId={issue.id}
                   labels={labels}
+                  projectId={issue.project_id}
                   align="start"
                   width="w-72"
                   appendAddTrigger

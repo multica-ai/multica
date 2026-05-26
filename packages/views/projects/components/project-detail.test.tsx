@@ -5,18 +5,24 @@ import type { Issue, IssuePriority, IssueStatus } from "@multica/core/types";
 
 const mockBoardView = vi.hoisted(() => vi.fn());
 const mockListView = vi.hoisted(() => vi.fn());
+const mockMyIssueListOptions = vi.hoisted(() => vi.fn());
+const mockMyIssueAssigneeGroupsOptions = vi.hoisted(() => vi.fn());
+const mockProjectGanttIssuesOptions = vi.hoisted(() => vi.fn());
+const mockSetViewState = vi.hoisted(() => vi.fn());
+const mockUseQuery = vi.hoisted(() => vi.fn());
 const viewState = vi.hoisted(() => ({
   viewMode: "board" as "board" | "list",
+  grouping: "status" as "status" | "assignee",
   statusFilters: [] as IssueStatus[],
   priorityFilters: [] as IssuePriority[],
   assigneeFilters: [],
   includeNoAssignee: false,
   creatorFilters: [],
-  labelFilters: [],
+  labelFilters: [] as string[],
 }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: new Map() }),
+  useQuery: (options?: { queryKey?: readonly unknown[] }) => mockUseQuery(options),
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -24,8 +30,13 @@ vi.mock("@multica/core/hooks", () => ({
 }));
 
 vi.mock("@multica/core/issues/queries", () => ({
-  myIssueListOptions: vi.fn(),
-  childIssueProgressOptions: vi.fn(),
+  myIssueListOptions: (wsId: string, scope: string, filter: unknown) =>
+    mockMyIssueListOptions(wsId, scope, filter),
+  myIssueAssigneeGroupsOptions: (wsId: string, scope: string, filter: unknown) =>
+    mockMyIssueAssigneeGroupsOptions(wsId, scope, filter),
+  projectGanttIssuesOptions: (wsId: string, projectId: string) =>
+    mockProjectGanttIssuesOptions(wsId, projectId),
+  childIssueProgressOptions: () => ({ queryKey: ["child-progress"] }),
 }));
 
 vi.mock("@multica/core/issues/mutations", () => ({
@@ -36,6 +47,13 @@ vi.mock("@multica/core/issues/stores/view-store-context", () => ({
   ViewStoreProvider: ({ children }: { children: ReactNode }) => children,
   useViewStore: (selector?: (state: typeof viewState) => unknown) =>
     (selector ? selector(viewState) : viewState),
+  useViewStoreApi: () => ({ getState: () => viewState, setState: mockSetViewState }),
+}));
+
+vi.mock("@multica/core/labels/queries", () => ({
+  labelListOptions: (_wsId: string, scope?: { projectId?: string | null }) => ({
+    queryKey: ["labels", scope?.projectId ?? null],
+  }),
 }));
 
 vi.mock("../../issues/utils/filter", async () => {
@@ -62,11 +80,19 @@ vi.mock("../../issues/components/list-view", () => ({
   },
 }));
 
+vi.mock("../../issues/components/issues-header", () => ({
+  IssuesHeader: () => <div data-testid="issues-header" />,
+}));
+
+vi.mock("../../issues/components/batch-action-toolbar", () => ({
+  BatchActionToolbar: () => <div data-testid="batch-action-toolbar" />,
+}));
+
 vi.mock("../../i18n", () => ({
   useT: () => ({ t: () => "" }),
 }));
 
-import { ProjectIssuesContent } from "./project-detail";
+import { ProjectIssuesContent, ProjectIssuesSurface, pruneLabelFiltersToVisibleProjectLabels } from "./project-detail";
 
 function issue({
   id,
@@ -112,6 +138,7 @@ const issues: Issue[] = [
 describe("ProjectIssuesContent", () => {
   beforeEach(() => {
     viewState.viewMode = "board";
+    viewState.grouping = "status";
     viewState.statusFilters = [];
     viewState.priorityFilters = [];
     viewState.assigneeFilters = [];
@@ -120,6 +147,38 @@ describe("ProjectIssuesContent", () => {
     viewState.labelFilters = [];
     mockBoardView.mockClear();
     mockListView.mockClear();
+    mockMyIssueListOptions.mockClear();
+    mockMyIssueAssigneeGroupsOptions.mockClear();
+    mockProjectGanttIssuesOptions.mockClear();
+    mockSetViewState.mockClear();
+    mockUseQuery.mockReset();
+    mockUseQuery.mockImplementation((options?: { queryKey?: readonly unknown[] }) => {
+      if (options?.queryKey?.[0] === "labels") {
+        return {
+          data: [
+            { id: "label-global", project_id: null },
+            { id: "label-project-b", project_id: "project-b" },
+          ],
+          isSuccess: true,
+        };
+      }
+      if (options?.queryKey?.[0] === "my-issues") return { data: [], isSuccess: true };
+      if (options?.queryKey?.[0] === "my-assignee-groups") return { data: { groups: [] }, isSuccess: true };
+      if (options?.queryKey?.[0] === "project-gantt") return { data: [], isSuccess: true };
+      return { data: new Map(), isSuccess: true };
+    });
+    mockMyIssueListOptions.mockReturnValue({
+      queryKey: ["my-issues"],
+      queryFn: vi.fn(),
+    });
+    mockMyIssueAssigneeGroupsOptions.mockReturnValue({
+      queryKey: ["my-assignee-groups"],
+      queryFn: vi.fn(),
+    });
+    mockProjectGanttIssuesOptions.mockReturnValue({
+      queryKey: ["project-gantt"],
+      queryFn: vi.fn(),
+    });
   });
 
   it("passes the current project to board view create affordances", () => {
@@ -197,5 +256,38 @@ describe("ProjectIssuesContent", () => {
     expect(props.issues.map((i: Issue) => i.id)).toEqual(
       expect.arrayContaining(["issue-1", "issue-2", "issue-3"]),
     );
+  });
+
+  it("prunes project label filters to labels visible in the current project scope", () => {
+    expect(
+      pruneLabelFiltersToVisibleProjectLabels(
+        ["label-project-a", "label-global", "label-project-b"],
+        [{ id: "label-global" }, { id: "label-project-b" }],
+      ),
+    ).toEqual(["label-global", "label-project-b"]);
+  });
+
+  it("does not send stale project label filters after switching projects", () => {
+    viewState.labelFilters = ["label-project-a", "label-global", "label-project-b"];
+
+    render(
+      <ProjectIssuesSurface
+        projectId="project-b"
+        scope="project:project-b"
+        filter={{ project_id: "project-b" }}
+      />,
+    );
+
+    expect(mockMyIssueListOptions).toHaveBeenCalledWith(
+      "ws-test",
+      "project:project-b",
+      expect.objectContaining({
+        project_id: "project-b",
+        label_ids: ["label-global", "label-project-b"],
+      }),
+    );
+    expect(mockSetViewState).toHaveBeenCalledWith({
+      labelFilters: ["label-global", "label-project-b"],
+    });
   });
 });

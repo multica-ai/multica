@@ -90,12 +90,12 @@ vi.mock("@multica/core/projects/queries", () => ({
 }));
 
 vi.mock("@multica/core/labels", () => ({
-  labelListOptions: (wsId: string) => ({
-    queryKey: ["labels", wsId],
+  labelListOptions: (wsId: string, scope?: { projectId?: string | null }) => ({
+    queryKey: ["labels", wsId, "list", scope?.projectId ? "project" : "workspace", scope?.projectId ?? null],
     queryFn: () =>
       Promise.resolve([
-        { id: "label-1", name: "bug", color: "#ef4444" },
-        { id: "label-2", name: "feature", color: "#22c55e" },
+        { id: "label-1", workspace_id: wsId, project_id: null, name: "bug", color: "#ef4444" },
+        { id: "label-2", workspace_id: wsId, project_id: null, name: "feature", color: "#22c55e" },
       ]),
   }),
   useCreateLabel: () => ({ mutate: mockCreateLabel, isPending: false }),
@@ -278,6 +278,41 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenuSeparator: () => null,
 }));
 
+vi.mock("../issues/components/label-scope-segment", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../issues/components/label-scope-segment")>();
+  return {
+    ...actual,
+    LabelScopeSegment: ({
+      value,
+      onValueChange,
+      projectLabel,
+      workspaceLabel,
+    }: {
+      value: "project" | "workspace";
+      onValueChange: (value: "project" | "workspace") => void;
+      projectLabel: string;
+      workspaceLabel: string;
+    }) => (
+      <div>
+        <button
+          type="button"
+          aria-pressed={value === "project"}
+          onClick={() => onValueChange("project")}
+        >
+          {projectLabel}
+        </button>
+        <button
+          type="button"
+          aria-pressed={value === "workspace"}
+          onClick={() => onValueChange("workspace")}
+        >
+          {workspaceLabel}
+        </button>
+      </div>
+    ),
+  };
+});
+
 vi.mock("./issue-picker-modal", () => ({
   IssuePickerModal: () => null,
 }));
@@ -376,8 +411,17 @@ describe("CreateIssueModal", () => {
       mockQuickCreateStore.keepOpen = v;
     });
     mockCreateLabel.mockImplementation(
-      (_data: { name: string; color: string }, opts?: { onSuccess?: (label: { id: string }) => void }) => {
-        opts?.onSuccess?.({ id: "label-new" });
+      (
+        data: { name: string; color: string; project_id?: string | null },
+        opts?: { onSuccess?: (label: { id: string; workspace_id: string; project_id: string | null; name: string; color: string }) => void },
+      ) => {
+        opts?.onSuccess?.({
+          id: "label-new",
+          workspace_id: "ws-test",
+          project_id: data.project_id ?? null,
+          name: data.name,
+          color: data.color,
+        });
       },
     );
     // Reset the shared draft mock so per-test assignee seeding (squad / agent)
@@ -670,6 +714,28 @@ describe("CreateIssueModal", () => {
           title: "Issue with new label",
           label_ids: ["label-new"],
         }),
+      );
+    });
+  });
+
+  it("supports creating a workspace label from the project create flow", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Issue with workspace label");
+    await user.click(screen.getByLabelText("Select labels"));
+    await user.click(screen.getByRole("button", { name: "Workspace" }));
+    await user.type(screen.getByPlaceholderText("Search or type a new label"), "global-risk");
+    await user.click(screen.getByRole("button", { name: /Create label "global-risk"/i }));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "global-risk", project_id: null }),
+        expect.any(Object),
+      );
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ label_ids: ["label-new"] }),
       );
     });
   });

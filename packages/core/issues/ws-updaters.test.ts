@@ -39,6 +39,7 @@ const AGENT_ID = "agent-1";
 const labelA: Label = {
   id: "label-a",
   workspace_id: WS_ID,
+  project_id: null,
   name: "bug",
   color: "#ef4444",
   created_at: "2025-01-01T00:00:00Z",
@@ -48,6 +49,7 @@ const labelA: Label = {
 const labelB: Label = {
   id: "label-b",
   workspace_id: WS_ID,
+  project_id: null,
   name: "feature",
   color: "#22c55e",
   created_at: "2025-01-01T00:00:00Z",
