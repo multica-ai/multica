@@ -2,8 +2,15 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { DAGCanvas } from "../../workflows/components";
-import { workflowDetailOptions, workflowNodesOptions, workflowEdgesOptions, workflowNodeRunsOptions } from "@multica/core/workflows/queries";
+import {
+  workflowDetailOptions,
+  workflowNodesOptions,
+  workflowEdgesOptions,
+  workflowNodeRunsOptions,
+  useCancelWorkflowRun,
+} from "@multica/core/workflows/queries";
 import { Badge } from "@multica/ui/components/ui/badge";
+import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
@@ -35,6 +42,7 @@ function getStatusLabel(status: string): string {
 function getRunSummary(nodeRuns: { status: string }[]): { label: string; variant: "default" | "secondary" | "destructive" | "outline" } {
   const hasBlocked = nodeRuns.some((n) => n.status === "blocked" || n.status === "format_failed");
   const hasFailed = nodeRuns.some((n) => n.status === "failed");
+  const allCancelled = nodeRuns.length > 0 && nodeRuns.every((n) => n.status === "cancelled");
   const allDone = nodeRuns.length > 0 && nodeRuns.every(
     (n) => n.status === "completed" || n.status === "critic_approved" || n.status === "skipped"
   );
@@ -42,11 +50,12 @@ function getRunSummary(nodeRuns: { status: string }[]): { label: string; variant
     (n) => !["completed", "critic_approved", "skipped", "failed", "cancelled", "pending", "blocked", "format_failed"].includes(n.status)
   );
 
-  if (hasBlocked) return { label: "Blocked", variant: "destructive" };
-  if (hasFailed) return { label: "Failed", variant: "destructive" };
-  if (allDone) return { label: "Completed", variant: "default" };
-  if (anyRunning) return { label: "In Progress", variant: "secondary" };
-  return { label: "Pending", variant: "outline" };
+  if (allCancelled) return { label: "Cancelled", variant: "outline" as const };
+  if (hasBlocked) return { label: "Blocked", variant: "destructive" as const };
+  if (hasFailed) return { label: "Failed", variant: "destructive" as const };
+  if (allDone) return { label: "Completed", variant: "default" as const };
+  if (anyRunning) return { label: "In Progress", variant: "secondary" as const };
+  return { label: "Pending", variant: "outline" as const };
 }
 
 export function WorkflowDagViewer({
@@ -65,16 +74,26 @@ export function WorkflowDagViewer({
     ...workflowNodeRunsOptions(wsId, workflowId, runId ?? ""),
     enabled: !!runId,
   });
+  const cancelRunMutation = useCancelWorkflowRun(wsId);
 
   const nodeStatusColors: Record<string, string> = {};
-  const nodeStatusLabels: Record<string, string> = {};
   for (const nr of nodeRuns) {
     nodeStatusColors[nr.workflow_node_id] = getStatusColor(nr.status);
-    nodeStatusLabels[nr.workflow_node_id] = getStatusLabel(nr.status);
   }
 
   const totalCount = nodes.length;
   const summary = getRunSummary(nodeRuns);
+
+  const handleCancel = async () => {
+    if (!runId || !confirm("Cancel this workflow run? All active sub-issues will stop.")) return;
+    try {
+      await cancelRunMutation.mutateAsync({ workflowId, runId });
+    } catch {
+      // silent
+    }
+  };
+
+  const isRunning = summary.label === "In Progress" || summary.label === "Pending";
 
   return (
     <div>
@@ -90,6 +109,17 @@ export function WorkflowDagViewer({
             {nodeRuns.filter((n) => n.status === "completed" || n.status === "critic_approved" || n.status === "skipped").length}/{totalCount} done
           </span>
         )}
+        {isRunning && runId && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-xs text-destructive hover:text-destructive"
+            onClick={handleCancel}
+            disabled={cancelRunMutation.isPending}
+          >
+            Cancel Run
+          </Button>
+        )}
       </div>
 
       {!runId && workflow && workflow.status !== "active" && (
@@ -99,7 +129,7 @@ export function WorkflowDagViewer({
       )}
       {!runId && workflow && workflow.status === "active" && (
         <div className="mb-2 px-3 py-1.5 rounded-md bg-blue-50 border border-blue-200 text-xs text-blue-700 dark:bg-blue-950 dark:border-blue-800 dark:text-blue-300">
-          Workflow is active — run should start when assigned. Try reassigning the issue.
+          Workflow is active — run will start when assigned.
         </div>
       )}
 
@@ -112,7 +142,6 @@ export function WorkflowDagViewer({
         />
       </div>
 
-      {/* Per-node status list */}
       {runId && nodeRuns.length > 0 && (
         <div className="mt-3 space-y-1">
           {nodeRuns.map((nr) => {

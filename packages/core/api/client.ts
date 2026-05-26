@@ -173,8 +173,6 @@ import {
   EMPTY_LIST_WORKFLOW_RUNS_RESPONSE,
   WorkflowRunSchema,
   EMPTY_WORKFLOW_RUN,
-  WorkflowNodeRunListSchema,
-  EMPTY_WORKFLOW_NODE_RUN_LIST,
   MyWorkflowTasksResponseSchema,
   EMPTY_MY_WORKFLOW_TASKS_RESPONSE,
 } from "./schemas";
@@ -1910,9 +1908,10 @@ export class ApiClient {
 
   async listWorkflowNodeRuns(workflowId: string, runId: string): Promise<WorkflowNodeRun[]> {
     const raw = await this.fetch<unknown>(`/api/workflows/${workflowId}/runs/${runId}/node-runs`);
-    return parseWithFallback(raw, WorkflowNodeRunListSchema, EMPTY_WORKFLOW_NODE_RUN_LIST, {
+    const parsed = parseWithFallback(raw, MyWorkflowTasksResponseSchema, EMPTY_MY_WORKFLOW_TASKS_RESPONSE, {
       endpoint: "GET /api/workflows/:id/runs/:runId/node-runs",
     });
+    return parsed.node_runs;
   }
 
   async submitNodeRun(nodeRunId: string, output: unknown): Promise<WorkflowNodeRun> {
