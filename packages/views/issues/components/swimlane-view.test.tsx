@@ -403,11 +403,6 @@ describe("SwimLaneView", () => {
   });
 
   it("does not render the add-issue button inside 'Other parents' cells", () => {
-    // The orphan lane is display-only: clicking + would create an issue
-    // with no parent context (it doesn't belong to any known parent),
-    // so the affordance is suppressed. mockIssues contains parent-1,
-    // child-1, orphan-1 — combine with orphanChild so both a real lane
-    // and the orphan lane are rendered.
     renderWithI18n(
       <SwimLaneView
         issues={[...mockIssues, orphanChild]}
@@ -415,10 +410,9 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    // Real lanes still render + buttons (No parent + Parent Issue 1 lanes
-    // each have one per visible status column). The orphan lane adds
-    // zero buttons regardless of how many statuses are visible.
-    const realLaneCount = 2; // No parent + Parent Issue 1
+    // No parent + Parent Issue 1 each have one + per visible status column.
+    // The Other parents lane must add zero.
+    const realLaneCount = 2;
     const visibleStatusCount = 6; // BOARD_STATUSES default
     expect(
       screen.getAllByRole("button", { name: /add issue/i }).length,
@@ -426,12 +420,8 @@ describe("SwimLaneView", () => {
   });
 
   it("does not call onMoveIssue when a card is dropped onto the empty whitespace of an 'Other parents' cell", () => {
-    // Round 3 review — the critical failure path is a drop onto the
-    // *empty area* of an orphan cell. With the cell re-enabled in the
-    // collision graph (so it absorbs whitespace drops instead of falling
-    // through to the nearest real cell), dnd-kit emits the cell's own
-    // droppable id as `over.id`. The ORPHAN_LANE_KEY guard must fire
-    // for that id, not just for orphan cards.
+    // `over.id` is the orphan cell id — what dnd-kit emits when the
+    // pointer lands on the cell's empty area.
     const mockOnMoveIssue = vi.fn();
     renderWithI18n(
       <SwimLaneView
@@ -440,18 +430,15 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    // Simulate drag-over first (optimistic UI must not move the card).
     act(() => {
       lastOnDragOver({
-        active: { id: "orphan-1" },
+        active: { id: "child-1" },
         over: { id: "swim:parent:__orphans__:todo" },
       });
     });
-
-    // Then drag-end onto the empty orphan cell area.
     act(() => {
       lastOnDragEnd({
-        active: { id: "orphan-1" },
+        active: { id: "child-1" },
         over: { id: "swim:parent:__orphans__:todo" },
       });
     });
@@ -488,36 +475,6 @@ describe("SwimLaneView", () => {
     // regular card.
     const parentTitleMatches = screen.getAllByText("Parent Issue 1");
     expect(parentTitleMatches).toHaveLength(1);
-  });
-
-  it("does not call onMoveIssue when a card from a real lane is dropped onto orphan cell whitespace", () => {
-    // Round 3 — the real failure path: drag a card from a real parent
-    // lane onto the empty whitespace of an orphan cell. Previously the
-    // cell was disabled, so dnd-kit fell through to the nearest real
-    // cell and silently re-parented. Now the cell is enabled and absorbs
-    // the drop; the guard rejects any move into/out of ORPHAN_LANE_KEY.
-    const mockOnMoveIssue = vi.fn();
-    renderWithI18n(
-      <SwimLaneView
-        issues={[...mockIssues, orphanChild]}
-        onMoveIssue={mockOnMoveIssue}
-      />,
-    );
-
-    act(() => {
-      lastOnDragOver({
-        active: { id: "child-1" },
-        over: { id: "swim:parent:__orphans__:todo" },
-      });
-    });
-    act(() => {
-      lastOnDragEnd({
-        active: { id: "child-1" },
-        over: { id: "swim:parent:__orphans__:todo" },
-      });
-    });
-
-    expect(mockOnMoveIssue).not.toHaveBeenCalled();
   });
 
   it("does not call onMoveIssue when a card is dragged out of 'Other parents'", () => {
