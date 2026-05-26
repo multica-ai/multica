@@ -37,6 +37,8 @@ import (
 type RuntimeToolsAdminService interface {
 	ListTools(ctx context.Context, runtimeID pgtype.UUID) ([]RuntimeToolView, error)
 	SetEnabled(ctx context.Context, runtimeID pgtype.UUID, toolName string, enabled bool) (RuntimeToolView, error)
+	// CEREBRO-PATCH(runtime-tools-scan-now-local-stamp): FIR-2284 stamp last_scanned_at on a local scan.
+	StampScanned(ctx context.Context, runtimeID pgtype.UUID) error
 
 	ListGroupGrants(ctx context.Context, runtimeID pgtype.UUID) ([]RuntimeToolGroupGrantView, error)
 	AddGroupGrant(ctx context.Context, runtimeID pgtype.UUID, toolName string, groupID, grantedBy pgtype.UUID) error
@@ -248,6 +250,11 @@ func (h *Handler) RequestRuntimeToolScan(w http.ResponseWriter, r *http.Request)
 	// now so the runtime's own tools surface in the unified table immediately;
 	// any MCP tools the async scan finds are added on top when it reports back.
 	h.persistRuntimeCapabilitySnapshot(r, rt.ID, rt.WorkspaceID, rt.Capabilities)
+	// CEREBRO-PATCH(runtime-tools-scan-now-local-stamp): FIR-2284 — the daemon
+	// only stamps last_scanned_at on the MCP rows it reports; a local runtime
+	// with no MCP servers never updated the "Last scanned" label. Stamp the
+	// runtime's existing inventory now so the label flips, mirroring cloud.
+	_ = h.runtimeToolsAdmin.StampScanned(r.Context(), rt.ID)
 	w.WriteHeader(http.StatusAccepted)
 }
 

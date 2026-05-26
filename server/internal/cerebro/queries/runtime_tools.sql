@@ -32,6 +32,17 @@ SET source = EXCLUDED.source,
 RETURNING id, runtime_id, tool_name, source, mcp_server_name, description,
           schema_json, enabled, last_scanned_at, created_at, updated_at;
 
+-- name: StampCerebroRuntimeToolsScanned :execrows
+-- FIR-2284: mark every tool row for a runtime as scanned "now". A cloud
+-- runtime gets its last_scanned_at from the in-process scanner's UpsertTool;
+-- a local daemon scan only stamps the MCP rows it reports back, so a local
+-- runtime with no MCP servers never updated its timestamp and the admin UI's
+-- "Last scanned" label stayed stuck on "Never scanned". The local "Scan now"
+-- path calls this to stamp the runtime's existing inventory the same way.
+UPDATE cerebro_runtime_tool
+SET last_scanned_at = now(), updated_at = now()
+WHERE runtime_id = $1;
+
 -- name: SetCerebroRuntimeToolEnabled :one
 UPDATE cerebro_runtime_tool
 SET enabled = $3, updated_at = now()

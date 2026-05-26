@@ -446,6 +446,26 @@ func (q *Queries) SetCerebroRuntimeToolEnabled(ctx context.Context, arg SetCereb
 	return i, err
 }
 
+const stampCerebroRuntimeToolsScanned = `-- name: StampCerebroRuntimeToolsScanned :execrows
+UPDATE cerebro_runtime_tool
+SET last_scanned_at = now(), updated_at = now()
+WHERE runtime_id = $1
+`
+
+// FIR-2284: mark every tool row for a runtime as scanned "now". A cloud
+// runtime gets its last_scanned_at from the in-process scanner's UpsertTool;
+// a local daemon scan only stamps the MCP rows it reports back, so a local
+// runtime with no MCP servers never updated its timestamp and the admin UI's
+// "Last scanned" label stayed stuck on "Never scanned". The local "Scan now"
+// path calls this to stamp the runtime's existing inventory the same way.
+func (q *Queries) StampCerebroRuntimeToolsScanned(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, stampCerebroRuntimeToolsScanned, runtimeID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertCerebroAgentRuntimeToolOverride = `-- name: UpsertCerebroAgentRuntimeToolOverride :one
 INSERT INTO cerebro_agent_runtime_tool_override (agent_id, tool_name, enabled, updated_by)
 VALUES ($1, $2, $3, $4)
