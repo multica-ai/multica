@@ -269,8 +269,6 @@ function renderWithI18n(ui: React.ReactNode) {
 describe("SwimLaneView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset mutable mock state between tests so stored lane order /
-    // collapsed state from one test doesn't leak into the next.
     mockViewState.swimlaneOrder = [];
     mockViewState.collapsedSwimlanes = [];
     useLoadMoreByStatusMock.mockImplementation(() => ({
@@ -303,10 +301,7 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    // No parent (orphan swimlane)
     expect(screen.getAllByText("No parent").length).toBeGreaterThanOrEqual(1);
-
-    // Parent Issue 1 swimlane
     expect(screen.getAllByText("Parent Issue 1").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("PROJ-1").length).toBeGreaterThanOrEqual(1);
   });
@@ -319,11 +314,9 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    // Orphan-1 is a true orphan → card in "No parent" + Backlog.
     expect(screen.getByText("Orphan Issue 1")).toBeInTheDocument();
 
-    // Parent Issue 1 is promoted to a lane header (has child-1 as a
-    // sub-issue) and must NOT also render as a card in "No parent".
+    // parent-1 is promoted to a lane header — must not also appear as a card.
     const parentTitleMatches = screen.getAllByText("Parent Issue 1");
     expect(parentTitleMatches).toHaveLength(1);
     expect(parentTitleMatches[0]!.closest("div")?.textContent).toContain("PROJ-1");
@@ -339,8 +332,6 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    // Find the per-cell "+" button by its aria-label (set to the
-    // `board.add_issue_tooltip` translation).
     const addButtons = screen.getAllByRole("button", { name: /add issue/i });
     expect(addButtons.length).toBeGreaterThan(0);
 
@@ -366,10 +357,7 @@ describe("SwimLaneView", () => {
     );
   });
 
-  // Child whose parent_issue_id points at an issue not in the loaded set
-  // (e.g. parent filtered out server-side by "assigned to me", or hidden
-  // by a status filter without an unfilteredIssues prop). Falls into the
-  // "Other parents" display-only lane.
+  // A child whose parent isn't in the loaded set — lands in "Other parents".
   const orphanChild: Issue = {
     id: "lonely-child",
     workspace_id: "ws-1",
@@ -446,16 +434,9 @@ describe("SwimLaneView", () => {
     expect(mockOnMoveIssue).not.toHaveBeenCalled();
   });
 
-  it("hides parent lanes whose only children are filtered out, while still rendering visible children of visible parents", () => {
-    // Round 2 review B — lane discovery walks the visible `issues` set,
-    // not the broader `unfilteredIssues`, so a status filter that hides
-    // all of a parent's children also hides that parent's lane (the
-    // parent itself can still render as a card via the unfilteredIssues
-    // path when the caller wires it through).
-    //
-    // Fixture: parent-1 + its only child (in_progress). With visibleStatuses
-    // restricted to ["todo"], child-1 isn't in `issues`, so parent-1's
-    // lane should disappear.
+  it("hides a parent lane when all its children are in hidden statuses", () => {
+    // child-1 (in_progress) is not in the visible set — parent-1's lane
+    // is dropped. parent-1 itself falls into the No-parent lane as a card.
     renderWithI18n(
       <SwimLaneView
         issues={mockIssues.filter((i) => i.status === "todo")}
@@ -466,21 +447,11 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    // Parent Issue 1 — its only child (child-1) is in_progress (hidden),
-    // so its lane is dropped. Only the "No parent" lane should render,
-    // and parent-1 itself shows up as a card within it (status: todo,
-    // not a lane header because no visible children reference it).
     expect(screen.queryByText("Child Issue 1")).not.toBeInTheDocument();
-    // Header still appears for "No parent"; "Parent Issue 1" is now a
-    // regular card.
-    const parentTitleMatches = screen.getAllByText("Parent Issue 1");
-    expect(parentTitleMatches).toHaveLength(1);
+    expect(screen.getAllByText("Parent Issue 1")).toHaveLength(1);
   });
 
   it("does not call onMoveIssue when a card is dragged out of 'Other parents'", () => {
-    // Same defense in the opposite direction — a card whose parent we
-    // don't know about must not be re-anchored to a different parent by
-    // accident.
     const mockOnMoveIssue = vi.fn();
     renderWithI18n(
       <SwimLaneView
@@ -507,16 +478,12 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    // The pencil link uses aria-label "Open parent issue" and href to /issues/<id>.
-    // Only the "Parent Issue 1" lane (parent-1) has a parent issue id; the
-    // orphan lane ("No parent") must not render this link.
     const links = screen.getAllByRole("link", { name: "Open parent issue" });
     expect(links).toHaveLength(1);
     expect(links[0]).toHaveAttribute("href", expect.stringContaining("parent-1"));
   });
 
   it("renders HiddenColumnsPanel only when hiddenStatuses is non-empty", () => {
-    // Case 1: no hidden statuses → panel is absent.
     const { unmount } = renderWithI18n(
       <SwimLaneView
         issues={mockIssues}
@@ -526,8 +493,6 @@ describe("SwimLaneView", () => {
     expect(screen.queryByText("Hidden columns")).not.toBeInTheDocument();
     unmount();
 
-    // Case 2: hide a status → panel shows the localized status name + count.
-    // "cancelled" is excluded from BOARD_STATUSES, so we pass "blocked" as hidden.
     renderWithI18n(
       <SwimLaneView
         issues={mockIssues}
@@ -549,11 +514,6 @@ describe("SwimLaneView", () => {
       />,
     );
 
-    expect(lastOnDragOver).toBeDefined();
-    expect(lastOnDragEnd).toBeDefined();
-
-    // Drag orphan-1 (status: backlog, parent: null, in "No parent" lane)
-    // to the "in_progress" column of the same "No parent" lane.
     const targetCellId = "swim:parent:none:in_progress";
 
     act(() => {
@@ -573,14 +533,11 @@ describe("SwimLaneView", () => {
     expect(mockOnMoveIssue).toHaveBeenCalledWith("orphan-1", {
       parent_issue_id: null,
       status: "in_progress",
-      position: 300, // maintains its position since it's the only item in target
+      position: 300,
     });
   });
 
   it("does not call onMoveIssue when drop target equals source cell (no-op)", () => {
-    // Drop "parent-1" (status: todo, parent_issue_id: null) onto its own
-    // current cell. The handler must detect the no-op and skip the mutation
-    // so the network and the optimistic cache aren't churned.
     const mockOnMoveIssue = vi.fn();
     renderWithI18n(
       <SwimLaneView issues={mockIssues} onMoveIssue={mockOnMoveIssue} />,
@@ -597,9 +554,6 @@ describe("SwimLaneView", () => {
   });
 
   it("emits parent_issue_id when dragging from orphan into a parent lane", () => {
-    // Drag "orphan-1" (parent_issue_id: null, status: backlog) into the
-    // "Parent Issue 1" lane's `todo` column. The contract: payload must
-    // carry the new parent_issue_id (parent-1) and the new status (todo).
     const mockOnMoveIssue = vi.fn();
     renderWithI18n(
       <SwimLaneView issues={mockIssues} onMoveIssue={mockOnMoveIssue} />,
@@ -629,8 +583,6 @@ describe("SwimLaneView", () => {
   });
 
   it("renders count for hidden statuses from in-memory statusTotals", () => {
-    // mockIssues: 1 backlog (orphan-1), 0 blocked. parent-1 is a lane
-    // header so it's excluded from totals.
     renderWithI18n(
       <SwimLaneView
         issues={mockIssues}
@@ -648,8 +600,6 @@ describe("SwimLaneView", () => {
   });
 
   it("hidden-column totals come from unfilteredIssues when provided", () => {
-    // Without unfilteredIssues, a status-filtered `issues` prop would
-    // make hidden statuses always read 0.
     const unfiltered: Issue[] = [
       ...mockIssues,
       {
@@ -679,13 +629,6 @@ describe("SwimLaneView", () => {
     expect(counts.filter((c) => c === "1").length).toBeGreaterThanOrEqual(2);
   });
 
-  // ------------------------------------------------------------------
-  // Lane reordering via drag-and-drop
-  //
-  // Two parent fixtures (parent-1, parent-2) so we can test cross-lane
-  // reordering.  Each needs a child issue so a swimlane is actually created
-  // (parentGroups skips parents with no children loaded).
-  // ------------------------------------------------------------------
   const multiParentIssues: Issue[] = [
     {
       id: "parent-1",
@@ -782,8 +725,6 @@ describe("SwimLaneView", () => {
       <SwimLaneView issues={multiParentIssues} onMoveIssue={vi.fn()} />,
     );
 
-    // Drag lane parent-1 onto lane parent-2 — expect order to become
-    // [parent-2, parent-1].
     act(() => {
       lastOnDragEnd({
         active: { id: "lane:parent-1" },
@@ -795,10 +736,6 @@ describe("SwimLaneView", () => {
   });
 
   it("appends newly-visible parents to the persisted order on first reorder", () => {
-    // stored=[parent-1] (parent-2 is new in this view). User drags
-    // parent-1 below parent-2, so the visible order flips. Persisted
-    // result must include both — earlier logic dropped the new entry
-    // when its slot in `stored` had been consumed.
     mockViewState.swimlaneOrder = ["parent-1"];
 
     renderWithI18n(
@@ -816,9 +753,6 @@ describe("SwimLaneView", () => {
   });
 
   it("preserves persisted entries that aren't currently visible during a reorder", () => {
-    // Persisted order contains two ids (filtered-a, filtered-b) that are
-    // not in the currently rendered set — they must keep their slots
-    // when the user reorders the visible lanes.
     mockViewState.swimlaneOrder = ["filtered-a", "parent-1", "filtered-b", "parent-2"];
 
     renderWithI18n(
@@ -856,7 +790,6 @@ describe("SwimLaneView", () => {
   });
 
   it("does not call onMoveIssue when a lane drag ends (no card mutation)", () => {
-    // Lane drags must not accidentally trigger card-position mutations.
     const mockOnMoveIssue = vi.fn();
     renderWithI18n(
       <SwimLaneView issues={multiParentIssues} onMoveIssue={mockOnMoveIssue} />,
@@ -873,7 +806,6 @@ describe("SwimLaneView", () => {
   });
 
   it("renders parent lanes in stored swimlaneOrder when set", () => {
-    // Set persisted order to put parent-2 first, then parent-1.
     mockViewState.swimlaneOrder = ["parent-2", "parent-1"];
 
     renderWithI18n(
@@ -888,9 +820,6 @@ describe("SwimLaneView", () => {
   });
 
   it("keeps 'No parent' lane pinned at top regardless of stored order", () => {
-    // Even if the user could somehow include a synthetic "no parent" key,
-    // the No-parent lane is rendered outside the SortableContext and
-    // always appears first.
     mockViewState.swimlaneOrder = ["parent-2", "parent-1"];
 
     renderWithI18n(
@@ -907,8 +836,6 @@ describe("SwimLaneView", () => {
   // ------------------------------------------------------------------
 
   it("collapses a parent lane when its id is in stored collapsedSwimlanes", () => {
-    // Pre-seed the store as if the lane had been collapsed in a prior
-    // session. Child cards inside that lane must not render.
     mockViewState.collapsedSwimlanes = ["parent-1"];
 
     renderWithI18n(
@@ -924,9 +851,6 @@ describe("SwimLaneView", () => {
   });
 
   it("collapses the 'No parent' lane when 'none' is in stored collapsedSwimlanes", () => {
-    // Sentinel key "none" represents the No-parent lane. mockIssues
-    // contains the orphan "Orphan Issue 1" — when collapsed, its card
-    // must be absent from the DOM.
     mockViewState.collapsedSwimlanes = ["none"];
 
     renderWithI18n(
@@ -942,7 +866,6 @@ describe("SwimLaneView", () => {
       <SwimLaneView issues={multiParentIssues} onMoveIssue={vi.fn()} />,
     );
 
-    // The Parent A lane header is the <button> containing the text "Parent A".
     const parentAHeader = screen.getByText("Parent A").closest("button");
     expect(parentAHeader).not.toBeNull();
     fireEvent.click(parentAHeader!);
@@ -955,9 +878,8 @@ describe("SwimLaneView", () => {
       <SwimLaneView issues={mockIssues} onMoveIssue={vi.fn()} />,
     );
 
-    // mockIssues' orphan card has description "No parent", so the literal
-    // appears twice in the DOM (lane title + card description). The lane
-    // title is the one inside a <button> — disambiguate by closest button.
+    // "No parent" appears twice (lane title + orphan-1's card description);
+    // find the one inside a button.
     const matches = screen.getAllByText("No parent");
     const noParentHeader = matches.map((m) => m.closest("button")).find(Boolean);
     expect(noParentHeader).toBeDefined();
