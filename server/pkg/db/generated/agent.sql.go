@@ -1525,6 +1525,62 @@ func (q *Queries) LinkTaskToIssue(ctx context.Context, arg LinkTaskToIssueParams
 	return err
 }
 
+const listActiveAgentsByRuntime = `-- name: ListActiveAgentsByRuntime :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, skills_local FROM agent
+WHERE runtime_id = $1 AND archived_at IS NULL
+ORDER BY name ASC
+`
+
+// Returns every non-archived agent bound to a runtime. Backs the cascade
+// delete dialog: when DELETE /api/runtimes/:id refuses with
+// runtime_has_active_agents, the response carries this list so the front-end
+// can render exactly the agents that will be archived if the user confirms,
+// and so the cascade endpoint's expected_active_agent_ids check has a stable
+// snapshot to compare against. Ordered by name for a deterministic display.
+func (q *Queries) ListActiveAgentsByRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listActiveAgentsByRuntime, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.SkillsLocal,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveTasksByIssue = `-- name: ListActiveTasksByIssue :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
@@ -2314,7 +2370,7 @@ const updateAgentCustomEnv = `-- name: UpdateAgentCustomEnv :one
 UPDATE agent
 SET custom_env = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, skills_local
 `
 
 type UpdateAgentCustomEnvParams struct {
@@ -2353,6 +2409,7 @@ func (q *Queries) UpdateAgentCustomEnv(ctx context.Context, arg UpdateAgentCusto
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.SkillsLocal,
 	)
 	return i, err
 }

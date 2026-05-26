@@ -16,17 +16,6 @@ import {
   deriveRuntimeHealth,
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
-import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -44,6 +33,7 @@ import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { workloadConfig } from "../../agents/presence";
 import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
+import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import {
   computeCostInWindow,
   formatLastSeen,
@@ -484,7 +474,6 @@ function RowMenu({
   canDelete: boolean;
 }) {
   const { t } = useT("runtimes");
-  const deleteMutation = useDeleteRuntime(wsId);
   const [deleteOpen, setDeleteOpen] = useState(false);
   // Delete is currently the only row action; if the row can't run it, drop
   // the kebab entirely so the column doesn't render an empty popover. The
@@ -495,20 +484,6 @@ function RowMenu({
   if (!canDelete || selfHealing) {
     return <span aria-hidden />;
   }
-
-  const handleDelete = () => {
-    deleteMutation.mutate(runtime.id, {
-      onSuccess: () => {
-        toast.success(t(($) => $.detail.toast_deleted));
-        setDeleteOpen(false);
-      },
-      onError: (e) => {
-        toast.error(
-          e instanceof Error ? e.message : t(($) => $.detail.toast_delete_failed),
-        );
-      },
-    });
-  };
 
   return (
     <>
@@ -541,35 +516,16 @@ function RowMenu({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <AlertDialog
+      <DeleteRuntimeDialog
         open={deleteOpen}
-        onOpenChange={(v) => {
-          if (deleteMutation.isPending) return;
-          setDeleteOpen(v);
+        onOpenChange={setDeleteOpen}
+        runtime={runtime}
+        wsId={wsId}
+        onDeleted={() => {
+          setDeleteOpen(false);
+          toast.success(t(($) => $.detail.toast_deleted));
         }}
-      >
-        <AlertDialogContent onClick={(e) => e.stopPropagation()}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(($) => $.detail.delete_dialog.description, { name: runtime.name })}
-              <span className="mt-2 block text-xs text-muted-foreground/80">
-                {t(($) => $.list.delete_admin_hint)}
-              </span>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.detail.delete_dialog.cancel)}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? t(($) => $.detail.delete_dialog.deleting) : t(($) => $.detail.delete_dialog.confirm)}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      />
     </>
   );
 }

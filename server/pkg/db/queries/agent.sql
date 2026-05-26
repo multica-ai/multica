@@ -86,6 +86,17 @@ SET archived_at = now(), archived_by = @archived_by, updated_at = now()
 WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND archived_at IS NULL
 RETURNING *;
 
+-- name: ListActiveAgentsByRuntime :many
+-- Returns every non-archived agent bound to a runtime. Backs the cascade
+-- delete dialog: when DELETE /api/runtimes/:id refuses with
+-- runtime_has_active_agents, the response carries this list so the front-end
+-- can render exactly the agents that will be archived if the user confirms,
+-- and so the cascade endpoint's expected_active_agent_ids check has a stable
+-- snapshot to compare against. Ordered by name for a deterministic display.
+SELECT * FROM agent
+WHERE runtime_id = $1 AND archived_at IS NULL
+ORDER BY name ASC;
+
 -- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1
