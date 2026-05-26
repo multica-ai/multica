@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -63,17 +65,34 @@ type workspaceLoader interface {
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
 }
 
+type agentStore interface {
+	ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]db.Agent, error)
+	UpdateAgent(ctx context.Context, arg db.UpdateAgentParams) (db.Agent, error)
+}
+
 // Handler generates photorealistic agent avatars via the Firtal Data Registry AI Gateway.
 type Handler struct {
 	storage    storage.Storage
 	workspaces workspaceLoader
+	agents     agentStore
 	httpClient *http.Client
+	mu         sync.Mutex
+	backfills  map[string]*backfillJob
 }
 
 // New creates a Handler. store persists the generated PNG; workspaces supplies
 // the per-workspace gateway credentials (with env fallback).
 func New(store storage.Storage, workspaces workspaceLoader) *Handler {
-	return &Handler{storage: store, workspaces: workspaces, httpClient: http.DefaultClient}
+	h := &Handler{
+		storage:    store,
+		workspaces: workspaces,
+		httpClient: http.DefaultClient,
+		backfills:  map[string]*backfillJob{},
+	}
+	if agents, ok := workspaces.(agentStore); ok {
+		h.agents = agents
+	}
+	return h
 }
 
 type generateRequest struct {
@@ -83,6 +102,29 @@ type generateRequest struct {
 
 type generateResponse struct {
 	URL string `json:"url"`
+}
+
+type backfillJob struct {
+	WorkspaceID string    `json:"workspace_id"`
+	Status      string    `json:"status"`
+	Total       int       `json:"total"`
+	Generated   int       `json:"generated"`
+	Skipped     int       `json:"skipped"`
+	Failed      int       `json:"failed"`
+	Errors      []string  `json:"errors"`
+	StartedAt   time.Time `json:"started_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type backfillStatusResponse struct {
+	WorkspaceID string   `json:"workspace_id"`
+	Status      string   `json:"status"`
+	Missing     int      `json:"missing"`
+	Total       int      `json:"total"`
+	Generated   int      `json:"generated"`
+	Skipped     int      `json:"skipped"`
+	Failed      int      `json:"failed"`
+	Errors      []string `json:"errors"`
 }
 
 // Generate handles POST /api/agents/generate-avatar.
@@ -107,24 +149,213 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	prompt := buildPrompt(req.AgentName, req.CustomPrompt)
-	imgBytes, err := callGateway(r.Context(), h.httpClient, cfg, prompt)
+	url, err := h.generateAndStore(r.Context(), wsID, req.AgentName, req.CustomPrompt)
 	if err != nil {
 		slog.Error("avatar generation failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "image generation failed")
 		return
 	}
 
-	id, _ := uuid.NewV7()
-	key := fmt.Sprintf("workspaces/%s/avatars/%s.png", wsID, id)
-	url, err := h.storage.Upload(r.Context(), key, imgBytes, "image/png", id.String()+".png")
+	writeJSON(w, http.StatusOK, generateResponse{URL: url})
+}
+
+// GenerateForAgent creates and stores an avatar for a single agent, then
+// persists only avatar_url via the COALESCE-based upstream UpdateAgent query.
+func (h *Handler) GenerateForAgent(ctx context.Context, wsID string, agent db.Agent) (string, error) {
+	if h.agents == nil {
+		return "", fmt.Errorf("agent store is not configured")
+	}
+	if agent.AvatarUrl.Valid && strings.TrimSpace(agent.AvatarUrl.String) != "" {
+		return agent.AvatarUrl.String, nil
+	}
+	url, err := h.generateAndStore(ctx, wsID, agent.Name, "")
 	if err != nil {
-		slog.Error("avatar upload failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "upload failed")
+		return "", err
+	}
+	_, err = h.agents.UpdateAgent(ctx, db.UpdateAgentParams{
+		ID:        agent.ID,
+		AvatarUrl: pgtype.Text{String: url, Valid: true},
+	})
+	if err != nil {
+		return "", fmt.Errorf("update agent avatar_url: %w", err)
+	}
+	return url, nil
+}
+
+// GenerateForAgentAsync runs the slow image generation outside the create-agent
+// request path. It intentionally uses a fresh background context because the
+// incoming request context is cancelled as soon as the 201 response is written.
+func (h *Handler) GenerateForAgentAsync(wsID string, agent db.Agent) {
+	if h == nil || h.agents == nil || h.storage == nil {
+		return
+	}
+	if agent.AvatarUrl.Valid && strings.TrimSpace(agent.AvatarUrl.String) != "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if _, err := h.GenerateForAgent(ctx, wsID, agent); err != nil {
+			slog.Warn("async agent avatar generation failed", "agent_id", util.UUIDToString(agent.ID), "workspace_id", wsID, "error", err)
+		}
+	}()
+}
+
+// Backfill starts a workspace-scoped background job for agents missing avatars.
+func (h *Handler) Backfill(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := h.requireWorkspaceAdmin(w, r)
+	if !ok {
+		return
+	}
+	agents, err := h.missingAvatarAgents(r.Context(), wsID)
+	if err != nil {
+		slog.Warn("list agents for avatar backfill failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to list agents")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, generateResponse{URL: url})
+	now := time.Now().UTC()
+	h.mu.Lock()
+	if existing := h.backfills[wsID]; existing != nil && existing.Status == "running" {
+		resp := backfillResponseLocked(wsID, len(agents), existing)
+		h.mu.Unlock()
+		writeJSON(w, http.StatusAccepted, resp)
+		return
+	}
+	job := &backfillJob{
+		WorkspaceID: wsID,
+		Status:      "running",
+		Total:       len(agents),
+		StartedAt:   now,
+		UpdatedAt:   now,
+	}
+	h.backfills[wsID] = job
+	resp := backfillResponseLocked(wsID, len(agents), job)
+	h.mu.Unlock()
+
+	go h.runBackfill(wsID, agents, job)
+	writeJSON(w, http.StatusAccepted, resp)
+}
+
+// BackfillStatus returns current progress for the workspace's backfill job.
+func (h *Handler) BackfillStatus(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := h.requireWorkspaceAdmin(w, r)
+	if !ok {
+		return
+	}
+	missing, err := h.missingAvatarAgents(r.Context(), wsID)
+	if err != nil {
+		slog.Warn("list agents for avatar backfill status failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to list agents")
+		return
+	}
+	h.mu.Lock()
+	resp := backfillResponseLocked(wsID, len(missing), h.backfills[wsID])
+	h.mu.Unlock()
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) generateAndStore(ctx context.Context, wsID, agentName, customPrompt string) (string, error) {
+	cfg := h.gatewayConfig(ctx, wsID)
+	if cfg.baseURL == "" || cfg.apiKey == "" {
+		return "", fmt.Errorf("image generation not configured: data registry AI gateway URL/key unset")
+	}
+	prompt := buildPrompt(agentName, customPrompt)
+	imgBytes, err := callGateway(ctx, h.httpClient, cfg, prompt)
+	if err != nil {
+		return "", err
+	}
+	id, _ := uuid.NewV7()
+	key := fmt.Sprintf("workspaces/%s/avatars/%s.png", wsID, id)
+	url, err := h.storage.Upload(ctx, key, imgBytes, "image/png", id.String()+".png")
+	if err != nil {
+		return "", fmt.Errorf("upload avatar: %w", err)
+	}
+	return url, nil
+}
+
+func (h *Handler) missingAvatarAgents(ctx context.Context, wsID string) ([]db.Agent, error) {
+	if h.agents == nil {
+		return nil, fmt.Errorf("agent store is not configured")
+	}
+	workspaceUUID, err := util.ParseUUID(wsID)
+	if err != nil {
+		return nil, err
+	}
+	agents, err := h.agents.ListAgents(ctx, workspaceUUID)
+	if err != nil {
+		return nil, err
+	}
+	missing := make([]db.Agent, 0)
+	for _, agent := range agents {
+		if !agent.AvatarUrl.Valid || strings.TrimSpace(agent.AvatarUrl.String) == "" {
+			missing = append(missing, agent)
+		}
+	}
+	return missing, nil
+}
+
+func (h *Handler) runBackfill(wsID string, agents []db.Agent, job *backfillJob) {
+	for _, agent := range agents {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		_, err := h.GenerateForAgent(ctx, wsID, agent)
+		cancel()
+
+		h.mu.Lock()
+		if err != nil {
+			job.Failed++
+			if len(job.Errors) < 5 {
+				job.Errors = append(job.Errors, fmt.Sprintf("%s: %v", agent.Name, err))
+			}
+		} else {
+			job.Generated++
+		}
+		job.UpdatedAt = time.Now().UTC()
+		h.mu.Unlock()
+	}
+	h.mu.Lock()
+	job.Status = "done"
+	job.UpdatedAt = time.Now().UTC()
+	h.mu.Unlock()
+}
+
+func backfillResponseLocked(wsID string, missing int, job *backfillJob) backfillStatusResponse {
+	if job == nil {
+		return backfillStatusResponse{
+			WorkspaceID: wsID,
+			Status:      "idle",
+			Missing:     missing,
+			Errors:      []string{},
+		}
+	}
+	return backfillStatusResponse{
+		WorkspaceID: job.WorkspaceID,
+		Status:      job.Status,
+		Missing:     missing,
+		Total:       job.Total,
+		Generated:   job.Generated,
+		Skipped:     job.Skipped,
+		Failed:      job.Failed,
+		Errors:      append([]string(nil), job.Errors...),
+	}
+}
+
+func (h *Handler) requireWorkspaceAdmin(w http.ResponseWriter, r *http.Request) (string, bool) {
+	wsID := middleware.WorkspaceIDFromContext(r.Context())
+	if wsID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return "", false
+	}
+	member, ok := middleware.MemberFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "workspace membership is required")
+		return "", false
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		writeError(w, http.StatusForbidden, "only workspace owners and admins can backfill agent avatars")
+		return "", false
+	}
+	return wsID, true
 }
 
 // buildPrompt returns the generation prompt. A custom prompt is used as-is;

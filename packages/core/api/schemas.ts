@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type {
   Agent,
+  AgentAvatarBackfillStatus,
   AgentTemplate,
   AgentTemplateSummary,
   Attachment,
@@ -670,6 +671,29 @@ export const EMPTY_USER: User = {
   profile_description: "",
   created_at: "",
   updated_at: "",
+};
+
+// CEREBRO-PATCH(agent-avatar-backfill): schema for admin avatar backfill progress.
+export const AgentAvatarBackfillStatusSchema = z.object({
+  workspace_id: z.string().default(""),
+  status: z.string().default("idle"),
+  missing: z.number().default(0),
+  total: z.number().default(0),
+  generated: z.number().default(0),
+  skipped: z.number().default(0),
+  failed: z.number().default(0),
+  errors: z.array(z.string()).default([]),
+}).loose();
+
+export const EMPTY_AGENT_AVATAR_BACKFILL_STATUS: AgentAvatarBackfillStatus = {
+  workspace_id: "",
+  status: "idle",
+  missing: 0,
+  total: 0,
+  generated: 0,
+  skipped: 0,
+  failed: 0,
+  errors: [],
 };
 
 // ---------------------------------------------------------------------------

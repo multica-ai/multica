@@ -944,6 +944,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/from-template", h.CreateAgentFromTemplate)
 				// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation endpoint
 				r.Post("/generate-avatar", cerebroAgentAvatarHandler.Generate)
+				r.Get("/backfill-avatars", cerebroAgentAvatarHandler.BackfillStatus) // CEREBRO-PATCH(agent-avatar-backfill): admin progress endpoint.
+				r.Post("/backfill-avatars", cerebroAgentAvatarHandler.Backfill)      // CEREBRO-PATCH(agent-avatar-backfill): async workspace avatar backfill.
 				r.Route("/{id}", func(r chi.Router) {
 					// GET is registered in the task-allowlist group above
 					// so agents can read their own configuration.

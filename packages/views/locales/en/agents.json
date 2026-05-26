@@ -29,6 +29,15 @@
     "unstable": "Unstable",
     "offline": "Offline"
   },
+  "avatar_backfill": {
+    "_comment": "CEREBRO-PATCH(agent-avatar-backfill): admin action for missing agent avatars.",
+    "button": "Generate missing avatars",
+    "progress": "Avatars {{done}}/{{total}}",
+    "none_missing_title": "All agents already have avatars",
+    "none_missing_toast": "All agents already have avatars",
+    "started_toast": "Avatar generation started",
+    "failed_toast": "Failed to start avatar generation"
+  },
   "workload": {
     "working": "Working",
     "queued": "Queued",

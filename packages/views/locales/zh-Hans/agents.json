@@ -29,6 +29,15 @@
     "unstable": "不稳定",
     "offline": "离线"
   },
+  "avatar_backfill": {
+    "_comment": "CEREBRO-PATCH(agent-avatar-backfill): admin action for missing agent avatars.",
+    "button": "生成缺失头像",
+    "progress": "头像 {{done}}/{{total}}",
+    "none_missing_title": "所有智能体已有头像",
+    "none_missing_toast": "所有智能体已有头像",
+    "started_toast": "头像生成已开始",
+    "failed_toast": "启动头像生成失败"
+  },
   "workload": {
     "working": "处理中",
     "queued": "排队中",

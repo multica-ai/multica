@@ -248,13 +248,13 @@ type ChatAttachmentMeta struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID               string                         `json:"id"`
-	Name             string                         `json:"name"`
-	Instructions     string                         `json:"instructions"`
-	Skills           []service.AgentSkillData       `json:"skills,omitempty"`
-	CustomEnv        map[string]string              `json:"custom_env,omitempty"`
-	CustomArgs       []string                       `json:"custom_args,omitempty"`
-	McpConfig        json.RawMessage                `json:"mcp_config,omitempty"`
+	ID           string                   `json:"id"`
+	Name         string                   `json:"name"`
+	Instructions string                   `json:"instructions"`
+	Skills       []service.AgentSkillData `json:"skills,omitempty"`
+	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
+	CustomArgs   []string                 `json:"custom_args,omitempty"`
+	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
 	// CEREBRO-PATCH(agent-infisical-secrets): resolved key/value secrets for
 	// the agent's granted folders. Backend fetches these via the per-user
 	// scoped Infisical machine identity at claim time so the daemon never
@@ -698,6 +698,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.ReconcileAgentStatus(r.Context(), created.ID)
 		created, _ = h.Queries.GetAgent(r.Context(), created.ID)
 	}
+	h.cerebroGenerateAgentAvatarAsync(workspaceID, created) // CEREBRO-PATCH(agent-avatar-auto): non-blocking default avatar for new agents.
 
 	resp := agentToResponse(created)
 	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — surface trigger eligibility.

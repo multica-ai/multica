@@ -6,12 +6,20 @@ import {
   ArrowLeft,
   ArrowUpDown,
   Bot,
+  ImagePlus,
   Plus,
+  RefreshCw,
   Search,
 } from "lucide-react";
+import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import type { Agent, AgentRuntime, CreateAgentRequest } from "@multica/core/types";
+import type {
+  Agent,
+  AgentAvatarBackfillStatus,
+  AgentRuntime,
+  CreateAgentRequest,
+} from "@multica/core/types";
 import {
   type AgentAvailability,
   agentRunCounts30dOptions,
@@ -138,6 +146,24 @@ export function AgentsPage() {
     return members.find((m) => m.user_id === currentUser.id)?.role ?? null;
   }, [members, currentUser]);
   const isWorkspaceAdmin = myRole === "owner" || myRole === "admin";
+  // CEREBRO-PATCH(agent-avatar-backfill): admin progress state for missing avatars.
+  const [isStartingBackfill, setIsStartingBackfill] = useState(false);
+  const { data: avatarBackfillStatus } = useQuery({
+    queryKey: [...workspaceKeys.agents(wsId), "avatar-backfill"],
+    queryFn: () => api.getAgentAvatarBackfillStatus(),
+    enabled: isWorkspaceAdmin,
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" ? 3_000 : false,
+  });
+  const isBackfillRunning = avatarBackfillStatus?.status === "running";
+
+  useEffect(() => {
+    if (!isBackfillRunning) return;
+    const id = window.setInterval(() => {
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    }, 10_000);
+    return () => window.clearInterval(id);
+  }, [isBackfillRunning, qc, wsId]);
 
   // Layer 1a — view (active / archived).
   const inView = useMemo(
@@ -307,6 +333,30 @@ export function AgentsPage() {
     return agent;
   };
 
+  const handleBackfillAvatars = async () => {
+    setIsStartingBackfill(true);
+    try {
+      const status = await api.startAgentAvatarBackfill();
+      qc.setQueryData(
+        [...workspaceKeys.agents(wsId), "avatar-backfill"],
+        status,
+      );
+      toast.success(
+        status.total === 0 && status.missing === 0
+          ? t(($) => $.avatar_backfill.none_missing_toast)
+          : t(($) => $.avatar_backfill.started_toast),
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t(($) => $.avatar_backfill.failed_toast),
+      );
+    } finally {
+      setIsStartingBackfill(false);
+    }
+  };
+
   const handleDuplicate = useCallback((agent: Agent) => {
     setDuplicateTemplate(agent);
     setShowCreate(true);
@@ -414,6 +464,10 @@ export function AgentsPage() {
         totalCount={totalActiveCount}
         canCreate={isWorkspaceAdmin}
         onCreate={() => setShowCreate(true)}
+        canBackfill={isWorkspaceAdmin}
+        backfillStatus={avatarBackfillStatus}
+        backfillStarting={isStartingBackfill}
+        onBackfill={handleBackfillAvatars}
       />
 
       <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
@@ -490,19 +544,35 @@ export function AgentsPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Page header — icon + title + count + create CTA. Unchanged.
+// Page header — icon + title + count + admin actions.
 // ---------------------------------------------------------------------------
 
 function PageHeaderBar({
   totalCount,
   canCreate,
   onCreate,
+  canBackfill = false,
+  backfillStatus,
+  backfillStarting = false,
+  onBackfill,
 }: {
   totalCount: number;
   canCreate: boolean;
   onCreate: () => void;
+  canBackfill?: boolean;
+  backfillStatus?: AgentAvatarBackfillStatus;
+  backfillStarting?: boolean;
+  onBackfill?: () => void;
 }) {
   const { t } = useT("agents");
+  const backfillRunning = backfillStatus?.status === "running";
+  const noMissing = (backfillStatus?.missing ?? 1) === 0;
+  const backfillLabel = backfillRunning
+    ? t(($) => $.avatar_backfill.progress, {
+        done: (backfillStatus?.generated ?? 0) + (backfillStatus?.failed ?? 0),
+        total: backfillStatus?.total ?? 0,
+      })
+    : t(($) => $.avatar_backfill.button);
   return (
     <PageHeader className="justify-between px-5">
       <div className="flex items-center gap-2">
@@ -526,12 +596,31 @@ function PageHeaderBar({
           </a>
         </p>
       </div>
-      {canCreate && (
-        <Button type="button" size="sm" onClick={onCreate}>
-          <Plus className="h-3 w-3" />
-          {t(($) => $.page.new_agent)}
-        </Button>
-      )}
+      <div className="flex items-center gap-2">
+        {canBackfill && onBackfill && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onBackfill}
+            disabled={backfillStarting || backfillRunning || noMissing}
+            title={noMissing ? t(($) => $.avatar_backfill.none_missing_title) : undefined}
+          >
+            {backfillRunning || backfillStarting ? (
+              <RefreshCw className="h-3 w-3 animate-spin" />
+            ) : (
+              <ImagePlus className="h-3 w-3" />
+            )}
+            {backfillLabel}
+          </Button>
+        )}
+        {canCreate && (
+          <Button type="button" size="sm" onClick={onCreate}>
+            <Plus className="h-3 w-3" />
+            {t(($) => $.page.new_agent)}
+          </Button>
+        )}
+      </div>
     </PageHeader>
   );
 }

@@ -14,6 +14,7 @@ import type {
   ListIssuesParams,
   ListGroupedIssuesParams,
   Agent,
+  AgentAvatarBackfillStatus,
   CreateAgentRequest,
   AgentTemplate,
   AgentTemplateSummary,
@@ -159,6 +160,7 @@ import {
   RuntimeToolsListSchema,
   RuntimeToolGrantsSchema,
   CapabilityListResponseSchema,
+  AgentAvatarBackfillStatusSchema,
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
   AttachmentResponseSchema,
@@ -175,6 +177,7 @@ import {
   DashboardUsageDailyListSchema,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
+  EMPTY_AGENT_AVATAR_BACKFILL_STATUS,
   EMPTY_ATTACHMENT,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
@@ -1502,6 +1505,29 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // CEREBRO-PATCH(agent-avatar-backfill): admin backfill status endpoint.
+  async getAgentAvatarBackfillStatus(): Promise<AgentAvatarBackfillStatus> {
+    const raw = await this.fetch<unknown>("/api/agents/backfill-avatars");
+    return parseWithFallback(
+      raw,
+      AgentAvatarBackfillStatusSchema,
+      EMPTY_AGENT_AVATAR_BACKFILL_STATUS,
+      { endpoint: "GET /api/agents/backfill-avatars" },
+    );
+  }
+
+  async startAgentAvatarBackfill(): Promise<AgentAvatarBackfillStatus> {
+    const raw = await this.fetch<unknown>("/api/agents/backfill-avatars", {
+      method: "POST",
+    });
+    return parseWithFallback(
+      raw,
+      AgentAvatarBackfillStatusSchema,
+      EMPTY_AGENT_AVATAR_BACKFILL_STATUS,
+      { endpoint: "POST /api/agents/backfill-avatars" },
+    );
   }
 
   async listAgentTemplates(): Promise<AgentTemplateSummary[]> {

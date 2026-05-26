@@ -4,6 +4,7 @@ export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReactio
 export type { IssueDependencyRef, IssueDependenciesResponse } from "./issue";
 export type {
   Agent,
+  AgentAvatarBackfillStatus, // CEREBRO-PATCH(agent-avatar-backfill): backfill progress API type.
   AgentInfisicalFolder, // CEREBRO-PATCH(agent-infisical-secrets): export folder grant type.
   AgentStatus,
   AgentRuntimeMode,

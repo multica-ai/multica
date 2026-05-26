@@ -227,6 +227,18 @@ export interface Agent {
   can_trigger?: boolean;
 }
 
+// CEREBRO-PATCH(agent-avatar-backfill): progress payload for workspace avatar rollout.
+export interface AgentAvatarBackfillStatus {
+  workspace_id: string;
+  status: "idle" | "running" | "done" | string;
+  missing: number;
+  total: number;
+  generated: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+}
+
 // CEREBRO-PATCH(agent-infisical-secrets): per-agent Infisical folder grant.
 // At spawn the daemon lists every secret in the folder and injects each under
 // its own Infisical key name, so the value never appears in the transcript.

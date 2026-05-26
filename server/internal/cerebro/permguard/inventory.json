@@ -321,6 +321,10 @@
       "gate": "cerebro_capability:create_agent"
     },
     {
+      "id": "POST /api/agents/backfill-avatars",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "POST /api/agents/{id}/archive",
       "gate": "cerebro_agent_access"
     },
