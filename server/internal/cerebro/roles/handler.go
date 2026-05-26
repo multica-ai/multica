@@ -193,7 +193,7 @@ func (h *Handler) ListAssignments(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := make([]roleAssignmentResponse, len(assignments))
 	for i, a := range assignments {
-		resp[i] = roleAssignmentResponseFromModel(a)
+		resp[i] = roleAssignmentResponseFromNamedRow(a)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

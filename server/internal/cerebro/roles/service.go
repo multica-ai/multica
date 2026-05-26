@@ -180,11 +180,11 @@ func (s *Service) Unassign(ctx context.Context, workspaceID, actorID, roleID, su
 	return assignment, nil
 }
 
-func (s *Service) ListAssignments(ctx context.Context, workspaceID, roleID pgtype.UUID) ([]cerebrodb.CerebroRoleAssignment, error) {
+func (s *Service) ListAssignments(ctx context.Context, workspaceID, roleID pgtype.UUID) ([]cerebrodb.ListCerebroRoleAssignmentsWithNamesRow, error) {
 	if _, err := s.Get(ctx, workspaceID, roleID); err != nil {
 		return nil, err
 	}
-	return s.Cerebro.ListCerebroRoleAssignments(ctx, roleID)
+	return s.Cerebro.ListCerebroRoleAssignmentsWithNames(ctx, roleID)
 }
 
 func (s *Service) requireSubjectExists(ctx context.Context, workspaceID pgtype.UUID, subjectType string, subjectID pgtype.UUID) error {

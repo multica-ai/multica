@@ -225,13 +225,20 @@ function normalizeGrant(raw: unknown): unknown {
   if (!raw || typeof raw !== "object") return raw;
   const rec = raw as Record<string, unknown>;
   if (rec.subject && rec.resource) return raw;
+  // The backend resolves the subject's human name server-side
+  // (subject_display_name). Fall back to the raw id only when it's missing —
+  // e.g. an older server, or a subject that was deleted.
+  const resolvedName =
+    typeof rec.subject_display_name === "string" && rec.subject_display_name.length > 0
+      ? rec.subject_display_name
+      : null;
   return {
     id: rec.id,
     workspace_id: rec.workspace_id,
     subject: {
       type: rec.subject_type ?? "workspace_default",
       id: rec.subject_id ?? null,
-      display_name: rec.subject_id ?? null,
+      display_name: resolvedName ?? rec.subject_id ?? null,
     },
     resource: {
       type: inferResourceType(String(rec.resource_pattern ?? "*")),

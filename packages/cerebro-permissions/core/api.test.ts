@@ -238,6 +238,85 @@ describe("fetchSubjectsWithPermissions — derived from the grants list", () => 
   });
 });
 
+describe("subject name resolution — backend subject_display_name", () => {
+  const subjectsFilter = { subjectType: null, search: "", limit: 50, offset: 0 };
+
+  it("uses the resolved subject_display_name instead of the raw id", async () => {
+    mockListPersonaGrants.mockResolvedValueOnce({
+      grants: [
+        {
+          id: "g1",
+          workspace_id: "ws-1",
+          subject_type: "agent",
+          subject_id: "2ed5cfea-3a0e-42c7-94db-77b8a6a276e7",
+          subject_display_name: "Mia - CEO EA",
+          resource_pattern: "*",
+          capability: "issues.read",
+          status: "active",
+          approval_required: false,
+          granted_at: "2026-05-20T10:00:00Z",
+          updated_at: "2026-05-20T10:00:00Z",
+        },
+      ],
+    });
+
+    const page = await fetchPersonaGrants("ws-1", filter);
+
+    expect(page.items[0]!.subject.display_name).toBe("Mia - CEO EA");
+    expect(page.items[0]!.subject.id).toBe(
+      "2ed5cfea-3a0e-42c7-94db-77b8a6a276e7",
+    );
+  });
+
+  it("falls back to the raw id when the name is missing or empty", async () => {
+    mockListPersonaGrants.mockResolvedValueOnce({
+      grants: [
+        {
+          id: "g1",
+          workspace_id: "ws-1",
+          subject_type: "agent",
+          subject_id: "agent-no-name",
+          subject_display_name: "",
+          resource_pattern: "*",
+          capability: "issues.read",
+          status: "active",
+          approval_required: false,
+          granted_at: "2026-05-20T10:00:00Z",
+          updated_at: "2026-05-20T10:00:00Z",
+        },
+      ],
+    });
+
+    const page = await fetchPersonaGrants("ws-1", filter);
+
+    expect(page.items[0]!.subject.display_name).toBe("agent-no-name");
+  });
+
+  it("surfaces the resolved name on the Subjects tab rows", async () => {
+    mockListPersonaGrants.mockResolvedValueOnce({
+      grants: [
+        {
+          id: "g1",
+          workspace_id: "ws-1",
+          subject_type: "agent",
+          subject_id: "2ed5cfea-3a0e-42c7-94db-77b8a6a276e7",
+          subject_display_name: "Mia - CEO EA",
+          resource_pattern: "*",
+          capability: "issues.read",
+          status: "active",
+          approval_required: false,
+          granted_at: "2026-05-20T10:00:00Z",
+          updated_at: "2026-05-20T10:00:00Z",
+        },
+      ],
+    });
+
+    const page = await fetchSubjectsWithPermissions("ws-1", subjectsFilter);
+
+    expect(page.items[0]!.display_name).toBe("Mia - CEO EA");
+  });
+});
+
 describe("audit filter — capability + until forwarded to core client", () => {
   it("passes capability and until to listPersonaGrantAudit", async () => {
     mockListPersonaGrantAudit.mockResolvedValueOnce({ items: [], total: 0, limit: 50, offset: 0 });

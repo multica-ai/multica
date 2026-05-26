@@ -16,11 +16,12 @@ type roleResponse struct {
 }
 
 type roleAssignmentResponse struct {
-	RoleID      string  `json:"role_id"`
-	SubjectType string  `json:"subject_type"`
-	SubjectID   string  `json:"subject_id"`
-	AddedBy     *string `json:"added_by"`
-	AddedAt     string  `json:"added_at"`
+	RoleID             string  `json:"role_id"`
+	SubjectType        string  `json:"subject_type"`
+	SubjectID          string  `json:"subject_id"`
+	SubjectDisplayName *string `json:"subject_display_name"`
+	AddedBy            *string `json:"added_by"`
+	AddedAt            string  `json:"added_at"`
 }
 
 func roleResponseFromModel(role cerebrodb.CerebroRole) roleResponse {
@@ -52,5 +53,24 @@ func roleAssignmentResponseFromModel(row cerebrodb.CerebroRoleAssignment) roleAs
 		SubjectID:   util.UUIDToString(row.SubjectID),
 		AddedBy:     util.UUIDToPtr(row.AddedBy),
 		AddedAt:     util.TimestampToString(row.AddedAt),
+	}
+}
+
+// roleAssignmentResponseFromNamedRow maps the display row that carries the
+// resolved subject name. An empty name (subject deleted) is sent as null so
+// the client falls back to its own label.
+func roleAssignmentResponseFromNamedRow(row cerebrodb.ListCerebroRoleAssignmentsWithNamesRow) roleAssignmentResponse {
+	var displayName *string
+	if row.SubjectDisplayName != "" {
+		name := row.SubjectDisplayName
+		displayName = &name
+	}
+	return roleAssignmentResponse{
+		RoleID:             util.UUIDToString(row.RoleID),
+		SubjectType:        row.SubjectType,
+		SubjectID:          util.UUIDToString(row.SubjectID),
+		SubjectDisplayName: displayName,
+		AddedBy:            util.UUIDToPtr(row.AddedBy),
+		AddedAt:            util.TimestampToString(row.AddedAt),
 	}
 }

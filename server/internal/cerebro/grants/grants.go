@@ -246,6 +246,15 @@ func (s *Service) Get(ctx context.Context, grantID, workspaceID pgtype.UUID) (ce
 	})
 }
 
+// GetWithName is the display variant of Get: the returned grant carries the
+// subject's resolved human-readable name, for the Access grant drawer.
+func (s *Service) GetWithName(ctx context.Context, grantID, workspaceID pgtype.UUID) (cerebrodb.GetCerebroWorkspaceGrantWithNameRow, error) {
+	return s.Cerebro.GetCerebroWorkspaceGrantWithName(ctx, cerebrodb.GetCerebroWorkspaceGrantWithNameParams{
+		ID:          grantID,
+		WorkspaceID: workspaceID,
+	})
+}
+
 // ListFilter carries the optional filter fields for List.
 type ListFilter struct {
 	SubjectType string
@@ -255,6 +264,19 @@ type ListFilter struct {
 
 func (s *Service) List(ctx context.Context, workspaceID pgtype.UUID, f ListFilter) ([]cerebrodb.CerebroWorkspaceGrant, error) {
 	return s.Cerebro.ListCerebroWorkspaceGrants(ctx, cerebrodb.ListCerebroWorkspaceGrantsParams{
+		WorkspaceID: workspaceID,
+		Column2:     f.SubjectType,
+		Column3:     f.SubjectID,
+		Column4:     f.Status,
+	})
+}
+
+// ListWithNames is the display variant of List: each grant carries the
+// subject's resolved human-readable name (member, agent, group, role) so the
+// Access UI never renders a raw UUID. The plain List stays untouched because
+// the permission resolver depends on its exact row shape.
+func (s *Service) ListWithNames(ctx context.Context, workspaceID pgtype.UUID, f ListFilter) ([]cerebrodb.ListCerebroWorkspaceGrantsWithNamesRow, error) {
+	return s.Cerebro.ListCerebroWorkspaceGrantsWithNames(ctx, cerebrodb.ListCerebroWorkspaceGrantsWithNamesParams{
 		WorkspaceID: workspaceID,
 		Column2:     f.SubjectType,
 		Column3:     f.SubjectID,
