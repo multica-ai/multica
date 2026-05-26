@@ -1,6 +1,6 @@
 {
   "page": {
-    "breadcrumb_title": "issue",
+    "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "工作区",
     "empty_title": "还没有 issue",
     "empty_hint": "创建一个 issue 开始使用。",

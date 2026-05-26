@@ -51,7 +51,7 @@
   },
   "mention": {
     "group_users": "用户",
-    "group_issues": "issue",
+    "group_issues": "Issues",
     "all_members": "所有成员",
     "searching": "搜索中...",
     "no_results": "无结果"
