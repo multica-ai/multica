@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Cloud, Lock, Monitor } from "lucide-react";
+import { displayRuntimeName } from "@multica/core/runtimes";
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
@@ -75,7 +76,9 @@ export function RuntimePicker({
       <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-0.5 text-xs text-muted-foreground">
         <Icon className="h-3 w-3 shrink-0" />
         <span className="min-w-0 truncate font-mono">
-          {selected?.name ?? t(($) => $.pickers.runtime_none)}
+          {selected
+            ? displayRuntimeName(selected.name, selected.provider)
+            : t(($) => $.pickers.runtime_none)}
         </span>
         {selected && (
           <span
@@ -92,11 +95,13 @@ export function RuntimePicker({
   // deliberately do NOT append `device_info` to the tooltip — that string
   // also leads with the host and would just repeat what's already in name,
   // producing the "Claude (host) (host · 2.1.121 (Claude Code))" mess.
-  const triggerLabel = selected?.name ?? t(($) => $.pickers.runtime_none);
+  const triggerLabel = selected
+    ? displayRuntimeName(selected.name, selected.provider)
+    : t(($) => $.pickers.runtime_none);
   const isOnline = selected?.status === "online";
   const triggerTitle = selected
     ? t(($) => $.pickers.runtime_tooltip, {
-        name: selected.name,
+        name: triggerLabel,
         status: isOnline ? t(($) => $.pickers.runtime_online) : t(($) => $.pickers.runtime_offline),
       })
     : t(($) => $.pickers.runtime_tooltip_none);
@@ -169,7 +174,7 @@ export function RuntimePicker({
           const rtOnline = rt.status === "online";
           const locked = isDisabled(rt);
           const tooltip = [
-            rt.name,
+            displayRuntimeName(rt.name, rt.provider),
             owner ? t(($) => $.pickers.runtime_owned_by, { name: owner.name }) : null,
             rtOnline ? t(($) => $.pickers.runtime_online) : t(($) => $.pickers.runtime_offline),
             locked ? t(($) => $.create_dialog.runtime_private_locked_tooltip) : null,
@@ -194,7 +199,7 @@ export function RuntimePicker({
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <span className="truncate text-sm font-medium">
-                    {rt.name}
+                    {displayRuntimeName(rt.name, rt.provider)}
                   </span>
                   {rt.runtime_mode === "cloud" && (
                     <span className="shrink-0 rounded bg-info/10 px-1 text-[10px] font-medium text-info">

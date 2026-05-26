@@ -1,6 +1,6 @@
 import { Cloud, Monitor, Wifi, WifiHigh, WifiOff } from "lucide-react";
 import { Badge } from "@multica/ui/components/ui/badge";
-import type { RuntimeHealth } from "@multica/core/runtimes";
+import { displayProviderName, type RuntimeHealth } from "@multica/core/runtimes";
 import { ProviderLogo } from "./provider-logo";
 import { useT } from "../../i18n";
 
@@ -18,7 +18,7 @@ export function ProviderChip({ provider }: { provider: string }) {
   return (
     <span className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
       <ProviderLogo provider={provider} className="h-3 w-3" />
-      <span className="capitalize">{provider}</span>
+      <span>{displayProviderName(provider)}</span>
     </span>
   );
 }

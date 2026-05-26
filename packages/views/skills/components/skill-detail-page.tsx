@@ -29,6 +29,7 @@ import { api } from "@multica/core/api";
 import { useTimeAgo } from "../../i18n";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { displayRuntimeName } from "@multica/core/runtimes";
 import {
   agentListOptions,
   memberListOptions,
@@ -215,7 +216,7 @@ function OriginSidebarCard({
       </div>
       {runtime && (
         <div className="mt-1 break-all text-xs text-foreground">
-          {runtime.name}
+          {displayRuntimeName(runtime.name, runtime.provider)}
         </div>
       )}
       {origin.source_path && (

@@ -15,7 +15,7 @@ When an agent is assigned a task in Multica:
 
 1. The daemon detects the task assignment
 2. It creates an isolated workspace directory
-3. It spawns the appropriate agent CLI (Claude Code, Codex, Gemini CLI, OpenClaw, OpenCode, or Hermes)
+3. It spawns the appropriate agent CLI (Claude Code, Codex, Gemini / AGY, OpenClaw, OpenCode, or Hermes)
 4. The agent executes autonomously, streaming progress back to Multica
 5. Results are reported — success, failure, or blockers
 
@@ -29,7 +29,7 @@ Real-time progress is streamed via WebSocket so you can follow along in the Mult
 |----------|-------------|-------------|
 | Claude Code | `claude` | Anthropic's coding agent |
 | Codex | `codex` | OpenAI's coding agent |
-| Gemini CLI | `gemini` | Google's coding agent |
+| Gemini / AGY | `agy` | Google's Antigravity coding agent |
 | OpenClaw | `openclaw` | Open-source coding agent |
 | OpenCode | `opencode` | Open-source coding agent |
 | Hermes | `hermes` | Nous Research coding agent |

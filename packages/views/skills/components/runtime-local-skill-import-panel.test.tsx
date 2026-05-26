@@ -29,16 +29,24 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 
-vi.mock("@multica/core/runtimes", () => ({
-  runtimeListOptions: (...args: unknown[]) => mockRuntimeListOptions(...args),
-  runtimeLocalSkillsOptions: (...args: unknown[]) =>
-    mockRuntimeLocalSkillsOptions(...args),
-  runtimeLocalSkillsKeys: {
-    forRuntime: (runtimeId: string) => ["runtimes", "local-skills", runtimeId],
-  },
-  resolveRuntimeLocalSkillImport: (...args: unknown[]) =>
-    mockResolveRuntimeLocalSkillImport(...args),
-}));
+vi.mock("@multica/core/runtimes", async () => {
+  const providerDisplay =
+    await vi.importActual<typeof import("@multica/core/runtimes")>(
+      "@multica/core/runtimes",
+    );
+  return {
+    runtimeListOptions: (...args: unknown[]) => mockRuntimeListOptions(...args),
+    displayProviderName: providerDisplay.displayProviderName,
+    displayRuntimeName: providerDisplay.displayRuntimeName,
+    runtimeLocalSkillsOptions: (...args: unknown[]) =>
+      mockRuntimeLocalSkillsOptions(...args),
+    runtimeLocalSkillsKeys: {
+      forRuntime: (runtimeId: string) => ["runtimes", "local-skills", runtimeId],
+    },
+    resolveRuntimeLocalSkillImport: (...args: unknown[]) =>
+      mockResolveRuntimeLocalSkillImport(...args),
+  };
+});
 
 vi.mock("sonner", () => ({
   toast: {

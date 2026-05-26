@@ -33,6 +33,7 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
 
 vi.mock("@multica/core/runtimes", () => ({
   deriveRuntimeHealth: () => "online",
+  displayRuntimeName: (name: string) => name,
   runtimeUsageOptions: () => ({ kind: "usage" }),
 }));
 

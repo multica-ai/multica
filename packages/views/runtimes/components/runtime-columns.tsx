@@ -14,6 +14,7 @@ import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { deriveWorkload } from "@multica/core/agents";
 import {
   deriveRuntimeHealth,
+  displayRuntimeName,
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
 import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
@@ -217,6 +218,7 @@ export function createRuntimeColumns({
 
 function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
   const { base: baseName } = splitRuntimeName(runtime.name);
+  const displayName = displayRuntimeName(baseName, runtime.provider);
   return (
     <div className="flex min-w-0 items-center gap-2">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center">
@@ -224,7 +226,7 @@ function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
       </div>
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <span className="block min-w-0 shrink truncate text-sm font-medium">
-          {baseName}
+          {displayName}
         </span>
         <VisibilityBadge runtime={runtime} />
       </div>
@@ -552,7 +554,9 @@ function RowMenu({
           <AlertDialogHeader>
             <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t(($) => $.detail.delete_dialog.description, { name: runtime.name })}
+              {t(($) => $.detail.delete_dialog.description, {
+                name: displayRuntimeName(runtime.name, runtime.provider),
+              })}
               <span className="mt-2 block text-xs text-muted-foreground/80">
                 {t(($) => $.list.delete_admin_hint)}
               </span>

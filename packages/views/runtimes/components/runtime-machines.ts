@@ -1,4 +1,9 @@
-import { deriveRuntimeHealth, type RuntimeHealth } from "@multica/core/runtimes";
+import {
+  deriveRuntimeHealth,
+  displayProviderName,
+  displayRuntimeName,
+  type RuntimeHealth,
+} from "@multica/core/runtimes";
 import type { AgentRuntime } from "@multica/core/types";
 import { formatDeviceInfo } from "../utils";
 
@@ -142,7 +147,11 @@ export function filterRuntimeMachines(
       machine.deviceInfo,
       machine.daemonId,
       machine.providerNames.join(" "),
+      machine.providerNames.map(displayProviderName).join(" "),
       machine.runtimes.map((runtime) => runtime.name).join(" "),
+      machine.runtimes
+        .map((runtime) => displayRuntimeName(runtime.name, runtime.provider))
+        .join(" "),
     ]
       .filter(Boolean)
       .join(" ")
@@ -262,7 +271,7 @@ function machineTitle(
   if (deviceName) return deviceName;
 
   if (first.runtime_mode === "cloud") {
-    return `${capitalize(first.provider)} cloud`;
+    return `${displayProviderName(first.provider)} cloud`;
   }
   return first.daemon_id ? shortDaemonId(first.daemon_id) : "Unknown machine";
 }
@@ -342,11 +351,6 @@ function commonCliVersion(runtimes: AgentRuntime[]): string | null {
 
 function shortDaemonId(daemonId: string): string {
   return daemonId.length > 12 ? `${daemonId.slice(0, 8)}...` : daemonId;
-}
-
-function capitalize(value: string): string {
-  if (!value) return "Runtime";
-  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
 }
 
 function compareRuntimeMachines(a: RuntimeMachine, b: RuntimeMachine): number {

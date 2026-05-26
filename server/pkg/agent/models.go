@@ -204,28 +204,24 @@ func codexStaticModels() []Model {
 	}
 }
 
-// geminiStaticModels lists the values we pass via `gemini -m`. Gemini
-// CLI has no `models list` subcommand, so dynamic discovery isn't
-// possible; the next best thing is to expose the CLI's own aliases
-// (auto / pro / flash / flash-lite and the `auto-gemini-*` family)
-// alongside a few explicit version pins. Aliases track whatever the
-// installed CLI considers current (see `resolveModel` in the CLI's
-// packages/core/src/config/models.ts), so new Gemini releases light
-// up without a Multica redeploy. Default is `auto` to match Google's
-// recommendation — the CLI picks Pro vs Flash per task and falls back
-// when quota is exhausted.
+// geminiStaticModels lists AGY CLI model names we pass via `agy -m`.
+// AGY 1.0.0 exposes a fixed picker rather than a daemon-friendly
+// `models list` command, so this catalog mirrors the current picker
+// labels. Do not mark a static default here: when agent.model is empty
+// Multica omits -m, allowing AGY's own default / GEMINI_MODEL /
+// settings.json model.name resolution to win. Provider is intentionally
+// "google" for every entry because these choices route through AGY /
+// Antigravity account entitlement even when the underlying model family
+// is Anthropic or OpenAI.
 func geminiStaticModels() []Model {
 	return []Model{
-		{ID: "auto", Label: "Auto (Gemini 3)", Provider: "google", Default: true},
-		{ID: "auto-gemini-2.5", Label: "Auto (Gemini 2.5)", Provider: "google"},
-		{ID: "pro", Label: "Pro", Provider: "google"},
-		{ID: "flash", Label: "Flash", Provider: "google"},
-		{ID: "flash-lite", Label: "Flash Lite", Provider: "google"},
-		{ID: "gemini-3-pro-preview", Label: "Gemini 3 Pro (preview)", Provider: "google"},
-		{ID: "gemini-3-flash-preview", Label: "Gemini 3 Flash (preview)", Provider: "google"},
-		{ID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro", Provider: "google"},
-		{ID: "gemini-2.5-flash", Label: "Gemini 2.5 Flash", Provider: "google"},
-		{ID: "gemini-2.5-flash-lite", Label: "Gemini 2.5 Flash Lite", Provider: "google"},
+		{ID: "gemini-3.5-flash-high", Label: "Gemini 3.5 Flash (High)", Provider: "google"},
+		{ID: "gemini-3.5-flash-medium", Label: "Gemini 3.5 Flash (Medium)", Provider: "google"},
+		{ID: "gemini-3.1-pro-high", Label: "Gemini 3.1 Pro (High)", Provider: "google"},
+		{ID: "gemini-3.1-pro-low", Label: "Gemini 3.1 Pro (Low)", Provider: "google"},
+		{ID: "claude-sonnet-4.6-thinking", Label: "Claude Sonnet 4.6 (Thinking)", Provider: "google"},
+		{ID: "claude-opus-4.6-thinking", Label: "Claude Opus 4.6 (Thinking)", Provider: "google"},
+		{ID: "gpt-oss-120b-medium", Label: "GPT-OSS 120B (Medium)", Provider: "google"},
 	}
 }
 

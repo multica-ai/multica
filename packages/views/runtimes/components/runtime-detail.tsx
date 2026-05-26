@@ -16,7 +16,11 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useDeleteRuntime, useUpdateRuntime } from "@multica/core/runtimes/mutations";
-import { deriveRuntimeHealth } from "@multica/core/runtimes";
+import {
+  deriveRuntimeHealth,
+  displayProviderName,
+  displayRuntimeName,
+} from "@multica/core/runtimes";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
@@ -159,7 +163,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         </Button>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
         <span className="truncate font-mono text-xs text-foreground">
-          {runtime.name}
+          {displayRuntimeName(runtime.name, runtime.provider)}
         </span>
         <div className="ml-auto flex items-center gap-2">
           {!canDelete && (
@@ -214,7 +218,9 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           <AlertDialogHeader>
             <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t(($) => $.detail.delete_dialog.description, { name: runtime.name })}
+              {t(($) => $.detail.delete_dialog.description, {
+                name: displayRuntimeName(runtime.name, runtime.provider),
+              })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -277,7 +283,7 @@ function HeroCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h2 className="truncate text-base font-semibold tracking-tight">
-              {runtime.name}
+              {displayRuntimeName(runtime.name, runtime.provider)}
             </h2>
             <HealthBadge health={health} />
             <span className="text-xs text-muted-foreground">
@@ -325,7 +331,7 @@ function HeroCard({
         <Fact label="Runtime">
           <span className="block truncate text-sm">
             {device?.runtime ?? (
-              <span className="capitalize">{runtime.provider}</span>
+              <span>{displayProviderName(runtime.provider)}</span>
             )}
           </span>
         </Fact>

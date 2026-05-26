@@ -89,6 +89,79 @@ func TestBuildLoginShellResolveScript_ShapeAndContent(t *testing.T) {
 	}
 }
 
+func TestDefaultAgentCommandNamesUsesAgyForGeminiProvider(t *testing.T) {
+	var hasAgy, hasGemini bool
+	for _, name := range defaultAgentCommandNames {
+		switch name {
+		case "agy":
+			hasAgy = true
+		case "gemini":
+			hasGemini = true
+		}
+	}
+	if !hasAgy {
+		t.Fatal("default agent probe list must include agy for the Gemini provider")
+	}
+	if hasGemini {
+		t.Fatal("default agent probe list must not include legacy gemini binary")
+	}
+}
+
+func TestLoadConfigDetectsAgyAsGeminiProvider(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	binDir := t.TempDir()
+	agyPath := filepath.Join(binDir, "agy")
+	if err := os.WriteFile(agyPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake agy: %v", err)
+	}
+
+	for _, envVar := range []string{
+		"MULTICA_CLAUDE_PATH",
+		"MULTICA_CODEX_PATH",
+		"MULTICA_OPENCODE_PATH",
+		"MULTICA_OPENCLAW_PATH",
+		"MULTICA_HERMES_PATH",
+		"MULTICA_GEMINI_PATH",
+		"MULTICA_PI_PATH",
+		"MULTICA_CURSOR_PATH",
+		"MULTICA_COPILOT_PATH",
+		"MULTICA_KIMI_PATH",
+		"MULTICA_KIRO_PATH",
+	} {
+		t.Setenv(envVar, "")
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("SHELL", "/usr/bin/fish")
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	entry, ok := cfg.Agents["gemini"]
+	if !ok {
+		t.Fatalf("expected Gemini provider to be registered from agy, got agents=%v", cfg.Agents)
+	}
+	if entry.Path != "agy" {
+		t.Fatalf("Gemini provider path = %q, want agy", entry.Path)
+	}
+}
+
+func TestDisplayNameForProviderShowsAgyForGeminiProvider(t *testing.T) {
+	if got := displayNameForProvider("gemini"); got != "AGY" {
+		t.Fatalf("displayNameForProvider(gemini) = %q, want AGY", got)
+	}
+	if got := displayNameForProvider("codex"); got != "Codex" {
+		t.Fatalf("displayNameForProvider(codex) = %q, want Codex", got)
+	}
+}
+
 // TestResolveAgentsViaLoginShell_ResolvesViaInteractiveShell verifies the
 // motivating bug scenario: a binary that lives in a directory which is NOT on
 // the daemon's PATH but IS added to PATH by the user's interactive shell rc

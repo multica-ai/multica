@@ -77,15 +77,18 @@ Cursor 编辑器的 CLI 对应物。**会话续接是坏的** —— Cursor CLI 
 | 认证 | CLI 里走 GitHub 浏览器登录。 |
 | 备注 | 登录账号必须有有效的 GitHub Copilot 订阅。 |
 
-### Gemini（Google）
+### Gemini / AGY（Google）
 
-支持 Gemini 2.5 和 3 系列。没有会话续接，没有 MCP —— 适合一次性、无需上下文记忆的任务。
+通过 Google Antigravity CLI 使用 AGY 当前模型目录，包括 Gemini 3.5 Flash、Gemini 3.1 Pro、Claude Sonnet/Opus 4.6 Thinking 和 GPT-OSS 120B。没有会话续接，没有 MCP —— 适合一次性、无需上下文记忆的任务。
 
 | | |
 |---|---|
-| 守护进程扫描 | `gemini` |
-| 安装 | 看官方指引 [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)。常见装法是 npm 包 `@google/gemini-cli`。 |
-| 认证 | 跑 `gemini` 会提示 Google 账号登录，或设置 `GEMINI_API_KEY`。 |
+| 守护进程扫描 | `agy` |
+| 安装 | 看官方 Antigravity CLI 安装说明：[antigravity.google/download](https://antigravity.google/download)。 |
+| 认证 | 使用守护进程前，先在 Antigravity 中登录，或交互式运行 `agy` 完成登录。AGY 支持 API key 时，`GEMINI_API_KEY` 仍可使用。 |
+| 模型选择 | 在 Multica 中选择模型会传给 `agy -m <model>`；留空则让 AGY 使用自身默认值、`GEMINI_MODEL` 或 `settings.json` 里的 `model.name`。 |
+| 设置 | AGY CLI 设置保存在 `~/.gemini/antigravity-cli/settings.json`；在 TUI 中用 `/config`、`/settings` 或 `/permissions` 调整安全和权限。 |
+| Headless 模式 | Multica 使用 `--dangerously-skip-permissions` 启动 AGY，避免守护进程任务卡在交互式审批上。 |
 
 ### OpenCode（SST）
 
