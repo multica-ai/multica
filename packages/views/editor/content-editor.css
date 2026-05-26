@@ -201,6 +201,18 @@
   min-width: 0;
 }
 
+/* CEREBRO-PATCH(todo-list-editor): Tiptap wraps task-item text in li > div > p,
+   so the generic `li > p` margin reset below misses it; the paragraph keeps its
+   0.625rem block margins and the text sits 10px below the top-aligned checkbox
+   (FIR-2297 alignment fix). Zero the margins so box and first text line align. */
+.rich-text-editor ul[data-type="taskList"] > li > div > p {
+  margin: 0;
+}
+
+.rich-text-editor ul[data-type="taskList"] > li > div > p + p {
+  margin-top: 0.25rem;
+}
+
 .rich-text-editor ul[data-type="taskList"] > li[data-checked="true"] > div,
 .rich-text-editor li.task-list-item:has(> input[type="checkbox"]:checked) {
   color: var(--muted-foreground);
