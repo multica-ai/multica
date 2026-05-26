@@ -1,15 +1,7 @@
 "use client";
 
-import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { isImeComposing } from "@multica/core/utils";
 import { getCurrentWsId } from "@multica/core/platform";
 import { skillDetailOptions } from "@multica/core/workspace/queries";
 import { skillPreviewText } from "./skill-preview";
@@ -17,58 +9,28 @@ import type { SkillMentionItem } from "./types";
 
 interface SkillMentionListProps {
   items: SkillMentionItem[];
-  command: (item: SkillMentionItem) => void;
+  selectedIndex: number;
+  onSelect: (index: number) => void;
+  onHover: (index: number) => void;
 }
 
-export interface SkillMentionListRef {
-  onKeyDown: (props: { event: KeyboardEvent }) => boolean;
-}
-
-export const SkillMentionList = forwardRef<
-  SkillMentionListRef,
-  SkillMentionListProps
->(function SkillMentionList({ items, command }, ref) {
-  const [selectedIndex, setSelectedIndex] = useState(0);
+/**
+ * Pure presentational list. Keyboard navigation (ArrowUp/Down/Enter) is
+ * owned by the extension closure in extension.ts so it works the instant
+ * the popup opens — before React has mounted this component and before any
+ * imperative ref has been bound (FIR-2299 follow-up).
+ */
+export function SkillMentionList({
+  items,
+  selectedIndex,
+  onSelect,
+  onHover,
+}: SkillMentionListProps) {
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
-
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [items]);
 
   useEffect(() => {
     itemRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
-
-  const selectItem = useCallback(
-    (index: number) => {
-      const item = items[index];
-      if (!item) return;
-      command(item);
-    },
-    [items, command],
-  );
-
-  useImperativeHandle(ref, () => ({
-    onKeyDown: ({ event }) => {
-      if (isImeComposing(event)) return false;
-      if (event.key === "ArrowUp") {
-        if (items.length === 0) return true;
-        setSelectedIndex((i) => (i + items.length - 1) % items.length);
-        return true;
-      }
-      if (event.key === "ArrowDown") {
-        if (items.length === 0) return true;
-        setSelectedIndex((i) => (i + 1) % items.length);
-        return true;
-      }
-      if (event.key === "Enter") {
-        if (items.length === 0) return true;
-        selectItem(selectedIndex);
-        return true;
-      }
-      return false;
-    },
-  }));
 
   if (items.length === 0) {
     return (
@@ -95,8 +57,8 @@ export const SkillMentionList = forwardRef<
             className={`flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left text-xs transition-colors ${
               idx === selectedIndex ? "bg-accent" : "hover:bg-accent/50"
             }`}
-            onClick={() => selectItem(idx)}
-            onMouseEnter={() => setSelectedIndex(idx)}
+            onClick={() => onSelect(idx)}
+            onMouseEnter={() => onHover(idx)}
           >
             <span className="font-medium">{item.name}</span>
             {item.description && (
@@ -110,7 +72,7 @@ export const SkillMentionList = forwardRef<
       {activeItem && <SkillPreviewPanel item={activeItem} />}
     </div>
   );
-});
+}
 
 /**
  * Side panel that previews what the highlighted skill does. Shows the skill

@@ -11,14 +11,12 @@ import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
 import { workspaceKeys, skillListOptions } from "@multica/core/workspace/queries";
 import type { SkillSummary } from "@multica/core/types";
+import { isImeComposing } from "@multica/core/utils";
 import {
   CEREBRO_FLAG_DEFAULTS,
   useCerebroFeatureFlagsStore,
 } from "@multica/cerebro-feature-flags";
-import {
-  SkillMentionList,
-  type SkillMentionListRef,
-} from "./suggestion-list";
+import { SkillMentionList } from "./suggestion-list";
 import { findSkillSuggestionMatch } from "./find-suggestion-match";
 import type { SkillMentionItem } from "./types";
 
@@ -47,8 +45,17 @@ function fuzzyMatches(item: SkillMentionItem, query: string): boolean {
 export function createSkillSuggestion(
   qc: QueryClient,
 ): Omit<SuggestionOptions<SkillMentionItem>, "editor"> {
-  let renderer: ReactRenderer<SkillMentionListRef> | null = null;
+  let renderer: ReactRenderer | null = null;
   let popup: HTMLDivElement | null = null;
+  // Keyboard navigation state lives here, not in the React list — this is the
+  // single source of truth so Enter/ArrowUp/ArrowDown work even before React
+  // has mounted the suggestion popup (FIR-2299 follow-up). The list reads
+  // these via props.
+  let currentItems: SkillMentionItem[] = [];
+  let selectedIndex = 0;
+  let activeCommand:
+    | ((item: SkillMentionItem) => void)
+    | null = null;
 
   function filterItems(
     skills: SkillSummary[] | undefined,
@@ -69,6 +76,21 @@ export function createSkillSuggestion(
     if (cached) return filterItems(cached, query);
     const skills = await qc.ensureQueryData(skillListOptions(wsId));
     return filterItems(skills, query);
+  }
+
+  function rerender() {
+    renderer?.updateProps({
+      items: currentItems,
+      selectedIndex,
+      onHover: (index: number) => {
+        selectedIndex = index;
+        rerender();
+      },
+      onSelect: (index: number) => {
+        const item = currentItems[index];
+        if (item) activeCommand?.(item);
+      },
+    });
   }
 
   return {
@@ -107,8 +129,23 @@ export function createSkillSuggestion(
     render: () => {
       return {
         onStart: (props: SuggestionProps<SkillMentionItem>) => {
+          currentItems = props.items;
+          selectedIndex = 0;
+          activeCommand = props.command;
+
           renderer = new ReactRenderer(SkillMentionList, {
-            props: { items: props.items, command: props.command },
+            props: {
+              items: currentItems,
+              selectedIndex,
+              onHover: (index: number) => {
+                selectedIndex = index;
+                rerender();
+              },
+              onSelect: (index: number) => {
+                const item = currentItems[index];
+                if (item) activeCommand?.(item);
+              },
+            },
             editor: props.editor,
           });
 
@@ -122,19 +159,47 @@ export function createSkillSuggestion(
         },
 
         onUpdate: (props: SuggestionProps<SkillMentionItem>) => {
-          renderer?.updateProps({
-            items: props.items,
-            command: props.command,
-          });
+          currentItems = props.items;
+          // Clamp the highlight: if filtering removed items below the cursor,
+          // move it onto the last available row so a follow-up Enter still
+          // selects something visible.
+          if (selectedIndex >= currentItems.length) {
+            selectedIndex = Math.max(0, currentItems.length - 1);
+          }
+          activeCommand = props.command;
+          rerender();
           if (popup) updatePosition(popup, props.clientRect);
         },
 
         onKeyDown: (props: { event: KeyboardEvent }) => {
-          if (props.event.key === "Escape") {
+          const { event } = props;
+          if (event.key === "Escape") {
             cleanup();
             return true;
           }
-          return renderer?.ref?.onKeyDown(props) ?? false;
+          // IME (Chinese pinyin, Japanese kana) — Enter commits composition,
+          // ArrowUp/Down moves IME candidates; do not intercept.
+          if (isImeComposing(event)) return false;
+          if (event.key === "ArrowUp") {
+            if (currentItems.length === 0) return true;
+            selectedIndex =
+              (selectedIndex + currentItems.length - 1) % currentItems.length;
+            rerender();
+            return true;
+          }
+          if (event.key === "ArrowDown") {
+            if (currentItems.length === 0) return true;
+            selectedIndex = (selectedIndex + 1) % currentItems.length;
+            rerender();
+            return true;
+          }
+          if (event.key === "Enter") {
+            if (currentItems.length === 0) return true;
+            const item = currentItems[selectedIndex];
+            if (item) activeCommand?.(item);
+            return true;
+          }
+          return false;
         },
 
         onExit: () => {
@@ -165,6 +230,9 @@ export function createSkillSuggestion(
         renderer = null;
         popup?.remove();
         popup = null;
+        currentItems = [];
+        selectedIndex = 0;
+        activeCommand = null;
       }
     },
   };
