@@ -193,6 +193,7 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
              * render them through the same pipeline as assistant replies.
              * Neutralise prose's leading/trailing margin so single-line
              * bubbles stay as compact as the plain-text version used to. */}
+            {/* CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch */}
             <div className="prose prose-sm dark:prose-invert max-w-[70ch] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
               <Markdown>{message.content}</Markdown>
             </div>
@@ -251,6 +252,7 @@ function AssistantMessage({
       {timeline.length > 0 ? (
         <TimelineView items={timeline} />
       ) : (
+        // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch]">
           <Markdown>{message.content}</Markdown>
         </div>
@@ -438,6 +440,7 @@ function TimelineView({
   return (
     <>
       {preface.length > 0 && (
+        // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch]">
           <Markdown>{preface.map((t) => t.content ?? "").join("")}</Markdown>
         </div>
@@ -446,6 +449,7 @@ function TimelineView({
         <OuterProcessFold items={middle} defaultOpen={!!isStreaming} />
       )}
       {final.length > 0 && (
+        // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch]">
           <Markdown>{final.map((t) => t.content ?? "").join("")}</Markdown>
         </div>
@@ -497,6 +501,7 @@ function OuterProcessFold({
 // prose size.
 function MiddleTextRow({ item }: { item: ChatTimelineItem }) {
   return (
+    // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
     <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-[70ch] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <Markdown>{item.content ?? ""}</Markdown>
     </div>
