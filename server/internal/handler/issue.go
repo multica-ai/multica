@@ -1544,6 +1544,75 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Cap on the number of parents we'll fan-out children for in one request.
+// Swimlane's visible-lane count is naturally bounded by what fits on screen
+// (typically <= 50), but cap explicitly so a malicious caller can't ANY()
+// across the whole workspace's issue set in a single round trip.
+const listChildrenByParentsLimit = 200
+
+// ListChildrenByParents returns the union of children for the
+// provided parent ids. Replaces the N-call fan-out Swimlane would otherwise
+// have to make on mount (one /issues/:id/children per visible parent lane).
+//
+// Workspace scope is enforced at the query level — any parent_id that doesn't
+// belong to the caller's workspace simply yields zero children, so callers
+// can't probe parents across workspace boundaries.
+func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	raw := r.URL.Query().Get("parent_ids")
+	if raw == "" {
+		// Empty input is a no-op response (not an error) — simplifies the
+		// client which calls this unconditionally on Swimlane mount even
+		// when there are zero visible parent lanes.
+		writeJSON(w, http.StatusOK, map[string]any{"issues": []IssueResponse{}})
+		return
+	}
+
+	parts := strings.Split(raw, ",")
+	if len(parts) > listChildrenByParentsLimit {
+		writeError(w, http.StatusBadRequest, "too many parent_ids")
+		return
+	}
+	parentIDs := make([]pgtype.UUID, 0, len(parts))
+	for _, s := range parts {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		id, ok := parseUUIDOrBadRequest(w, s, "parent_ids")
+		if !ok {
+			return
+		}
+		parentIDs = append(parentIDs, id)
+	}
+	if len(parentIDs) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"issues": []IssueResponse{}})
+		return
+	}
+
+	children, err := h.Queries.ListChildrenByParents(r.Context(), db.ListChildrenByParentsParams{
+		WorkspaceID: wsUUID,
+		ParentIds:   parentIDs,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list child issues")
+		return
+	}
+	prefix := h.getIssuePrefix(r.Context(), wsUUID)
+	resp := make([]IssueResponse, len(children))
+	for i, child := range children {
+		resp[i] = issueToResponse(child, prefix)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"issues": resp,
+	})
+}
+
 func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 	wsID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, wsID, "workspace_id")

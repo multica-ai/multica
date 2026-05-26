@@ -56,6 +56,9 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "detail", id] as const,
   children: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "children", id] as const,
+  /** Batched children — key includes sorted parent ids for cache stability. */
+  childrenByParents: (wsId: string, parentIds: readonly string[]) =>
+    [...issueKeys.all(wsId), "children-by-parents", parentIds] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
   /** Full-issue timeline (single TanStack Query, no cursor). */
@@ -381,6 +384,71 @@ export function childIssuesOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.children(wsId, id),
     queryFn: () => api.listChildIssues(id).then((r) => r.issues),
+  });
+}
+
+/**
+ * Batched variant of {@link childIssuesOptions}: fetches children for all
+ * given parents in a single `GET /api/issues/children?parent_ids=…` request.
+ *
+ * Used by SwimLaneView to resolve parent lanes without an N-request fan-out.
+ * Returns a Map<parentId, Issue[]> so callers can look up children by lane
+ * in O(1). parentIds must be sorted + deduplicated by the caller so the
+ * React Query cache key is stable across renders.
+ *
+ * Enabled only when parentIds is non-empty — callers should skip this
+ * query (via `enabled: false`) when there are no parent lanes to resolve.
+ */
+/**
+ * queryFn that fetches children for all given parents, then immediately
+ * writes each parent's slice into the per-parent issueKeys.children cache.
+ * Other surfaces (issue-detail sub-issues panel, set-parent modal) that
+ * call childIssuesOptions will hit the primed cache instead of re-fetching.
+ * Hydration happens in queryFn (not a useEffect) to avoid infinite render
+ * loops that would occur if setQueryData triggered a re-render cycle.
+ */
+async function fetchAndHydrateChildrenByParents(
+  qc: import("@tanstack/react-query").QueryClient,
+  wsId: string,
+  parentIds: readonly string[],
+) {
+  const response = await api.listChildrenByParents([...parentIds]);
+  // Group by parent and populate per-parent caches.
+  const grouped = new Map<string, Issue[]>();
+  for (const issue of response.issues) {
+    if (!issue.parent_issue_id) continue;
+    const bucket = grouped.get(issue.parent_issue_id);
+    if (bucket) {
+      bucket.push(issue);
+    } else {
+      grouped.set(issue.parent_issue_id, [issue]);
+    }
+  }
+  for (const [parentId, children] of grouped) {
+    // Only hydrate if the per-parent cache is empty — don't overwrite a
+    // fresher result that another query (e.g. issue-detail) may have written.
+    const existing = qc.getQueryData<Issue[]>(issueKeys.children(wsId, parentId));
+    if (!existing || existing.length === 0) {
+      qc.setQueryData(issueKeys.children(wsId, parentId), children);
+    }
+  }
+  return grouped;
+}
+
+export function childrenByParentsOptions(
+  wsId: string,
+  parentIds: readonly string[],
+  qc: import("@tanstack/react-query").QueryClient,
+) {
+  return queryOptions({
+    queryKey: issueKeys.childrenByParents(wsId, parentIds),
+    queryFn: () => fetchAndHydrateChildrenByParents(qc, wsId, parentIds),
+    enabled: parentIds.length > 0,
+    // Never auto-refetch: the canonical per-parent data lives in
+    // issueKeys.children entries, kept fresh by mutations + WS events.
+    // The batch key changes whenever new un-cached parents appear, so
+    // there's no stale batch result to worry about.
+    staleTime: Infinity,
   });
 }
 

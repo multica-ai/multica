@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SwimLaneView } from "./swimlane-view";
 import type { Issue } from "@multica/core/types";
@@ -12,6 +12,17 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 // Mock hooks
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
+}));
+
+// Mock the API so childrenByParentsOptions doesn't fire real HTTP.
+// Individual tests can override listChildrenByParents via mockResolvedValueOnce.
+const mockListChildrenByParents = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ issues: [] }),
+);
+vi.mock("@multica/core/api", () => ({
+  api: { listChildrenByParents: mockListChildrenByParents },
+  getApi: () => ({ listChildrenByParents: mockListChildrenByParents }),
+  setApiInstance: vi.fn(),
 }));
 
 // Mock paths
@@ -307,6 +318,7 @@ describe("SwimLaneView", () => {
     mockViewState.swimlaneGrouping = "parent";
     mockViewState.swimlaneOrders = { parent: [], project: [], assignee: [] };
     mockViewState.collapsedSwimlanes = { parent: [], project: [], assignee: [] };
+    mockListChildrenByParents.mockResolvedValue({ issues: [] });
     useLoadMoreByStatusMock.mockImplementation(() => ({
       total: 0,
       loaded: 0,
@@ -1145,5 +1157,105 @@ describe("SwimLaneView", () => {
         status: "done",
       }),
     );
+  });
+
+  // ------------------------------------------------------------------
+  // Batched children fetch (childrenByParentsOptions)
+  // ------------------------------------------------------------------
+
+  it("fires listChildrenByParents once with all visible parent ids on mount", async () => {
+    // multiParentIssues has parent-1 (Child of A) and parent-2 (Child of B) as
+    // visible parent lanes. Both ids should appear in one batched call.
+    renderWithI18n(
+      <SwimLaneView issues={multiParentIssues} onMoveIssue={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(mockListChildrenByParents).toHaveBeenCalledTimes(1);
+    });
+    const [calledIds] = mockListChildrenByParents.mock.calls[0] as [string[]];
+    expect(calledIds.sort()).toEqual(["parent-1", "parent-2"].sort());
+  });
+
+  it("does not fire listChildrenByParents when there are no parent lanes", async () => {
+    // All issues are top-level — no parent lanes, no batch request.
+    const flatIssues = mockIssues.filter((i) => i.parent_issue_id === null);
+    renderWithI18n(
+      <SwimLaneView issues={flatIssues} onMoveIssue={vi.fn()} />,
+    );
+
+    await act(async () => {});
+    expect(mockListChildrenByParents).not.toHaveBeenCalled();
+  });
+
+  it("merges batch-fetched children into parent lanes so previously-empty cells populate", async () => {
+    // Scenario: grandparent G → parent P (loaded, becomes a lane header) →
+    // grandchild GC (NOT in the initial `issues` set, returned only by the
+    // batch fetch). P's lane should show GC after the batch resolves.
+    const grandparent: Issue = {
+      id: "gp-1",
+      workspace_id: "ws-1",
+      number: 10,
+      identifier: "PROJ-10",
+      title: "Grandparent",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 10,
+      start_date: null,
+      due_date: null,
+      metadata: {},
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const parent: Issue = {
+      ...grandparent,
+      id: "p-1",
+      number: 11,
+      identifier: "PROJ-11",
+      title: "Parent",
+      parent_issue_id: "gp-1",
+      position: 11,
+    };
+    const grandchild: Issue = {
+      ...grandparent,
+      id: "gc-1",
+      number: 12,
+      identifier: "PROJ-12",
+      title: "Grandchild (batch only)",
+      status: "in_progress",
+      parent_issue_id: "p-1",
+      position: 12,
+    };
+
+    mockListChildrenByParents.mockResolvedValueOnce({ issues: [grandchild] });
+
+    renderWithI18n(
+      <SwimLaneView
+        issues={[grandparent, parent]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Grandchild (batch only)")).toBeInTheDocument();
+    });
+  });
+
+  it("does not fire listChildrenByParents when swimlaneGrouping is not parent", async () => {
+    mockViewState.swimlaneGrouping = "project";
+
+    renderWithI18n(
+      <SwimLaneView issues={multiParentIssues} onMoveIssue={vi.fn()} />,
+    );
+
+    await act(async () => {});
+    expect(mockListChildrenByParents).not.toHaveBeenCalled();
   });
 });
