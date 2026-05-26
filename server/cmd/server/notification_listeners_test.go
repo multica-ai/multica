@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/autosubscribe"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -1032,6 +1033,103 @@ func notificationEventsForRecipient(t *testing.T, queries *db.Queries, recipient
 		t.Fatalf("ListNotificationEventsByRecipient: %v", err)
 	}
 	return items
+}
+
+func TestNotification_DescriptionMentionIndependentOfAutoSubscribe(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	mentionedEmail := "notif-description-mention-autosub-off@multica.ai"
+	mentionedID := createTestUser(t, mentionedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mentionedEmail) })
+
+	prefs := autosubscribe.NewUserDefaults()
+	prefs.IssueDescriptionMention = false
+	setAutoSubscribePreference(t, queries, mentionedID, prefs)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	description := "please check [@Mentioned](mention://member/" + mentionedID + ")"
+	issueTitle := "description mention issue"
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       issueTitle,
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				Description: &description,
+			},
+			"description_changed": true,
+		},
+	})
+
+	if isSubscribed(t, queries, issueID, "member", mentionedID) {
+		t.Fatal("description mention should not subscribe users when issue_description_mention is disabled")
+	}
+
+	inboxItems := inboxItemsForRecipient(t, queries, mentionedID)
+	if len(inboxItems) != 1 {
+		t.Fatalf("expected 1 inbox item for mentioned user, got %d", len(inboxItems))
+	}
+	if inboxItems[0].Type != "mentioned" {
+		t.Fatalf("expected inbox type 'mentioned', got %q", inboxItems[0].Type)
+	}
+	if !inboxItems[0].Body.Valid || inboxItems[0].Body.String != description {
+		t.Fatalf("expected inbox body %q, got %#v", description, inboxItems[0].Body)
+	}
+
+	notificationRows := notificationEventsForRecipient(t, queries, mentionedID)
+	if len(notificationRows) != 1 {
+		t.Fatalf("expected 1 canonical notification event, got %d", len(notificationRows))
+	}
+	if notificationRows[0].Type != "mentioned" {
+		t.Fatalf("expected notification type 'mentioned', got %q", notificationRows[0].Type)
+	}
+	if notificationRows[0].Title != issueTitle {
+		t.Fatalf("expected notification title %q, got %q", issueTitle, notificationRows[0].Title)
+	}
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       issueTitle,
+				Status:      "in_progress",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+				Description: &description,
+			},
+			"status_changed": true,
+			"prev_status":    "todo",
+		},
+	})
+
+	inboxItems = inboxItemsForRecipient(t, queries, mentionedID)
+	if len(inboxItems) != 1 {
+		t.Fatalf("expected only the mention inbox item after status change, got %d", len(inboxItems))
+	}
+	if inboxItems[0].Type != "mentioned" {
+		t.Fatalf("expected remaining inbox type 'mentioned', got %q", inboxItems[0].Type)
+	}
 }
 
 func notificationDeliveriesForEvent(t *testing.T, queries *db.Queries, eventID string) []db.NotificationDelivery {
