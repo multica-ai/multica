@@ -32,6 +32,7 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "Multica needs photo library access so you can attach images to issues and comments.",
+        "NSPhotoLibraryAddUsageDescription": "Multica needs permission to save previewed images to your photo library.",
         "NSDocumentsFolderUsageDescription": "Multica needs document access so you can attach files to issues and comments."
       }
     },
