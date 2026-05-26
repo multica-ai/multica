@@ -13,6 +13,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 isolation-profile classify/expand
+	cerebrosandboxprofile "github.com/multica-ai/multica/server/internal/cerebro/sandboxprofile"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -39,6 +41,8 @@ type AgentRuntimeResponse struct {
 	// SandboxPolicy is Multica-owned runtime policy that shapes daemon
 	// Seatbelt enforcement for shell, host and path controls.
 	SandboxPolicy any `json:"sandbox_policy"`
+	// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 named isolation profile the stored policy currently equals (real status, not a default).
+	SandboxProfile string `json:"sandbox_profile"`
 	// CEREBRO-PATCH(runtime): persona integration additions.
 	// PersonaSandbox is the runtime-scoped persona sandbox (E1). When set it
 	// is the hard upper bound for every agent on this runtime — at spawn
@@ -93,6 +97,8 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		OwnerID:        uuidToPtr(rt.OwnerID),
 		SandboxEnabled: boolToPtr(rt.SandboxEnabled),
 		SandboxPolicy:  unmarshalJSONMap(rt.SandboxPolicy),
+		// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 classify stored policy into its profile.
+		SandboxProfile: cerebrosandboxprofile.Classify(rt.SandboxPolicy),
 		PersonaSandbox: rt.PersonaSandbox.String,
 		Capabilities:   capabilities,
 		LastSeenAt:     timestampToPtr(rt.LastSeenAt),
@@ -704,6 +710,8 @@ type UpdateRuntimeSandboxRequest struct {
 
 type RuntimeSandboxPolicyRequest struct {
 	SandboxPolicy json.RawMessage `json:"sandbox_policy"`
+	// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 optional preset id; when set it expands to the canonical policy server-side.
+	Profile string `json:"profile,omitempty"`
 }
 
 // UpdateAgentRuntimeSandbox sets or clears the per-runtime sandbox override.
@@ -790,6 +798,12 @@ func (h *Handler) UpdateAgentRuntimeSandboxPolicy(w http.ResponseWriter, r *http
 	var req RuntimeSandboxPolicyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 expand a named profile to its canonical policy server-side.
+	req.SandboxPolicy, err = cerebrosandboxprofile.Resolve(req.Profile, req.SandboxPolicy)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if len(req.SandboxPolicy) == 0 || string(req.SandboxPolicy) == "null" {

@@ -181,6 +181,35 @@ func (h *Handler) SetRuntimeToolEnabled(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, tool)
 }
 
+// CEREBRO-PATCH(runtime-tools-scan-now): FIR-2230 admin-triggered live scan endpoint.
+// RequestRuntimeToolScan handles POST /api/.../runtimes/{runtimeId}/tools/scan-now.
+// Pushes an immediate MCP tools/list scan request to the runtime's daemon over
+// the daemon websocket (FIR-2230), instead of waiting for the next scheduled
+// heartbeat scan. The scan itself is async — the daemon reports results back
+// through the existing ingest endpoint, so the client refetches the inventory
+// shortly after a 202. Returns 502 when no daemon is connected for the runtime,
+// so the UI can tell the admin the runtime is offline rather than silently
+// dropping the request.
+func (h *Handler) RequestRuntimeToolScan(w http.ResponseWriter, r *http.Request) {
+	if !h.requireToolsAdmin(w) {
+		return
+	}
+	rtID, _, ok := h.loadRuntimeForAdmin(w, r)
+	if !ok {
+		return
+	}
+	if h.DaemonHub == nil {
+		writeError(w, http.StatusServiceUnavailable, "daemon websocket not available")
+		return
+	}
+	if h.DaemonHub.RuntimeConnectionCount(uuidToString(rtID)) == 0 {
+		writeError(w, http.StatusBadGateway, "runtime daemon is offline")
+		return
+	}
+	h.DaemonHub.RequestToolScan(uuidToString(rtID))
+	w.WriteHeader(http.StatusAccepted)
+}
+
 // ListRuntimeToolGrants handles GET /api/runtimes/{runtimeId}/tool-grants.
 // Returns both group and user grants in one response keyed by tool name.
 func (h *Handler) ListRuntimeToolGrants(w http.ResponseWriter, r *http.Request) {

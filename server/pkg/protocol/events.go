@@ -129,6 +129,10 @@ const (
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
 	EventDaemonRegister      = "daemon:register"
 	EventDaemonTaskAvailable = "daemon:task_available"
+	// CEREBRO-PATCH(daemon-tool-scan-now): FIR-2230 — server→daemon push asking
+	// for an immediate MCP tools/list scan instead of waiting for the daemon's
+	// next scheduled heartbeat scan.
+	EventDaemonToolScanRequested = "daemon:tool_scan_requested"
 
 	// Connection liveness — emitted on every active WS connection so clients
 	// can detect a half-open or system-suspended (iOS PWA background) socket

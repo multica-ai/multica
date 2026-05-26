@@ -37,6 +37,10 @@ import (
 	cerebrogroups "github.com/multica-ai/multica/server/internal/cerebro/groups"
 	// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant control plane handler import
 	cerebrogrants "github.com/multica-ai/multica/server/internal/cerebro/grants"
+	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy handler import
+	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
+	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler import
+	cerebrosandboxprofile "github.com/multica-ai/multica/server/internal/cerebro/sandboxprofile"
 	// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject CRUD + assignment handler import
 	cerebroroles "github.com/multica-ai/multica/server/internal/cerebro/roles"
 	// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox handler import
@@ -261,6 +265,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant control plane handler + JEH-1212 upstream queries for subject validation
 	cerebroGrantsHandler := cerebrogrants.NewHandler(cerebrogrants.New(cerebroQueries, queries, pool, bus)) // CEREBRO-PATCH(cerebro-grants-routes): JEH-1213
 	cerebroRolesHandler := cerebroroles.New(cerebroQueries, queries, bus)                                   // CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject handler
+	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler (data layer the permission screen reads from).
+	cerebroToolPolicyHandler := cerebrotoolpolicy.NewHandler(cerebrotoolpolicy.NewStore(pool))
+	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler.
+	cerebroSandboxProfileHandler := cerebrosandboxprofile.NewHandler()
 	// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox handler — materialises permission-engine needs_approval verdicts into a human inbox.
 	cerebroApprovalsHandler := cerebroapprovals.NewHandler(cerebroapprovals.New(cerebroQueries, pool, bus))
 	// CEREBRO-PATCH(router-group-permissions-seam): JEH-1009 wire capability gate into the upstream handler
@@ -616,6 +624,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/grants/audit", cerebroGrantsHandler.Audit) // CEREBRO-PATCH(persona-permissions-audit): expose grant audit before {grantId}.
 					r.Post("/grants/evaluate", cerebroGrantsHandler.Evaluate)
 					r.Get("/grants/{grantId}", cerebroGrantsHandler.Get)
+					// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 per-tool policy table read (any member).
+					r.Get("/tool-policy", cerebroToolPolicyHandler.Table)
+					// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog (any member).
+					r.Get("/sandbox-profiles", cerebroSandboxProfileHandler.List)
 					// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox reads (any member). /audit before /{approvalId} so it is not shadowed.
 					r.Get("/approvals", cerebroApprovalsHandler.List)
 					r.Get("/approvals/audit", cerebroApprovalsHandler.Audit)
@@ -660,6 +672,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/grants", cerebroGrantsHandler.Create)
 					r.Patch("/grants/{grantId}", cerebroGrantsHandler.Update)
 					r.Delete("/grants/{grantId}", cerebroGrantsHandler.Delete)
+					// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 per-tool policy writes (admin/owner only).
+					r.Put("/tool-policy", cerebroToolPolicyHandler.Set)
+					r.Delete("/tool-policy", cerebroToolPolicyHandler.Clear)
 					// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval decisions + intake seam (admin/owner only).
 					r.Post("/approvals/intake", cerebroApprovalsHandler.Intake)
 					r.Post("/approvals/{approvalId}/approve", cerebroApprovalsHandler.Approve)
@@ -1040,6 +1055,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// runtime tool inventory + per-tool group/user access grants.
 					r.Get("/tools", h.ListRuntimeTools)
 					r.Patch("/tools/{toolName}", h.SetRuntimeToolEnabled)
+					// CEREBRO-PATCH(router-runtime-tools-scan-now): FIR-2230 admin-triggered live scan.
+					r.Post("/tools/scan-now", h.RequestRuntimeToolScan)
 					r.Get("/tool-grants", h.ListRuntimeToolGrants)
 					r.Post("/tools/{toolName}/groups/{groupId}", h.AddRuntimeToolGroupGrant)
 					r.Delete("/tools/{toolName}/groups/{groupId}", h.RemoveRuntimeToolGroupGrant)

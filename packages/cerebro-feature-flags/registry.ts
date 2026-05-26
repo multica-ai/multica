@@ -29,6 +29,7 @@ export type CerebroFlagKey =
   | "cerebro_persona_permissions"
   | "cerebro_skill_mention"
   | "cerebro_grants"
+  | "cerebro_tool_policy"
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
   | "cerebro_agent_passes"
@@ -67,7 +68,13 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_persona_permissions: true,
   cerebro_skill_mention: true,
   cerebro_grants: false,
-  cerebro_approvals: false,
+  cerebro_tool_policy: false,
+  // Deliberately ON (FIR-2230 phase 5): the legacy duplicate "Pending" tab on
+  // the Access page was removed, so the approvals inbox is now the ONLY surface
+  // for needs_approval asks. Leaving this off would leave prod with no approvals
+  // surface at all — the change is intentional and coupled to that removal, not
+  // an accidental prod-behaviour flip.
+  cerebro_approvals: true,
   cerebro_move_comment_to_subissue: true,
   cerebro_agent_passes: true,
   cerebro_references: true,
@@ -217,6 +224,12 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Grant control plane",
     description:
       "Enable the Persona grant control plane API and CLI (POST/PATCH/DELETE /api/workspaces/{id}/grants and `multica grant` commands).",
+  },
+  {
+    key: "cerebro_tool_policy",
+    label: "Unified tool permissions",
+    description:
+      "Enable the unified per-tool permission table (Tool · Source · Runtime · This agent · Effective) on agent and runtime pages, backed by the four-layer Runtime › Agent › Group › User chain. GET /api/workspaces/{id}/tool-policy (member) + PUT/DELETE (admin/owner). FIR-2230.",
   },
   {
     key: "cerebro_approvals",

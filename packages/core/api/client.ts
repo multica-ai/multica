@@ -1188,28 +1188,7 @@ export class ApiClient {
     );
   }
 
-  // CEREBRO-PATCH(approvals-client): FIR-2133 — approval inbox endpoints (list pending / approve / reject)
-  async listPendingApprovalAsks<T = unknown>(
-    wsId: string,
-    filter: { limit?: number; offset?: number } = {},
-  ): Promise<T> {
-    const params = new URLSearchParams({ status: "pending" });
-    if (filter.limit !== undefined) params.set("limit", String(filter.limit));
-    if (filter.offset !== undefined) params.set("offset", String(filter.offset));
-    return this.fetch<T>(`/api/workspaces/${wsId}/approvals?${params.toString()}`);
-  }
-
-  async approveAsk<T = unknown>(wsId: string, askId: string): Promise<T> {
-    return this.fetch<T>(`/api/workspaces/${wsId}/approvals/${askId}/approve`, { method: "POST" });
-  }
-
-  async rejectAsk<T = unknown>(wsId: string, askId: string, reason?: string): Promise<T> {
-    return this.fetch<T>(`/api/workspaces/${wsId}/approvals/${askId}/reject`, {
-      method: "POST",
-      body: reason ? JSON.stringify({ note: reason }) : undefined,
-    });
-  }
-
+  // CEREBRO-PATCH(approvals-client-removed): FIR-2230 phase 5 — the approval-ask client methods (listPendingApprovalAsks/approveAsk/rejectAsk) were removed when the duplicate "Pending" view was consolidated into the dedicated approvals inbox (which calls cerebroRequest). No remaining caller in the upstream client.
   // Web Push (per-device subscriptions). The server returns enabled=false
   // when VAPID keys aren't configured — callers should hide the subscribe UI
   // in that case.

@@ -30,6 +30,10 @@ import type {
   RuntimeToolGrants,
 } from "@multica/cerebro-types";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { ToolPolicyTable } from "@multica/cerebro-tool-policy/views";
+import { toolPolicyKeys } from "@multica/cerebro-tool-policy/core";
+import { SandboxProfileCard } from "./sandbox-profile-card";
 import { groupListOptions } from "@multica/cerebro-groups";
 import type { CerebroGroup } from "@multica/cerebro-groups";
 import { Switch } from "@multica/ui/components/ui/switch";
@@ -69,6 +73,11 @@ export function RuntimeToolsCard({
   const wsId = useWorkspaceId() || workspaceId;
   const [search, setSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  // FIR-2230: when the unified per-tool permission table is enabled, the runtime
+  // page shows the Allow/Ask/Deny/Inherit chain (this view edits the Runtime
+  // layer) with a server-resolved Effective column, replacing the prior
+  // enable-toggle + grants card. Flag defaults off.
+  const unifiedToolPolicy = useFeatureFlag("cerebro_tool_policy");
 
   const toolsQuery = useQuery({
     queryKey: runtimeToolsKey(runtime.id),
@@ -198,83 +207,138 @@ export function RuntimeToolsCard({
     },
   });
 
-  // The runtime is scanned automatically by the daemon on its heartbeat; there
-  // is no admin-triggered immediate scan. So this button does the one honest
-  // thing it can: re-fetch the latest inventory the daemon has already reported,
-  // rather than the old fake "scan queued" toast that signalled an action it
-  // never performed (FIR-2193).
-  const [refreshing, setRefreshing] = useState(false);
-  async function handleRefresh() {
-    setRefreshing(true);
+  // FIR-2230 real "Scan now": ask the daemon to run a tools/list scan right now
+  // over the websocket, instead of waiting for its scheduled heartbeat scan. The
+  // scan is async — the daemon reports results back through the ingest endpoint —
+  // so we refresh the inventory a couple of times over the next few seconds to
+  // pull in whatever it found. A 502 means the runtime's daemon is offline.
+  const [scanning, setScanning] = useState(false);
+  async function refreshInventory() {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: runtimeToolsKey(runtime.id) }),
+      qc.invalidateQueries({ queryKey: runtimeToolGrantsKey(runtime.id) }),
+      qc.invalidateQueries({ queryKey: toolPolicyKeys.all(wsId) }),
+    ]);
+  }
+  async function handleScanNow() {
+    setScanning(true);
     try {
-      await Promise.all([toolsQuery.refetch(), grantsQuery.refetch()]);
-      toast.success("Refreshed", {
-        description: "Showing the latest tools the daemon reported.",
+      await api.cerebroRequest<void>(
+        `/api/runtimes/${runtime.id}/tools/scan-now`,
+        { method: "POST" },
+      );
+      toast.success("Scan started", {
+        description: "Asked the daemon to scan now — refreshing inventory…",
+      });
+      // The daemon spawns each MCP server and runs tools/list; results land a
+      // few seconds later. Poll the inventory twice so the table updates without
+      // the admin clicking again.
+      await refreshInventory();
+      setTimeout(() => void refreshInventory(), 2500);
+      setTimeout(() => void refreshInventory(), 6000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      toast.error("Couldn't start scan", {
+        description: /502|offline/i.test(msg)
+          ? "The runtime's daemon is offline."
+          : msg || "Try again in a moment.",
       });
     } finally {
-      setRefreshing(false);
+      setScanning(false);
     }
   }
 
   return (
-    <div className="rounded-md border bg-card">
+    <div className="space-y-4">
+      {/* FIR-2230 phase 6: the outer wall (isolation profile) sits next to access
+          (the per-tool permission table). Flagged on with the same feature flag. */}
+      {unifiedToolPolicy && (
+        <SandboxProfileCard runtime={runtime} wsId={wsId} canEdit={canEdit} />
+      )}
+      <div className="rounded-md border bg-card">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
         <div>
           <h3 className="text-sm font-medium">Tools on runtime</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            All tools on <code className="font-mono text-[11px]">{runtime.name}</code>{" "}
-            — cloud and MCP combined. Per row: enable and control access. The
-            runtime is scanned automatically in the background.
+            {unifiedToolPolicy ? (
+              <>
+                All tools on{" "}
+                <code className="font-mono text-[11px]">{runtime.name}</code> —
+                set Allow, Ask, or Deny per tool on this runtime. The Effective
+                column shows the result of the full chain after the agent, group,
+                and user layers above it.
+              </>
+            ) : (
+              <>
+                All tools on{" "}
+                <code className="font-mono text-[11px]">{runtime.name}</code> —
+                cloud and MCP combined. Per row: enable and control access. The
+                runtime is scanned automatically in the background.
+              </>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <LastScannedLabel scannedAt={lastScannedAt} />
+          {/* FIR-2230 phase 7: one honest scan button. The old "Refresh" only
+              re-read the daemon's last cache; the real "Scan now" asks the
+              daemon to run a live tools/list. It works in both the legacy card
+              and the unified table, so there is no longer a cache-only button. */}
           <Button
             size="sm"
             variant="outline"
-            onClick={handleRefresh}
-            disabled={refreshing}
+            onClick={handleScanNow}
+            disabled={scanning}
             className="gap-1.5"
-            title="Re-fetch the latest tools reported by the background scan"
+            title="Ask the daemon to scan this runtime's tools right now"
           >
-            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
-            {refreshing ? "Refreshing…" : "Refresh"}
+            <RefreshCw className={cn("h-3.5 w-3.5", scanning && "animate-spin")} />
+            {scanning ? "Scanning…" : "Scan now"}
           </Button>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-b p-3">
-        <div className="relative min-w-[200px] flex-1 max-w-xs">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search tools, sources…"
-            className="h-8 w-full rounded-md border bg-background pl-7 pr-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          />
+      {unifiedToolPolicy ? (
+        <div className="p-3">
+          <ToolPolicyTable wsId={wsId} view="runtime" subjectId={runtime.id} />
         </div>
-        <FilterChips value={sourceFilter} onChange={setSourceFilter} counts={counts} />
-      </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2 border-b p-3">
+            <div className="relative min-w-[200px] flex-1 max-w-xs">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search tools, sources…"
+                className="h-8 w-full rounded-md border bg-background pl-7 pr-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+            <FilterChips value={sourceFilter} onChange={setSourceFilter} counts={counts} />
+          </div>
 
-      <RuntimeToolsBody
-        toolsQuery={toolsQuery}
-        filteredTools={filteredTools}
-        grantsByTool={grantsByTool}
-        groups={groups}
-        members={members}
-        canEdit={canEdit}
-        onToggle={(toolName, enabled) =>
-          toggleMutation.mutate({ toolName, enabled })
-        }
-        onGroupGrant={(toolName, groupId, grant) =>
-          groupGrantMutation.mutate({ toolName, groupId, grant })
-        }
-        onUserGrant={(toolName, userId, grant) =>
-          userGrantMutation.mutate({ toolName, userId, grant })
-        }
-        togglePending={toggleMutation.isPending}
-      />
+          <RuntimeToolsBody
+            toolsQuery={toolsQuery}
+            filteredTools={filteredTools}
+            grantsByTool={grantsByTool}
+            groups={groups}
+            members={members}
+            canEdit={canEdit}
+            onToggle={(toolName, enabled) =>
+              toggleMutation.mutate({ toolName, enabled })
+            }
+            onGroupGrant={(toolName, groupId, grant) =>
+              groupGrantMutation.mutate({ toolName, groupId, grant })
+            }
+            onUserGrant={(toolName, userId, grant) =>
+              userGrantMutation.mutate({ toolName, userId, grant })
+            }
+            togglePending={toggleMutation.isPending}
+          />
+        </>
+      )}
+      </div>
     </div>
   );
 }

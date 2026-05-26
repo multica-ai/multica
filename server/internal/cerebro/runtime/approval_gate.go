@@ -28,6 +28,7 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/permissions"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -96,6 +97,16 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 			return true, ""
 		}
 	}
+
+	// FIR-2230: when the unified per-tool policy chain is wired, it — not the
+	// capability resolver — decides this call. Every tool is resolved through
+	// Runtime › Agent › Group › User; unconfigured tools fall back to the chain's
+	// Base default (Allow), so the blast radius is exactly the tools an operator
+	// gave an explicit Ask/Deny row.
+	if e.toolPolicy != nil {
+		return e.guardToolCallViaPolicy(ctx, agentID, workspaceID, toolName, args, meta)
+	}
+
 	capKey := toolCapabilityKey(toolName)
 	if capKey == "" {
 		return true, ""
@@ -147,6 +158,112 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	return true, ""
 }
 
+// guardToolCallViaPolicy enforces the FIR-2230 per-tool permission chain for one
+// tool call. It resolves the tool through Runtime › Agent › Group › User for the
+// agent's owner — the principal whose ceiling the agent runs under — and maps
+// the Effective verdict: Allow proceeds immediately, Deny stops, Ask creates an
+// inbox request and BLOCKS until a human approves (continue) or rejects/expires
+// (stop), reusing the same gate machinery as the capability path. Any lookup or
+// gate error fails closed.
+func (e *FirtalGatewayExecutor) guardToolCallViaPolicy(
+	ctx context.Context,
+	agentID, workspaceID pgtype.UUID,
+	toolName string,
+	args map[string]any,
+	meta GatewayRequestMeta,
+) (bool, string) {
+	// The chain's user ceiling is the agent's owner; the runtime layer is the
+	// agent's runtime. Both come from the agent row. resolveGroupIDs (in the
+	// store) expands the owner's real groups for the Group layer.
+	var runtimeID, ownerID pgtype.UUID
+	if agentID.Valid {
+		agent, err := e.queries.GetAgent(ctx, agentID)
+		if err != nil {
+			e.logger.Warn("tool-policy gate: agent lookup failed — failing closed",
+				"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName, "error", err)
+			return false, fmt.Sprintf("tool-policy gate error: %v", err)
+		}
+		runtimeID = agent.RuntimeID
+		ownerID = agent.OwnerID
+	}
+
+	eff, err := e.toolPolicy.Resolve(ctx, toolpolicy.Query{
+		WorkspaceID: workspaceID,
+		ToolKey:     toolName,
+		RuntimeID:   runtimeID,
+		AgentID:     agentID,
+		UserID:      ownerID,
+	})
+	if err != nil {
+		e.logger.Warn("tool-policy gate: resolve failed — failing closed",
+			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName, "error", err)
+		return false, fmt.Sprintf("tool-policy gate error: %v", err)
+	}
+
+	decision := toolPolicyDecision(eff)
+	if decision.Kind == permissions.DecisionAllow {
+		// Fast path: no ask, no await, no inbox row for an allowed tool.
+		return true, ""
+	}
+
+	req := permgate.Request{
+		Permission: permissions.Request{
+			WorkspaceID: workspaceID,
+			Actor:       permissions.Actor{Type: "agent", ID: agentID},
+			Agent:       agentID,
+			Capability:  toolName,
+		},
+		RequesterType: approvals.RequesterAgent,
+		RequesterID:   agentID,
+		Surface:       approvals.SurfaceSystem,
+		Context: map[string]any{
+			"tool_name": toolName,
+			"task_id":   meta.TaskID,
+			"args":      args,
+			"effective": string(eff.Setting),
+			"reason":    eff.Reason,
+		},
+	}
+
+	res, err := e.gate.GuardDecision(ctx, req, decision)
+	if err != nil {
+		e.logger.Warn("tool-policy gate error — failing closed",
+			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName,
+			"effective", string(eff.Setting), "error", err)
+		return false, fmt.Sprintf("permission gate error: %v", err)
+	}
+	e.logger.Info("tool-policy gate decision",
+		"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName,
+		"effective", string(eff.Setting), "outcome", string(res.Outcome), "reason", eff.Reason)
+	if res.Outcome.Stops() {
+		reason := res.Reason
+		if reason == "" {
+			reason = eff.Reason
+		}
+		if reason == "" {
+			reason = string(res.Outcome)
+		}
+		return false, reason
+	}
+	return true, ""
+}
+
+// toolPolicyDecision maps a resolved tool-policy verdict to the permission
+// decision the gate acts on: Allow → allow, Ask → needs_approval (inbox + wait),
+// Deny → deny. Resolve never returns Inherit; any unexpected value fails closed.
+func toolPolicyDecision(eff toolpolicy.Effective) permissions.Decision {
+	switch eff.Setting {
+	case toolpolicy.SettingAllow:
+		return permissions.Decision{Kind: permissions.DecisionAllow, Reason: eff.Reason}
+	case toolpolicy.SettingAsk:
+		return permissions.Decision{Kind: permissions.DecisionNeedsApproval, Reason: eff.Reason}
+	case toolpolicy.SettingDeny:
+		return permissions.Decision{Kind: permissions.DecisionDeny, Reason: eff.Reason}
+	default:
+		return permissions.Decision{Kind: permissions.DecisionDeny, Reason: "unresolved tool policy"}
+	}
+}
+
 // EnableApprovalGate activates the enforcement gate on this executor, scoped to
 // the given agent allowlist (empty = all agents). Calling it is what turns the
 // default no-op into real enforcement; the server only calls it under the env
@@ -176,6 +293,10 @@ const (
 	envApprovalGateAgents  = "CEREBRO_APPROVAL_GATE_AGENTS"
 	envApprovalGateWait    = "CEREBRO_APPROVAL_GATE_WAIT"
 	envApprovalGateTTL     = "CEREBRO_APPROVAL_GATE_TTL"
+	// envApprovalGateMode selects which engine resolves each tool call:
+	// "toolpolicy" (FIR-2230 unified per-tool chain) or the default capability
+	// resolver (FIR-2193). Unset/anything else = capability, so prod is unchanged.
+	envApprovalGateMode = "CEREBRO_APPROVAL_GATE_MODE"
 
 	defaultApprovalGateWait = 10 * time.Minute
 	defaultApprovalGateTTL  = 30 * time.Minute
@@ -200,6 +321,15 @@ func MaybeEnableApprovalGate(e *FirtalGatewayExecutor, cerebroQueries *cerebrodb
 	gate.WaitTimeout = durationFromEnv(defaultApprovalGateWait, envApprovalGateWait)
 	gate.ApprovalTTL = durationFromEnv(defaultApprovalGateTTL, envApprovalGateTTL)
 
+	// Tool-policy mode resolves every tool through the unified Runtime › Agent ›
+	// Group › User chain so the permission table's Allow/Ask/Deny rows gate real
+	// tool calls; the gate above still provides the shared inbox + await. Default
+	// (capability) keeps the prior FIR-2193 resolver path.
+	toolPolicyMode := approvalGateModeToolPolicy()
+	if toolPolicyMode {
+		e.toolPolicy = toolpolicy.NewStoreFromQueries(cerebroQueries)
+	}
+
 	var allowlist []pgtype.UUID
 	if raw := strings.TrimSpace(os.Getenv(envApprovalGateAgents)); raw != "" {
 		for _, part := range splitCSV(raw) {
@@ -214,7 +344,12 @@ func MaybeEnableApprovalGate(e *FirtalGatewayExecutor, cerebroQueries *cerebrodb
 	}
 
 	e.EnableApprovalGate(gate, allowlist)
+	mode := "capability"
+	if toolPolicyMode {
+		mode = "toolpolicy"
+	}
 	e.logger.Info("approval enforcement gate ENABLED (controlled rollout)",
+		"resolver_mode", mode,
 		"scoped_agents", len(allowlist),
 		"wait_timeout", gate.WaitTimeout.String(),
 		"approval_ttl", gate.ApprovalTTL.String(),
@@ -224,6 +359,17 @@ func MaybeEnableApprovalGate(e *FirtalGatewayExecutor, cerebroQueries *cerebrodb
 func approvalGateEnvEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envApprovalGateEnabled))) {
 	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// approvalGateModeToolPolicy reports whether the gate should resolve through the
+// FIR-2230 per-tool policy chain instead of the default capability resolver.
+func approvalGateModeToolPolicy() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envApprovalGateMode))) {
+	case "toolpolicy", "tool-policy", "tool_policy":
 		return true
 	default:
 		return false

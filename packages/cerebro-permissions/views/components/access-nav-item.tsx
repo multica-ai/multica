@@ -1,7 +1,6 @@
 "use client";
 
 import { ShieldCheck } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
 import { useCurrentMember } from "@multica/core/permissions";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { cn } from "@multica/ui/lib/utils";
@@ -10,7 +9,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@multica/ui/components/ui/sidebar";
-import { pendingAsksOptions } from "../../core";
 
 interface AccessNavItemProps {
   workspaceSlug: string;
@@ -22,16 +20,11 @@ export function AccessNavItem({ workspaceSlug, onClick }: AccessNavItemProps) {
   const { role } = useCurrentMember(workspace?.id ?? "");
   const { pathname } = useNavigation();
 
-  const pendingCount = useQuery(
-    pendingAsksOptions(workspace?.id ?? "", { limit: 1, offset: 0 }),
-  );
-
   if (!workspaceSlug) return null;
   if (role !== "owner" && role !== "admin") return null;
 
   const href = `/${workspaceSlug}/access`;
   const isActive = pathname === href || pathname.startsWith(href + "/");
-  const pending = pendingCount.data?.total ?? 0;
 
   return (
     <SidebarMenuItem>
@@ -46,11 +39,6 @@ export function AccessNavItem({ workspaceSlug, onClick }: AccessNavItemProps) {
       >
         <ShieldCheck />
         <span>Access</span>
-        {pending > 0 && (
-          <span className="ml-auto inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-warning text-[10px] font-semibold text-warning-foreground px-1">
-            {pending > 99 ? "99+" : pending}
-          </span>
-        )}
       </SidebarMenuButton>
     </SidebarMenuItem>
   );

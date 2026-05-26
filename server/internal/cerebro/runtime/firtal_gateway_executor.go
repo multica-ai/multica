@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mcp"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -51,6 +52,14 @@ type FirtalGatewayExecutor struct {
 	// only these agents are gated; every other agent runs ungated even when the
 	// gate is set. Empty means "all agents" (used once the rollout is broad).
 	gateAgents map[[16]byte]struct{}
+
+	// toolPolicy is the FIR-2230 per-tool permission chain. When non-nil the
+	// gate resolves each tool call through the Runtime › Agent › Group › User
+	// chain (the unified model) instead of the capability resolver, so the
+	// Allow/Ask/Deny rows authored in the permission table actually gate real
+	// tool calls. Nil by default — it is only set under the toolpolicy gate mode
+	// (see MaybeEnableApprovalGate), keeping production on the prior behaviour.
+	toolPolicy *toolpolicy.Store
 }
 
 func NewFirtalGatewayExecutor(
@@ -489,7 +498,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	}
 	if toolSrv != nil {
 		// CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): keep the legacy three-tool path on the same compat transport so tool-enabled tasks avoid Anthropic-native malformed requests entirely.
-		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools))
+		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools))
 	}
 
 	completion, err := e.runAnthropicToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, anthropicTools, tctx, toolSrv, activeRegistry, useRegistry)
@@ -508,7 +517,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, activeRegistry, enabledTools)
 	}
 	if toolSrv != nil {
-		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools))
+		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools))
 	}
 	return completion, err
 }
@@ -555,7 +564,13 @@ func anthropicToolsToGatewayToolDefs(tools []AnthropicTool) []GatewayToolDef {
 // runToolLoopWithServer is the testable inner form of the legacy OpenAI-compat
 // tool loop. Tests can register their own handlers on toolSrv so the loop's
 // control flow can be exercised without a real database.
-func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, toolSrv *mcp.Server, tools []GatewayToolDef) (GatewayCompletion, error) {
+//
+// FIR-2230: this fallback MCP path dispatches real tool calls, so every call is
+// routed through guardToolCall (Runtime › Agent › Group › User) before dispatch —
+// the same choke-point the registry and Anthropic-native loops use. Without it a
+// Deny/Ask row would silently not apply here. guardToolCall is a no-op when no
+// gate is configured, so the default fleet is unaffected.
+func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID pgtype.UUID, toolSrv *mcp.Server, tools []GatewayToolDef) (GatewayCompletion, error) {
 	history := withToolUsageHint(initialMessages)
 
 	var acc GatewayCompletion
@@ -591,6 +606,23 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 			ToolCalls: completion.ToolCalls,
 		})
 		for _, call := range completion.ToolCalls {
+			if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, decodeToolArgs(call.Function.Arguments), meta); !allowed {
+				e.logger.Info("firtal gateway tool call blocked by approval gate",
+					"task_id", meta.TaskID,
+					"agent_id", meta.AgentID,
+					"workspace_id", meta.WorkspaceID,
+					"round", round+1,
+					"tool", call.Function.Name,
+					"tool_call_id", call.ID,
+					"reason", reason,
+				)
+				history = append(history, GatewayMessage{
+					Role:       "tool",
+					ToolCallID: call.ID,
+					Content:    fmt.Sprintf("blocked by approval gate: %s", reason),
+				})
+				continue
+			}
 			result, dur := e.dispatchTool(ctx, toolSrv, call)
 			e.logger.Info("firtal gateway tool call",
 				"task_id", meta.TaskID,

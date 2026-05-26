@@ -586,6 +586,18 @@ type CerebroShareToken struct {
 	RevokedAt      pgtype.Timestamptz `json:"revoked_at"`
 }
 
+type CerebroToolPolicy struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ToolKey     string             `json:"tool_key"`
+	Layer       string             `json:"layer"`
+	SubjectID   pgtype.UUID        `json:"subject_id"`
+	Setting     string             `json:"setting"`
+	UpdatedBy   pgtype.UUID        `json:"updated_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroUserInfisicalFolder struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

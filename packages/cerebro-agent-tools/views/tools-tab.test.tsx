@@ -1,16 +1,21 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent } from "@multica/core/types";
 
 const mockListRuntimes = vi.hoisted(() => vi.fn());
 const mockListRuntimeTools = vi.hoisted(() => vi.fn());
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
+const mockUseFeatureFlag = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
+}));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: (key: string) => mockUseFeatureFlag(key),
 }));
 
 vi.mock("@multica/core/api", async () => {
@@ -74,6 +79,8 @@ beforeEach(() => {
   ]);
   mockListRuntimeTools.mockResolvedValue([]);
   mockCerebroRequest.mockResolvedValue([]);
+  // Default: unified tool-policy flag off → keep the legacy override card.
+  mockUseFeatureFlag.mockReturnValue(false);
 });
 
 describe("CerebroToolsTab", () => {
@@ -108,5 +115,34 @@ describe("CerebroToolsTab", () => {
     expect(
       screen.queryByRole("combobox", { name: /Skift override/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("renders the unified ToolPolicyTable when the flag is on", async () => {
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_tool_policy",
+    );
+    renderToolsTab();
+
+    // The FIR-2230 table replaces the legacy override card on the agent page.
+    expect(await screen.findByTestId("tool-policy-table")).toBeInTheDocument();
+    expect(screen.queryByText(/Tools på agenten/i)).not.toBeInTheDocument();
+  });
+
+  it("binds the agent's owner as the user ceiling on the agent page", async () => {
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_tool_policy",
+    );
+    renderToolsTab();
+
+    // The Effective column must reflect the full Runtime › Agent › Group › User
+    // chain, so the table fetch carries the agent's runtime, the agent itself,
+    // AND the owner's user id (the groups are expanded server-side from it).
+    await waitFor(() => expect(mockCerebroRequest).toHaveBeenCalled());
+    const urls = mockCerebroRequest.mock.calls.map(([url]) => String(url));
+    const tableUrl = urls.find((u) => u.includes("/tool-policy?"));
+    expect(tableUrl).toBeDefined();
+    expect(tableUrl).toContain("agent_id=agent-1");
+    expect(tableUrl).toContain("runtime_id=runtime-1");
+    expect(tableUrl).toContain("user_id=user-1");
   });
 });

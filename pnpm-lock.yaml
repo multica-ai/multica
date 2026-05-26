@@ -995,6 +995,12 @@ importers:
 
   packages/cerebro-agent-tools:
     dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
+      '@multica/cerebro-tool-policy':
+        specifier: workspace:*
+        version: link:../cerebro-tool-policy
       '@multica/cerebro-types':
         specifier: workspace:*
         version: link:../cerebro-types
@@ -1019,6 +1025,9 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 4.3.6
+      zustand:
+        specifier: 'catalog:'
+        version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
     devDependencies:
       '@multica/tsconfig':
         specifier: workspace:*
@@ -1761,6 +1770,9 @@ importers:
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
+      '@multica/cerebro-tool-policy':
+        specifier: workspace:*
+        version: link:../cerebro-tool-policy
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -2104,6 +2116,15 @@ importers:
 
   packages/cerebro-runtime-tools:
     dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
+      '@multica/cerebro-groups':
+        specifier: workspace:*
+        version: link:../cerebro-groups
+      '@multica/cerebro-tool-policy':
+        specifier: workspace:*
+        version: link:../cerebro-tool-policy
       '@multica/cerebro-types':
         specifier: workspace:*
         version: link:../cerebro-types
@@ -2125,6 +2146,12 @@ importers:
       sonner:
         specifier: ^2.0.7
         version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      zod:
+        specifier: 'catalog:'
+        version: 4.3.6
+      zustand:
+        specifier: 'catalog:'
+        version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
     devDependencies:
       '@multica/tsconfig':
         specifier: workspace:*
@@ -2282,6 +2309,58 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.0
         version: 19.2.3(@types/react@19.2.14)
+      '@vitejs/plugin-react':
+        specifier: 'catalog:'
+        version: 6.0.1(babel-plugin-react-compiler@1.0.0)(vite@8.0.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.5.0)(jiti@2.6.1)(terser@5.47.1)(yaml@2.9.0))
+      jsdom:
+        specifier: 'catalog:'
+        version: 29.0.1(@noble/hashes@1.8.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.0(@opentelemetry/api@1.9.1)(@types/node@25.5.0)(jsdom@29.0.1(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.5.0)(jiti@2.6.1)(terser@5.47.1)(yaml@2.9.0))
+
+  packages/cerebro-tool-policy:
+    dependencies:
+      '@multica/core':
+        specifier: workspace:*
+        version: link:../core
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../ui
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.96.2(react@19.2.3)
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.0.1(react@19.2.3)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.3
+      zod:
+        specifier: 'catalog:'
+        version: 4.3.6
+      zustand:
+        specifier: 'catalog:'
+        version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
+    devDependencies:
+      '@multica/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@testing-library/user-event':
+        specifier: 'catalog:'
+        version: 14.6.1(@testing-library/dom@10.4.1)
+      '@types/react':
+        specifier: ^19.2.0
+        version: 19.2.14
       '@vitejs/plugin-react':
         specifier: 'catalog:'
         version: 6.0.1(babel-plugin-react-compiler@1.0.0)(vite@8.0.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.5.0)(jiti@2.6.1)(terser@5.47.1)(yaml@2.9.0))

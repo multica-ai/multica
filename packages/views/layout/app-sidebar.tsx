@@ -83,8 +83,7 @@ import { DashboardNavItem } from "@multica/cerebro-dashboard/views/dashboard-nav
 import { TasksNavItem } from "@multica/cerebro-tasks/views/tasks-nav-item";
 // CEREBRO-PATCH(cerebro-workflows-sidebar): JEH-1047 sidebar entry for cerebro workflows page
 import { WorkflowsNavItem } from "@multica/cerebro-workflows/views/workflows-nav-item";
-// CEREBRO-PATCH(cerebro-permissions-sidebar): JEH-1180 sidebar entry for cerebro permissions page
-import { PermissionsNavItem } from "@multica/cerebro-permissions/views/permissions-nav-item";
+// CEREBRO-PATCH(cerebro-permissions-sidebar): FIR-2230 phase 7 — removed; the standalone Permissions page was merged into the single Access page (see cerebro-access-sidebar below).
 // CEREBRO-PATCH(cerebro-approvals-sidebar): FIR-2131 sidebar entry for cerebro approval inbox
 import { ApprovalsNavItem } from "@multica/cerebro-approvals/views/approvals-nav-item";
 // CEREBRO-PATCH(cerebro-access-sidebar): FIR-2133 sidebar entry for unified access + audit page
@@ -841,8 +840,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     </React.Fragment>
                   );
                 })}
-                {/* CEREBRO-PATCH(cerebro-permissions-sidebar): JEH-1180 cerebro permissions entry in workspace group */}
-                <PermissionsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-approvals-sidebar): FIR-2131 cerebro approval inbox entry in workspace group */}
                 <ApprovalsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-access-sidebar): FIR-2133 unified access + audit page entry */}

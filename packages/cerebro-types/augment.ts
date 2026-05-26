@@ -33,6 +33,14 @@ declare module "@multica/core/types/agent" {
      * defaults (daemon falls back to agent.mcp_config alone).
      */
     tools_config?: unknown | null;
+    /**
+     * FIR-2230 phase 6: the named sandbox isolation profile this runtime's
+     * stored sandbox_policy currently equals ("developer" | "read_only" |
+     * "custom"). Classified server-side from the real enforced policy and
+     * surfaced via the runtime-sandbox-profile patch. Older servers omit it;
+     * the picker treats missing as "developer" (the system default).
+     */
+    sandbox_profile?: string;
   }
 }
 

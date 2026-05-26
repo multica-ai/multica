@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Info, ShieldCheck, ShieldOff } from "lucide-react";
 import { useCurrentMember } from "@multica/core/permissions";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -12,16 +11,17 @@ import {
   TabsTrigger,
 } from "@multica/ui/components/ui/tabs";
 import { PageHeader } from "@multica/views/layout/page-header";
-import { pendingAsksOptions } from "../core";
 import { SubjectsTab } from "./components/subjects-tab";
-import { PendingAsksTab } from "./components/pending-asks-tab";
 import { GrantsToolbar } from "./components/grants-toolbar";
 import { GrantsTable } from "./components/grants-table";
 import { GrantDrawer } from "./components/grant-drawer";
 import { CreateGrantDialog } from "./components/create-grant-dialog";
 import { AuditTab } from "./components/audit-tab";
+import { AuthoringMatrixTab } from "./components/authoring-matrix-tab";
+import { RolesTab } from "./components/roles-tab";
+import { EffectivePermissionTab } from "./components/effective-permission-tab";
 
-type PageTab = "subjects" | "pending" | "grants" | "audit";
+type PageTab = "subjects" | "grants" | "matrix" | "roles" | "effective" | "audit";
 
 export function AccessPage() {
   const workspace = useCurrentWorkspace();
@@ -30,10 +30,6 @@ export function AccessPage() {
   const [activeTab, setActiveTab] = useState<PageTab>("subjects");
   const [showCreate, setShowCreate] = useState(false);
   const [selectedGrantId, setSelectedGrantId] = useState<string | null>(null);
-
-  const pendingCount = useQuery(
-    pendingAsksOptions(workspace?.id ?? "", { limit: 1, offset: 0 }),
-  );
 
   if (!workspace || isMemberLoading) {
     return (
@@ -57,7 +53,6 @@ export function AccessPage() {
   }
 
   const wsId = workspace.id;
-  const pendingTotal = pendingCount.data?.total ?? 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -77,9 +72,12 @@ export function AccessPage() {
           <div className="space-y-1">
             <p>
               <strong className="text-foreground">People &amp; Agents</strong> — pick an agent or person and see what it can do. <em>Expand a row → flip the &quot;Ask first&quot; switch</em> to make it ask a human before using that capability.{" "}
-              <strong className="text-foreground">Pending</strong> — requests waiting for you to approve or reject.{" "}
               <strong className="text-foreground">Permissions</strong> — create or edit grants (the base allow/deny rules).{" "}
-              <strong className="text-foreground">Audit</strong> — every change, with who/when/what.
+              <strong className="text-foreground">Matrix</strong> — the same grants as a who-can-do-what grid.{" "}
+              <strong className="text-foreground">Roles</strong> — reusable bundles of grants you assign to people or agents.{" "}
+              <strong className="text-foreground">Effective</strong> — check exactly what one subject may do on a resource.{" "}
+              <strong className="text-foreground">Audit</strong> — every change, with who/when/what.{" "}
+              Requests waiting for a decision live in <strong className="text-foreground">Approvals</strong> in the sidebar.
             </p>
           </div>
         </div>
@@ -93,15 +91,10 @@ export function AccessPage() {
         <div className="border-b px-4">
           <TabsList variant="line" className="h-10">
             <TabsTrigger value="subjects">People &amp; Agents</TabsTrigger>
-            <TabsTrigger value="pending" className="relative">
-              Pending
-              {pendingTotal > 0 && (
-                <span className="ml-1.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-warning text-[10px] font-semibold text-warning-foreground px-1">
-                  {pendingTotal > 99 ? "99+" : pendingTotal}
-                </span>
-              )}
-            </TabsTrigger>
             <TabsTrigger value="grants">Permissions</TabsTrigger>
+            <TabsTrigger value="matrix">Matrix</TabsTrigger>
+            <TabsTrigger value="roles">Roles</TabsTrigger>
+            <TabsTrigger value="effective">Effective</TabsTrigger>
             <TabsTrigger value="audit">Audit</TabsTrigger>
           </TabsList>
         </div>
@@ -110,15 +103,23 @@ export function AccessPage() {
           <SubjectsTab wsId={wsId} />
         </TabsContent>
 
-        <TabsContent value="pending" className="flex flex-1 min-h-0 flex-col">
-          <PendingAsksTab wsId={wsId} />
-        </TabsContent>
-
         <TabsContent value="grants" className="flex flex-1 min-h-0 flex-col">
           <GrantsToolbar wsId={wsId} onCreate={() => setShowCreate(true)} />
           <div className="flex-1 min-h-0 overflow-y-auto">
             <GrantsTable wsId={wsId} onRowClick={(id) => setSelectedGrantId(id)} />
           </div>
+        </TabsContent>
+
+        <TabsContent value="matrix" className="flex flex-1 min-h-0 flex-col">
+          <AuthoringMatrixTab wsId={wsId} />
+        </TabsContent>
+
+        <TabsContent value="roles" className="flex flex-1 min-h-0 flex-col">
+          <RolesTab wsId={wsId} />
+        </TabsContent>
+
+        <TabsContent value="effective" className="flex flex-1 min-h-0 flex-col">
+          <EffectivePermissionTab wsId={wsId} />
         </TabsContent>
 
         <TabsContent value="audit" className="flex flex-1 min-h-0 flex-col">

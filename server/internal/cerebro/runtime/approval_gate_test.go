@@ -12,6 +12,7 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/permissions"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
 // --- fakes (assignable to permgate.Gate's exported interface fields) --------
@@ -194,5 +195,30 @@ func TestGuardToolCall_NeedsApproval_RejectedBlocks(t *testing.T) {
 	}
 	if ap.intakes != 1 {
 		t.Fatalf("needs_approval must create exactly one ask, got %d", ap.intakes)
+	}
+}
+
+// --- toolPolicyDecision (FIR-2230 chain verdict → gate decision) ------------
+
+func TestToolPolicyDecision(t *testing.T) {
+	cases := []struct {
+		setting toolpolicy.Setting
+		want    permissions.DecisionKind
+	}{
+		{toolpolicy.SettingAllow, permissions.DecisionAllow},
+		{toolpolicy.SettingAsk, permissions.DecisionNeedsApproval},
+		{toolpolicy.SettingDeny, permissions.DecisionDeny},
+		// Resolve never yields Inherit; an unexpected value must fail closed.
+		{toolpolicy.SettingInherit, permissions.DecisionDeny},
+	}
+	for _, c := range cases {
+		got := toolPolicyDecision(toolpolicy.Effective{Setting: c.setting, Reason: "r"})
+		if got.Kind != c.want {
+			t.Errorf("toolPolicyDecision(%q).Kind = %q, want %q", c.setting, got.Kind, c.want)
+		}
+	}
+	// The Effective reason is carried through for the audit trail.
+	if got := toolPolicyDecision(toolpolicy.Effective{Setting: toolpolicy.SettingDeny, Reason: "Capped by user"}); got.Reason != "Capped by user" {
+		t.Errorf("reason not carried through, got %q", got.Reason)
 	}
 }

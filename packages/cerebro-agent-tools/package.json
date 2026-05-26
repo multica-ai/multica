@@ -12,6 +12,8 @@
     "./views": "./views/index.ts"
   },
   "dependencies": {
+    "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/cerebro-tool-policy": "workspace:*",
     "@multica/cerebro-types": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
@@ -21,7 +23,8 @@
     "zod": "catalog:"
   },
   "peerDependencies": {
-    "react": "catalog:"
+    "react": "catalog:",
+    "zustand": "catalog:"
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",

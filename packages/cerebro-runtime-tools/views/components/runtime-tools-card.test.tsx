@@ -1,6 +1,7 @@
 import type React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AgentRuntime } from "@multica/core/types/agent";
 import type { RuntimeTool } from "@multica/cerebro-types";
@@ -9,6 +10,8 @@ const mockListRuntimeTools = vi.hoisted(() => vi.fn());
 const mockListRuntimeToolGrants = vi.hoisted(() => vi.fn());
 const mockListCerebroGroups = vi.hoisted(() => vi.fn());
 const mockListMembers = vi.hoisted(() => vi.fn());
+const mockCerebroRequest = vi.hoisted(() => vi.fn());
+const mockUseFeatureFlag = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -22,12 +25,17 @@ vi.mock("@multica/core/api", async () => {
       listRuntimeToolGrants: mockListRuntimeToolGrants,
       listCerebroGroups: mockListCerebroGroups,
       listMembers: mockListMembers,
+      cerebroRequest: mockCerebroRequest,
     },
   };
 });
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
+}));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: (key: string) => mockUseFeatureFlag(key),
 }));
 
 import { RuntimeToolsCard } from "./runtime-tools-card";
@@ -74,6 +82,9 @@ beforeEach(() => {
   });
   mockListCerebroGroups.mockResolvedValue([]);
   mockListMembers.mockResolvedValue([]);
+  mockCerebroRequest.mockResolvedValue({ tools: [] });
+  // Default: unified tool-policy flag off → keep the legacy tools+grants card.
+  mockUseFeatureFlag.mockReturnValue(false);
 });
 
 describe("RuntimeToolsCard", () => {
@@ -142,5 +153,80 @@ describe("RuntimeToolsCard", () => {
         screen.getByText(/couldn't load tools/i),
       ).toBeInTheDocument(),
     );
+  });
+
+  it("renders the unified ToolPolicyTable when the flag is on", async () => {
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_tool_policy",
+    );
+    mockCerebroRequest.mockResolvedValue({
+      tools: [
+        {
+          tool_key: "bigquery.query",
+          title: "BigQuery query",
+          category: "data",
+          source: "mcp",
+          layers: { runtime: "allow", agent: null, group: null, user: null },
+          effective: {
+            setting: "allow",
+            decided_by: "runtime",
+            capped_by: "",
+            reason: "",
+          },
+        },
+      ],
+    });
+
+    renderWithClient(
+      <RuntimeToolsCard runtime={runtime} workspaceId="ws-1" canEdit={true} />,
+    );
+
+    // The FIR-2230 table replaces the legacy enable+grants body on the runtime page.
+    expect(await screen.findByTestId("tool-policy-table")).toBeInTheDocument();
+    expect(await screen.findByText("BigQuery query")).toBeInTheDocument();
+  });
+
+  it("Scan now triggers a live daemon scan via the scan-now endpoint", async () => {
+    const user = userEvent.setup();
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_tool_policy",
+    );
+    mockCerebroRequest.mockResolvedValue({ tools: [] });
+
+    renderWithClient(
+      <RuntimeToolsCard runtime={runtime} workspaceId="ws-1" canEdit={true} />,
+    );
+
+    const scanBtn = await screen.findByRole("button", { name: /scan now/i });
+    await user.click(scanBtn);
+
+    await waitFor(() => {
+      const post = mockCerebroRequest.mock.calls.find(
+        (c) =>
+          typeof c[0] === "string" &&
+          c[0].endsWith("/tools/scan-now") &&
+          (c[1] as RequestInit | undefined)?.method === "POST",
+      );
+      expect(post).toBeTruthy();
+      expect(post![0]).toBe("/api/runtimes/rt-1/tools/scan-now");
+    });
+  });
+
+  it("shows the real Scan now button (not the old cache-only Refresh) even with the unified flag off", async () => {
+    // FIR-2230 phase 7: the cache-only "Refresh" button is gone. The honest
+    // "Scan now" is the single scan affordance and shows in the legacy card too.
+    mockUseFeatureFlag.mockReturnValue(false);
+    mockListRuntimeTools.mockResolvedValue([]);
+
+    renderWithClient(
+      <RuntimeToolsCard runtime={runtime} workspaceId="ws-1" canEdit={true} />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: /scan now/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^refresh$/i }),
+    ).not.toBeInTheDocument();
   });
 });
