@@ -343,6 +343,15 @@ func TestNotification_CommentCreated(t *testing.T) {
 	addTestSubscriber(t, issueID, "member", testUserID, "creator")
 	addTestSubscriber(t, issueID, "member", sub1ID, "assignee")
 
+	commentID := "00000000-0000-0000-0000-000000000321"
+	commentContent := "test comment content"
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, commentID, issueID, testWorkspaceID, "member", commenterID, commentContent, "comment"); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+
 	bus.Publish(events.Event{
 		Type:        protocol.EventCommentCreated,
 		WorkspaceID: testWorkspaceID,
@@ -350,11 +359,11 @@ func TestNotification_CommentCreated(t *testing.T) {
 		ActorID:     commenterID, // commenter is the actor
 		Payload: map[string]any{
 			"comment": handler.CommentResponse{
-				ID:         "00000000-0000-0000-0000-000000000000",
+				ID:         commentID,
 				IssueID:    issueID,
 				AuthorType: "member",
 				AuthorID:   commenterID,
-				Content:    "test comment content",
+				Content:    commentContent,
 				Type:       "comment",
 			},
 			"issue_title":  "comment test issue",
@@ -387,6 +396,23 @@ func TestNotification_CommentCreated(t *testing.T) {
 	commenterItems := inboxItemsForRecipient(t, queries, commenterID)
 	if len(commenterItems) != 0 {
 		t.Fatalf("expected 0 inbox items for commenter, got %d", len(commenterItems))
+	}
+
+	events := notificationEventsForRecipient(t, queries, sub1ID)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 canonical notification event for subscriber, got %d", len(events))
+	}
+	if !events[0].CommentID.Valid || util.UUIDToString(events[0].CommentID) != commentID {
+		t.Fatalf("expected notification comment_id %q, got %q", commentID, util.UUIDToString(events[0].CommentID))
+	}
+
+	workspace, err := queries.GetWorkspace(context.Background(), util.MustParseUUID(testWorkspaceID))
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	expectedLink := "https://app.multica.ai/" + workspace.Slug + "/issues/" + issueIdentifierForTest(t, queries, issueID) + "?comment=" + commentID
+	if !events[0].Link.Valid || events[0].Link.String != expectedLink {
+		t.Fatalf("expected notification link %q, got %#v", expectedLink, events[0].Link)
 	}
 }
 
