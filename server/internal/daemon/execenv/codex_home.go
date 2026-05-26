@@ -140,13 +140,21 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// Codex keys hook trust by the hooks.json source path. The per-task home
 	// loads codex-home/hooks.json, so trust accepted for the shared
 	// ~/.codex/hooks.json must be mirrored to that per-task source ID.
-	if err := syncCodexHookTrustState(
+	hookTrustResult, err := syncCodexHookTrustStateWithResult(
 		filepath.Join(sharedHome, "config.toml"),
 		filepath.Join(codexHome, "config.toml"),
 		filepath.Join(sharedHome, "hooks.json"),
 		filepath.Join(codexHome, "hooks.json"),
-	); err != nil {
+	)
+	if err != nil {
 		logger.Warn("execenv: codex-home hook trust sync failed", "error", err)
+	} else {
+		logger.Info("execenv: codex-home hook trust sync",
+			"codex_home", codexHome,
+			"shared_hooks", hookTrustResult.SharedHooksCount,
+			"mapped_hooks", hookTrustResult.MappedHooksCount,
+			"stale_hooks", hookTrustResult.StaleHooksCount,
+			"changed", hookTrustResult.Changed)
 	}
 
 	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
