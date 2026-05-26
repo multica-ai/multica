@@ -17,6 +17,7 @@ interface DAGCanvasProps {
   onNodeDoubleClick?: (nodeId: string) => void;
   onAutoLayout?: () => void;
   nodeStatusColors?: Record<string, string>;
+  nodeStatuses?: Record<string, { status: string; isRunning: boolean }>;
   initialScale?: number;
 }
 
@@ -29,14 +30,14 @@ interface NodeRect {
   h: number;
 }
 
-function getNodeRect(node: WorkflowNode): NodeRect {
+function getNodeRect(node: WorkflowNode, h?: number): NodeRect {
   return {
     id: node.id,
     title: node.title,
     x: node.position_x,
     y: node.position_y,
     w: NODE_WIDTH,
-    h: NODE_HEIGHT,
+    h: h ?? NODE_HEIGHT,
   };
 }
 
@@ -52,6 +53,7 @@ export function DAGCanvas({
   onNodeClick,
   onNodeDoubleClick,
   nodeStatusColors,
+  nodeStatuses,
   initialScale,
 }: DAGCanvasProps) {
   const selectedNodeId = useWorkflowEditorStore((s) => s.selectedNodeId);
@@ -72,7 +74,7 @@ export function DAGCanvas({
   scaleRef.current = scale;
   offsetRef.current = offset;
 
-  const rects = nodes.map(getNodeRect);
+  const rects = nodes.map((n) => getNodeRect(n, nodeStatuses?.[n.id] ? NODE_HEIGHT + 20 : undefined));
   const rectMap = new Map(rects.map((r) => [r.id, r]));
 
   const svgToLocal = useCallback((clientX: number, clientY: number) => {
@@ -261,10 +263,16 @@ export function DAGCanvas({
 
 	        // Compute line endpoints at node edges (not centers)
 	        const angle = Math.atan2(t.cy - s.cy, t.cx - s.cx);
-	        const hw = NODE_WIDTH / 2, hh = NODE_HEIGHT / 2;
+	        const shw = source.w / 2, shh = source.h / 2;
+	        const thw = target.w / 2, thh = target.h / 2;
+	        // Source: start at rect edge
+	        const sEdgeX = s.cx + (shw / Math.abs(Math.cos(angle)) < shh / Math.abs(Math.sin(angle)) ? shw / Math.abs(Math.cos(angle)) : shh / Math.abs(Math.sin(angle))) * Math.cos(angle) * 1.05;
+	        const sEdgeY = s.cy + (shw / Math.abs(Math.cos(angle)) < shh / Math.abs(Math.sin(angle)) ? shw / Math.abs(Math.cos(angle)) : shh / Math.abs(Math.sin(angle))) * Math.sin(angle) * 1.05;
+	        const sx = Math.abs(Math.cos(angle)) < 0.001 ? s.cx : sEdgeX;
+	        const sy = Math.abs(Math.sin(angle)) < 0.001 ? s.cy : sEdgeY;
 	        // Target: stop at rect edge
-	        const tEdgeX = t.cx - (hw / Math.abs(Math.cos(angle)) < hh / Math.abs(Math.sin(angle)) ? hw / Math.abs(Math.cos(angle)) : hh / Math.abs(Math.sin(angle))) * Math.cos(angle) * 1.05;
-	        const tEdgeY = t.cy - (hw / Math.abs(Math.cos(angle)) < hh / Math.abs(Math.sin(angle)) ? hw / Math.abs(Math.cos(angle)) : hh / Math.abs(Math.sin(angle))) * Math.sin(angle) * 1.05;
+	        const tEdgeX = t.cx - (thw / Math.abs(Math.cos(angle)) < thh / Math.abs(Math.sin(angle)) ? thw / Math.abs(Math.cos(angle)) : thh / Math.abs(Math.sin(angle))) * Math.cos(angle) * 1.05;
+	        const tEdgeY = t.cy - (thw / Math.abs(Math.cos(angle)) < thh / Math.abs(Math.sin(angle)) ? thw / Math.abs(Math.cos(angle)) : thh / Math.abs(Math.sin(angle))) * Math.sin(angle) * 1.05;
 	        const tx = Math.abs(Math.cos(angle)) < 0.001 ? t.cx : tEdgeX;
 	        const ty = Math.abs(Math.sin(angle)) < 0.001 ? t.cy : tEdgeY;
 	        // Arrowhead
@@ -277,8 +285,8 @@ export function DAGCanvas({
 	        return (
 	          <g key={edge.id}>
 	            <line
-	              x1={s.cx}
-	              y1={s.cy}
+	              x1={sx}
+	              y1={sy}
 	              x2={tx}
 	              y2={ty}
 	              stroke="#64748b"
@@ -317,6 +325,9 @@ export function DAGCanvas({
       {rects.map((rect) => {
         const isSelected = selectedNodeId === rect.id;
         const statusColor = nodeStatusColors?.[rect.id];
+        const statusInfo = nodeStatuses?.[rect.id];
+        const isRunning = statusInfo?.isRunning ?? false;
+        const h = statusInfo ? NODE_HEIGHT + 20 : NODE_HEIGHT;
 
         return (
           <g
@@ -330,7 +341,7 @@ export function DAGCanvas({
               x={rect.x}
               y={rect.y}
               width={rect.w}
-              height={rect.h}
+              height={h}
               rx={8}
               fill={statusColor ?? "currentColor"}
               className={cn(
@@ -344,10 +355,20 @@ export function DAGCanvas({
               x={rect.x + 4}
               y={rect.y + 4}
               width={rect.w - 8}
-              height={rect.h - 8}
+              height={h - 8}
             >
-              <div className="flex items-center justify-center h-full text-sm text-center px-2 overflow-hidden">
-                <span className="truncate font-medium text-foreground">{rect.title}</span>
+              <div className="flex flex-col justify-center h-full text-sm text-center px-2 overflow-hidden">
+                <div className="flex items-center justify-center gap-1">
+                  {isRunning && (
+                    <svg className="animate-spin shrink-0" width="12" height="12" viewBox="0 0 12 12">
+                      <circle cx="6" cy="6" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="18 8" className="text-primary" />
+                    </svg>
+                  )}
+                  <span className="truncate font-medium text-foreground">{rect.title}</span>
+                </div>
+                {statusInfo && (
+                  <span className="text-[10px] text-muted-foreground truncate mt-0.5">{statusInfo.status}</span>
+                )}
               </div>
             </foreignObject>
           </g>

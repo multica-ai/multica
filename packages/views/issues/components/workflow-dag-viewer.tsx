@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { DAGCanvas } from "../../workflows/components";
 import {
@@ -9,26 +10,27 @@ import {
   workflowNodeRunsOptions,
   useCancelWorkflowRun,
 } from "@multica/core/workflows/queries";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
-  pending:           { color: "#6b7280", label: "Pending" },
-  format_checking:   { color: "#f59e0b", label: "Checking" },
-  format_ok:         { color: "#f59e0b", label: "Format OK" },
-  format_failed:     { color: "#ef4444", label: "Format Failed" },
-  worker_assigned:   { color: "#f59e0b", label: "Assigned" },
-  working:           { color: "#3b82f6", label: "Working" },
-  awaiting_critic:   { color: "#3b82f6", label: "Awaiting Review" },
-  critic_reviewing:  { color: "#3b82f6", label: "Reviewing" },
-  critic_approved:   { color: "#22c55e", label: "Approved" },
-  critic_rework:     { color: "#f59e0b", label: "Rework" },
-  completed:         { color: "#22c55e", label: "Done" },
-  failed:            { color: "#ef4444", label: "Failed" },
-  blocked:           { color: "#f59e0b", label: "Blocked" },
-  skipped:           { color: "#6b7280", label: "Skipped" },
-  cancelled:         { color: "#6b7280", label: "Cancelled" },
+  pending:           { color: "rgba(107,114,128,0.2)", label: "Pending" },
+  format_checking:   { color: "rgba(245,158,11,0.25)", label: "Checking" },
+  format_ok:         { color: "rgba(245,158,11,0.25)", label: "Format OK" },
+  format_failed:     { color: "rgba(239,68,68,0.25)", label: "Format Failed" },
+  worker_assigned:   { color: "rgba(245,158,11,0.25)", label: "Assigned" },
+  working:           { color: "rgba(59,130,246,0.25)", label: "Working" },
+  awaiting_critic:   { color: "rgba(59,130,246,0.25)", label: "Awaiting Review" },
+  critic_reviewing:  { color: "rgba(59,130,246,0.25)", label: "Reviewing" },
+  critic_approved:   { color: "rgba(34,197,94,0.25)", label: "Approved" },
+  critic_rework:     { color: "rgba(245,158,11,0.25)", label: "Rework" },
+  completed:         { color: "rgba(34,197,94,0.25)", label: "Done" },
+  failed:            { color: "rgba(239,68,68,0.25)", label: "Failed" },
+  blocked:           { color: "rgba(245,158,11,0.25)", label: "Blocked" },
+  skipped:           { color: "rgba(107,114,128,0.2)", label: "Skipped" },
+  cancelled:         { color: "rgba(107,114,128,0.2)", label: "Cancelled" },
 };
 
 function getStatusColor(status: string): string {
@@ -58,6 +60,21 @@ function getRunSummary(nodeRuns: { status: string }[]): { label: string; variant
   return { label: "Pending", variant: "outline" as const };
 }
 
+function workerTypeToActorType(t: string): string {
+  if (t === "human") return "member";
+  if (t === "agent") return "agent";
+  if (t === "squad") return "squad";
+  return "member";
+}
+
+function isWorkerPhase(status: string): boolean {
+  return ["worker_assigned", "working"].includes(status);
+}
+
+function isCriticPhase(status: string): boolean {
+  return ["awaiting_critic", "critic_reviewing", "critic_approved", "critic_rework"].includes(status);
+}
+
 export function WorkflowDagViewer({
   workflowId,
   runId,
@@ -75,10 +92,19 @@ export function WorkflowDagViewer({
     enabled: !!runId,
   });
   const cancelRunMutation = useCancelWorkflowRun(wsId);
+  const { getActorName } = useActorName();
+
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const nodeStatusColors: Record<string, string> = {};
+  const nodeStatuses: Record<string, { status: string; isRunning: boolean }> = {};
+  const runningSet = new Set(["format_checking", "working", "critic_reviewing"]);
   for (const nr of nodeRuns) {
     nodeStatusColors[nr.workflow_node_id] = getStatusColor(nr.status);
+    nodeStatuses[nr.workflow_node_id] = {
+      status: getStatusLabel(nr.status),
+      isRunning: runningSet.has(nr.status),
+    };
   }
 
   const totalCount = nodes.length;
@@ -94,6 +120,13 @@ export function WorkflowDagViewer({
   };
 
   const isRunning = summary.label === "In Progress" || summary.label === "Pending";
+
+  const selectedNodeRun = selectedNodeId
+    ? nodeRuns.find((nr) => nr.workflow_node_id === selectedNodeId) ?? null
+    : null;
+  const selectedNode = selectedNodeId
+    ? nodes.find((n) => n.id === selectedNodeId) ?? null
+    : null;
 
   return (
     <div>
@@ -138,21 +171,134 @@ export function WorkflowDagViewer({
           nodes={nodes}
           edges={edges}
           nodeStatusColors={nodeStatusColors}
+          nodeStatuses={nodeStatuses}
+          onNodeClick={(id) => setSelectedNodeId(id === selectedNodeId ? null : id)}
           initialScale={2}
         />
       </div>
+
+      {/* Selected node run detail panel */}
+      {selectedNodeRun && selectedNode && (
+        <div className="mt-3 rounded-lg border bg-card p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">{selectedNode.title}</span>
+              <Badge variant="secondary" className="text-[10px] px-1.5 h-4">
+                {getStatusLabel(selectedNodeRun.status)}
+              </Badge>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5"
+              onClick={() => setSelectedNodeId(null)}
+            >
+              <svg width="12" height="12" viewBox="0 0 15 15" fill="none">
+                <path d="M11.7816 4.03157C12.0062 3.80702 12.0062 3.44295 11.7816 3.2184C11.5571 2.99385 11.193 2.99385 10.9685 3.2184L7.50005 6.68682L4.03164 3.2184C3.80708 2.99385 3.44301 2.99385 3.21846 3.2184C2.99391 3.44295 2.99391 3.80702 3.21846 4.03157L6.68688 7.49999L3.21846 10.9684C2.99391 11.193 2.99391 11.557 3.21846 11.7816C3.44301 12.0061 3.80708 12.0061 4.03164 11.7816L7.50005 8.31316L10.9685 11.7816C11.193 12.0061 11.5571 12.0061 11.7816 11.7816C12.0062 11.557 12.0062 11.193 11.7816 10.9684L8.31322 7.49999L11.7816 4.03157Z" fill="currentColor" />
+              </svg>
+            </Button>
+          </div>
+
+          {/* Worker section */}
+          <div className="space-y-1.5 pt-2 border-t">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Executor</span>
+              {isWorkerPhase(selectedNodeRun.status) && (
+                <Badge variant="secondary" className="text-[10px] px-1 h-3.5 animate-pulse">Active</Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground w-10 shrink-0">Type</span>
+              <span>{selectedNodeRun.worker_type}</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground w-10 shrink-0">Name</span>
+              <span>{selectedNodeRun.worker_id
+                ? getActorName(workerTypeToActorType(selectedNodeRun.worker_type), selectedNodeRun.worker_id)
+                : "—"}</span>
+            </div>
+            {selectedNodeRun.worker_output != null && (
+              <div className="text-xs">
+                <span className="text-muted-foreground">Output</span>
+                <pre className="mt-1 p-2 rounded bg-muted/50 text-[11px] max-h-32 overflow-y-auto whitespace-pre-wrap break-all">
+                  {typeof selectedNodeRun.worker_output === "string"
+                    ? selectedNodeRun.worker_output
+                    : JSON.stringify(selectedNodeRun.worker_output, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+
+          {/* Critic section */}
+          <div className="space-y-1.5 pt-2 border-t">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Reviewer</span>
+              {isCriticPhase(selectedNodeRun.status) && (
+                <Badge variant="secondary" className="text-[10px] px-1 h-3.5 animate-pulse">Active</Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground w-10 shrink-0">Type</span>
+              <span>{selectedNodeRun.critic_type}</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground w-10 shrink-0">Name</span>
+              <span>{selectedNodeRun.critic_id
+                ? getActorName(workerTypeToActorType(selectedNodeRun.critic_type), selectedNodeRun.critic_id)
+                : "—"}</span>
+            </div>
+            {selectedNodeRun.critic_comment && (
+              <div className="text-xs">
+                <span className="text-muted-foreground">Comment</span>
+                <p className="mt-1 p-2 rounded bg-muted/50 text-[11px]">{selectedNodeRun.critic_comment}</p>
+              </div>
+            )}
+            {selectedNodeRun.critic_output != null && (
+              <div className="text-xs">
+                <span className="text-muted-foreground">Output</span>
+                <pre className="mt-1 p-2 rounded bg-muted/50 text-[11px] max-h-32 overflow-y-auto whitespace-pre-wrap break-all">
+                  {typeof selectedNodeRun.critic_output === "string"
+                    ? selectedNodeRun.critic_output
+                    : JSON.stringify(selectedNodeRun.critic_output, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+
+          {/* Meta */}
+          <div className="pt-2 border-t flex items-center gap-4 text-[10px] text-muted-foreground">
+            {selectedNodeRun.started_at && (
+              <span>Started: {new Date(selectedNodeRun.started_at).toLocaleString()}</span>
+            )}
+            {selectedNodeRun.completed_at && (
+              <span>Completed: {new Date(selectedNodeRun.completed_at).toLocaleString()}</span>
+            )}
+            {selectedNodeRun.retry_count > 0 && (
+              <span>Retries: {selectedNodeRun.retry_count}</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {runId && nodeRuns.length > 0 && (
         <div className="mt-3 space-y-1">
           {nodeRuns.map((nr) => {
             const node = nodes.find((n) => n.id === nr.workflow_node_id);
             return (
-              <div key={nr.id} className="flex items-center gap-2 text-xs">
+              <button
+                key={nr.id}
+                type="button"
+                className={cn(
+                  "w-full flex items-center gap-2 text-xs px-2 py-1 rounded hover:bg-accent/40 transition-colors",
+                  nr.workflow_node_id === selectedNodeId && "bg-accent/60"
+                )}
+                onClick={() => setSelectedNodeId(nr.workflow_node_id === selectedNodeId ? null : nr.workflow_node_id)}
+              >
                 <span
                   className="w-2 h-2 rounded-full shrink-0"
                   style={{ backgroundColor: getStatusColor(nr.status) }}
                 />
-                <span className="w-28 truncate text-muted-foreground">
+                <span className="w-28 truncate text-muted-foreground text-left">
                   {node?.title ?? nr.node_title}
                 </span>
                 <Badge variant="secondary" className="text-[10px] px-1.5 h-4">
@@ -163,7 +309,7 @@ export function WorkflowDagViewer({
                     retry {nr.retry_count}
                   </span>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>

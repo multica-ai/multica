@@ -2915,7 +2915,7 @@ func (h *Handler) createWorkflowSubIssue(
 		assigneeID = node.WorkerID
 	}
 
-	return qtx.CreateIssue(ctx, db.CreateIssueParams{
+	return qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 		WorkspaceID:   wsUUID,
 		Title:         subTitle,
 		Description:   parentIssue.Description,
@@ -2929,6 +2929,8 @@ func (h *Handler) createWorkflowSubIssue(
 		Position:      0,
 		Number:        issueNumber,
 		ProjectID:     parentIssue.ProjectID,
+		OriginType:    pgtype.Text{String: "workflow", Valid: true},
+		OriginID:      nodeRun.ID,
 	})
 }
 

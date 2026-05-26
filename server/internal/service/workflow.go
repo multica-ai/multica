@@ -800,10 +800,10 @@ func (s *WorkflowService) executeFormatChecker(ctx context.Context, qtx *db.Quer
 
 	if len(node.FormatSchema) == 0 {
 		// No format schema → format_ok directly.
-		updated, err := qtx.UpdateWorkflowNodeRunStatus(ctx, db.UpdateWorkflowNodeRunStatusParams{
-			ID:     nodeRun.ID,
-			Status: NodeRunStatusFormatOk,
-		})
+		if _, err := s.TransitionNodeRun(ctx, nodeRun, NodeRunStatusFormatOk); err != nil {
+			return err
+		}
+		updated, err := s.Queries.GetWorkflowNodeRun(ctx, nodeRun.ID)
 		if err != nil {
 			return err
 		}
@@ -818,15 +818,11 @@ func (s *WorkflowService) executeFormatChecker(ctx context.Context, qtx *db.Quer
 
 	valid, valErr := validateJSONSchema(node.FormatSchema, run.Input)
 	if !valid {
-		_, err := qtx.UpdateWorkflowNodeRunStatus(ctx, db.UpdateWorkflowNodeRunStatusParams{
-			ID:     nodeRun.ID,
-			Status: NodeRunStatusFormatFailed,
-		})
-		if err != nil {
+		if _, err := s.TransitionNodeRun(ctx, nodeRun, NodeRunStatusFormatFailed); err != nil {
 			return err
 		}
 		if valErr != nil {
-			qtx.SetWorkflowNodeRunCriticOutput(ctx, db.SetWorkflowNodeRunCriticOutputParams{
+			s.Queries.SetWorkflowNodeRunCriticOutput(ctx, db.SetWorkflowNodeRunCriticOutputParams{
 				ID:            nodeRun.ID,
 				CriticComment: pgtype.Text{String: valErr.Error(), Valid: true},
 				Status:        NodeRunStatusFormatFailed,
@@ -835,10 +831,10 @@ func (s *WorkflowService) executeFormatChecker(ctx context.Context, qtx *db.Quer
 		return nil
 	}
 
-	updated, err := qtx.UpdateWorkflowNodeRunStatus(ctx, db.UpdateWorkflowNodeRunStatusParams{
-		ID:     nodeRun.ID,
-		Status: NodeRunStatusFormatOk,
-	})
+	if _, err := s.TransitionNodeRun(ctx, nodeRun, NodeRunStatusFormatOk); err != nil {
+		return err
+	}
+	updated, err := s.Queries.GetWorkflowNodeRun(ctx, nodeRun.ID)
 	if err != nil {
 		return err
 	}
@@ -973,7 +969,7 @@ func (s *WorkflowService) HandleWorkflowTaskCompletion(ctx context.Context, task
 	case "worker":
 		if nodeRun.Status == NodeRunStatusWorking {
 			// Transition to awaiting_critic with the task output as worker output.
-			return s.runInTx(ctx, func(qtx *db.Queries) error {
+			if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 				updated, err := qtx.SetWorkflowNodeRunWorkerOutput(ctx, db.SetWorkflowNodeRunWorkerOutputParams{
 					ID:           nodeRun.ID,
 					WorkerOutput: task.Result,
@@ -982,8 +978,16 @@ func (s *WorkflowService) HandleWorkflowTaskCompletion(ctx context.Context, task
 				if err != nil {
 					return err
 				}
-				return s.dispatchCritic(ctx, updated)
-			})
+				// Save updated for use after tx commits.
+				nodeRun = updated
+				return nil
+			}); err != nil {
+			return err
+			}
+			if err := s.dispatchCritic(ctx, nodeRun); err != nil {
+				return fmt.Errorf("dispatch critic: %w", err)
+			}
+			return nil
 		}
 	case "critic":
 		if nodeRun.Status == NodeRunStatusCriticReviewing {

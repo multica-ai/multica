@@ -18,22 +18,24 @@ import { DAGCanvas } from "./dag-canvas";
 import { NodeRunCard } from "./node-run-card";
 import type { WorkflowRunStatus, NodeRunStatus } from "@multica/core/types";
 
+const RUNNING_STATES = new Set<NodeRunStatus>(["format_checking", "working", "critic_reviewing"]);
+
 const STATUS_COLOR: Record<NodeRunStatus, string> = {
-  pending: "fill-muted stroke-muted",
-  format_checking: "fill-blue-500/30 stroke-blue-500",
-  format_ok: "fill-emerald-500/20 stroke-emerald-500",
-  format_failed: "fill-red-500/30 stroke-red-500",
-  worker_assigned: "fill-amber-500/20 stroke-amber-500",
-  working: "fill-blue-500/30 stroke-blue-500",
-  awaiting_critic: "fill-amber-500/20 stroke-amber-500",
-  critic_reviewing: "fill-purple-500/20 stroke-purple-500",
-  critic_approved: "fill-emerald-500/20 stroke-emerald-500",
-  critic_rework: "fill-orange-500/20 stroke-orange-500",
-  completed: "fill-emerald-500/30 stroke-emerald-500",
-  failed: "fill-red-500/30 stroke-red-500",
-  blocked: "fill-red-500/30 stroke-red-500",
-  skipped: "fill-muted stroke-muted",
-  cancelled: "fill-muted stroke-muted",
+  pending: "rgba(107,114,128,0.2)",
+  format_checking: "rgba(245,158,11,0.3)",
+  format_ok: "rgba(34,197,94,0.25)",
+  format_failed: "rgba(239,68,68,0.3)",
+  worker_assigned: "rgba(245,158,11,0.25)",
+  working: "rgba(59,130,246,0.3)",
+  awaiting_critic: "rgba(168,85,247,0.25)",
+  critic_reviewing: "rgba(168,85,247,0.3)",
+  critic_approved: "rgba(34,197,94,0.25)",
+  critic_rework: "rgba(249,115,22,0.25)",
+  completed: "rgba(34,197,94,0.3)",
+  failed: "rgba(239,68,68,0.3)",
+  blocked: "rgba(239,68,68,0.3)",
+  skipped: "rgba(107,114,128,0.2)",
+  cancelled: "rgba(107,114,128,0.2)",
 };
 
 interface WorkflowRunPageProps {
@@ -57,10 +59,16 @@ export function WorkflowRunPage({ workflowId, runId }: WorkflowRunPageProps) {
   const nodeRunByNodeId = new Map(nodeRuns.map((nr) => [nr.workflow_node_id, nr]));
 
   const nodeStatusColors: Record<string, string> = {};
+  const nodeStatuses: Record<string, { status: string; isRunning: boolean }> = {};
   for (const node of nodes) {
     const nr = nodeRunByNodeId.get(node.id);
     if (nr) {
-      nodeStatusColors[node.id] = STATUS_COLOR[nr.status as NodeRunStatus] ?? "fill-muted stroke-muted";
+      const s = nr.status as NodeRunStatus;
+      nodeStatusColors[node.id] = STATUS_COLOR[s] ?? "fill-muted stroke-muted";
+      nodeStatuses[node.id] = {
+        status: t(($) => ($.run.status as Record<string, string>)[s] ?? s),
+        isRunning: RUNNING_STATES.has(s),
+      };
     }
   }
 
@@ -118,6 +126,7 @@ export function WorkflowRunPage({ workflowId, runId }: WorkflowRunPageProps) {
               nodes={nodes}
               edges={edges}
               nodeStatusColors={nodeStatusColors}
+              nodeStatuses={nodeStatuses}
             />
           ) : (
             <div className="flex items-center justify-center h-full">
