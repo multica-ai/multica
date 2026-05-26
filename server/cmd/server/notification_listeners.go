@@ -1884,6 +1884,23 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			recipientID = util.UUIDToString(issue.CreatorID)
 		}
 
+		// Find last agent comment for comment anchor link (needed by both
+		// notifySubscribers for dedup and the explicit IM delivery below).
+		lastAgentCommentID := ""
+		taskComments, commentErr := queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+			IssueID:     parseUUID(issueID),
+			WorkspaceID: parseUUID(e.WorkspaceID),
+			Limit:       100,
+		})
+		if commentErr == nil {
+			for i := len(taskComments) - 1; i >= 0; i-- {
+				if taskComments[i].AuthorType == "agent" {
+					lastAgentCommentID = util.UUIDToString(taskComments[i].ID)
+					break
+				}
+			}
+		}
+
 		notifySubscribers(ctx, queries, bus, issueID, issue.Status, e.WorkspaceID,
 			events.Event{
 				Type:        e.Type,
@@ -1893,26 +1910,13 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			},
 			exclude, "task_failed", "action_required",
 			issue.Title, failureSummary,
-			"",
+			lastAgentCommentID,
 			emptyDetails)
 
-		// Deliver to openclaw_weixin and dingtalk for task_failed (same as task_completed)
+		// Deliver to openclaw_weixin and dingtalk for task_failed (same as task_completed).
+		// If the recipient is already a subscriber, recordOpenclawWeixinDelivery will
+		// dedup against the delivery created by notifySubscribers above (same comment_id).
 		if recipientID != "" && recipientID != agentID {
-			// Find last agent comment for comment anchor link
-			lastAgentCommentID := ""
-			taskComments, commentErr := queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
-				IssueID:     parseUUID(issueID),
-				WorkspaceID: parseUUID(e.WorkspaceID),
-				Limit:       100,
-			})
-			if commentErr == nil {
-				for i := len(taskComments) - 1; i >= 0; i-- {
-					if taskComments[i].AuthorType == "agent" {
-						lastAgentCommentID = util.UUIDToString(taskComments[i].ID)
-						break
-					}
-				}
-			}
 
 			nCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, lastAgentCommentID, "")
 			payloadSnapshot, _ := json.Marshal(map[string]any{
