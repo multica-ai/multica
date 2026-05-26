@@ -13,6 +13,7 @@
     "in_review": "In Review",
     "done": "Done",
     "blocked": "Blocked",
+    "polling": "Polling",
     "cancelled": "Cancelled"
   },
   "priority": {
@@ -428,5 +429,25 @@
     "dont_show_again": "Don't show this again",
     "keep_in_backlog": "Keep in Backlog",
     "move_to_todo": "Move to Todo"
+  },
+  "polling_setup": {
+    "title": "Set up Polling",
+    "description": "This issue will execute repeatedly at the specified interval. The assigned agent will run each cycle automatically.",
+    "interval_label": "Execution interval",
+    "custom_label": "Custom interval (minutes)",
+    "cancel": "Cancel",
+    "confirm": "Start Polling"
+  },
+  "polling_settings": {
+    "section_title": "Polling",
+    "interval_label": "Interval",
+    "interval_minutes_one": "{{count}} minute",
+    "interval_minutes_other": "{{count}} minutes",
+    "next_run_label": "Next run",
+    "last_run_label": "Last run",
+    "run_count_label": "Executions",
+    "edit_config": "Edit",
+    "stop_polling": "Stop Polling",
+    "paused": "Paused"
   }
 }

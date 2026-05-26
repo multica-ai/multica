@@ -7,7 +7,7 @@ import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
-import { CalendarClock, CalendarDays } from "lucide-react";
+import { CalendarClock, CalendarDays, Repeat } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -105,8 +105,18 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   return (
     <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
-      {/* Row 1: Identifier */}
-      <p className="text-xs text-muted-foreground">{issue.identifier}</p>
+      {/* Row 1: Identifier + polling badge */}
+      <div className="flex items-center gap-1">
+        <p className="text-xs text-muted-foreground">{issue.identifier}</p>
+        {issue.status === "polling" && (
+          <span className="inline-flex items-center gap-0.5 rounded-full bg-purple-500/10 px-1 py-0.5 text-[10px] text-purple-600 dark:text-purple-400">
+            <Repeat className="size-2.5" />
+            {issue.poll_next_run && (
+              <span>{new Date(issue.poll_next_run).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span>
+            )}
+          </span>
+        )}
+      </div>
 
       {/* Row 2: Title */}
       <p className="mt-1 text-sm font-medium leading-snug line-clamp-2">

@@ -7,7 +7,9 @@
 -- "Assigned to me"), and the two filters must produce disjoint result sets.
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id
+       i.parent_issue_id, i.position, i.start_date, i.due_date,
+       i.poll_start_at, i.poll_interval_minutes, i.poll_next_run, i.poll_last_run, i.poll_run_count,
+       i.created_at, i.updated_at, i.number, i.project_id
 FROM issue i
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -77,13 +79,32 @@ WHERE id = ANY(sqlc.arg('issue_ids')::uuid[])
 SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: ListPollingIssuesDue :many
+SELECT *
+FROM issue
+WHERE status = 'polling'
+  AND poll_next_run IS NOT NULL
+  AND poll_next_run <= now()
+ORDER BY poll_next_run ASC, created_at ASC
+LIMIT $1;
+
+-- name: ListPollingIssuesWithoutSchedule :many
+SELECT *
+FROM issue
+WHERE status = 'polling'
+  AND poll_next_run IS NULL
+ORDER BY created_at ASC
+LIMIT $1;
+
 -- name: CreateIssue :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, start_date, due_date, number, project_id
+    parent_issue_id, position, start_date, due_date, number, project_id,
+    poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+    sqlc.narg('poll_start_at'), sqlc.narg('poll_interval_minutes'), sqlc.narg('poll_next_run'), sqlc.narg('poll_last_run'), COALESCE(sqlc.narg('poll_run_count'), 0)
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -103,6 +124,11 @@ UPDATE issue SET
     due_date = sqlc.narg('due_date'),
     parent_issue_id = sqlc.narg('parent_issue_id'),
     project_id = sqlc.narg('project_id'),
+    poll_start_at = sqlc.narg('poll_start_at'),
+    poll_interval_minutes = sqlc.narg('poll_interval_minutes'),
+    poll_next_run = sqlc.narg('poll_next_run'),
+    poll_last_run = sqlc.narg('poll_last_run'),
+    poll_run_count = COALESCE(sqlc.narg('poll_run_count'), poll_run_count),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -119,10 +145,11 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id
+    origin_type, origin_id, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    sqlc.narg('origin_type'), sqlc.narg('origin_id')
+    sqlc.narg('origin_type'), sqlc.narg('origin_id'),
+    sqlc.narg('poll_start_at'), sqlc.narg('poll_interval_minutes'), sqlc.narg('poll_next_run'), sqlc.narg('poll_last_run'), COALESCE(sqlc.narg('poll_run_count'), 0)
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec
@@ -146,7 +173,9 @@ DELETE FROM issue WHERE id = $1;
 -- filter; member-direct assignment is intentionally excluded).
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id
+       i.parent_issue_id, i.position, i.start_date, i.due_date,
+       i.poll_start_at, i.poll_interval_minutes, i.poll_next_run, i.poll_last_run, i.poll_run_count,
+       i.created_at, i.updated_at, i.number, i.project_id
 FROM issue i
 WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')

@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ChevronRight, ListTodo } from "lucide-react";
-import type { UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { useIssueViewStore, useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
@@ -22,6 +22,7 @@ import { IssuesHeader } from "./issues-header";
 import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
+import { PollingSetupDialog } from "./polling-setup-dialog";
 import { useT } from "../../i18n";
 
 export function IssuesPage() {
@@ -117,8 +118,13 @@ export function IssuesPage() {
   }, [visibleStatuses]);
 
   const updateIssueMutation = useUpdateIssue();
-  const handleMoveIssue = useCallback(
-    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
+
+  // Polling setup dialog state for board drag-to-polling
+  const [pollingDialogOpen, setPollingDialogOpen] = useState(false);
+  const [pendingPollingIssue, setPendingPollingIssue] = useState<Issue | null>(null);
+
+  const doUpdateIssue = useCallback(
+    (issueId: string, updates: Partial<UpdateIssueRequest>) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
         {
@@ -132,6 +138,33 @@ export function IssuesPage() {
       );
     },
     [updateIssueMutation, t],
+  );
+
+  const handleMoveIssue = useCallback(
+    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
+      if (updates.status === "polling") {
+        const issue = headerIssues.find((i) => i.id === issueId);
+        if (issue && issue.poll_interval_minutes == null) {
+          setPendingPollingIssue(issue);
+          setPollingDialogOpen(true);
+          return;
+        }
+      }
+      doUpdateIssue(issueId, updates);
+    },
+    [doUpdateIssue, headerIssues],
+  );
+
+  const handlePollingDialogConfirm = useCallback(
+    (intervalMinutes: number) => {
+      if (!pendingPollingIssue) return;
+      doUpdateIssue(pendingPollingIssue.id, {
+        status: "polling",
+        poll_interval_minutes: intervalMinutes,
+      });
+      setPendingPollingIssue(null);
+    },
+    [doUpdateIssue, pendingPollingIssue],
   );
 
   if (loading) {
@@ -217,6 +250,12 @@ export function IssuesPage() {
         )}
         {viewMode === "list" && <BatchActionToolbar />}
       </ViewStoreProvider>
+
+      <PollingSetupDialog
+        open={pollingDialogOpen}
+        onOpenChange={setPollingDialogOpen}
+        onConfirm={handlePollingDialogConfirm}
+      />
     </div>
   );
 }

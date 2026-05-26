@@ -363,6 +363,88 @@ func TestIssueCRUD(t *testing.T) {
 	}
 }
 
+func TestUpdateIssueEnablesPollingFields(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":    "Polling issue",
+		"status":   "todo",
+		"priority": "none",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("CreateIssue decode failed: %v", err)
+	}
+	issueID, _ := created["id"].(string)
+	if issueID == "" {
+		t.Fatal("CreateIssue: expected id in response")
+	}
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/issues/"+issueID, nil)
+		req = withURLParam(req, "id", issueID)
+		testHandler.DeleteIssue(w, req)
+	})
+
+	startAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"status":               "polling",
+		"poll_start_at":        startAt.Format(time.RFC3339),
+		"poll_interval_minutes": 30,
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue polling: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("UpdateIssue decode failed: %v", err)
+	}
+	if got := updated["status"]; got != "polling" {
+		t.Fatalf("UpdateIssue: expected status polling, got %#v", got)
+	}
+	if got := updated["poll_interval_minutes"]; got != float64(30) {
+		t.Fatalf("UpdateIssue: expected poll_interval_minutes 30, got %#v", got)
+	}
+	if got := updated["poll_start_at"]; got != startAt.Format(time.RFC3339) {
+		t.Fatalf("UpdateIssue: expected poll_start_at %s, got %#v", startAt.Format(time.RFC3339), got)
+	}
+	if got := updated["poll_next_run"]; got == nil || got == "" {
+		t.Fatalf("UpdateIssue: expected poll_next_run to be populated, got %#v", got)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"status": "todo",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue stop polling: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	updated = map[string]any{}
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("UpdateIssue stop polling decode failed: %v", err)
+	}
+	if got := updated["status"]; got != "todo" {
+		t.Fatalf("UpdateIssue stop polling: expected status todo, got %#v", got)
+	}
+	if got := updated["poll_interval_minutes"]; got != float64(30) {
+		t.Fatalf("UpdateIssue stop polling: expected config to persist, got %#v", got)
+	}
+	if got := updated["poll_next_run"]; got != nil {
+		t.Fatalf("UpdateIssue stop polling: expected poll_next_run cleared, got %#v", got)
+	}
+}
+
 // TestDeleteIssueByIdentifier guards against #1661 — DELETE /api/issues/{id}
 // must actually delete the row when the path segment is a human-readable
 // identifier ("HAN-42") rather than a UUID. Before the PR #1680 + MUL-1410
@@ -494,6 +576,134 @@ func TestCreateIssueExplicitBacklogPreserved(t *testing.T) {
 	}
 
 	// Cleanup
+	cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+	cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+	testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+}
+
+func TestCreateIssueFutureStartDateDefersExecution(t *testing.T) {
+	ctx := context.Background()
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent
+		WHERE workspace_id = $1
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	futureStart := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Minute)
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Scheduled issue",
+		"status":        "todo",
+		"priority":      "medium",
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+		"start_date":    futureStart.Format(time.RFC3339),
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.Status != "backlog" {
+		t.Fatalf("CreateIssue: future start_date should defer to backlog, got %q", created.Status)
+	}
+	if created.StartDate == nil {
+		t.Fatal("CreateIssue: expected start_date to be preserved")
+	}
+	gotStart, err := time.Parse(time.RFC3339, *created.StartDate)
+	if err != nil {
+		t.Fatalf("parse created start_date: %v", err)
+	}
+	if !gotStart.Equal(futureStart) {
+		t.Fatalf("CreateIssue: expected start_date %s, got %s", futureStart.Format(time.RFC3339), gotStart.Format(time.RFC3339))
+	}
+
+	var taskCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM agent_task_queue
+		WHERE issue_id = $1
+	`, created.ID).Scan(&taskCount); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if taskCount != 0 {
+		t.Fatalf("CreateIssue: expected no task to be enqueued before the start date, got %d", taskCount)
+	}
+
+	cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+	cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+	testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+}
+
+func TestCreateIssueRejectsPastStartDate(t *testing.T) {
+	pastStart := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Minute)
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      "Past scheduled issue",
+		"start_date": pastStart.Format(time.RFC3339),
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateIssue: expected 400 for past start_date, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "start_date") {
+		t.Fatalf("CreateIssue: expected past start_date error to mention start_date, got %s", w.Body.String())
+	}
+}
+
+func TestUpdateIssueFutureStartDateDefersExecution(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Issue to reschedule",
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	futureStart := time.Now().UTC().Add(90 * time.Minute).Truncate(time.Minute)
+	updateReq := newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
+		"start_date": futureStart.Format(time.RFC3339),
+	})
+	updateReq = withURLParam(updateReq, "id", created.ID)
+	w = httptest.NewRecorder()
+	testHandler.UpdateIssue(w, updateReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if updated.Status != "backlog" {
+		t.Fatalf("UpdateIssue: future start_date should defer to backlog, got %q", updated.Status)
+	}
+	if updated.StartDate == nil {
+		t.Fatal("UpdateIssue: expected start_date to be preserved")
+	}
+	gotStart, err := time.Parse(time.RFC3339, *updated.StartDate)
+	if err != nil {
+		t.Fatalf("parse updated start_date: %v", err)
+	}
+	if !gotStart.Equal(futureStart) {
+		t.Fatalf("UpdateIssue: expected start_date %s, got %s", futureStart.Format(time.RFC3339), gotStart.Format(time.RFC3339))
+	}
+
 	cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
 	cleanupReq = withURLParam(cleanupReq, "id", created.ID)
 	testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)

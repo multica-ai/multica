@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { CalendarClock } from "lucide-react";
 import type { UpdateIssueRequest } from "@multica/core/types";
-import { Calendar } from "@multica/ui/components/ui/calendar";
 import {
   Popover,
   PopoverTrigger,
@@ -11,6 +10,25 @@ import {
 } from "@multica/ui/components/ui/popover";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../../i18n";
+
+function toLocalDateTimeValue(date: Date) {
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function hasExplicitTime(date: Date) {
+  return date.getHours() !== 0 || date.getMinutes() !== 0 || date.getSeconds() !== 0 || date.getMilliseconds() !== 0;
+}
+
+function formatStartDateLabel(date: Date) {
+  const dateLabel = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (!hasExplicitTime(date)) return dateLabel;
+  const timeLabel = date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${dateLabel}, ${timeLabel}`;
+}
 
 export function StartDatePicker({
   startDate,
@@ -32,6 +50,7 @@ export function StartDatePicker({
   const { t } = useT("issues");
   const [open, setOpen] = useState(defaultOpen);
   const date = startDate ? new Date(startDate) : undefined;
+  const minValue = toLocalDateTimeValue(new Date());
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -44,7 +63,7 @@ export function StartDatePicker({
             <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />
             {date ? (
               <span>
-                {date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                {formatStartDateLabel(date)}
               </span>
             ) : (
               <span className="text-muted-foreground">{t(($) => $.pickers.start_date.trigger_label)}</span>
@@ -53,16 +72,22 @@ export function StartDatePicker({
         )}
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align={align}>
-        <Calendar
-          mode="single"
-          selected={date}
-          onSelect={(d: Date | undefined) => {
-            onUpdate({ start_date: d ? d.toISOString() : null });
-            setOpen(false);
-          }}
-        />
-        {date && (
-          <div className="border-t px-3 py-2">
+        <div className="flex flex-col gap-3 p-3">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-muted-foreground">{t(($) => $.pickers.start_date.trigger_label)}</span>
+            <input
+              aria-label={t(($) => $.pickers.start_date.trigger_label)}
+              type="datetime-local"
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              min={minValue}
+              value={date ? toLocalDateTimeValue(date) : ""}
+              onChange={(e) => {
+                const value = e.target.value;
+                onUpdate({ start_date: value ? new Date(value).toISOString() : null });
+              }}
+            />
+          </label>
+          <div className="flex justify-end">
             <Button
               variant="ghost"
               size="xs"
@@ -75,7 +100,7 @@ export function StartDatePicker({
               {t(($) => $.pickers.start_date.clear_action)}
             </Button>
           </div>
-        )}
+        </div>
       </PopoverContent>
     </Popover>
   );

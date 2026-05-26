@@ -171,28 +171,35 @@ const createIssue = `-- name: CreateIssue :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, start_date, due_date, number, project_id
+    parent_issue_id, position, start_date, due_date, number, project_id,
+    poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+    $16, $17, $18, $19, COALESCE($20, 0)
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count
 `
 
 type CreateIssueParams struct {
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Title         string             `json:"title"`
-	Description   pgtype.Text        `json:"description"`
-	Status        string             `json:"status"`
-	Priority      string             `json:"priority"`
-	AssigneeType  pgtype.Text        `json:"assignee_type"`
-	AssigneeID    pgtype.UUID        `json:"assignee_id"`
-	CreatorType   string             `json:"creator_type"`
-	CreatorID     pgtype.UUID        `json:"creator_id"`
-	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
-	Position      float64            `json:"position"`
-	StartDate     pgtype.Timestamptz `json:"start_date"`
-	DueDate       pgtype.Timestamptz `json:"due_date"`
-	Number        int32              `json:"number"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	Title               string             `json:"title"`
+	Description         pgtype.Text        `json:"description"`
+	Status              string             `json:"status"`
+	Priority            string             `json:"priority"`
+	AssigneeType        pgtype.Text        `json:"assignee_type"`
+	AssigneeID          pgtype.UUID        `json:"assignee_id"`
+	CreatorType         string             `json:"creator_type"`
+	CreatorID           pgtype.UUID        `json:"creator_id"`
+	ParentIssueID       pgtype.UUID        `json:"parent_issue_id"`
+	Position            float64            `json:"position"`
+	StartDate           pgtype.Timestamptz `json:"start_date"`
+	DueDate             pgtype.Timestamptz `json:"due_date"`
+	Number              int32              `json:"number"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	PollStartAt         pgtype.Timestamptz `json:"poll_start_at"`
+	PollIntervalMinutes pgtype.Int4        `json:"poll_interval_minutes"`
+	PollNextRun         pgtype.Timestamptz `json:"poll_next_run"`
+	PollLastRun         pgtype.Timestamptz `json:"poll_last_run"`
+	PollRunCount        interface{}        `json:"poll_run_count"`
 }
 
 func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error) {
@@ -212,6 +219,11 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		arg.DueDate,
 		arg.Number,
 		arg.ProjectID,
+		arg.PollStartAt,
+		arg.PollIntervalMinutes,
+		arg.PollNextRun,
+		arg.PollLastRun,
+		arg.PollRunCount,
 	)
 	var i Issue
 	err := row.Scan(
@@ -238,6 +250,11 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		&i.OriginID,
 		&i.FirstExecutedAt,
 		&i.StartDate,
+		&i.PollStartAt,
+		&i.PollIntervalMinutes,
+		&i.PollNextRun,
+		&i.PollLastRun,
+		&i.PollRunCount,
 	)
 	return i, err
 }
@@ -247,31 +264,37 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id
+    origin_type, origin_id, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date
+    $16, $17,
+    $18, $19, $20, $21, COALESCE($22, 0)
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count
 `
 
 type CreateIssueWithOriginParams struct {
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Title         string             `json:"title"`
-	Description   pgtype.Text        `json:"description"`
-	Status        string             `json:"status"`
-	Priority      string             `json:"priority"`
-	AssigneeType  pgtype.Text        `json:"assignee_type"`
-	AssigneeID    pgtype.UUID        `json:"assignee_id"`
-	CreatorType   string             `json:"creator_type"`
-	CreatorID     pgtype.UUID        `json:"creator_id"`
-	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
-	Position      float64            `json:"position"`
-	StartDate     pgtype.Timestamptz `json:"start_date"`
-	DueDate       pgtype.Timestamptz `json:"due_date"`
-	Number        int32              `json:"number"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
-	OriginType    pgtype.Text        `json:"origin_type"`
-	OriginID      pgtype.UUID        `json:"origin_id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	Title               string             `json:"title"`
+	Description         pgtype.Text        `json:"description"`
+	Status              string             `json:"status"`
+	Priority            string             `json:"priority"`
+	AssigneeType        pgtype.Text        `json:"assignee_type"`
+	AssigneeID          pgtype.UUID        `json:"assignee_id"`
+	CreatorType         string             `json:"creator_type"`
+	CreatorID           pgtype.UUID        `json:"creator_id"`
+	ParentIssueID       pgtype.UUID        `json:"parent_issue_id"`
+	Position            float64            `json:"position"`
+	StartDate           pgtype.Timestamptz `json:"start_date"`
+	DueDate             pgtype.Timestamptz `json:"due_date"`
+	Number              int32              `json:"number"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	OriginType          pgtype.Text        `json:"origin_type"`
+	OriginID            pgtype.UUID        `json:"origin_id"`
+	PollStartAt         pgtype.Timestamptz `json:"poll_start_at"`
+	PollIntervalMinutes pgtype.Int4        `json:"poll_interval_minutes"`
+	PollNextRun         pgtype.Timestamptz `json:"poll_next_run"`
+	PollLastRun         pgtype.Timestamptz `json:"poll_last_run"`
+	PollRunCount        interface{}        `json:"poll_run_count"`
 }
 
 func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWithOriginParams) (Issue, error) {
@@ -293,6 +316,11 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		arg.ProjectID,
 		arg.OriginType,
 		arg.OriginID,
+		arg.PollStartAt,
+		arg.PollIntervalMinutes,
+		arg.PollNextRun,
+		arg.PollLastRun,
+		arg.PollRunCount,
 	)
 	var i Issue
 	err := row.Scan(
@@ -319,6 +347,11 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		&i.OriginID,
 		&i.FirstExecutedAt,
 		&i.StartDate,
+		&i.PollStartAt,
+		&i.PollIntervalMinutes,
+		&i.PollNextRun,
+		&i.PollLastRun,
+		&i.PollRunCount,
 	)
 	return i, err
 }
@@ -333,7 +366,7 @@ func (q *Queries) DeleteIssue(ctx context.Context, id pgtype.UUID) error {
 }
 
 const findActiveDuplicateIssue = `-- name: FindActiveDuplicateIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count FROM issue
 WHERE workspace_id = $1
   AND status NOT IN ('done', 'cancelled')
   AND project_id IS NOT DISTINCT FROM $2::uuid
@@ -382,12 +415,17 @@ func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDu
 		&i.OriginID,
 		&i.FirstExecutedAt,
 		&i.StartDate,
+		&i.PollStartAt,
+		&i.PollIntervalMinutes,
+		&i.PollNextRun,
+		&i.PollLastRun,
+		&i.PollRunCount,
 	)
 	return i, err
 }
 
 const getIssue = `-- name: GetIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count FROM issue
 WHERE id = $1
 `
 
@@ -418,12 +456,17 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 		&i.OriginID,
 		&i.FirstExecutedAt,
 		&i.StartDate,
+		&i.PollStartAt,
+		&i.PollIntervalMinutes,
+		&i.PollNextRun,
+		&i.PollLastRun,
+		&i.PollRunCount,
 	)
 	return i, err
 }
 
 const getIssueByNumber = `-- name: GetIssueByNumber :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count FROM issue
 WHERE workspace_id = $1 AND number = $2
 `
 
@@ -459,12 +502,17 @@ func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberPara
 		&i.OriginID,
 		&i.FirstExecutedAt,
 		&i.StartDate,
+		&i.PollStartAt,
+		&i.PollIntervalMinutes,
+		&i.PollNextRun,
+		&i.PollLastRun,
+		&i.PollRunCount,
 	)
 	return i, err
 }
 
 const getIssueByOrigin = `-- name: GetIssueByOrigin :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count FROM issue
 WHERE workspace_id = $1
   AND origin_type = $2
   AND origin_id = $3
@@ -509,12 +557,17 @@ func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginPara
 		&i.OriginID,
 		&i.FirstExecutedAt,
 		&i.StartDate,
+		&i.PollStartAt,
+		&i.PollIntervalMinutes,
+		&i.PollNextRun,
+		&i.PollLastRun,
+		&i.PollRunCount,
 	)
 	return i, err
 }
 
 const getIssueInWorkspace = `-- name: GetIssueInWorkspace :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count FROM issue
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -550,6 +603,11 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 		&i.OriginID,
 		&i.FirstExecutedAt,
 		&i.StartDate,
+		&i.PollStartAt,
+		&i.PollIntervalMinutes,
+		&i.PollNextRun,
+		&i.PollLastRun,
+		&i.PollRunCount,
 	)
 	return i, err
 }
@@ -590,7 +648,7 @@ func (q *Queries) GetProjectIDsByIssues(ctx context.Context, issueIds []pgtype.U
 }
 
 const listChildIssues = `-- name: ListChildIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count FROM issue
 WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC
 `
@@ -628,6 +686,11 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 			&i.OriginID,
 			&i.FirstExecutedAt,
 			&i.StartDate,
+			&i.PollStartAt,
+			&i.PollIntervalMinutes,
+			&i.PollNextRun,
+			&i.PollLastRun,
+			&i.PollRunCount,
 		); err != nil {
 			return nil, err
 		}
@@ -642,7 +705,9 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 const listIssues = `-- name: ListIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id
+       i.parent_issue_id, i.position, i.start_date, i.due_date,
+       i.poll_start_at, i.poll_interval_minutes, i.poll_next_run, i.poll_last_run, i.poll_run_count,
+       i.created_at, i.updated_at, i.number, i.project_id
 FROM issue i
 WHERE i.workspace_id = $1
   AND ($4::text IS NULL OR i.status = $4)
@@ -711,24 +776,29 @@ type ListIssuesParams struct {
 }
 
 type ListIssuesRow struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Title         string             `json:"title"`
-	Description   pgtype.Text        `json:"description"`
-	Status        string             `json:"status"`
-	Priority      string             `json:"priority"`
-	AssigneeType  pgtype.Text        `json:"assignee_type"`
-	AssigneeID    pgtype.UUID        `json:"assignee_id"`
-	CreatorType   string             `json:"creator_type"`
-	CreatorID     pgtype.UUID        `json:"creator_id"`
-	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
-	Position      float64            `json:"position"`
-	StartDate     pgtype.Timestamptz `json:"start_date"`
-	DueDate       pgtype.Timestamptz `json:"due_date"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	Number        int32              `json:"number"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	Title               string             `json:"title"`
+	Description         pgtype.Text        `json:"description"`
+	Status              string             `json:"status"`
+	Priority            string             `json:"priority"`
+	AssigneeType        pgtype.Text        `json:"assignee_type"`
+	AssigneeID          pgtype.UUID        `json:"assignee_id"`
+	CreatorType         string             `json:"creator_type"`
+	CreatorID           pgtype.UUID        `json:"creator_id"`
+	ParentIssueID       pgtype.UUID        `json:"parent_issue_id"`
+	Position            float64            `json:"position"`
+	StartDate           pgtype.Timestamptz `json:"start_date"`
+	DueDate             pgtype.Timestamptz `json:"due_date"`
+	PollStartAt         pgtype.Timestamptz `json:"poll_start_at"`
+	PollIntervalMinutes pgtype.Int4        `json:"poll_interval_minutes"`
+	PollNextRun         pgtype.Timestamptz `json:"poll_next_run"`
+	PollLastRun         pgtype.Timestamptz `json:"poll_last_run"`
+	PollRunCount        int32              `json:"poll_run_count"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	Number              int32              `json:"number"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
 }
 
 // involves_user_id widens the assignee filter to surface issues where the user
@@ -773,6 +843,11 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 			&i.Position,
 			&i.StartDate,
 			&i.DueDate,
+			&i.PollStartAt,
+			&i.PollIntervalMinutes,
+			&i.PollNextRun,
+			&i.PollLastRun,
+			&i.PollRunCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Number,
@@ -791,7 +866,9 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 const listOpenIssues = `-- name: ListOpenIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id
+       i.parent_issue_id, i.position, i.start_date, i.due_date,
+       i.poll_start_at, i.poll_interval_minutes, i.poll_next_run, i.poll_last_run, i.poll_run_count,
+       i.created_at, i.updated_at, i.number, i.project_id
 FROM issue i
 WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
@@ -846,24 +923,29 @@ type ListOpenIssuesParams struct {
 }
 
 type ListOpenIssuesRow struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Title         string             `json:"title"`
-	Description   pgtype.Text        `json:"description"`
-	Status        string             `json:"status"`
-	Priority      string             `json:"priority"`
-	AssigneeType  pgtype.Text        `json:"assignee_type"`
-	AssigneeID    pgtype.UUID        `json:"assignee_id"`
-	CreatorType   string             `json:"creator_type"`
-	CreatorID     pgtype.UUID        `json:"creator_id"`
-	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
-	Position      float64            `json:"position"`
-	StartDate     pgtype.Timestamptz `json:"start_date"`
-	DueDate       pgtype.Timestamptz `json:"due_date"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	Number        int32              `json:"number"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	Title               string             `json:"title"`
+	Description         pgtype.Text        `json:"description"`
+	Status              string             `json:"status"`
+	Priority            string             `json:"priority"`
+	AssigneeType        pgtype.Text        `json:"assignee_type"`
+	AssigneeID          pgtype.UUID        `json:"assignee_id"`
+	CreatorType         string             `json:"creator_type"`
+	CreatorID           pgtype.UUID        `json:"creator_id"`
+	ParentIssueID       pgtype.UUID        `json:"parent_issue_id"`
+	Position            float64            `json:"position"`
+	StartDate           pgtype.Timestamptz `json:"start_date"`
+	DueDate             pgtype.Timestamptz `json:"due_date"`
+	PollStartAt         pgtype.Timestamptz `json:"poll_start_at"`
+	PollIntervalMinutes pgtype.Int4        `json:"poll_interval_minutes"`
+	PollNextRun         pgtype.Timestamptz `json:"poll_next_run"`
+	PollLastRun         pgtype.Timestamptz `json:"poll_last_run"`
+	PollRunCount        int32              `json:"poll_run_count"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	Number              int32              `json:"number"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
 }
 
 // See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
@@ -900,10 +982,132 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 			&i.Position,
 			&i.StartDate,
 			&i.DueDate,
+			&i.PollStartAt,
+			&i.PollIntervalMinutes,
+			&i.PollNextRun,
+			&i.PollLastRun,
+			&i.PollRunCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Number,
 			&i.ProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPollingIssuesDue = `-- name: ListPollingIssuesDue :many
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count
+FROM issue
+WHERE status = 'polling'
+  AND poll_next_run IS NOT NULL
+  AND poll_next_run <= now()
+ORDER BY poll_next_run ASC, created_at ASC
+LIMIT $1
+`
+
+func (q *Queries) ListPollingIssuesDue(ctx context.Context, limit int32) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listPollingIssuesDue, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.PollStartAt,
+			&i.PollIntervalMinutes,
+			&i.PollNextRun,
+			&i.PollLastRun,
+			&i.PollRunCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPollingIssuesWithoutSchedule = `-- name: ListPollingIssuesWithoutSchedule :many
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count
+FROM issue
+WHERE status = 'polling'
+  AND poll_next_run IS NULL
+ORDER BY created_at ASC
+LIMIT $1
+`
+
+func (q *Queries) ListPollingIssuesWithoutSchedule(ctx context.Context, limit int32) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listPollingIssuesWithoutSchedule, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.PollStartAt,
+			&i.PollIntervalMinutes,
+			&i.PollNextRun,
+			&i.PollLastRun,
+			&i.PollRunCount,
 		); err != nil {
 			return nil, err
 		}
@@ -971,24 +1175,34 @@ UPDATE issue SET
     due_date = $10,
     parent_issue_id = $11,
     project_id = $12,
+    poll_start_at = $13,
+    poll_interval_minutes = $14,
+    poll_next_run = $15,
+    poll_last_run = $16,
+    poll_run_count = COALESCE($17, poll_run_count),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count
 `
 
 type UpdateIssueParams struct {
-	ID            pgtype.UUID        `json:"id"`
-	Title         pgtype.Text        `json:"title"`
-	Description   pgtype.Text        `json:"description"`
-	Status        pgtype.Text        `json:"status"`
-	Priority      pgtype.Text        `json:"priority"`
-	AssigneeType  pgtype.Text        `json:"assignee_type"`
-	AssigneeID    pgtype.UUID        `json:"assignee_id"`
-	Position      pgtype.Float8      `json:"position"`
-	StartDate     pgtype.Timestamptz `json:"start_date"`
-	DueDate       pgtype.Timestamptz `json:"due_date"`
-	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
+	ID                  pgtype.UUID        `json:"id"`
+	Title               pgtype.Text        `json:"title"`
+	Description         pgtype.Text        `json:"description"`
+	Status              pgtype.Text        `json:"status"`
+	Priority            pgtype.Text        `json:"priority"`
+	AssigneeType        pgtype.Text        `json:"assignee_type"`
+	AssigneeID          pgtype.UUID        `json:"assignee_id"`
+	Position            pgtype.Float8      `json:"position"`
+	StartDate           pgtype.Timestamptz `json:"start_date"`
+	DueDate             pgtype.Timestamptz `json:"due_date"`
+	ParentIssueID       pgtype.UUID        `json:"parent_issue_id"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	PollStartAt         pgtype.Timestamptz `json:"poll_start_at"`
+	PollIntervalMinutes pgtype.Int4        `json:"poll_interval_minutes"`
+	PollNextRun         pgtype.Timestamptz `json:"poll_next_run"`
+	PollLastRun         pgtype.Timestamptz `json:"poll_last_run"`
+	PollRunCount        pgtype.Int4        `json:"poll_run_count"`
 }
 
 func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue, error) {
@@ -1005,6 +1219,11 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		arg.DueDate,
 		arg.ParentIssueID,
 		arg.ProjectID,
+		arg.PollStartAt,
+		arg.PollIntervalMinutes,
+		arg.PollNextRun,
+		arg.PollLastRun,
+		arg.PollRunCount,
 	)
 	var i Issue
 	err := row.Scan(
@@ -1031,6 +1250,11 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		&i.OriginID,
 		&i.FirstExecutedAt,
 		&i.StartDate,
+		&i.PollStartAt,
+		&i.PollIntervalMinutes,
+		&i.PollNextRun,
+		&i.PollLastRun,
+		&i.PollRunCount,
 	)
 	return i, err
 }
@@ -1040,7 +1264,7 @@ UPDATE issue SET
     status = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, poll_start_at, poll_interval_minutes, poll_next_run, poll_last_run, poll_run_count
 `
 
 type UpdateIssueStatusParams struct {
@@ -1075,6 +1299,11 @@ func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusPa
 		&i.OriginID,
 		&i.FirstExecutedAt,
 		&i.StartDate,
+		&i.PollStartAt,
+		&i.PollIntervalMinutes,
+		&i.PollNextRun,
+		&i.PollLastRun,
+		&i.PollRunCount,
 	)
 	return i, err
 }

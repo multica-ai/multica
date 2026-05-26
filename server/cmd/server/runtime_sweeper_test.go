@@ -5,8 +5,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -76,6 +79,46 @@ func cleanupSweeperFixture(t *testing.T, issueID, agentID string) {
 	testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
 	testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
 	testPool.Exec(ctx, `UPDATE agent SET status = 'idle' WHERE id = $1`, agentID)
+}
+
+func setupScheduledIssueFixture(t *testing.T) (string, string) {
+	t.Helper()
+	ctx := context.Background()
+
+	var agentID, runtimeID, creatorID string
+	err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id, m.user_id
+		FROM agent a
+		JOIN member m ON m.workspace_id = a.workspace_id
+		JOIN "user" u ON u.id = m.user_id
+		WHERE u.email = $1
+		LIMIT 1
+	`, integrationTestEmail).Scan(&agentID, &runtimeID, &creatorID)
+	if err != nil {
+		t.Fatalf("failed to find test agent: %v", err)
+	}
+
+	startDate := time.Now().UTC().Add(-5 * time.Minute)
+	var issueID string
+	err = testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			assignee_type, assignee_id, position, number, start_date
+		)
+		VALUES ($1, 'Scheduled sweeper test issue', 'backlog', 'none', 'member', $2, 'agent', $3, 0, 99001, $4)
+		RETURNING id
+	`, testWorkspaceID, creatorID, agentID, startDate).Scan(&issueID)
+	if err != nil {
+		t.Fatalf("failed to create scheduled test issue: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	_ = runtimeID
+	return issueID, agentID
 }
 
 func TestRefreshAgentStatusFromTasks(t *testing.T) {
@@ -201,6 +244,50 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 	}
 	if status != "failed" {
 		t.Fatalf("expected task status 'failed', got '%s'", status)
+	}
+}
+
+func TestSweepScheduledIssuesPromotesBacklogIssueToTodo(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID := setupScheduledIssueFixture(t)
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	bus := events.New()
+	taskSvc := service.NewTaskService(db.New(testPool), testPool, realtime.NewHub(), bus)
+	queuedTask := make(chan string, 1)
+	bus.Subscribe("task:queued", func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		if payload["issue_id"] != issueID {
+			return
+		}
+		if taskID, ok := payload["task_id"].(string); ok {
+			select {
+			case queuedTask <- taskID:
+			default:
+			}
+		}
+	})
+
+	sweepScheduledIssues(context.Background(), testPool, db.New(testPool), taskSvc, bus)
+
+	var status string
+	if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status); err != nil {
+		t.Fatalf("query issue status: %v", err)
+	}
+	if status != "todo" {
+		t.Fatalf("expected scheduled issue to advance to todo, got %q", status)
+	}
+
+	select {
+	case <-queuedTask:
+	default:
+		t.Fatal("expected scheduled issue activation to enqueue a task")
 	}
 }
 

@@ -13,6 +13,7 @@
     "in_review": "审核中",
     "done": "已完成",
     "blocked": "已阻塞",
+    "polling": "轮询中",
     "cancelled": "已取消"
   },
   "priority": {
@@ -419,5 +420,25 @@
     "dont_show_again": "不再提示",
     "keep_in_backlog": "保持在 Backlog",
     "move_to_todo": "移到 Todo"
+  },
+  "polling_setup": {
+    "title": "设置轮询",
+    "description": "该 issue 将按指定间隔反复执行。被分配的智能体会自动运行每个周期。",
+    "interval_label": "执行间隔",
+    "custom_label": "自定义间隔（分钟）",
+    "cancel": "取消",
+    "confirm": "开始轮询"
+  },
+  "polling_settings": {
+    "section_title": "轮询",
+    "interval_label": "间隔",
+    "interval_minutes_one": "{{count}} 分钟",
+    "interval_minutes_other": "{{count}} 分钟",
+    "next_run_label": "下次执行",
+    "last_run_label": "上次执行",
+    "run_count_label": "执行次数",
+    "edit_config": "编辑",
+    "stop_polling": "停止轮询",
+    "paused": "已暂停"
   }
 }

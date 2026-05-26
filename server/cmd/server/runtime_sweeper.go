@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -56,6 +60,9 @@ const (
 	// ticks and 500 rows/tick we drain 60k rows/hour worst case — plenty
 	// of headroom for the documented backlog without monopolising DB CPU.
 	queuedExpireBatchSize = 500
+	// scheduledIssueBatchSize caps how many backlog issues are promoted per
+	// sweep tick when their start_date has arrived.
+	scheduledIssueBatchSize = 500
 )
 
 // runRuntimeSweeper periodically marks runtimes as offline if their
@@ -69,7 +76,7 @@ const (
 // hot heartbeat path; the DB is allowed to lag up to runtimeHeartbeatDBFlushInterval).
 // When liveness is unavailable or errors, we fall back to trusting the DB
 // stale window — that is the original behavior.
-func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus) {
+func runRuntimeSweeper(ctx context.Context, pool *pgxpool.Pool, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus) {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
 
@@ -81,6 +88,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
+			sweepScheduledIssues(ctx, pool, queries, taskSvc, bus)
 			gcRuntimes(ctx, queries, bus)
 		}
 	}
@@ -342,4 +350,180 @@ func reconcileAgentStatus(ctx context.Context, queries *db.Queries, bus *events.
 		ActorType:   "system",
 		Payload:     map[string]any{"agent_id": util.UUIDToString(agent.ID), "status": agent.Status},
 	})
+}
+
+func sweepScheduledIssues(ctx context.Context, pool *pgxpool.Pool, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) {
+	rows, err := pool.Query(ctx, `
+		SELECT id
+		FROM issue
+		WHERE status = 'backlog'
+		  AND start_date IS NOT NULL
+		  AND start_date <= now()
+		ORDER BY start_date ASC, created_at ASC
+		LIMIT $1
+	`, scheduledIssueBatchSize)
+	if err != nil {
+		slog.Warn("issue sweeper: failed to list scheduled issues", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	var issueIDs []pgtype.UUID
+	for rows.Next() {
+		var issueID pgtype.UUID
+		if err := rows.Scan(&issueID); err != nil {
+			slog.Warn("issue sweeper: failed to scan scheduled issue id", "error", err)
+			return
+		}
+		issueIDs = append(issueIDs, issueID)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("issue sweeper: failed to iterate scheduled issues", "error", err)
+		return
+	}
+	if len(issueIDs) == 0 {
+		return
+	}
+
+	activated := 0
+	for _, issueID := range issueIDs {
+		ok, err := activateScheduledIssue(ctx, pool, queries, taskSvc, bus, issueID)
+		if err != nil {
+			slog.Warn("issue sweeper: failed to activate scheduled issue", "issue_id", util.UUIDToString(issueID), "error", err)
+			continue
+		}
+		if ok {
+			activated++
+		}
+	}
+	if activated > 0 {
+		slog.Info("issue sweeper: activated scheduled issues", "count", activated)
+	}
+}
+
+func activateScheduledIssue(ctx context.Context, pool *pgxpool.Pool, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus, issueID pgtype.UUID) (bool, error) {
+	var issue db.Issue
+	err := pool.QueryRow(ctx, `
+		UPDATE issue
+		SET status = 'todo',
+		    updated_at = now()
+		WHERE id = $1
+		  AND status = 'backlog'
+		  AND start_date IS NOT NULL
+		  AND start_date <= now()
+		RETURNING *
+	`,
+		issueID,
+	).Scan(
+		&issue.ID,
+		&issue.WorkspaceID,
+		&issue.Title,
+		&issue.Description,
+		&issue.Status,
+		&issue.Priority,
+		&issue.AssigneeType,
+		&issue.AssigneeID,
+		&issue.CreatorType,
+		&issue.CreatorID,
+		&issue.ParentIssueID,
+		&issue.AcceptanceCriteria,
+		&issue.ContextRefs,
+		&issue.Position,
+		&issue.DueDate,
+		&issue.CreatedAt,
+		&issue.UpdatedAt,
+		&issue.Number,
+		&issue.ProjectID,
+		&issue.OriginType,
+		&issue.OriginID,
+		&issue.FirstExecutedAt,
+		&issue.StartDate,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	prefix := ""
+	if workspace, err := queries.GetWorkspace(ctx, issue.WorkspaceID); err == nil {
+		prefix = workspace.IssuePrefix
+	}
+	payload := map[string]any{
+		"issue":         issueToMap(issue, prefix),
+		"status_changed": true,
+		"prev_status":   "backlog",
+		"creator_type":  issue.CreatorType,
+		"creator_id":    util.UUIDToString(issue.CreatorID),
+		"source":        "start_date_sweep",
+	}
+	if bus != nil {
+		bus.Publish(events.Event{
+			Type:        protocol.EventIssueUpdated,
+			WorkspaceID: util.UUIDToString(issue.WorkspaceID),
+			ActorType:   "system",
+			ActorID:     "",
+			Payload:     payload,
+		})
+	}
+
+	if taskSvc == nil {
+		return true, nil
+	}
+
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid {
+		agent, err := queries.GetAgent(ctx, issue.AssigneeID)
+		if err == nil {
+			ready, _, err := service.AgentReadiness(ctx, queries, agent)
+			if err == nil && ready {
+				if _, err := taskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
+					slog.Warn("issue sweeper: failed to enqueue scheduled agent task", "issue_id", util.UUIDToString(issue.ID), "error", err)
+				}
+			}
+		}
+	}
+
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
+		squad, err := queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID:          issue.AssigneeID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err == nil {
+			leader, err := queries.GetAgent(ctx, squad.LeaderID)
+			if err == nil {
+				ready, _, err := service.AgentReadiness(ctx, queries, leader)
+				if err == nil && ready {
+					if _, err := taskSvc.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, pgtype.UUID{}); err != nil {
+						slog.Warn("issue sweeper: failed to enqueue scheduled squad task", "issue_id", util.UUIDToString(issue.ID), "error", err)
+					}
+				}
+			}
+		}
+	}
+
+	return true, nil
+}
+
+func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
+	return map[string]any{
+		"id":              util.UUIDToString(issue.ID),
+		"workspace_id":    util.UUIDToString(issue.WorkspaceID),
+		"number":          issue.Number,
+		"identifier":      issuePrefix + "-" + strconv.Itoa(int(issue.Number)),
+		"title":           issue.Title,
+		"description":     util.TextToPtr(issue.Description),
+		"status":          issue.Status,
+		"priority":        issue.Priority,
+		"assignee_type":   util.TextToPtr(issue.AssigneeType),
+		"assignee_id":     util.UUIDToPtr(issue.AssigneeID),
+		"creator_type":    issue.CreatorType,
+		"creator_id":      util.UUIDToString(issue.CreatorID),
+		"parent_issue_id": util.UUIDToPtr(issue.ParentIssueID),
+		"position":        issue.Position,
+		"start_date":      util.TimestampToPtr(issue.StartDate),
+		"due_date":        util.TimestampToPtr(issue.DueDate),
+		"created_at":      util.TimestampToString(issue.CreatedAt),
+		"updated_at":      util.TimestampToString(issue.UpdatedAt),
+	}
 }

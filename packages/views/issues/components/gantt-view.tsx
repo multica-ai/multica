@@ -296,6 +296,7 @@ const STATUS_BAR_BG: Record<IssueStatus, string> = {
   in_review: "bg-success",
   done: "bg-info",
   blocked: "bg-destructive",
+  polling: "bg-purple-500",
   cancelled: "bg-muted-foreground/40",
 };
 

@@ -29,6 +29,10 @@ export interface UpdateIssueRequest {
   due_date?: string | null;
   parent_issue_id?: string | null;
   project_id?: string | null;
+  /** Polling interval in minutes. Required when status is set to "polling". */
+  poll_interval_minutes?: number | null;
+  /** When to start polling (RFC3339). Defaults to now if not set. */
+  poll_start_at?: string | null;
   /** Attachment IDs to bind to this issue alongside the description update.
    *  Used by the description editor to register newly uploaded files so they
    *  surface in `issueAttachments` and keep their preview Eye on refresh. */

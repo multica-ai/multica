@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -55,11 +56,17 @@ type IssueResponse struct {
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
 	Labels *[]LabelResponse `json:"labels,omitempty"`
+	// Polling fields — present when the issue is in (or was previously in) polling mode.
+	PollIntervalMinutes *int32  `json:"poll_interval_minutes,omitempty"`
+	PollStartAt         *string `json:"poll_start_at,omitempty"`
+	PollNextRun         *string `json:"poll_next_run,omitempty"`
+	PollLastRun         *string `json:"poll_last_run,omitempty"`
+	PollRunCount        int32   `json:"poll_run_count,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
-	return IssueResponse{
+	resp := IssueResponse{
 		ID:            uuidToString(i.ID),
 		WorkspaceID:   uuidToString(i.WorkspaceID),
 		Number:        i.Number,
@@ -80,12 +87,28 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 	}
+	if i.PollIntervalMinutes.Valid {
+		resp.PollIntervalMinutes = int32ToPtr(i.PollIntervalMinutes)
+	}
+	if i.PollStartAt.Valid {
+		resp.PollStartAt = timestampToPtr(i.PollStartAt)
+	}
+	if i.PollNextRun.Valid {
+		resp.PollNextRun = timestampToPtr(i.PollNextRun)
+	}
+	if i.PollLastRun.Valid {
+		resp.PollLastRun = timestampToPtr(i.PollLastRun)
+	}
+	if i.PollRunCount > 0 {
+		resp.PollRunCount = i.PollRunCount
+	}
+	return resp
 }
 
 // issueListRowToResponse converts a list-query row (no description) to an IssueResponse.
 func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
-	return IssueResponse{
+	resp := IssueResponse{
 		ID:            uuidToString(i.ID),
 		WorkspaceID:   uuidToString(i.WorkspaceID),
 		Number:        i.Number,
@@ -106,6 +129,22 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 	}
+	if i.PollIntervalMinutes.Valid {
+		resp.PollIntervalMinutes = int32ToPtr(i.PollIntervalMinutes)
+	}
+	if i.PollStartAt.Valid {
+		resp.PollStartAt = timestampToPtr(i.PollStartAt)
+	}
+	if i.PollNextRun.Valid {
+		resp.PollNextRun = timestampToPtr(i.PollNextRun)
+	}
+	if i.PollLastRun.Valid {
+		resp.PollLastRun = timestampToPtr(i.PollLastRun)
+	}
+	if i.PollRunCount > 0 {
+		resp.PollRunCount = i.PollRunCount
+	}
+	return resp
 }
 
 // labelsByIssue bulk-loads labels for the given issue IDs and returns a map
@@ -141,7 +180,7 @@ func (h *Handler) labelsByIssue(ctx context.Context, wsUUID pgtype.UUID, issueID
 
 func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
-	return IssueResponse{
+	resp := IssueResponse{
 		ID:            uuidToString(i.ID),
 		WorkspaceID:   uuidToString(i.WorkspaceID),
 		Number:        i.Number,
@@ -162,6 +201,22 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 	}
+	if i.PollIntervalMinutes.Valid {
+		resp.PollIntervalMinutes = int32ToPtr(i.PollIntervalMinutes)
+	}
+	if i.PollStartAt.Valid {
+		resp.PollStartAt = timestampToPtr(i.PollStartAt)
+	}
+	if i.PollNextRun.Valid {
+		resp.PollNextRun = timestampToPtr(i.PollNextRun)
+	}
+	if i.PollLastRun.Valid {
+		resp.PollLastRun = timestampToPtr(i.PollLastRun)
+	}
+	if i.PollRunCount > 0 {
+		resp.PollRunCount = i.PollRunCount
+	}
+	return resp
 }
 
 type IssueAssigneeGroupResponse struct {
@@ -1763,7 +1818,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339")
 			return
 		}
+		if t.Before(time.Now().UTC()) {
+			writeError(w, http.StatusBadRequest, "start_date must be greater than or equal to the current time")
+			return
+		}
 		startDate = pgtype.Timestamptz{Time: t, Valid: true}
+		if status != "backlog" && t.After(time.Now().UTC()) {
+			status = "backlog"
+		}
 	}
 
 	var dueDate pgtype.Timestamptz
@@ -1980,6 +2042,11 @@ type UpdateIssueRequest struct {
 	DueDate       *string  `json:"due_date"`
 	ParentIssueID *string  `json:"parent_issue_id"`
 	ProjectID     *string  `json:"project_id"`
+	// Polling configuration. When status is set to "polling", poll_interval_minutes
+	// is required. Setting status to any non-polling value clears poll_next_run
+	// (but preserves poll_interval_minutes for easy re-enable).
+	PollIntervalMinutes *int32  `json:"poll_interval_minutes"`
+	PollStartAt         *string `json:"poll_start_at"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -2066,7 +2133,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339")
 				return
 			}
+			now := time.Now().UTC()
+			if t.Before(now) {
+				writeError(w, http.StatusBadRequest, "start_date must be greater than or equal to the current time")
+				return
+			}
 			params.StartDate = pgtype.Timestamptz{Time: t, Valid: true}
+			if t.After(now) {
+				params.Status = pgtype.Text{String: "backlog", Valid: true}
+			}
 		} else {
 			params.StartDate = pgtype.Timestamptz{Valid: false} // explicit null = clear date
 		}
@@ -2133,6 +2208,77 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.ProjectID = pgtype.UUID{Valid: false}
 		}
 	}
+
+	// Polling field handling.
+	newStatus := prevIssue.Status
+	if req.Status != nil {
+		newStatus = *req.Status
+	}
+
+	if newStatus == "polling" {
+		// Entering polling mode: poll_interval_minutes is required.
+		interval := prevIssue.PollIntervalMinutes
+		if req.PollIntervalMinutes != nil {
+			if *req.PollIntervalMinutes <= 0 {
+				writeError(w, http.StatusBadRequest, "poll_interval_minutes must be greater than 0")
+				return
+			}
+			interval = pgtype.Int4{Int32: *req.PollIntervalMinutes, Valid: true}
+		}
+		if !interval.Valid {
+			writeError(w, http.StatusBadRequest, "poll_interval_minutes is required when setting status to polling")
+			return
+		}
+		params.PollIntervalMinutes = interval
+
+		var pollStartAt time.Time
+		if req.PollStartAt != nil && *req.PollStartAt != "" {
+			t, err := time.Parse(time.RFC3339, *req.PollStartAt)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid poll_start_at format, expected RFC3339")
+				return
+			}
+			pollStartAt = t
+			params.PollStartAt = pgtype.Timestamptz{Time: t, Valid: true}
+		} else if prevIssue.PollStartAt.Valid {
+			pollStartAt = prevIssue.PollStartAt.Time
+			params.PollStartAt = prevIssue.PollStartAt
+		} else {
+			params.PollStartAt = pgtype.Timestamptz{Valid: false}
+		}
+
+		now := time.Now().UTC()
+		nextRun := service.InitialPollingNextRun(pollStartAt, interval.Int32, now)
+		params.PollNextRun = pgtype.Timestamptz{Time: nextRun, Valid: true}
+	} else if req.Status != nil && prevIssue.Status == "polling" {
+		// Exiting polling mode: preserve poll_interval_minutes for easy re-enable,
+		// clear poll_next_run so the scheduler stops picking this issue up.
+		params.PollIntervalMinutes = prevIssue.PollIntervalMinutes
+		if req.PollIntervalMinutes != nil {
+			if *req.PollIntervalMinutes > 0 {
+				params.PollIntervalMinutes = pgtype.Int4{Int32: *req.PollIntervalMinutes, Valid: true}
+			} else {
+				params.PollIntervalMinutes = pgtype.Int4{Valid: false}
+			}
+		}
+		params.PollNextRun = pgtype.Timestamptz{Valid: false}
+		params.PollStartAt = prevIssue.PollStartAt
+	} else {
+		// Not touching polling status — preserve existing poll fields.
+		params.PollIntervalMinutes = prevIssue.PollIntervalMinutes
+		params.PollNextRun = prevIssue.PollNextRun
+		params.PollStartAt = prevIssue.PollStartAt
+		if req.PollIntervalMinutes != nil {
+			if *req.PollIntervalMinutes > 0 {
+				params.PollIntervalMinutes = pgtype.Int4{Int32: *req.PollIntervalMinutes, Valid: true}
+			} else {
+				params.PollIntervalMinutes = pgtype.Int4{Valid: false}
+			}
+		}
+	}
+	// Always preserve last_run and run_count (not user-settable).
+	params.PollLastRun = prevIssue.PollLastRun
+	params.PollRunCount = pgtype.Int4{Int32: prevIssue.PollRunCount, Valid: true}
 
 	// Validate the resulting (assignee_type, assignee_id) pair when the caller
 	// touches either field. Existing data on the issue is left alone if the
@@ -2524,7 +2670,14 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					continue
 				}
+				now := time.Now().UTC()
+				if t.Before(now) {
+					continue
+				}
 				params.StartDate = pgtype.Timestamptz{Time: t, Valid: true}
+				if t.After(now) {
+					params.Status = pgtype.Text{String: "backlog", Valid: true}
+				}
 			} else {
 				params.StartDate = pgtype.Timestamptz{Valid: false}
 			}

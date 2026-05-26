@@ -1606,6 +1606,7 @@ func TestValidIssueStatuses(t *testing.T) {
 		"in_review":   true,
 		"done":        true,
 		"blocked":     true,
+		"polling":     true,
 		"cancelled":   true,
 	}
 	for _, s := range validIssueStatuses {

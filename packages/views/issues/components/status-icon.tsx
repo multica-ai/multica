@@ -125,6 +125,50 @@ function BlockedIcon() {
   );
 }
 
+/** Circular arrow for polling — indicates recurring execution */
+function PollingIcon() {
+  const r = 4;
+  const startAngle = -Math.PI * 0.3;
+  const endAngle = Math.PI * 1.2;
+  const sx = CX + r * Math.cos(startAngle);
+  const sy = CY + r * Math.sin(startAngle);
+  const ex = CX + r * Math.cos(endAngle);
+  const ey = CY + r * Math.sin(endAngle);
+  const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
+  return (
+    <g>
+      {/* Outer dashed ring */}
+      <circle
+        cx={CX}
+        cy={CY}
+        r={OUTER_R}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeDasharray="3.14 0"
+        strokeDashoffset={-0.7}
+      />
+      {/* Circular arrow arc */}
+      <path
+        d={`M${sx},${sy} A${r},${r} 0 ${largeArc},1 ${ex},${ey}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+      />
+      {/* Arrowhead */}
+      <path
+        d={`M${ex},${ey} L${ex + 2},${ey - 2} M${ex},${ey} L${ex - 2.5},${ey - 1}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </g>
+  );
+}
+
 function CancelledIcon() {
   return (
     <ProgressCircle progress={0}>
@@ -150,6 +194,7 @@ const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
   in_review: InReviewIcon,
   done: DoneIcon,
   blocked: BlockedIcon,
+  polling: PollingIcon,
   cancelled: CancelledIcon,
 };
 

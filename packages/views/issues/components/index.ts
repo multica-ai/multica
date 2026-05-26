@@ -2,6 +2,8 @@ export { StatusIcon } from "./status-icon";
 export { StatusHeading } from "./status-heading";
 export { PriorityIcon } from "./priority-icon";
 export { StatusPicker, PriorityPicker, AssigneePicker, canAssignAgent, StartDatePicker, DueDatePicker, LabelPicker } from "./pickers";
+export { PollingSetupDialog } from "./polling-setup-dialog";
+export { PollingSettings } from "./polling-settings";
 export { IssueDetail } from "./issue-detail";
 export { IssuesPage } from "./issues-page";
 export { CommentCard } from "./comment-card";

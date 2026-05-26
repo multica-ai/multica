@@ -7,7 +7,8 @@ export type IssueStatus =
   | "in_review"
   | "done"
   | "blocked"
-  | "cancelled";
+  | "cancelled"
+  | "polling";
 
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
@@ -40,6 +41,11 @@ export interface Issue {
   position: number;
   start_date: string | null;
   due_date: string | null;
+  poll_interval_minutes?: number | null;
+  poll_start_at?: string | null;
+  poll_next_run?: string | null;
+  poll_last_run?: string | null;
+  poll_run_count?: number;
   reactions?: IssueReaction[];
   labels?: Label[];
   created_at: string;

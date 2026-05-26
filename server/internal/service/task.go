@@ -437,7 +437,41 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 	return task, nil
 }
 
-// EnqueueTaskForMention creates a queued task for a mentioned agent on an issue.
+// EnqueueTaskForPollingIssue enqueues a task for a polling issue.
+// Unlike EnqueueTaskForIssue, this does not change the issue status
+// (polling issues remain in "polling" status throughout execution).
+func (s *TaskService) EnqueueTaskForPollingIssue(ctx context.Context, issue db.Issue) {
+	if !issue.AssigneeID.Valid {
+		slog.Warn("polling task enqueue skipped: issue has no assignee",
+			"issue_id", util.UUIDToString(issue.ID))
+		return
+	}
+
+	// Check for active tasks to prevent re-entrancy.
+	hasActive, err := s.Queries.HasActiveTaskForIssue(ctx, issue.ID)
+	if err != nil {
+		slog.Warn("polling task enqueue: active check failed",
+			"issue_id", util.UUIDToString(issue.ID), "error", err)
+		return
+	}
+	if hasActive {
+		slog.Debug("polling task enqueue skipped: issue has active task",
+			"issue_id", util.UUIDToString(issue.ID))
+		return
+	}
+
+	task, err := s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false)
+	if err != nil {
+		slog.Warn("polling task enqueue failed",
+			"issue_id", util.UUIDToString(issue.ID), "error", err)
+		return
+	}
+
+	slog.Info("polling task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(issue.ID),
+	)
+}
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
@@ -1463,9 +1497,15 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							"error", checkErr,
 						)
 					} else if !hasActive {
+						// Polling issues reset to "polling" so the
+						// scheduler picks them up again; others reset to "todo".
+						resetStatus := "todo"
+						if issue.PollIntervalMinutes.Valid {
+							resetStatus = "polling"
+						}
 						if _, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 							ID:     t.IssueID,
-							Status: "todo",
+							Status: resetStatus,
 						}); updateErr != nil {
 							slog.Warn("handle failed tasks: reset stuck issue failed",
 								"issue_id", issueKey,

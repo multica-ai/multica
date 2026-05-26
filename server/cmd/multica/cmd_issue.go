@@ -225,7 +225,7 @@ var issueSearchCmd = &cobra.Command{
 }
 
 var validIssueStatuses = []string{
-	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
+	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "polling", "cancelled",
 }
 
 func init() {
@@ -279,6 +279,8 @@ func init() {
 	issueCreateCmd.Flags().String("start-date", "", "Start date (RFC3339 format)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (RFC3339 format)")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
+	issueCreateCmd.Flags().Int("poll-interval-minutes", 0, "Polling interval in minutes (required when status is polling)")
+	issueCreateCmd.Flags().String("poll-start-at", "", "When to start polling (RFC3339 format; defaults to now)")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 
@@ -295,10 +297,14 @@ func init() {
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (RFC3339 format; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (RFC3339 format)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
+	issueUpdateCmd.Flags().Int("poll-interval-minutes", 0, "Polling interval in minutes (required when status is polling)")
+	issueUpdateCmd.Flags().String("poll-start-at", "", "When to start polling (RFC3339 format; defaults to now)")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+	issueStatusCmd.Flags().Int("poll-interval-minutes", 0, "Polling interval in minutes (required when status is polling)")
+	issueStatusCmd.Flags().String("poll-start-at", "", "When to start polling (RFC3339 format; defaults to now)")
 
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -594,6 +600,12 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetBool("allow-duplicate"); v {
 		body["allow_duplicate"] = true
 	}
+	if v, _ := cmd.Flags().GetInt("poll-interval-minutes"); v > 0 {
+		body["poll_interval_minutes"] = v
+	}
+	if v, _ := cmd.Flags().GetString("poll-start-at"); v != "" {
+		body["poll_start_at"] = v
+	}
 	aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", issueAssigneeKinds)
 	if resolveErr != nil {
 		return fmt.Errorf("resolve assignee: %w", resolveErr)
@@ -777,6 +789,22 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			body["parent_issue_id"] = parent.ID
 		}
 	}
+	if cmd.Flags().Changed("poll-interval-minutes") {
+		v, _ := cmd.Flags().GetInt("poll-interval-minutes")
+		if v > 0 {
+			body["poll_interval_minutes"] = v
+		} else {
+			body["poll_interval_minutes"] = nil
+		}
+	}
+	if cmd.Flags().Changed("poll-start-at") {
+		v, _ := cmd.Flags().GetString("poll-start-at")
+		if v != "" {
+			body["poll_start_at"] = v
+		} else {
+			body["poll_start_at"] = nil
+		}
+	}
 
 	if len(body) == 0 {
 		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, etc.")
@@ -893,6 +921,17 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"status": status}
+
+	if status == "polling" {
+		if v, _ := cmd.Flags().GetInt("poll-interval-minutes"); v > 0 {
+			body["poll_interval_minutes"] = v
+		} else {
+			return fmt.Errorf("--poll-interval-minutes is required when setting status to polling")
+		}
+		if v, _ := cmd.Flags().GetString("poll-start-at"); v != "" {
+			body["poll_start_at"] = v
+		}
+	}
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update status: %w", err)

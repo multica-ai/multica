@@ -7,6 +7,7 @@ export const STATUS_ORDER: IssueStatus[] = [
   "in_review",
   "done",
   "blocked",
+  "polling",
   "cancelled",
 ];
 
@@ -17,6 +18,7 @@ export const ALL_STATUSES: IssueStatus[] = [
   "in_review",
   "done",
   "blocked",
+  "polling",
   "cancelled",
 ];
 
@@ -28,6 +30,7 @@ export const BOARD_STATUSES: IssueStatus[] = [
   "in_review",
   "done",
   "blocked",
+  "polling",
 ];
 
 export const STATUS_CONFIG: Record<
@@ -46,5 +49,6 @@ export const STATUS_CONFIG: Record<
   in_review: { label: "In Review", iconColor: "text-success", hoverBg: "hover:bg-success/10", dividerColor: "bg-success", columnBg: "bg-success/5" },
   done: { label: "Done", iconColor: "text-info", hoverBg: "hover:bg-info/10", dividerColor: "bg-info", columnBg: "bg-info/5" },
   blocked: { label: "Blocked", iconColor: "text-destructive", hoverBg: "hover:bg-destructive/10", dividerColor: "bg-destructive", columnBg: "bg-destructive/5" },
+  polling: { label: "Polling", iconColor: "text-purple-500", hoverBg: "hover:bg-purple-500/10", dividerColor: "bg-purple-500", columnBg: "bg-purple-500/5" },
   cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent", dividerColor: "bg-muted-foreground/40", columnBg: "bg-muted/40" },
 };
