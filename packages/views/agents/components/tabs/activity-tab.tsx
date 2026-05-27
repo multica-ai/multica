@@ -400,6 +400,14 @@ function TaskRow({
           ? t(($) => $.tab_body.activity.source_autopilot_run)
           : t(($) => $.tab_body.activity.source_untracked)
     : null;
+  const displayTitle = taskDisplayTitle(task, issue, {
+    issueShortFallback: t(($) => $.tab_body.activity.issue_short_fallback, {
+      prefix: task.issue_id.slice(0, 8),
+    }),
+    sourceFallback: sourceFallback ?? t(($) => $.tab_body.activity.source_untracked),
+  });
+  const showTriggerTooltip =
+    !!task.trigger_summary && task.trigger_summary !== displayTitle;
 
   const SourceIcon = hasIssue
     ? Hash
@@ -464,7 +472,7 @@ function TaskRow({
               {issue.identifier}
             </span>
           )}
-          {task.trigger_summary ? (
+          {showTriggerTooltip ? (
             // Hover surfaces "why this task ran" — the snapshot lets the
             // agent-side row stay anchored on issue.title (the
             // identification axis here) while still letting the user
@@ -474,10 +482,7 @@ function TaskRow({
               <TooltipTrigger
                 render={
                   <span className="truncate text-sm">
-                    {issue?.title ??
-                      (hasIssue
-                        ? t(($) => $.tab_body.activity.issue_short_fallback, { prefix: task.issue_id.slice(0, 8) })
-                        : (sourceFallback ?? t(($) => $.tab_body.activity.source_untracked)))}
+                    {displayTitle}
                   </span>
                 }
               />
@@ -492,10 +497,7 @@ function TaskRow({
             </Tooltip>
           ) : (
             <span className="truncate text-sm">
-              {issue?.title ??
-                (hasIssue
-                  ? t(($) => $.tab_body.activity.issue_short_fallback, { prefix: task.issue_id.slice(0, 8) })
-                  : (sourceFallback ?? t(($) => $.tab_body.activity.source_untracked)))}
+              {displayTitle}
             </span>
           )}
         </div>
@@ -601,6 +603,23 @@ function Sep() {
 
 type AgentsT = ReturnType<typeof useT<"agents">>["t"];
 type TimeAgoFn = (dateStr: string) => string;
+
+interface TaskDisplayLabels {
+  issueShortFallback: string;
+  sourceFallback: string;
+}
+
+export function taskDisplayTitle(
+  task: Pick<AgentTask, "issue_id" | "trigger_summary">,
+  issue: Pick<Issue, "title"> | undefined,
+  labels: TaskDisplayLabels,
+): string {
+  if (issue?.title) return issue.title;
+  if (task.issue_id !== "") return labels.issueShortFallback;
+  const summary = task.trigger_summary?.trim();
+  if (summary) return summary;
+  return labels.sourceFallback;
+}
 
 function activeTaskTimeText(task: AgentTask, t: AgentsT, timeAgo: TimeAgoFn): string {
   if (task.status === "running" && task.started_at) {

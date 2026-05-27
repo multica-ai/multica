@@ -3,6 +3,7 @@ import type { AgentTask } from "@multica/core/types";
 import {
   deriveAvgDurationLast30d,
   formatDurationMs,
+  taskDisplayTitle,
 } from "./activity-tab";
 
 const NOW = new Date("2026-04-28T12:00:00Z").getTime();
@@ -105,5 +106,68 @@ describe("formatDurationMs", () => {
   it("handles zero / negative defensively", () => {
     expect(formatDurationMs(0)).toBe("—");
     expect(formatDurationMs(-100)).toBe("—");
+  });
+});
+
+describe("taskDisplayTitle", () => {
+  const labels = {
+    issueShortFallback: "Issue 12345678...",
+    sourceFallback: "Autopilot run",
+  };
+
+  it("prefers the loaded issue title for issue-linked tasks", () => {
+    expect(
+      taskDisplayTitle(
+        task({
+          issue_id: "issue-id",
+          trigger_summary: "Fix from webhook",
+        }),
+        { title: "Fix activity row labels" },
+        labels,
+      ),
+    ).toBe("Fix activity row labels");
+  });
+
+  it("uses the issue fallback while an issue-linked task title is loading", () => {
+    expect(
+      taskDisplayTitle(
+        task({
+          issue_id: "issue-id",
+          trigger_summary: "Fix from webhook",
+        }),
+        undefined,
+        labels,
+      ),
+    ).toBe("Issue 12345678...");
+  });
+
+  it("uses trigger_summary as the primary title for no-issue autopilot tasks", () => {
+    expect(
+      taskDisplayTitle(
+        task({
+          issue_id: "",
+          trigger_summary: "Sync failed GitHub PR checks",
+          autopilot_run_id: "run-id",
+          kind: "autopilot",
+        }),
+        undefined,
+        labels,
+      ),
+    ).toBe("Sync failed GitHub PR checks");
+  });
+
+  it("falls back to the source label when no contextual title exists", () => {
+    expect(
+      taskDisplayTitle(
+        task({
+          issue_id: "",
+          trigger_summary: "   ",
+          autopilot_run_id: "run-id",
+          kind: "autopilot",
+        }),
+        undefined,
+        labels,
+      ),
+    ).toBe("Autopilot run");
   });
 });
