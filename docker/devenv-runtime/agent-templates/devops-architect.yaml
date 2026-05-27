@@ -1,0 +1,12 @@
+# Seed: extracted from workspace agent "Devops Architect - Ankesh"
+# Source: e4369030-0de8-45f0-9325-946cea143a9f
+# Note: model downgraded from claude-opus-4-7 to claude-sonnet-4-6 for litellm-MVP compatibility.
+#       Restore to claude-opus-4-7 once it is in the litellm proxy's model_list.
+#       Name normalized: "Devops Architect - Ankesh" → "DevOps Architect"
+#       Visibility normalized: workspace (already workspace)
+name: "DevOps Architect"
+description: "DevOps, CICD, Kubernetes and infrastructure related tasks"
+model: "claude-sonnet-4-6"
+max_concurrent_tasks: 6
+visibility: "workspace"
+instructions_file: "devops-architect.instructions.md"

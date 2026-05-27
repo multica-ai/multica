@@ -1,0 +1,10 @@
+# Seed: extracted from workspace agent "Technical Product Manager"
+# Source: 7fcbd9a8-304b-407e-84f1-56ecad62ed9b
+# Note: model downgraded from claude-opus-4-7 to claude-sonnet-4-6 for litellm-MVP compatibility.
+#       Restore to claude-opus-4-7 once it is in the litellm proxy's model_list.
+name: "Technical Product Manager"
+description: "Orchestration loop for agentic development - Delegates, verifies and unblocks"
+model: "claude-sonnet-4-6"
+max_concurrent_tasks: 6
+visibility: "workspace"
+instructions_file: "technical-product-manager.instructions.md"

@@ -2,5 +2,8 @@
 !Dockerfile
 !docker-bake.hcl
 !entrypoint.sh
+!agentfarm-bootstrap.sh
+!agent-templates/
+!agent-templates/**
 !README.md
 !.dockerignore

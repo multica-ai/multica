@@ -17,6 +17,15 @@
 #   OPENCODE_PORT — bind port    (default 4096;    see Dockerfile ENV).
 #   OPENCODE_EXTRA_ARGS — extra args appended verbatim, e.g.
 #                         `--cors https://devenv-jshuff.development.g2.com`.
+#
+# Agentfarm mode (all four required):
+#   MULTICA_PAT          — bot PAT for multica login (from SSM /devenv/development/MULTICA_PAT).
+#   MULTICA_WORKSPACE_ID — workspace UUID injected via configmap.
+#   LITELLM_API_KEY      — LiteLLM virtual key injected via secret.
+#   WORKSPACE_SLUG       — namespace injected via Downward API (fieldRef: metadata.namespace).
+#   When all four are set, agentfarm-bootstrap.sh runs first to register the daemon,
+#   flip the runtime public, and provision the six standard agents. The daemon
+#   runs in the background; opencode serve is always PID 1.
 
 set -euo pipefail
 
@@ -30,11 +39,20 @@ if [ -n "${GH_TOKEN:-}" ]; then
   fi
 fi
 
-# ── Multica daemon (optional) ───────────────────────────────────
-# When MULTICA_TOKEN is set, configure the CLI for the self-hosted
-# server and start the daemon in the background. The daemon connects
-# the devenv to the Multica workspace so agents can be dispatched.
-if [ -n "${MULTICA_TOKEN:-}" ]; then
+# ── Agentfarm mode ───────────────────────────────────────────────
+# When the four agentfarm env vars are present, run the bootstrap
+# script to provision daemon + agents, then fall through to opencode.
+if [ -n "${MULTICA_PAT:-}" ] \
+  && [ -n "${MULTICA_WORKSPACE_ID:-}" ] \
+  && [ -n "${LITELLM_API_KEY:-}" ] \
+  && [ -n "${WORKSPACE_SLUG:-}" ]; then
+  echo "devenv: agentfarm mode — running agentfarm-bootstrap.sh"
+  /usr/local/bin/agentfarm-bootstrap.sh
+
+# ── Multica daemon (optional, personal devenv) ───────────────────
+# When MULTICA_TOKEN is set (but agentfarm mode is not), configure
+# the CLI and start the daemon in the background.
+elif [ -n "${MULTICA_TOKEN:-}" ]; then
   server_url="${MULTICA_SERVER_URL:-https://agentfarm.g2.com}"
   app_url="${MULTICA_APP_URL:-https://agentfarm.g2.com}"
 

@@ -1,0 +1,10 @@
+# Seed: extracted from workspace agent "Code Reviewer flavor Ankesh"
+# Source: bc73fe9e-190c-491e-94de-fe9f78e8d007
+# Note: Name normalized: "Code Reviewer flavor Ankesh" → "Code Reviewer"
+#       Visibility normalized: private → workspace (bot-owned workspace requires workspace visibility)
+name: "Code Reviewer"
+description: "Does code review after Handoff"
+model: "claude-sonnet-4-6"
+max_concurrent_tasks: 6
+visibility: "workspace"
+instructions_file: "code-reviewer.instructions.md"

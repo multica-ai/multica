@@ -22,12 +22,19 @@ RUN curl -fsSL "https://pkgs.k8s.io/core:/stable:/${KUBECTL_MINOR}/deb/Release.k
  && echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${KUBECTL_MINOR}/deb/ /" \
       > /etc/apt/sources.list.d/kubernetes.list \
  && apt-get update \
- && apt-get install -y --no-install-recommends kubectl \
+ && apt-get install -y --no-install-recommends kubectl yq \
  && rm -rf /var/lib/apt/lists/*
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
  && chmod +x /usr/local/bin/entrypoint.sh
+
+COPY agentfarm-bootstrap.sh /usr/local/bin/agentfarm-bootstrap.sh
+RUN sed -i 's/\r$//' /usr/local/bin/agentfarm-bootstrap.sh \
+ && chmod +x /usr/local/bin/agentfarm-bootstrap.sh
+
+COPY agent-templates/ /etc/multica/agent-templates/
+RUN chmod -R a+r /etc/multica/agent-templates/
 
 USER agent
 

@@ -1,0 +1,12 @@
+# Seed: extracted from workspace agent "Best Practices Advisor - Ankesh"
+# Source: 48cae881-2917-4b60-8e8a-e8feb23afb26
+# Note: model downgraded from claude-opus-4-7 to claude-sonnet-4-6 for litellm-MVP compatibility.
+#       Restore to claude-opus-4-7 once it is in the litellm proxy's model_list.
+#       Name normalized: "Best Practices Advisor - Ankesh" → "Best Practices Advisor"
+#       Visibility normalized: private → workspace (bot-owned workspace requires workspace visibility)
+name: "Best Practices Advisor"
+description: "Evaluates plans and implementations against established best practices. Does not write code or design."
+model: "claude-sonnet-4-6"
+max_concurrent_tasks: 6
+visibility: "workspace"
+instructions_file: "best-practices-advisor.instructions.md"

@@ -1,0 +1,8 @@
+# Seed: extracted from workspace agent "SDE"
+# Source: 801c6b6f-3927-441c-b83f-41e72f593881
+name: "SDE"
+description: "Software engineer for general engineering task"
+model: "claude-sonnet-4-6"
+max_concurrent_tasks: 6
+visibility: "workspace"
+instructions_file: "sde.instructions.md"

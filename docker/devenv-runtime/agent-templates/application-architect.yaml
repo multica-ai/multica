@@ -1,0 +1,11 @@
+# Seed: extracted from workspace agent "Application architect Ankesh"
+# Source: 7c14c514-1102-4f46-ba33-acc01b247227
+# Note: model downgraded from claude-opus-4-7 to claude-sonnet-4-6 for litellm-MVP compatibility.
+#       Restore to claude-opus-4-7 once it is in the litellm proxy's model_list.
+#       Name normalized: "Application architect Ankesh" → "Application Architect"
+name: "Application Architect"
+description: "Designs application and identifies gaps"
+model: "claude-sonnet-4-6"
+max_concurrent_tasks: 6
+visibility: "workspace"
+instructions_file: "application-architect.instructions.md"
