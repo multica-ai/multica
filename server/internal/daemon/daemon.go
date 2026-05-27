@@ -2442,11 +2442,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Prepare against a stable user path is cheap (no clone, no copy).
 	if task.PriorWorkDir != "" && localAssignment == nil {
 		env = execenv.Reuse(execenv.ReuseParams{
-			WorkDir:      task.PriorWorkDir,
-			Provider:     provider,
-			CodexVersion: codexVersion,
-			OpenclawBin:  openclawBin,
-			Task:         taskCtx,
+			WorkDir:        task.PriorWorkDir,
+			WorkspacesRoot: d.cfg.WorkspacesRoot,
+			WorkspaceID:    task.WorkspaceID,
+			Provider:       provider,
+			CodexVersion:   codexVersion,
+			OpenclawBin:    openclawBin,
+			Task:           taskCtx,
 		}, d.logger)
 	}
 	if env == nil {

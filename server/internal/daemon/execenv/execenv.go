@@ -197,7 +197,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{
+			CodexVersion:  params.CodexVersion,
+			WritableRoots: codexRepoCacheWritableRoots(params.WorkspacesRoot, params.WorkspaceID),
+		}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
@@ -229,10 +232,12 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 // the per-provider knobs (CodexVersion, OpenclawBin) so callers can pass
 // the same resolved binary path on both first-run and reuse paths.
 type ReuseParams struct {
-	WorkDir      string
-	Provider     string
-	CodexVersion string // only used when Provider == "codex"
-	OpenclawBin  string // only used when Provider == "openclaw"; empty = PATH lookup
+	WorkDir        string
+	WorkspacesRoot string
+	WorkspaceID    string
+	Provider       string
+	CodexVersion   string // only used when Provider == "codex"
+	OpenclawBin    string // only used when Provider == "openclaw"; empty = PATH lookup
 	// LocalDirectory is true when the reused WorkDir is a user-supplied
 	// directory (the local_directory flow). The flag is propagated into
 	// the returned Environment so downstream callers (notably the GC
@@ -279,7 +284,10 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{
+			CodexVersion:  params.CodexVersion,
+			WritableRoots: codexRepoCacheWritableRoots(params.WorkspacesRoot, params.WorkspaceID),
+		}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome
@@ -307,6 +315,13 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 
 	logger.Info("execenv: reusing env", "workdir", params.WorkDir)
 	return env
+}
+
+func codexRepoCacheWritableRoots(workspacesRoot, workspaceID string) []string {
+	if workspacesRoot == "" || workspaceID == "" {
+		return nil
+	}
+	return []string{filepath.Join(workspacesRoot, ".repos", workspaceID)}
 }
 
 // hydrateCodexSkills populates the per-task CODEX_HOME/skills directory with

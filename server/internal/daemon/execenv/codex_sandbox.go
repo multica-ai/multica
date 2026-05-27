@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -40,6 +41,10 @@ type codexSandboxPolicy struct {
 	NetworkAccess bool
 	// Reason is a short human-readable label used in warn-level logs.
 	Reason string
+	// WritableRoots are additional absolute paths Codex may write when Mode is
+	// workspace-write. The task cwd is already writable; this is for support
+	// paths such as git worktree metadata that intentionally live outside cwd.
+	WritableRoots []string
 }
 
 // codexSandboxPolicyFor picks the right policy for the given platform and
@@ -134,10 +139,38 @@ func renderMulticaManagedBlock(policy codexSandboxPolicy) string {
 	b.WriteString(fmt.Sprintf("sandbox_mode = %q\n", policy.Mode))
 	if policy.Mode == "workspace-write" {
 		b.WriteString(fmt.Sprintf("sandbox_workspace_write.network_access = %t\n", policy.NetworkAccess))
+		if roots := cleanCodexWritableRoots(policy.WritableRoots); len(roots) > 0 {
+			b.WriteString("sandbox_workspace_write.writable_roots = [")
+			for i, root := range roots {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				b.WriteString(strconv.Quote(root))
+			}
+			b.WriteString("]\n")
+		}
 	}
 	b.WriteString(multicaManagedEndMarker)
 	b.WriteString("\n")
 	return b.String()
+}
+
+func cleanCodexWritableRoots(roots []string) []string {
+	cleaned := make([]string, 0, len(roots))
+	seen := make(map[string]struct{}, len(roots))
+	for _, root := range roots {
+		root = strings.TrimSpace(root)
+		if root == "" || !filepath.IsAbs(root) {
+			continue
+		}
+		root = filepath.Clean(root)
+		if _, ok := seen[root]; ok {
+			continue
+		}
+		seen[root] = struct{}{}
+		cleaned = append(cleaned, root)
+	}
+	return cleaned
 }
 
 // managedBlockRe captures the daemon-owned block (including the surrounding

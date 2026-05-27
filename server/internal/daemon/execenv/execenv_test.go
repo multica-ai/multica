@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -1978,6 +1979,52 @@ func TestEnsureCodexSandboxConfigCreatesDefaultLinux(t *testing.T) {
 	}
 }
 
+func TestEnsureCodexSandboxConfigWritesWritableRoots(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	repoCacheRoot := filepath.Join(dir, "workspaces", ".repos", "ws-1")
+
+	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	policy.WritableRoots = []string{repoCacheRoot, repoCacheRoot + string(os.PathSeparator), "relative/path", repoCacheRoot}
+	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
+		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config.toml: %v", err)
+	}
+	s := string(data)
+	want := "sandbox_workspace_write.writable_roots = [" + strconv.Quote(filepath.Clean(repoCacheRoot)) + "]"
+	if !strings.Contains(s, want) {
+		t.Errorf("missing writable_roots entry %q, got:\n%s", want, s)
+	}
+	if strings.Contains(s, "relative/path") {
+		t.Errorf("relative writable root should be ignored, got:\n%s", s)
+	}
+}
+
+func TestEnsureCodexSandboxConfigOmitsWritableRootsOutsideWorkspaceWrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	policy := codexSandboxPolicyFor("darwin", "0.121.0")
+	policy.WritableRoots = []string{filepath.Join(dir, "workspaces", ".repos", "ws-1")}
+	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
+		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config.toml: %v", err)
+	}
+	if strings.Contains(string(data), "writable_roots") {
+		t.Errorf("danger-full-access policy should not emit writable_roots, got:\n%s", data)
+	}
+}
+
 func TestEnsureCodexSandboxConfigDarwinFallsBack(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -2240,6 +2287,38 @@ func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
 	}
 	if !strings.Contains(s, `sandbox_mode = "workspace-write"`) {
 		t.Error("config.toml missing sandbox_mode")
+	}
+}
+
+func TestPrepareCodexHomeAllowsWorkspaceRepoCacheRoot(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	workspacesRoot := t.TempDir()
+	workspaceID := "ws-codex-repo-cache"
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    workspaceID,
+		TaskID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task: TaskContextForEnv{
+			IssueID: "issue-1",
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(env.CodexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read codex config: %v", err)
+	}
+	repoCacheRoot := filepath.Join(workspacesRoot, ".repos", workspaceID)
+	want := "sandbox_workspace_write.writable_roots = [" + strconv.Quote(repoCacheRoot) + "]"
+	if !strings.Contains(string(data), want) {
+		t.Fatalf("codex config missing repo-cache writable root %q, got:\n%s", want, data)
 	}
 }
 
