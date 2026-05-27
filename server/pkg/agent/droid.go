@@ -40,19 +40,24 @@ type droidBackend struct {
 // stream-json`. Only the union of fields we consume is modeled; unknown
 // fields are ignored.
 type droidStreamEvent struct {
-	Type      string          `json:"type"`
-	Subtype   string          `json:"subtype,omitempty"`
-	SessionID string          `json:"session_id,omitempty"`
-	Role      string          `json:"role,omitempty"`
-	Text      string          `json:"text,omitempty"`
-	FinalText string          `json:"finalText,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	Output    string          `json:"output,omitempty"`
-	NumTurns  int             `json:"numTurns,omitempty"`
-	Usage     *struct {
+	Type      string `json:"type"`
+	Subtype   string `json:"subtype,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Role      string `json:"role,omitempty"`
+	Text      string `json:"text,omitempty"`
+	FinalText string `json:"finalText,omitempty"`
+	ID        string `json:"id,omitempty"`
+	// tool_call fields (droid uses toolName/parameters, not name/input)
+	ToolName   string          `json:"toolName,omitempty"`
+	Parameters json.RawMessage `json:"parameters,omitempty"`
+	// tool_result fields (droid puts output under "value", not "output";
+	// the parent tool_call id is repeated under "id" rather than a
+	// separate tool_use_id field)
+	Value   string `json:"value,omitempty"`
+	IsError bool   `json:"isError,omitempty"`
+	// completion fields
+	NumTurns int `json:"numTurns,omitempty"`
+	Usage    *struct {
 		InputTokens         int64 `json:"input_tokens"`
 		OutputTokens        int64 `json:"output_tokens"`
 		CacheReadTokens     int64 `json:"cache_read_input_tokens"`
@@ -80,7 +85,19 @@ func (b *droidBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		args = append(args, "--cwd", opts.Cwd)
 	}
 	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
+		// Multica's shared Claude/GPT catalogs use a different ID convention
+		// than droid (e.g. "claude-sonnet-4.6" with dots and an optional
+		// "anthropic/" prefix vs droid's "claude-sonnet-4-6" with dashes).
+		// Normalize before passing through so an agent configured against
+		// the general catalog still routes to a valid droid model id.
+		normalized := normalizeDroidModelID(opts.Model)
+		if normalized != opts.Model {
+			b.cfg.Logger.Info("droid: normalized model id",
+				"requested", opts.Model,
+				"normalized", normalized,
+			)
+		}
+		args = append(args, "--model", normalized)
 	}
 	if opts.ResumeSessionID != "" {
 		args = append(args, "-s", opts.ResumeSessionID)
@@ -178,22 +195,32 @@ func (b *droidBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 					trySend(msgCh, Message{Type: MessageText, Content: ev.Text})
 				}
 				// role=user is an echo of our own prompt — skip.
-			case "tool_use":
+			case "reasoning":
+				// Pre-tool / pre-answer thinking. Droid emits these as
+				// standalone events with `text`; surface them as the
+				// canonical MessageThinking so the UI shows agent
+				// reasoning the same way it does for Claude/Codex.
+				if ev.Text != "" {
+					trySend(msgCh, Message{Type: MessageThinking, Content: ev.Text})
+				}
+			case "tool_call":
 				input := map[string]any{}
-				if len(ev.Input) > 0 {
-					_ = json.Unmarshal(ev.Input, &input)
+				if len(ev.Parameters) > 0 {
+					_ = json.Unmarshal(ev.Parameters, &input)
 				}
 				trySend(msgCh, Message{
 					Type:   MessageToolUse,
-					Tool:   droidToolNameFromTitle(ev.Name),
+					Tool:   droidToolNameFromTitle(ev.ToolName),
 					CallID: ev.ID,
 					Input:  input,
 				})
 			case "tool_result":
+				// `id` repeats the matching tool_call's id (droid does
+				// not emit a separate tool_use_id field).
 				trySend(msgCh, Message{
 					Type:   MessageToolResult,
-					CallID: ev.ToolUseID,
-					Output: ev.Output,
+					CallID: ev.ID,
+					Output: ev.Value,
 				})
 			case "completion":
 				if ev.FinalText != "" {
@@ -282,6 +309,69 @@ func droidModelFromEvent(line string) string {
 	}
 	_ = json.Unmarshal([]byte(line), &m)
 	return m.Model
+}
+
+// droidKnownModelIDs is the set of droid-native model IDs we ship with
+// the static catalog (see droidStaticModels in models.go). Used by
+// normalizeDroidModelID to short-circuit when the caller already passed
+// a valid id, and to recognize a successful claude-* dot→dash conversion.
+var droidKnownModelIDs = map[string]struct{}{
+	"claude-opus-4-7":            {},
+	"claude-opus-4-7-fast":       {},
+	"claude-opus-4-6":            {},
+	"claude-opus-4-6-fast":       {},
+	"claude-opus-4-5-20251101":   {},
+	"claude-sonnet-4-6":          {},
+	"claude-sonnet-4-5-20250929": {},
+	"claude-haiku-4-5-20251001":  {},
+	"gpt-5.5":                    {},
+	"gpt-5.5-fast":               {},
+	"gpt-5.5-pro":                {},
+	"gpt-5.4":                    {},
+	"gpt-5.4-fast":               {},
+	"gpt-5.4-mini":               {},
+	"gpt-5.3-codex":              {},
+	"gpt-5.3-codex-fast":         {},
+	"gpt-5.2":                    {},
+	"gpt-5.2-codex":              {},
+	"gemini-3.1-pro-preview":     {},
+	"gemini-3.5-flash":           {},
+	"gemini-3-flash-preview":     {},
+	"glm-5.1":                    {},
+	"kimi-k2.6":                  {},
+	"kimi-k2.5":                  {},
+	"deepseek-v4-pro":            {},
+	"minimax-m2.7":               {},
+	"minimax-m2.5":               {},
+}
+
+// normalizeDroidModelID maps a model id coming from Multica's shared
+// model catalogs (which use dots for claude versions and an optional
+// "<provider>/" prefix) onto droid's native id format. Unknown ids pass
+// through unchanged — droid will reject them and surface the canonical
+// "Available built-in models:" list to the user.
+func normalizeDroidModelID(id string) string {
+	if _, ok := droidKnownModelIDs[id]; ok {
+		return id
+	}
+	// Strip a leading "<provider>/" prefix (anthropic/, openai/, google/, …).
+	if idx := strings.LastIndex(id, "/"); idx >= 0 {
+		id = id[idx+1:]
+	}
+	if _, ok := droidKnownModelIDs[id]; ok {
+		return id
+	}
+	// Claude-family ids in droid use dashes for version numbers
+	// ("claude-sonnet-4-6") where the shared catalog uses dots
+	// ("claude-sonnet-4.6"). GPT/Gemini/Kimi/MiniMax keep dots in
+	// droid too, so only apply this rewrite to claude- ids.
+	if strings.HasPrefix(id, "claude-") {
+		candidate := strings.ReplaceAll(id, ".", "-")
+		if _, ok := droidKnownModelIDs[candidate]; ok {
+			return candidate
+		}
+	}
+	return id
 }
 
 // droidToolNameFromTitle normalizes Factory.ai droid's built-in tool
