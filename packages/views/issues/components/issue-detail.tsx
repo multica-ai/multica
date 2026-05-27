@@ -438,7 +438,7 @@ function IssueAttachmentRow({
         />
       </div>
       {preview.modal}
-      {!pending && (onDelete || onAppendToDesc) && (
+      {(onDelete || onAppendToDesc) && (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -1429,8 +1429,9 @@ export function IssueDetail({
   const queryClient = useQueryClient();
 
   // Attachments uploaded against this issue. Drives the description
-  // editor's click-time fresh-sign download.
-  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(id));
+  // editor's click-time fresh-sign download. Must use `resolvedId` so the
+  // cache key matches what `useUpdateIssue.onSettled` invalidates (UUID).
+  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(resolvedId));
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
