@@ -1470,6 +1470,11 @@ func (h *Handler) RetryAgentComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	retryInstruction, err := decodeRetryInstruction(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	workspaceID := h.resolveWorkspaceID(r)
 	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
 		ID:          parseUUID(commentID),
@@ -1543,17 +1548,27 @@ func (h *Handler) RetryAgentComment(w http.ResponseWriter, r *http.Request) {
 		issue.AssigneeID.Valid && uuidToString(issue.AssigneeID) == uuidToString(comment.AuthorID)
 
 	if isAssigneeAgent {
+		taskContext, err := service.TaskContextWithRetryInstruction(nil, retryInstruction)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if triggerID.Valid {
-			_, err = h.TaskService.EnqueueTaskForIssue(r.Context(), issue, triggerID)
+			_, err = h.TaskService.EnqueueTaskForIssueWithContext(r.Context(), issue, taskContext, triggerID)
 		} else {
-			_, err = h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			_, err = h.TaskService.EnqueueTaskForIssueWithContext(r.Context(), issue, taskContext)
 		}
 	} else {
 		if !triggerID.Valid {
 			writeError(w, http.StatusBadRequest, "cannot retry: no member message in thread to use as context")
 			return
 		}
-		_, err = h.TaskService.EnqueueTaskForMention(r.Context(), issue, comment.AuthorID, triggerID)
+		taskContext, ctxErr := service.TaskContextWithRetryInstruction(nil, retryInstruction)
+		if ctxErr != nil {
+			writeError(w, http.StatusBadRequest, ctxErr.Error())
+			return
+		}
+		_, err = h.TaskService.EnqueueTaskForMentionWithContext(r.Context(), issue, comment.AuthorID, triggerID, taskContext)
 	}
 	if err != nil {
 		slog.Warn("retry agent comment: enqueue failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentID)...)

@@ -455,6 +455,17 @@
     "update_failed": "Failed to update label",
     "delete_failed": "Failed to delete label"
   },
+  "retry_with_note": {
+    "action": "Retry with note",
+    "title": "Retry with note",
+    "description": "Add guidance for the next agent run.",
+    "label": "What should the agent pay attention to?",
+    "placeholder": "Describe what should change on this retry...",
+    "hint": "This note is added to the next task prompt.",
+    "too_long": "Keep the note under {{max}} characters.",
+    "cancel": "Cancel",
+    "submit": "Retry"
+  },
   "backlog_hint": {
     "title": "Agent is paused in Backlog",
     "description": "This issue is parked, so the assigned agent will wait. Move it to Todo when you want the agent to start.",

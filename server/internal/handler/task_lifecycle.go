@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -104,8 +105,38 @@ type RerunIssueRequest struct {
 	// (and reuses its leader/worker role) rather than the issue's current
 	// assignee — so clicking retry on row that belonged to a now-displaced
 	// agent re-fires that same agent, not the new assignee.
-	TaskID string `json:"task_id,omitempty"`
+	TaskID           string `json:"task_id,omitempty"`
+	RetryInstruction string `json:"retry_instruction,omitempty"`
 }
+
+const maxRetryInstructionRunes = 2000
+
+type retryInstructionRequest struct {
+	RetryInstruction string `json:"retry_instruction,omitempty"`
+}
+
+func decodeRetryInstruction(r *http.Request) (string, error) {
+	if r.ContentLength == 0 {
+		return "", nil
+	}
+	var req retryInstructionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		return "", err
+	}
+	return validateRetryInstruction(req.RetryInstruction)
+}
+
+func validateRetryInstruction(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if len([]rune(value)) > maxRetryInstructionRunes {
+		return "", errRetryInstructionTooLong{}
+	}
+	return value, nil
+}
+
+type errRetryInstructionTooLong struct{}
+
+func (errRetryInstructionTooLong) Error() string { return "retry_instruction too long" }
 
 // RerunIssue manually re-enqueues an agent run for the issue. By default it
 // targets the issue's current assignee (agent or squad leader); if the
@@ -133,6 +164,11 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	retryInstruction, err := validateRetryInstruction(req.RetryInstruction)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	var sourceTaskID pgtype.UUID
 	if req.TaskID != "" {
@@ -143,7 +179,7 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		sourceTaskID = parsed
 	}
 
-	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{})
+	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, retryInstruction)
 	if err != nil {
 		slog.Warn("issue rerun failed", "issue_id", id, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
