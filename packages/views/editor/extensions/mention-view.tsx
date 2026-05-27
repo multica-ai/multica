@@ -19,6 +19,7 @@ import type { NodeViewProps } from "@tiptap/react";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
 import { IssueChip } from "../../issues/components/issue-chip";
+import { saveIssueDetailScrollPositionFromTarget } from "../../issues/utils/issue-detail-scroll-state";
 
 export function MentionView({ node }: NodeViewProps) {
   const { type, id, label } = node.attrs;
@@ -52,6 +53,7 @@ function IssueMention({
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    saveIssueDetailScrollPositionFromTarget(e.currentTarget);
     if (e.metaKey || e.ctrlKey || e.shiftKey) {
       if (openInNewTab) openInNewTab(issuePath, fallbackLabel);
       return;

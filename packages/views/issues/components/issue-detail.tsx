@@ -83,6 +83,10 @@ import { cn } from "@multica/ui/lib/utils";
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+import {
+  getIssueDetailScrollPosition,
+  saveIssueDetailScrollPosition,
+} from "../utils/issue-detail-scroll-state";
 
 function SubscriberPopoverContent({
   members,
@@ -724,6 +728,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!scrollContainerEl) return;
+    const save = () => saveIssueDetailScrollPosition(wsId, id, scrollContainerEl.scrollTop);
+    scrollContainerEl.addEventListener("scroll", save, { passive: true });
+    return () => {
+      scrollContainerEl.removeEventListener("scroll", save);
+      save();
+    };
+  }, [id, scrollContainerEl, wsId]);
+
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
   const [expandedResolved, setExpandedResolved] = useState<Set<string>>(() => new Set());
@@ -1060,6 +1074,25 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [allChildrenSelected, childIssueIds, deselectIds, selectIds]);
 
   const loading = issueLoading;
+
+  useEffect(() => {
+    if (!scrollContainerEl || highlightCommentId || loading) return;
+    const savedScrollTop = getIssueDetailScrollPosition(wsId, id);
+    if (savedScrollTop === undefined) return;
+
+    let frame = 0;
+    let cancelled = false;
+    const restore = (remainingFrames: number) => {
+      scrollContainerEl.scrollTop = savedScrollTop;
+      if (cancelled || remainingFrames <= 0) return;
+      frame = window.requestAnimationFrame(() => restore(remainingFrames - 1));
+    };
+    restore(8);
+    return () => {
+      cancelled = true;
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [highlightCommentId, id, loading, scrollContainerEl, wsId]);
 
   // Deep-link landing. Semantically equivalent to navigating to
   // `#comment-${id}`: find the element with that id, scrollIntoView it.
@@ -1740,6 +1773,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <div
           ref={setScrollContainerEl}
           data-tab-scroll-root
+          data-issue-detail-scroll-root
+          data-workspace-id={wsId}
+          data-issue-id={id}
+          data-testid="issue-detail-scroll-root"
           className="relative flex-1 overflow-y-auto"
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">

@@ -3,6 +3,7 @@
 import { AppLink } from "../../navigation";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { IssueChip } from "./issue-chip";
+import { saveIssueDetailScrollPositionFromTarget } from "../utils/issue-detail-scroll-state";
 
 interface IssueMentionCardProps {
   issueId: string;
@@ -18,7 +19,11 @@ interface IssueMentionCardProps {
 export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardProps) {
   const p = useWorkspacePaths();
   return (
-    <AppLink href={p.issueDetail(issueId)} className="issue-mention not-prose inline-flex">
+    <AppLink
+      href={p.issueDetail(issueId)}
+      className="issue-mention not-prose inline-flex"
+      onClick={(e) => saveIssueDetailScrollPositionFromTarget(e.currentTarget)}
+    >
       <IssueChip
         issueId={issueId}
         fallbackLabel={fallbackLabel}

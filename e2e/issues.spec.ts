@@ -82,6 +82,32 @@ test.describe("Issues", () => {
     ).toBeVisible();
   });
 
+  test("restores issue detail scroll after opening an issue mention and going back", async ({ page }) => {
+    const mentioned = await api.createIssue("E2E Mention Target " + Date.now());
+    const filler = Array.from({ length: 70 }, (_, i) => `Filler line ${i + 1}`).join("\n\n");
+    const original = await api.createIssue("E2E Long Mention Source " + Date.now(), {
+      description: `${filler}\n\nOpen [${mentioned.identifier}](mention://issue/${mentioned.id}) from here.\n\n${filler}`,
+    });
+
+    await page.goto(`/e2e-workspace/issues/${original.id}`);
+    const scrollRoot = page.getByTestId("issue-detail-scroll-root");
+    await expect(scrollRoot).toBeVisible();
+
+    const mention = page.locator(`a.issue-mention[href$="/issues/${mentioned.id}"]`).first();
+    await mention.scrollIntoViewIfNeeded();
+    const before = await scrollRoot.evaluate((el) => el.scrollTop);
+    expect(before).toBeGreaterThan(200);
+
+    await mention.click();
+    await page.waitForURL(new RegExp(`/issues/${mentioned.id}$`));
+    await page.goBack();
+    await page.waitForURL(new RegExp(`/issues/${original.id}$`));
+
+    await expect
+      .poll(() => scrollRoot.evaluate((el) => el.scrollTop))
+      .toBeGreaterThan(before - 80);
+  });
+
   test("can dismiss issue creation", async ({ page }) => {
     await page.getByRole("button", { name: "New Issue" }).click();
 

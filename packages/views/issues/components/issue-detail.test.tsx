@@ -335,6 +335,7 @@ vi.mock("react-virtuoso", () => ({
 // with a spy so the deep-link effect's call can be observed.
 beforeEach(() => {
   scrollIntoViewSpy.mockClear();
+  resetIssueDetailScrollPositionsForTest();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
     configurable: true,
     writable: true,
@@ -435,6 +436,10 @@ const mockTimeline: TimelineEntry[] = [
 // ---------------------------------------------------------------------------
 
 import { IssueDetail } from "./issue-detail";
+import {
+  resetIssueDetailScrollPositionsForTest,
+  saveIssueDetailScrollPosition,
+} from "../utils/issue-detail-scroll-state";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1108,6 +1113,16 @@ describe("IssueDetail (shared)", () => {
         "issue-1",
         expect.objectContaining({ description: "" }),
       );
+    });
+  });
+
+  it("restores the saved issue-detail scroll position on remount", async () => {
+    saveIssueDetailScrollPosition("ws-1", "issue-1", 640);
+    renderIssueDetail();
+
+    const scrollRoot = await screen.findByTestId("issue-detail-scroll-root");
+    await waitFor(() => {
+      expect(scrollRoot.scrollTop).toBe(640);
     });
   });
 });

@@ -34,6 +34,7 @@ import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import type { Attachment } from "@multica/core/types";
 import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
+import { saveIssueDetailScrollPositionFromTarget } from "../issues/utils/issue-detail-scroll-state";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { isAllowedFileCardHref } from "@multica/ui/markdown";
@@ -112,6 +113,7 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
+        saveIssueDetailScrollPositionFromTarget(e.currentTarget);
         if (e.metaKey || e.ctrlKey || e.shiftKey) {
           if (openInNewTab) {
             openInNewTab(path, label);
