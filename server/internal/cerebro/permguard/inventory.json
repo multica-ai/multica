@@ -753,6 +753,10 @@
       "gate": "self_only"
     },
     {
+      "id": "POST /api/runtimes/{runtimeId}/archive-agents-and-delete",
+      "gate": "cerebro_runtime_access"
+    },
+    {
       "id": "POST /api/runtimes/{runtimeId}/local-skills",
       "gate": "cerebro_runtime_access"
     },
@@ -939,6 +943,10 @@
     {
       "id": "PUT /api/agents/{id}/",
       "gate": "cerebro_agent_access"
+    },
+    {
+      "id": "PUT /api/agents/{id}/env",
+      "gate": "workspace_admin"
     },
     {
       "id": "PUT /api/agents/{id}/infisical-folders",
@@ -1327,6 +1335,14 @@
     {
       "id": "agent e2e-spawn",
       "exempt": "developer-tool — local spawn against own daemon, no server mutation"
+    },
+    {
+      "id": "agent env get",
+      "exempt": "read-only — wraps GET /api/agents/{id}/env"
+    },
+    {
+      "id": "agent env set",
+      "gate": "via:PUT /api/agents/{id}/env"
     },
     {
       "id": "agent get",
