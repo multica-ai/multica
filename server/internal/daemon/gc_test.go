@@ -832,6 +832,74 @@ func TestShouldCleanTaskDir_KindDispatch(t *testing.T) {
 	}
 }
 
+func TestShouldCleanTaskDir_EmptyParentIDFallsBackToOrphanMTime(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		meta *execenv.GCMeta
+	}{
+		{
+			name: "legacy issue meta",
+			meta: &execenv.GCMeta{WorkspaceID: "ws"},
+		},
+		{
+			name: "issue meta",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindIssue, WorkspaceID: "ws"},
+		},
+		{
+			name: "chat meta",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindChat, WorkspaceID: "ws"},
+		},
+		{
+			name: "autopilot run meta",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, WorkspaceID: "ws"},
+		},
+		{
+			name: "quick create meta",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindQuickCreate, WorkspaceID: "ws"},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			requests := 0
+			mux := http.NewServeMux()
+			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				http.Error(w, "unexpected request", http.StatusBadRequest)
+			})
+
+			d := newGCTestDaemon(t, mux)
+			d.cfg.GCOrphanTTL = 365 * 24 * time.Hour
+			taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", tc.name, tc.meta)
+
+			got := d.shouldCleanTaskDir(context.Background(), taskDir)
+			if got != gcActionSkip {
+				t.Fatalf("empty parent id should skip while under orphan TTL, got %d", got)
+			}
+			if requests != 0 {
+				t.Fatalf("empty parent id should not call gc-check endpoint, got %d requests", requests)
+			}
+
+			old := time.Now().Add(-400 * 24 * time.Hour)
+			if err := os.Chtimes(taskDir, old, old); err != nil {
+				t.Fatalf("chtimes: %v", err)
+			}
+			got = d.shouldCleanTaskDir(context.Background(), taskDir)
+			if got != gcActionOrphan {
+				t.Fatalf("empty parent id over orphan TTL should orphan, got %d", got)
+			}
+			if requests != 0 {
+				t.Fatalf("empty parent id should not call gc-check endpoint after mtime fallback, got %d requests", requests)
+			}
+		})
+	}
+}
+
 // TestShouldCleanTaskDir_ChatHardDeletedFreshMtime locks acceptance #3:
 // when a user hard-deletes a chat session, the workdir must be reclaimed
 // on the next GC cycle (≤ GCInterval), not deferred to GCOrphanTTL. A
