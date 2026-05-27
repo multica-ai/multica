@@ -218,9 +218,10 @@ func createInboxItemForChannel(
 		Title:         d.Title,
 		Body:          util.StrToText(d.Body),
 		ActorType:     util.StrToText(d.Actor.ActorType),
-		ActorID:       parseUUID(d.Actor.ActorID),
-		Details:       d.Details,
-		Route:         route,
+		// CEREBRO-PATCH(issue-date-reminders): system-generated notifications (e.g. date reminders) have no member/agent actor — NULL the actor_id instead of panicking on an empty string.
+		ActorID: optionalUUID(d.Actor.ActorID),
+		Details: d.Details,
+		Route:   route,
 	})
 	if err != nil {
 		slog.Error("inbox item creation failed",

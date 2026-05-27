@@ -502,6 +502,13 @@ type CerebroGroupRuntimeAccess struct {
 	GrantedAt pgtype.Timestamptz `json:"granted_at"`
 }
 
+type CerebroIssueDateReminder struct {
+	IssueID      pgtype.UUID        `json:"issue_id"`
+	Kind         string             `json:"kind"`
+	ReminderDate pgtype.Date        `json:"reminder_date"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroIssueDueTime struct {
 	IssueID   pgtype.UUID        `json:"issue_id"`
 	DueAt     pgtype.Timestamptz `json:"due_at"`

@@ -38,7 +38,9 @@ export type CerebroFlagKey =
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
   | "cerebro_agent_avatar"
   // FIR-2385: private agents visible-but-locked + tag → run-request to owner.
-  | "cerebro_private_agent_requests";
+  | "cerebro_private_agent_requests"
+  // FIR-2412: notify the assignee when an issue's start/due date arrives.
+  | "cerebro_date_reminders";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -88,6 +90,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // into a run-request in the owner's inbox. Off restores the old behavior
   // (private agents hidden, tags silently dropped).
   cerebro_private_agent_requests: true,
+  // FIR-2412: on by default — the assignee gets an inbox + push reminder when
+  // a start/due date arrives. Off hides the settings rows and the UI control.
+  cerebro_date_reminders: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -281,5 +286,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Private agent run requests",
     description:
       "Show private agents you don't own as visible-but-locked in the agent list and @-picker (name + description only). Tagging one no longer silently drops — it sends a run-request to the agent's owner, who can run it from their inbox. The owner stays in control; server-side foreign-trigger blocking is unchanged. FIR-2385.",
+  },
+  {
+    key: "cerebro_date_reminders",
+    label: "Start / due date reminders",
+    description:
+      "Notify the assignee when an issue's start or due date arrives (the day-of, in their timezone). Delivery follows each user's per-channel notification preferences (inbox / mobile push / desktop). Off hides the settings rows. FIR-2412.",
   },
 ];

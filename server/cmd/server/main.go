@@ -340,6 +340,8 @@ func main() {
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	// CEREBRO-PATCH(inbox-reminders-due): due reminders re-enter inbox live and can fire reminder-only mobile push.
 	go runReminderDueSweeper(sweepCtx, queries, bus)
+	// CEREBRO-PATCH(issue-date-reminders): fire a notification when an issue's start/due date arrives (the day-of).
+	go runIssueDateReminderSweeper(sweepCtx, queries, bus)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
 	// CEREBRO-PATCH(cerebro-account-token-retention): bound token telemetry storage to the rolling windows.

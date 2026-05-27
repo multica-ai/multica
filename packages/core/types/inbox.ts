@@ -24,6 +24,9 @@ export type InboxItemType =
   | "quick_create_failed"
   // CEREBRO-PATCH(inbox-reminders-type): reminders are muted inbox items scheduled for later.
   | "reminder"
+  // CEREBRO-PATCH(issue-date-reminders): fired when an issue's start/due date arrives.
+  | "due_date_reminder"
+  | "start_date_reminder"
   // CEREBRO-PATCH(core-types-inbox): FIR-2385 — a non-owner tagged a private agent; the owner can run it.
   | "private_agent_run_request";
 
