@@ -656,26 +656,34 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		pending = append(pending, pendingAttachment{path: filePath, data: data})
 	}
 
+	attachmentIDs := make([]string, 0, len(pending))
+	cleanupUploadedAttachments := func() {
+		for _, id := range attachmentIDs {
+			if err := client.DeleteJSON(ctx, "/api/attachments/"+id); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: cleanup uploaded attachment %s failed: %v\n", id, err)
+			}
+		}
+	}
+	for _, att := range pending {
+		id, uploadErr := client.UploadFile(ctx, att.data, att.path, "")
+		if uploadErr != nil {
+			cleanupUploadedAttachments()
+			return fmt.Errorf("upload attachment %s: %w", att.path, uploadErr)
+		}
+		attachmentIDs = append(attachmentIDs, id)
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
+	}
+	if len(attachmentIDs) > 0 {
+		body["attachment_ids"] = attachmentIDs
+	}
+
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues", body, &result); err != nil {
+		cleanupUploadedAttachments()
 		if msg, ok := activeDuplicateIssueCreateMessage(err); ok {
 			return errors.New(msg)
 		}
 		return fmt.Errorf("create issue: %w", err)
-	}
-
-	// Upload attachments and link them to the newly created issue.
-	// Failures here are partial-success: the issue exists already, so
-	// turning a non-zero exit on the caller would invite a retry that
-	// duplicates the issue. Warn on stderr and continue.
-	issueID := strVal(result, "id")
-	for _, att := range pending {
-		if _, uploadErr := client.UploadFile(ctx, att.data, att.path, issueID); uploadErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: upload attachment %s failed (issue already created, %s): %v\n",
-				att.path, strVal(result, "identifier"), uploadErr)
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 
 	output, _ := cmd.Flags().GetString("output")

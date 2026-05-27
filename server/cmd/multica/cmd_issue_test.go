@@ -318,6 +318,112 @@ func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
 	}
 }
 
+func TestRunIssueCreateSendsPreUploadedAttachmentIDs(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/one.txt"
+	if err := os.WriteFile(path, []byte("one"), 0o600); err != nil {
+		t.Fatalf("write attachment: %v", err)
+	}
+
+	var issueBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/upload-file":
+			if r.FormValue("issue_id") != "" {
+				t.Errorf("upload issue_id = %q, want empty pre-create upload", r.FormValue("issue_id"))
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "att-1"})
+		case "/api/issues":
+			if err := json.NewDecoder(r.Body).Decode(&issueBody); err != nil {
+				t.Errorf("decode issue body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+				"title":      "With attachment",
+				"status":     "todo",
+				"priority":   "none",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "With attachment")
+	_ = cmd.Flags().Set("attachment", path)
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+
+	got, ok := issueBody["attachment_ids"].([]any)
+	if !ok || len(got) != 1 || got[0] != "att-1" {
+		t.Fatalf("attachment_ids = %#v, want [att-1]", issueBody["attachment_ids"])
+	}
+}
+
+func TestRunIssueCreateCleansUpUploadedAttachmentsOnLaterUploadFailure(t *testing.T) {
+	dir := t.TempDir()
+	first := dir + "/one.txt"
+	second := dir + "/two.txt"
+	if err := os.WriteFile(first, []byte("one"), 0o600); err != nil {
+		t.Fatalf("write first attachment: %v", err)
+	}
+	if err := os.WriteFile(second, []byte("two"), 0o600); err != nil {
+		t.Fatalf("write second attachment: %v", err)
+	}
+
+	uploads := 0
+	var deletes []string
+	createdIssue := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/upload-file":
+			uploads++
+			if uploads == 1 {
+				json.NewEncoder(w).Encode(map[string]any{"id": "att-1"})
+				return
+			}
+			http.Error(w, "upload failed", http.StatusInternalServerError)
+		case "/api/attachments/att-1":
+			if r.Method != http.MethodDelete {
+				t.Errorf("cleanup method = %s, want DELETE", r.Method)
+			}
+			deletes = append(deletes, r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		case "/api/issues":
+			createdIssue = true
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "With attachments")
+	_ = cmd.Flags().Set("attachment", first+","+second)
+	err := runIssueCreate(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "upload attachment") {
+		t.Fatalf("runIssueCreate error = %v, want upload attachment error", err)
+	}
+	if createdIssue {
+		t.Fatalf("issue was created after attachment upload failure")
+	}
+	if len(deletes) != 1 || deletes[0] != "/api/attachments/att-1" {
+		t.Fatalf("cleanup deletes = %#v, want [/api/attachments/att-1]", deletes)
+	}
+}
+
 func TestTruncateID(t *testing.T) {
 	tests := []struct {
 		name string

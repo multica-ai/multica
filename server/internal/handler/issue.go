@@ -2110,30 +2110,50 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var linkedAttachments []db.Attachment
+	if len(attachmentIDs) > 0 {
+		if err := qtx.LinkAttachmentsToIssue(r.Context(), db.LinkAttachmentsToIssueParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			Column3:     attachmentIDs,
+		}); err != nil {
+			slog.Warn("link issue attachments failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID), "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to link attachments")
+			return
+		}
+		linkedAttachments, err = qtx.ListAttachmentsByIssue(r.Context(), db.ListAttachmentsByIssueParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			slog.Warn("list issue attachments failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID), "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to link attachments")
+			return
+		}
+		linkedByID := make(map[string]struct{}, len(linkedAttachments))
+		for _, att := range linkedAttachments {
+			linkedByID[uuidToString(att.ID)] = struct{}{}
+		}
+		for _, id := range attachmentIDs {
+			if _, ok := linkedByID[uuidToString(id)]; !ok {
+				writeError(w, http.StatusBadRequest, "attachment not found or already linked")
+				return
+			}
+		}
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create issue")
 		return
 	}
 
-	// Link any pre-uploaded attachments to this issue.
-	if len(attachmentIDs) > 0 {
-		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
-	}
-
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
 
-	// Fetch linked attachments so they appear in the response.
-	if len(attachmentIDs) > 0 {
-		attachments, err := h.Queries.ListAttachmentsByIssue(r.Context(), db.ListAttachmentsByIssueParams{
-			IssueID:     issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-		})
-		if err == nil && len(attachments) > 0 {
-			resp.Attachments = make([]AttachmentResponse, len(attachments))
-			for i, a := range attachments {
-				resp.Attachments[i] = h.attachmentToResponse(a)
-			}
+	if len(linkedAttachments) > 0 {
+		resp.Attachments = make([]AttachmentResponse, len(linkedAttachments))
+		for i, a := range linkedAttachments {
+			resp.Attachments[i] = h.attachmentToResponse(a)
 		}
 	}
 

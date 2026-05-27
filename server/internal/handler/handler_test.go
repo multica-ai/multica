@@ -1429,6 +1429,76 @@ func TestCreateIssueRejectsMalformedAttachmentIDBeforeWrite(t *testing.T) {
 	}
 }
 
+func TestCreateIssueLinksAttachmentsAtomically(t *testing.T) {
+	var attachmentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+		VALUES ($1, 'member', $2, 'create-attachment.txt', 'https://cdn.example.com/create-attachment.txt', 'text/plain', 3)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&attachmentID); err != nil {
+		t.Fatalf("insert attachment: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, attachmentID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          "Create issue with attachment",
+		"attachment_ids": []string{attachmentID},
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode issue response: %v", err)
+	}
+	defer func() {
+		cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+	}()
+	if len(created.Attachments) != 1 || created.Attachments[0].ID != attachmentID {
+		t.Fatalf("response attachments = %#v, want linked attachment %s", created.Attachments, attachmentID)
+	}
+
+	var linkedIssueID string
+	if err := testPool.QueryRow(context.Background(), `SELECT issue_id::text FROM attachment WHERE id = $1`, attachmentID).Scan(&linkedIssueID); err != nil {
+		t.Fatalf("query linked attachment: %v", err)
+	}
+	if linkedIssueID != created.ID {
+		t.Fatalf("attachment issue_id = %q, want %q", linkedIssueID, created.ID)
+	}
+}
+
+func TestCreateIssueRejectsUnlinkableAttachmentIDBeforeCommit(t *testing.T) {
+	var before int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&before); err != nil {
+		t.Fatalf("count issues before: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          "Create issue with missing attachment",
+		"attachment_ids": []string{"00000000-0000-0000-0000-000000000099"},
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateIssue: expected 400 for unlinkable attachment_ids, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var after int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&after); err != nil {
+		t.Fatalf("count issues after: %v", err)
+	}
+	if after != before {
+		t.Fatalf("CreateIssue: unlinkable attachment_ids should roll back issue, count before=%d after=%d", before, after)
+	}
+}
+
 // TestUpdateIssueRejectsMalformedAssigneeID is the equivalent for the update
 // path, where the same parseUUID-shaped gap existed on a previously-unassigned
 // issue.
