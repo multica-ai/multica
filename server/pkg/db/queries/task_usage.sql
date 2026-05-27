@@ -132,6 +132,10 @@ SELECT
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    -- CEREBRO-PATCH(task-usage-gateway-cost): real gateway spend rolled into the
+    -- hourly bucket so the workspace dashboard trend chart shows the real charge
+    -- instead of a token estimate (FIR-2405).
+    SUM(cost_cents)::bigint          AS cost_cents,
     SUM(task_count)::int             AS task_count
 FROM task_usage_hourly
 WHERE workspace_id = $1
@@ -160,6 +164,9 @@ SELECT
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    -- CEREBRO-PATCH(task-usage-gateway-cost): real gateway spend per (agent, model)
+    -- so the dashboard's per-agent cost matches the real charge (FIR-2405).
+    SUM(cost_cents)::bigint          AS cost_cents,
     SUM(task_count)::int             AS task_count
 FROM task_usage_hourly
 WHERE workspace_id = $1

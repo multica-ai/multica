@@ -333,9 +333,18 @@ export function collectUnmappedModels(rows: readonly Priceable[]): string[] {
 type Priceable = Pick<
   RuntimeUsage,
   "model" | "input_tokens" | "output_tokens" | "cache_read_tokens" | "cache_write_tokens"
->;
+> & {
+  // CEREBRO-PATCH(task-usage-gateway-cost): optional real Firtal-gateway charge
+  // (in cents) for this usage row. Present on gateway-backed buckets, absent /
+  // 0 for daemon / non-gateway runtimes (FIR-2405).
+  cost_cents?: number;
+};
 
 export function estimateCost(usage: Priceable): number {
+  // CEREBRO-PATCH(task-usage-gateway-cost): prefer the real gateway charge when
+  // the row carries one; only fall back to the token estimate for buckets the
+  // gateway never priced (daemon / local runtimes).
+  if (usage.cost_cents && usage.cost_cents > 0) return usage.cost_cents / 100;
   const pricing = resolvePricing(usage.model);
   if (!pricing) return 0;
   return (
@@ -356,14 +365,31 @@ export interface CostBreakdown {
 
 export function estimateCostBreakdown(usage: Priceable): CostBreakdown {
   const pricing = resolvePricing(usage.model);
-  if (!pricing) {
-    return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-  }
+  const est: CostBreakdown = pricing
+    ? {
+        input: (usage.input_tokens * pricing.input) / 1_000_000,
+        output: (usage.output_tokens * pricing.output) / 1_000_000,
+        cacheRead: (usage.cache_read_tokens * pricing.cacheRead) / 1_000_000,
+        cacheWrite: (usage.cache_write_tokens * pricing.cacheWrite) / 1_000_000,
+      }
+    : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+  // CEREBRO-PATCH(task-usage-gateway-cost): when the gateway reported a real
+  // total for this row, rescale the per-component estimate so the stacked
+  // breakdown sums to the real charge while keeping the input/output/cache
+  // proportions. This keeps the cost charts on the real number (FIR-2405)
+  // without the gateway having to report a per-component split it doesn't
+  // emit. Unpriced models (no proportions) attribute the whole charge to input.
+  const real = usage.cost_cents && usage.cost_cents > 0 ? usage.cost_cents / 100 : null;
+  if (real == null) return est;
+  const estTotal = est.input + est.output + est.cacheRead + est.cacheWrite;
+  if (estTotal <= 0) return { input: real, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const k = real / estTotal;
   return {
-    input: (usage.input_tokens * pricing.input) / 1_000_000,
-    output: (usage.output_tokens * pricing.output) / 1_000_000,
-    cacheRead: (usage.cache_read_tokens * pricing.cacheRead) / 1_000_000,
-    cacheWrite: (usage.cache_write_tokens * pricing.cacheWrite) / 1_000_000,
+    input: est.input * k,
+    output: est.output * k,
+    cacheRead: est.cacheRead * k,
+    cacheWrite: est.cacheWrite * k,
   };
 }
 

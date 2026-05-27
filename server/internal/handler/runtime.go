@@ -18,7 +18,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/pricing"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -152,10 +151,11 @@ type RuntimeUsageResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	// CostCents is the row's cost computed against pkg/pricing — the same
-	// authoritative table used for budget enforcement. Returning it from the
-	// API keeps the dashboard from carrying a duplicate (and drifting)
-	// pricing table on the frontend.
+	// CostCents is the bucket's spend. CEREBRO-PATCH(task-usage-gateway-cost):
+	// it is the real Firtal-gateway charge when the bucket carried one, and
+	// otherwise the pkg/pricing token estimate (preferGatewayCost). Returning
+	// it from the API keeps the dashboard from carrying a duplicate (and
+	// drifting) pricing table on the frontend.
 	CostCents int64 `json:"cost_cents"`
 }
 
@@ -216,12 +216,10 @@ func (h *Handler) listRuntimeUsage(ctx context.Context, runtimeID pgtype.UUID, t
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
-			CostCents: pricing.ComputeCents(row.Model, pricing.Usage{
-				InputTokens:      row.InputTokens,
-				OutputTokens:     row.OutputTokens,
-				CacheReadTokens:  row.CacheReadTokens,
-				CacheWriteTokens: row.CacheWriteTokens,
-			}),
+			// CEREBRO-PATCH(task-usage-gateway-cost): prefer the real gateway spend
+			// rolled into the hourly bucket; fall back to the token estimate only
+			// for buckets with no gateway cost (FIR-2405).
+			CostCents: preferGatewayCost(row.CostCents, row.Model, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheWriteTokens),
 		}
 	}
 	return resp, nil
@@ -269,9 +267,10 @@ func (h *Handler) GetRuntimeTaskActivity(w http.ResponseWriter, r *http.Request)
 }
 
 // RuntimeUsageByAgentResponse is one (agent, model) row of "Cost by agent".
-// Model stays on the wire because cost is computed client-side from a model
-// pricing table, intentionally not stored server-side so pricing changes
-// don't require a back-fill. The client groups by agent_id and sums.
+// Model stays on the wire so the client can still estimate cost from its
+// pricing table for non-gateway runtimes. CEREBRO-PATCH(task-usage-gateway-cost):
+// cost_cents carries the real gateway charge for this (agent, model) bucket
+// when present (0 otherwise); the client prefers it over the estimate.
 type RuntimeUsageByAgentResponse struct {
 	AgentID          string `json:"agent_id"`
 	Model            string `json:"model"`
@@ -279,6 +278,7 @@ type RuntimeUsageByAgentResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	CostCents        int64  `json:"cost_cents"`
 	TaskCount        int32  `json:"task_count"`
 }
 
@@ -324,7 +324,9 @@ func (h *Handler) GetRuntimeUsageByAgent(w http.ResponseWriter, r *http.Request)
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
-			TaskCount:        row.TaskCount,
+			// CEREBRO-PATCH(task-usage-gateway-cost): prefer the real gateway spend.
+			CostCents: preferGatewayCost(row.CostCents, row.Model, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheWriteTokens),
+			TaskCount: row.TaskCount,
 		}
 	}
 
@@ -341,7 +343,10 @@ type RuntimeUsageByHourResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	TaskCount        int32  `json:"task_count"`
+	// CEREBRO-PATCH(task-usage-gateway-cost): real gateway charge for this
+	// (hour, model) bucket when present (0 otherwise).
+	CostCents int64 `json:"cost_cents"`
+	TaskCount int32 `json:"task_count"`
 }
 
 // GetRuntimeUsageByHour returns hourly (0..23) token aggregates for a
@@ -389,7 +394,9 @@ func (h *Handler) GetRuntimeUsageByHour(w http.ResponseWriter, r *http.Request) 
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
-			TaskCount:        row.TaskCount,
+			// CEREBRO-PATCH(task-usage-gateway-cost): prefer the real gateway spend.
+			CostCents: preferGatewayCost(row.CostCents, row.Model, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheWriteTokens),
+			TaskCount: row.TaskCount,
 		}
 	}
 

@@ -376,6 +376,9 @@ const DashboardUsageDailySchema = z.object({
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
+  // CEREBRO-PATCH(task-usage-gateway-cost): real gateway charge (cents); 0 when
+  // absent so the cost utils fall back to the token estimate (FIR-2405).
+  cost_cents: z.number().default(0),
   task_count: z.number().default(0),
 }).loose();
 
@@ -388,6 +391,8 @@ const DashboardUsageByAgentSchema = z.object({
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
+  // CEREBRO-PATCH(task-usage-gateway-cost): real gateway charge (cents); 0 when absent.
+  cost_cents: z.number().default(0),
   task_count: z.number().default(0),
 }).loose();
 

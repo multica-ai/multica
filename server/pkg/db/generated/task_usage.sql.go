@@ -470,6 +470,9 @@ SELECT
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    -- CEREBRO-PATCH(task-usage-gateway-cost): real gateway spend per (agent, model)
+    -- so the dashboard's per-agent cost matches the real charge (FIR-2405).
+    SUM(cost_cents)::bigint          AS cost_cents,
     SUM(task_count)::int             AS task_count
 FROM task_usage_hourly
 WHERE workspace_id = $1
@@ -492,6 +495,7 @@ type ListDashboardUsageByAgentRow struct {
 	OutputTokens     int64       `json:"output_tokens"`
 	CacheReadTokens  int64       `json:"cache_read_tokens"`
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	CostCents        int64       `json:"cost_cents"`
 	TaskCount        int32       `json:"task_count"`
 }
 
@@ -523,6 +527,7 @@ func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboa
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+			&i.CostCents,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
@@ -543,6 +548,10 @@ SELECT
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    -- CEREBRO-PATCH(task-usage-gateway-cost): real gateway spend rolled into the
+    -- hourly bucket so the workspace dashboard trend chart shows the real charge
+    -- instead of a token estimate (FIR-2405).
+    SUM(cost_cents)::bigint          AS cost_cents,
     SUM(task_count)::int             AS task_count
 FROM task_usage_hourly
 WHERE workspace_id = $1
@@ -566,6 +575,7 @@ type ListDashboardUsageDailyRow struct {
 	OutputTokens     int64       `json:"output_tokens"`
 	CacheReadTokens  int64       `json:"cache_read_tokens"`
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	CostCents        int64       `json:"cost_cents"`
 	TaskCount        int32       `json:"task_count"`
 }
 
@@ -604,6 +614,7 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+			&i.CostCents,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
