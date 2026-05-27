@@ -51,13 +51,14 @@
     "copy_failed": "复制失败"
   },
   "mention": {
-    "_comment_cerebro_patch": "CEREBRO-PATCH(mention-access-locale-zh): JEH-1250 — no_project_access tooltip",
+    "_comment_cerebro_patch": "CEREBRO-PATCH(mention-access-locale-zh): JEH-1250 no_project_access + FIR-2349 no_trigger_private tooltips",
     "group_users": "用户",
     "group_issues": "issue",
     "all_members": "所有成员",
     "searching": "搜索中...",
     "no_results": "无结果",
-    "no_project_access": "无权访问此项目"
+    "no_project_access": "无权访问此项目",
+    "no_trigger_private": "不会触发 — 个人 Agent，仅所有者可唤醒"
   },
   "code_block": {
     "copy_code": "复制代码"
