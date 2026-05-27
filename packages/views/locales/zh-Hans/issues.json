@@ -301,7 +301,15 @@
     "_comment_pin": "CEREBRO-PATCH(i18n-reply-pin): JEH-1065 — pin toggle on issue reply input",
     "pin_tooltip": "固定回复到视口",
     "unpin_tooltip": "取消固定回复",
-    "pinned_placeholder": "回复已固定 — 滚动浏览不受影响"
+    "pinned_placeholder": "回复已固定 — 滚动浏览不受影响",
+    "_reply_target_agent_indicator": "CEREBRO-PATCH(i18n-reply-target-agent-indicator): FIR-2349 reply composer agent trigger target bar",
+    "target_label": "回复给",
+    "target_trigger_inactive": "不会触发",
+    "target_trigger_title": "{{name}} 不会被触发",
+    "target_trigger_description": "个人智能体。只有所有者可以唤醒它。",
+    "target_owner_label": "所有者",
+    "target_tag_owner": "标记所有者",
+    "target_owner_missing": "无法在工作区列表中找到所有者。"
   },
   "agent_activity": {
     "hover_header_other": "{{count}} 个智能体正在工作",
