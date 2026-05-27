@@ -17,6 +17,8 @@ import {
   Plug,
   // CEREBRO-PATCH(settings-page-accounts-icon): Konti tab icon (JEH-999)
   KeyRound,
+  // CEREBRO-PATCH(settings-page-status-models): FIR-1550 status models tab icon
+  Workflow,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -43,6 +45,8 @@ import { GroupsTab } from "@multica/cerebro-groups/views";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(settings-page-accounts-import): cerebro Konti tab (JEH-999)
 import { AccountsSettingsTab } from "@multica/cerebro-runtime/views";
+// CEREBRO-PATCH(settings-page-status-models): FIR-1550 workflow v2a status models tab
+import { StatusModelsTab } from "@multica/cerebro-status-models/views";
 import { useT } from "../../i18n";
 import {
   CerebroMobileTabNav,
@@ -82,6 +86,8 @@ const WORKSPACE_TAB_ICONS = {
 } as const;
 // CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 workspace groups tab value
 const GROUPS_TAB_VALUE = "groups";
+// CEREBRO-PATCH(settings-page-status-models): FIR-1550 status models tab value
+const STATUS_MODELS_TAB_VALUE = "status-models";
 
 const DEFAULT_TAB = "profile";
 const TAB_QUERY_KEY = "tab";
@@ -126,6 +132,8 @@ export function SettingsPage({
   }, [setHideFloatingChat]);
   // CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 feature-flagged Groups tab
   const groupsEnabled = useFeatureFlag("cerebro_groups_enabled");
+  // CEREBRO-PATCH(settings-page-status-models): FIR-1550 feature-flagged status models tab
+  const statusModelsEnabled = useFeatureFlag("cerebro_workflows");
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
   // the default. Whitelisting also blocks junk like ?tab=<script> from
   // surfacing in the DOM via Radix Tabs internals.
@@ -138,13 +146,16 @@ export function SettingsPage({
         ...Object.values(WORKSPACE_TAB_VALUES),
         // CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 valid tab
         ...(groupsEnabled ? [GROUPS_TAB_VALUE] : []),
+        // CEREBRO-PATCH(settings-page-status-models): FIR-1550 valid tab
+        ...(statusModelsEnabled ? [STATUS_MODELS_TAB_VALUE] : []),
         // CEREBRO-PATCH(settings-page-accounts-valid): include cerebro Konti tab (JEH-999)
         ACCOUNTS_TAB_VALUE,
         // CEREBRO-PATCH(settings-page-documentation): documentation tab is valid
         ...(documentationContent ? ["documentation"] : []),
         ...(extraAccountTabs?.map((tab) => tab.value) ?? []),
       ]),
-    [extraAccountTabs, documentationContent, groupsEnabled],
+    // CEREBRO-PATCH(settings-page-status-models): FIR-1550 recompute when flag changes
+    [extraAccountTabs, documentationContent, groupsEnabled, statusModelsEnabled],
   );
 
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
@@ -196,6 +207,8 @@ export function SettingsPage({
     }
     // CEREBRO-PATCH(settings-page-accounts-mobile): cerebro Konti tab in workspace group (JEH-999)
     workspaceItems.push({ value: ACCOUNTS_TAB_VALUE, label: "Konti", icon: KeyRound });
+    // CEREBRO-PATCH(settings-page-status-models): FIR-1550 mobile nav entry
+    if (statusModelsEnabled) workspaceItems.push({ value: STATUS_MODELS_TAB_VALUE, label: "Statusmodeller", icon: Workflow });
     const groups: CerebroMobileTabNavGroup[] = [
       {
         label: t(($) => $.page.my_account),
@@ -221,7 +234,8 @@ export function SettingsPage({
     }
 
     return groups;
-  }, [documentationContent, extraAccountTabs, t, workspaceName, groupsEnabled]);
+    // CEREBRO-PATCH(settings-page-status-models): FIR-1550 rebuild mobile nav when flag changes
+  }, [documentationContent, extraAccountTabs, t, workspaceName, groupsEnabled, statusModelsEnabled]);
 
   return (
     <Tabs
@@ -289,6 +303,13 @@ export function SettingsPage({
             <KeyRound className="h-4 w-4" />
             Konti
           </TabsTrigger>
+          {/* CEREBRO-PATCH(settings-page-status-models): FIR-1550 status models trigger */}
+          {statusModelsEnabled && (
+            <TabsTrigger value={STATUS_MODELS_TAB_VALUE}>
+              <Workflow className="h-4 w-4" />
+              Statusmodeller
+            </TabsTrigger>
+          )}
 
           {/* CEREBRO-PATCH(settings-page-documentation): Resources group with Documentation tab */}
           {documentationContent && (
@@ -332,6 +353,8 @@ export function SettingsPage({
             )}
             {/* CEREBRO-PATCH(settings-page-accounts-content): cerebro Konti tab content (JEH-999) */}
             <TabsContent value={ACCOUNTS_TAB_VALUE}><AccountsSettingsTab /></TabsContent>
+            {/* CEREBRO-PATCH(settings-page-status-models): FIR-1550 status models content */}
+            {statusModelsEnabled && (<TabsContent value={STATUS_MODELS_TAB_VALUE}><StatusModelsTab /></TabsContent>)}
             {extraAccountTabs?.map((tab) => (
               <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
             ))}

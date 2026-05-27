@@ -69,6 +69,8 @@ import (
 	cerebrosharetoken "github.com/multica-ai/multica/server/internal/cerebro/sharetoken"
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST handler import
 	cerebroworkflows "github.com/multica-ai/multica/server/internal/cerebro/workflows"
+	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 workflow v2a status-model handler import
+	cerebrostatusmodels "github.com/multica-ai/multica/server/internal/cerebro/statusmodels"
 	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler import
 	cerebroagentavatar "github.com/multica-ai/multica/server/internal/cerebro/agent_avatar"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -346,6 +348,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroShareTokenHandler := cerebrosharetoken.NewHandler(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).WithService(opts.WorkflowService)
+	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 workflow v2a status-model handler instance
+	cerebroStatusModelsHandler := cerebrostatusmodels.NewHandler(cerebroQueries)
 	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler instance; FIR-2049 pass queries so avatar reads gateway creds from workspace settings
 	cerebroAgentAvatarHandler := cerebroagentavatar.New(store, queries)
 
@@ -1235,6 +1239,33 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/regenerate-signing-secret", cerebroWorkflowsHandler.RegenerateInboundSigningSecret)
 				r.Post("/{id}/regenerate-outbound-secret", cerebroWorkflowsHandler.RegenerateOutboundSecret)
 				r.Post("/_test/cron-sweep", cerebroWorkflowsHandler.TestSweepCron)
+			})
+			// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 workflow v2a status-model REST surface.
+			r.Route("/api/cerebro/status-models", func(r chi.Router) {
+				// Read-only: any workspace member (the board needs to resolve labels).
+				r.Get("/", cerebroStatusModelsHandler.List)
+				r.Get("/assignments", cerebroStatusModelsHandler.Assignments)
+				r.Get("/{id}", cerebroStatusModelsHandler.Get)
+				// Writes: admin/owner only (FIR-1550 — only workspace-admin controls models).
+				r.Group(func(r chi.Router) {
+					// CEREBRO-PATCH(cerebro-status-models-admin-gate): FIR-1550 model writes require admin/owner.
+					r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+					r.Post("/", cerebroStatusModelsHandler.Create)
+					r.Put("/{id}", cerebroStatusModelsHandler.Update)
+					r.Delete("/{id}", cerebroStatusModelsHandler.Delete)
+				})
+			})
+			// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 per-project status-model selection.
+			r.Route("/api/cerebro/projects/{projectId}/status-model", func(r chi.Router) {
+				// Read-only: any workspace member.
+				r.Get("/", cerebroStatusModelsHandler.GetProjectModel)
+				// Writes: admin/owner only (FIR-1550 — only workspace-admin controls project selection).
+				r.Group(func(r chi.Router) {
+					// CEREBRO-PATCH(cerebro-status-models-admin-gate): FIR-1550 project-model writes require admin/owner.
+					r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+					r.Put("/", cerebroStatusModelsHandler.SetProjectModel)
+					r.Delete("/", cerebroStatusModelsHandler.ClearProjectModel)
+				})
 			})
 		})
 	})

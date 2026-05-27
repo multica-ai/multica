@@ -417,6 +417,26 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/cerebro/status-models/",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "PUT /api/cerebro/status-models/{id}",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "DELETE /api/cerebro/status-models/{id}",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "PUT /api/cerebro/projects/{projectId}/status-model/",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "DELETE /api/cerebro/projects/{projectId}/status-model/",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "POST /api/channels/",
       "gate": "workspace_member"
     },

@@ -549,6 +549,16 @@ type CerebroProjectGroupMember struct {
 	AddedAt   pgtype.Timestamptz `json:"added_at"`
 }
 
+type CerebroProjectStatusModel struct {
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	StatusModelID  pgtype.UUID        `json:"status_model_id"`
+	AssignedByID   pgtype.UUID        `json:"assigned_by_id"`
+	AssignedByType string             `json:"assigned_by_type"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroRole struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -608,6 +618,18 @@ type CerebroShareToken struct {
 	CreatedByID    pgtype.UUID        `json:"created_by_id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	RevokedAt      pgtype.Timestamptz `json:"revoked_at"`
+}
+
+type CerebroStatusModel struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Name          string             `json:"name"`
+	Description   pgtype.Text        `json:"description"`
+	Statuses      []byte             `json:"statuses"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroToolPolicy struct {
