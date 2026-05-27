@@ -14,7 +14,8 @@ interface SkillMultiSelectProps {
   /** Currently-selected skill IDs (controlled). */
   selectedIds: ReadonlySet<string>;
   /** Replaces the selection on every toggle. */
-  onChange: (next: Set<string>) => void;
+  onChange?: (next: Set<string>) => void;
+  disabled?: boolean;
 }
 
 /**
@@ -29,6 +30,7 @@ interface SkillMultiSelectProps {
 export function SkillMultiSelect({
   selectedIds,
   onChange,
+  disabled = false,
 }: SkillMultiSelectProps) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
@@ -38,10 +40,11 @@ export function SkillMultiSelect({
   const label = t(($) => $.create_dialog.skills_section.label);
 
   const toggle = (skill: SkillSummary) => {
+    if (disabled) return;
     const next = new Set(selectedIds);
     if (next.has(skill.id)) next.delete(skill.id);
     else next.add(skill.id);
-    onChange(next);
+    onChange?.(next);
   };
 
   if (!expanded) {
@@ -52,8 +55,10 @@ export function SkillMultiSelect({
         </div>
         <button
           type="button"
-          onClick={() => setExpanded(true)}
-          className="mt-1.5 flex w-full items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
+          onClick={disabled ? undefined : () => setExpanded(true)}
+          className={`mt-1.5 flex w-full items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-left transition-colors ${
+            disabled ? "cursor-default" : "hover:border-primary/40 hover:bg-accent/40"
+          }`}
         >
           <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
@@ -63,7 +68,9 @@ export function SkillMultiSelect({
                 })
               : t(($) => $.create_dialog.skills_section.placeholder)}
           </div>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+          {!disabled && (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+          )}
         </button>
       </div>
     );
@@ -83,6 +90,7 @@ export function SkillMultiSelect({
           variant="ghost"
           size="sm"
           onClick={() => setExpanded(false)}
+          disabled={disabled}
           className="h-6 gap-1 px-2 text-xs"
         >
           <X className="h-3 w-3" />
@@ -96,6 +104,7 @@ export function SkillMultiSelect({
           selectedIds={selectedIds}
           onToggle={toggle}
           loading={isLoading}
+          disabled={disabled}
           emptyMessage={t(($) => $.create_dialog.skills_section.list_empty_multi)}
         />
       </div>

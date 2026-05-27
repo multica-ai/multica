@@ -16,6 +16,7 @@ import type {
   AgentVisibility,
   RuntimeDevice,
   MemberWithUser,
+  CopyAgentRequest,
   CreateAgentRequest,
 } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
@@ -47,18 +48,16 @@ export function CreateAgentDialog({
   squadId,
   onClose,
   onCreate,
+  onDuplicate,
 }: {
   runtimes: RuntimeDevice[];
   runtimesLoading?: boolean;
   members: MemberWithUser[];
   currentUserId: string | null;
   // When provided, the dialog opens in "Duplicate" mode: the visible
-  // fields (name / description / runtime / visibility / model) are
-  // pre-populated from this agent, and the hidden fields
-  // (instructions / custom_args / custom_env / max_concurrent_tasks)
-  // are forwarded to the create call so the new agent is a true clone.
-  // Skills are copied separately by the caller after createAgent
-  // succeeds — they're not part of CreateAgentRequest.
+  // fields are pre-populated from this agent for review, but submit uses
+  // POST /api/agents/:id/copy so large fields omitted from the slim list
+  // (instructions / runtime_config / mcp_config) still clone from storage.
   template?: Agent | null;
   // When set, every successful create is followed by
   // addSquadMember(squadId, agent) so the new agent joins this squad.
@@ -72,6 +71,7 @@ export function CreateAgentDialog({
   // section callers can keep returning `void`; the dialog tolerates a
   // falsy return (no follow-up runs).
   onCreate: (data: CreateAgentRequest) => Promise<Agent | void>;
+  onDuplicate?: (id: string, data: CopyAgentRequest) => Promise<Agent | void>;
 }) {
   const { t } = useT("agents");
   const isDuplicate = !!template;
@@ -149,10 +149,25 @@ export function CreateAgentDialog({
   };
 
   const handleSubmit = async () => {
-    if (!name.trim() || !selectedRuntime || selectedRuntimeLocked) return;
+    if (!name.trim()) return;
+    if (!isDuplicate && (!selectedRuntime || selectedRuntimeLocked)) return;
     setCreating(true);
 
     try {
+      if (template) {
+        if (!onDuplicate) {
+          throw new Error("duplicate handler is not configured");
+        }
+        const copiedAgent = await onDuplicate(template.id, { name: name.trim() });
+        if (copiedAgent && squadId) {
+          await attachToSquad(copiedAgent.id, copiedAgent.name);
+        }
+        onClose();
+        return;
+      }
+
+      if (!selectedRuntime || selectedRuntimeLocked) return;
+
       const trimmedInstructions = instructions.trim();
       const data: CreateAgentRequest = {
         name: name.trim(),
@@ -163,23 +178,6 @@ export function CreateAgentDialog({
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
       };
-      if (template) {
-        // Duplicate path: forward the hidden config fields the source
-        // agent had so the clone is functional out of the box (env / args
-        // / concurrency). Skills now flow through the dialog form, so we
-        // don't blindly carry template.skills here anymore — the form's
-        // selectedSkillIds is the source of truth.
-        if (template.custom_args.length) data.custom_args = template.custom_args;
-        if (
-          !template.custom_env_redacted &&
-          Object.keys(template.custom_env).length > 0
-        ) {
-          data.custom_env = template.custom_env;
-        }
-        if (template.max_concurrent_tasks) {
-          data.max_concurrent_tasks = template.max_concurrent_tasks;
-        }
-      }
       const createdAgent = await onCreate(data);
       // Follow-up: attach selected skills to the newly created agent.
       // onCreate returns the created Agent for this path; if the caller
@@ -249,7 +247,12 @@ export function CreateAgentDialog({
                 same shape as detail-page header so the affordance is
                 instantly familiar. */}
             <div className="flex items-start gap-4">
-              <AvatarPicker value={avatarUrl} onChange={setAvatarUrl} size={64} />
+              <AvatarPicker
+                value={avatarUrl}
+                onChange={setAvatarUrl}
+                size={64}
+                disabled={isDuplicate}
+              />
               <div className="flex-1 min-w-0 space-y-3">
                 <div>
                   <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.name_label)}</Label>
@@ -276,6 +279,7 @@ export function CreateAgentDialog({
                     placeholder={t(($) => $.create_dialog.description_placeholder)}
                     maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
                     className="mt-1"
+                    disabled={isDuplicate}
                   />
                   <div className="mt-1">
                     <CharCounter
@@ -293,10 +297,13 @@ export function CreateAgentDialog({
                 <button
                   type="button"
                   onClick={() => setVisibility("workspace")}
+                  disabled={isDuplicate}
                   className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
                     visibility === "workspace"
                       ? "border-primary bg-primary/5"
-                      : "border-border hover:bg-muted"
+                      : isDuplicate
+                        ? "border-border"
+                        : "border-border hover:bg-muted"
                   }`}
                 >
                   <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -310,10 +317,13 @@ export function CreateAgentDialog({
                 <button
                   type="button"
                   onClick={() => setVisibility("private")}
+                  disabled={isDuplicate}
                   className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
                     visibility === "private"
                       ? "border-primary bg-primary/5"
-                      : "border-border hover:bg-muted"
+                      : isDuplicate
+                        ? "border-border"
+                        : "border-border hover:bg-muted"
                   }`}
                 >
                   <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -334,6 +344,7 @@ export function CreateAgentDialog({
               currentUserId={currentUserId}
               selectedRuntimeId={selectedRuntimeId}
               onSelect={setSelectedRuntimeId}
+              disabled={isDuplicate}
             />
 
             <ModelDropdown
@@ -341,7 +352,7 @@ export function CreateAgentDialog({
               runtimeOnline={selectedRuntime?.status === "online"}
               value={model}
               onChange={setModel}
-              disabled={!selectedRuntime}
+              disabled={isDuplicate || !selectedRuntime}
             />
 
             {/* --- Optional sections (instructions / skills) ---
@@ -349,7 +360,8 @@ export function CreateAgentDialog({
                 Duplicate pre-fills everything from the source agent. */}
             <InstructionsEditor
               value={instructions}
-              onChange={setInstructions}
+              onChange={isDuplicate ? undefined : setInstructions}
+              readOnly={isDuplicate}
               placeholder={
                 isDuplicate
                   ? t(($) => $.create_dialog.instructions.placeholder_duplicate)
@@ -359,7 +371,8 @@ export function CreateAgentDialog({
 
             <SkillMultiSelect
               selectedIds={selectedSkillIds}
-              onChange={setSelectedSkillIds}
+              onChange={isDuplicate ? undefined : setSelectedSkillIds}
+              disabled={isDuplicate}
             />
           </div>
         </div>
@@ -377,10 +390,12 @@ export function CreateAgentDialog({
           <Button
             onClick={handleSubmit}
             disabled={
-              creating || !name.trim() || !selectedRuntime || selectedRuntimeLocked
+              creating ||
+              !name.trim() ||
+              (!isDuplicate && (!selectedRuntime || selectedRuntimeLocked))
             }
             title={
-              selectedRuntimeLocked
+              !isDuplicate && selectedRuntimeLocked
                 ? t(($) => $.create_dialog.runtime_private_locked_tooltip)
                 : undefined
             }

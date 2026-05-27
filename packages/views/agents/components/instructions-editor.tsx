@@ -12,11 +12,12 @@ interface InstructionsEditorProps {
    *  preview text when collapsed. */
   value: string;
   /** Fires on every keystroke (debounced inside ContentEditor). */
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
   /** Optional placeholder override. Defaults to the i18n "click to write"
    *  copy; the create dialog passes the duplicate-specific string for
    *  agents being cloned. */
   placeholder?: string;
+  readOnly?: boolean;
 }
 
 /**
@@ -35,6 +36,7 @@ export function InstructionsEditor({
   value,
   onChange,
   placeholder,
+  readOnly = false,
 }: InstructionsEditorProps) {
   const { t } = useT("agents");
   const [expanded, setExpanded] = useState(false);
@@ -58,8 +60,13 @@ export function InstructionsEditor({
         </div>
         <button
           type="button"
-          onClick={expand}
-          className="mt-1.5 flex w-full items-start gap-2.5 rounded-lg border bg-card px-3 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
+          onClick={readOnly ? undefined : expand}
+          className={cn(
+            "mt-1.5 flex w-full items-start gap-2.5 rounded-lg border bg-card px-3 py-3 text-left transition-colors",
+            readOnly
+              ? "cursor-default"
+              : "hover:border-primary/40 hover:bg-accent/40",
+          )}
         >
           <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
@@ -72,7 +79,9 @@ export function InstructionsEditor({
               <div className="text-sm text-muted-foreground">{resolvedPlaceholder}</div>
             )}
           </div>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+          {!readOnly && (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+          )}
         </button>
       </div>
     );
@@ -104,7 +113,7 @@ export function InstructionsEditor({
         <ContentEditor
           ref={editorRef}
           defaultValue={value}
-          onUpdate={onChange}
+          onUpdate={onChange ?? (() => {})}
           placeholder={t(($) => $.create_dialog.instructions.editor_placeholder)}
           className="min-h-[160px] max-h-[320px] overflow-y-auto px-3 py-2.5 text-sm"
           showBubbleMenu={true}

@@ -886,6 +886,7 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 		CustomArgs:             ca,
 		McpConfig:              mc,
 		Model:                  sourceAgent.Model,
+		ThinkingLevel:          sourceAgent.ThinkingLevel,
 		CustomEnvCopiedPending: envCopiedPending,
 	})
 	if err != nil {
@@ -1337,6 +1338,7 @@ func (h *Handler) canManageAgentAllowedPrincipals(w http.ResponseWriter, r *http
 	}
 	return true
 }
+
 // resolveAgentProvider returns the provider name for the runtime that
 // will own this agent after the in-flight update applies. Used by the
 // thinking_level validator so a runtime/model swap and a level swap

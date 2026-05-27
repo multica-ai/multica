@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestAgentDuplicateBaseName(t *testing.T) {
@@ -221,6 +223,113 @@ func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	testHandler.CreateAgent(w2, newRequest(http.MethodPost, "/api/agents", body))
 	if w2.Code != http.StatusConflict {
 		t.Fatalf("second CreateAgent with duplicate name: expected 409, got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
+func TestCopyAgentCopiesConfigFields(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	suffix := uuid.NewString()
+	sourceName := "copy-fields-source-" + suffix
+	copyName := "copy-fields-target-" + suffix
+	skillName := "copy-fields-skill-" + suffix
+
+	var skillID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+		VALUES ($1, $2, 'copy skill', 'content', '{}'::jsonb, $3)
+		RETURNING id
+	`, testWorkspaceID, skillName, testUserID).Scan(&skillID); err != nil {
+		t.Fatalf("insert skill: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM skill WHERE id = $1`, skillID)
+	})
+
+	var sourceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config, model, thinking_level
+		)
+		VALUES (
+			$1, $2, 'source description', 'cloud', '{"temperature":0.2}'::jsonb,
+			$3, 'workspace', 3, $4,
+			'source instructions', '{"TOKEN":"secret","EMPTY":""}'::jsonb,
+			'["--flag","value"]'::jsonb, '{"servers":{"fs":{}}}'::jsonb,
+			'gpt-5.5', 'high'
+		)
+		RETURNING id
+	`, testWorkspaceID, sourceName, handlerTestRuntimeID(t), testUserID).Scan(&sourceID); err != nil {
+		t.Fatalf("insert source agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, sourceID)
+	})
+
+	if _, err := testPool.Exec(ctx, `INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`, sourceID, skillID); err != nil {
+		t.Fatalf("insert agent skill: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/agents/"+sourceID+"/copy", map[string]any{
+		"name": copyName,
+	}), "id", sourceID)
+	testHandler.CopyAgent(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CopyAgent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ID == "" || resp.ID == sourceID {
+		t.Fatalf("unexpected copied id %q", resp.ID)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, resp.ID)
+	})
+
+	if resp.Name != copyName {
+		t.Fatalf("name = %q, want %q", resp.Name, copyName)
+	}
+	if resp.Description != "source description" {
+		t.Fatalf("description = %q", resp.Description)
+	}
+	if resp.Instructions != "source instructions" {
+		t.Fatalf("instructions = %q", resp.Instructions)
+	}
+	if resp.MaxConcurrentTasks != 3 {
+		t.Fatalf("max_concurrent_tasks = %d, want 3", resp.MaxConcurrentTasks)
+	}
+	if resp.Model != "gpt-5.5" {
+		t.Fatalf("model = %q", resp.Model)
+	}
+	if resp.ThinkingLevel != "high" {
+		t.Fatalf("thinking_level = %q", resp.ThinkingLevel)
+	}
+	if got := resp.RuntimeConfig.(map[string]any)["temperature"]; got != float64(0.2) {
+		t.Fatalf("runtime_config.temperature = %#v", got)
+	}
+	if len(resp.CustomArgs) != 2 || resp.CustomArgs[0] != "--flag" || resp.CustomArgs[1] != "value" {
+		t.Fatalf("custom_args = %#v", resp.CustomArgs)
+	}
+	if string(resp.McpConfig) != `{"servers":{"fs":{}}}` {
+		t.Fatalf("mcp_config = %s", string(resp.McpConfig))
+	}
+	if len(resp.Skills) != 1 || resp.Skills[0].ID != skillID {
+		t.Fatalf("skills = %#v, want skill %s", resp.Skills, skillID)
+	}
+	if resp.CustomEnv["TOKEN"] != "" || resp.CustomEnv["EMPTY"] != "" {
+		t.Fatalf("custom_env values should be stripped on copy, got %#v", resp.CustomEnv)
+	}
+	if !resp.CustomEnvCopiedPending {
+		t.Fatal("custom_env_copied_pending = false, want true")
 	}
 }
 
