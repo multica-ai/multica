@@ -19,6 +19,9 @@
         "/auth/": {
           "Proxy": "http://127.0.0.1:4900/auth/"
         },
+        "/uploads/": {
+          "Proxy": "http://127.0.0.1:4900/uploads/"
+        },
         "/ws": {
           "Proxy": "http://127.0.0.1:4900/ws"
         },
@@ -37,6 +40,9 @@
         },
         "/auth/": {
           "Proxy": "http://127.0.0.1:4900/auth/"
+        },
+        "/uploads/": {
+          "Proxy": "http://127.0.0.1:4900/uploads/"
         },
         "/ws": {
           "Proxy": "http://127.0.0.1:4900/ws"
