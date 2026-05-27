@@ -15,7 +15,6 @@ import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-contex
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
-import { SwimLaneView } from "../../issues/components/swimlane-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -175,23 +174,6 @@ export function MyIssuesPage() {
     [myIssues, statusFilters, priorityFilters, agentRunningFilter, runningIssueIds],
   );
 
-  // Status-unfiltered companion for Swimlane.
-  const swimlaneIssues = useMemo(
-    () =>
-      filterIssues(myIssues, {
-        statusFilters: [],
-        priorityFilters,
-        assigneeFilters: [],
-        includeNoAssignee: false,
-        creatorFilters: [],
-        projectFilters: [],
-        includeNoProject: false,
-        labelFilters: [],
-        agentRunningFilter,
-        runningIssueIds,
-      }),
-    [myIssues, priorityFilters, agentRunningFilter, runningIssueIds],
-  );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 

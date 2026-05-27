@@ -21,7 +21,6 @@ import { PageHeader } from "../../layout/page-header";
 import { IssuesHeader } from "./issues-header";
 import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
-import { SwimLaneView } from "./swimlane-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
@@ -162,12 +161,6 @@ export function IssuesPage() {
     [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
   );
 
-  // Status-unfiltered companion for Swimlane — same narrowing as `issues`
-  // minus the status filter.
-  const swimlaneIssues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
-    [scopedIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
-  );
 
   // Fetch sub-issue progress from the backend so counts are accurate
   // regardless of client-side pagination or filtering of done issues.

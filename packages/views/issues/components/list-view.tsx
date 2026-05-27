@@ -19,7 +19,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { IssueListFilter, IssueSortParam } from "@multica/core/issues/queries";
+import type { IssueListFilter } from "@multica/core/issues/queries";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -59,7 +59,6 @@ export function ListView({
   myIssuesFilter,
   projectId,
   onMoveIssue,
-  sort,
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
@@ -69,7 +68,6 @@ export function ListView({
   /** When set, the per-section "+" pre-fills the project on the create form. */
   projectId?: string;
   onMoveIssue?: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
-  sort?: IssueSortParam;
 }) {
   const listCollapsedStatuses = useViewStore(
     (s) => s.listCollapsedStatuses
@@ -312,7 +310,6 @@ export function ListView({
             dragEnabled={dragEnabled}
             isExpanded={isExpanded}
             sortLabel={sortLabel}
-            sort={sort}
           />
         );
       })}
@@ -361,7 +358,6 @@ function StatusAccordionItem({
   dragEnabled,
   isExpanded,
   sortLabel,
-  sort,
 }: {
   status: IssueStatus;
   issueIds: string[];
@@ -372,7 +368,6 @@ function StatusAccordionItem({
   dragEnabled: boolean;
   isExpanded: boolean;
   sortLabel: string | null;
-  sort?: IssueSortParam;
 }) {
   const { t } = useT("issues");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);

@@ -253,7 +253,6 @@ export function ProjectIssuesContent({
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
-          sort={sort}
           projectId={projectId}
           onMoveIssue={handleMoveIssue}
         />
