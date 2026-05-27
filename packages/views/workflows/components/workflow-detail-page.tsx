@@ -56,7 +56,13 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   const updateWorkflowMutation = useUpdateWorkflow(wsId);
   const deleteWorkflowMutation = useDeleteWorkflow(wsId);
 
-  const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
+  // Merge cached edits into nodes for instant visual feedback
+  const displayNodes = nodes.map((n) => {
+    const edits = nodeEdits[n.id];
+    return edits ? { ...n, ...edits } : n;
+  });
+
+  const selectedNode = displayNodes.find((n) => n.id === selectedNodeId) ?? null;
 
   const queryClient = useQueryClient();
 
@@ -136,8 +142,17 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
 
   const handleAutoLayout = async () => {
     const layout = computeAutoLayout(nodes, edges);
+    queryClient.setQueryData<typeof nodes>(workflowNodesOptions(wsId, id!).queryKey, (old) => {
+      if (!old) return old;
+      const posMap = new Map(layout.map((l) => [l.nodeId, { x: l.x, y: l.y }]));
+      return old.map((n) => {
+        const p = posMap.get(n.id);
+        return p ? { ...n, position_x: p.x, position_y: p.y } : n;
+      });
+    });
+    // Cache positions — saved on Done
     for (const { nodeId: nid, x, y } of layout) {
-      updateNodeMutation.mutate({ nodeId: nid, position_x: x, position_y: y });
+      useWorkflowEditorStore.getState().cacheNodeEdits(nid, { position_x: x, position_y: y });
     }
   };
 
@@ -269,7 +284,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
             </div>
           ) : (
             <DAGCanvas
-              nodes={nodes}
+              nodes={displayNodes}
               edges={edges}
               onNodeMoved={handleNodeMoved}
               onEdgeCreate={handleEdgeCreate}

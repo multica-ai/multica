@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Plus, Workflow as WorkflowIcon, Play, Pause, FileText, Archive, Zap, History, Eye } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { workflowListOptions, useCreateWorkflow } from "@multica/core/workflows/queries";
+import { workflowListOptions, workflowNodesOptions, workflowEdgesOptions, useCreateWorkflow } from "@multica/core/workflows/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { AppLink, useNavigation } from "../../navigation";
@@ -146,22 +146,88 @@ function TemplateThumbnail({ nodes, edges }: { nodes: WorkflowTemplate["nodes"];
 
 function WorkflowRow({ workflow }: { workflow: Workflow }) {
   const { t } = useT("workflows");
+  const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const status = (workflow.status as WorkflowStatus) || "draft";
   const Icon = STATUS_ICON[status] ?? FileText;
 
+  const { data: nodes = [] } = useQuery({
+    ...workflowNodesOptions(wsId, workflow.id),
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: edges = [] } = useQuery({
+    ...workflowEdgesOptions(wsId, workflow.id),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Build mini thumbnail from real nodes/edges
+  const hasNodes = nodes.length > 0;
+  const minX = hasNodes ? Math.min(...nodes.map((n) => n.position_x)) : 0;
+  const minY = hasNodes ? Math.min(...nodes.map((n) => n.position_y)) : 0;
+  const maxX = hasNodes ? Math.max(...nodes.map((n) => n.position_x + 180)) : 1;
+  const maxY = hasNodes ? Math.max(...nodes.map((n) => n.position_y + 64)) : 1;
+  const vw = maxX - minX + 40;
+  const vh = maxY - minY + 20;
+  const thumbH = 44;
+  const thumbW = Math.min(vw * (thumbH / vh), 180);
+
   return (
-    <div className="group/row flex flex-col gap-2 border-b px-4 py-3 text-sm transition-colors hover:bg-accent/40 sm:h-11 sm:flex-row sm:items-center sm:gap-2 sm:border-b-0 sm:px-5 sm:py-0">
+    <div className="group/row flex items-center gap-2 border-b px-5 py-2 text-sm transition-colors hover:bg-accent/40 h-16">
       <AppLink
         href={wsPaths.workflowDetail(workflow.id)}
-        className="flex min-w-0 items-center gap-2 sm:flex-1"
+        className="flex min-w-0 items-center gap-2 w-48 shrink-0"
       >
         <WorkflowIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate font-medium">{workflow.title}</span>
+        <span className="min-w-0 truncate font-medium">{workflow.title}</span>
       </AppLink>
 
-      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pl-6 text-xs sm:contents sm:pl-0">
-        <span className={cn("flex items-center gap-1 sm:w-20 sm:shrink-0 sm:justify-center", STATUS_COLOR[status])}>
+      {hasNodes && (
+        <svg
+          className="shrink-0 rounded opacity-50 group-hover/row:opacity-80 transition-opacity self-center"
+          width={thumbW}
+          height={thumbH}
+          viewBox={`${minX - 20} ${minY - 10} ${vw} ${vh}`}
+        >
+          {edges.map((e) => {
+            const s = nodes.find((n) => n.id === e.source_node_id);
+            const t = nodes.find((n) => n.id === e.target_node_id);
+            if (!s || !t) return null;
+            const sx = s.position_x + 180;
+            const sy = s.position_y + 32;
+            const tx = t.position_x;
+            const ty = t.position_y + 32;
+            const midX = (sx + tx) / 2;
+            return (
+              <path
+                key={e.id}
+                d={`M ${sx},${sy} L ${midX},${sy} L ${midX},${ty} L ${tx},${ty}`}
+                stroke="#94a3b8"
+                strokeWidth="2"
+                fill="none"
+              />
+            );
+          })}
+          {nodes.map((n) => (
+            <rect
+              key={n.id}
+              x={n.position_x}
+              y={n.position_y}
+              width={180}
+              height={64}
+              rx="6"
+              fill="currentColor"
+              className="text-muted-foreground/20"
+              stroke="#94a3b8"
+              strokeWidth="1"
+            />
+          ))}
+        </svg>
+      )}
+
+      <div className="flex-1" />
+
+      <div className="flex items-center gap-x-3 text-xs shrink-0">
+        <span className={cn("flex items-center gap-1 w-16 justify-center", STATUS_COLOR[status])}>
           <Icon className="h-3 w-3" />
           {t(($) => $.status[getStatusKey(status) as keyof typeof $.status])}
         </span>
