@@ -60,7 +60,16 @@ jobs:
             throw "Windows x64 installer not found"
           }
           Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait
-          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $expectedBinDir = Join-Path $env:LOCALAPPDATA 'Programs\Multica\resources\app.asar.unpacked\resources\bin'
+          $expectedExe = Join-Path $expectedBinDir 'multica.exe'
+          if (-not (Test-Path $expectedExe)) {
+            throw "Bundled CLI not found at expected asar-unpack path: $expectedExe"
+          }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';' | ForEach-Object { $_.Trim().TrimEnd('\') }) -notcontains $expectedBinDir.TrimEnd('\')) {
+            throw "User PATH does not contain expected bundled CLI directory: $expectedBinDir"
+          }
+          $env:Path = $userPath + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine')
           cmd.exe /d /c "multica --help"
 
       - name: Upload Desktop artifacts (${{ matrix.target }})
