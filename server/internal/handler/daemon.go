@@ -1629,6 +1629,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+
+			// CEREBRO-PATCH(daemon-snapshot-saving): inline issue+thread + measure when the snapshot_prompt cost saving is on (FIR-2384)
+			h.applySnapshotSaving(r.Context(), &resp, issue, task.TriggerCommentID, task.ID)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it

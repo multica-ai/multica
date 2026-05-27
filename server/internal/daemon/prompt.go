@@ -32,6 +32,10 @@ func BuildPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	if snap, ok := snapshotIssueContext(task); ok { // CEREBRO-PATCH(daemon-snapshot-prompt): inline issue+thread when snapshot saving on (FIR-2384)
+		b.WriteString(snap)
+		return b.String()
+	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). On long-running issues use `--recent 20 --output json` to read the 20 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
 	return b.String()
@@ -147,6 +151,11 @@ func buildCommentPrompt(task Task, provider string) string {
 		if task.Agent != nil && strings.Contains(task.Agent.Instructions, "## Squad Operating Protocol") {
 			fmt.Fprintf(&b, "⚠️ **Squad leader no_action rule:** If you decide no action is needed, call `multica squad activity %s no_action --reason \"...\"` and EXIT. DO NOT post any comment — not even one that says \"no action needed\" or \"exiting silently\". The squad activity call records your decision; a comment is redundant noise.\n\n", task.IssueID)
 		}
+	}
+	if snap, ok := snapshotIssueContext(task); ok { // CEREBRO-PATCH(daemon-snapshot-prompt): inline issue+thread when snapshot saving on (FIR-2384)
+		b.WriteString(snap)
+		b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
+		return b.String()
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, read the triggering thread first: `multica issue comment list %s --thread %s --tail 30 --output json` returns the root + the 30 most recent replies in that thread (root is always included, even at `--tail 0`, so you keep the \"what is this about\" context without dragging hundreds of replies into your prompt). If 30 replies aren't enough, walk older replies in the same thread one page at a time by passing the stderr `Next reply cursor: --before <ts> --before-id <reply-id>` line back as `--before <ts> --before-id <reply-id>` on the next call. If you also need cross-thread background, `multica issue comment list %s --recent 20 --output json` pulls the 20 most recently active threads on the issue; under `--recent` the same `--before` / `--before-id` flags walk older *threads* (stderr label: `Next thread cursor`) instead of older replies. Avoid the unfiltered `--output json` form on long-running issues; it dumps the full flat timeline (cap 2000) and wastes context. `--since <RFC3339>` is still available for incremental polling and may combine with `--thread --tail` or `--recent`.\n\n", task.IssueID, task.TriggerCommentID, task.IssueID)
