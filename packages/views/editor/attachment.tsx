@@ -25,8 +25,8 @@
 
 import {
   Download,
+  Eye,
   Link as LinkIcon,
-  Maximize2,
   Minimize2,
   Trash2,
 } from "lucide-react";
@@ -327,7 +327,7 @@ function ImageAttachmentView({
             onClick={(e) => e.stopPropagation()}
           >
             <button type="button" onClick={onView} title={t(($) => $.image.view)}>
-              <Maximize2 className="size-3.5" />
+              <Eye className="size-3.5" />
             </button>
             <button type="button" onClick={onDownload} title={t(($) => $.image.download)}>
               <Download className="size-3.5" />
