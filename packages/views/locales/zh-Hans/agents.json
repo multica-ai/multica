@@ -171,6 +171,8 @@
     "allowed_users_count": "{{count}} 个用户",
     "allowed_users_empty": "没有其他用户",
     "allowed_users_loading": "加载中",
+    "allowed_users_search_placeholder": "搜索用户",
+    "allowed_users_no_results": "无匹配用户",
     "save": "保存",
     "cancel": "取消"
   },

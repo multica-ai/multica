@@ -1269,7 +1269,9 @@ func (h *Handler) ListAgentAllowedPrincipals(w http.ResponseWriter, r *http.Requ
 }
 
 type UpdateAgentAllowedPrincipalsRequest struct {
-	UserIDs []string `json:"user_ids"`
+	UserIDs       *[]string `json:"user_ids"`
+	AddUserIDs    []string  `json:"add_user_ids"`
+	RemoveUserIDs []string  `json:"remove_user_ids"`
 }
 
 func (h *Handler) UpdateAgentAllowedPrincipals(w http.ResponseWriter, r *http.Request) {
@@ -1289,33 +1291,112 @@ func (h *Handler) UpdateAgentAllowedPrincipals(w http.ResponseWriter, r *http.Re
 	}
 
 	workspaceID := uuidToString(agent.WorkspaceID)
-	seen := map[string]struct{}{}
-	userIDs := make([]pgtype.UUID, 0, len(req.UserIDs))
-	for _, rawID := range req.UserIDs {
-		userID, ok := parseUUIDOrBadRequest(w, rawID, "user id")
+	parseAllowedUserIDs := func(rawIDs []string) ([]pgtype.UUID, bool) {
+		seen := map[string]struct{}{}
+		userIDs := make([]pgtype.UUID, 0, len(rawIDs))
+		for _, rawID := range rawIDs {
+			userID, ok := parseUUIDOrBadRequest(w, rawID, "user id")
+			if !ok {
+				return nil, false
+			}
+			userIDStr := uuidToString(userID)
+			if _, exists := seen[userIDStr]; exists {
+				continue
+			}
+			seen[userIDStr] = struct{}{}
+			if _, err := h.getWorkspaceMember(r.Context(), userIDStr, workspaceID); err != nil {
+				writeError(w, http.StatusBadRequest, "allowed user must be a workspace member")
+				return nil, false
+			}
+			userIDs = append(userIDs, userID)
+		}
+		return userIDs, true
+	}
+
+	var replaceUserIDs []pgtype.UUID
+	if req.UserIDs != nil {
+		replaceUserIDs, ok = parseAllowedUserIDs(*req.UserIDs)
 		if !ok {
 			return
 		}
-		userIDStr := uuidToString(userID)
-		if _, exists := seen[userIDStr]; exists {
-			continue
-		}
-		seen[userIDStr] = struct{}{}
-		if _, err := h.getWorkspaceMember(r.Context(), userIDStr, workspaceID); err != nil {
-			writeError(w, http.StatusBadRequest, "allowed user must be a workspace member")
-			return
-		}
-		userIDs = append(userIDs, userID)
+	}
+	addUserIDs, ok := parseAllowedUserIDs(req.AddUserIDs)
+	if !ok {
+		return
+	}
+	removeUserIDs, ok := parseAllowedUserIDs(req.RemoveUserIDs)
+	if !ok {
+		return
 	}
 
-	if err := h.Queries.ReplaceAgentAllowedPrincipals(r.Context(), db.ReplaceAgentAllowedPrincipalsParams{
-		WorkspaceID:  agent.WorkspaceID,
-		AgentID:      agent.ID,
-		PrincipalIds: userIDs,
-		CreatedBy:    parseUUID(requestUserID(r)),
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update agent allowed users")
+	for _, addUserID := range addUserIDs {
+		addUserIDStr := uuidToString(addUserID)
+		for _, removeUserID := range removeUserIDs {
+			if addUserIDStr == uuidToString(removeUserID) {
+				writeError(w, http.StatusBadRequest, "allowed user cannot be both added and removed")
+				return
+			}
+		}
+	}
+
+	if req.UserIDs != nil && (len(req.AddUserIDs) > 0 || len(req.RemoveUserIDs) > 0) {
+		writeError(w, http.StatusBadRequest, "user_ids cannot be combined with add_user_ids or remove_user_ids")
 		return
+	}
+
+	q := h.Queries
+	var commit func() error
+	if len(addUserIDs) > 0 && len(removeUserIDs) > 0 {
+		tx, err := h.TxStarter.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to start transaction")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		q = h.Queries.WithTx(tx)
+		commit = func() error { return tx.Commit(r.Context()) }
+	}
+
+	switch {
+	case req.UserIDs != nil:
+		if err := q.ReplaceAgentAllowedPrincipals(r.Context(), db.ReplaceAgentAllowedPrincipalsParams{
+			WorkspaceID:  agent.WorkspaceID,
+			AgentID:      agent.ID,
+			PrincipalIds: replaceUserIDs,
+			CreatedBy:    parseUUID(requestUserID(r)),
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update agent allowed users")
+			return
+		}
+	case len(addUserIDs) > 0 || len(removeUserIDs) > 0:
+		if len(removeUserIDs) > 0 {
+			if err := q.RemoveAgentAllowedPrincipals(r.Context(), db.RemoveAgentAllowedPrincipalsParams{
+				AgentID:      agent.ID,
+				PrincipalIds: removeUserIDs,
+			}); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update agent allowed users")
+				return
+			}
+		}
+		if len(addUserIDs) > 0 {
+			if err := q.AddAgentAllowedPrincipals(r.Context(), db.AddAgentAllowedPrincipalsParams{
+				WorkspaceID:  agent.WorkspaceID,
+				AgentID:      agent.ID,
+				PrincipalIds: addUserIDs,
+				CreatedBy:    parseUUID(requestUserID(r)),
+			}); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update agent allowed users")
+				return
+			}
+		}
+	default:
+	}
+
+	if commit != nil {
+		if err := commit(); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update agent allowed users")
+			return
+		}
 	}
 
 	rows, err := h.Queries.ListAgentAllowedPrincipals(r.Context(), agent.ID)

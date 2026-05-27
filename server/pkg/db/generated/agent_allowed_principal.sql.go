@@ -11,6 +11,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addAgentAllowedPrincipals = `-- name: AddAgentAllowedPrincipals :exec
+INSERT INTO agent_allowed_principal (
+    workspace_id, agent_id, principal_type, principal_id, created_by
+)
+SELECT $1::uuid,
+       $2::uuid,
+       'member',
+       unnest($3::uuid[]),
+       $4::uuid
+ON CONFLICT (agent_id, principal_type, principal_id) DO NOTHING
+`
+
+type AddAgentAllowedPrincipalsParams struct {
+	WorkspaceID  pgtype.UUID   `json:"workspace_id"`
+	AgentID      pgtype.UUID   `json:"agent_id"`
+	PrincipalIds []pgtype.UUID `json:"principal_ids"`
+	CreatedBy    pgtype.UUID   `json:"created_by"`
+}
+
+func (q *Queries) AddAgentAllowedPrincipals(ctx context.Context, arg AddAgentAllowedPrincipalsParams) error {
+	_, err := q.db.Exec(ctx, addAgentAllowedPrincipals,
+		arg.WorkspaceID,
+		arg.AgentID,
+		arg.PrincipalIds,
+		arg.CreatedBy,
+	)
+	return err
+}
+
 const isAgentAllowedPrincipal = `-- name: IsAgentAllowedPrincipal :one
 SELECT EXISTS (
     SELECT 1
@@ -118,6 +147,23 @@ func (q *Queries) ListAgentAllowedPrincipals(ctx context.Context, agentID pgtype
 		return nil, err
 	}
 	return items, nil
+}
+
+const removeAgentAllowedPrincipals = `-- name: RemoveAgentAllowedPrincipals :exec
+DELETE FROM agent_allowed_principal
+WHERE agent_id = $1::uuid
+  AND principal_type = 'member'
+  AND principal_id = ANY($2::uuid[])
+`
+
+type RemoveAgentAllowedPrincipalsParams struct {
+	AgentID      pgtype.UUID   `json:"agent_id"`
+	PrincipalIds []pgtype.UUID `json:"principal_ids"`
+}
+
+func (q *Queries) RemoveAgentAllowedPrincipals(ctx context.Context, arg RemoveAgentAllowedPrincipalsParams) error {
+	_, err := q.db.Exec(ctx, removeAgentAllowedPrincipals, arg.AgentID, arg.PrincipalIds)
+	return err
 }
 
 const replaceAgentAllowedPrincipals = `-- name: ReplaceAgentAllowedPrincipals :exec
