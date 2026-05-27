@@ -109,7 +109,21 @@
     "repos_search_empty": "没有匹配的仓库。",
     "repos_url_placeholder": "https://github.com/owner/repo 或 git@github.com:owner/repo.git",
     "repos_add": "添加",
-    "repos_selected": "已选"
+    "repos_selected": "已选",
+    "source_pill_local": "本地目录",
+    "source_tab_repos": "GitHub 仓库",
+    "source_tab_local": "本地目录",
+    "local_heading": "使用本机的本地工作目录",
+    "local_on_device": "绑定到 {{device}}",
+    "local_this_machine": "本机",
+    "local_daemon_offline": "Daemon 未运行 —— 启动后才能绑定本地目录。",
+    "local_pick": "选择目录…",
+    "local_picking": "正在打开选择器…",
+    "local_change": "更换目录…",
+    "local_clear": "清除",
+    "local_pick_failed": "无法打开目录选择器。",
+    "local_invalid_dir": "该目录不可用，请重新选择。",
+    "local_hint": "其他机器上的 agent 看不到这个路径，会启动失败。需要协作请用仓库模式。"
   },
   "create_issue": {
     "sr_manual": "新建 issue",

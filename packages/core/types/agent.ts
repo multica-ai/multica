@@ -70,7 +70,19 @@ export interface AgentTask {
   // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
   // which source produced it.
   issue_id: string;
-  status: "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
+  // `waiting_local_directory` is the daemon-emitted hold state for the
+  // local_directory flow: a task that has been dispatched but is parked
+  // because another task currently owns the same on-disk path lock.
+  // Treated as an active (non-terminal) state alongside queued/dispatched/
+  // running by every consumer that buckets tasks into "active vs done".
+  status:
+    | "queued"
+    | "dispatched"
+    | "waiting_local_directory"
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelled";
   priority: number;
   dispatched_at: string | null;
   started_at: string | null;

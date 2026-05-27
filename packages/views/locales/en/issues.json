@@ -306,6 +306,7 @@
   "agent_live": {
     "is_working": "{{name}} is working",
     "is_queued": "{{name}} is queued",
+    "is_waiting_local_directory": "{{name}} is waiting for the local directory",
     "queued_elapsed_prefix": "queued for {{elapsed}}",
     "fallback_name": "Agent",
     "tool_count_one": "{{count}} tool",
@@ -335,6 +336,7 @@
     "trigger_initial": "Initial run",
     "status_queued": "Queued",
     "status_dispatched": "Starting",
+    "status_waiting_local_directory": "Waiting for local directory",
     "status_running": "Working",
     "status_completed": "Completed",
     "status_failed": "Failed",

@@ -70,6 +70,7 @@ import type {
   ListProjectsResponse,
   ProjectResource,
   CreateProjectResourceRequest,
+  UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
   Label,
   CreateLabelRequest,
@@ -1545,6 +1546,17 @@ export class ApiClient {
   ): Promise<ProjectResource> {
     return this.fetch(`/api/projects/${projectId}/resources`, {
       method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateProjectResource(
+    projectId: string,
+    resourceId: string,
+    data: UpdateProjectResourceRequest,
+  ): Promise<ProjectResource> {
+    return this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
+      method: "PUT",
       body: JSON.stringify(data),
     });
   }

@@ -164,6 +164,18 @@ func LoadConfig(overrides Overrides) (Config, error) {
 				Model: strings.TrimSpace(os.Getenv(modelEnv)),
 			}, true
 		}
+		if defaultCmd == "codex" && cmd == defaultCmd {
+			// Codex Desktop bundles its CLI inside the macOS app instead of
+			// installing it onto PATH.
+			for _, p := range codexDesktopAppBundlePaths() {
+				if _, err := os.Stat(p); err == nil {
+					return AgentEntry{
+						Path:  p,
+						Model: strings.TrimSpace(os.Getenv(modelEnv)),
+					}, true
+				}
+			}
+		}
 		return AgentEntry{}, false
 	}
 
@@ -541,6 +553,16 @@ func shellArgsFromEnv(name string) ([]string, error) {
 var defaultAgentCommandNames = []string{
 	"claude", "codex", "opencode", "openclaw", "hermes",
 	"gemini", "grok", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
+}
+
+var codexDesktopAppBundlePaths = func() []string {
+	paths := []string{
+		"/Applications/Codex.app/Contents/Resources/codex",
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex"))
+	}
+	return paths
 }
 
 // loginShellResolveTimeout caps how long the daemon will wait for the user's

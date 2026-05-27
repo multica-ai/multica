@@ -3730,3 +3730,147 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 		}
 	})
 }
+
+// Tests below cover the local_directory flow (MUL-2663): the daemon
+// substitutes LocalWorkDir for the synthesized envRoot/workdir when a
+// project pins the task to a user-supplied directory. The agent runs in
+// place; the daemon's envRoot still hosts output/, logs/, and .gc_meta.json
+// (the daemon's logbook), but the workdir slot is the user's path.
+
+func TestPrepareLocalWorkDir(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	userDir := t.TempDir()
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-local",
+		TaskID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "Test Agent",
+		LocalWorkDir:   userDir,
+		Task: TaskContextForEnv{
+			IssueID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if !env.LocalDirectory {
+		t.Fatal("expected env.LocalDirectory to be true")
+	}
+	if env.WorkDir != userDir {
+		t.Errorf("WorkDir = %q, want %q (user-supplied path)", env.WorkDir, userDir)
+	}
+
+	// envRoot should still be created for scratch dirs, but the synthesised
+	// workdir/ subdirectory should NOT exist (we substituted the user's
+	// path for it).
+	for _, sub := range []string{"output", "logs"} {
+		path := filepath.Join(env.RootDir, sub)
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected %s to exist: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(env.RootDir, "workdir")); !os.IsNotExist(err) {
+		t.Fatalf("expected envRoot/workdir to NOT exist for local_directory tasks; err=%v", err)
+	}
+
+	// Context files should still land in the user's directory so the
+	// agent can discover them.
+	contextPath := filepath.Join(userDir, ".agent_context", "issue_context.md")
+	if _, err := os.Stat(contextPath); err != nil {
+		t.Fatalf("expected context file in user dir: %v", err)
+	}
+}
+
+func TestEnvironmentCleanupPreservesLocalDirectory(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	userDir := t.TempDir()
+
+	// Drop a sentinel file inside the user's directory so we can verify
+	// Cleanup never removed it.
+	sentinel := filepath.Join(userDir, "user-file.txt")
+	if err := os.WriteFile(sentinel, []byte("keep me"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-local",
+		TaskID:         "b1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "Test Agent",
+		LocalWorkDir:   userDir,
+		Task:           TaskContextForEnv{IssueID: "issue-1"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	// removeAll=true on a local_directory env MUST NOT touch the user's
+	// directory. envRoot (the daemon's logbook) is fair game.
+	if err := env.Cleanup(true); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("user file removed by Cleanup: %v", err)
+	}
+	if _, err := os.Stat(env.RootDir); !os.IsNotExist(err) {
+		t.Fatalf("expected envRoot to be cleaned, got err=%v", err)
+	}
+
+	// removeAll=false should also leave the user's directory alone (the
+	// existing semantics for non-local tasks would have removed WorkDir
+	// — that's exactly what we must NOT do here).
+	env2, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-local-2",
+		TaskID:         "b2b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "Test Agent",
+		LocalWorkDir:   userDir,
+		Task:           TaskContextForEnv{IssueID: "issue-1"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare 2: %v", err)
+	}
+	if err := env2.Cleanup(false); err != nil {
+		t.Fatalf("Cleanup 2: %v", err)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("partial Cleanup removed user file: %v", err)
+	}
+}
+
+// TestEnvironmentCleanupStandardModeRemovesWorkdir is the negative control:
+// a non-local_directory env preserves its existing semantics so the
+// local_directory branch can't silently regress the regular flow.
+func TestEnvironmentCleanupStandardModeRemovesWorkdir(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-std",
+		TaskID:         "c1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "Test Agent",
+		Task:           TaskContextForEnv{IssueID: "issue-1"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if env.LocalDirectory {
+		t.Fatal("expected LocalDirectory to be false for standard env")
+	}
+	if err := env.Cleanup(false); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if _, err := os.Stat(env.WorkDir); !os.IsNotExist(err) {
+		t.Fatalf("expected workdir to be removed in standard mode")
+	}
+	// output/logs should remain.
+	if _, err := os.Stat(filepath.Join(env.RootDir, "output")); err != nil {
+		t.Fatalf("output/ removed by partial cleanup: %v", err)
+	}
+}

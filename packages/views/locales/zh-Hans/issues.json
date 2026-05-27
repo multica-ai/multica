@@ -300,6 +300,7 @@
   "agent_live": {
     "is_working": "{{name}} 正在处理",
     "is_queued": "{{name}} 排队中",
+    "is_waiting_local_directory": "{{name}} 正在等待本地目录",
     "queued_elapsed_prefix": "已排队 {{elapsed}}",
     "fallback_name": "智能体",
     "tool_count_other": "{{count}} 次工具调用",
@@ -328,6 +329,7 @@
     "trigger_initial": "首次运行",
     "status_queued": "排队中",
     "status_dispatched": "启动中",
+    "status_waiting_local_directory": "等待本地目录释放",
     "status_running": "处理中",
     "status_completed": "已完成",
     "status_failed": "失败",

@@ -131,6 +131,13 @@ type Daemon struct {
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 
+	// localPathLocks serialises agent tasks whose project resource is a
+	// local_directory pinned to this daemon. Two tasks targeting the same
+	// on-disk path run sequentially; the second blocks on the lock and is
+	// surfaced via the server-side waiting_local_directory status while it
+	// waits. See MUL-2663.
+	localPathLocks *LocalPathLocker
+
 	// bgSyncs tracks background goroutines started by registerTaskRepos so
 	// callers (notably tests using t.TempDir-backed cache roots) can wait for
 	// them to drain before tearing the daemon down. Without this the bg
@@ -164,6 +171,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		agentVersions:             make(map[string]string),
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
+		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
@@ -2034,6 +2042,20 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		"reuse_workdir", task.PriorWorkDir != "",
 	)
 
+	// If the task targets a project_resource of type local_directory that
+	// is pinned to this daemon, acquire the path mutex BEFORE StartTask so
+	// the server-side state machine is dispatched → waiting_local_directory
+	// → running rather than backwards-transitioning from running into the
+	// wait state. The release is deferred so a panic or early return
+	// always frees the lock for the next waiter.
+	localRelease, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, taskLog)
+	if abort {
+		return
+	}
+	if localRelease != nil {
+		defer localRelease()
+	}
+
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		taskLog.Error("start task failed", "error", err)
 		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", "", "agent_error"); failErr != nil {
@@ -2116,11 +2138,136 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// crash leaves the directory as an orphan (cleaned up by GCOrphanTTL).
 	if result.EnvRoot != "" {
 		if meta, ok := gcMetaForTask(task); ok {
+			// A local_directory project_resource matched this daemon
+			// means the agent ran in the user's own tree. Stamp the
+			// meta so the GC loop never tries to RemoveAll envRoot's
+			// sibling workdir (which is the user's path) or the envRoot
+			// itself (we want output/ and logs/ to linger for forensic
+			// access).
+			if assignment, _ := findLocalDirectoryAssignment(task.ProjectResources, d.cfg.DaemonID); assignment != nil {
+				meta.LocalDirectory = true
+			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
 				taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
 			}
 		}
 	}
+}
+
+// acquireLocalDirectoryLockIfNeeded inspects the task's project resources for
+// a local_directory pinned to this daemon, validates the path, and takes the
+// path mutex. Returns a release callback (nil when no local_directory
+// resource applies) and abort=true when the caller must bail without
+// starting the task (the helper has already reported the failure to the
+// server).
+//
+// The helper covers four distinct failure modes:
+//
+//  1. The project_resource JSON is structurally broken — fail the task fast.
+//  2. The path fails validation (missing, not a directory, no R/W, system
+//     blacklist) — fail the task fast with a user-facing reason.
+//  3. The mutex is held by another task — call MarkTaskWaitingLocalDirectory
+//     so the row flips to waiting_local_directory while we block on the
+//     lock, then return the release callback once we win.
+//  4. The blocking wait is cancelled (daemon shutdown, server-side cancel)
+//     — fail the task with the ctx error.
+func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger) (release func(), abort bool) {
+	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
+		return nil, false
+	}
+	assignment, err := findLocalDirectoryAssignment(task.ProjectResources, d.cfg.DaemonID)
+	if err != nil {
+		taskLog.Error("local_directory: resolve resource failed", "error", err)
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
+			taskLog.Error("fail task after local_directory resolve error", "error", failErr)
+		}
+		return nil, true
+	}
+	if assignment == nil {
+		return nil, false
+	}
+	taskLog = taskLog.With("local_directory", assignment.AbsPath)
+	if err := validateLocalPath(assignment.AbsPath); err != nil {
+		taskLog.Error("local_directory: path validation failed", "error", err)
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
+			taskLog.Error("fail task after local_directory validation error", "error", failErr)
+		}
+		return nil, true
+	}
+
+	// While the lock is contended the daemon would otherwise sit blocked on
+	// the path mutex with no signal back from the server — the main
+	// per-task watcher only starts after StartTask. If the user cancels
+	// the issue or it gets reassigned during the wait, we need to notice
+	// promptly so the daemon slot isn't pinned by a phantom waiter. We
+	// spin up the cancellation watcher lazily inside onWait so the
+	// no-contention fast path still costs nothing.
+	waitCtx, waitCancel := context.WithCancel(ctx)
+	defer waitCancel()
+	pollInterval := d.cancelPollInterval
+	if pollInterval == 0 {
+		pollInterval = 5 * time.Second
+	}
+	var (
+		watcherOnce     sync.Once
+		cancelledByPoll <-chan struct{}
+	)
+
+	onWait := func(holder string) {
+		reason := fmt.Sprintf("local_directory %s", assignment.AbsPath)
+		if holder != "" {
+			reason = fmt.Sprintf("%s (held by task %s)", reason, shortID(holder))
+		}
+		taskLog.Info("local_directory: waiting on path mutex", "holder", shortID(holder))
+		if waitErr := d.client.MarkTaskWaitingLocalDirectory(ctx, task.ID, reason); waitErr != nil {
+			// Non-fatal: even if the server-side flag fails to update,
+			// we still want to block on the lock and proceed when free.
+			// The UI just won't see the explicit "waiting" badge.
+			taskLog.Warn("local_directory: mark waiting status failed", "error", waitErr)
+		}
+		// Start polling once we actually park. shouldInterruptAgent inside
+		// watchTaskCancellation already handles both server-side cancel
+		// (status=cancelled) and the row-deleted reassignment case (404),
+		// which is the full set of "this task shouldn't run anymore"
+		// signals we need to react to during the wait.
+		watcherOnce.Do(func() {
+			cancelledByPoll = d.watchTaskCancellation(waitCtx, task.ID, pollInterval, taskLog)
+			go func() {
+				select {
+				case <-cancelledByPoll:
+					waitCancel()
+				case <-waitCtx.Done():
+				}
+			}()
+		})
+	}
+	release, err = d.localPathLocks.Acquire(waitCtx, assignment.RealPath, task.ID, onWait)
+	if err != nil {
+		// If the wait was cut short because the server cancelled the task
+		// (or deleted the row), the row is already in a terminal state —
+		// return silently the same way the run-phase poller does at
+		// lines ~2104. Issuing FailTask here would be a no-op at best
+		// and a confusing redundant log line at worst.
+		if cancelledByPoll != nil {
+			select {
+			case <-cancelledByPoll:
+				taskLog.Info("local_directory: wait aborted by server-side cancel")
+				return nil, true
+			default:
+			}
+		}
+		taskLog.Error("local_directory: lock acquire failed", "error", err)
+		failureReason := "local_directory_error"
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			failureReason = "cancelled"
+		}
+		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("local_directory wait cancelled: %s", err.Error()), "", "", failureReason); failErr != nil {
+			taskLog.Error("fail task after local_directory lock cancel", "error", failErr)
+		}
+		return nil, true
+	}
+	taskLog.Info("local_directory: lock acquired")
+	return release, false
 }
 
 // reportTaskResult writes the final task disposition back to the server.
@@ -2285,7 +2432,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if provider == "openclaw" {
 		openclawBin = entry.Path
 	}
-	if task.PriorWorkDir != "" {
+	// Resolve any local_directory assignment again here so runTask can plumb
+	// LocalWorkDir into execenv. handleTask already validated + locked the
+	// path; this call is a pure JSON parse over the same task payload.
+	localAssignment, _ := findLocalDirectoryAssignment(task.ProjectResources, d.cfg.DaemonID)
+	// Reuse intentionally skipped for local_directory tasks: the prior
+	// WorkDir is the user's own path (always present) but the reuse path
+	// loses the envRoot association the GC loop needs, and re-running
+	// Prepare against a stable user path is cheap (no clone, no copy).
+	if task.PriorWorkDir != "" && localAssignment == nil {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkDir:      task.PriorWorkDir,
 			Provider:     provider,
@@ -2296,7 +2451,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if env == nil {
 		var err error
-		env, err = execenv.Prepare(execenv.PrepareParams{
+		prepParams := execenv.PrepareParams{
 			WorkspacesRoot: d.cfg.WorkspacesRoot,
 			WorkspaceID:    task.WorkspaceID,
 			TaskID:         task.ID,
@@ -2305,7 +2460,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			CodexVersion:   codexVersion,
 			OpenclawBin:    openclawBin,
 			Task:           taskCtx,
-		}, d.logger)
+		}
+		if localAssignment != nil {
+			prepParams.LocalWorkDir = localAssignment.AbsPath
+		}
+		env, err = execenv.Prepare(prepParams, d.logger)
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 		}
