@@ -59,8 +59,13 @@ type CostSavingRunFacts struct {
 	// i.e. reads a daemon agent would otherwise have made itself.
 	InlinedContextReads int
 	// ToolResultChars is the total characters of tool-result content carried in
-	// the run transcript — the surface that prune_tool_results targets.
+	// the run transcript — the surface that prune_tool_results targets. Used as
+	// the would-save estimate when the saving is in shadow mode.
 	ToolResultChars int64
+	// PrunedToolResultChars is the characters prune_tool_results ACTUALLY dropped
+	// from the transcript this run (0 unless the saving was "on" and a round was
+	// superseded). Used as the measured saving when the saving is applied.
+	PrunedToolResultChars int64
 	// RoutingHeldOut is true when model_routing is "on" for the workspace but
 	// this run was picked as the holdout control arm (FIR-2325 phase 5): the run
 	// deliberately executed on the requested (expensive) model instead of the
@@ -188,13 +193,19 @@ func measureRun(modes map[string]string, f CostSavingRunFacts, cheapModel string
 
 		case savingPruneToolResults:
 			// Pruning drops superseded tool-call output from the context window.
-			// Baseline = approx tokens of the tool-result surface; effective = 0
-			// once pruned. The saved tokens are priced as input tokens on the run's
-			// model so the dashboard can show a real dollar figure — never a guess.
+			// When applied ("on"), the saving counts the chars we ACTUALLY pruned
+			// this run; in shadow it estimates the full tool-result surface as the
+			// would-save. Baseline = approx tokens dropped; effective = 0 once
+			// pruned. The saved tokens are priced as input tokens on the run's
+			// model so the dashboard shows a real dollar figure — never a guess.
 			if f.ToolResultChars <= 0 {
 				continue
 			}
-			savedTokens := f.ToolResultChars / approxCharsPerToken
+			savedChars := f.ToolResultChars
+			if applied {
+				savedChars = f.PrunedToolResultChars
+			}
+			savedTokens := savedChars / approxCharsPerToken
 			m := base
 			m.Metric, m.Baseline, m.Effective = metricContextTokens, savedTokens, 0
 			m.SavedCents = tokenSavingCents(f.EffectiveModel, f.RequestedModel, savedTokens)

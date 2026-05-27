@@ -327,7 +327,7 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	}
 	var completion GatewayCompletion
 	if cfg.ToolsEnabledForAgent(task.AgentID) {
-		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID, task.OriginalUserID)
+		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID, task.OriginalUserID, costModes)
 	} else {
 		completion, err = e.completeGateway(runCtx, cfg, agent.Model.String, messages, meta)
 	}
@@ -341,13 +341,14 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	e.recordTaskMessage(finalCtx, task, completion.Output)
 	e.recordTaskUsage(finalCtx, task, plan.workspaceID, completion)
 	e.recordCostSavingMeasurements(finalCtx, plan.workspaceID, task.ID, costModes, CostSavingRunFacts{
-		RequestedModel:      requestedModel,
-		EffectiveModel:      completion.Model,
-		Usage:               pricing.Usage{InputTokens: completion.Usage.InputTokens, OutputTokens: completion.Usage.OutputTokens, CacheReadTokens: completion.Usage.CacheReadTokens, CacheWriteTokens: completion.Usage.CacheWriteTokens},
-		ActualCostCents:     completionCostCents(completion),
-		InlinedContextReads: plan.inlinedContextReads,
-		ToolResultChars:     completion.ToolResultChars,
-		RoutingHeldOut:      routingHeldOut,
+		RequestedModel:        requestedModel,
+		EffectiveModel:        completion.Model,
+		Usage:                 pricing.Usage{InputTokens: completion.Usage.InputTokens, OutputTokens: completion.Usage.OutputTokens, CacheReadTokens: completion.Usage.CacheReadTokens, CacheWriteTokens: completion.Usage.CacheWriteTokens},
+		ActualCostCents:       completionCostCents(completion),
+		InlinedContextReads:   plan.inlinedContextReads,
+		ToolResultChars:       completion.ToolResultChars,
+		PrunedToolResultChars: completion.PrunedToolResultChars,
+		RoutingHeldOut:        routingHeldOut,
 	})
 
 	result, _ := json.Marshal(protocol.TaskCompletedPayload{
@@ -480,8 +481,12 @@ func (e *FirtalGatewayExecutor) completeGatewayWithTools(ctx context.Context, cf
 // registry or the MCP server, results are appended, and the next round runs.
 // The first round without tool calls becomes the final output. Budget is
 // checked before each tool dispatch. Usage is summed across all rounds.
-func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID, originalUserID pgtype.UUID) (GatewayCompletion, error) {
+func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID, originalUserID pgtype.UUID, costModes map[string]string) (GatewayCompletion, error) {
 	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID}
+	// FIR-2325: prune_tool_results actually drops superseded tool output from the
+	// transcript mid-run when "on" for this workspace. Off/shadow keep the full
+	// transcript (no behavior change), so the default fleet is unaffected.
+	pruneOn := costModes[savingPruneToolResults] == savingModeOn
 
 	// Determine tools: registry-backed when available, else fall back to the
 	// hardcoded MCP server (POC compatibility).
@@ -529,14 +534,14 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 
 	if useRegistry && activeRegistry != nil {
 		// CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): use the provider-compatible tool loop as the primary path for enabled registry tools; prod Anthropic-native failures did not reliably lift Kristian into fallback.
-		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, activeRegistry, enabledTools)
+		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, pruneOn)
 	}
 	if toolSrv != nil {
 		// CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): keep the legacy three-tool path on the same compat transport so tool-enabled tasks avoid Anthropic-native malformed requests entirely.
-		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools))
+		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools), pruneOn)
 	}
 
-	completion, err := e.runAnthropicToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, anthropicTools, tctx, toolSrv, activeRegistry, useRegistry)
+	completion, err := e.runAnthropicToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, anthropicTools, tctx, toolSrv, activeRegistry, useRegistry, pruneOn)
 	if err == nil || !isAnthropicMalformedToolRequest(err) || len(anthropicTools) == 0 {
 		return completion, err
 	}
@@ -549,10 +554,10 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		"error", err,
 	)
 	if useRegistry && activeRegistry != nil {
-		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, activeRegistry, enabledTools)
+		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, pruneOn)
 	}
 	if toolSrv != nil {
-		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools))
+		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools), pruneOn)
 	}
 	return completion, err
 }
@@ -605,7 +610,7 @@ func anthropicToolsToGatewayToolDefs(tools []AnthropicTool) []GatewayToolDef {
 // the same choke-point the registry and Anthropic-native loops use. Without it a
 // Deny/Ask row would silently not apply here. guardToolCall is a no-op when no
 // gate is configured, so the default fleet is unaffected.
-func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID pgtype.UUID, toolSrv *mcp.Server, tools []GatewayToolDef) (GatewayCompletion, error) {
+func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID pgtype.UUID, toolSrv *mcp.Server, tools []GatewayToolDef, pruneOn bool) (GatewayCompletion, error) {
 	history := withToolUsageHint(initialMessages)
 
 	var acc GatewayCompletion
@@ -677,6 +682,9 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 				Content:    resultText,
 			})
 		}
+		if pruneOn {
+			acc.PrunedToolResultChars += pruneSupersededGatewayToolResults(history)
+		}
 	}
 
 	// Tool-round budget exhausted. Make one final gateway call WITHOUT tools
@@ -705,6 +713,7 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 	agentID, workspaceID pgtype.UUID,
 	registry *Registry,
 	tools []Tool,
+	pruneOn bool,
 ) (GatewayCompletion, error) {
 	history := withRegistryToolUsageHint(initialMessages, tools)
 	toolDefs := toolsToGatewayToolDefs(tools)
@@ -796,6 +805,9 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 				Content:    resultText,
 			})
 		}
+		if pruneOn {
+			acc.PrunedToolResultChars += pruneSupersededGatewayToolResults(history)
+		}
 	}
 
 	e.logger.Info("firtal gateway chat-completions fallback forcing final no-tool call",
@@ -831,6 +843,7 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 	toolSrv *mcp.Server,
 	registry *Registry,
 	useRegistry bool,
+	pruneOn bool,
 ) (GatewayCompletion, error) {
 	// Extract system prompt from the first message if present.
 	systemText := ""
@@ -980,6 +993,9 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 			Role:    "user",
 			Content: toolResultBlocks,
 		})
+		if pruneOn {
+			acc.PrunedToolResultChars += pruneSupersededAnthropicToolResults(history)
+		}
 	}
 
 	// Tool-round budget exhausted. Make one final call without tools so the

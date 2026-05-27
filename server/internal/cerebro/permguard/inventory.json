@@ -1693,6 +1693,10 @@
       "gate": "via:POST /api/issues/"
     },
     {
+      "id": "issue context",
+      "exempt": "read-only — wraps GET /api/issues/{id}/context (CEREBRO-PATCH issue-context-bundle, FIR-2384)"
+    },
+    {
       "id": "issue get",
       "exempt": "read-only — wraps GET /api/issues/{id}"
     },

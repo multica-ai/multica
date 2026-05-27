@@ -2451,6 +2451,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 		WorkspaceContext:                 task.WorkspaceContext,
+		// CEREBRO-PATCH(runtime-config-snapshot): FIR-2384 — when a fewer-calls saving rewrote the start-of-run reads, suppress/replace the redundant read steps in the runtime workflow brief. snapshot_prompt inlines issue+thread; bundled_read points at `multica issue context`.
+		IssueSnapshotInlined: strings.TrimSpace(task.IssueSnapshot) != "",
+		BundleContextHint:    task.BundleContextHint,
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop

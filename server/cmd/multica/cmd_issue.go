@@ -137,6 +137,13 @@ var issueStatusCmd = &cobra.Command{
 	RunE: runIssueStatus,
 }
 
+var issueContextCmd = &cobra.Command{
+	Use:   "context <id>",
+	Short: "Get issue, recent comments, members, and labels in one call",
+	Args:  exactArgs(1),
+	RunE:  runIssueContext, // CEREBRO-PATCH(issue-context-cli): FIR-2384 bundled context read.
+}
+
 // Comment subcommands.
 
 var issueCommentCmd = &cobra.Command{
@@ -245,6 +252,7 @@ func init() {
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueAskCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueContextCmd) // CEREBRO-PATCH(issue-context-cli): FIR-2384 bundled context read.
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
@@ -310,6 +318,9 @@ func init() {
 
 	// issue status
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue context
+	issueContextCmd.Flags().String("output", "json", "Output format: json") // CEREBRO-PATCH(issue-context-cli): FIR-2384 bundled context read.
 
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
