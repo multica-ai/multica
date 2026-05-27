@@ -37,7 +37,8 @@ cat > "${config_dir}/config.json" <<JSON
 {
   "server_url": "${MULTICA_SERVER_URL}",
   "app_url": "${MULTICA_SERVER_URL}",
-  "token": "${MULTICA_PAT}"
+  "token": "${MULTICA_PAT}",
+  "workspace_id": "${MULTICA_WORKSPACE_ID}"
 }
 JSON
 
