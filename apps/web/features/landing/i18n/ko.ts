@@ -240,7 +240,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         resources: {
           label: "리소스",
           links: [
-            { label: "문서", href: "/docs" },
+            { label: "문서", href: "/docs/ko" },
             { label: "API", href: githubUrl },
             { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
           ],

@@ -22,6 +22,12 @@ export function isZhLocale(locale: Locale): boolean {
   return locale === "zh-Hans";
 }
 
+export function docsHrefForLocale(locale: Locale): string {
+  if (locale === "zh-Hans") return "/docs/zh";
+  if (locale === "ko") return "/docs/ko";
+  return "/docs";
+}
+
 type FeatureSection = {
   label: string;
   title: string;
