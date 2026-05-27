@@ -520,10 +520,22 @@ export const SquadSchema = z.object({
   archived_at: z.string().nullable().optional().transform((v) => v ?? null),
   archived_by: z.string().nullable().optional().transform((v) => v ?? null),
   member_count: z.number().default(0),
-  member_preview: z.array(SquadMemberPreviewSchema).default([]),
+  // CEREBRO-PATCH(squad-list-element-resilience): FIR-2394 — drop a malformed
+  // preview entry instead of failing the whole squad. member_preview is a
+  // hover-card adornment; one bad entry must never blank the squad it adorns.
+  member_preview: z
+    .array(SquadMemberPreviewSchema.nullable().catch(null))
+    .transform((arr) => arr.filter((m): m is NonNullable<typeof m> => m !== null))
+    .default([]),
 }).loose();
 
-export const SquadListSchema = z.array(SquadSchema);
+// CEREBRO-PATCH(squad-list-element-resilience): FIR-2394 — a single malformed
+// squad must not blank the entire list (board assignees, pickers, hover cards).
+// z.array fails atomically, so drop the bad element and keep the rest rather
+// than letting parseWithFallback collapse the whole list to empty.
+export const SquadListSchema = z
+  .array(SquadSchema.nullable().catch(null))
+  .transform((arr) => arr.filter((s): s is NonNullable<typeof s> => s !== null));
 export const EMPTY_SQUAD_LIST: Squad[] = [];
 export const EMPTY_SQUAD: Squad = {
   id: "",
