@@ -27,6 +27,14 @@ describe("mobile markdown tokenizer", () => {
         mentionId: "agent-1",
       },
     ]);
+    expect(tokenizeInline("[@Frontend](mention://squad/squad-1)")).toEqual([
+      {
+        type: "mention",
+        content: "@Frontend",
+        mentionType: "squad",
+        mentionId: "squad-1",
+      },
+    ]);
     expect(tokenizeInline("[MUL-123](mention://issue/issue-1)")).toEqual([
       {
         type: "mention",

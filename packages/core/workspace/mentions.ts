@@ -4,12 +4,14 @@ import type {
   IssueStatus,
   MemberWithUser,
   MentionFrequencyEntry,
+  Squad,
 } from "../types";
+import { isSquadSelectable } from "../permissions";
 
 export type WorkspaceMentionTarget = {
   id: string;
   label: string;
-  type: "all" | "member" | "agent" | "issue";
+  type: "all" | "member" | "agent" | "squad" | "issue";
   description?: string;
   status?: IssueStatus;
 };
@@ -23,7 +25,9 @@ export function buildWorkspaceMentionTargets(
   members: MemberWithUser[],
   agents: Agent[],
   ctx: MentionPermissionContext,
+  squads: Squad[] = [],
 ): WorkspaceMentionTarget[] {
+  const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
   return [
     { id: "all", label: "All members", type: "all" },
     ...members.map((member) => ({
@@ -47,6 +51,13 @@ export function buildWorkspaceMentionTargets(
         id: agent.id,
         label: agent.name,
         type: "agent" as const,
+      })),
+    ...squads
+      .filter((squad) => isSquadSelectable(squad, agentsById, ctx.userId))
+      .map((squad) => ({
+        id: squad.id,
+        label: squad.name,
+        type: "squad" as const,
       })),
   ];
 }

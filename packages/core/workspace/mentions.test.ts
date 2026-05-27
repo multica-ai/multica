@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Agent, Issue, MemberWithUser } from "../types";
+import type { Agent, Issue, MemberWithUser, Squad } from "../types";
 import {
   buildWorkspaceMentionTargets,
   issueToMentionTarget,
@@ -44,6 +44,23 @@ function agent(overrides: Partial<Agent>): Agent {
     updated_at: overrides.updated_at ?? "2026-01-01T00:00:00Z",
     archived_at: overrides.archived_at ?? null,
   } as Agent;
+}
+
+function squad(overrides: Partial<Squad>): Squad {
+  return {
+    id: overrides.id ?? "squad-1",
+    workspace_id: overrides.workspace_id ?? "ws-1",
+    name: overrides.name ?? "Frontend Squad",
+    description: overrides.description ?? "",
+    instructions: overrides.instructions ?? "",
+    avatar_url: overrides.avatar_url ?? null,
+    leader_id: overrides.leader_id ?? "agent-1",
+    creator_id: overrides.creator_id ?? "user-1",
+    created_at: overrides.created_at ?? "2026-01-01T00:00:00Z",
+    updated_at: overrides.updated_at ?? "2026-01-01T00:00:00Z",
+    archived_at: overrides.archived_at ?? null,
+    archived_by: overrides.archived_by ?? null,
+  };
 }
 
 describe("workspace mention targets", () => {
@@ -106,6 +123,25 @@ describe("workspace mention targets", () => {
 
     const agentLabels = targets.filter((t) => t.type === "agent").map((t) => t.label);
     expect(agentLabels).toContain("Allowed Bot");
+  });
+
+  it("includes selectable squads and hides archived or unavailable squads", () => {
+    const targets = buildWorkspaceMentionTargets(
+      [member({ user_id: "user-1", name: "Alice" })],
+      [
+        agent({ id: "visible-leader", name: "Visible Leader" }),
+        agent({ id: "private-leader", name: "Private Leader", visibility: "private", owner_id: "other-user" }),
+      ],
+      { userId: "user-1", role: "member" },
+      [
+        squad({ id: "visible-squad", name: "Visible Squad", leader_id: "visible-leader" }),
+        squad({ id: "private-squad", name: "Private Squad", leader_id: "private-leader" }),
+        squad({ id: "archived-squad", name: "Archived Squad", leader_id: "visible-leader", archived_at: "2026-01-01T00:00:00Z" }),
+      ],
+    );
+
+    const squadLabels = targets.filter((target) => target.type === "squad").map((target) => target.label);
+    expect(squadLabels).toEqual(["Visible Squad"]);
   });
 
   it("maps issues to issue mention targets", () => {

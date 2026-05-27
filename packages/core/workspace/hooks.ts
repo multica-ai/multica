@@ -100,6 +100,7 @@ export type { WorkspaceMentionTarget } from "./mentions";
 export function useWorkspaceMentionTargets(wsId: string) {
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const { data: mentionFrequency = [] } = useQuery(mentionFrequencyOptions(wsId));
   const userId = useAuthStore((state) => state.user?.id ?? null);
   const role = useMemo(
@@ -113,6 +114,7 @@ export function useWorkspaceMentionTargets(wsId: string) {
         members,
         agents,
         { userId, role },
+        squads,
       );
       const ownAgentIds = agents
         .filter((agent) => userId !== null && agent.owner_id === userId)
@@ -121,6 +123,6 @@ export function useWorkspaceMentionTargets(wsId: string) {
         ownAgentIds,
       });
     },
-    [agents, members, mentionFrequency, role, userId],
+    [agents, members, mentionFrequency, role, squads, userId],
   );
 }

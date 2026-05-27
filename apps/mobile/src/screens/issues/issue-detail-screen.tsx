@@ -1483,7 +1483,13 @@ function MentionSuggestionGroup({
               >
                 {target.type === "issue"
                   ? target.description ?? t("issues.issue")
-                  : target.type === "agent" ? t("issues.agent") : target.type === "all" ? t("issues.all_members") : t("issues.member")}
+                  : target.type === "agent"
+                    ? t("issues.agent")
+                    : target.type === "squad"
+                      ? t("issues.squad")
+                      : target.type === "all"
+                        ? t("issues.all_members")
+                        : t("issues.member")}
               </Text>
             </View>
           </Pressable>
