@@ -16,6 +16,9 @@
 
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
+import { useQuery } from "@tanstack/react-query";
+import { issueListOptions, issueDetailOptions } from "@multica/core/issues/queries";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
 import { IssueChip } from "../../issues/components/issue-chip";
@@ -45,9 +48,17 @@ function IssueMention({
   issueId: string;
   fallbackLabel?: string;
 }) {
- const p = useWorkspacePaths();
+  const p = useWorkspacePaths();
   const { push, openInNewTab } = useNavigation();
-  const issuePath = p.issueDetail(issueId);
+  const wsId = useWorkspaceId();
+  const { data: issues = [] } = useQuery(issueListOptions(wsId));
+  const listIssue = issues.find((i) => i.id === issueId);
+  const { data: detailIssue } = useQuery({
+    ...issueDetailOptions(wsId, issueId),
+    enabled: !listIssue,
+  });
+  const identifier = listIssue?.identifier ?? detailIssue?.identifier;
+  const issuePath = p.issueDetail(identifier ?? issueId);
 
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();

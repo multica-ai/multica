@@ -117,15 +117,15 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   }, [isPinned, issueId, createPin, deletePin]);
 
   const copyLink = useCallback(async () => {
-    if (!issueId) return;
-    const url = navigation.getShareableUrl(paths.issueDetail(issueId));
+    if (!issueIdentifier) return;
+    const url = navigation.getShareableUrl(paths.issueDetail(issueIdentifier));
     try {
       await navigator.clipboard.writeText(url);
       toast.success(t(($) => $.detail.link_copied));
     } catch {
       toast.error(t(($) => $.detail.link_copy_failed));
     }
-  }, [paths, issueId, navigation, t]);
+  }, [paths, issueIdentifier, navigation, t]);
 
   const openCreateSubIssue = useCallback(() => {
     if (!issueId) return;
