@@ -79,6 +79,9 @@ func (m *mockStorage) KeyFromURL(rawURL string) string {
 	return rawURL
 }
 func (m *mockStorage) CdnDomain() string { return "cdn.example.com" }
+func (m *mockStorage) RemapURL(rawURL string) string {
+	return rawURL
+}
 func (m *mockStorage) PresignedInlineGetURL(_ context.Context, key string, contentType string, filename string, _ time.Duration) (string, error) {
 	return fmt.Sprintf(
 		"https://cdn.example.com/%s?response-content-disposition=inline&response-content-type=%s&filename=%s",

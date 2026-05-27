@@ -166,6 +166,19 @@ func stripCustomEnvValuesForCopy(src []byte) ([]byte, bool) {
 	return b, hadSecret
 }
 
+// copyCustomEnvForAgentCopy preserves env values only when the source agent
+// already belongs to the current user. Copying another user's agent keeps the
+// keys for usability but drops values to avoid leaking secrets.
+func copyCustomEnvForAgentCopy(src []byte, sourceOwnerID pgtype.UUID, userID string) ([]byte, bool) {
+	if uuidToString(sourceOwnerID) != userID {
+		return stripCustomEnvValuesForCopy(src)
+	}
+	if len(src) == 0 {
+		return []byte("{}"), false
+	}
+	return append([]byte(nil), src...), false
+}
+
 // RepoData holds repository information included in claim responses so the
 // daemon can set up worktrees for each workspace repo.
 type RepoData struct {
@@ -849,7 +862,7 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 	} else {
 		rc = append([]byte(nil), rc...)
 	}
-	ce, envCopiedPending := stripCustomEnvValuesForCopy(sourceAgent.CustomEnv)
+	ce, envCopiedPending := copyCustomEnvForAgentCopy(sourceAgent.CustomEnv, sourceAgent.OwnerID, userID)
 	ca := sourceAgent.CustomArgs
 	if len(ca) == 0 {
 		ca = []byte("[]")
