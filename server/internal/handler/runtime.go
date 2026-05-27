@@ -588,6 +588,19 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(archivedAgentIDs) > 0 {
+		activeSquads, err := h.Queries.ListActiveSquadsByLeaderIDs(r.Context(), archivedAgentIDs)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check squad dependencies")
+			return
+		}
+		if len(activeSquads) > 0 {
+			writeJSON(w, http.StatusConflict, runtimeHasActiveSquadLeadersResponse(activeSquads))
+			return
+		}
+		if err := h.Queries.DeleteArchivedSquadsByLeaderIDs(r.Context(), archivedAgentIDs); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clean up archived squads")
+			return
+		}
 		if err := h.Queries.PauseAutopilotsByAgentAssignees(r.Context(), archivedAgentIDs); err != nil {
 			slog.Warn("pause autopilots for archived agents failed",
 				"runtime_id", uuidToString(rt.ID), "error", err)
@@ -636,6 +649,18 @@ func runtimeHasActiveAgentsResponse(agents []db.Agent) map[string]any {
 		"error":         "cannot delete runtime: it has active agents bound to it. Archive or reassign the agents first.",
 		"code":          "runtime_has_active_agents",
 		"active_agents": resp,
+	}
+}
+
+func runtimeHasActiveSquadLeadersResponse(squads []db.Squad) map[string]any {
+	resp := make([]SquadResponse, len(squads))
+	for i, s := range squads {
+		resp[i] = squadToResponse(s)
+	}
+	return map[string]any{
+		"error":         "cannot delete runtime: archived agents on this runtime still lead active squads. Change or archive those squads first.",
+		"code":          "runtime_has_active_squad_leaders",
+		"active_squads": resp,
 	}
 }
 
@@ -803,6 +828,19 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 		return
 	}
 	if len(allArchivedIDs) > 0 {
+		activeSquads, err := qtx.ListActiveSquadsByLeaderIDs(r.Context(), allArchivedIDs)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check squad dependencies")
+			return
+		}
+		if len(activeSquads) > 0 {
+			writeJSON(w, http.StatusConflict, runtimeHasActiveSquadLeadersResponse(activeSquads))
+			return
+		}
+		if err := qtx.DeleteArchivedSquadsByLeaderIDs(r.Context(), allArchivedIDs); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clean up archived squads")
+			return
+		}
 		if err := qtx.PauseAutopilotsByAgentAssignees(r.Context(), allArchivedIDs); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to pause autopilots")
 			return

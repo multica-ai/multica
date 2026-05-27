@@ -114,6 +114,19 @@ func (q *Queries) DeleteArchivedAgentsByRuntime(ctx context.Context, runtimeID p
 	return err
 }
 
+const deleteArchivedSquadsByLeaderIDs = `-- name: DeleteArchivedSquadsByLeaderIDs :exec
+DELETE FROM squad
+WHERE archived_at IS NOT NULL AND leader_id = ANY($1::uuid[])
+`
+
+// Archived squads are hidden and have no restore path. Remove them before
+// deleting archived leader agents so squad.leader_id's ON DELETE RESTRICT FK
+// does not block runtime teardown.
+func (q *Queries) DeleteArchivedSquadsByLeaderIDs(ctx context.Context, leaderIds []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteArchivedSquadsByLeaderIDs, leaderIds)
+	return err
+}
+
 const deleteStaleOfflineRuntimes = `-- name: DeleteStaleOfflineRuntimes :many
 DELETE FROM agent_runtime
 WHERE status = 'offline'
@@ -493,6 +506,47 @@ func (q *Queries) ListArchivedAgentIDsByRuntime(ctx context.Context, runtimeID p
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveSquadsByLeaderIDs = `-- name: ListActiveSquadsByLeaderIDs :many
+SELECT id, workspace_id, name, description, leader_id, creator_id, created_at, updated_at, archived_at, archived_by, avatar_url, instructions FROM squad
+WHERE archived_at IS NULL AND leader_id = ANY($1::uuid[])
+ORDER BY name ASC
+`
+
+// Active squads still depend on their leader agent. Runtime deletion must not
+// hard-delete those leaders; surface these as explicit blockers instead.
+func (q *Queries) ListActiveSquadsByLeaderIDs(ctx context.Context, leaderIds []pgtype.UUID) ([]Squad, error) {
+	rows, err := q.db.Query(ctx, listActiveSquadsByLeaderIDs, leaderIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Squad{}
+	for rows.Next() {
+		var i Squad
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Description,
+			&i.LeaderID,
+			&i.CreatorID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.AvatarUrl,
+			&i.Instructions,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

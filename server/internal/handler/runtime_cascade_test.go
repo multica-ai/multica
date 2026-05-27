@@ -209,6 +209,95 @@ func TestArchiveAgentsAndDeleteRuntime_HappyPath(t *testing.T) {
 	}
 }
 
+// TestDeleteAgentRuntime_ArchivedSquadLeaderCleanup covers the production
+// failure mode: an already-archived agent on the runtime still leads an
+// archived squad, whose leader_id FK used to block hard-deleting the agent.
+func TestDeleteAgentRuntime_ArchivedSquadLeaderCleanup(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID := createCascadeFixtureRuntime(t, ctx, "Archived Squad Runtime")
+	agentID := createCascadeFixtureAgent(t, ctx, runtimeID, "Archived Squad Leader")
+	squadID := createCascadeFixtureSquad(t, ctx, agentID, "Archived Squad", true)
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent SET archived_at = now(), archived_by = $2 WHERE id = $1
+	`, agentID, testUserID); err != nil {
+		t.Fatalf("archive fixture agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.DeleteAgentRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var rtRows, agentRows, squadRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&rtRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent WHERE id = $1`, agentID).Scan(&agentRows); err != nil {
+		t.Fatalf("count agent rows: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM squad WHERE id = $1`, squadID).Scan(&squadRows); err != nil {
+		t.Fatalf("count squad rows: %v", err)
+	}
+	if rtRows != 0 || agentRows != 0 || squadRows != 0 {
+		t.Fatalf("expected runtime/agent/archived squad deleted, got runtime=%d agent=%d squad=%d", rtRows, agentRows, squadRows)
+	}
+}
+
+func TestDeleteAgentRuntime_ActiveSquadLeaderBlocks(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID := createCascadeFixtureRuntime(t, ctx, "Active Squad Runtime")
+	agentID := createCascadeFixtureAgent(t, ctx, runtimeID, "Active Squad Leader")
+	squadID := createCascadeFixtureSquad(t, ctx, agentID, "Active Squad", false)
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent SET archived_at = now(), archived_by = $2 WHERE id = $1
+	`, agentID, testUserID); err != nil {
+		t.Fatalf("archive fixture agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.DeleteAgentRuntime(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Code         string          `json:"code"`
+		ActiveSquads []SquadResponse `json:"active_squads"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "runtime_has_active_squad_leaders" {
+		t.Fatalf("expected code runtime_has_active_squad_leaders, got %q", body.Code)
+	}
+	if len(body.ActiveSquads) != 1 || body.ActiveSquads[0].ID != squadID {
+		t.Fatalf("expected active squad %s in response, got %+v", squadID, body.ActiveSquads)
+	}
+
+	var rtRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&rtRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if rtRows != 1 {
+		t.Fatalf("expected runtime to survive active-squad blocker, count=%d", rtRows)
+	}
+}
+
 // TestArchiveAgentsAndDeleteRuntime_PlanChanged proves the dialog-confirm
 // race guard: if the user's snapshot of active agents drifts from the live
 // set (somebody added or archived an agent while the dialog was open), the
@@ -302,4 +391,27 @@ func createCascadeFixtureAgent(t *testing.T, ctx context.Context, runtimeID, nam
 		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 	return agentID
+}
+
+func createCascadeFixtureSquad(t *testing.T, ctx context.Context, leaderID, name string, archived bool) string {
+	t.Helper()
+	var squadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, $2, '', $3, $4)
+		RETURNING id
+	`, testWorkspaceID, name, leaderID, testUserID).Scan(&squadID); err != nil {
+		t.Fatalf("insert cascade fixture squad: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+	if archived {
+		if _, err := testPool.Exec(ctx, `
+			UPDATE squad SET archived_at = now(), archived_by = $2 WHERE id = $1
+		`, squadID, testUserID); err != nil {
+			t.Fatalf("archive fixture squad: %v", err)
+		}
+	}
+	return squadID
 }

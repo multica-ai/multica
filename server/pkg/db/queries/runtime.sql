@@ -202,6 +202,20 @@ SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL;
 -- name: DeleteArchivedAgentsByRuntime :exec
 DELETE FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
 
+-- name: ListActiveSquadsByLeaderIDs :many
+-- Active squads still depend on their leader agent. Runtime deletion must not
+-- hard-delete those leaders; surface these as explicit blockers instead.
+SELECT * FROM squad
+WHERE archived_at IS NULL AND leader_id = ANY(@leader_ids::uuid[])
+ORDER BY name ASC;
+
+-- name: DeleteArchivedSquadsByLeaderIDs :exec
+-- Archived squads are hidden and have no restore path. Remove them before
+-- deleting archived leader agents so squad.leader_id's ON DELETE RESTRICT FK
+-- does not block runtime teardown.
+DELETE FROM squad
+WHERE archived_at IS NOT NULL AND leader_id = ANY(@leader_ids::uuid[]);
+
 -- name: PauseAutopilotsByAgentAssignees :exec
 -- Pauses every active autopilot whose agent assignee is in the supplied list.
 -- Called before hard-deleting archived agents on runtime teardown so the rows
