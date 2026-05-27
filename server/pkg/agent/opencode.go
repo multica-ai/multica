@@ -217,17 +217,9 @@ func (b *opencodeBackend) processEvents(ctx context.Context, r io.Reader, ch cha
 			continue
 		}
 
-		if opts.TraceCallback != nil {
-			opts.TraceCallback("raw_stdout", line, "")
-		}
-
 		var event opencodeEvent
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			continue
-		}
-
-		if opts.TraceCallback != nil {
-			opts.TraceCallback("provider_event", "", line)
 		}
 
 		if event.SessionID != "" {

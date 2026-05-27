@@ -530,17 +530,9 @@ func (c *copilotACPClient) closeAllPending(err error) {
 }
 
 func (c *copilotACPClient) handleLine(line string) {
-	if c.traceCallback != nil {
-		c.traceCallback("raw_stdout", line, "")
-	}
-
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(line), &raw); err != nil {
 		return
-	}
-
-	if c.traceCallback != nil {
-		c.traceCallback("provider_event", "", line)
 	}
 
 	if _, hasID := raw["id"]; hasID {
@@ -716,6 +708,22 @@ func (c *copilotACPClient) choosePermissionOption(raw json.RawMessage) string {
 	if allow == "" {
 		allow = deny
 	}
+
+	// Auto-approve trusted Multica platform commands (e.g. "multica ...")
+	// without routing through the approval callback.
+	input := params.ToolCall.RawInput
+	if input == nil {
+		input = params.ToolCall.Input
+	}
+	if input == nil {
+		input = params.ToolCall.Parameters
+	}
+	if input != nil {
+		if command := trustedPlatformCommandFromInput(input); isTrustedPlatformCommand(command) {
+			return allow
+		}
+	}
+
 	if c.onApproval == nil {
 		return allow
 	}

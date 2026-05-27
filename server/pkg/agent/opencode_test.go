@@ -1359,3 +1359,42 @@ func TestOpencodeBuildRunArgs_ApprovalPolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestOpencodeProcessEventsNoRawProviderTraces(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	var traceChannels []string
+	trace := func(channel, _, _ string) {
+		traceChannels = append(traceChannels, channel)
+	}
+
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_raw","part":{"type":"step-start"}}`,
+		`{"type":"text","timestamp":1001,"sessionID":"ses_raw","part":{"type":"text","text":"hello"}}`,
+		`{"type":"tool_use","timestamp":1002,"sessionID":"ses_raw","part":{"tool":"bash","callID":"call_1","state":{"status":"completed","input":{"command":"ls"},"output":"file.go\n"}}}`,
+		`{"type":"step_finish","timestamp":1003,"sessionID":"ses_raw","part":{"type":"step-finish"}}`,
+	}, "\n")
+
+	b.processEvents(context.Background(), strings.NewReader(lines), ch, ExecOptions{TraceCallback: trace})
+	close(ch)
+
+	for _, tc := range traceChannels {
+		if tc == "raw_stdout" || tc == "provider_event" {
+			t.Errorf("standardized provider must not emit %q trace to user-visible stream", tc)
+		}
+	}
+
+	hasDisplay := false
+	for _, tc := range traceChannels {
+		if tc == "display_event" {
+			hasDisplay = true
+			break
+		}
+	}
+	if !hasDisplay {
+		t.Fatal("expected display_event traces to be emitted")
+	}
+}

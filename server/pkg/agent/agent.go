@@ -206,6 +206,19 @@ func New(agentType string, cfg Config) (Backend, error) {
 	}
 }
 
+// SupportedBackends returns the set of agent types accepted by New.
+func SupportedBackends() []string {
+	return []string{
+		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw",
+		"hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI",
+	}
+}
+
+// RegisteredProviders returns the set of provider names with capability entries.
+func RegisteredProviders() []string {
+	return registeredProviders()
+}
+
 // DetectVersion runs the agent CLI with --version and returns the output.
 func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 	return detectCLIVersion(ctx, executablePath)

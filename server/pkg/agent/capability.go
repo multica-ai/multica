@@ -1,5 +1,7 @@
 package agent
 
+import "sort"
+
 // Capability declares the runtime-level features a provider supports. The
 // registry is intentionally about behavior, not provider-specific integration
 // details such as config filenames, skill roots, or protocol wiring.
@@ -97,6 +99,17 @@ var capabilityRegistry = map[string]Capability{
 		ResumeSession:    true,
 		StructuredOutput: true,
 	},
+}
+
+// registeredProviders returns the sorted list of provider names in the
+// capability registry. Exported indirectly via RegisteredProviders in agent.go.
+func registeredProviders() []string {
+	names := make([]string, 0, len(capabilityRegistry))
+	for name := range capabilityRegistry {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // CapabilityFor reports the registered capability for provider.

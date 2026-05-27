@@ -2732,7 +2732,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			} else {
 				execOpts.OnApproval = WithApprovalTrace(execOpts.OnApproval, d.traceStore, task.ID, traceRunID, provider)
 			}
-			execOpts.TraceCallback = BuildTraceCallback(d.traceStore, task.ID, traceRunID, provider)
+			execOpts.TraceCallback = BuildTraceCallback(d.traceStore, task.ID, traceRunID, provider, capability.StreamDisplay)
 		}
 		if provider == "claude" || provider == "codebuddy" {
 			execOpts.ClaudePermissionMode = protocol.ResolveClaudePermissionMode(rtCfg)

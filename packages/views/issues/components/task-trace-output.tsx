@@ -1356,13 +1356,19 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
   }, [healthPort, streamNonce, task.id]);
 
   const visibleLines = useMemo(() => {
-    if (showRaw) return lines;
+    if (showRaw && streamGated) return lines;
+    const rawChannels = new Set(["raw_stdout", "provider_event"]);
+    if (showRaw) {
+      // StreamDisplay providers: show everything except raw provider channels
+      // (backend already filters these, but this is a belt-and-suspenders guard).
+      return lines.filter((line) => !rawChannels.has(line.channel));
+    }
     return lines.filter((line) => (
       line.channel === "display_event" ||
       line.channel === "approval_request" ||
       line.channel === "approval_response"
     ));
-  }, [lines, showRaw]);
+  }, [lines, showRaw, streamGated]);
 
   const workItems = useMemo(() => buildWorkItems(visibleLines, showRaw), [visibleLines, showRaw]);
   const latestVisibleLineSeq = visibleLines[visibleLines.length - 1]?.seq ?? -1;
