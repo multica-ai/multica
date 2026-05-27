@@ -312,14 +312,19 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
   // banner reads as "waiting" rather than "working" at a glance.
   return (
     <div className={isQueued ? "rounded-lg border border-border bg-muted/30" : "rounded-lg border border-info/20 bg-info/5"}>
-      <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
-        {task.agent_id ? (
-          <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard showStatusDot />
-        ) : (
-          <div className="flex items-center justify-center h-5 w-5 rounded-full shrink-0 bg-info/10 text-info">
-            <Bot className="h-3 w-3" />
-          </div>
-        )}
+        <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
+          {task.agent_id ? (
+            <span className="relative inline-flex">
+              <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard showStatusDot />
+              {task.status === "running" && (
+                <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-background animate-pulse" />
+              )}
+            </span>
+          ) : (
+            <div className="flex items-center justify-center h-5 w-5 rounded-full shrink-0 bg-info/10 text-info">
+              <Bot className="h-3 w-3" />
+            </div>
+          )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
           {isQueued ? (
             <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
