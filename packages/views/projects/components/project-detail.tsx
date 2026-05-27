@@ -44,6 +44,7 @@ import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
 import { GanttView } from "../../issues/components/gantt-view";
+import { SwimLaneView } from "../../issues/components/swimlane-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -127,6 +128,7 @@ export function ProjectIssuesContent({
   assigneeGroupFilter,
   scope,
   filter,
+  sort,
   ganttIssues,
   scopedLabelFilters,
 }: {
@@ -152,6 +154,12 @@ export function ProjectIssuesContent({
   const effectiveLabelFilters = scopedLabelFilters ?? labelFilters;
   const issues = projectIssues;
 
+  // Status-unfiltered companion for Swimlane.
+  const swimlaneIssues = useMemo(
+    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
+    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+  );
+
   // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
   // to wait for every status bucket to paginate in. View-store filters still
   // apply so toggling priority / assignee / label hides the same bars.
@@ -175,7 +183,7 @@ export function ProjectIssuesContent({
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
-    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
+    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position" | "parent_issue_id">, onSettled?: () => void) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
         {
@@ -185,18 +193,19 @@ export function ProjectIssuesContent({
                 ? err.message
                 : t(($) => $.detail.toast_move_issue_failed),
             ),
+          onSettled: () => onSettled?.(),
         },
       );
     },
     [updateIssueMutation, t],
   );
 
-  // Gantt has its own data source (scheduled-only) and its own empty axis —
-  // we never short-circuit it here, otherwise an unscheduled-but-non-empty
-  // project would surface a misleading "no issues" CTA. For Board/List the
-  // bucketed cache really is the ground truth, so an empty result means an
-  // empty project.
-  if (viewMode !== "gantt" && projectIssues.length === 0) {
+  // Gantt and Swimlane have their own data sources and empty states —
+  // we never short-circuit them here, otherwise an unscheduled/unparented
+  // but non-empty project would surface a misleading "no issues" CTA.
+  // For Board/List the bucketed cache really is the ground truth,
+  // so an empty result means an empty project.
+  if (viewMode !== "gantt" && viewMode !== "swimlane" && projectIssues.length === 0) {
     return (
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
         <ListTodo className="h-10 w-10 text-muted-foreground/40" />
@@ -231,6 +240,7 @@ export function ProjectIssuesContent({
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
+          sort={sort}
           projectId={projectId}
         />
       )}
@@ -241,10 +251,26 @@ export function ProjectIssuesContent({
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
+          sort={sort}
           projectId={projectId}
+          onMoveIssue={handleMoveIssue}
         />
       )}
       {viewMode === "gantt" && <GanttView issues={filteredGanttIssues} />}
+      {viewMode === "swimlane" && (
+        <SwimLaneView
+          issues={issues}
+          unfilteredIssues={swimlaneIssues}
+          visibleStatuses={visibleStatuses}
+          hiddenStatuses={hiddenStatuses}
+          onMoveIssue={handleMoveIssue}
+          childProgressMap={childProgressMap}
+          myIssuesScope={scope}
+          myIssuesFilter={filter}
+          sort={sort}
+          projectId={projectId}
+        />
+      )}
     </div>
   );
 }
@@ -262,6 +288,8 @@ export function ProjectIssuesSurface({
   const viewStoreApi = useViewStoreApi();
   const viewMode = useViewStore((s) => s.viewMode);
   const grouping = useViewStore((s) => s.grouping);
+  const sortBy = useViewStore((s) => s.sortBy);
+  const sortDirection = useViewStore((s) => s.sortDirection);
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);
@@ -332,6 +360,8 @@ export function ProjectIssuesSurface({
     wsId,
     scope,
     assigneeGroupFilter,
+    undefined,
+    sort,
   );
   // Each view owns exactly one data source. Board/List ride the bucketed
   // `myIssueListOptions` cache; the assignee-grouped board uses the grouped
@@ -525,6 +555,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       {/* Properties */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
@@ -657,6 +688,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         return (
           <div>
             <button
+              type="button"
               className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${progressOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
               onClick={() => setProgressOpen(!progressOpen)}
             >
@@ -681,6 +713,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       {/* Description */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${descriptionOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setDescriptionOpen(!descriptionOpen)}
         >

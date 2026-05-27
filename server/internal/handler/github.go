@@ -89,8 +89,8 @@ type GitHubPullRequestResponse struct {
 }
 
 type GitHubConnectResponse struct {
-	URL       string `json:"url"`
-	Configured bool  `json:"configured"`
+	URL        string `json:"url"`
+	Configured bool   `json:"configured"`
 }
 
 func githubInstallationToResponse(i db.GithubInstallation) GitHubInstallationResponse {
@@ -492,6 +492,19 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 // version numbers like "v1.2-3".
 var identifierRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{1,9})-(\d+)\b`)
 
+// closingIdentifierRe extracts identifiers that appear immediately after a
+// GitHub-style closing keyword ("close[sd]?", "fix(e[sd])?", "resolve[sd]?"),
+// optionally separated by a colon and whitespace. Matching is intentionally
+// strict on adjacency — "Fix MUL-1" closes MUL-1, but "Fix login MUL-1"
+// does not. This mirrors GitHub's own closing-keyword grammar and is the
+// gate the webhook uses to decide whether to auto-advance an issue to
+// `done` after a PR merges. References like "Follow up in MUL-2" and bare
+// title prefixes like "MUL-1: ..." link the PR (via identifierRe) but
+// never auto-close.
+var closingIdentifierRe = regexp.MustCompile(
+	`(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[:\s]+([a-z][a-z0-9]{1,9})-(\d+)\b`,
+)
+
 // HandleGitHubWebhook (POST /api/webhooks/github) is GitHub's destination for
 // every event from a connected installation. We verify HMAC signature, route
 // on X-GitHub-Event, and either upsert PR rows + auto-link to issues or
@@ -638,7 +651,7 @@ type ghPullRequestPayload struct {
 			AvatarURL string `json:"avatar_url"`
 		} `json:"user"`
 	} `json:"pull_request"`
-	Changes *ghPRChanges `json:"changes"`
+	Changes    *ghPRChanges `json:"changes"`
 	Repository struct {
 		Name  string `json:"name"`
 		Owner struct {
@@ -929,6 +942,29 @@ func extractIdentifiers(parts ...string) []string {
 	out := []string{}
 	for _, src := range parts {
 		for _, m := range identifierRe.FindAllStringSubmatch(src, -1) {
+			ident := strings.ToUpper(m[1]) + "-" + m[2]
+			if _, dup := seen[ident]; dup {
+				continue
+			}
+			seen[ident] = struct{}{}
+			out = append(out, ident)
+		}
+	}
+	return out
+}
+
+// extractClosingIdentifiers pulls every "PREFIX-NUMBER" identifier that
+// appears immediately after a GitHub-style closing keyword in the supplied
+// fields, deduplicating in input order. Identifiers in branch names are
+// intentionally excluded — callers should pass only title and body — because
+// branch names are not natural-language fields and treating "mul-1/fix-login"
+// as a close declaration would silently re-open the bug this gate is meant
+// to fix.
+func extractClosingIdentifiers(parts ...string) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, src := range parts {
+		for _, m := range closingIdentifierRe.FindAllStringSubmatch(src, -1) {
 			ident := strings.ToUpper(m[1]) + "-" + m[2]
 			if _, dup := seen[ident]; dup {
 				continue

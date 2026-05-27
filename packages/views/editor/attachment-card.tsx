@@ -97,6 +97,21 @@ function AttachmentCardChrome({
           <Download className="size-3.5" />
         </button>
       )}
+      {!uploading && canDelete && onDelete && (
+        <button
+          type="button"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          title={t(($) => $.attachment.remove)}
+          aria-label={t(($) => $.attachment.remove)}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      )}
     </div>
   );
 }

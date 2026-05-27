@@ -31,6 +31,12 @@ type AutopilotService struct {
 	TaskSvc   *TaskService
 }
 
+// DefaultAutopilotTriggerTimezone is the timezone used to render Autopilot
+// trigger output when a trigger has no configured timezone or the configured
+// timezone fails to load. Exported so the scheduler can use the same default
+// when computing next run times.
+const DefaultAutopilotTriggerTimezone = "UTC"
+
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
 	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
 }
@@ -80,7 +86,8 @@ func (s *AutopilotService) DispatchAutopilot(
 
 	switch autopilot.ExecutionMode {
 	case "create_issue":
-		if err := s.dispatchCreateIssue(ctx, autopilot, &run); err != nil {
+		triggerTimezone := s.resolveAutopilotTriggerTimezone(ctx, triggerID)
+		if err := s.dispatchCreateIssue(ctx, autopilot, &run, triggerTimezone); err != nil {
 			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
 				return skipped, nil
 			}
@@ -133,7 +140,7 @@ func (s *AutopilotService) DispatchAutopilot(
 // Creator on the issue is always the agent that will actually do the work
 // (the resolved leader for a squad autopilot, otherwise the assignee agent
 // itself), so activity / mentions render with the right author identity.
-func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
+func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, triggerTimezone string) error {
 	leader, _, err := s.resolveAutopilotLeader(ctx, ap)
 	if err != nil {
 		return fmt.Errorf("resolve leader: %w", err)
@@ -147,8 +154,8 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 
 	qtx := s.Queries.WithTx(tx)
 
-	title := s.interpolateTemplate(ap)
-	description := s.buildIssueDescription(ap, *run)
+	title := s.interpolateTemplate(ap, *run, triggerTimezone)
+	description := s.buildIssueDescription(ap, *run, triggerTimezone)
 
 	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
 	if err != nil {
@@ -838,17 +845,80 @@ func autopilotRunDurationMS(run db.AutopilotRun) int64 {
 	return ms
 }
 
+func (s *AutopilotService) resolveAutopilotTriggerTimezone(ctx context.Context, triggerID pgtype.UUID) string {
+	if !triggerID.Valid || s == nil || s.Queries == nil {
+		return DefaultAutopilotTriggerTimezone
+	}
+
+	trigger, err := s.Queries.GetAutopilotTrigger(ctx, triggerID)
+	if err != nil {
+		slog.Warn("failed to load autopilot trigger timezone; falling back to UTC",
+			"trigger_id", util.UUIDToString(triggerID),
+			"error", err,
+		)
+		return DefaultAutopilotTriggerTimezone
+	}
+
+	timezone := strings.TrimSpace(trigger.Timezone.String)
+	if !trigger.Timezone.Valid || timezone == "" {
+		return DefaultAutopilotTriggerTimezone
+	}
+	if _, err := time.LoadLocation(timezone); err != nil {
+		slog.Warn("invalid autopilot trigger timezone; falling back to UTC",
+			"trigger_id", util.UUIDToString(triggerID),
+			"timezone", timezone,
+			"error", err,
+		)
+		return DefaultAutopilotTriggerTimezone
+	}
+	return timezone
+}
+
+func formatAutopilotRunTimestamp(run db.AutopilotRun, timezone string) string {
+	triggeredAt := autopilotRunTriggeredAt(run)
+	loc, label := autopilotTriggerLocation(timezone)
+	return triggeredAt.In(loc).Format("2006-01-02 15:04") + " " + label
+}
+
+func formatAutopilotRunDate(run db.AutopilotRun, timezone string) string {
+	triggeredAt := autopilotRunTriggeredAt(run)
+	loc, _ := autopilotTriggerLocation(timezone)
+	return triggeredAt.In(loc).Format("2006-01-02")
+}
+
+func autopilotRunTriggeredAt(run db.AutopilotRun) time.Time {
+	if run.TriggeredAt.Valid {
+		return run.TriggeredAt.Time
+	}
+	if run.CreatedAt.Valid {
+		return run.CreatedAt.Time
+	}
+	return time.Now().UTC()
+}
+
+func autopilotTriggerLocation(timezone string) (*time.Location, string) {
+	label := strings.TrimSpace(timezone)
+	if label == "" {
+		label = DefaultAutopilotTriggerTimezone
+	}
+	loc, err := time.LoadLocation(label)
+	if err != nil {
+		return time.UTC, DefaultAutopilotTriggerTimezone
+	}
+	return loc, label
+}
+
 // buildIssueDescription appends an autopilot system instruction to the
 // user-provided description, asking the agent to rename the issue after
 // it understands the actual work. For webhook-sourced runs, also appends
 // a payload section so the agent has the event context inline (otherwise
 // the agent only sees the issue body, never the run's trigger_payload).
-func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.AutopilotRun) pgtype.Text {
-	now := time.Now().UTC().Format("2006-01-02 15:04 UTC")
+func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.AutopilotRun, triggerTimezone string) pgtype.Text {
+	triggeredAt := formatAutopilotRunTimestamp(run, triggerTimezone)
 	var b strings.Builder
 	b.WriteString(ap.Description.String)
 	b.WriteString("\n\n---\n*Autopilot run triggered at ")
-	b.WriteString(now)
+	b.WriteString(triggeredAt)
 	b.WriteString(". After starting work, rename this issue to accurately reflect what you are doing.*")
 
 	if run.Source == "webhook" && len(run.TriggerPayload) > 0 {
@@ -904,17 +974,17 @@ var issueTitleTemplateTokenRE = regexp.MustCompile(`\{\{\s*([^{}]*?)\s*\}\}`)
 // tolerated so the render layer accepts every form that
 // ValidateIssueTitleTemplate accepts — otherwise users would save templates
 // that pass validation but still emit a literal token at trigger time.
-func (s *AutopilotService) interpolateTemplate(ap db.Autopilot) string {
+func (s *AutopilotService) interpolateTemplate(ap db.Autopilot, run db.AutopilotRun, triggerTimezone string) string {
 	tmpl := ap.Title
 	if ap.IssueTitleTemplate.Valid && ap.IssueTitleTemplate.String != "" {
 		tmpl = ap.IssueTitleTemplate.String
 	}
-	now := time.Now().UTC().Format("2006-01-02")
+	triggerDate := formatAutopilotRunDate(run, triggerTimezone)
 	return issueTitleTemplateTokenRE.ReplaceAllStringFunc(tmpl, func(match string) string {
 		name := strings.TrimSpace(match[2 : len(match)-2])
 		switch name {
 		case "date":
-			return now
+			return triggerDate
 		default:
 			return match
 		}

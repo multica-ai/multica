@@ -1479,6 +1479,32 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
+			// Parent-issue resolution for quick-create tasks opened from
+			// "Add sub issue". The handler already verified workspace
+			// membership at submit time; here we re-fetch to pull the
+			// human-readable identifier (e.g. MUL-123) the agent will
+			// reference in the prompt. If the parent was deleted between
+			// submit and claim we surface the UUID anyway — the agent
+			// still passes `--parent <uuid>` and the server-side create
+			// will fail loud, which is a better outcome than silently
+			// dropping the sub-issue intent.
+			if qc.ParentIssueID != "" {
+				resp.ParentIssueID = qc.ParentIssueID
+				if parentUUID, err := util.ParseUUID(qc.ParentIssueID); err == nil {
+					if wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID); wsErr == nil {
+						parent, perr := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+							ID:          parentUUID,
+							WorkspaceID: wsUUID,
+						})
+						if perr == nil && parent.ID.Valid {
+							if ws, werr := h.Queries.GetWorkspace(r.Context(), wsUUID); werr == nil {
+								resp.ParentIssueIdentifier = ws.IssuePrefix + "-" + strconv.Itoa(int(parent.Number))
+							}
+						}
+					}
+				}
+			}
+
 			// Squad-leader briefing injection for quick-create tasks. When
 			// the user picked a squad in the modal, the task runs on the
 			// squad's leader agent (resolved by the handler). Surface the
@@ -1694,6 +1720,45 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task started", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
+	writeJSON(w, http.StatusOK, taskToResponse(*task))
+}
+
+// TaskWaitLocalDirectoryRequest is the body the daemon POSTs when it parks
+// a freshly-dispatched task on a busy local_directory path.
+type TaskWaitLocalDirectoryRequest struct {
+	// Reason is a short hint surfaced by the UI alongside the status —
+	// typically "<path>" or "<path> (holder: <task short id>)". Small
+	// enough to fit on the issue card. Empty is accepted; the column is
+	// nullable on the server.
+	Reason string `json:"reason"`
+}
+
+// MarkTaskWaitingLocalDirectory transitions a dispatched task to
+// waiting_local_directory. Called by the daemon when, after claiming a task
+// whose project carries a local_directory resource, it discovers another
+// in-flight task already holds the path's mutex.
+func (h *Handler) MarkTaskWaitingLocalDirectory(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+		return
+	}
+
+	var req TaskWaitLocalDirectoryRequest
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+
+	task, err := h.TaskService.MarkTaskWaitingLocalDirectory(r.Context(), parseUUID(taskID), req.Reason)
+	if err != nil {
+		slog.Warn("mark task waiting_local_directory failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	writeJSON(w, http.StatusOK, taskToResponse(*task))
 }
 

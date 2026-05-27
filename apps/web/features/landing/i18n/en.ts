@@ -293,7 +293,57 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
-        version: "0.3.7",
+        version: "0.3.10",
+        date: "2026-05-27",
+        title: "Local Working Directories",
+        changes: [],
+        features: [
+          "Projects can now use a local working directory on Desktop, so tasks can run in an existing folder while Multica shows when another task is waiting for that directory",
+          "Autopilot webhook triggers can now filter incoming events and actions before work starts, with docs linked directly from the setup flow",
+          "Swimlane views can group Issues by parent Issue, project, or assignee, making large boards easier to slice by how the team plans work",
+          "Comments now support selecting multiple attachments and keeping, removing, or replacing attachments while editing",
+        ],
+        improvements: [
+          "Chinese product copy is more consistent across navigation, settings, search, and runtime screens",
+          "The frontend codebase received accessibility and React cleanup across common screens, and mobile checks now run only when mobile code changes",
+          "CLI list output is cleaner for automated readers, and squad lists now show member counts when available",
+        ],
+        fixes: [
+          "Swimlane lanes no longer appear empty when nested Issues load beyond the first page",
+          "Creating a sub-Issue with an intelligent agent now preserves the parent Issue relationship",
+          "Scheduled autopilot titles and descriptions now use the trigger's configured timezone",
+          "Comment editors avoid duplicate live-update flashes, keep text after failed sends, and apply mention behavior consistently when edited",
+          "Code blocks without a detected language now render their text instead of an empty block",
+          "Desktop and web avatars now resolve relative upload paths correctly",
+          "Codex, Cursor, and Hermes runtime handling received fixes for Desktop discovery, command arguments, usage attribution, and clearer stalled-run diagnostics",
+          "Private intelligent agents can no longer be triggered by plain comments from users who cannot access them",
+          "Several UI details were cleaned up across GitHub settings, project creation, board sorting, and agent skill screens",
+        ],
+      },
+      {
+        version: "0.3.9",
+        date: "2026-05-26",
+        title: "Swimlanes & More Predictable Issues",
+        changes: [],
+        features: [
+          "Issues now support a swimlane view, letting teams review parent work and status columns together when large projects have many subtasks",
+          "Issue lists now support drag-and-drop ordering, sticky group headers, and stable ordering when more results load",
+        ],
+        improvements: [
+          "The CLI now shows the local service version in status output and uses cleaner status fields",
+          "Self-hosting guidance now explains the hourly usage rollup required for accurate usage views, with updated English and Chinese troubleshooting notes",
+          "Agent skill settings were simplified before release so unsupported local-skill controls no longer appear in the product",
+          "Dependency checks are stricter, helping missing packages surface earlier before builds or desktop runs",
+        ],
+        fixes: [
+          "GitHub PRs now finish linked Issues only when the PR clearly says it closes them, so reference-only links no longer close work by accident",
+          "Parent/child Issue automation waits for dependency checks before starting queued follow-up work, and agent-driven status changes trigger the right assignee",
+          "Issue threads and list pages keep their order when loading more content, and board drag positions stay stable",
+          "Chat resize behavior, board-card assignee rows, and XML parsing security received smaller stability fixes",
+        ],
+      },
+      {
+        version: "0.3.8",
         date: "2026-05-25",
         title: "Multica for iOS, Helm Self-Hosting & Smoother Collaboration",
         changes: [],

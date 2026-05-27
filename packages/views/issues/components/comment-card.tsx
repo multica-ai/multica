@@ -73,7 +73,7 @@ interface CommentCardProps {
    */
   canModerate?: boolean;
   onReply: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
-  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   /** Toggle the resolved state on the thread root. Only invoked for root entries. */
@@ -270,6 +270,8 @@ export function AttachmentList({ attachments, content, className }: { attachment
           <AttachmentRenderer
             key={a.id}
             attachment={{ kind: "record", attachment: a }}
+            editable={!!onRemove}
+            onDelete={onRemove ? () => onRemove(a.id) : undefined}
           />
         ))}
       </div>
@@ -339,7 +341,7 @@ function CommentRow({
   issueOpen: boolean;
   currentUserId?: string;
   canModerate?: boolean;
-  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   selectionQuoteActions?: SelectionQuoteActions;
@@ -370,208 +372,25 @@ function CommentRow({
     onDrop: (files) => editEditorRef.current?.uploadFiles(files),
     enabled: editing,
   });
-
-  // Edit-mode draft: virtualization unmounts the card when it scrolls out
-  // of viewport, taking the in-progress edit with it. Persist via store
-  // so a scroll-away + scroll-back round-trip restores the user's edits.
-  // Key includes issueId so two issues with the same comment id (impossible
-  // but defensive) don't collide; cleared on cancel and on save.
-  const editDraftKey = `edit:${issueId}:${entry.id}` as const;
-  const getEditDraft = useCommentDraftStore.getState().getDraft;
-  const setEditDraft = useCommentDraftStore((s) => s.setDraft);
-  const clearEditDraft = useCommentDraftStore((s) => s.clearDraft);
-  // Read the snapshot once when the edit pass mounts; ContentEditor only
-  // honors `defaultValue` on mount, so a live store subscription here would
-  // cause an extra unmount/remount on every keystroke.
-  const editInitialValue = editing
-    ? (getEditDraft(editDraftKey) ?? entry.content ?? "")
-    : (entry.content ?? "");
-
-  const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
-  const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
-  const canDeleteEntry = isOwn || canModerate;
-  const isTemp = entry.id.startsWith("temp-");
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [retryWithNoteOpen, setRetryWithNoteOpen] = useState(false);
-  const isAgent = isAgentComment(entry);
-  const agentMeta = isAgent ? agents.find((agent) => agent.id === entry.actor_id) : undefined;
-  const memberAncestor = isAgent ? findMemberAncestorComment(entry, commentById) : null;
-  const isAgentOwner = !!(agentMeta?.owner_id && currentUserId && agentMeta.owner_id === currentUserId);
-  const isTriggerMember = !!(
-    memberAncestor &&
-    currentUserId &&
-    memberAncestor.actor_type === "member" &&
-    memberAncestor.actor_id === currentUserId
-  );
-  const canRetryAgentComment =
-    isAgent &&
-    !isTemp &&
-    issueOpen &&
-    (canModerate || isAgentOwner || isTriggerMember);
-  const retryAgentComment = useRetryAgentComment(issueId, entry.id);
-
-  const startEdit = () => {
-    cancelledRef.current = false;
-    setEditing(true);
-  };
-
-  const cancelEdit = () => {
-    cancelledRef.current = true;
-    setEditing(false);
-    setPendingAttachments([]);
-    clearEditDraft(editDraftKey);
-  };
-
-  const saveEdit = async () => {
-    if (cancelledRef.current) return;
-    const trimmed = editEditorRef.current
-      ?.getMarkdown()
-      ?.replace(/(\n\s*)+$/, "")
-      .trim();
-    if (!trimmed || trimmed === (entry.content ?? "").trim()) {
-      setEditing(false);
-      setPendingAttachments([]);
-      clearEditDraft(editDraftKey);
-      return;
-    }
-    const activeIds = pendingAttachments
-      .filter((a) => trimmed.includes(a.url))
-      .map((a) => a.id);
-    try {
-      await onEdit(entry.id, trimmed, activeIds.length > 0 ? activeIds : undefined);
-      setEditing(false);
-      setPendingAttachments([]);
-      clearEditDraft(editDraftKey);
-    } catch (err) {
-      toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.comment.update_failed),
-      );
-    }
-  };
-
-  const reactions = entry.reactions ?? [];
-  const contentText = entry.content ?? "";
-  const isLongContent = isLongCommentContent(contentText);
-
-  return (
-    <div className={`py-3${isTemp ? " opacity-60" : ""}`}>
-      <div className="flex items-center gap-2.5">
-        <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
-        <span className="cursor-pointer text-sm font-medium">
-          {entry.actor_display_name ?? getActorName(entry.actor_type, entry.actor_id)}
-        </span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span className="text-xs text-muted-foreground cursor-default">
-                {timeAgo(entry.created_at)}
-              </span>
-            }
-          />
-          <TooltipContent side="top">
-            {new Date(entry.created_at).toLocaleString()}
-          </TooltipContent>
-        </Tooltip>
-
-        {!isTemp && (
-          <div className="ml-auto flex items-center gap-0.5">
-            <QuickEmojiPicker
-              onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
-              align="end"
-            />
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => {
-                copyMarkdown(entry.content ?? "");
-                toast.success(t(($) => $.comment.copied_toast));
-              }}>
-                <Copy className="h-3.5 w-3.5" />
-                {t(($) => $.comment.copy_action)}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { void copyCommentLink(entry.id); }}>
-                <Link2 className="h-3.5 w-3.5" />
-                {t(($) => $.actions.copy_link)}
-              </DropdownMenuItem>
-              {canRetryAgentComment && <DropdownMenuSeparator />}
-              {canRetryAgentComment && (
-                <DropdownMenuItem
-                  disabled={retryAgentComment.isPending}
-                  onClick={() => retryAgentComment.mutate(undefined)}
-                >
-                  <RotateCw className="h-3.5 w-3.5" />
-                  {t(($) => $.comment.retry_action)}
-                </DropdownMenuItem>
-              )}
-              {canRetryAgentComment && (
-                <DropdownMenuItem
-                  disabled={retryAgentComment.isPending}
-                  onClick={() => setRetryWithNoteOpen(true)}
-                >
-                  <MessageSquarePlus className="h-3.5 w-3.5" />
-                  {t(($) => $.retry_with_note.action)}
-                </DropdownMenuItem>
-              )}
-              {(canEditEntry || canDeleteEntry) && (
-                <>
-                  <DropdownMenuSeparator />
-                  {canEditEntry && (
-                    <DropdownMenuItem onClick={startEdit}>
-                      <Pencil className="h-3.5 w-3.5" />
-                      {t(($) => $.comment.edit_action)}
-                    </DropdownMenuItem>
-                  )}
-                  {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
-                  {canDeleteEntry && (
-                    <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
-                      <Trash2 className="h-3.5 w-3.5" />
-                      {t(($) => $.comment.delete_action)}
-                    </DropdownMenuItem>
-                  )}
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DeleteCommentDialog
-            open={confirmDelete}
-            onOpenChange={setConfirmDelete}
-            onConfirm={() => onDelete(entry.id)}
-          />
-          <RetryWithNoteDialog
-            open={retryWithNoteOpen}
-            pending={retryAgentComment.isPending}
-            onOpenChange={setRetryWithNoteOpen}
-            onSubmit={(note) => retryAgentComment.mutateAsync(note)}
-          />
-          </div>
-        )}
       </div>
 
-      {editing ? (
+      {edit.editing ? (
         <div
-          {...dropZoneProps}
+          {...edit.dropZoneProps}
           className="relative mt-1.5 pl-8"
-          onKeyDown={(e) => { if (e.key === "Escape") cancelEdit(); }}
+          onKeyDown={(e) => { if (e.key === "Escape") edit.cancelEdit(); }}
         >
           <div className="text-sm leading-relaxed">
             <ContentEditor
-              ref={editEditorRef}
-              defaultValue={editInitialValue}
+              ref={edit.editorRef}
+              defaultValue={edit.initialValue}
               placeholder={t(($) => $.comment.edit_placeholder)}
               onUpdate={(md) => {
-                if (md.trim().length > 0) setEditDraft(editDraftKey, md);
-                else clearEditDraft(editDraftKey);
+                if (md.trim().length > 0) edit.setDraft(edit.draftKey, md);
+                else edit.clearDraft(edit.draftKey);
               }}
-              onSubmit={saveEdit}
-              onUploadFile={handleEditUpload}
+              onSubmit={edit.saveEdit}
+              onUploadFile={edit.handleUpload}
               debounceMs={100}
               currentIssueId={issueId}
               attachments={editorAttachments}
@@ -586,11 +405,11 @@ function CommentRow({
               onSelectMany={(files) => editEditorRef.current?.uploadFiles(files)}
             />
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
-              <Button size="sm" variant="outline" onClick={saveEdit}>{t(($) => $.comment.save_action)}</Button>
+              <Button size="sm" variant="ghost" onClick={edit.cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
+              <Button size="sm" variant="outline" onClick={edit.saveEdit}>{t(($) => $.comment.save_action)}</Button>
             </div>
           </div>
-          {isDragOver && <FileDropOverlay />}
+          {edit.isDragOver && <FileDropOverlay />}
         </div>
       ) : (
         <>
@@ -600,16 +419,14 @@ function CommentRow({
             className="mt-1.5 pl-8"
           />
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
-          {!isTemp && (
-            <ReactionBar
-              reactions={reactions}
-              currentUserId={currentUserId}
-              onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
-              getActorName={getActorName}
-              hideAddButton={!isLongContent}
-              className="mt-1.5 pl-8"
-            />
-          )}
+          <ReactionBar
+            reactions={reactions}
+            currentUserId={currentUserId}
+            onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
+            getActorName={getActorName}
+            hideAddButton={!isLongContent}
+            className="mt-1.5 pl-8"
+          />
         </>
       )}
     </div>
@@ -645,45 +462,12 @@ function CommentCardImpl({
   const { getActorName } = useActorName();
   const copyCommentLink = useCopyCommentLink(issueId);
   const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
-  const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
-  const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
-  const open = !isCollapsed;
-  const handleOpenChange = useCallback((_open: boolean) => toggleCollapse(issueId, entry.id), [toggleCollapse, issueId, entry.id]);
-  const [editing, setEditing] = useState(false);
-  const editEditorRef = useRef<ContentEditorRef>(null);
-  const cancelledRef = useRef(false);
-  // Pending uploads from the root-comment edit pass — same rationale as CommentRow.
-  const [parentPendingAttachments, setParentPendingAttachments] = useState<Attachment[]>([]);
-  const parentEditorAttachments = parentPendingAttachments.length > 0
-    ? [...(entry.attachments ?? []), ...parentPendingAttachments]
-    : entry.attachments;
-  const handleParentEditUpload = useCallback(async (file: File) => {
-    const result = await uploadWithToast(file, { issueId });
-    if (result) setParentPendingAttachments((prev) => [...prev, result]);
-    return result;
-  }, [uploadWithToast, issueId]);
-  const { isDragOver: parentDragOver, dropZoneProps: parentDropZoneProps } = useFileDropZone({
-    onDrop: (files) => editEditorRef.current?.uploadFiles(files),
-    enabled: editing,
-  });
 
-  // Edit-mode draft (root comment). Same rationale as CommentRow's draft.
-  const parentEditDraftKey = `edit:${issueId}:${entry.id}` as const;
-  const getParentEditDraft = useCommentDraftStore.getState().getDraft;
-  const setParentEditDraft = useCommentDraftStore((s) => s.setDraft);
-  const clearParentEditDraft = useCommentDraftStore((s) => s.clearDraft);
-  const parentEditInitialValue = editing
-    ? (getParentEditDraft(parentEditDraftKey) ?? entry.content ?? "")
-    : (entry.content ?? "");
+  const edit = useEditAttachmentState(issueId, entry, onEdit);
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
-  // Author-only edit is the same as before; admins additionally get edit
-  // *and* delete on member-authored comments, plus delete on agent-authored
-  // ones. Edit on agent comments is intentionally never offered — agents
-  // own their own outputs.
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
-  const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [retryWithNoteOpen, setRetryWithNoteOpen] = useState(false);
   const isAgent = isAgentComment(entry);
@@ -703,50 +487,6 @@ function CommentCardImpl({
     (canModerate || isAgentOwner || isTriggerMember);
   const retryAgentComment = useRetryAgentComment(issueId, entry.id);
 
-  const startEdit = () => {
-    cancelledRef.current = false;
-    setEditing(true);
-  };
-
-  const cancelEdit = () => {
-    cancelledRef.current = true;
-    setEditing(false);
-    setParentPendingAttachments([]);
-    clearParentEditDraft(parentEditDraftKey);
-  };
-
-  const saveEdit = async () => {
-    if (cancelledRef.current) return;
-    const trimmed = editEditorRef.current
-      ?.getMarkdown()
-      ?.replace(/(\n\s*)+$/, "")
-      .trim();
-    if (!trimmed || trimmed === (entry.content ?? "").trim()) {
-      setEditing(false);
-      setParentPendingAttachments([]);
-      clearParentEditDraft(parentEditDraftKey);
-      return;
-    }
-    const activeIds = parentPendingAttachments
-      .filter((a) => trimmed.includes(a.url))
-      .map((a) => a.id);
-    try {
-      await onEdit(entry.id, trimmed, activeIds.length > 0 ? activeIds : undefined);
-      setEditing(false);
-      setParentPendingAttachments([]);
-      clearParentEditDraft(parentEditDraftKey);
-    } catch (err) {
-      toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.comment.update_failed),
-      );
-    }
-  };
-
-  // The parent precomputes the flat thread (using collectThreadReplies),
-  // memoizes by thread, and stabilizes the array reference, so we render
-  // straight from `replies` instead of re-walking the graph on every render.
   const allNestedReplies = replies;
 
   const replyCount = allNestedReplies.length;
@@ -839,7 +579,7 @@ function CommentCardImpl({
               </span>
             )}
 
-            {open && !isTemp && (
+            {open && (
               <div className="ml-auto flex items-center gap-0.5">
                 <QuickEmojiPicker
                   onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
@@ -906,7 +646,7 @@ function CommentCardImpl({
                     <>
                       <DropdownMenuSeparator />
                       {canEditEntry && (
-                        <DropdownMenuItem onClick={startEdit}>
+                        <DropdownMenuItem onClick={edit.startEdit}>
                           <Pencil className="h-3.5 w-3.5" />
                           {t(($) => $.comment.edit_action)}
                         </DropdownMenuItem>
@@ -945,21 +685,21 @@ function CommentCardImpl({
           <div className="px-4 pb-3" data-comment-id={entry.id} data-thread-root-id={entry.id}>
             {editing ? (
               <div
-                {...parentDropZoneProps}
+                {...edit.dropZoneProps}
                 className="relative pl-10"
-                onKeyDown={(e) => { if (e.key === "Escape") cancelEdit(); }}
+                onKeyDown={(e) => { if (e.key === "Escape") edit.cancelEdit(); }}
               >
                 <div className="text-sm leading-relaxed">
                   <ContentEditor
-                    ref={editEditorRef}
-                    defaultValue={parentEditInitialValue}
+                    ref={edit.editorRef}
+                    defaultValue={edit.initialValue}
                     placeholder={t(($) => $.comment.edit_placeholder)}
                     onUpdate={(md) => {
-                      if (md.trim().length > 0) setParentEditDraft(parentEditDraftKey, md);
-                      else clearParentEditDraft(parentEditDraftKey);
+                      if (md.trim().length > 0) edit.setDraft(edit.draftKey, md);
+                      else edit.clearDraft(edit.draftKey);
                     }}
-                    onSubmit={saveEdit}
-                    onUploadFile={handleParentEditUpload}
+                    onSubmit={edit.saveEdit}
+                    onUploadFile={edit.handleUpload}
                     debounceMs={100}
                     currentIssueId={issueId}
                     attachments={parentEditorAttachments}
@@ -974,11 +714,11 @@ function CommentCardImpl({
                     onSelectMany={(files) => editEditorRef.current?.uploadFiles(files)}
                   />
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
-                    <Button size="sm" variant="outline" onClick={saveEdit}>{t(($) => $.comment.save_action)}</Button>
+                    <Button size="sm" variant="ghost" onClick={edit.cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
+                    <Button size="sm" variant="outline" onClick={edit.saveEdit}>{t(($) => $.comment.save_action)}</Button>
                   </div>
                 </div>
-                {parentDragOver && <FileDropOverlay />}
+                {edit.isDragOver && <FileDropOverlay />}
               </div>
             ) : (
               <>
@@ -988,16 +728,14 @@ function CommentCardImpl({
                   className="pl-10"
                 />
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
-                {!isTemp && (
-                  <ReactionBar
-                    reactions={reactions}
-                    currentUserId={currentUserId}
-                    onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
-                    getActorName={getActorName}
-                    hideAddButton={!isLongContent}
-                    className="mt-1.5 pl-10"
-                  />
-                )}
+                <ReactionBar
+                  reactions={reactions}
+                  currentUserId={currentUserId}
+                  onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
+                  getActorName={getActorName}
+                  hideAddButton={!isLongContent}
+                  className="mt-1.5 pl-10"
+                />
               </>
             )}
           </div>

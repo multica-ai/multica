@@ -846,45 +846,36 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// must keep the resolved root in sync.
 	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
-	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
-	// Skip when the comment comes from the assigned agent itself to avoid loops.
-	// Also skip when the comment @mentions others but not the assignee agent —
-	// the user is talking to someone else, not requesting work from the assignee.
-	// Also skip when replying in a member-started thread without mentioning the
-	// assignee — the user is continuing a member-to-member conversation.
 	taskContext := taskContextForCommentType(req.Type)
-	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) &&
+	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, taskContext)
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID string, taskContext []byte) {
+	if actorType == "member" && h.shouldEnqueueOnComment(ctx, issue, actorType, actorID) &&
 		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
-		!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
-		// Always use the current comment as the trigger so the agent reads
-		// the actual new reply, not the thread root. Reply placement (flat
-		// thread grouping) is handled downstream by createAgentComment,
-		// which resolves parent_id to the thread root before posting. This
-		// mirrors the mention path's behavior (see enqueueMentionedAgentTasks).
-		if _, err := h.TaskService.EnqueueTaskForIssueWithContext(
-			r.Context(),
-			issue,
-			taskContext,
-			comment.ID,
-		); err != nil {
-			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
+		!h.isReplyToMemberThread(ctx, parentComment, comment.Content, issue) {
+		if _, err := h.TaskService.EnqueueTaskForIssueWithContext(ctx, issue, taskContext, comment.ID); err != nil {
+			slog.Warn("enqueue agent task on comment failed", "issue_id", uuidToString(issue.ID), "error", err)
 		}
 	}
 
-	// Squad trigger: if the issue is assigned to a squad, trigger the squad leader.
-	// Skip when the comment author is the leader (prevent internal loops), or
-	// when a member explicitly @mentions anyone (agent/member/squad/all) — that
-	// counts as deliberate routing and the leader stays out.
-	if h.shouldEnqueueSquadLeaderOnComment(r.Context(), issue, comment.Content, authorType, authorID) {
-		h.enqueueSquadLeaderTask(r.Context(), issue, comment.ID, authorType, authorID)
+	if h.shouldEnqueueSquadLeaderOnComment(ctx, issue, comment.Content, actorType, actorID) {
+		h.enqueueSquadLeaderTask(ctx, issue, comment.ID, actorType, actorID)
 	}
 
-	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
-	// Pass parentComment so that replies inherit mentions from the thread root.
-	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID, taskContext)
-	h.trackMentionFrequency(r.Context(), issue.WorkspaceID, authorType, authorID, comment.Content)
 
-	writeJSON(w, http.StatusCreated, resp)
+		}
+	}
+
+	if h.shouldEnqueueSquadLeaderOnComment(ctx, issue, comment.Content, actorType, actorID) {
+		h.enqueueSquadLeaderTask(ctx, issue, comment.ID, actorType, actorID)
+	}
+
+	h.enqueueMentionedAgentTasks(ctx, issue, comment, parentComment, actorType, actorID, taskContext)
+	h.trackMentionFrequency(ctx, issue.WorkspaceID, actorType, actorID, comment.Content)
+
 }
 
 func (h *Handler) createCommentWithIssueProgress(ctx context.Context, issue db.Issue, params db.CreateCommentParams) (db.Comment, *db.Issue, string, error) {
@@ -1355,8 +1346,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Content       string   `json:"content"`
-		AttachmentIDs []string `json:"attachment_ids"`
+		Content       string    `json:"content"`
+		AttachmentIDs *[]string `json:"attachment_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1367,12 +1358,22 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
-	if !ok {
-		return
+	var attachmentIDs []pgtype.UUID
+	replaceAttachments := req.AttachmentIDs != nil
+	if replaceAttachments {
+		var ok bool
+		attachmentIDs, ok = parseUUIDSliceOrBadRequest(w, *req.AttachmentIDs, "attachment_ids")
+		if !ok {
+			return
+		}
 	}
 
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
+
+	oldContent := existing.Content
+
+	// Expand bare issue identifiers (same pipeline as CreateComment).
+	req.Content = mention.ExpandIssueIdentifiers(r.Context(), h.Queries, wsUUID, req.Content)
 
 	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
 		ID:      commentUUID,
@@ -1384,12 +1385,19 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bind any newly uploaded attachments referenced in the edited content so
-	// they appear in the timeline's comment.attachments after refresh. Existing
-	// attachments already point at this comment via the upload flow; passing
-	// them again is a no-op at the SQL level.
-	if len(attachmentIDs) > 0 {
-		h.linkAttachmentsByIDs(r.Context(), comment.ID, existing.IssueID, attachmentIDs)
+	// Replace the comment attachment set when a modern client sends
+	// attachment_ids. Older clients omit the field; in that case preserve the
+	// existing attachment links rather than unlinking everything.
+	if replaceAttachments {
+		if err := h.Queries.ReplaceCommentAttachments(r.Context(), db.ReplaceCommentAttachmentsParams{
+			CommentID:     comment.ID,
+			IssueID:       existing.IssueID,
+			AttachmentIds: attachmentIDs,
+		}); err != nil {
+			slog.Error("failed to replace comment attachments", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to update attachments")
+			return
+		}
 	}
 
 	// Fetch reactions and attachments for the updated comment.
@@ -1415,6 +1423,28 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("comment updated", append(logger.RequestAttrs(r), "comment_id", commentId)...)
 	h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp})
+
+	if oldContent != comment.Content {
+		if err := h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID); err != nil {
+			slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
+		}
+
+		issue, err := h.Queries.GetIssue(r.Context(), existing.IssueID)
+		if err != nil {
+			slog.Warn("load issue for edit post-processing failed", "issue_id", uuidToString(existing.IssueID), "error", err)
+		} else {
+			var parentComment *db.Comment
+			if existing.ParentID.Valid {
+				parent, err := h.Queries.GetComment(r.Context(), existing.ParentID)
+				if err == nil {
+					parentComment = &parent
+				}
+			}
+
+			h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

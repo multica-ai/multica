@@ -1,24 +1,19 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef, memo } from "react";
 import {
   DndContext,
   DragOverlay,
   PointerSensor,
   useSensor,
   useSensors,
-  pointerWithin,
-  closestCenter,
-  type CollisionDetection,
   type DragStartEvent,
   type DragEndEvent,
   type DragOverEvent,
 } from "@dnd-kit/core";
 import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
-import { Eye, MoreHorizontal } from "lucide-react";
-import type { Issue, IssueAssigneeGroup, IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
-import { Button } from "@multica/ui/components/ui/button";
+import type { Issue, IssueAssigneeGroup, IssueStatus } from "@multica/core/types";
 import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { AssigneeGroupedIssuesFilter, IssueListFilter } from "@multica/core/issues/queries";
 import {
@@ -30,52 +25,23 @@ import {
 import { useViewStoreApi, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { IssueGrouping, SortField, SortDirection } from "@multica/core/issues/stores/view-store";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { sortIssues } from "../utils/sort";
-import { StatusIcon } from "./status-icon";
-import { BoardColumn, type BoardColumnGroup } from "./board-column";
+import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-column";
 import { BoardCardContent } from "./board-card";
+import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
-
-type BoardMoveUpdates = Pick<
-  UpdateIssueRequest,
-  "status" | "assignee_type" | "assignee_id" | "position"
->;
-
-const UNASSIGNED_GROUP_ID = "assignee:unassigned";
-
-function makeKanbanCollision(columnIds: Set<string>): CollisionDetection {
-  return (args) => {
-    const pointer = pointerWithin(args);
-    if (pointer.length > 0) {
-      // Prefer card collisions over column collisions so that
-      // dragging down within a column finds the target card
-      // instead of the column droppable.
-      const cards = pointer.filter((c) => !columnIds.has(c.id as string));
-      if (cards.length > 0) return cards;
-    }
-    // Fallback: closestCenter finds the nearest card even when
-    // the pointer is in a gap between cards (common when dragging down).
-    return closestCenter(args);
-  };
-}
-
-function statusGroupId(status: IssueStatus): string {
-  return `status:${status}`;
-}
-
-function assigneeGroupId(
-  type: IssueAssigneeType | null,
-  id: string | null,
-): string {
-  return type && id ? `assignee:${type}:${id}` : UNASSIGNED_GROUP_ID;
-}
-
-function getIssueGroupId(issue: Issue, grouping: IssueGrouping): string {
-  if (grouping === "status") return statusGroupId(issue.status);
-  return assigneeGroupId(issue.assignee_type, issue.assignee_id);
-}
+import {
+  type DragMoveUpdates,
+  makeKanbanCollision,
+  statusGroupId,
+  assigneeGroupId,
+  buildColumns,
+  computePosition,
+  findColumn,
+  issueMatchesGroup,
+  getMoveUpdates,
+} from "../utils/drag-utils";
 
 function isStatusGroup(
   group: BoardColumnGroup,
@@ -137,7 +103,7 @@ function buildGroups(
     none: 3,
   };
 
-  return [...groups.values()].sort((a, b) => {
+  return Array.from(groups.values()).toSorted((a, b) => {
     const aOrder = order[a.assigneeType ?? "none"] ?? 99;
     const bOrder = order[b.assigneeType ?? "none"] ?? 99;
     if (aOrder !== bOrder) return aOrder - bOrder;
@@ -145,71 +111,8 @@ function buildGroups(
   });
 }
 
-/** Build column ID arrays from TQ issue data, respecting current sort. */
-function buildColumns(
-  issues: Issue[],
-  groups: BoardColumnGroup[],
-  grouping: IssueGrouping,
-  sortBy: SortField,
-  sortDirection: SortDirection,
-): Record<string, string[]> {
-  const cols: Record<string, string[]> = {};
-  for (const group of groups) {
-    const sorted = sortIssues(
-      issues.filter((i) => getIssueGroupId(i, grouping) === group.id),
-      sortBy,
-      sortDirection,
-    );
-    cols[group.id] = sorted.map((i) => i.id);
-  }
-  return cols;
-}
-
-/** Compute a float position for `activeId` based on its neighbors in `ids`. */
-function computePosition(ids: string[], activeId: string, issueMap: Map<string, Issue>): number {
-  const idx = ids.indexOf(activeId);
-  if (idx === -1) return 0;
-  const getPos = (id: string) => issueMap.get(id)?.position ?? 0;
-  if (ids.length === 1) return issueMap.get(activeId)?.position ?? 0;
-  if (idx === 0) return getPos(ids[1]!) - 1;
-  if (idx === ids.length - 1) return getPos(ids[idx - 1]!) + 1;
-  return (getPos(ids[idx - 1]!) + getPos(ids[idx + 1]!)) / 2;
-}
-
-/** Find which column contains a given ID (issue or column droppable). */
-function findColumn(
-  columns: Record<string, string[]>,
-  id: string,
-  columnIds: Set<string>,
-): string | null {
-  if (columnIds.has(id)) return id;
-  for (const [columnId, ids] of Object.entries(columns)) {
-    if (ids.includes(id)) return columnId;
-  }
-  return null;
-}
-
-function issueMatchesGroup(issue: Issue, group: BoardColumnGroup): boolean {
-  if (group.status) return issue.status === group.status;
-  return (
-    (issue.assignee_type ?? null) === (group.assigneeType ?? null) &&
-    (issue.assignee_id ?? null) === (group.assigneeId ?? null)
-  );
-}
-
-function getMoveUpdates(
-  group: BoardColumnGroup,
-  position: number,
-): BoardMoveUpdates {
-  if (group.status) return { status: group.status, position };
-  return {
-    assignee_type: group.assigneeType ?? null,
-    assignee_id: group.assigneeId ?? null,
-    position,
-  };
-}
-
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
+const EMPTY_IDS: string[] = [];
 
 export function BoardView({
   issues,
@@ -222,6 +125,7 @@ export function BoardView({
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
   myIssuesFilter,
+  sort,
   projectId,
   columnCounts,
 }: {
@@ -231,7 +135,7 @@ export function BoardView({
   assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
   visibleStatuses: IssueStatus[];
   hiddenStatuses: IssueStatus[];
-  onMoveIssue: (issueId: string, updates: BoardMoveUpdates) => void;
+  onMoveIssue: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   childProgressMap?: Map<string, ChildProgress>;
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
@@ -242,9 +146,12 @@ export function BoardView({
   columnCounts?: Partial<Record<IssueStatus, number>>;
 }) {
   const { t } = useT("issues");
-  const sortBy = useViewStore((s) => s.sortBy);
-  const sortDirection = useViewStore((s) => s.sortDirection);
   const grouping = useViewStore((s) => s.grouping);
+  const sortBy = useViewStore((s) => s.sortBy);
+  const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
+  const sortLabel = sortBy !== "position"
+    ? t(($) => $.board.ordered_by, { field: t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]) })
+    : null;
   const { getActorName } = useActorName();
   const issueListTarget = myIssuesScope || myIssuesFilter
     ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
@@ -314,21 +221,23 @@ export function BoardView({
   // --- Drag state ---
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const isDraggingRef = useRef(false);
+  const isSettlingRef = useRef(false);
+  const [settleVersion, setSettleVersion] = useState(0);
 
   // --- Local columns state ---
   // Between drags: follows TQ via useEffect.
   // During drag: local-only, driven by onDragOver/onDragEnd.
   const [columns, setColumns] = useState<Record<string, string[]>>(() =>
-    buildColumns(groupedIssues, groups, grouping, sortBy, sortDirection),
+    buildColumns(groupedIssues, groups, grouping),
   );
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
 
   useEffect(() => {
-    if (!isDraggingRef.current) {
-      setColumns(buildColumns(groupedIssues, groups, grouping, sortBy, sortDirection));
+    if (!isDraggingRef.current && !isSettlingRef.current) {
+      setColumns(buildColumns(groupedIssues, groups, grouping));
     }
-  }, [groupedIssues, groups, grouping, sortBy, sortDirection]);
+  }, [groupedIssues, groups, grouping, settleVersion]);
 
   // After a cross-column move, lock for one animation frame so dnd-kit's
   // collision detection can stabilize before processing the next move.
@@ -351,7 +260,7 @@ export function BoardView({
   }, [groupedIssues]);
 
   const issueMapRef = useRef(issueMap);
-  if (!isDraggingRef.current) {
+  if (!isDraggingRef.current && !isSettlingRef.current) {
     issueMapRef.current = issueMap;
   }
 
@@ -383,6 +292,8 @@ export function BoardView({
         const overCol = findColumn(prev, overId, groupIds);
         if (!activeCol || !overCol || activeCol === overCol) return prev;
 
+        if (sortBy !== "position") return prev;
+
         recentlyMovedRef.current = true;
         const oldIds = prev[activeCol]!.filter((id) => id !== activeId);
         const newIds = [...prev[overCol]!];
@@ -392,7 +303,7 @@ export function BoardView({
         return { ...prev, [activeCol]: oldIds, [overCol]: newIds };
       });
     },
-    [groupIds],
+    [groupIds, sortBy],
   );
 
   const handleDragEnd = useCallback(
@@ -402,7 +313,7 @@ export function BoardView({
       setActiveIssue(null);
 
       const resetColumns = () =>
-        setColumns(buildColumns(groupedIssues, groups, grouping, sortBy, sortDirection));
+        setColumns(buildColumns(groupedIssues, groups, grouping));
 
       if (!over) {
         resetColumns();
@@ -420,9 +331,9 @@ export function BoardView({
         return;
       }
 
-      // Same-column reorder
+      // Same-column reorder (manual sort only)
       let finalColumns = cols;
-      if (activeCol === overCol) {
+      if (activeCol === overCol && sortBy === "position") {
         const ids = cols[activeCol]!;
         const oldIndex = ids.indexOf(activeId);
         const newIndex = ids.indexOf(overId);
@@ -433,7 +344,9 @@ export function BoardView({
         }
       }
 
-      const finalCol = findColumn(finalColumns, activeId, groupIds);
+      const finalCol = sortBy === "position"
+        ? findColumn(finalColumns, activeId, groupIds)
+        : overCol;
       if (!finalCol) {
         resetColumns();
         return;
@@ -445,6 +358,22 @@ export function BoardView({
       }
 
       const map = issueMapRef.current;
+
+      if (sortBy !== "position") {
+        // Cross-column: only update group (status/assignee), keep original position.
+        const currentIssue = map.get(activeId);
+        if (!currentIssue || issueMatchesGroup(currentIssue, finalGroup)) {
+          resetColumns();
+          return;
+        }
+        isSettlingRef.current = true;
+        onMoveIssue(activeId, getMoveUpdates(finalGroup, currentIssue.position), () => {
+          isSettlingRef.current = false;
+          setSettleVersion((v) => v + 1);
+        });
+        return;
+      }
+
       const finalIds = finalColumns[finalCol]!;
       const newPosition = computePosition(finalIds, activeId, map);
       const currentIssue = map.get(activeId);
@@ -457,9 +386,12 @@ export function BoardView({
         return;
       }
 
-      onMoveIssue(activeId, getMoveUpdates(finalGroup, newPosition));
+      isSettlingRef.current = true;
+      onMoveIssue(activeId, getMoveUpdates(finalGroup, newPosition), () => {
+        isSettlingRef.current = false;
+      });
     },
-    [groupedIssues, groups, grouping, sortBy, sortDirection, onMoveIssue, groupIds, groupMap],
+    [groupedIssues, groups, grouping, onMoveIssue, groupIds, groupMap, sortBy],
   );
 
   return (
@@ -470,7 +402,7 @@ export function BoardView({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4">
+      <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-2">
         {groups.length === 0 ? (
           <div className="flex min-w-full flex-1 items-center justify-center text-sm text-muted-foreground">
             {t(($) => $.board.empty_grouping)}
@@ -481,7 +413,7 @@ export function BoardView({
               <PaginatedBoardColumn
                 key={group.id}
                 group={group}
-                issueIds={columns[group.id] ?? []}
+                issueIds={columns[group.id] ?? EMPTY_IDS}
                 issueMap={issueMapRef.current}
                 childProgressMap={childProgressMap}
                 issueListTarget={issueListTarget}
@@ -493,22 +425,25 @@ export function BoardView({
                 <PaginatedAssigneeBoardColumn
                   key={group.id}
                   group={group}
-                  issueIds={columns[group.id] ?? []}
+                  issueIds={columns[group.id] ?? EMPTY_IDS}
                   issueMap={issueMapRef.current}
                   childProgressMap={childProgressMap}
                   queryKey={assigneeGroupQueryKey}
                   filter={assigneeGroupFilter}
+                  sort={sort}
                   projectId={projectId}
+                  sortLabel={sortLabel}
                 />
               ) : (
                 <BoardColumn
                   key={group.id}
                   group={group}
-                  issueIds={columns[group.id] ?? []}
+                  issueIds={columns[group.id] ?? EMPTY_IDS}
                   issueMap={issueMapRef.current}
                   childProgressMap={childProgressMap}
                   projectId={projectId}
                   totalCount={group.totalCount}
+                  sortLabel={sortLabel}
                 />
               )
             ),
@@ -516,7 +451,7 @@ export function BoardView({
         )}
 
         {grouping === "status" && hiddenStatuses.length > 0 && (
-          <HiddenColumnsPanel
+          <BoardHiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
             issueListTarget={issueListTarget}
             columnCounts={columnCounts}
@@ -526,7 +461,7 @@ export function BoardView({
 
       <DragOverlay dropAnimation={null}>
         {activeIssue ? (
-          <div className="w-[280px] rotate-2 scale-105 cursor-grabbing opacity-90 shadow-lg shadow-black/10">
+          <div style={{ width: BOARD_CARD_WIDTH }} className="rotate-1 cursor-grabbing opacity-90 shadow-lg shadow-black/10">
             <BoardCardContent issue={activeIssue} childProgress={childProgressMap.get(activeIssue.id)} />
           </div>
         ) : null}
@@ -535,14 +470,16 @@ export function BoardView({
   );
 }
 
-function PaginatedAssigneeBoardColumn({
+const PaginatedAssigneeBoardColumn = memo(function PaginatedAssigneeBoardColumn({
   group,
   issueIds,
   issueMap,
   childProgressMap,
   queryKey,
   filter,
+  sort,
   projectId,
+  sortLabel,
 }: {
   group: BoardColumnGroup;
   issueIds: string[];
@@ -550,7 +487,9 @@ function PaginatedAssigneeBoardColumn({
   childProgressMap?: Map<string, ChildProgress>;
   queryKey: QueryKey;
   filter: AssigneeGroupedIssuesFilter;
+  sort?: IssueSortParam;
   projectId?: string;
+  sortLabel?: string | null;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByAssigneeGroup(
     {
@@ -560,6 +499,7 @@ function PaginatedAssigneeBoardColumn({
     },
     queryKey,
     filter,
+    sort,
   );
   return (
     <BoardColumn
@@ -569,6 +509,7 @@ function PaginatedAssigneeBoardColumn({
       childProgressMap={childProgressMap}
       totalCount={total}
       projectId={projectId}
+      sortLabel={sortLabel}
       footer={
         hasMore ? (
           <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
@@ -576,9 +517,9 @@ function PaginatedAssigneeBoardColumn({
       }
     />
   );
-}
+});
 
-function PaginatedBoardColumn({
+const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   group,
   issueIds,
   issueMap,
@@ -607,6 +548,7 @@ function PaginatedBoardColumn({
       childProgressMap={childProgressMap}
       totalCount={displayCount ?? (isLoaded ? total : issueIds.length)}
       projectId={projectId}
+      sortLabel={sortLabel}
       footer={
         hasMore ? (
           <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
@@ -614,7 +556,7 @@ function PaginatedBoardColumn({
       }
     />
   );
-}
+});
 
 function HiddenColumnsPanel({
   hiddenStatuses,

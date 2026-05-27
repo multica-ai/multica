@@ -43,6 +43,7 @@
     "recharts": "3.8.0",
     "rehype-katex": "catalog:",
     "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "catalog:",
@@ -60,6 +61,7 @@
     "react-i18next": "catalog:"
   },
   "devDependencies": {
+    "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@testing-library/react": "catalog:",
     "@vitejs/plugin-react": "catalog:",

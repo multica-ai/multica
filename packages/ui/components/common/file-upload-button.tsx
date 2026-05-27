@@ -14,6 +14,7 @@ interface FileUploadButtonProps {
   disabled?: boolean;
   className?: string;
   size?: "sm" | "default";
+  multiple?: boolean;
 }
 
 function FileUploadButton({
@@ -23,6 +24,7 @@ function FileUploadButton({
   disabled,
   className,
   size = "default",
+  multiple = false,
 }: FileUploadButtonProps) {
   const { t } = useTranslation("ui");
   const inputRef = useRef<HTMLInputElement>(null);

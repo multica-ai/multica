@@ -20,11 +20,10 @@
  * Why not clipboardTextParser? It only runs when there's NO text/html on
  * the clipboard (ProseMirror source: `let asText = !!text && !html`).
  *
- * Why not heuristic detection (looksLikeMarkdown / hasRichHtml)? Unreliable.
- * VS Code's HTML contains <code> tags that fool rich-content detectors.
- * Markdown pattern matching has too many edge cases. Instead, the classifier
- * only keeps narrow deterministic exits for editor-owned slices, code block
- * context, structured plain text, and large payloads.
+ * HTML/text classification is intentionally conservative. Rich semantic HTML
+ * should stay native so links, lists, emphasis, and inline code survive.
+ * Syntax-highlight wrappers from editors (<pre>/<code>/<span>/<div>) are not
+ * enough by themselves, because those should still paste as Markdown source.
  */
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
@@ -96,6 +95,7 @@ function classifyPaste({
   if (!text) return "native";
   if (isInsideCodeBlock) return "literal";
   if (html && html.includes("data-pm-slice")) return "native";
+  if (html && hasSemanticRichHtml(html, text)) return "native";
   if (text.length > LARGE_PASTE_TEXT_THRESHOLD) return "literal";
   if (isStructuredPlainText(text)) return "literal";
   if (isLongSingleLineLiteralText(text)) return "literal";
@@ -140,8 +140,23 @@ export function createMarkdownPasteExtension() {
 
               // Everything else (VS Code, text editors, .md files, terminals,
               // web pages): parse text/plain as Markdown.
-              const json = editor.markdown.parse(text);
+              const preprocessed = escapeRawHtmlTagsOutsideCode(text);
+              const json = editor.markdown.parse(preprocessed);
               const node = editor.schema.nodeFromJSON(json);
+
+              // Safety net: if parsing still produces an empty doc despite
+              // non-empty input, fall back to literal insertion.
+              const first = node.content.firstChild;
+              const parsedEmpty =
+                node.content.childCount === 0 ||
+                (node.content.childCount === 1 &&
+                  first?.type.name === "paragraph" &&
+                  first.content.size === 0);
+              if (text.trim() && parsedEmpty) {
+                view.dispatch(view.state.tr.insertText(text));
+                return true;
+              }
+
               const slice = Slice.maxOpen(node.content);
               const tr = view.state.tr.replaceSelection(slice);
               view.dispatch(tr);

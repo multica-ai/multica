@@ -15,8 +15,8 @@ const cancelAgentTasksByRuntimeOrAgent = `-- name: CancelAgentTasksByRuntimeOrAg
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE (runtime_id = ANY($1::uuid[]) OR agent_id = ANY($2::uuid[]))
-  AND status IN ('queued', 'dispatched', 'running')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason
 `
 
 type CancelAgentTasksByRuntimeOrAgentParams struct {
@@ -73,6 +73,7 @@ func (q *Queries) CancelAgentTasksByRuntimeOrAgent(ctx context.Context, arg Canc
 			&i.TriggerSummary,
 			&i.ForceFreshSession,
 			&i.IsLeaderTask,
+			&i.WaitReason,
 		); err != nil {
 			return nil, err
 		}
@@ -152,16 +153,18 @@ func (q *Queries) DeleteStaleOfflineRuntimes(ctx context.Context, staleSeconds f
 const failTasksForOfflineRuntimes = `-- name: FailTasksForOfflineRuntimes :many
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',
-    failure_reason = 'runtime_offline'
-WHERE status IN ('dispatched', 'running')
+    failure_reason = 'runtime_offline',
+    wait_reason = NULL
+WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason
 `
 
-// Marks dispatched/running tasks as failed when their runtime is offline.
-// This cleans up orphaned tasks after a daemon crash or network partition.
+// Marks dispatched/running/waiting_local_directory tasks as failed when
+// their runtime is offline. This cleans up orphaned tasks after a daemon
+// crash or network partition.
 func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, failTasksForOfflineRuntimes)
 	if err != nil {
@@ -197,6 +200,7 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQ
 			&i.TriggerSummary,
 			&i.ForceFreshSession,
 			&i.IsLeaderTask,
+			&i.WaitReason,
 		); err != nil {
 			return nil, err
 		}
@@ -494,6 +498,49 @@ func (q *Queries) ListArchivedAgentIDsByRuntime(ctx context.Context, runtimeID p
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockAgentRuntime = `-- name: LockAgentRuntime :one
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM agent_runtime
+WHERE id = $1
+FOR UPDATE
+`
+
+// Acquires a row-level exclusive lock on the runtime row. Used at the
+// top of the cascade-delete transaction so that:
+//  1. PostgreSQL's FK validation on agent.runtime_id (FK ... ON DELETE
+//     RESTRICT) needs FOR KEY SHARE on the parent runtime row, which
+//     conflicts with FOR UPDATE — so any concurrent INSERT or UPDATE
+//     that would point a new/moved agent at this runtime blocks until
+//     our transaction finishes; and
+//  2. concurrent UPDATE/DELETE of the runtime row itself (e.g. another
+//     delete attempt) waits for us to commit.
+//
+// Combined with ListActiveAgentsByRuntimeForUpdate (which row-locks the
+// existing active set) this closes the plan-compare → archive race that
+// was possible at read-committed isolation between the snapshot and the
+// bulk archive.
+func (q *Queries) LockAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, lockAgentRuntime, id)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+	)
+	return i, err
 }
 
 const markAgentRuntimeOnline = `-- name: MarkAgentRuntimeOnline :one

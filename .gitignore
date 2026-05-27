@@ -66,6 +66,8 @@ apps/mobile/**/*.mobileprovision
 
 # context (agent workspace)
 .context
+.agent_context/
+.multica/
 
 # local settings
 .claude/

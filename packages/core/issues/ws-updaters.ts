@@ -47,7 +47,7 @@ export function onIssueUpdated(
   const detailData = getIssueFromDetailCache(qc, wsId, issue.id);
   const oldParentId =
     detailData?.parent_issue_id ??
-    (listData ? findIssueLocation(listData, issue.id)?.issue.parent_issue_id : null) ??
+    (firstListData ? findIssueLocation(firstListData, issue.id)?.issue.parent_issue_id : null) ??
     null;
   // The NEW parent comes from the WS payload when parent_issue_id changed
   const newParentId = issue.parent_issue_id ?? null;
@@ -90,6 +90,7 @@ export function onIssueUpdated(
     if (issue.status !== undefined || issue.parent_issue_id !== undefined) {
       qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
     }
+    qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
   }
 }
 
@@ -154,9 +155,9 @@ export function onIssueMetadataChanged(
   issueId: string,
   metadata: IssueMetadata,
 ) {
-  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-    old ? patchIssueInBuckets(old, issueId, { metadata }) : old,
-  );
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { metadata }));
+  }
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, metadata } : old,
   );

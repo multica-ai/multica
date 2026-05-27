@@ -18,7 +18,7 @@ func TestChooseCursorInvocation_PassthroughForNonLauncher(t *testing.T) {
 
 	execName := "cursor-agent"
 	lookedUp := filepath.Join(t.TempDir(), "cursor-agent") // no .cmd / .bat
-	args := []string{"chat", "-p", "hello\nworld", "--output-format", "stream-json", "--yolo"}
+	args := []string{"-p", "hello\nworld", "--output-format", "stream-json", "--yolo"}
 
 	gotExec, gotArgs := chooseCursorInvocation(execName, lookedUp, args, logger)
 

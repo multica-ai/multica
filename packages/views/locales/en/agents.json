@@ -331,7 +331,6 @@
     "skills": {
       "intro": "Workspace skills assigned to this agent. Local runtime skills are always available automatically.",
       "add_action": "Add skill",
-      "import_hint": "Importing creates a workspace copy that your team can edit and reuse.",
       "empty_title": "No skills assigned",
       "empty_hint": "Add workspace skills to share team knowledge with this agent.",
       "remove_failed_toast": "Failed to remove skill",

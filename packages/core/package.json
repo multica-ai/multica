@@ -27,6 +27,7 @@
     "./workspace/hooks": "./workspace/hooks.ts",
     "./wiki": "./wiki/index.ts",
     "./wiki/queries": "./wiki/queries.ts",
+    "./workspace/avatar-url": "./workspace/avatar-url.ts",
     "./issues": "./issues/index.ts",
     "./issues/queries": "./issues/queries.ts",
     "./issues/hooks": "./issues/hooks.ts",
@@ -121,6 +122,7 @@
     "react": "catalog:"
   },
   "devDependencies": {
+    "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",

@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: The top 7 common issues when self-hosting Multica — symptoms, causes, how to diagnose, how to fix.
+description: Common issues when self-hosting Multica — symptoms, causes, how to diagnose, how to fix.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -131,6 +131,75 @@ Check your inbox (including spam) for the real verification code.
 
 - In production, leave `MULTICA_DEV_VERIFICATION_CODE` empty — configure Resend and use real codes
 - For local development or internal testing, either copy the generated code from server logs or set `APP_ENV=development` plus `MULTICA_DEV_VERIFICATION_CODE=888888` — never enable a fixed code on a public instance (see [Sign-in and signup configuration → Fixed local testing codes](/auth-setup#fixed-local-testing-codes))
+
+## Usage dashboard stays at zero
+
+**Symptom**: agents complete tasks, raw token usage is written to the database, but **Settings → Usage** and **Settings → Runtime** show 0 input / output / cost across the board. This is silent — there is no error in the backend logs.
+
+**Likely causes**:
+
+1. **`rollup_task_usage_hourly()` is never scheduled** — the Usage / Runtime dashboards read from the derived `task_usage_hourly` table, which is populated by that function. The bundled `pgvector/pgvector:pg17` image does not include `pg_cron`, and the backend does not run the rollup in-process either. On a fresh self-host install with no external scheduler, this is the default state.
+2. **`pg_cron` is installed but pointing at the wrong database** — `pg_cron.database_name` defaults to `postgres`; if your Multica database has a different name, the scheduled job never sees `rollup_task_usage_hourly()`.
+3. **The scheduler is running but the rollup is silently erroring** — e.g. wrong DB role / search_path inside the cron entry.
+
+**How to diagnose**:
+
+```sql
+-- Confirm raw events exist but the hourly table is empty.
+SELECT count(*) AS raw_rows FROM task_usage;
+SELECT count(*) AS hourly_rows FROM task_usage_hourly;
+
+-- Confirm pg_cron is (or isn't) available.
+SELECT * FROM pg_available_extensions WHERE name = 'pg_cron';
+SHOW shared_preload_libraries;
+
+-- If pg_cron is installed, check the schedule + last run.
+SELECT jobname, schedule, database, active FROM cron.job;
+SELECT jobname, status, return_message, start_time, end_time
+  FROM cron.job_run_details ORDER BY start_time DESC LIMIT 10;
+
+-- Watermark — if this is 1970-01-01, the rollup has never run.
+SELECT watermark_at FROM task_usage_hourly_rollup_state;
+```
+
+**How to fix**:
+
+- Call the rollup once by hand to confirm it works: `SELECT rollup_task_usage_hourly();` — refresh the dashboard; if numbers appear, the only missing piece is a scheduler.
+- Pick one of the supported paths from [Self-host quickstart → Schedule the usage rollup](/self-host-quickstart#7-schedule-the-usage-rollup-required-for-the-usage-dashboard): external cron / systemd-timer / Kubernetes CronJob, or swap Postgres for an image with `pg_cron`.
+- If you already have history that pre-dates the schedule, run `backfill_task_usage_hourly` inside the backend container to seed buckets before the watermark.
+
+## Migration `103` fails with `refusing to drop legacy daily rollups`
+
+**Symptom**: upgrading from `v0.3.4` to `v0.3.5+`, the backend container fails to start (or `migrate up` aborts) with:
+
+```text
+ERROR: refusing to drop legacy daily rollups:
+  task_usage_hourly_rollup_state.watermark_at (1970-01-01 ...) trails
+  task_usage latest event (...) by more than 01:00:00 — backfill is
+  incomplete or pg_cron is not running. Run cmd/backfill_task_usage_hourly
+  (and let pg_cron catch up) before re-running migrate
+```
+
+**Likely cause**: this is migration `103`'s fail-closed guard. It refuses to drop the legacy daily rollups until `task_usage_hourly` has caught up with raw `task_usage`. The guard fires whenever existing rows are present and the rollup watermark still sits at the epoch — i.e. nothing has rolled history into the hourly table yet.
+
+**How to fix**:
+
+1. Run the backfill against the same database (idempotent, safe to interrupt, safe to re-run):
+
+   ```bash
+   # Docker Compose
+   docker compose -f docker-compose.selfhost.yml exec backend \
+     ./backfill_task_usage_hourly --sleep-between-slices=2s
+
+   # Kubernetes
+   kubectl -n multica exec deploy/multica-backend -- \
+     ./backfill_task_usage_hourly --sleep-between-slices=2s
+   ```
+
+2. Re-run the upgrade — restarting the backend container is enough, migrations run on startup. The guard now sees a current watermark and lets `103` apply.
+3. Set up an ongoing rollup schedule (cron / `pg_cron`) so the watermark keeps advancing — see [Self-host quickstart → Schedule the usage rollup](/self-host-quickstart#7-schedule-the-usage-rollup-required-for-the-usage-dashboard).
+
+`--sleep-between-slices=2s` is a polite default on production databases with years of history. Use `--months-back N --force-partial` if you only want to keep the last N months and are willing to permanently abandon older buckets.
 
 ## Port conflicts
 

@@ -111,11 +111,45 @@
     "visibility_toast_updated": "Visibility set to {{visibility}}",
     "visibility_toast_failed": "Failed to update visibility",
     "delete_dialog": {
-      "title": "Delete Runtime",
-      "description": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
-      "cancel": "Cancel",
-      "confirm": "Delete",
-      "deleting": "Deleting..."
+      "light": {
+        "title": "Delete Runtime?",
+        "description": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
+        "cancel": "Cancel",
+        "confirm": "Delete runtime",
+        "submitting": "Deleting..."
+      },
+      "cascade": {
+        "title_one": "Archive {{count}} agent and delete this Runtime?",
+        "title_other": "Archive {{count}} agents and delete this Runtime?",
+        "description": "Delete \"{{name}}\". The agents below will be archived and removed from active workflows; their queued or running tasks will be cancelled, and then the Runtime will be deleted.",
+        "warning": "This is destructive. Archived agents will be removed from active workflows and their queued or running tasks will be cancelled.",
+        "notice_runtime_has_active_agents": "Active agents were added since you opened this dialog. Review the new plan and confirm.",
+        "notice_runtime_delete_plan_changed": "The active agent set changed while this dialog was open. Review the new plan and confirm.",
+        "checkbox_one": "I understand this {{count}} agent will be archived and any queued or running tasks will be cancelled.",
+        "checkbox_other": "I understand these {{count}} agents will be archived and any queued or running tasks will be cancelled.",
+        "cancel": "Cancel",
+        "confirm_one": "Archive {{count}} agent and delete runtime",
+        "confirm_other": "Archive {{count}} agents and delete runtime",
+        "submitting": "Archiving and deleting...",
+        "self_healing_blocked_toast": "This runtime is managed by a running local daemon and will re-register itself.",
+        "delete_failed_toast": "Failed to delete runtime",
+        "table": {
+          "header_agent": "Agent",
+          "header_owner": "Owner",
+          "header_status": "Status",
+          "header_visibility": "Visibility",
+          "header_model": "Model",
+          "owner_self": "You",
+          "owner_unassigned": "—",
+          "model_unset": "—",
+          "presence_unknown": "—",
+          "workload_idle": "Idle",
+          "workload_working": "Working",
+          "workload_queued": "Queued",
+          "visibility_workspace": "Workspace",
+          "visibility_private": "Private"
+        }
+      }
     },
     "toast_deleted": "Runtime deleted",
     "toast_delete_failed": "Failed to delete runtime",

@@ -115,6 +115,7 @@ const mockListSquads = vi.hoisted(() =>
 );
 vi.mock("@multica/core/api", () => ({
   api: {
+    getBaseUrl: () => "http://127.0.0.1:8080",
     listIssues: (...args: any[]) => mockListIssues(...args),
     listGroupedIssues: (...args: any[]) => mockListGroupedIssues(...args),
     updateIssue: vi.fn(),

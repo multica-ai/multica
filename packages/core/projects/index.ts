@@ -10,4 +10,10 @@ export {
   type ProjectViewState,
 } from "./stores";
 export { useProjectDraftStore } from "./draft-store";
-export { projectResourcesOptions, useCreateProjectResource, useDeleteProjectResource } from "./resource-queries";
+export {
+  projectResourceKeys,
+  projectResourcesOptions,
+  useCreateProjectResource,
+  useUpdateProjectResource,
+  useDeleteProjectResource,
+} from "./resource-queries";

@@ -154,6 +154,55 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 	}
 }
 
+// TestBuildQuickCreatePromptParentPinning verifies that when the user
+// opened quick-create from "Add sub issue" on an existing issue, the prompt
+// instructs the agent to pass `--parent <uuid>` so the new issue is filed
+// as a sub-issue. The frontend already seeds parent_issue_id silently
+// through the manual→agent switch, so this is the last hop that has to
+// hold up — without the prompt instruction the agent would create a
+// standalone issue and the sub-issue relationship would be silently
+// dropped.
+func TestBuildQuickCreatePromptParentPinning(t *testing.T) {
+	const (
+		parentID         = "33333333-2222-1111-4444-555555555555"
+		parentIdentifier = "MUL-2534"
+	)
+	out := buildQuickCreatePrompt(Task{
+		QuickCreatePrompt:     "fix the login button color",
+		ParentIssueID:         parentID,
+		ParentIssueIdentifier: parentIdentifier,
+	})
+	mustContain := []string{
+		"--parent \"" + parentID + "\"",
+		parentIdentifier,
+		"modal entry point is authoritative",
+		"filed as a sub-issue",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("buildQuickCreatePrompt with parent missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+
+	// When only the UUID is available (identifier lookup failed on claim),
+	// the agent must still get the --parent instruction so the sub-issue
+	// intent isn't silently dropped.
+	uuidOnly := buildQuickCreatePrompt(Task{
+		QuickCreatePrompt: "fix the login button color",
+		ParentIssueID:     parentID,
+	})
+	if !strings.Contains(uuidOnly, "--parent \""+parentID+"\"") {
+		t.Errorf("buildQuickCreatePrompt with parent UUID only must still pin --parent, got:\n%s", uuidOnly)
+	}
+
+	// Without a parent, the prompt must NOT mention --parent at all — a
+	// plain quick-create run should not start filing sub-issues.
+	plain := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color"})
+	if strings.Contains(plain, "--parent") {
+		t.Errorf("buildQuickCreatePrompt without parent must NOT mention --parent, got:\n%s", plain)
+	}
+}
+
 // TestBuildPromptSquadLeaderNoActionForMemberTrigger verifies that the
 // squad leader no_action prohibition is injected in the per-turn prompt
 // regardless of whether the triggering comment was posted by an agent or
