@@ -1119,7 +1119,7 @@ describe("IssueDetail (shared)", () => {
     fireEvent.scroll(scrollContainer);
 
     const jumpToTop = await screen.findByRole("button", { name: "Jump to top" });
-    expect(jumpToTop).toHaveClass("absolute", "top-4");
+    expect(jumpToTop).toHaveClass("absolute", "top-8", "sm:top-4");
     fireEvent.click(jumpToTop);
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
   });
