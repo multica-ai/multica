@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -430,6 +432,27 @@ func TestOpenclawEntriesToModelsUsesIDOverName(t *testing.T) {
 func TestParseOpenclawAgentsJSONRejectsGarbage(t *testing.T) {
 	if _, ok := parseOpenclawAgentsJSON([]byte("not json")); ok {
 		t.Error("expected ok=false for non-JSON")
+	}
+}
+
+func TestDiscoverOpenclawAgentsReportsMissingGatewayScope(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "openclaw")
+	script := "#!/bin/sh\n" +
+		"echo 'gateway probe failed: missing scope: operator.read' >&2\n" +
+		"exit 1\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	_, err := discoverOpenclawAgents(context.Background(), fakePath)
+	if err == nil {
+		t.Fatal("expected missing operator.read scope error, got nil")
+	}
+	if !strings.Contains(err.Error(), "operator.read") {
+		t.Errorf("error missing operator.read: %v", err)
 	}
 }
 

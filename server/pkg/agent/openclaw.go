@@ -21,6 +21,8 @@ import (
 // change it without also updating those consumers.
 const openclawNoParseableOutput = "openclaw returned no parseable output"
 
+const openclawGatewayOperatorReadScope = "operator.read"
+
 // minOpenclawVersion is the lowest openclaw version that emits its
 // --json result on stdout. PR #2101 swapped the adapter from reading
 // stderr to stdout; older builds wrote JSON to stderr and now appear
@@ -88,14 +90,15 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 	// openclaw writes its --json output to stdout. Stderr carries log
 	// overflow (security warnings, tool errors, etc.) — capture it via a
-	// log writer so it surfaces in daemon logs without being fed into the
-	// JSON parser.
+	// bounded log writer so actionable auth failures can also be surfaced
+	// in Result.Error without feeding stderr into the JSON parser.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("openclaw stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[openclaw:stderr] ")
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[openclaw:stderr] "), agentStderrTailBytes)
+	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -131,6 +134,9 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		} else if runCtx.Err() == context.Canceled {
 			scanResult.status = "aborted"
 			scanResult.errMsg = "execution cancelled"
+		} else if errMsg, ok := openclawMissingGatewayScopeError(stderrBuf.Tail()); ok {
+			scanResult.status = "failed"
+			scanResult.errMsg = errMsg
 		} else if exitErr != nil && scanResult.status == "completed" {
 			scanResult.status = "failed"
 			scanResult.errMsg = fmt.Sprintf("openclaw exited with error: %v", exitErr)
@@ -267,6 +273,13 @@ func compareOpenclawVersion(a, b string) int {
 		}
 	}
 	return 0
+}
+
+func openclawMissingGatewayScopeError(raw string) (string, bool) {
+	if !strings.Contains(strings.ToLower(raw), "missing scope: "+openclawGatewayOperatorReadScope) {
+		return "", false
+	}
+	return "OpenClaw gateway token is missing required scope operator.read. Grant operator.read to the OpenClaw gateway token, then reconnect the runtime.", true
 }
 
 // ── Event handlers ──

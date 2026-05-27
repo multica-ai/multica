@@ -870,7 +870,13 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	} {
 		cmd := exec.CommandContext(runCtx, executablePath, jsonArgs...)
 		hideAgentWindow(cmd)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
 		out, err := cmd.Output()
+		combined := string(out) + "\n" + stderr.String()
+		if errMsg, ok := openclawMissingGatewayScopeError(combined); ok {
+			return nil, fmt.Errorf("openclaw gateway probe: %s", errMsg)
+		}
 		if err != nil {
 			continue
 		}
@@ -884,7 +890,13 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	// the wrong tokens produces nonsense entries like "Identity:".
 	cmd := exec.CommandContext(runCtx, executablePath, "agents", "list")
 	hideAgentWindow(cmd)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	combined := string(out) + "\n" + stderr.String()
+	if errMsg, ok := openclawMissingGatewayScopeError(combined); ok {
+		return nil, fmt.Errorf("openclaw gateway probe: %s", errMsg)
+	}
 	if err != nil {
 		return []Model{}, nil
 	}

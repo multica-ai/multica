@@ -1510,3 +1510,68 @@ func TestOpenclawExecuteAllowsCurrentVersion(t *testing.T) {
 		t.Fatal("timeout waiting for result")
 	}
 }
+
+func TestOpenclawMissingGatewayScopeError(t *testing.T) {
+	t.Parallel()
+
+	msg, ok := openclawMissingGatewayScopeError("gateway probe failed: missing scope: operator.read")
+	if !ok {
+		t.Fatal("expected missing operator.read scope to be detected")
+	}
+	for _, want := range []string{"operator.read", "Grant", "reconnect"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message missing %q: %s", want, msg)
+		}
+	}
+
+	if _, ok := openclawMissingGatewayScopeError("missing scope: workspace.read"); ok {
+		t.Fatal("unexpected detection for unrelated scope")
+	}
+}
+
+func TestOpenclawExecuteReportsMissingGatewayScopeFromStderr(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "openclaw")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"--version\" ]; then\n" +
+		"  echo 'openclaw 2026.5.5 c37871e'\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"echo 'gateway probe failed: missing scope: operator.read' >&2\n" +
+		"exit 1\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("openclaw", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new openclaw backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("Execute returned synchronous error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "failed" {
+			t.Errorf("status = %q, want failed", result.Status)
+		}
+		if !strings.Contains(result.Error, "operator.read") {
+			t.Errorf("error missing operator.read: %q", result.Error)
+		}
+		if strings.Contains(result.Error, openclawNoParseableOutput) {
+			t.Errorf("missing-scope failure collapsed to generic parse error: %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
