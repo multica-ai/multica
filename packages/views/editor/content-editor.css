@@ -513,10 +513,6 @@
   display: block !important;
 }
 
-.rich-text-editor .attachment-hidden-node {
-  display: none !important;
-}
-
 /* Images — generic fallback (non-NodeView contexts) */
 .rich-text-editor img {
   max-width: 100%;

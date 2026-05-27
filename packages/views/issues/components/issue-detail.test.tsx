@@ -762,7 +762,7 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
   });
 
-  it("keeps issue-level attachments visible below the description even when referenced inline", async () => {
+  it("renders referenced attachments inline while keeping the attachment area visible", async () => {
     mockApiObj.getIssue.mockResolvedValue({
       ...mockIssue,
       description: "Spec file: [report.pdf](https://cdn.example.test/report.pdf)",
@@ -791,6 +791,7 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => {
       expect(screen.getByTestId("issue-attachment-card")).toHaveTextContent("report.pdf");
     });
+    expect(screen.getByTestId("rich-text-editor")).toHaveAttribute("data-hide-attachments", "false");
   });
 
   it("uploads description files into the attachment area and binds them immediately", async () => {

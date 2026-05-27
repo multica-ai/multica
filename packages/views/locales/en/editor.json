@@ -36,7 +36,8 @@
     "copy_link": "Copy link",
     "delete": "Delete",
     "link_copied": "Link copied",
-    "copy_link_failed": "Failed to copy link"
+    "copy_link_failed": "Failed to copy link",
+    "collapse_to_card": "Show as compact card"
   },
   "attachment": {
     "download_failed": "Couldn't fetch a download link. Try again in a moment.",
@@ -46,7 +47,8 @@
     "preview_too_large": "File is too large to preview. Please download.",
     "preview_unsupported": "This file type can't be previewed.",
     "close": "Close",
-    "open_in_new_tab": "Open in new tab"
+    "open_in_new_tab": "Open in new tab",
+    "expand_to_preview": "Show as inline preview"
   },
   "link_hover": {
     "copy_link": "Copy link",
@@ -65,7 +67,8 @@
     "copy_code": "Copy code",
     "show_preview": "Show preview",
     "show_source": "Show source",
-    "fullscreen": "Fullscreen"
+    "fullscreen": "Fullscreen",
+    "delete": "Delete block"
   },
   "file_card": {
     "uploading": "Uploading {{filename}}"

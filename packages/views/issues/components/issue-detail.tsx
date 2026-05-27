@@ -425,7 +425,16 @@ function IssueAttachmentRow({
   };
 
   return (
-    <div className="flex items-center gap-1 group">
+    <div className="flex items-center gap-1 group" onMouseDown={(e) => {
+      // Prevent clicks in the attachment row from shifting focus to the
+      // editor above. Without this, after the dropdown closes the browser
+      // refocuses the editor and ProseMirror may process a stale delete
+      // event that removes the last line of content instead of the
+      // attachment card.
+      if ((e.target as HTMLElement).closest('[role="menu"]') || (e.target as HTMLElement).closest('button')) {
+        e.preventDefault();
+      }
+    }}>
       <div className="flex-1 min-w-0">
         <AttachmentCard
           filename={attachment.filename}
@@ -438,13 +447,14 @@ function IssueAttachmentRow({
         />
       </div>
       {preview.modal}
-      {!pending && (onDelete || onAppendToDesc) && (
+      {(onDelete || onAppendToDesc) && (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <button
                 type="button"
                 className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-opacity"
+                onMouseDown={(e) => e.preventDefault()}
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />
               </button>
@@ -1429,8 +1439,9 @@ export function IssueDetail({
   const queryClient = useQueryClient();
 
   // Attachments uploaded against this issue. Drives the description
-  // editor's click-time fresh-sign download.
-  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(id));
+  // editor's click-time fresh-sign download. Must use `resolvedId` so the
+  // cache key matches what `useUpdateIssue.onSettled` invalidates (UUID).
+  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(resolvedId));
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
@@ -1550,8 +1561,9 @@ export function IssueDetail({
     onDrop: (files) => descEditorRef.current?.uploadFiles(files),
   });
   // Pending uploads in the description editor. We bind them immediately after
-  // upload so IssueAttachmentList can be the canonical display surface while
-  // the description editor keeps the attachment markdown hidden.
+  // upload so IssueAttachmentList can show the compact attachment index while
+  // the description keeps rendering attachments inline at their markdown
+  // positions.
   const [descPendingAttachments, setDescPendingAttachments] = useState<Attachment[]>([]);
   useEffect(() => {
     setDescPendingAttachments([]);
@@ -1561,16 +1573,17 @@ export function IssueDetail({
     : issueAttachments;
   const handleDescriptionUpload = useCallback(
     async (file: File) => {
-      const result = await uploadWithToast(file);
+      // Pass issueId in upload context so the attachment record is created
+      // with issue_id pre-set in the DB. This ensures the attachment survives
+      // page refresh even if the separate link call races or the user removes
+      // the node from the body before the debounced save fires.
+      const result = await uploadWithToast(file, { issueId: resolvedId });
       if (result) {
         setDescPendingAttachments((prev) => [...prev, result]);
-        if (issue) {
-          handleUpdateField({ attachment_ids: [result.id] });
-        }
       }
       return result;
     },
-    [handleUpdateField, issue, uploadWithToast],
+    [resolvedId, uploadWithToast],
   );
 
   const insertQuoteToNewComment = useCallback((markdown: string) => {
@@ -2473,19 +2486,16 @@ export function IssueDetail({
               defaultValue={issue.description || ""}
               placeholder={t(($) => $.detail.desc_placeholder)}
               onUpdate={(md) => {
-                // Bind any pending uploads still referenced in the markdown
-                // so they appear in `issueAttachments` after refresh and the
-                // editor's text/code preview keeps working past reload.
-                const ids = descPendingAttachments
-                  .filter((a) => md.includes(a.url))
-                  .map((a) => a.id);
-                handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
+                // Attachments are linked to the issue at upload time (via
+                // issueId context), so we only save the description text here.
+                // Removing an attachment node from the body does NOT unlink or
+                // delete the attachment — only the attachment area delete does.
+                handleUpdateField({ description: md });
               }}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
               currentIssueId={resolvedId}
               attachments={descEditorAttachments}
-              hideAttachments
               selectionQuoteActions={{
                 onQuoteToNewComment: handleEditorQuoteToNewComment,
                 onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
