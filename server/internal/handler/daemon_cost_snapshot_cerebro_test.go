@@ -1,5 +1,7 @@
 package handler
 
+// CEREBRO-PATCH(daemon-snapshot-saving): tests for the snapshot_prompt renderer + measurement params (FIR-2384).
+
 import (
 	"fmt"
 	"strings"

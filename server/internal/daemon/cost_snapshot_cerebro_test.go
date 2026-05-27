@@ -1,5 +1,7 @@
 package daemon
 
+// CEREBRO-PATCH(daemon-snapshot-prompt): tests for the snapshot_prompt start-prompt fold (FIR-2384).
+
 import (
 	"strings"
 	"testing"

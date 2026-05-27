@@ -36,6 +36,10 @@ func BuildPrompt(task Task, provider string) string {
 		b.WriteString(snap)
 		return b.String()
 	}
+	if bundle, ok := bundleContextInstruction(task); ok { // CEREBRO-PATCH(daemon-bundled-prompt): steer to single `issue context` call when bundled_read saving on (FIR-2384)
+		b.WriteString(bundle)
+		return b.String()
+	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). On long-running issues use `--recent 20 --output json` to read the 20 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
 	return b.String()
@@ -154,6 +158,11 @@ func buildCommentPrompt(task Task, provider string) string {
 	}
 	if snap, ok := snapshotIssueContext(task); ok { // CEREBRO-PATCH(daemon-snapshot-prompt): inline issue+thread when snapshot saving on (FIR-2384)
 		b.WriteString(snap)
+		b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
+		return b.String()
+	}
+	if bundle, ok := bundleContextInstruction(task); ok { // CEREBRO-PATCH(daemon-bundled-prompt): steer to single `issue context` call when bundled_read saving on (FIR-2384)
+		b.WriteString(bundle)
 		b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
 		return b.String()
 	}

@@ -534,6 +534,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.With(middleware.RequireUserScope).Get("/api/issues/grouped", h.ListGroupedIssues)
 			issueScope := middleware.AllowTaskScopeForIssue("id")
 			r.With(issueScope).Get("/api/issues/{id}", h.GetIssue)
+			// CEREBRO-PATCH(issue-context-bundle-route): FIR-2384 — bundled issue+comments+members+labels read for the `multica issue context` cost saving.
+			r.With(issueScope).Get("/api/issues/{id}/context", h.GetIssueContext)
 			r.With(issueScope).Put("/api/issues/{id}", h.UpdateIssue)
 			r.With(issueScope).Get("/api/issues/{id}/comments", h.ListComments)
 			r.With(issueScope).Post("/api/issues/{id}/comments", h.CreateComment)

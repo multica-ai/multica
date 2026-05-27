@@ -64,6 +64,8 @@ type Task struct {
 	TriggerAuthorName     string                `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
 	// CEREBRO-PATCH(daemon-task-issue-snapshot): FIR-2384 — pre-rendered issue + recent thread, set only when the workspace's snapshot_prompt cost saving is "on"; inlined into the start prompt so the agent skips the issue get + comment list reads.
 	IssueSnapshot           string               `json:"issue_snapshot,omitempty"`
+	// CEREBRO-PATCH(daemon-task-bundle-context-hint): FIR-2384 — set when the workspace's bundled_read cost saving is "on"; the start prompt then points the agent at a single `multica issue context` call instead of separate issue get + comment list reads.
+	BundleContextHint       bool                 `json:"bundle_context_hint,omitempty"`
 	ChatSessionID           string               `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string               `json:"chat_message,omitempty"`              // user message content for chat tasks
 	ChatMessageAttachments  []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`  // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
