@@ -49,6 +49,11 @@ variable "HERMES_COMMIT"       { default = "498bfc7bc12a937621b4215312049b100072
 // ships at build time; pin for stricter reproducibility once a known-good
 // version is identified.
 variable "GH_CLI_VERSION"      { default = "" }
+// acli apt version pin. Required (not empty) — agents call JIRA via this and
+// a silent upstream downgrade should fail the build, not ship. Format mirrors
+// the package version advertised at acli.atlassian.com/linux/deb (semver with
+// a `~stable` suffix, e.g. `1.3.18~stable`). Bump per the README.
+variable "ACLI_VERSION"        { default = "1.3.18~stable" }
 variable "UID"                 { default = "1000" }
 variable "GID"                 { default = "1000" }
 
@@ -83,12 +88,13 @@ target "default" {
     HERMES_REF          = "${HERMES_REF}"
     HERMES_COMMIT       = "${HERMES_COMMIT}"
     GH_CLI_VERSION      = "${GH_CLI_VERSION}"
+    ACLI_VERSION        = "${ACLI_VERSION}"
     UID                 = "${UID}"
     GID                 = "${GID}"
   }
   labels = {
     "org.opencontainers.image.source"      = "https://github.com/g2crowd/agentfarm"
-    "org.opencontainers.image.description" = "Shared agent-runtime base (multica + claude + codex + opencode + pi + hermes)"
+    "org.opencontainers.image.description" = "Shared agent-runtime base (multica + claude + codex + opencode + pi + hermes + acli)"
     "org.opencontainers.image.licenses"    = "UNLICENSED"
   }
   cache-from = ["type=gha,scope=agent-runtime-base"]

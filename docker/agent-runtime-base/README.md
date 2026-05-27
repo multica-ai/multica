@@ -29,6 +29,7 @@ Image: `ghcr.io/g2crowd/agent-runtime-base:<tag>` — multi-arch
 | `pi`      | npm `@earendil-works/pi-coding-agent`           | `PI_VERSION`             |
 | `hermes`  | [`NousResearch/hermes-agent`][hermes] installer | `HERMES_REF` (upstream release tag) + `HERMES_COMMIT` (verified SHA) |
 | `gh`      | apt from `cli.github.com/packages`              | `GH_CLI_VERSION` (apt)   |
+| `acli`    | apt from `acli.atlassian.com/linux/deb`         | `ACLI_VERSION` (apt)     |
 
 Common substrate: Debian `bookworm-slim`, Node `22` LTS, Go `1.26.1` (build
 stage only), `git`, `bash`, `curl`, `jq`, `rsync`, `ripgrep`, `tini`,
@@ -59,6 +60,7 @@ All version-pinned via build args. Defaults match the Dockerfile so a bare
 | `HERMES_REF`           | `v2026.5.7`                              | Upstream calver release tag (`vYYYY.M.D`) in `NousResearch/hermes-agent`. The installer's `git clone --branch <ref>` accepts tags. Never default this back to a branch name like `main`. Bump together with `HERMES_COMMIT`. |
 | `HERMES_COMMIT`        | `498bfc7bc12a937621b4215312049b1000726df3` | The commit SHA that `HERMES_REF` resolves to (peeled — what `git rev-parse HEAD` returns after `git clone --branch <tag>`, not the tag-object SHA). The Dockerfile verifies the installed HEAD matches; the build fails loudly if the tag has been force-moved. Resolve via `git ls-remote --tags https://github.com/NousResearch/hermes-agent <tag>^{}` (the `^{}` form gives you the peeled commit). |
 | `GH_CLI_VERSION`       | (empty)                                  | apt version pin for `gh` (e.g. `2.63.0`). Empty = whatever cli.github.com ships at build time. |
+| `ACLI_VERSION`         | `1.3.18~stable`                          | apt version pin for `acli`. Required (no empty default) — agents drive JIRA via this and an upstream regression silently downgrading capability would be hard to spot. Format matches the package version advertised at `acli.atlassian.com/linux/deb` (semver with a `~stable` suffix). |
 | `UID`                  | `1000`                                   | Runtime user uid.                                                   |
 | `GID`                  | `1000`                                   | Runtime user gid.                                                   |
 
@@ -74,6 +76,7 @@ opencode --version
 pi      --version
 multica --version
 gh      --version
+acli    --version
 hermes  --help     # hermes uses python-fire; --version is not surfaced
 ```
 
@@ -89,7 +92,7 @@ To run the smoke test manually against a built image:
 docker run --rm ghcr.io/g2crowd/agent-runtime-base:<tag> \
   sh -c "claude --version && codex --version && opencode --version \
       && pi --version && multica --version && gh --version \
-      && hermes --help >/dev/null"
+      && acli --version && hermes --help >/dev/null"
 ```
 
 ## Building locally
@@ -156,11 +159,30 @@ one of the baked tools:
    apt versions from `cli.github.com/packages`. Leave empty to take whatever
    ships at build time (acceptable for most rebuilds; pin if a specific gh
    release fixes a bug you care about).
-6. **Open the PR.** CI bakes the new image on merge (see `publish.yml`'s
+6. **For `acli` (Atlassian CLI):** bump `ACLI_VERSION` in `docker-bake.hcl`.
+   Find the current pinnable version by reading the apt repo's `Packages`
+   index — the `Version:` field is exactly what apt expects:
+   ```bash
+   curl -fsSL https://acli.atlassian.com/linux/deb/dists/stable/main/binary-amd64/Packages \
+     | awk '/^Package: acli$/{flag=1} flag && /^Version:/{print $2; exit}'
+   ```
+   Atlassian publishes a single `stable` track and supports each release for
+   six months after publication — bump roughly quarterly to stay ahead of the
+   support window. Smoke-test locally:
+   ```bash
+   docker buildx bake -f docker/agent-runtime-base/docker-bake.hcl \
+     --set default.platform=linux/arm64 \
+     --set default.output=type=docker \
+     --set default.tags=test-acli-pin:local default
+   ```
+   The Dockerfile pins `acli=${ACLI_VERSION}` against apt — a stale or
+   removed version fails the build with `E: Version '<X>' for 'acli' was not
+   found`, so wedging an unsupported pin into prod is mechanically impossible.
+7. **Open the PR.** CI bakes the new image on merge (see `publish.yml`'s
    `bake-build-agent-runtime-base` job) and publishes both
    `ghcr.io/g2crowd/agent-runtime-base:<sha>` and
    `ghcr.io/g2crowd/agent-runtime-base:latest`.
-7. **Bump consumers** in a separate PR. Each downstream image FROMs
+8. **Bump consumers** in a separate PR. Each downstream image FROMs
    `agent-runtime-base:<tag>` — bump `BASE_TAG` in their bake file
    (`docker/devenv-runtime/docker-bake.hcl`)
    to the new `<sha>`, or leave it at `latest` to ride the floating tag.

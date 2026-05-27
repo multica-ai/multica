@@ -14,6 +14,7 @@
 #   * pi         — @earendil-works/pi-coding-agent (npm)   @ PI_VERSION
 #   * hermes     — NousResearch/hermes-agent (installer)   @ HERMES_REF (+ HERMES_COMMIT verify)
 #   * gh         — GitHub CLI (apt; cli.github.com repo)   @ GH_CLI_VERSION
+#   * acli       — Atlassian CLI (apt; acli.atlassian.com) @ ACLI_VERSION
 #
 # Substrate: debian bookworm-slim, node LTS, git, bash, curl, jq, rsync,
 # ripgrep, ca-certificates, tini. Non-root user `agent` at UID:GID 1000:1000.
@@ -80,6 +81,13 @@ ARG HERMES_COMMIT=498bfc7bc12a937621b4215312049b1000726df3
 # at build time. Empty means "no version constraint" (apt picks the available
 # candidate); the cache-from in the bake file plus the smoke test bound risk.
 ARG GH_CLI_VERSION=
+# Pin acli via apt. Unlike GH_CLI_VERSION (which may be empty), this MUST be
+# pinned to a specific apt package version — agents call into JIRA from the
+# shell, so an upstream regression silently downgrading capability would be
+# hard to spot. Format matches what `acli.atlassian.com/linux/deb`'s Packages
+# index advertises: `<semver>~stable` (e.g. `1.3.18~stable`). Bump in
+# lockstep with the upstream release calendar; see README's "Bump procedure".
+ARG ACLI_VERSION=1.3.18~stable
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -89,6 +97,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 # git's credential helper for cloning private github.com repos.
 # Installing from the upstream cli.github.com apt repo keeps it on a stable
 # release cadence — distro-packaged versions of `gh` lag months behind.
+# The Atlassian CLI (`acli`) is baked in here so agents can drive JIRA from
+# the shell. Source: Atlassian's official apt repo at acli.atlassian.com —
+# the documented headless-install channel. Auth is the user's problem at
+# runtime; nothing is configured here.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -109,9 +121,15 @@ RUN apt-get update \
  && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
       > /etc/apt/sources.list.d/github-cli.list \
+ && curl -fsSL https://acli.atlassian.com/gpg/public-key.asc \
+      | gpg --dearmor -o /etc/apt/keyrings/acli-archive-keyring.gpg \
+ && chmod go+r /etc/apt/keyrings/acli-archive-keyring.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/acli-archive-keyring.gpg] https://acli.atlassian.com/linux/deb stable main" \
+      > /etc/apt/sources.list.d/acli.list \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
       gh${GH_CLI_VERSION:+=${GH_CLI_VERSION}} \
+      acli=${ACLI_VERSION} \
  && rm -rf /var/lib/apt/lists/*
 
 # Pin each npm-distributed agent CLI. `latest` is acceptable as a build-arg
@@ -197,6 +215,7 @@ RUN claude --version \
  && pi --version \
  && multica --version \
  && gh --version \
+ && acli --version \
  && hermes --help >/dev/null
 
 USER agent
@@ -206,5 +225,5 @@ ENV HOME=/home/agent \
     MULTICA_WORKSPACES_ROOT=/home/agent/multica_workspaces
 
 LABEL org.opencontainers.image.source="https://github.com/g2crowd/agentfarm" \
-      org.opencontainers.image.description="Shared agent-runtime base (multica + claude + codex + opencode + pi + hermes)" \
+      org.opencontainers.image.description="Shared agent-runtime base (multica + claude + codex + opencode + pi + hermes + acli)" \
       org.opencontainers.image.licenses="UNLICENSED"
