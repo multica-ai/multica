@@ -1,5 +1,6 @@
 import { app, ipcMain, BrowserWindow, shell } from "electron";
 import { execFile } from "child_process";
+import { EventEmitter } from "events";
 import {
   readFile,
   writeFile,
@@ -126,9 +127,64 @@ function urlsMatch(a: string, b: string): boolean {
   return na.length > 0 && na === nb;
 }
 
+// In-process fan-out so other main-process modules (e.g. tray-manager) can
+// observe daemon status changes without round-tripping through IPC. The
+// renderer still receives `daemon:status` events via webContents below.
+const daemonEvents = new EventEmitter();
+let lastStatus: DaemonStatus = { state: "installing_cli" };
+
 function sendStatus(status: DaemonStatus): void {
+  lastStatus = status;
   const win = getMainWindow();
   win?.webContents.send("daemon:status", status);
+  daemonEvents.emit("status", status);
+}
+
+/**
+ * Subscribe to daemon status changes from within the main process. The
+ * listener is invoked once synchronously with the current status (replay),
+ * then on every subsequent status change. Returns an unsubscribe function.
+ */
+export function subscribeDaemonStatus(
+  listener: (status: DaemonStatus) => void,
+): () => void {
+  listener(lastStatus);
+  daemonEvents.on("status", listener);
+  return () => {
+    daemonEvents.off("status", listener);
+  };
+}
+
+export async function getDaemonPrefs(): Promise<DaemonPrefs> {
+  return loadPrefs();
+}
+
+export async function setDaemonPrefs(
+  partial: Partial<DaemonPrefs>,
+): Promise<DaemonPrefs> {
+  const cur = await loadPrefs();
+  const merged = { ...cur, ...partial };
+  await savePrefs(merged);
+  return merged;
+}
+
+export const daemonOps = {
+  start: () => withGuard(() => startDaemon()),
+  stop: () => withGuard(() => stopDaemon()),
+  restart: () => withGuard(() => restartDaemon()),
+};
+
+export async function openDaemonLogFile(): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  const active = await ensureActiveProfile();
+  const logPath = profileLogPath(active.name);
+  if (!existsSync(logPath)) {
+    return { success: false, error: "Log file not found yet" };
+  }
+  const error = await shell.openPath(logPath);
+  return error === "" ? { success: true } : { success: false, error };
 }
 
 interface HealthPayload {
@@ -917,16 +973,7 @@ export function setupDaemonManager(
   // Reveal the daemon's log file in the user's default editor / Console
   // app. Acts as the escape hatch when the in-app log viewer isn't enough
   // (full history, complex search, copy-to-clipboard at scale).
-  ipcMain.handle("daemon:open-log-file", async () => {
-    const active = await ensureActiveProfile();
-    const logPath = profileLogPath(active.name);
-    if (!existsSync(logPath)) {
-      return { success: false, error: "Log file not found yet" };
-    }
-    // shell.openPath returns "" on success, error string on failure.
-    const error = await shell.openPath(logPath);
-    return error === "" ? { success: true } : { success: false, error };
-  });
+  ipcMain.handle("daemon:open-log-file", () => openDaemonLogFile());
 
   // First-run CLI install kicks off here. Status bar shows "Setting up…"
   // until the managed binary is on disk (instant on subsequent launches).

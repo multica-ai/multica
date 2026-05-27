@@ -5,6 +5,7 @@ import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
+import { setupTray } from "./tray-manager";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
@@ -174,6 +175,14 @@ function createWindow(): void {
     mainWindow?.show();
   });
 
+  // Without this, closing the window on macOS (where the app stays alive)
+  // leaves a destroyed BrowserWindow in the `mainWindow` slot. Tray clicks
+  // and deep-link dispatch would then call methods on a dead reference
+  // instead of recreating the window via showOrCreateMainWindow().
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+
   // Detect OS language changes while the app is running. Electron has no
   // dedicated event for this on any platform, so we poll on focus regain —
   // catches the common case where users switch System Settings → Language
@@ -260,6 +269,20 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
   }
+}
+
+// Single path for "bring the main window forward" used by the tray, the
+// macOS `activate` event, and any future deep-link / notification handlers.
+// If the window was closed (mainWindow === null after the `closed` event)
+// or somehow destroyed, recreate it; otherwise restore + show + focus.
+function showOrCreateMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
 }
 
 // --- Dev / production isolation -------------------------------------------
@@ -460,6 +483,10 @@ if (!gotTheLock) {
 
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
+    setupTray({
+      getWindow: () => mainWindow,
+      showOrCreateWindow: showOrCreateMainWindow,
+    });
 
     // macOS: deep link arrives via open-url event
     app.on("open-url", (_event, url) => {
