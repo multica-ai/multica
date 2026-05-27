@@ -151,6 +151,15 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent).toBe(literalCode);
   });
 
+  it("renders code blocks without a language tag (lowlight highlightAuto fallback)", () => {
+    const token = "mul_407ec1e4464b580304362ed749f821901fd7d310";
+    const { container } = render(
+      <ReadonlyContent content={["```", token, "```"].join("\n")} />,
+    );
+    const blockCode = container.querySelector("pre code");
+    expect(blockCode?.textContent?.trim()).toBe(token);
+  });
+
   it("keeps editor code literal by disabling font ligatures", () => {
     const codeCss = readFileSync("editor/styles/code.css", "utf8");
 
