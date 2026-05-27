@@ -79,6 +79,35 @@ func (q *Queries) CreateResumeFromPauseTask(ctx context.Context, id pgtype.UUID)
 	return i, err
 }
 
+const deleteResumedTimeoutComment = `-- name: DeleteResumedTimeoutComment :exec
+DELETE FROM comment
+WHERE issue_id = $1
+  AND author_type = 'agent'
+  AND author_id = $2
+  AND content LIKE 'BLOCKED: Agent-run timed out before it could post a final comment.%'
+  AND content LIKE '%Run: ` + "`" + `' || $3::text || '` + "`" + `%'
+`
+
+type DeleteResumedTimeoutCommentParams struct {
+	IssueID      pgtype.UUID `json:"issue_id"`
+	AuthorID     pgtype.UUID `json:"author_id"`
+	ParentTaskID string      `json:"parent_task_id"`
+}
+
+// Removes the BLOCKED timeout comment a prior segment posted on an issue
+// once a resume task is created for that segment (FIR-2395). The unpause
+// sweeper calls this immediately after CreateResumeFromPauseTask so the
+// user only sees the live retry, not the stale timeout noise.
+//
+// The comment is identified by its body shape and the embedded task UUID
+// emitted by timeoutFailureCommentBody in server/internal/service/task.go.
+// Scoped to the same agent on the same issue, so concurrent comments from
+// other agents (autopilots, squad-mates) are untouched.
+func (q *Queries) DeleteResumedTimeoutComment(ctx context.Context, arg DeleteResumedTimeoutCommentParams) error {
+	_, err := q.db.Exec(ctx, deleteResumedTimeoutComment, arg.IssueID, arg.AuthorID, arg.ParentTaskID)
+	return err
+}
+
 const getAgentRuntimePauseSnapshot = `-- name: GetAgentRuntimePauseSnapshot :one
 SELECT id, paused_at, unpause_at, pause_reason
 FROM agent_runtime

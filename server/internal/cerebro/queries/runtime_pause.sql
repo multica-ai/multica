@@ -145,3 +145,20 @@ FROM agent_task_queue p
 LEFT JOIN agent a ON a.id = p.agent_id
 WHERE p.id = $1
 RETURNING *;
+
+-- name: DeleteResumedTimeoutComment :exec
+-- Removes the BLOCKED timeout comment a prior segment posted on an issue
+-- once a resume task is created for that segment (FIR-2395). The unpause
+-- sweeper calls this immediately after CreateResumeFromPauseTask so the
+-- user only sees the live retry, not the stale timeout noise.
+--
+-- The comment is identified by its body shape and the embedded task UUID
+-- emitted by timeoutFailureCommentBody in server/internal/service/task.go.
+-- Scoped to the same agent on the same issue, so concurrent comments from
+-- other agents (autopilots, squad-mates) are untouched.
+DELETE FROM comment
+WHERE issue_id = @issue_id
+  AND author_type = 'agent'
+  AND author_id = @author_id
+  AND content LIKE 'BLOCKED: Agent-run timed out before it could post a final comment.%'
+  AND content LIKE '%Run: `' || @parent_task_id::text || '`%';

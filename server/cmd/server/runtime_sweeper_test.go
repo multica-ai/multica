@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -686,6 +687,171 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 	}
 	if remaining != 3 {
 		t.Fatalf("expected 3 queued tasks remaining after batched sweep, got %d", remaining)
+	}
+}
+
+// CEREBRO-PATCH(suppress-stale-blocked-comment-test): FIR-2395 — Case A.
+// A run that has already posted an agent comment after its own started_at
+// must NOT produce a BLOCKED "agent timed out" comment when the sweeper
+// later trips the running-task timeout. Otherwise the user sees a red
+// scary message stacked on top of the real, delivered answer.
+func TestTimeoutDoesNotPostBlockedCommentWhenAgentAlreadyReplied(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a
+		JOIN member m ON m.workspace_id = a.workspace_id
+		JOIN "user" u ON u.id = m.user_id
+		WHERE u.email = $1
+		LIMIT 1
+	`, integrationTestEmail).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("failed to find test agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id)
+		SELECT $1, 'FIR-2395 Case A — agent already replied', 'in_review', 'none', 'member', m.user_id, 'agent', $2
+		FROM member m WHERE m.workspace_id = $1 LIMIT 1
+		RETURNING id
+	`, testWorkspaceID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to create test issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			dispatched_at, started_at, attempt, max_attempts
+		)
+		VALUES ($1, $2, $3, 'running', 0,
+		        now() - interval '3 hours', now() - interval '3 hours', 3, 3)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("failed to create stale running task: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'agent', $3, 'Delivered — see PR.', 'comment')
+	`, issueID, testWorkspaceID, agentID); err != nil {
+		t.Fatalf("failed to seed delivered agent comment: %v", err)
+	}
+
+	queries := db.New(testPool)
+	bus := events.New()
+	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
+		DispatchTimeoutSecs: 300.0,
+		RunningTimeoutSecs:  1.0,
+	})
+	if err != nil {
+		t.Fatalf("FailStaleTasks failed: %v", err)
+	}
+	if len(failedTasks) == 0 {
+		t.Fatal("expected the stale task to be picked up by FailStaleTasks")
+	}
+
+	svc := service.NewTaskService(queries, testPool, nil, bus)
+	svc.HandleFailedTasks(ctx, failedTasks)
+
+	var blocked int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM comment
+		WHERE issue_id = $1
+		  AND content LIKE 'BLOCKED: Agent-run timed out%'
+	`, issueID).Scan(&blocked); err != nil {
+		t.Fatalf("failed to count BLOCKED comments: %v", err)
+	}
+	if blocked != 0 {
+		t.Fatalf("expected zero BLOCKED comments after agent had already replied, got %d", blocked)
+	}
+}
+
+// FIR-2395 — Case C. A genuinely silent timeout (no agent comment posted
+// after started_at) must still surface the BLOCKED fallback so the user
+// knows the run died. Guards against an over-zealous suppression rule.
+func TestTimeoutPostsBlockedCommentForTrulySilentHang(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a
+		JOIN member m ON m.workspace_id = a.workspace_id
+		JOIN "user" u ON u.id = m.user_id
+		WHERE u.email = $1
+		LIMIT 1
+	`, integrationTestEmail).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("failed to find test agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id)
+		SELECT $1, 'FIR-2395 Case C — silent hang', 'in_progress', 'none', 'member', m.user_id, 'agent', $2
+		FROM member m WHERE m.workspace_id = $1 LIMIT 1
+		RETURNING id
+	`, testWorkspaceID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to create test issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			dispatched_at, started_at, attempt, max_attempts
+		)
+		VALUES ($1, $2, $3, 'running', 0,
+		        now() - interval '3 hours', now() - interval '3 hours', 3, 3)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("failed to create stale running task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	bus := events.New()
+	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
+		DispatchTimeoutSecs: 300.0,
+		RunningTimeoutSecs:  1.0,
+	})
+	if err != nil {
+		t.Fatalf("FailStaleTasks failed: %v", err)
+	}
+	if len(failedTasks) == 0 {
+		t.Fatal("expected the stale task to be picked up by FailStaleTasks")
+	}
+
+	svc := service.NewTaskService(queries, testPool, nil, bus)
+	svc.HandleFailedTasks(ctx, failedTasks)
+
+	var blocked int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM comment
+		WHERE issue_id = $1
+		  AND content LIKE 'BLOCKED: Agent-run timed out%'
+	`, issueID).Scan(&blocked); err != nil {
+		t.Fatalf("failed to count BLOCKED comments: %v", err)
+	}
+	if blocked != 1 {
+		t.Fatalf("expected exactly 1 BLOCKED comment for a silent hang, got %d", blocked)
 	}
 }
 

@@ -1588,7 +1588,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// want to spam the issue with "task timed out" messages on every
 	// daemon hiccup. Also skip when auto-paused so rate-limit failures do
 	// not post on every 5-min fail-safe loop tick.
-	if errMsg != "" && task.IssueID.Valid && retried == nil && !autoPaused { // CEREBRO-PATCH(auto-pause-on-failure)
+	// CEREBRO-PATCH(suppress-stale-blocked-comment): FIR-2395 — when this
+	// run already posted a visible agent comment, the BLOCKED timeout
+	// fallback is just noise stacked on top of the real answer.
+	if errMsg != "" && task.IssueID.Valid && retried == nil && !autoPaused && s.shouldPostTimeoutFailureComment(ctx, task) { // CEREBRO-PATCH(auto-pause-on-failure)
 		if failureReason == "timeout" {
 			s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(s.timeoutFailureCommentBody(ctx, task, errMsg)), "comment", task.TriggerCommentID)
 		} else {
@@ -1914,7 +1917,10 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		}
 
 		issueKey := util.UUIDToString(t.IssueID)
-		if failureReason == "timeout" && t.IssueID.Valid && !taskRetried && !retriedIssues[issueKey] {
+		// CEREBRO-PATCH(suppress-stale-blocked-comment): FIR-2395 — same gate
+		// as the FailTask path so the sweeper-driven timeout sweep also
+		// stops piling BLOCKED comments on top of a delivered answer.
+		if failureReason == "timeout" && t.IssueID.Valid && !taskRetried && !retriedIssues[issueKey] && s.shouldPostTimeoutFailureComment(ctx, t) {
 			errMsg := "task timed out"
 			if t.Error.Valid && strings.TrimSpace(t.Error.String) != "" {
 				errMsg = t.Error.String
@@ -1947,6 +1953,51 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
 	return retried
+}
+
+// CEREBRO-PATCH(suppress-stale-blocked-comment): FIR-2395 — shared decision
+// for both FailTask and HandleFailedTasks. Returns false when the run already
+// delivered a visible agent comment to the issue after `started_at`; the
+// caller then skips the BLOCKED fallback (which would just be noise stacked
+// on top of the real reply). Defaults to true on missing data / query errors
+// so a genuine silent timeout still surfaces.
+func (s *TaskService) shouldPostTimeoutFailureComment(ctx context.Context, task db.AgentTaskQueue) bool {
+	if !task.IssueID.Valid {
+		return true
+	}
+	if s.Queries == nil {
+		return true
+	}
+	since := task.StartedAt
+	if !since.Valid {
+		// Tasks that never started (dispatched, then declared timed out)
+		// can't have been the source of a real reply — leave the BLOCKED
+		// fallback in place so the user sees something happened.
+		return true
+	}
+	commented, err := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
+		IssueID:  task.IssueID,
+		AuthorID: task.AgentID,
+		Since:    since,
+	})
+	if err != nil {
+		slog.Warn("suppress-stale-blocked-comment: agent-comment check failed; defaulting to post",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"agent_id", util.UUIDToString(task.AgentID),
+			"error", err,
+		)
+		return true
+	}
+	if commented {
+		slog.Info("suppress-stale-blocked-comment: agent already replied in this run; skipping BLOCKED",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"agent_id", util.UUIDToString(task.AgentID),
+		)
+		return false
+	}
+	return true
 }
 
 func (s *TaskService) timeoutFailureCommentBody(ctx context.Context, task db.AgentTaskQueue, errMsg string) string {
