@@ -32,6 +32,17 @@ describe("ReplyInput target resolution", () => {
     ).toEqual([fallback.id]);
   });
 
+  it("does not show a target when there is no replied-to agent or agent tag", () => {
+    const agent = makeAgent("agent-1", "Agent One");
+
+    expect(
+      getReplyTargetAgents({
+        markdown: "plain issue comment",
+        agents: [agent],
+      }),
+    ).toEqual([]);
+  });
+
   it("switches to explicitly tagged agents", () => {
     const fallback = makeAgent("agent-fallback", "Fallback Agent");
     const tagged = makeAgent("agent-tagged", "Tagged Agent");

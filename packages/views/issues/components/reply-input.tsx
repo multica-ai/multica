@@ -186,40 +186,7 @@ function ReplyInput({
             size={avatarSize}
             className="mt-0.5 shrink-0 hidden sm:block"
           />
-          <div
-            {...dropZoneProps}
-            // CEREBRO-PATCH(reply-input-click-to-focus): JEH-1200 — clicks
-            // anywhere in the card focus the editor (skip when the target is
-            // itself interactive so buttons/links still work).
-            onMouseDown={(e) => {
-              if ((e.target as HTMLElement).closest("button, a, input, textarea, [contenteditable]")) return;
-              e.preventDefault();
-              editorRef.current?.focus();
-            }}
-            className={cn(
-              "relative min-w-0 flex-1 flex flex-col rounded-md bg-card min-h-20",
-              isExpanded
-                ? "h-[60vh]"
-                : size === "sm" ? "max-h-40" : "max-h-56",
-            )}
-          >
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              <div ref={measureRef}>
-                <ContentEditor
-                  ref={editorRef}
-                  placeholder={placeholderText}
-                  onUpdate={(md) => {
-                    setMarkdown(md);
-                    setIsEmpty(!md.trim());
-                  }}
-                  onSubmit={handleSubmit}
-                  onUploadFile={handleUpload}
-                  debounceMs={100}
-                  currentIssueId={issueId}
-                  submitOnEnter={submitOnEnter}
-                />
-              </div>
-            </div>
+          <div className="min-w-0 flex-1">
             <ReplyTargetBar
               agents={targetAgents}
               members={members}
@@ -229,55 +196,90 @@ function ReplyInput({
                 editorRef.current?.insertText(` ${memberMentionMarkdown(owner)} `);
               }}
             />
-            <div className="flex items-center justify-between gap-1 pt-1">
-              <FileUploadButton
-                size="sm"
-                onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
-                onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
-              />
-              <div className="flex items-center gap-1">
-                {pinEnabled && (
-                  <PinButton
-                    isPinned={isPinned}
-                    onToggle={togglePin}
-                    pinLabel={t(($) => $.reply.pin_tooltip)}
-                    unpinLabel={t(($) => $.reply.unpin_tooltip)}
+            <div
+              {...dropZoneProps}
+              // CEREBRO-PATCH(reply-input-click-to-focus): JEH-1200 — clicks
+              // anywhere in the card focus the editor (skip when the target is
+              // itself interactive so buttons/links still work).
+              onMouseDown={(e) => {
+                if ((e.target as HTMLElement).closest("button, a, input, textarea, [contenteditable]")) return;
+                e.preventDefault();
+                editorRef.current?.focus();
+              }}
+              className={cn(
+                "relative min-w-0 flex flex-col rounded-md bg-card min-h-20",
+                isExpanded
+                  ? "h-[60vh]"
+                  : size === "sm" ? "max-h-40" : "max-h-56",
+              )}
+            >
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <div ref={measureRef}>
+                  <ContentEditor
+                    ref={editorRef}
+                    placeholder={placeholderText}
+                    onUpdate={(md) => {
+                      setMarkdown(md);
+                      setIsEmpty(!md.trim());
+                    }}
+                    onSubmit={handleSubmit}
+                    onUploadFile={handleUpload}
+                    debounceMs={100}
+                    currentIssueId={issueId}
+                    submitOnEnter={submitOnEnter}
                   />
-                )}
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsExpanded((v) => !v);
-                          editorRef.current?.focus();
-                        }}
-                        aria-label={isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-                      >
-                        {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-                      </button>
-                    }
-                  />
-                  <TooltipContent side="top">{isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}</TooltipContent>
-                </Tooltip>
-                <button
-                  type="button"
-                  disabled={isEmpty || submitting}
-                  onClick={handleSubmit}
-                  aria-label="Send"
-                  className="inline-flex h-9 w-9 sm:h-7 sm:w-7 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:bg-muted disabled:text-muted-foreground disabled:pointer-events-none"
-                >
-                  {submitting ? (
-                    <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" />
-                  ) : (
-                    <ArrowUp className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                  )}
-                </button>
+                </div>
               </div>
+              <div className="flex items-center justify-between gap-1 pt-1">
+                <FileUploadButton
+                  size="sm"
+                  onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
+                  onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
+                />
+                <div className="flex items-center gap-1">
+                  {pinEnabled && (
+                    <PinButton
+                      isPinned={isPinned}
+                      onToggle={togglePin}
+                      pinLabel={t(($) => $.reply.pin_tooltip)}
+                      unpinLabel={t(($) => $.reply.unpin_tooltip)}
+                    />
+                  )}
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsExpanded((v) => !v);
+                            editorRef.current?.focus();
+                          }}
+                          aria-label={isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                        >
+                          {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                        </button>
+                      }
+                    />
+                    <TooltipContent side="top">{isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}</TooltipContent>
+                  </Tooltip>
+                  <button
+                    type="button"
+                    disabled={isEmpty || submitting}
+                    onClick={handleSubmit}
+                    aria-label="Send"
+                    className="inline-flex h-9 w-9 sm:h-7 sm:w-7 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:bg-muted disabled:text-muted-foreground disabled:pointer-events-none"
+                  >
+                    {submitting ? (
+                      <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" />
+                    ) : (
+                      <ArrowUp className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+              {isDragOver && <FileDropOverlay />}
             </div>
-            {isDragOver && <FileDropOverlay />}
           </div>
         </div>
       </div>
@@ -304,7 +306,7 @@ function ReplyTargetBar({
   if (agents.length === 0) return null;
 
   return (
-    <div className="mt-1 flex min-h-7 flex-wrap items-center gap-1.5 border-t border-border/50 pt-1 text-[11px] text-muted-foreground">
+    <div className="mb-1 flex min-h-7 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
       <span className="shrink-0 font-medium">{t(($) => $.reply.target_label)}</span>
       {agents.map((agent) => {
         const decision = canTriggerPrivateAgentMention(agent, { userId, role });
