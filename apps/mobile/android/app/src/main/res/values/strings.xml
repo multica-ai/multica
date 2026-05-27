@@ -1,4 +1,5 @@
 <resources>
   <string name="app_name">Multicam</string>
   <string name="expo_runtime_version">0.1.1</string>
+  <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
 </resources>

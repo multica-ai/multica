@@ -133,21 +133,7 @@ function withAndroidResourceSettings(config) {
           '    <item name="android:windowBackground">@drawable/ic_launcher_background</item>\n' +
           "  </style>"
       );
-      ensureColor(path.join(valuesDir, "colors.xml"), "splashscreen_background", "#FFFFFF");
       ensureColor(path.join(valuesDir, "colors.xml"), "colorPrimary", "#023c69");
-
-      const splashBackground = path.join(resDir, "drawable", "ic_launcher_background.xml");
-      if (fs.existsSync(splashBackground)) {
-        writeIfChanged(
-          splashBackground,
-          '<layer-list xmlns:android="http://schemas.android.com/apk/res/android">\n' +
-            '  <item android:drawable="@color/splashscreen_background"/>\n' +
-            "  <item>\n" +
-            '    <bitmap android:gravity="center" android:src="@drawable/splashscreen_logo"/>\n' +
-            "  </item>\n" +
-            "</layer-list>\n"
-        );
-      }
 
       return modConfig;
     },

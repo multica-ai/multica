@@ -37,6 +37,7 @@
     "expo-notifications": "^55.0.20",
     "expo-router": "~55.0.13",
     "expo-secure-store": "^55.0.13",
+    "expo-splash-screen": "~55.0.21",
     "expo-updates": "~55.0.21",
     "i18next": "catalog:",
     "lucide-react-native": "catalog:",

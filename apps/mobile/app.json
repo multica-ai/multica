@@ -5,8 +5,8 @@
     "scheme": "wujieai-multicam",
     "version": "0.1.1",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon-android.png",
+    "userInterfaceStyle": "light",
     "runtimeVersion": {
       "policy": "appVersion"
     },
@@ -20,15 +20,15 @@
       "package": "com.wujieai.multica",
       "versionCode": 2,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
-        "backgroundColor": "#111111"
+        "foregroundImage": "./assets/icon-android.png",
+        "backgroundColor": "#000000"
       }
     },
     "ios": {
       "bundleIdentifier": "com.wujieai.multica",
       "buildNumber": "4",
       "supportsTablet": false,
-      "icon": "./assets/icon.png",
+      "icon": "./assets/icon-ios.png",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "Multica needs photo library access so you can attach images to issues and comments.",

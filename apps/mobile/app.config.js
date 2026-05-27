@@ -18,6 +18,19 @@ export default {
   },
   plugins: [
     "./plugins/with-multica-android-native.cjs",
+    [
+      "expo-splash-screen",
+      {
+        backgroundColor: "#FFFFFF",
+        image: "./assets/splash-icon-light-safe.png",
+        imageWidth: 200,
+        resizeMode: "contain",
+        dark: {
+          backgroundColor: "#000000",
+          image: "./assets/splash-icon-dark-safe.png",
+        },
+      },
+    ],
     ...(app.expo.plugins || []),
     ...(googleIosUrlScheme
       ? [
