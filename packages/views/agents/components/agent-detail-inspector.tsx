@@ -336,6 +336,14 @@ function AllowedUsersPicker({
     }
   }, [allowedUserIds, open]);
 
+  // Prevent opening the picker while allowed-principals data is still loading.
+  // Without this guard the draft initializes to [] and a subsequent save would
+  // replace (and therefore lose) any previously persisted principals.
+  const handleOpenChange = (next: boolean) => {
+    if (next && loading) return;
+    setOpen(next);
+  };
+
   const allowedSet = new Set(allowedUserIds);
   const draftSet = new Set(draft);
   const selectableMembers = members.filter((member) => member.user_id !== agent.owner_id);
@@ -375,12 +383,13 @@ function AllowedUsersPicker({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         render={
           <button
             type="button"
-            className="inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs transition-colors hover:bg-accent/50"
+            disabled={loading}
+            className="inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs transition-colors hover:bg-accent/50 disabled:pointer-events-none disabled:opacity-50"
           >
             <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate">
