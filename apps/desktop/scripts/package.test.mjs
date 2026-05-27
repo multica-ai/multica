@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { delimiter, resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import {
@@ -8,6 +9,16 @@ import {
   resolveBuildMatrix,
   stripLeadingSeparator,
 } from "./package.mjs";
+
+const desktopRoot = resolve(import.meta.dirname, "..");
+const electronBuilderConfig = readFileSync(
+  resolve(desktopRoot, "electron-builder.yml"),
+  "utf-8",
+);
+const windowsInstallerHook = readFileSync(
+  resolve(desktopRoot, "build", "installer.nsh"),
+  "utf-8",
+);
 
 describe("normalizeGitVersion", () => {
   it("returns null for empty / nullish input", () => {
@@ -269,5 +280,30 @@ describe("envWithLocalBins", () => {
       workspaceBin,
       "runner-bin",
     ]);
+  });
+});
+
+describe("Windows installer CLI PATH exposure", () => {
+  it("uses an NSIS include hook for the Windows installer", () => {
+    expect(electronBuilderConfig).toMatch(
+      /win:\n(?:[ ]{2}.+\n)*[ ]{2}target:\n[ ]{4}- nsis/,
+    );
+    expect(electronBuilderConfig).toMatch(
+      /nsis:\n[ ]{2}include: build\/installer\.nsh/,
+    );
+  });
+
+  it("adds the actual packaged CLI directory to the user PATH", () => {
+    expect(windowsInstallerHook).toContain(
+      String.raw`$INSTDIR\resources\app.asar.unpacked\resources\bin`,
+    );
+    expect(windowsInstallerHook).not.toContain(
+      String.raw`$INSTDIR\resources\bin`,
+    );
+    expect(windowsInstallerHook).toContain(
+      String.raw`WriteRegExpandStr HKCU "Environment" "Path"`,
+    );
+    expect(windowsInstallerHook).toContain("WM_SETTINGCHANGE");
+    expect(windowsInstallerHook).toContain("!macro customInstall");
   });
 });

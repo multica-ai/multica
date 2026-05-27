@@ -88,6 +88,8 @@ win:
   target:
     - nsis
   artifactName: multica-desktop-${version}-windows-${arch}.${ext}
+nsis:
+  include: build/installer.nsh
 publish:
   provider: github
   owner: multica-ai

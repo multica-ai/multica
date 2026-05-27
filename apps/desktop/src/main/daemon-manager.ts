@@ -14,7 +14,7 @@ import {
   unwatchFile,
   type StatsListener,
 } from "fs";
-import { join } from "path";
+import { delimiter, join } from "path";
 import { homedir } from "os";
 import type { DaemonStatus, DaemonPrefs } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
@@ -308,12 +308,16 @@ function findCliOnPath(): string | null {
  *   electron-builder's `asarUnpack: resources/**` extracts the binary to
  *   `app.asar.unpacked/`, so we swap the path segment to execute it.
  */
-function bundledCliPath(): string {
-  const binName = process.platform === "win32" ? "multica.exe" : "multica";
-  return join(app.getAppPath(), "resources", "bin", binName).replace(
+function bundledCliDir(): string {
+  return join(app.getAppPath(), "resources", "bin").replace(
     "app.asar",
     "app.asar.unpacked",
   );
+}
+
+function bundledCliPath(): string {
+  const binName = process.platform === "win32" ? "multica.exe" : "multica";
+  return join(bundledCliDir(), binName);
 }
 
 async function probeCliBinary(
@@ -638,11 +642,24 @@ function profileArgs(active: ActiveProfile): string[] {
 
 // Env passed to every CLI child so the daemon process knows it was spawned
 // by the Desktop app. The server uses this to mark runtimes as managed and
-// hide CLI self-update UI. Computed lazily so it picks up the PATH fix
-// applied by fix-path in main/index.ts — as a top-level const it would
-// snapshot process.env at import time, before that block runs.
+// hide CLI self-update UI. Computed lazily so it picks up PATH fixes applied
+// during main-process startup and prepends the bundled CLI directory for
+// agent shells spawned before Windows refreshes the user's registry PATH.
 function desktopSpawnEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
+  const pathKey =
+    Object.keys(process.env).find((key) => key.toUpperCase() === "PATH") ??
+    "PATH";
+  const existingPath = process.env[pathKey] ?? "";
+  const cliDir = bundledCliDir();
+  const pathEntries = String(existingPath)
+    .split(delimiter)
+    .filter((entry) => entry.length > 0 && entry !== cliDir);
+
+  return {
+    ...process.env,
+    [pathKey]: [cliDir, ...pathEntries].join(delimiter),
+    MULTICA_LAUNCHED_BY: "desktop",
+  };
 }
 
 async function startDaemon(): Promise<{ success: boolean; error?: string }> {
