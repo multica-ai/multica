@@ -153,6 +153,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		startTime := time.Now()
 		scanCh := make(chan eventResult, 1)
 		go func() {
+			defer stdoutReader.Close()
 			scanCh <- b.processEvents(stdoutReader, msgCh)
 		}()
 
