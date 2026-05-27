@@ -660,6 +660,34 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cost-optimization-client): FIR-2325 per-workspace agent-saving
+  // mode overrides (off/shadow/on). Server returns ONLY the overrides — defaults
+  // are applied client-side from the cerebro-cost-optimization registry. PUT sets
+  // a mode; DELETE reverts a saving to its registry default (clears the override).
+  async listCostOptimization(wsId: string): Promise<{ overrides: Record<string, string> }> {
+    return this.fetch(`/api/workspaces/${wsId}/cost-optimization`);
+  }
+
+  async setCostOptimization(wsId: string, key: string, mode: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/cost-optimization/${key}`, {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    });
+  }
+
+  async clearCostOptimization(wsId: string, key: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/cost-optimization/${key}`, {
+      method: "DELETE",
+    });
+  }
+
+  // CEREBRO-PATCH(cost-optimization-dashboard-client): FIR-2325 phase-5 savings
+  // dashboard (estimated would-save vs holdout-measured actual). Returns raw;
+  // the cerebro-cost-optimization package validates the shape with a zod schema.
+  async getCostOptimizationDashboard(wsId: string): Promise<unknown> {
+    return this.fetch(`/api/workspaces/${wsId}/cost-optimization/dashboard`);
+  }
+
   // CEREBRO-PATCH(cerebro-account-client): JEH-921 workspace accounts CRUD.
   async listCerebroAccounts(wsId: string): Promise<CerebroAccount[]> {
     return this.fetch(`/api/workspaces/${wsId}/accounts`);

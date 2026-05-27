@@ -59,6 +59,10 @@ type GatewayCompletion struct {
 	Output    string
 	ToolCalls []GatewayToolCall
 	Usage     GatewayUsage
+	// ToolResultChars is the total characters of tool-result content produced
+	// across the tool loop. It feeds the prune_tool_results cost measurement
+	// (FIR-2325); it is summed alongside Usage and is 0 for tool-free runs.
+	ToolResultChars int64
 }
 
 type GatewayRequestMeta struct {

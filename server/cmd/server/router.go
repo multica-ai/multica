@@ -30,6 +30,8 @@ import (
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler import
 	cerebrodashboard "github.com/multica-ai/multica/server/internal/cerebro/dashboard"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 per-workspace saving-mode handler import.
+	cerebrocostoptimization "github.com/multica-ai/multica/server/internal/cerebro/cost_optimization"
 	// CEREBRO-PATCH(cerebro-dictation-routes): JEH-729 streaming dictation proxy handler import.
 	cerebrodictation "github.com/multica-ai/multica/server/internal/cerebro/dictation"
 	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
@@ -247,6 +249,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.CerebroQueries = cerebroQueries
 	h.PullRequestLinkHealer = cerebrogithubprheal.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-github-pr-heal): JEH-1919
 	featureFlagsHandler := feature_flags.New(cerebroQueries, bus)
+	// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 per-workspace saving-mode handler.
+	costOptimizationHandler := cerebrocostoptimization.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(router-channel-listen): wire the cerebro channel-listen
 	// service into the upstream handler so the comment trigger path can
 	// dispatch always-listening agents in channels.
@@ -623,6 +627,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(feature-flags-routes): per-user feature-flag overrides
 					r.Get("/feature-flags", featureFlagsHandler.List)
 					r.Put("/feature-flags/{key}", featureFlagsHandler.Upsert)
+					// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 saving-mode read (any member).
+					r.Get("/cost-optimization", costOptimizationHandler.List)
+					// CEREBRO-PATCH(cerebro-cost-optimization-dashboard): FIR-2325 phase-5 savings dashboard (any member).
+					r.Get("/cost-optimization/dashboard", costOptimizationHandler.Dashboard)
 					// CEREBRO-PATCH(cerebro-groups-routes): workspace group list (member-level).
 					r.Get("/groups", cerebroGroupsHandler.List)
 					// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 workspace role list (member-level).
@@ -683,6 +691,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 per-tool policy writes (admin/owner only).
 					r.Put("/tool-policy", cerebroToolPolicyHandler.Set)
 					r.Delete("/tool-policy", cerebroToolPolicyHandler.Clear)
+					// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 saving-mode writes (admin/owner only).
+					r.Put("/cost-optimization/{key}", costOptimizationHandler.Upsert)
+					r.Delete("/cost-optimization/{key}", costOptimizationHandler.Delete)
 					// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval decisions + intake seam (admin/owner only).
 					r.Post("/approvals/intake", cerebroApprovalsHandler.Intake)
 					r.Post("/approvals/{approvalId}/approve", cerebroApprovalsHandler.Approve)
