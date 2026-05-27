@@ -266,6 +266,210 @@ func (h *Handler) CreateReminder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, toResponse(item))
 }
 
+// notificationItemResponse mirrors handler.InboxItemResponse so the
+// notifications page consumes the same shape as the inbox feed. Kept local
+// to the cerebro package so this file does not import the upstream handler.
+type notificationItemResponse struct {
+	ID            string          `json:"id"`
+	WorkspaceID   string          `json:"workspace_id"`
+	RecipientType string          `json:"recipient_type"`
+	RecipientID   string          `json:"recipient_id"`
+	Type          string          `json:"type"`
+	Severity      string          `json:"severity"`
+	Route         string          `json:"route"`
+	IssueID       *string         `json:"issue_id"`
+	ProjectID     *string         `json:"project_id"`
+	Title         string          `json:"title"`
+	Body          *string         `json:"body"`
+	Read          bool            `json:"read"`
+	Archived      bool            `json:"archived"`
+	MutedUntil    *string         `json:"muted_until"`
+	CreatedAt     string          `json:"created_at"`
+	IssueStatus   *string         `json:"issue_status"`
+	ActorType     *string         `json:"actor_type"`
+	ActorID       *string         `json:"actor_id"`
+	Details       json.RawMessage `json:"details"`
+}
+
+func notificationsRowToResponse(r db.ListNotificationsItemsRow) notificationItemResponse {
+	return notificationItemResponse{
+		ID:            util.UUIDToString(r.ID),
+		WorkspaceID:   util.UUIDToString(r.WorkspaceID),
+		RecipientType: r.RecipientType,
+		RecipientID:   util.UUIDToString(r.RecipientID),
+		Type:          r.Type,
+		Severity:      r.Severity,
+		Route:         r.Route,
+		IssueID:       uuidPtr(r.IssueID),
+		ProjectID:     uuidPtr(r.ProjectID),
+		Title:         r.Title,
+		Body:          textPtr(r.Body),
+		Read:          r.Read,
+		Archived:      r.Archived,
+		MutedUntil:    timestampPtr(r.MutedUntil),
+		CreatedAt:     r.CreatedAt.Time.Format(time.RFC3339Nano),
+		IssueStatus:   textPtr(r.IssueStatus),
+		ActorType:     textPtr(r.ActorType),
+		ActorID:       uuidPtr(r.ActorID),
+		Details:       json.RawMessage(r.Details),
+	}
+}
+
+func uuidPtr(u pgtype.UUID) *string {
+	if !u.Valid {
+		return nil
+	}
+	s := util.UUIDToString(u)
+	return &s
+}
+
+func textPtr(t pgtype.Text) *string {
+	if !t.Valid {
+		return nil
+	}
+	s := t.String
+	return &s
+}
+
+func timestampPtr(t pgtype.Timestamptz) *string {
+	if !t.Valid {
+		return nil
+	}
+	s := t.Time.Format(time.RFC3339Nano)
+	return &s
+}
+
+// ListNotifications returns the user's non-archived notifications-routed inbox
+// items in the current workspace. Mirrors the upstream ListInbox handler but
+// uses the route='notifications' filter. The SQL and the route flag are
+// cerebro-only (see CEREBRO-PATCH(cerebro-inbox-fields)), so the handler lives
+// here rather than in the upstream inbox package.
+func (h *Handler) ListNotifications(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := workspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	recipientID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	items, err := h.Upstream.ListNotificationsItems(r.Context(), db.ListNotificationsItemsParams{
+		WorkspaceID:   wsUUID,
+		RecipientType: "member",
+		RecipientID:   recipientID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list notifications")
+		return
+	}
+	resp := make([]notificationItemResponse, len(items))
+	for i, item := range items {
+		resp[i] = notificationsRowToResponse(item)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// CountUnreadNotifications returns the unread, non-muted notification count
+// in the current workspace.
+func (h *Handler) CountUnreadNotifications(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := workspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	recipientID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	count, err := h.Upstream.CountUnreadNotifications(r.Context(), db.CountUnreadNotificationsParams{
+		WorkspaceID:   wsUUID,
+		RecipientType: "member",
+		RecipientID:   recipientID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count unread notifications")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{"count": count})
+}
+
+// MarkAllNotificationsRead flips every unread notification in the workspace
+// to read for the calling user. Returns the count of affected rows.
+func (h *Handler) MarkAllNotificationsRead(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := workspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	recipientID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	count, err := h.Upstream.MarkAllNotificationsRead(r.Context(), db.MarkAllNotificationsReadParams{
+		WorkspaceID: wsUUID,
+		RecipientID: recipientID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark all notifications read")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
+// ArchiveAllNotifications archives every active notification in the workspace
+// for the calling user. Returns the count of affected rows.
+func (h *Handler) ArchiveAllNotifications(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := workspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	recipientID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	count, err := h.Upstream.ArchiveAllNotifications(r.Context(), db.ArchiveAllNotificationsParams{
+		WorkspaceID: wsUUID,
+		RecipientID: recipientID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to archive all notifications")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
+func workspaceUUID(w http.ResponseWriter, r *http.Request) (pgtype.UUID, bool) {
+	wsID := middleware.WorkspaceIDFromContext(r.Context())
+	if wsID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return pgtype.UUID{}, false
+	}
+	wsUUID, err := util.ParseUUID(wsID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return pgtype.UUID{}, false
+	}
+	return wsUUID, true
+}
+
 // ListActiveIssueTasks returns issue IDs in the current workspace that have
 // in-flight tasks. Drives the "agent is working" indicator on inbox rows.
 func (h *Handler) ListActiveIssueTasks(w http.ResponseWriter, r *http.Request) {
