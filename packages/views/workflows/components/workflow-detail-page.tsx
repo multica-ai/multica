@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Plus, Wand, Trash2, Power, ArrowLeft } from "lucide-react";
@@ -44,6 +44,10 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   const setMode = useWorkflowEditorStore((s) => s.setMode);
   const nodeEdits = useWorkflowEditorStore((s) => s.nodeEdits);
   const clearNodeEdits = useWorkflowEditorStore((s) => s.clearNodeEdits);
+
+  useEffect(() => {
+    useWorkflowEditorStore.getState().reset();
+  }, [id]);
 
   const { data: workflow, isLoading } = useQuery(workflowDetailOptions(wsId, id!));
   const { data: nodes = [] } = useQuery(workflowNodesOptions(wsId, id!));
