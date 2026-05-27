@@ -332,18 +332,14 @@ function AllowedUsersPicker({
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
 
-  useEffect(() => {
-    if (!open) {
+  // Prevent opening the picker while allowed-principals data is still loading.
+  // When the popover opens, initialize draft from the latest server state.
+  const handleOpenChange = (next: boolean) => {
+    if (next && loading) return;
+    if (next) {
       setDraft(allowedUserIds);
       setSearch("");
     }
-  }, [allowedUserIds, open]);
-
-  // Prevent opening the picker while allowed-principals data is still loading.
-  // Without this guard the draft initializes to [] and a subsequent save would
-  // replace (and therefore lose) any previously persisted principals.
-  const handleOpenChange = (next: boolean) => {
-    if (next && loading) return;
     setOpen(next);
   };
 

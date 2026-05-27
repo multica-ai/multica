@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -110,6 +110,10 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       ...agentAllowedPrincipalsOptions(wsId, agentId),
       enabled: !!agent && agent.visibility === "private" && canManageAllowedPrincipals,
     });
+  const allowedPrincipalUserIds = useMemo(
+    () => allowedPrincipals.map((p) => p.user_id),
+    [allowedPrincipals],
+  );
 
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [showDuplicate, setShowDuplicate] = useState(false);
@@ -342,7 +346,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           currentUserId={currentUser?.id ?? null}
           canEdit={canEdit.allowed}
           canManageAllowedPrincipals={canManageAllowedPrincipals}
-          allowedPrincipalUserIds={allowedPrincipals.map((p) => p.user_id)}
+          allowedPrincipalUserIds={allowedPrincipalUserIds}
           allowedPrincipalsLoading={allowedPrincipalsLoading}
           onUpdate={handleUpdate}
           onUpdateAllowedPrincipals={handleUpdateAllowedPrincipals}
