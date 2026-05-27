@@ -12,7 +12,11 @@ import { TasksTable } from "./components/tasks-table";
 import { TasksPagination } from "./components/tasks-pagination";
 import { useCerebroTasksStore } from "../core/store";
 import { cerebroTasksListOptions } from "../core/queries";
-import { parseTasksFilterFromSearchParams, tasksFilterPath } from "../core/url-state";
+import {
+  parseTasksFilterFromSearchParams,
+  replaceBrowserHistoryPath,
+  tasksFilterPath,
+} from "../core/url-state";
 
 // Cross-agent tasks page (JEH-900). Lists every agent task in the
 // workspace with filters for agent, status, time range, and type. Backed
@@ -87,6 +91,7 @@ export function TasksPage() {
 
   useEffect(() => {
     if (!hydrated || filterPath === currentPath) return;
+    replaceBrowserHistoryPath(filterPath);
     navigation.replace(filterPath);
   }, [currentPath, filterPath, hydrated, navigation]);
 

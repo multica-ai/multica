@@ -1,5 +1,5 @@
 import { forwardRef, useRef, useState, useImperativeHandle } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, TimelineEntry } from "@multica/core/types";
@@ -473,6 +473,11 @@ const mockTimeline: TimelineEntry[] = [
 // ---------------------------------------------------------------------------
 
 import { IssueDetail } from "./issue-detail";
+// FIR-1550 regression: the issue detail status surfaces must read the project's
+// status model. These drive a test that seeds an assigned model and asserts the
+// picker shows the model label — proving issue-detail mounts the provider.
+import { useCerebroFeatureFlagsStore } from "@multica/cerebro-feature-flags";
+import { cerebroStatusModelsKeys } from "@multica/cerebro-status-models/core/queries";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1311,5 +1316,112 @@ describe("IssueDetail unarchive toolbar (cerebro)", () => {
     if (!first) throw new Error("expected at least one unarchive button");
     fireEvent.click(first);
     expect(onUnarchive).toHaveBeenCalledTimes(1);
+  });
+});
+
+// CEREBRO-PATCH(issue-detail-status-model): FIR-1550 — the issue detail status
+// surfaces must resolve the issue's project status model. Tine's re-QA found the
+// status picker on issue detail still showed default labels because the page
+// never mounted CerebroStatusModelProvider (only project detail did). This block
+// seeds an assigned model and asserts the picker trigger renders the model label.
+describe("IssueDetail status-model presentation (cerebro)", () => {
+  const WS_ID = "ws-1";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockViewport.isMobile = false;
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-1" });
+    mockApiObj.listTimeline.mockResolvedValue([]);
+    mockApiObj.listIssueReactions.mockResolvedValue([]);
+    mockApiObj.listIssueSubscribers.mockResolvedValue([]);
+    mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
+    mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
+    mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.listMembers.mockResolvedValue([
+      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
+    ]);
+    mockApiObj.listAgents.mockResolvedValue([]);
+    mockApiObj.getProject.mockResolvedValue({
+      id: "p-1",
+      workspace_id: WS_ID,
+      title: "Workflow project",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+  });
+
+  afterEach(() => {
+    // Revert the flag override so the store does not leak into other suites.
+    useCerebroFeatureFlagsStore.getState().setFlag("cerebro_workflows", undefined);
+  });
+
+  it("shows the project model label on the status picker instead of the default", async () => {
+    useCerebroFeatureFlagsStore.getState().setFlag("cerebro_workflows", true);
+
+    // gcTime must outlive the gap between seeding and the provider mounting an
+    // observer — createTestQueryClient uses gcTime: 0, which would evict the
+    // seeded data before the provider reads it.
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: Infinity },
+        mutations: { retry: false },
+      },
+    });
+    // Seed the provider's two queries so it resolves a model without hitting the
+    // (mocked) API: project p-1 is assigned model m-1, which renames the
+    // in_progress base status (the fixture issue's status) to "Building".
+    queryClient.setQueryData(cerebroStatusModelsKeys.assignments(WS_ID), {
+      assignments: [
+        {
+          project_id: "p-1",
+          workspace_id: WS_ID,
+          status_model_id: "m-1",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    queryClient.setQueryData(cerebroStatusModelsKeys.list(WS_ID), {
+      status_models: [
+        {
+          id: "m-1",
+          workspace_id: WS_ID,
+          name: "Plan-first pipeline",
+          statuses: [
+            { key: "building", label: "Building", color: "#facc15", base_status: "in_progress", position: 0 },
+          ],
+          project_count: 1,
+          created_by_id: "user-1",
+          created_by_type: "member",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={queryClient}>
+          <IssueDetail issueId="issue-1" />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    // Status picker trigger now renders the model label, not the upstream
+    // "In Progress" default — this is the assertion that fails on the old code
+    // where issue-detail rendered <StatusPicker /> with no provider.
+    const labels = await screen.findAllByText("Building");
+    expect(labels.length).toBeGreaterThan(0);
+    expect(screen.queryByText("In Progress")).not.toBeInTheDocument();
   });
 });

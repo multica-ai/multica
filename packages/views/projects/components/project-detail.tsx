@@ -34,6 +34,8 @@ import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
+// CEREBRO-PATCH(project-detail-status-model): FIR-1550 per-project status model presentation
+import { CerebroStatusModelProvider, useStatusPresentation } from "@multica/cerebro-status-models/views";
 // CEREBRO-PATCH(project-detail-tabs): Documents-tab + Access-tab imports for cerebro tab system
 import { ProjectDocuments } from "@multica/cerebro-artifacts/views/components";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
@@ -203,15 +205,18 @@ function ProjectIssuesContent({
     return map;
   }, [projectIssues, subIssueDisplay]);
 
+  // CEREBRO-PATCH(project-detail-status-model): model columns replace BOARD_STATUSES when a model is assigned
+  const statusPresentation = useStatusPresentation();
+  const baseColumns = statusPresentation.orderedBaseStatuses ?? BOARD_STATUSES;
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)
-      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
-    return BOARD_STATUSES;
-  }, [statusFilters]);
+      return baseColumns.filter((s) => statusFilters.includes(s));
+    return baseColumns;
+  }, [statusFilters, baseColumns]);
 
   const hiddenStatuses = useMemo(
-    () => BOARD_STATUSES.filter((s) => !visibleStatuses.includes(s)),
-    [visibleStatuses],
+    () => baseColumns.filter((s) => !visibleStatuses.includes(s)),
+    [visibleStatuses, baseColumns],
   );
 
   const updateIssueMutation = useUpdateIssue();
@@ -380,7 +385,8 @@ function ProjectIssuesSurface({
   const projectIssues = usesGantt ? ganttIssues : bucketedIssues;
 
   return (
-    <>
+    // CEREBRO-PATCH(project-detail-status-model): FIR-1550 provide the project's status-model presentation to header + board
+    <CerebroStatusModelProvider projectId={projectId}>
       <IssuesHeader scopedIssues={projectIssues} allowGantt />
       <ProjectIssuesContent
         projectId={projectId}
@@ -394,7 +400,7 @@ function ProjectIssuesSurface({
         ganttIssues={ganttIssues}
       />
       <BatchActionToolbar />
-    </>
+    </CerebroStatusModelProvider>
   );
 }
 

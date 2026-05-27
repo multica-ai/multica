@@ -856,6 +856,8 @@ function CommentCardImpl({
               size="sm"
               avatarType="member"
               avatarId={currentUserId ?? ""}
+              // CEREBRO-PATCH(reply-target-indicator): FIR-2349 pass the replied-to agent id so the reply field shows which agent a tagless reply will trigger
+              replyTargetAgentId={entry.actor_type === "agent" ? entry.actor_id : undefined}
               onSubmit={(content, attachmentIds) => onReply(entry.id, content, attachmentIds)}
             />
           </div>

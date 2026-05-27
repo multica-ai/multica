@@ -93,6 +93,8 @@ import { StatusIcon } from "./status-icon";
 // CEREBRO-PATCH(issue-dependencies): FIR-823 blocks/blocked-by/related sidebar section.
 import { DependenciesSection } from "./dependencies-section";
 import { AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker, PriorityPicker, StartDatePicker, StatusPicker } from "./pickers";
+// CEREBRO-PATCH(issue-detail-status-model): FIR-1550 provide the issue's project status-model presentation to status surfaces
+import { CerebroStatusModelProvider } from "@multica/cerebro-status-models/views";
 import { useMoveCommentToSubIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
@@ -2406,6 +2408,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
 
   if (isMobile) {
     return (
+      // CEREBRO-PATCH(issue-detail-status-model): wrap status surfaces in the issue's project status-model presentation
+      <CerebroStatusModelProvider projectId={issue.project_id ?? ""}>
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
@@ -2414,10 +2418,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           </SheetContent>
         </Sheet>
       </div>
+      </CerebroStatusModelProvider>
     );
   }
 
   return (
+    // CEREBRO-PATCH(issue-detail-status-model): wrap status surfaces in the issue's project status-model presentation
+    <CerebroStatusModelProvider projectId={issue.project_id ?? ""}>
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="content" minSize="50%">
         {detailContent}
@@ -2440,5 +2447,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
       </div>
       </ResizablePanel>
     </ResizablePanelGroup>
+    </CerebroStatusModelProvider>
   );
 }

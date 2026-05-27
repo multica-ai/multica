@@ -322,7 +322,15 @@
     "_comment_pin": "CEREBRO-PATCH(i18n-reply-pin): JEH-1065 — pin toggle on issue reply input",
     "pin_tooltip": "Pin reply to viewport",
     "unpin_tooltip": "Unpin reply from viewport",
-    "pinned_placeholder": "Reply pinned — scroll freely"
+    "pinned_placeholder": "Reply pinned — scroll freely",
+    "_reply_target_agent_indicator": "CEREBRO-PATCH(i18n-reply-target-agent-indicator): FIR-2349 reply composer agent trigger target bar",
+    "target_label": "Replying to",
+    "target_trigger_inactive": "won't trigger",
+    "target_trigger_title": "{{name}} won't trigger",
+    "target_trigger_description": "Personal agent. Only the owner can wake it.",
+    "target_owner_label": "Owner",
+    "target_tag_owner": "Tag owner",
+    "target_owner_missing": "Owner could not be found in the workspace list."
   },
   "agent_activity": {
     "hover_header_one": "{{count}} agent working",
