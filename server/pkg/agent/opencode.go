@@ -111,16 +111,26 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		cancel()
 		return nil, fmt.Errorf("opencode stdout pipe: %w", err)
 	}
+	stderrReader, stderrWriter, err := os.Pipe()
+	if err != nil {
+		cancel()
+		_ = stdoutReader.Close()
+		_ = stdoutWriter.Close()
+		return nil, fmt.Errorf("opencode stderr pipe: %w", err)
+	}
 	cmd.Stdout = stdoutWriter
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[opencode:stderr] ")
+	cmd.Stderr = stderrWriter
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		_ = stdoutReader.Close()
 		_ = stdoutWriter.Close()
+		_ = stderrReader.Close()
+		_ = stderrWriter.Close()
 		return nil, fmt.Errorf("start opencode: %w", err)
 	}
 	_ = stdoutWriter.Close()
+	_ = stderrWriter.Close()
 
 	b.cfg.Logger.Info("opencode started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -131,15 +141,20 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	go func() {
 		waitCh <- cmd.Wait()
 	}()
+	go func() {
+		defer stderrReader.Close()
+		_, _ = io.Copy(newLogWriter(b.cfg.Logger, "[opencode:stderr] "), stderrReader)
+	}()
 
 	stopCancelCleanup := make(chan struct{})
 	// Terminate the whole OpenCode process group when the context is cancelled,
-	// and close stdout so any inherited writer cannot keep the scanner blocked.
+	// and close pipes so inherited writers cannot keep readers blocked.
 	go func() {
 		select {
 		case <-runCtx.Done():
 			terminateOpenCodeProcessGroup(cmd)
 			_ = stdoutReader.Close()
+			_ = stderrReader.Close()
 		case <-stopCancelCleanup:
 		}
 	}()
