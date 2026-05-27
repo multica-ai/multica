@@ -341,3 +341,61 @@ func TestS3StoragePresignedInlineGetURLOverridesDisposition(t *testing.T) {
 		t.Fatalf("PresignedInlineGetURL() missing content-type override: %q", rawURL)
 	}
 }
+
+func TestS3StorageRemapURL(t *testing.T) {
+	cases := []struct {
+		name        string
+		cdnDomain   string
+		endpointURL string
+		bucket      string
+		region      string
+		rawURL      string
+		want        string
+	}{
+		{
+			name:   "no cdn domain returns unchanged",
+			bucket: "multica", region: "cn-east-3",
+			endpointURL: "https://obs.cn-east-3.myhuaweicloud.com",
+			rawURL:      "https://multica.obs.cn-east-3.myhuaweicloud.com/storage/ws/file.pdf",
+			want:        "https://multica.obs.cn-east-3.myhuaweicloud.com/storage/ws/file.pdf",
+		},
+		{
+			name:      "already cdn url returns unchanged",
+			cdnDomain: "obs-multica.wujieai.com",
+			bucket:    "multica", region: "cn-east-3",
+			endpointURL: "https://obs.cn-east-3.myhuaweicloud.com",
+			rawURL:      "https://obs-multica.wujieai.com/storage/ws/file.pdf",
+			want:        "https://obs-multica.wujieai.com/storage/ws/file.pdf",
+		},
+		{
+			name:      "old OBS virtual-hosted URL remapped to cdn",
+			cdnDomain: "obs-multica.wujieai.com",
+			bucket:    "multica", region: "cn-east-3",
+			endpointURL: "https://obs.cn-east-3.myhuaweicloud.com",
+			rawURL:      "https://multica.obs.cn-east-3.myhuaweicloud.com/storage/workspaces/ws-1/att/file.pdf",
+			want:        "https://obs-multica.wujieai.com/storage/workspaces/ws-1/att/file.pdf",
+		},
+		{
+			name:      "unrecognized url returned unchanged",
+			cdnDomain: "obs-multica.wujieai.com",
+			bucket:    "multica", region: "cn-east-3",
+			endpointURL: "https://obs.cn-east-3.myhuaweicloud.com",
+			rawURL:      "https://other-host.example.com/some/path",
+			want:        "https://other-host.example.com/some/path",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &S3Storage{
+				bucket:      tc.bucket,
+				region:      tc.region,
+				cdnDomain:   tc.cdnDomain,
+				endpointURL: tc.endpointURL,
+			}
+			if got := s.RemapURL(tc.rawURL); got != tc.want {
+				t.Fatalf("RemapURL(%q) = %q, want %q", tc.rawURL, got, tc.want)
+			}
+		})
+	}
+}
