@@ -621,6 +621,10 @@
       "gate": "self_only"
     },
     {
+      "id": "POST /api/inbox/{id}/run-private-agent",
+      "gate": "self_only"
+    },
+    {
       "id": "POST /api/inbox/{id}/unarchive",
       "gate": "self_only"
     },
@@ -1699,6 +1703,10 @@
     {
       "id": "issue create",
       "gate": "via:POST /api/issues/"
+    },
+    {
+      "id": "issue context",
+      "exempt": "read-only — wraps GET /api/issues/{id}/context (CEREBRO-PATCH issue-context-bundle, FIR-2384)"
     },
     {
       "id": "issue get",

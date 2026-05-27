@@ -118,6 +118,14 @@ interface CommentCardProps {
   onCollapseResolved?: () => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
+  /**
+   * CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — agent the
+   * backend trigger will wake when the reply has no @agent mentions
+   * (issue assignee or, when the assignee is a squad, the squad leader).
+   * Resolved once in `issue-detail.tsx` and forwarded so the reply field
+   * indicator matches the trigger, not the replied-to comment author.
+   */
+  triggerAgentId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +500,7 @@ function CommentCardImpl({
   onResolveToggle,
   onCollapseResolved,
   highlightedCommentId,
+  triggerAgentId,
 }: CommentCardProps) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
@@ -856,8 +865,8 @@ function CommentCardImpl({
               size="sm"
               avatarType="member"
               avatarId={currentUserId ?? ""}
-              // CEREBRO-PATCH(reply-target-indicator): FIR-2349 pass the replied-to agent id so the reply field shows which agent a tagless reply will trigger
-              replyTargetAgentId={entry.actor_type === "agent" ? entry.actor_id : undefined}
+              // CEREBRO-PATCH(reply-target-indicator): FIR-2392 show the agent the trigger logic will actually wake (issue assignee / squad leader), not the replied-to comment author.
+              triggerAgentId={triggerAgentId}
               onSubmit={(content, attachmentIds) => onReply(entry.id, content, attachmentIds)}
             />
           </div>

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -23,11 +24,15 @@ import (
 type Handler struct {
 	Upstream *db.Queries
 	Cerebro  *cerebrodb.Queries
+	// Tasks enqueues the agent run when the owner accepts a
+	// private_agent_run_request (FIR-2385). nil disables only that endpoint.
+	Tasks *service.TaskService
 }
 
-// New constructs the handler. The router wires both query packages in.
-func New(upstream *db.Queries, cerebro *cerebrodb.Queries) *Handler {
-	return &Handler{Upstream: upstream, Cerebro: cerebro}
+// New constructs the handler. The router wires both query packages and the
+// task service in.
+func New(upstream *db.Queries, cerebro *cerebrodb.Queries, tasks *service.TaskService) *Handler {
+	return &Handler{Upstream: upstream, Cerebro: cerebro, Tasks: tasks}
 }
 
 // inboxItemResponse is the JSON shape returned by mute / unmute / unread.

@@ -4,6 +4,7 @@ package handler
 
 import (
 	"bytes"
+	"context" // CEREBRO-PATCH(mcp-config-mutation-redact): needed by redactAgentMcpConfigOnMutation.
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -203,6 +204,8 @@ type AgentTaskResponse struct {
 	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
+	IssueSnapshot           string                `json:"issue_snapshot,omitempty"`            // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
+	BundleContextHint       bool                  `json:"bundle_context_hint,omitempty"`       // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
 	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `multica attachment download <id>` per entry
@@ -419,11 +422,20 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	// to preserve A2A collaboration; members must be in allowed_principals
 	// (agent owner or workspace owner/admin) to see private agents.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	// CEREBRO-PATCH(private-agent-visible-but-locked): FIR-2385 — flag-gated.
+	privateRequestsEnabled := h.cerebroPrivateAgentRequestsEnabled(r.Context(), workspaceID, userID)
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
+		lockedPrivate := false
 		if a.Visibility == "private" && actorType == "member" {
 			if !memberAllowedForPrivateAgent(a, actorID, member.Role) {
-				continue
+				// CEREBRO-PATCH(private-agent-visible-but-locked): keep the agent
+				// in the response (name + description) marked locked instead of
+				// hiding it; legacy hide when the flag is off (FIR-2385).
+				if !privateRequestsEnabled {
+					continue
+				}
+				lockedPrivate = true
 			}
 		}
 		resp := agentToResponse(a)
@@ -446,6 +458,11 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		} else {
 			_, allowedByGroup := visibleAgents[uuidToString(a.ID)]
 			resp.CanTrigger = allowedByGroup || ownerExempt(a.OwnerID)
+		}
+		// CEREBRO-PATCH(private-agent-visible-but-locked): a locked private agent
+		// exposes only name + description and is never triggerable (FIR-2385).
+		if lockedPrivate {
+			redactLockedPrivateAgent(&resp)
 		}
 		visible = append(visible, resp)
 	}
@@ -732,7 +749,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		isFirstAgent,
 	))
 
-	redactAgentResponseForActor(&resp, actorType)
+	// CEREBRO-PATCH(mcp-config-mutation-redact): FIR-2394 — honor workspace always_redact_env + per-row gate, not just actor=agent.
+	h.redactAgentMcpConfigOnMutation(r.Context(), created, &resp, actorType, ownerID, member.Role)
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -838,6 +856,34 @@ func redactMcpConfig(resp *AgentResponse) {
 // target's mcp_config from the mutation response. MUL-2600.
 func redactAgentResponseForActor(resp *AgentResponse, actorType string) {
 	if actorType == "agent" {
+		redactMcpConfig(resp)
+	}
+}
+
+// CEREBRO-PATCH(mcp-config-mutation-redact): FIR-2394 — apply the same
+// three-gate mcp_config redaction as GetAgent/ListAgents to mutation
+// responses. The prior `redactAgentResponseForActor` only stripped on
+// agent actors, so a workspace with `always_redact_env=true` still
+// surfaced freshly written or untouched mcp_config secrets on the
+// create/update/archive/restore response bodies. Loading the workspace
+// once per mutation is acceptable for the security guarantee.
+func (h *Handler) redactAgentMcpConfigOnMutation(ctx context.Context, agent db.Agent, resp *AgentResponse, actorType, userID, memberRole string) {
+	if actorType == "agent" {
+		redactMcpConfig(resp)
+		return
+	}
+	ws, err := h.Queries.GetWorkspace(ctx, agent.WorkspaceID)
+	if err != nil {
+		// Fail closed: if we cannot confirm the workspace policy, do not
+		// surface secret-bearing content on the response.
+		redactMcpConfig(resp)
+		return
+	}
+	if workspaceAlwaysRedactSecrets(ws.Settings) {
+		redactMcpConfig(resp)
+		return
+	}
+	if !canViewAgentSecrets(agent, userID, memberRole) {
 		redactMcpConfig(resp)
 	}
 }
@@ -1104,7 +1150,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(updated.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
-	redactAgentResponseForActor(&resp, actorType)
+	// CEREBRO-PATCH(mcp-config-mutation-redact): FIR-2394 — honor workspace always_redact_env + per-row gate, not just actor=agent.
+	h.redactAgentMcpConfigOnMutation(r.Context(), updated, &resp, actorType, userID, member.Role)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1129,7 +1176,8 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.canManageAgent(w, r, agent); !ok {
+	member, ok := h.canManageAgent(w, r, agent)
+	if !ok {
 		return
 	}
 	if agent.ArchivedAt.Valid {
@@ -1165,7 +1213,8 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	resp.CanTrigger = h.cerebroCanTrigger(r.Context(), r, wsID, archived.ID, archived.OwnerID)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentArchived, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
-	redactAgentResponseForActor(&resp, actorType)
+	// CEREBRO-PATCH(mcp-config-mutation-redact): FIR-2394 — honor workspace always_redact_env + per-row gate, not just actor=agent.
+	h.redactAgentMcpConfigOnMutation(r.Context(), archived, &resp, actorType, userID, member.Role)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1175,7 +1224,8 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.canManageAgent(w, r, agent); !ok {
+	member, ok := h.canManageAgent(w, r, agent)
+	if !ok {
 		return
 	}
 	if !agent.ArchivedAt.Valid {
@@ -1198,7 +1248,8 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
-	redactAgentResponseForActor(&resp, actorType)
+	// CEREBRO-PATCH(mcp-config-mutation-redact): FIR-2394 — honor workspace always_redact_env + per-row gate, not just actor=agent.
+	h.redactAgentMcpConfigOnMutation(r.Context(), restored, &resp, actorType, userID, member.Role)
 	writeJSON(w, http.StatusOK, resp)
 }
 
