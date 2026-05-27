@@ -1047,6 +1047,10 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Reques
 			// CEREBRO-PATCH(private-agent-owner-only-trigger): only the owning
 			// member's sphere may wake a private squad leader via mention (FIR-2349).
 			if !h.canTriggerPrivateAgent(ctx, agent, authorType, authorID) {
+				// CEREBRO-PATCH(private-agent-run-request-hook): member tag of an unowned private agent → run-request to owner (FIR-2385).
+				if authorType == "member" && h.PrivateAgentRunRequester != nil {
+					_ = h.PrivateAgentRunRequester.RequestPrivateAgentRun(ctx, wsID, agent.ID, agent.OwnerID, issue.ID, comment.ID, parseUUID(authorID), agent.Name)
+				}
 				continue
 			}
 			if h.MentionTriggerGate != nil { // CEREBRO-PATCH(mention-trigger-gate-hook): JEH-1917.
@@ -1105,6 +1109,10 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Reques
 		// that same member (FIR-2349). Private autopilot comments already ran
 		// the stricter same-owner match above.
 		if !privateAutopilotComment && !h.canTriggerPrivateAgent(ctx, agent, authorType, authorID) {
+			// CEREBRO-PATCH(private-agent-run-request-hook): member tag of an unowned private agent → run-request to owner (FIR-2385).
+			if authorType == "member" && h.PrivateAgentRunRequester != nil {
+				_ = h.PrivateAgentRunRequester.RequestPrivateAgentRun(ctx, wsID, agent.ID, agent.OwnerID, issue.ID, comment.ID, parseUUID(authorID), agent.Name)
+			}
 			continue
 		}
 		if h.MentionTriggerGate != nil { // CEREBRO-PATCH(mention-trigger-gate-hook): JEH-1917.

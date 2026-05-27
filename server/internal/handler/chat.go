@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/pricing"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -253,12 +252,9 @@ func (h *Handler) GetChatSessionUsage(w http.ResponseWriter, r *http.Request) {
 		totalCacheRead += row.TotalCacheReadTokens
 		totalCacheWrite += row.TotalCacheWriteTokens
 		taskCount += row.TaskCount
-		costCents += pricing.ComputeCents(row.Model, pricing.Usage{
-			InputTokens:      row.TotalInputTokens,
-			OutputTokens:     row.TotalOutputTokens,
-			CacheReadTokens:  row.TotalCacheReadTokens,
-			CacheWriteTokens: row.TotalCacheWriteTokens,
-		})
+		// CEREBRO-PATCH(task-usage-gateway-cost): prefer the gateway's exact
+		// spend over the pricing-table estimate for the chat session total.
+		costCents += preferGatewayCost(row.TotalCostCents, row.Model, row.TotalInputTokens, row.TotalOutputTokens, row.TotalCacheReadTokens, row.TotalCacheWriteTokens)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

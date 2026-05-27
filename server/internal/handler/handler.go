@@ -130,6 +130,9 @@ type Handler struct {
 	GroupPermissions GroupPermissionsInvoker
 	// CEREBRO-PATCH(handler-mention-trigger-gate): cerebro @mention trigger gate.
 	MentionTriggerGate MentionTriggerGateInvoker
+	// CEREBRO-PATCH(handler-private-agent-run-request): FIR-2385 — turns a member's
+	// tag of an unowned private agent into a run-request in the owner's inbox.
+	PrivateAgentRunRequester PrivateAgentRunRequesterInvoker
 	// CEREBRO-PATCH(handler-runtime-account): cerebro daemon-driven account
 	// registration service. Wired by the router after construction.
 	RuntimeAccount RuntimeAccountInvoker
@@ -193,6 +196,17 @@ type RuntimePauseState struct {
 // @mention trigger gate.
 type MentionTriggerGateInvoker interface {
 	CanTriggerMention(ctx context.Context, r *http.Request, workspaceID string, agentID, ownerID pgtype.UUID) (bool, error)
+}
+
+// PrivateAgentRunRequesterInvoker is the upstream-side seam for FIR-2385. It is
+// invoked from the comment mention path when a *member* tags a private agent
+// they do not own (the trigger gate has already refused). The cerebro
+// implementation records a run-request in the owner's inbox and dedups on
+// (agent, comment); the boolean trigger gate stays a pure authz answer.
+//
+// CEREBRO-PATCH(handler-private-agent-run-request-iface): seam for FIR-2385.
+type PrivateAgentRunRequesterInvoker interface {
+	RequestPrivateAgentRun(ctx context.Context, workspaceID string, agentID, ownerID, issueID, commentID, requesterID pgtype.UUID, agentName string) error
 }
 
 // ChannelListenInvoker is the upstream-side seam that the cerebro

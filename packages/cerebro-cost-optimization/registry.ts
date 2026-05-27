@@ -37,6 +37,55 @@ export type CostSavingMetric =
   | "context_tokens";
 
 /**
+ * Which agent runtime a saving actually affects. Savings live in two runtimes:
+ *
+ *   - "daemon"  — local agents that claim tasks from the server (the team's own
+ *                 agents on a fixed plan). Server-side affordances apply here.
+ *   - "gateway" — cloud agents the server runs and bills per token; the server
+ *                 controls the model call and the context window.
+ *   - "both"    — the saving applies in either runtime.
+ *
+ * model_routing and prune_tool_results only change cost in the gateway, where
+ * the server owns the model choice and the context window. The settings UI
+ * marks those so a daemon-only workspace sees the button is scoped to the cloud
+ * runtime — not a dead toggle, and no false promise that it touches local
+ * agents.
+ */
+export type CostSavingRuntimeScope = "daemon" | "gateway" | "both";
+
+/**
+ * Short badge text for a runtime-scoped saving, or null when the saving applies
+ * in every runtime (no badge needed). A default branch keeps an unknown scope
+ * from throwing — it just renders no badge.
+ */
+export function runtimeScopeBadge(scope: CostSavingRuntimeScope): string | null {
+  switch (scope) {
+    case "gateway":
+      return "Cloud runtime only";
+    case "daemon":
+      return "Local runtime only";
+    default:
+      return null;
+  }
+}
+
+/**
+ * One-line explanation shown under a runtime-scoped saving so the scope is
+ * honest about what it does and does not affect, or null when it applies
+ * everywhere.
+ */
+export function runtimeScopeNote(scope: CostSavingRuntimeScope): string | null {
+  switch (scope) {
+    case "gateway":
+      return "Only affects cloud (gateway) agents the server runs and bills per token. Local daemon agents run on a fixed plan, so this saving does not change their cost.";
+    case "daemon":
+      return "Only affects local daemon agents that claim tasks from the server.";
+    default:
+      return null;
+  }
+}
+
+/**
  * Default mode for each saving. Applied at read time when no override exists.
  *
  * Every saving defaults to "off" — opt-in, not opt-out. These savings change
@@ -67,6 +116,8 @@ export interface CostSavingDefinition {
   description: string;
   /** The unit this saving reduces — see {@link CostSavingMetric}. */
   metric: CostSavingMetric;
+  /** Which runtime this saving actually affects — see {@link CostSavingRuntimeScope}. */
+  runtimeScope: CostSavingRuntimeScope;
   /**
    * Rough estimate of the per-run reduction, used only as a sanity hint in the
    * UI before real measurement exists. Measurement always overrides this.
@@ -85,6 +136,7 @@ export const COST_SAVINGS: CostSavingDefinition[] = [
     description:
       "Put the issue and the latest comment thread directly into the run's start prompt, so the agent does not have to fetch the issue and its comments itself on every run.",
     metric: "platform_calls",
+    runtimeScope: "both",
     estimateNote: "Removes ~40% of platform calls per run.",
   },
   {
@@ -93,6 +145,7 @@ export const COST_SAVINGS: CostSavingDefinition[] = [
     description:
       "Serve a single combined \"issue context\" call (issue + comments + members + labels) instead of 4-5 separate calls.",
     metric: "platform_calls",
+    runtimeScope: "both",
     estimateNote: "Collapses 4-5 calls into 1 at run start.",
   },
   {
@@ -101,6 +154,7 @@ export const COST_SAVINGS: CostSavingDefinition[] = [
     description:
       "Use a cheaper model as the default and only escalate to an expensive model when the task requires it.",
     metric: "model_cost",
+    runtimeScope: "gateway",
     estimateNote: "Cheaper model handles the majority of runs.",
   },
   {
@@ -109,6 +163,7 @@ export const COST_SAVINGS: CostSavingDefinition[] = [
     description:
       "Drop outdated tool-call results from the context window mid-run so the agent does not keep paying for superseded output.",
     metric: "context_tokens",
+    runtimeScope: "gateway",
     estimateNote: "Trims superseded tool output from later turns.",
   },
 ];

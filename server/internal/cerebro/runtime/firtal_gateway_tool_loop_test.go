@@ -70,6 +70,7 @@ func TestRunToolLoopReturnsFinalTextAfterToolDispatch(t *testing.T) {
 		pgtype.UUID{},
 		srv,
 		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "echo"}}},
+		false,
 	)
 	if err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
@@ -120,6 +121,7 @@ func TestRunToolLoopForcesFinalAnswerWhenModelKeepsCallingTools(t *testing.T) {
 		pgtype.UUID{},
 		toolSrv,
 		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "echo"}}},
+		false,
 	)
 	if err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
@@ -174,6 +176,7 @@ func TestRunToolLoopForcedFinalCallOmitsTools(t *testing.T) {
 		pgtype.UUID{},
 		toolSrv,
 		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "echo"}}},
+		false,
 	); err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
 	}
@@ -235,6 +238,7 @@ func TestRunToolLoopThreeStepAcceptanceFlow(t *testing.T) {
 			{Type: "function", Function: GatewayToolFunction{Name: "list_comments"}},
 			{Type: "function", Function: GatewayToolFunction{Name: "add_comment"}},
 		},
+		false,
 	)
 	if err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
@@ -292,6 +296,7 @@ func TestRunToolLoopSendsToolResultsAsRoleToolMessages(t *testing.T) {
 		pgtype.UUID{},
 		toolSrv,
 		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "echo"}}},
+		false,
 	); err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
 	}
@@ -361,6 +366,7 @@ func TestGatewayCompatRegistryToolLoopDispatchesTools(t *testing.T) { // CEREBRO
 		pgtype.UUID{},
 		reg,
 		[]Tool{fallbackTestTool{}},
+		false,
 	)
 	if err != nil {
 		t.Fatalf("runGatewayCompatRegistryToolLoop error = %v", err)
@@ -412,6 +418,7 @@ func TestRunToolLoopUsesGatewayCompatTransportForToolEnabledTasks(t *testing.T) 
 		pgtype.UUID{},
 		pgtype.UUID{},
 		pgtype.UUID{},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
@@ -472,6 +479,7 @@ func TestRunToolLoopWithServerGateBlocksDeniedTool(t *testing.T) {
 		gateTestUUID(9),
 		toolSrv,
 		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "web_fetch"}}},
+		false,
 	)
 	if err != nil {
 		t.Fatalf("runToolLoopWithServer error = %v", err)
