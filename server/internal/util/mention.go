@@ -36,6 +36,25 @@ func ParseMentions(content string) []Mention {
 	return result
 }
 
+// DiffMentions returns mentions present in newContent but absent in oldContent.
+// Used by UpdateComment to trigger agents only for newly added mentions.
+func DiffMentions(oldContent, newContent string) []Mention {
+	oldSet := make(map[string]bool)
+	for _, m := range ParseMentions(oldContent) {
+		oldSet[m.Type+":"+m.ID] = true
+	}
+	var added []Mention
+	seen := make(map[string]bool)
+	for _, m := range ParseMentions(newContent) {
+		key := m.Type + ":" + m.ID
+		if !oldSet[key] && !seen[key] {
+			seen[key] = true
+			added = append(added, m)
+		}
+	}
+	return added
+}
+
 // HasMentionAll returns true if any mention in the slice is an @all mention.
 func HasMentionAll(mentions []Mention) bool {
 	for _, m := range mentions {

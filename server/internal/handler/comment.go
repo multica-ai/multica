@@ -1214,6 +1214,72 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 	}
 }
 
+// enqueueNewlyMentionedAgentTasks triggers agent tasks for a pre-computed list
+// of mentions (typically the diff between old and new content on a comment edit).
+// Unlike enqueueMentionedAgentTasks, it does NOT re-parse comment content and
+// does NOT apply parent mention inheritance — edits are explicit actions.
+func (h *Handler) enqueueNewlyMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string, mentions []util.Mention) {
+	for _, m := range mentions {
+		if m.Type == "squad" {
+			squadUUID := parseUUID(m.ID)
+			squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+				ID:          squadUUID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil {
+				continue
+			}
+			leaderID := squad.LeaderID
+			agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+				ID:          leaderID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+				continue
+			}
+			if !h.canTriggerPrivateAgent(ctx, agent, authorType, authorID) {
+				continue
+			}
+			hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+				IssueID: issue.ID,
+				AgentID: leaderID,
+			})
+			if err != nil || hasPending {
+				continue
+			}
+			squadTaskContext := taskContextForSquadMention(nil, squad)
+			if _, err := h.TaskService.EnqueueTaskForSquadLeaderWithContext(ctx, issue, leaderID, comment.ID, squadTaskContext); err != nil {
+				slog.Warn("enqueue squad leader mention task on edit failed", "issue_id", uuidToString(issue.ID), "squad_id", m.ID, "error", err)
+			}
+			continue
+		}
+		if m.Type != "agent" {
+			continue
+		}
+		agentUUID := parseUUID(m.ID)
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          agentUUID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+			continue
+		}
+		if !h.canTriggerPrivateAgent(ctx, agent, authorType, authorID) {
+			continue
+		}
+		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+			IssueID: issue.ID,
+			AgentID: agentUUID,
+		})
+		if err != nil || hasPending {
+			continue
+		}
+		if _, err := h.TaskService.EnqueueTaskForMentionWithContext(ctx, issue, agentUUID, comment.ID, nil); err != nil {
+			slog.Warn("enqueue mention agent task on edit failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
+		}
+	}
+}
+
 // trackMentionFrequency records member/agent mentions for ranking in mention
 // suggestion UI. Called after comment creation; best effort only.
 func (h *Handler) trackMentionFrequency(ctx context.Context, workspaceID pgtype.UUID, authorType, authorID, content string) {
@@ -1331,6 +1397,22 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	cid := uuidToString(comment.ID)
 	resp := commentToResponse(comment, grouped[cid], groupedAtt[cid])
+
+	// Trigger agents for newly added mentions (OPE-1434).
+	newMentions := util.DiffMentions(existing.Content, req.Content)
+	if len(newMentions) > 0 {
+		issue, err := h.Queries.GetIssue(r.Context(), existing.IssueID)
+		if err == nil {
+			var parentComment *db.Comment
+			if existing.ParentID.Valid {
+				if p, err := h.Queries.GetComment(r.Context(), existing.ParentID); err == nil {
+					parentComment = &p
+				}
+			}
+			h.enqueueNewlyMentionedAgentTasks(r.Context(), issue, comment, parentComment, actorType, actorID, newMentions)
+		}
+	}
+
 	slog.Info("comment updated", append(logger.RequestAttrs(r), "comment_id", commentId)...)
 	h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp})
 	writeJSON(w, http.StatusOK, resp)
