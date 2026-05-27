@@ -244,7 +244,12 @@ export function AgentsScreen() {
               onPress={() => setOwnerPickerOpen(true)}
               style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
             >
-              <Text numberOfLines={1} style={styles.filterButtonText}>
+              <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.82}
+                numberOfLines={1}
+                style={styles.filterButtonText}
+              >
                 {selectedOwner?.name ?? t("agents.owner")}
               </Text>
               <ChevronDown color={colors.mutedForeground} size={14} />
@@ -262,6 +267,9 @@ export function AgentsScreen() {
             >
               <Archive color={showArchived ? colors.primaryForeground : colors.mutedForeground} size={14} />
               <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.82}
+                numberOfLines={1}
                 style={[
                   styles.filterButtonText,
                   showArchived && styles.filterButtonTextActive,
@@ -1381,7 +1389,12 @@ function SegmentedControl<T extends string>({
               pressed && styles.pressed,
             ]}
           >
-            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+            <Text
+              adjustsFontSizeToFit
+              minimumFontScale={0.82}
+              numberOfLines={1}
+              style={[styles.segmentText, active && styles.segmentTextActive]}
+            >
               {option.label}
             </Text>
           </Pressable>
@@ -1473,8 +1486,24 @@ function PickerTrigger({
       ]}
     >
       <View style={styles.pickerTriggerTextWrap}>
-        <Text numberOfLines={1} style={styles.pickerTriggerLabel}>{label}</Text>
-        {meta ? <Text numberOfLines={1} style={styles.pickerTriggerMeta}>{meta}</Text> : null}
+        <Text
+          adjustsFontSizeToFit
+          minimumFontScale={0.82}
+          numberOfLines={1}
+          style={styles.pickerTriggerLabel}
+        >
+          {label}
+        </Text>
+        {meta ? (
+          <Text
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            numberOfLines={1}
+            style={styles.pickerTriggerMeta}
+          >
+            {meta}
+          </Text>
+        ) : null}
       </View>
       <ChevronDown color={colors.mutedForeground} size={16} />
     </Pressable>
@@ -1507,8 +1536,24 @@ function PickerRow({
       ]}
     >
       <View style={styles.pickerRowText}>
-        <Text numberOfLines={1} style={styles.pickerRowLabel}>{label}</Text>
-        {meta ? <Text numberOfLines={1} style={styles.pickerRowMeta}>{meta}</Text> : null}
+        <Text
+          adjustsFontSizeToFit
+          minimumFontScale={0.82}
+          numberOfLines={1}
+          style={styles.pickerRowLabel}
+        >
+          {label}
+        </Text>
+        {meta ? (
+          <Text
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            numberOfLines={1}
+            style={styles.pickerRowMeta}
+          >
+            {meta}
+          </Text>
+        ) : null}
       </View>
       {selected ? <CheckCircle2 color={colors.success} size={18} /> : null}
     </Pressable>
@@ -1531,7 +1576,14 @@ function RuntimeBadge({ mode, label }: { mode: AgentRuntimeMode; label: string }
   return (
     <View style={styles.metaBadge}>
       <Icon color={colors.mutedForeground} size={13} />
-      <Text numberOfLines={1} style={styles.metaBadgeText}>{label}</Text>
+      <Text
+        adjustsFontSizeToFit
+        minimumFontScale={0.82}
+        numberOfLines={1}
+        style={styles.metaBadgeText}
+      >
+        {label}
+      </Text>
     </View>
   );
 }
@@ -1795,6 +1847,7 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 12,
     fontWeight: "600",
+    lineHeight: 16,
     maxWidth: 80,
   },
   filterButtonTextActive: {
@@ -1922,6 +1975,8 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 11,
     fontWeight: "500",
+    lineHeight: 14,
+    minWidth: 0,
   },
   optionChip: {
     alignItems: "center",
@@ -1975,10 +2030,12 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 14,
     fontWeight: "500",
+    lineHeight: 18,
   },
   pickerRowMeta: {
     color: colors.mutedForeground,
     fontSize: 12,
+    lineHeight: 16,
     marginTop: 2,
   },
   pickerRowSelected: {
@@ -2003,10 +2060,12 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 14,
     fontWeight: "500",
+    lineHeight: 18,
   },
   pickerTriggerMeta: {
     color: colors.mutedForeground,
     fontSize: 12,
+    lineHeight: 16,
     marginTop: 2,
   },
   pickerTriggerTextWrap: {
@@ -2065,6 +2124,9 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 12,
     fontWeight: "600",
+    lineHeight: 16,
+    textAlign: "center",
+    width: "100%",
   },
   segmentTextActive: {
     color: colors.foreground,
