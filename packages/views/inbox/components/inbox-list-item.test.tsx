@@ -72,6 +72,8 @@ vi.mock("@multica/cerebro-inbox", () => {
       item.type === "reminder" || item.muted_until === "2000-01-01T11:00:00.000Z" ? (
         <span>Reminder</span>
       ) : null,
+    CerebroInboxRunRequestRow: ({ item }: { item: InboxItem }) =>
+      item.type === "private_agent_run_request" ? <span>Run request</span> : null,
     isReminderOverdue: (value: string | null | undefined) =>
       value === "2000-01-01T11:00:00.000Z",
   };

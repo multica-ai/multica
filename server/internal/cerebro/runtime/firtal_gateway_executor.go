@@ -1270,6 +1270,7 @@ func (e *FirtalGatewayExecutor) recordTaskUsage(ctx context.Context, task db.Age
 		OutputTokens:     usage.OutputTokens,
 		CacheReadTokens:  usage.CacheReadTokens,
 		CacheWriteTokens: usage.CacheWriteTokens,
+		CostCents:        usage.CostCents,
 	}); err != nil {
 		e.logger.Warn("firtal gateway task usage upsert failed", "task_id", util.UUIDToString(task.ID), "model", completion.Model, "error", err)
 	}

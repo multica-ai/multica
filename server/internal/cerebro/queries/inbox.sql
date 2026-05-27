@@ -98,3 +98,30 @@ SET muted_until = $2,
     details = $3
 WHERE id = $1
 RETURNING *;
+
+-- name: FindPrivateAgentRunRequest :one
+-- FIR-2385 dedup guard: a repeated tag of the same private agent on the same
+-- comment must not spam the owner with duplicate run-requests. Matches on the
+-- (owner recipient, agent, comment) triple carried in details.
+SELECT *
+FROM inbox_item
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND type = 'private_agent_run_request'
+  AND archived = false
+  AND details->>'agent_id' = $3::text
+  AND details->>'comment_id' = $4::text
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: CreatePrivateAgentRunRequest :one
+-- FIR-2385: a non-owner tagged a private agent. Instead of waking the agent we
+-- drop a run-request in the owner's inbox; the owner runs it from there. The
+-- recipient is the agent owner; actor is the requester who tagged.
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title, body,
+    actor_type, actor_id, details, route
+) VALUES ($1, 'member', $2, 'private_agent_run_request', 'action_required', $3, $4, $5, 'member', $6, $7, 'inbox')
+RETURNING *;
