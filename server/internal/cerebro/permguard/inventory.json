@@ -645,6 +645,14 @@
       "gate": "self_only"
     },
     {
+      "id": "POST /api/inbox/notifications/archive-all",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/inbox/notifications/mark-all-read",
+      "gate": "self_only"
+    },
+    {
       "id": "POST /api/inbox/reminders",
       "gate": "self_only"
     },
