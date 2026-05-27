@@ -68,6 +68,20 @@ export function tasksFilterPath(pathname: string, filter: TasksFilter): string {
   return query ? `${pathname}?${query}` : pathname;
 }
 
+export function replaceBrowserHistoryPath(path: string): boolean {
+  if (typeof window === "undefined") return false;
+
+  const current = `${window.location.pathname}${window.location.search}`;
+  if (current === path) return false;
+
+  try {
+    window.history.replaceState(window.history.state, "", path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function parsePositiveInt(raw: string | null): number | null {
   const n = parseNonNegativeInt(raw);
   return n && n > 0 ? n : null;
