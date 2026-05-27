@@ -822,7 +822,7 @@ function SubIssueRow({ child }: { child: Issue }) {
         }
       />
       <AppLink
-        href={paths.issueDetail(child.id)}
+        href={paths.issueDetail(child.identifier)}
         className="flex min-w-0 flex-1 items-center gap-2.5"
       >
         <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
@@ -2076,7 +2076,7 @@ export function IssueDetail({
           </button>
           {parentIssueOpen && <div className="pl-2">
             <AppLink
-              href={paths.issueDetail(parentIssue.id)}
+              href={paths.issueDetail(parentIssue.identifier)}
               className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
             >
               <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
@@ -2319,7 +2319,7 @@ export function IssueDetail({
             {parentIssue && (
               <>
                 <AppLink
-                  href={paths.issueDetail(parentIssue.id)}
+                  href={paths.issueDetail(parentIssue.identifier)}
                   className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
                 >
                   {parentIssue.identifier}
@@ -2443,7 +2443,7 @@ export function IssueDetail({
 
           {parentIssue && (
             <AppLink
-              href={paths.issueDetail(parentIssue.id)}
+              href={paths.issueDetail(parentIssue.identifier)}
               className="mt-2 inline-flex max-w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group/parent"
             >
               <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
