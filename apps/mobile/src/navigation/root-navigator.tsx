@@ -33,6 +33,7 @@ import { InboxScreen } from "../screens/mine/inbox-screen";
 import { AgentsScreen } from "../screens/mine/agents-screen";
 import { MineScreen } from "../screens/mine/mine-screen";
 import { SettingScreen } from "../screens/mine/setting-screen";
+import { SquadsScreen } from "../screens/mine/squads-screen";
 import { RuntimesScreen } from "../screens/runtimes/runtimes-screen";
 import { WorkspaceSetupScreen } from "../screens/workspace/workspace-setup-screen";
 import { colors, spacing } from "../theme/tokens";
@@ -50,6 +51,7 @@ export type RootStackParamList = {
   Search: undefined;
   Runtimes: undefined;
   Agents: undefined;
+  Squads: undefined;
   Inbox: undefined;
   InboxDetail: { inboxItemId: string };
   Setting: undefined;
@@ -147,6 +149,7 @@ function AuthenticatedNavigator() {
             <Stack.Screen component={SearchScreen} name="Search" />
             <Stack.Screen component={RuntimesScreen} name="Runtimes" />
             <Stack.Screen component={AgentsScreen} name="Agents" />
+            <Stack.Screen component={SquadsScreen} name="Squads" />
             <Stack.Screen component={InboxScreen} name="Inbox" />
             <Stack.Screen component={InboxDetailScreen} name="InboxDetail" />
             <Stack.Screen component={SettingScreen} name="Setting" />

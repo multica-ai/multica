@@ -23,6 +23,7 @@ export const linking = {
       Search: "search",
       Runtimes: "runtimes",
       Agents: "agents",
+      Squads: "squads",
       Inbox: "inbox",
       InboxDetail: "inbox/:inboxItemId",
       Setting: "setting",

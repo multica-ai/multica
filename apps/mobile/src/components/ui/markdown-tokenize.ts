@@ -28,7 +28,7 @@ export function tokenizeInline(content: string): InlineToken[] {
       continue;
     }
 
-    const mentionMatch = rest.match(/^\[(@?[^\]]+)\]\(mention:\/\/(all|member|agent|issue)\/([^)]+)\)/);
+    const mentionMatch = rest.match(/^\[(@?[^\]]+)\]\(mention:\/\/(all|member|agent|squad|issue)\/([^)]+)\)/);
     if (mentionMatch) {
       tokens.push({
         type: "mention",

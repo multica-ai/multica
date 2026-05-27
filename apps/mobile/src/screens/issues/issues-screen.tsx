@@ -20,6 +20,7 @@ import {
 import { filterIssues, type ActorFilterValue } from "@multica/core/issues/utils/filter";
 import { useAuthStore } from "@multica/core/auth";
 import { useMemberList, useAgentList } from "@multica/core/workspace/hooks";
+import { squadListOptions } from "@multica/core/workspace/queries";
 import { useProjectList } from "@multica/core/projects/hooks";
 import type { Issue, IssuePriority, IssueStatus, Label, ListIssuesParams, ListIssuesResponse } from "@multica/core/types";
 import type { RootStackParamList } from "../../navigation/root-navigator";
@@ -81,6 +82,7 @@ export function IssuesScreen() {
   } = useLoadMoreByStatusForWorkspace(workspace.id, status);
   const { data: members = [] } = useMemberList(workspace.id);
   const { data: agents = [] } = useAgentList(workspace.id);
+  const { data: squads = [] } = useCoreQuery(squadListOptions(workspace.id));
   const { data: projects = [] } = useProjectList(workspace.id);
   const { data: labels = [] } = useCoreQuery(labelListOptions(workspace.id));
 
@@ -335,6 +337,7 @@ export function IssuesScreen() {
         members={members}
         onClose={() => setFilterOpen(false)}
         projects={projects}
+        squads={squads}
         visible={filterOpen}
       />
     </Screen>
@@ -427,6 +430,7 @@ function IssueFilterSheet({
   members,
   onClose,
   projects,
+  squads,
   visible,
 }: {
   agents: Array<{ id: string; name: string; archived_at?: string | null }>;
@@ -436,6 +440,7 @@ function IssueFilterSheet({
   members: Array<{ user_id: string; name: string }>;
   onClose: () => void;
   projects: Array<{ id: string; title: string }>;
+  squads: Array<{ id: string; name: string; archived_at?: string | null }>;
   visible: boolean;
 }) {
   const { t } = useTranslation();
@@ -457,6 +462,7 @@ function IssueFilterSheet({
   const toggleLabelFilter = useMobileIssuesFilterStore((s) => s.toggleLabelFilter);
   const clearFilters = useMobileIssuesFilterStore((s) => s.clearFilters);
   const activeAgents = agents.filter((agent) => !agent.archived_at);
+  const activeSquads = squads.filter((squad) => !squad.archived_at);
   const assigneeSelectedKeys = useMemo(
     () => new Set(assigneeFilters.map(actorKey)),
     [assigneeFilters],
@@ -487,8 +493,14 @@ function IssueFilterSheet({
         label: agent.name,
         meta: t("issues.agent"),
       })),
+      ...activeSquads.map((squad) => ({
+        id: squad.id,
+        type: "squad" as const,
+        label: squad.name,
+        meta: t("issues.squad"),
+      })),
     ],
-    [activeAgents, members, t],
+    [activeAgents, activeSquads, members, t],
   );
   const projectOptions = useMemo(
     () => projects.map((project) => ({ id: project.id, label: project.title })),
