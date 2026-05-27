@@ -30,6 +30,7 @@ export {
   toDateTimeLocalValue,
   formatMutedUntilTime,
   formatPlannedDateTime,
+  isReminderOverdue,
 } from "./mute-time";
 // FIR-2115 — "Group by → Action" inbox grouping.
 export {
