@@ -37,6 +37,8 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
+// CEREBRO-PATCH(comment-edit-attachment-binding): FIR-2394 — pure binding helpers extracted for robustness + unit coverage.
+import { attachmentReferencedInContent, collectActiveAttachmentIds } from "./comment-attachment-binding";
 import { AttachmentList } from "@multica/cerebro-attachments/views";
 import type { Attachment, TimelineEntry } from "@multica/core/types";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
@@ -199,19 +201,6 @@ function MoveCommentToSubIssueDialog({
   );
 }
 
-function collectActiveAttachmentIds(
-  content: string,
-  attachments: Attachment[],
-  retainedStandaloneIds?: Set<string> | null,
-): string[] {
-  const ids = new Set<string>();
-  for (const attachment of attachments) {
-    if (content.includes(attachment.url)) ids.add(attachment.id);
-  }
-  for (const id of retainedStandaloneIds ?? []) ids.add(id);
-  return [...ids];
-}
-
 function sameIdSet(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   const set = new Set(a);
@@ -222,7 +211,7 @@ function initialStandaloneAttachmentIds(entry: TimelineEntry): Set<string> {
   const content = entry.content ?? "";
   return new Set(
     (entry.attachments ?? [])
-      .filter((attachment) => !content.includes(attachment.url))
+      .filter((attachment) => !attachmentReferencedInContent(content, attachment))
       .map((attachment) => attachment.id),
   );
 }
