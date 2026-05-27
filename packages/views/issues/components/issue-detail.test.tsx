@@ -1105,7 +1105,7 @@ describe("IssueDetail (shared)", () => {
     await flushAnimationFrame();
 
     const jumpToCommentBox = await screen.findByRole("button", { name: "Jump to comment box" });
-    expect(jumpToCommentBox).toHaveClass("absolute", "bottom-4");
+    expect(jumpToCommentBox).toHaveClass("absolute", "bottom-[calc(env(safe-area-inset-bottom)+1rem)]");
     expect(jumpToCommentBox).not.toHaveClass("fixed", "right-2", "bottom-14");
     fireEvent.click(jumpToCommentBox);
     expect(virtuosoScrollToIndexSpy).toHaveBeenCalledWith({
@@ -1168,6 +1168,27 @@ describe("IssueDetail (shared)", () => {
 
     expect(await screen.findByRole("button", { name: "Jump to top" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Jump to comment box" })).not.toBeInTheDocument();
+  });
+
+  it("renders the jump pill as a mobile-friendly touch target", async () => {
+    mockViewport.isMobile = true;
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    const scrollContainer = screen.getByTestId("issue-detail-scroll-container");
+    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 2000 });
+    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 500 });
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 0 });
+    fireEvent.scroll(scrollContainer);
+    await flushAnimationFrame();
+
+    const jumpToCommentBox = await screen.findByRole("button", { name: "Jump to comment box" });
+    expect(jumpToCommentBox).toHaveClass("min-h-10", "max-w-[calc(100%-2rem)]", "touch-manipulation");
+    expect(jumpToCommentBox).toHaveClass("bottom-[calc(env(safe-area-inset-bottom)+1rem)]");
+    expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
   });
 
   it("sends empty description when editor is cleared", async () => {
