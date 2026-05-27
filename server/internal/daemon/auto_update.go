@@ -12,9 +12,9 @@ import (
 // shelling out to brew/curl. Mirrors the pattern used at the top of daemon.go
 // for `isBrewInstall` / `getBrewPrefix` / `matchKnownBrewPrefix`.
 var (
-	fetchLatestRelease = cli.FetchLatestRelease
-	isReleaseVersion   = cli.IsReleaseVersion
-	isNewerVersion     = cli.IsNewerVersion
+	fetchLatestRelease = cli.FetchLatestManifestReleaseAsGitHubRelease
+	isReleaseVersion   = cli.IsUpdatableVersion
+	isNewerVersion     = cli.IsNewerUpdatableVersion
 )
 
 // autoUpdateInitialDelay is how long the loop waits after Run() returns before
@@ -51,11 +51,11 @@ func (d *Daemon) autoUpdateLoop(ctx context.Context) {
 		return
 	}
 	if !isReleaseVersion(d.cfg.CLIVersion) {
-		// Source builds (`make daemon`) and ad-hoc builds report a
-		// `git describe`-style version; auto-upgrading them to a public
-		// release would silently downgrade the dev work checked out on the
-		// machine. Skip and let the developer drive their own version.
-		d.logger.Info("auto-update: skipped (not a release build)", "version", d.cfg.CLIVersion)
+		// Source builds (`make daemon`) report a dirty or unparseable
+		// version; auto-upgrading them to a published build would silently
+		// clobber the dev work checked out on the machine. Fork release
+		// builds (git-describe style like v0.3.6-767-gabcdef0) ARE eligible.
+		d.logger.Info("auto-update: skipped (not an updatable build)", "version", d.cfg.CLIVersion)
 		return
 	}
 
