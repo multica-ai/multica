@@ -132,6 +132,7 @@
     "disabled_badge": "Disabled",
     "deprecated_badge": "Deprecated",
     "next_label": "Next: {{date}}",
+    "event_filters_label": "Events",
     "webhook_url_label": "Webhook URL",
     "copy_url": "Copy URL",
     "url_copied": "Webhook URL copied",
