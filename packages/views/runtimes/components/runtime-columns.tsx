@@ -106,7 +106,12 @@ export function createRuntimeColumns({
       header: () => t(($) => $.list.col_runtime),
       size: COL_WIDTHS.runtime,
       meta: { grow: true },
-      cell: ({ row }) => <RuntimeNameCell runtime={row.original.runtime} />,
+      cell: ({ row }) => (
+        <RuntimeNameCell
+          runtime={row.original.runtime}
+          ownerMember={row.original.ownerMember}
+        />
+      ),
     },
     {
       id: "health",
@@ -214,16 +219,38 @@ export function createRuntimeColumns({
 // Cell renderers
 // ---------------------------------------------------------------------------
 
-function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
-  const { base: baseName } = splitRuntimeName(runtime.name);
+function RuntimeNameCell({
+  runtime,
+  ownerMember,
+}: {
+  runtime: AgentRuntime;
+  ownerMember: MemberWithUser | null;
+}) {
+  const { base: baseName, hostname } = splitRuntimeName(runtime.name);
+  // Display: "ownerName · machineName" when owner is known, otherwise just baseName
+  const displayName = ownerMember
+    ? hostname
+      ? `${ownerMember.name} · ${hostname}`
+      : `${ownerMember.name} · ${baseName}`
+    : baseName;
+
   return (
     <div className="flex min-w-0 items-center gap-2">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center">
-        <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
+        {ownerMember ? (
+          <ActorAvatar
+            actorType="member"
+            actorId={ownerMember.user_id}
+            size={28}
+            enableHoverCard
+          />
+        ) : (
+          <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
+        )}
       </div>
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <span className="block min-w-0 shrink truncate text-sm font-medium">
-          {baseName}
+          {displayName}
         </span>
         <VisibilityBadge runtime={runtime} />
       </div>
