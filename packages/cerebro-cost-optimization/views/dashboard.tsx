@@ -1,7 +1,12 @@
 "use client";
 
+import { Badge } from "@multica/ui/components/ui/badge";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
-import { COST_SAVINGS, type CostSavingDefinition } from "../registry";
+import {
+  COST_SAVINGS,
+  type CostSavingDefinition,
+  runtimeScopeBadge,
+} from "../registry";
 import {
   estimatedValue,
   formatUsd,
@@ -33,12 +38,16 @@ function SavingCard({
     ? saving.treatmentRunCount + saving.controlRunCount
     : 0;
   const totalRuns = saving ? measuredRuns + saving.shadowRunCount : 0;
+  const scopeBadge = runtimeScopeBadge(def.runtimeScope);
 
   return (
     <Card>
       <CardContent className="space-y-3">
         <div className="space-y-0.5">
-          <p className="text-sm font-medium">{def.label}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium">{def.label}</p>
+            {scopeBadge && <Badge variant="secondary">{scopeBadge}</Badge>}
+          </div>
           <p className="text-xs text-muted-foreground">{def.description}</p>
         </div>
 

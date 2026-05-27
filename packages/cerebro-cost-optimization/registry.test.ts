@@ -3,6 +3,8 @@ import {
   COST_SAVINGS,
   COST_SAVING_DEFAULTS,
   isDefaultMode,
+  runtimeScopeBadge,
+  runtimeScopeNote,
   type CostSavingKey,
 } from "./registry";
 
@@ -35,5 +37,32 @@ describe("cost-saving registry", () => {
       expect(isDefaultMode(key, "shadow")).toBe(false);
       expect(isDefaultMode(key, "on")).toBe(false);
     }
+  });
+
+  it("declares a runtime scope for every saving", () => {
+    const valid = new Set(["daemon", "gateway", "both"]);
+    for (const def of COST_SAVINGS) {
+      expect(valid.has(def.runtimeScope)).toBe(true);
+    }
+  });
+
+  it("marks model_routing and prune_tool_results as gateway-only", () => {
+    // These two only change cost in the gateway runtime; the UI must badge them
+    // so a daemon-only workspace is not shown a dead toggle. snapshot_prompt and
+    // bundled_read apply in both runtimes, so they carry no scope badge.
+    const scope = (key: CostSavingKey) =>
+      COST_SAVINGS.find((s) => s.key === key)?.runtimeScope;
+    expect(scope("model_routing")).toBe("gateway");
+    expect(scope("prune_tool_results")).toBe("gateway");
+    expect(scope("snapshot_prompt")).toBe("both");
+    expect(scope("bundled_read")).toBe("both");
+  });
+
+  it("renders a badge + note only for runtime-scoped savings", () => {
+    expect(runtimeScopeBadge("gateway")).toBeTruthy();
+    expect(runtimeScopeNote("gateway")).toBeTruthy();
+    expect(runtimeScopeBadge("daemon")).toBeTruthy();
+    expect(runtimeScopeBadge("both")).toBeNull();
+    expect(runtimeScopeNote("both")).toBeNull();
   });
 });
