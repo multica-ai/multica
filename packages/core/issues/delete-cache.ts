@@ -47,11 +47,11 @@ export function collectDeletedIssueCacheMetadata(
   const detail = qc.getQueryData<Issue>(issueKeys.detail(wsId, issueId));
   collectParentId(parentIssueIds, detail?.parent_issue_id);
 
-  collectParentFromListCache(
-    parentIssueIds,
-    qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId)),
-    issueId,
-  );
+  for (const [, data] of qc.getQueriesData<ListIssuesCache>({
+    queryKey: issueKeys.list(wsId),
+  })) {
+    collectParentFromListCache(parentIssueIds, data, issueId);
+  }
 
   for (const [, data] of qc.getQueriesData<ListIssuesCache>({
     queryKey: issueKeys.myAll(wsId),
@@ -76,9 +76,13 @@ export function pruneDeletedIssueFromListCaches(
   wsId: string,
   issueId: string,
 ) {
-  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-    old ? removeIssueFromBuckets(old, issueId) : old,
-  );
+  for (const [key] of qc.getQueriesData<ListIssuesCache>({
+    queryKey: issueKeys.list(wsId),
+  })) {
+    qc.setQueryData<ListIssuesCache>(key, (old) =>
+      old ? removeIssueFromBuckets(old, issueId) : old,
+    );
+  }
 
   for (const [key] of qc.getQueriesData<ListIssuesCache>({
     queryKey: issueKeys.myAll(wsId),

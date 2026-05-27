@@ -1,0 +1,127 @@
+# -----------------------------------------------------------------------------
+# Container images
+# -----------------------------------------------------------------------------
+images:
+  backend:
+    repository: ghcr.io/multica-ai/multica-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: ghcr.io/multica-ai/multica-web
+    tag: latest
+    pullPolicy: IfNotPresent
+  postgres:
+    repository: pgvector/pgvector
+    tag: pg17
+    pullPolicy: IfNotPresent
+
+# -----------------------------------------------------------------------------
+# Pre-created Secret with sensitive values. Create it before `helm install`:
+#
+#   kubectl -n <namespace> create secret generic multica-secrets \
+#     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
+#     --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+#     --from-literal=RESEND_API_KEY="" \
+#     --from-literal=GOOGLE_CLIENT_SECRET="" \
+#     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+#     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+#
+# The chart references this Secret by name; it does not template it, so real
+# values never need to land in git.
+# -----------------------------------------------------------------------------
+existingSecret: multica-secrets
+
+# -----------------------------------------------------------------------------
+# PostgreSQL (pgvector)
+# -----------------------------------------------------------------------------
+postgres:
+  database: multica
+  user: multica
+  persistence:
+    size: 10Gi
+    # Leave empty to use the cluster's default StorageClass.
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+# -----------------------------------------------------------------------------
+# Backend (Go API + WS server)
+# -----------------------------------------------------------------------------
+backend:
+  replicas: 1
+  uploads:
+    persistence:
+      size: 5Gi
+      storageClass: ""
+  # All non-secret backend env. Secret values come from `existingSecret`.
+  config:
+    appEnv: production
+    appUrl: http://multica.dev.lan
+    frontendOrigin: http://multica.dev.lan
+    corsAllowedOrigins: ""
+    cookieDomain: ""
+    resendFromEmail: noreply@multica.ai
+    allowSignup: true
+    allowedEmails: ""
+    allowedEmailDomains: ""
+    googleClientId: ""
+    googleRedirectUri: http://multica.dev.lan/auth/callback
+    s3Bucket: ""
+    s3Region: us-west-2
+    cloudfrontDomain: ""
+    cloudfrontKeyPairId: ""
+    localUploadBaseUrl: http://api.multica.dev.lan
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+# -----------------------------------------------------------------------------
+# Frontend (Next.js standalone)
+#
+# The multica-web image bakes REMOTE_API_URL=http://backend:8080 at build time;
+# the chart ships an ExternalName Service named "backend" so that bare host
+# resolves to the in-cluster backend Service.
+# -----------------------------------------------------------------------------
+frontend:
+  replicas: 1
+  # Compatibility shim for the prebuilt multica-web image.
+  compatibility:
+    # When true (default) the chart creates an ExternalName Service literally
+    # named "backend" so the REMOTE_API_URL=http://backend:8080 baked into the
+    # web image resolves in-cluster. Because that name is unprefixed, only ONE
+    # release of this chart can run per namespace, and it will collide with any
+    # pre-existing Service/backend (helm install then fails without
+    # --take-ownership). Set to false if you run a web image built with a
+    # patched REMOTE_API_URL and don't need the alias.
+    backendAlias: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+# -----------------------------------------------------------------------------
+# Ingress
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: traefik
+  annotations: {}
+  frontend:
+    host: multica.dev.lan
+  backend:
+    host: api.multica.dev.lan
+  # tls:
+  #   - hosts: [multica.dev.lan, api.multica.dev.lan]
+  #     secretName: multica-tls

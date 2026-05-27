@@ -38,7 +38,7 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import { AttachmentList } from "@multica/cerebro-attachments/views";
-import type { TimelineEntry } from "@multica/core/types";
+import type { Attachment, TimelineEntry } from "@multica/core/types";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 
@@ -102,7 +102,7 @@ interface CommentCardProps {
    */
   canModerate?: boolean;
   onReply: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
-  onEdit: (commentId: string, content: string) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   /** True when the root thread can be lifted into a child issue. */
@@ -199,6 +199,34 @@ function MoveCommentToSubIssueDialog({
   );
 }
 
+function collectActiveAttachmentIds(
+  content: string,
+  attachments: Attachment[],
+  retainedStandaloneIds?: Set<string> | null,
+): string[] {
+  const ids = new Set<string>();
+  for (const attachment of attachments) {
+    if (content.includes(attachment.url)) ids.add(attachment.id);
+  }
+  for (const id of retainedStandaloneIds ?? []) ids.add(id);
+  return [...ids];
+}
+
+function sameIdSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((id) => set.has(id));
+}
+
+function initialStandaloneAttachmentIds(entry: TimelineEntry): Set<string> {
+  const content = entry.content ?? "";
+  return new Set(
+    (entry.attachments ?? [])
+      .filter((attachment) => !content.includes(attachment.url))
+      .map((attachment) => attachment.id),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Single comment row (used for both parent and replies within the same Card)
 // ---------------------------------------------------------------------------
@@ -216,7 +244,7 @@ function CommentRow({
   entry: TimelineEntry;
   currentUserId?: string;
   canModerate?: boolean;
-  onEdit: (commentId: string, content: string) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
 }) {
@@ -227,6 +255,18 @@ function CommentRow({
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
   const { uploadWithToast } = useFileUpload(api);
+  // Pending uploads from this edit pass. Merged with `entry.attachments` so
+  // newly uploaded text/code files get an Eye button in the edit-mode editor;
+  // the active subset is sent as `attachmentIds` on save so the server binds
+  // them to the comment (otherwise they'd remain orphaned at the issue level
+  // and disappear after refresh).
+  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  const [retainedStandaloneIds, setRetainedStandaloneIds] = useState<Set<string> | null>(null);
+  const handleEditUpload = useCallback(async (file: File) => {
+    const result = await uploadWithToast(file, { issueId });
+    if (result) setPendingAttachments((prev) => [...prev, result]);
+    return result;
+  }, [uploadWithToast, issueId]);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editEditorRef.current?.uploadFile(f)),
     enabled: editing,
@@ -235,17 +275,21 @@ function CommentRow({
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
+  // CEREBRO-PATCH(comment-temp-optimistic): dim + gate reactions on optimistic temp rows.
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const startEdit = () => {
     cancelledRef.current = false;
+    setRetainedStandaloneIds(initialStandaloneAttachmentIds(entry));
     setEditing(true);
   };
 
   const cancelEdit = () => {
     cancelledRef.current = true;
     setEditing(false);
+    setPendingAttachments([]);
+    setRetainedStandaloneIds(null);
   };
 
   const saveEdit = async () => {
@@ -254,21 +298,39 @@ function CommentRow({
       ?.getMarkdown()
       ?.replace(/(\n\s*)+$/, "")
       .trim();
-    if (!trimmed || trimmed === (entry.content ?? "").trim()) {
+    if (!trimmed) return;
+    const activeIds = collectActiveAttachmentIds(
+      trimmed,
+      [...(entry.attachments ?? []), ...pendingAttachments],
+      retainedStandaloneIds,
+    );
+    const attachmentsChanged = !sameIdSet(activeIds, (entry.attachments ?? []).map((a) => a.id));
+    if (trimmed === (entry.content ?? "").trim() && !attachmentsChanged) {
       setEditing(false);
+      setPendingAttachments([]);
+      setRetainedStandaloneIds(null);
       return;
     }
     try {
-      await onEdit(entry.id, trimmed);
+      await onEdit(entry.id, trimmed, activeIds);
       setEditing(false);
-    } catch {
-      toast.error(t(($) => $.comment.update_failed));
+      setPendingAttachments([]);
+      setRetainedStandaloneIds(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.comment.update_failed),
+      );
     }
   };
 
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
+  const standaloneEditAttachments = (entry.attachments ?? []).filter((attachment) =>
+    retainedStandaloneIds?.has(attachment.id),
+  );
 
   return (
     <div className={`py-3${isTemp ? " opacity-60" : ""}`}>
@@ -290,12 +352,11 @@ function CommentRow({
           </TooltipContent>
         </Tooltip>
 
-        {!isTemp && (
-          <div className="ml-auto flex items-center gap-0.5">
-            <QuickEmojiPicker
-              onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
-              align="end"
-            />
+        <div className="ml-auto flex items-center gap-0.5">
+          <QuickEmojiPicker
+            onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
+            align="end"
+          />
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -337,8 +398,7 @@ function CommentRow({
             onOpenChange={setConfirmDelete}
             onConfirm={() => onDelete(entry.id)}
           />
-          </div>
-        )}
+        </div>
       </div>
 
       {editing ? (
@@ -359,13 +419,29 @@ function CommentRow({
             />
           </div>
           <div className="flex items-center justify-between mt-2">
-            {/* CEREBRO-PATCH(file-upload-button-api): new onAttach/onEmbed
-                prop API on FileUploadButton (popup picker). */}
-            <FileUploadButton
-              size="sm"
-              onAttach={(files) => files.forEach((f) => editEditorRef.current?.uploadFile(f))}
-              onEmbed={(files) => files.forEach((f) => editEditorRef.current?.uploadFile(f, { embedImage: true }))}
-            />
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              {standaloneEditAttachments.length > 0 && (
+                <AttachmentList
+                  attachments={standaloneEditAttachments}
+                  className="max-w-full"
+                  onRemove={(attachmentId) =>
+                    setRetainedStandaloneIds((ids) => {
+                      const next = new Set(ids ?? []);
+                      next.delete(attachmentId);
+                      return next;
+                    })
+                  }
+                />
+              )}
+              {/* CEREBRO-PATCH(file-upload-button-api): onAttach/onEmbed popup picker;
+                  uploads route through handleEditUpload so they bind on save. */}
+              <FileUploadButton
+                size="sm"
+                multiple
+                onAttach={(files) => files.forEach((f) => handleEditUpload(f))}
+                onEmbed={(files) => files.forEach((f) => editEditorRef.current?.uploadFile(f, { embedImage: true }))}
+              />
+            </div>
             <div className="flex items-center gap-2">
               <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
               <Button size="sm" variant="outline" onClick={saveEdit}>{t(($) => $.comment.save_action)}</Button>
@@ -428,6 +504,14 @@ function CommentCardImpl({
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
+  // Pending uploads from the root-comment edit pass — same rationale as CommentRow.
+  const [parentPendingAttachments, setParentPendingAttachments] = useState<Attachment[]>([]);
+  const [parentRetainedStandaloneIds, setParentRetainedStandaloneIds] = useState<Set<string> | null>(null);
+  const handleParentEditUpload = useCallback(async (file: File) => {
+    const result = await uploadWithToast(file, { issueId });
+    if (result) setParentPendingAttachments((prev) => [...prev, result]);
+    return result;
+  }, [uploadWithToast, issueId]);
   const { isDragOver: parentDragOver, dropZoneProps: parentDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editEditorRef.current?.uploadFile(f)),
     enabled: editing,
@@ -440,6 +524,7 @@ function CommentCardImpl({
   // own their own outputs.
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
+  // CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 lift-thread gating + optimistic temp dimming.
   const canMoveEntry = canMoveToSubIssue && !!onMoveToSubIssue && (isOwn || canModerate);
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -448,12 +533,15 @@ function CommentCardImpl({
 
   const startEdit = () => {
     cancelledRef.current = false;
+    setParentRetainedStandaloneIds(initialStandaloneAttachmentIds(entry));
     setEditing(true);
   };
 
   const cancelEdit = () => {
     cancelledRef.current = true;
     setEditing(false);
+    setParentPendingAttachments([]);
+    setParentRetainedStandaloneIds(null);
   };
 
   const saveEdit = async () => {
@@ -462,15 +550,30 @@ function CommentCardImpl({
       ?.getMarkdown()
       ?.replace(/(\n\s*)+$/, "")
       .trim();
-    if (!trimmed || trimmed === (entry.content ?? "").trim()) {
+    if (!trimmed) return;
+    const activeIds = collectActiveAttachmentIds(
+      trimmed,
+      [...(entry.attachments ?? []), ...parentPendingAttachments],
+      parentRetainedStandaloneIds,
+    );
+    const attachmentsChanged = !sameIdSet(activeIds, (entry.attachments ?? []).map((a) => a.id));
+    if (trimmed === (entry.content ?? "").trim() && !attachmentsChanged) {
       setEditing(false);
+      setParentPendingAttachments([]);
+      setParentRetainedStandaloneIds(null);
       return;
     }
     try {
-      await onEdit(entry.id, trimmed);
+      await onEdit(entry.id, trimmed, activeIds);
       setEditing(false);
-    } catch {
-      toast.error(t(($) => $.comment.update_failed));
+      setParentPendingAttachments([]);
+      setParentRetainedStandaloneIds(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.comment.update_failed),
+      );
     }
   };
 
@@ -484,7 +587,11 @@ function CommentCardImpl({
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
+  // CEREBRO-PATCH(comment-user-question-badge): highlight comments that are user questions.
   const isQuestion = isUserQuestionComment(entry);
+  const parentStandaloneEditAttachments = (entry.attachments ?? []).filter((attachment) =>
+    parentRetainedStandaloneIds?.has(attachment.id),
+  );
 
   const isHighlighted = highlightedCommentId === entry.id;
   const handleConfirmMove = useCallback(async () => {
@@ -565,7 +672,7 @@ function CommentCardImpl({
               </span>
             )}
 
-            {open && !isTemp && (
+            {open && (
               <div className="ml-auto flex items-center gap-0.5">
                 <QuickEmojiPicker
                   onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
@@ -674,13 +781,29 @@ function CommentCardImpl({
                   />
                 </div>
                 <div className="flex items-center justify-between mt-2">
-                  {/* CEREBRO-PATCH(file-upload-button-api): new
-                      onAttach/onEmbed prop API on FileUploadButton. */}
-                  <FileUploadButton
-                    size="sm"
-                    onAttach={(files) => files.forEach((f) => editEditorRef.current?.uploadFile(f))}
-                    onEmbed={(files) => files.forEach((f) => editEditorRef.current?.uploadFile(f, { embedImage: true }))}
-                  />
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    {parentStandaloneEditAttachments.length > 0 && (
+                      <AttachmentList
+                        attachments={parentStandaloneEditAttachments}
+                        className="max-w-full"
+                        onRemove={(attachmentId) =>
+                          setParentRetainedStandaloneIds((ids) => {
+                            const next = new Set(ids ?? []);
+                            next.delete(attachmentId);
+                            return next;
+                          })
+                        }
+                      />
+                    )}
+                    {/* CEREBRO-PATCH(file-upload-button-api): onAttach/onEmbed popup picker;
+                        uploads route through handleParentEditUpload so they bind on save. */}
+                    <FileUploadButton
+                      size="sm"
+                      multiple
+                      onAttach={(files) => files.forEach((f) => handleParentEditUpload(f))}
+                      onEmbed={(files) => files.forEach((f) => editEditorRef.current?.uploadFile(f, { embedImage: true }))}
+                    />
+                  </div>
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
                     <Button size="sm" variant="outline" onClick={saveEdit}>{t(($) => $.comment.save_action)}</Button>

@@ -17,12 +17,15 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
-// freshAgentUpdateCmd returns a standalone cobra.Command with the three
-// --custom-env* flags registered identically to agentUpdateCmd, so tests
-// can mutate flag state without leaking across subtests (the package-level
-// agentUpdateCmd has no Reset).
-func freshAgentUpdateCmd() *cobra.Command {
-	c := &cobra.Command{Use: "update"}
+// freshAgentEnvSetCmd returns a standalone cobra.Command with the three
+// --custom-env* flags registered identically to agentEnvSetCmd, so
+// resolveCustomEnv-shaped tests can mutate flag state without leaking
+// across subtests. After MUL-2600 the same three flags are registered
+// on `agent create` and `agent env set` (NOT on `agent update`), but
+// the parser they drive is shared, so a single fresh-command helper
+// covers both call sites.
+func freshAgentEnvSetCmd() *cobra.Command {
+	c := &cobra.Command{Use: "set"}
 	c.Flags().String("custom-env", "", "")
 	c.Flags().Bool("custom-env-stdin", false, "")
 	c.Flags().String("custom-env-file", "", "")
@@ -105,10 +108,10 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 	})
 }
 
-// TestParseCustomEnv covers the --custom-env flag parser used by both
-// `agent create` and `agent update`. The flag accepts a JSON object of
-// string keys and values; the only clear signal is the explicit "{}"
-// (server treats a non-nil empty map on update as a clear). Empty or
+// TestParseCustomEnv covers the --custom-env flag parser used by
+// `agent create` and `agent env set`. The flag accepts a JSON object
+// of string keys and values; the only clear signal is the explicit
+// "{}" (server treats a non-nil empty map as a clear). Empty or
 // whitespace-only input must error — that path nearly always means an
 // upstream failure rather than a deliberate clear, especially via the
 // stdin/file channels.
@@ -186,12 +189,12 @@ func TestParseCustomEnv(t *testing.T) {
 	}
 }
 
-// TestAgentUpdateNoFieldsErrorMentionsAllCustomEnvFlags actually invokes
-// runAgentUpdate with no flags set and asserts the resulting "no fields"
-// error mentions all three --custom-env channels by name. This guards
-// against the discoverability regression we'd see if a future edit
-// dropped one of the flag names from the hint.
-func TestAgentUpdateNoFieldsErrorMentionsAllCustomEnvFlags(t *testing.T) {
+// TestAgentUpdateNoFieldsErrorPointsAtEnvCommand invokes runAgentUpdate
+// with no flags set and asserts the resulting "no fields" error
+// directs the user toward the new env subcommand. After MUL-2600 the
+// --custom-env* flags are gone from `agent update`; the hint must
+// surface their replacement so users discover the new audited path.
+func TestAgentUpdateNoFieldsErrorPointsAtEnvCommand(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
 	t.Setenv("MULTICA_WORKSPACE_ID", "test-ws")
@@ -199,10 +202,6 @@ func TestAgentUpdateNoFieldsErrorMentionsAllCustomEnvFlags(t *testing.T) {
 	t.Setenv("MULTICA_AGENT_ID", "")
 	t.Setenv("MULTICA_TASK_ID", "")
 
-	// Build a fresh command with the same flag surface as agentUpdateCmd
-	// but without the package-level state, so cmd.Flags().Changed(...)
-	// returns false for every field and runAgentUpdate falls into the
-	// "no fields to update" branch.
 	cmd := &cobra.Command{Use: "update"}
 	cmd.Flags().String("name", "", "")
 	cmd.Flags().String("description", "", "")
@@ -211,9 +210,6 @@ func TestAgentUpdateNoFieldsErrorMentionsAllCustomEnvFlags(t *testing.T) {
 	cmd.Flags().String("runtime-config", "", "")
 	cmd.Flags().String("model", "", "")
 	cmd.Flags().String("custom-args", "", "")
-	cmd.Flags().String("custom-env", "", "")
-	cmd.Flags().Bool("custom-env-stdin", false, "")
-	cmd.Flags().String("custom-env-file", "", "")
 	cmd.Flags().String("visibility", "", "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().Int32("max-concurrent-tasks", 0, "")
@@ -225,11 +221,19 @@ func TestAgentUpdateNoFieldsErrorMentionsAllCustomEnvFlags(t *testing.T) {
 		t.Fatal("runAgentUpdate with no flags: expected 'no fields' error, got nil")
 	}
 	msg := err.Error()
-	// "--custom-env (" matches the bare flag specifically, not its -stdin /
-	// -file siblings, so we can prove all three names are present.
-	for _, want := range []string{"--custom-env (", "--custom-env-stdin", "--custom-env-file"} {
-		if !strings.Contains(msg, want) {
-			t.Fatalf("no-fields error must mention %q; got: %q", want, msg)
+	if !strings.Contains(msg, "multica agent env set") {
+		t.Fatalf("no-fields error must direct users to `multica agent env set`; got: %q", msg)
+	}
+}
+
+// TestAgentUpdateDoesNotExposeCustomEnvFlags is the inverse guarantee
+// for the above test: if someone re-adds the --custom-env* flags to
+// `agent update`, this fails loudly. The /env path is the only
+// audited surface and we don't want a silent regression.
+func TestAgentUpdateDoesNotExposeCustomEnvFlags(t *testing.T) {
+	for _, flag := range []string{"custom-env", "custom-env-stdin", "custom-env-file"} {
+		if agentUpdateCmd.Flag(flag) != nil {
+			t.Errorf("agent update must NOT expose --%s after MUL-2600; use `multica agent env set` instead", flag)
 		}
 	}
 }
@@ -274,18 +278,19 @@ func TestParseCustomArgsErrorSanitization(t *testing.T) {
 	}
 }
 
-// TestAgentCreateAndUpdateExposeSecretSafeFlags guarantees the
+// TestAgentCreateAndEnvSetExposeSecretSafeFlags guarantees the
 // --custom-env-stdin and --custom-env-file alternatives stay wired
-// up on both commands. They exist specifically so callers can keep
+// up on both commands that accept env input (`agent create` and the
+// new `agent env set`). They exist specifically so callers can keep
 // secret material out of shell history / 'ps'; regressing either
 // surface reopens the foot-gun.
-func TestAgentCreateAndUpdateExposeSecretSafeFlags(t *testing.T) {
+func TestAgentCreateAndEnvSetExposeSecretSafeFlags(t *testing.T) {
 	for _, flag := range []string{"custom-env-stdin", "custom-env-file"} {
 		if agentCreateCmd.Flag(flag) == nil {
 			t.Fatalf("agent create must expose --%s", flag)
 		}
-		if agentUpdateCmd.Flag(flag) == nil {
-			t.Fatalf("agent update must expose --%s", flag)
+		if agentEnvSetCmd.Flag(flag) == nil {
+			t.Fatalf("agent env set must expose --%s", flag)
 		}
 	}
 	// The --custom-env help text must warn users that argv is visible
@@ -295,7 +300,7 @@ func TestAgentCreateAndUpdateExposeSecretSafeFlags(t *testing.T) {
 		usage string
 	}{
 		{"agent create", agentCreateCmd.Flag("custom-env").Usage},
-		{"agent update", agentUpdateCmd.Flag("custom-env").Usage},
+		{"agent env set", agentEnvSetCmd.Flag("custom-env").Usage},
 	} {
 		low := strings.ToLower(c.usage)
 		if !strings.Contains(low, "shell history") || !strings.Contains(low, "'ps'") {
@@ -308,7 +313,7 @@ func TestAgentCreateAndUpdateExposeSecretSafeFlags(t *testing.T) {
 // flag, stdin, file, mutual exclusion, and the "not supplied" path.
 func TestResolveCustomEnv(t *testing.T) {
 	t.Run("not supplied", func(t *testing.T) {
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		got, ok, err := resolveCustomEnv(cmd)
 		if err != nil || ok || got != nil {
 			t.Fatalf("unset flags: got=%v ok=%v err=%v", got, ok, err)
@@ -316,7 +321,7 @@ func TestResolveCustomEnv(t *testing.T) {
 	})
 
 	t.Run("inline flag", func(t *testing.T) {
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		if err := cmd.Flags().Set("custom-env", `{"A":"1"}`); err != nil {
 			t.Fatal(err)
 		}
@@ -330,7 +335,7 @@ func TestResolveCustomEnv(t *testing.T) {
 	})
 
 	t.Run("stdin", func(t *testing.T) {
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		if err := cmd.Flags().Set("custom-env-stdin", "true"); err != nil {
 			t.Fatal(err)
 		}
@@ -350,7 +355,7 @@ func TestResolveCustomEnv(t *testing.T) {
 		if err := os.WriteFile(path, []byte(`{"C":"3"}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		if err := cmd.Flags().Set("custom-env-file", path); err != nil {
 			t.Fatal(err)
 		}
@@ -364,7 +369,7 @@ func TestResolveCustomEnv(t *testing.T) {
 	})
 
 	t.Run("mutually exclusive: inline + stdin", func(t *testing.T) {
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		_ = cmd.Flags().Set("custom-env", `{"A":"1"}`)
 		_ = cmd.Flags().Set("custom-env-stdin", "true")
 		_, _, err := resolveCustomEnv(cmd)
@@ -379,7 +384,7 @@ func TestResolveCustomEnv(t *testing.T) {
 		if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		_ = cmd.Flags().Set("custom-env", `{}`)
 		_ = cmd.Flags().Set("custom-env-file", path)
 		_, _, err := resolveCustomEnv(cmd)
@@ -394,7 +399,7 @@ func TestResolveCustomEnv(t *testing.T) {
 		if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		_ = cmd.Flags().Set("custom-env-stdin", "true")
 		_ = cmd.Flags().Set("custom-env-file", path)
 		_, _, err := resolveCustomEnv(cmd)
@@ -404,7 +409,7 @@ func TestResolveCustomEnv(t *testing.T) {
 	})
 
 	t.Run("file: missing path surfaces filesystem error", func(t *testing.T) {
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		_ = cmd.Flags().Set("custom-env-file", filepath.Join(t.TempDir(), "does-not-exist.json"))
 		_, _, err := resolveCustomEnv(cmd)
 		if err == nil || !strings.Contains(err.Error(), "--custom-env-file") {
@@ -417,7 +422,7 @@ func TestResolveCustomEnv(t *testing.T) {
 	// The resolver must reject it with a channel-specific error so the
 	// secret map is never silently wiped.
 	t.Run("stdin: empty input errors", func(t *testing.T) {
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		_ = cmd.Flags().Set("custom-env-stdin", "true")
 		cmd.SetIn(bytes.NewBufferString(""))
 		_, _, err := resolveCustomEnv(cmd)
@@ -427,7 +432,7 @@ func TestResolveCustomEnv(t *testing.T) {
 	})
 
 	t.Run("stdin: whitespace-only input errors", func(t *testing.T) {
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		_ = cmd.Flags().Set("custom-env-stdin", "true")
 		cmd.SetIn(bytes.NewBufferString("   \n\t "))
 		_, _, err := resolveCustomEnv(cmd)
@@ -437,7 +442,7 @@ func TestResolveCustomEnv(t *testing.T) {
 	})
 
 	t.Run("stdin: explicit {} still clears", func(t *testing.T) {
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		_ = cmd.Flags().Set("custom-env-stdin", "true")
 		cmd.SetIn(bytes.NewBufferString("{}"))
 		got, ok, err := resolveCustomEnv(cmd)
@@ -455,7 +460,7 @@ func TestResolveCustomEnv(t *testing.T) {
 		if err := os.WriteFile(path, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		_ = cmd.Flags().Set("custom-env-file", path)
 		_, _, err := resolveCustomEnv(cmd)
 		if err == nil || !strings.Contains(err.Error(), "--custom-env-file") || !strings.Contains(err.Error(), "{}") {
@@ -464,7 +469,7 @@ func TestResolveCustomEnv(t *testing.T) {
 	})
 
 	t.Run("file: empty path errors instead of being silently swallowed", func(t *testing.T) {
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		// Mark the flag as Changed with an empty value — previously this
 		// was swallowed by the && filePath != "" guard.
 		_ = cmd.Flags().Set("custom-env-file", "")
@@ -483,7 +488,7 @@ func TestResolveCustomEnv(t *testing.T) {
 		if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		cmd := freshAgentUpdateCmd()
+		cmd := freshAgentEnvSetCmd()
 		_ = cmd.Flags().Set("custom-env-file", path)
 		got, ok, err := resolveCustomEnv(cmd)
 		if err != nil || !ok {
@@ -752,7 +757,6 @@ func TestAgentAvatarUpdateFailure(t *testing.T) {
 	}
 }
 
-
 // TestAgentAvatarMissingFileFlag rejects when --file is not provided.
 func TestAgentAvatarMissingFileFlag(t *testing.T) {
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
@@ -889,13 +893,13 @@ func TestAgentGetTableIncludesAvatarURL(t *testing.T) {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		json.NewEncoder(w).Encode(map[string]any{
-			"id":         "agent-123",
-			"name":       "TestAgent",
-			"status":     "active",
+			"id":           "agent-123",
+			"name":         "TestAgent",
+			"status":       "active",
 			"runtime_mode": "cloud",
-			"visibility": "workspace",
-			"avatar_url": "https://cdn.example.com/avatar.png",
-			"description": "A test agent",
+			"visibility":   "workspace",
+			"avatar_url":   "https://cdn.example.com/avatar.png",
+			"description":  "A test agent",
 		})
 	}))
 	defer srv.Close()

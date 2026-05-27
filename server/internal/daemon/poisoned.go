@@ -116,7 +116,9 @@ func classifyResumeUnsafeTimeout(provider, errMsg string) (string, bool) {
 	if strings.ToLower(strings.TrimSpace(provider)) != "codex" || errMsg == "" {
 		return "", false
 	}
-	if strings.Contains(strings.ToLower(errMsg), strings.ToLower(agent.CodexSemanticInactivityMarker)) {
+	lowered := strings.ToLower(errMsg)
+	if strings.Contains(lowered, strings.ToLower(agent.CodexSemanticInactivityMarker)) ||
+		strings.Contains(lowered, strings.ToLower(agent.CodexFirstTurnNoProgressMarker)) {
 		return FailureReasonCodexSemanticInactivity, true
 	}
 	return "", false

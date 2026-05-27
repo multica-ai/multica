@@ -50,7 +50,7 @@ import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import "katex/dist/katex.min.css";
-import "./content-editor.css";
+import "./styles/index.css";
 
 // ---------------------------------------------------------------------------
 // Helpers

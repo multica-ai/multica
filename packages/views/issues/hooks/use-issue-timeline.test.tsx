@@ -177,6 +177,62 @@ describe("useIssueTimeline", () => {
     expect(updated.map((e) => e.id)).toEqual(["new-c"]);
   });
 
+  it("comment:created inserts at the correct sorted position by created_at", () => {
+    queryState.data = [
+      { type: "comment", id: "c1", actor_type: "member", actor_id: "u", created_at: "2026-05-06T01:00:00Z" },
+      { type: "comment", id: "c3", actor_type: "member", actor_id: "u", created_at: "2026-05-06T03:00:00Z" },
+    ];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const handler = wsHandlers.get("comment:created");
+    act(() => {
+      handler!({
+        comment: {
+          id: "c2",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "u",
+          content: "",
+          parent_id: null,
+          created_at: "2026-05-06T02:00:00Z",
+          updated_at: "2026-05-06T02:00:00Z",
+          type: "comment",
+          reactions: [],
+          attachments: [],
+        },
+      });
+    });
+    const updated = cacheUpdates.last as Array<{ id: string }>;
+    expect(updated.map((e) => e.id)).toEqual(["c1", "c2", "c3"]);
+  });
+
+  it("comment:created re-sorts when the new entry is oldest", () => {
+    queryState.data = [
+      { type: "comment", id: "c2", actor_type: "member", actor_id: "u", created_at: "2026-05-06T02:00:00Z" },
+      { type: "comment", id: "c3", actor_type: "member", actor_id: "u", created_at: "2026-05-06T03:00:00Z" },
+    ];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const handler = wsHandlers.get("comment:created");
+    act(() => {
+      handler!({
+        comment: {
+          id: "c1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "u",
+          content: "",
+          parent_id: null,
+          created_at: "2026-05-06T01:00:00Z",
+          updated_at: "2026-05-06T01:00:00Z",
+          type: "comment",
+          reactions: [],
+          attachments: [],
+        },
+      });
+    });
+    const updated = cacheUpdates.last as Array<{ id: string }>;
+    expect(updated.map((e) => e.id)).toEqual(["c1", "c2", "c3"]);
+  });
+
   it("ignores WS events for other issues", () => {
     queryState.data = [];
     renderHook(() => useIssueTimeline("issue-1", "user-1"));

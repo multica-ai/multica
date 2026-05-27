@@ -176,4 +176,4 @@ iOS 移动端代码位于 [`apps/mobile/`](apps/mobile/)，自己编译装到手
 
 ## 开源协议
 
-[Apache 2.0](LICENSE)
+[Modified Apache 2.0 (with commercial restrictions)](LICENSE)

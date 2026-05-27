@@ -7,3 +7,4 @@ public/swe-worker-*.js
 public/workbox-*.js
 
 .vercel
+.source/

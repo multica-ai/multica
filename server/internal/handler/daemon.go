@@ -33,10 +33,11 @@ import (
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
-// taskTokenTTL bounds the blast radius of an exfiltrated per-task
-// token. Long enough for any realistic single agent run; short enough
-// that a stolen token expires before it can be reused tomorrow.
-const taskTokenTTL = 1 * time.Hour
+// taskTokenTTL bounds the blast radius of an exfiltrated per-task token.
+// Upstream (MUL-2600) sets 24h so the token survives long-running agent
+// tasks without expiring mid-run; the identity binding (actor=agent, no
+// owner-only endpoints) is what limits the blast radius, not the TTL.
+const taskTokenTTL = 24 * time.Hour
 
 // workspaceIDForTask returns the workspace UUID that owns this task,
 // resolved via issue_id, chat_session_id, or autopilot_run_id —
@@ -70,10 +71,14 @@ func (h *Handler) workspaceIDForTask(ctx context.Context, task db.AgentTaskQueue
 	return pgtype.UUID{}, nil
 }
 
-// mintTaskToken generates and stores a task-scoped token. Returns the
-// plain-text token to hand to the daemon — only the hash is persisted.
-func (h *Handler) mintTaskToken(ctx context.Context, task db.AgentTaskQueue, workspaceID string) (string, error) {
-	raw, err := auth.GenerateTaskToken()
+// mintTaskToken generates and stores a task-scoped `mat_` token bound to
+// (agent, task, workspace, owner). Returns the plain-text token to hand to the
+// daemon — only the hash is persisted. Adopts upstream's MUL-2600 model
+// (replacing the fork's mtt_ / BYTEA scheme from JEH-324): the bound user_id is
+// the runtime owner so member-shaped reads still resolve, while actor identity
+// stays agent-only server-side.
+func (h *Handler) mintTaskToken(ctx context.Context, task db.AgentTaskQueue, workspaceID string, ownerID pgtype.UUID) (string, error) {
+	raw, err := auth.GenerateAgentTaskToken()
 	if err != nil {
 		return "", fmt.Errorf("generate task token: %w", err)
 	}
@@ -81,13 +86,12 @@ func (h *Handler) mintTaskToken(ctx context.Context, task db.AgentTaskQueue, wor
 	wsUUID := pgtype.UUID{}
 	_ = wsUUID.Scan(workspaceID)
 
-	if err := h.Queries.CreateTaskToken(ctx, db.CreateTaskTokenParams{
-		TokenHash:   auth.HashTokenBytes(raw),
+	if _, err := h.Queries.CreateTaskToken(ctx, db.CreateTaskTokenParams{
+		TokenHash:   auth.HashToken(raw),
 		TaskID:      task.ID,
-		IssueID:     task.IssueID,
 		AgentID:     task.AgentID,
 		WorkspaceID: wsUUID,
-		Scope:       "task",
+		UserID:      ownerID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(taskTokenTTL), Valid: true},
 	}); err != nil {
 		return "", fmt.Errorf("persist task token: %w", err)
@@ -260,7 +264,7 @@ func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
 			continue
 		}
 		seen[url] = struct{}{}
-		normalized = append(normalized, RepoData{URL: url})
+		normalized = append(normalized, RepoData{URL: url, Description: repo.Description})
 	}
 	return normalized
 }
@@ -1916,18 +1920,22 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// CEREBRO-PATCH(per-task-token): mint a per-task token (mtt_) the daemon
-	// will inject as MULTICA_TOKEN for the spawned agent process. Scoped to
-	// the task's issue/agent/workspace; expires after taskTokenTTL. Replaces
-	// the previous behavior where the daemon shared its full PAT with every
-	// agent.
-	token, err := h.mintTaskToken(r.Context(), *task, resp.WorkspaceID)
-	if err != nil {
-		slog.Error("mint task token failed", "task_id", uuidToString(task.ID), "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to mint task token")
-		return
+	// Mint a task-scoped `mat_` token bound to (agent, task, workspace, owner)
+	// the daemon injects as MULTICA_TOKEN for the spawned agent process. The
+	// server treats it as actor=agent regardless of headers, so owner-only
+	// endpoints (e.g. /api/agents/{id}/env) reject agent traffic (MUL-2600).
+	// Skip silently when the runtime has no owning user (cloud / system
+	// runtimes) — the daemon then falls back to its own credential.
+	if runtime.OwnerID.Valid {
+		token, err := h.mintTaskToken(r.Context(), *task, resp.WorkspaceID, runtime.OwnerID)
+		if err != nil {
+			outcome = "error_token"
+			slog.Error("mint task token failed", "task_id", uuidToString(task.ID), "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to mint task token")
+			return
+		}
+		resp.AuthToken = token
 	}
-	resp.TaskToken = token
 
 	// Workspace-level Context (workspace.context DB column) — the per-workspace
 	// system prompt that workspace owners set in Settings → General. Inject it
@@ -2062,6 +2070,16 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.emitIssueExecutedOnFirstCompletion(r, task)
+
+	// Best-effort revoke of any agent task token minted at claim time.
+	// The token would naturally expire at the 24h watermark and is also
+	// cascaded on agent_task deletion, but eagerly deleting it on
+	// completion shrinks the window where a compromised agent process
+	// can keep making API calls after its task finishes. Failure here is
+	// non-fatal; the expiry / cascade are the durable guards.
+	if err := h.Queries.DeleteTaskTokensByTask(r.Context(), task.ID); err != nil {
+		slog.Warn("complete task: failed to revoke task tokens", "task_id", uuidToString(task.ID), "error", err)
+	}
 
 	slog.Info("task completed", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
 	writeJSON(w, http.StatusOK, taskToResponse(*task))
@@ -2253,6 +2271,13 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("fail task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	// Best-effort revoke of the mat_ task token minted at claim. Same
+	// rationale as CompleteTask — eager deletion shrinks the post-
+	// terminal window. The 24h expiry / cascade are the durable guards.
+	if err := h.Queries.DeleteTaskTokensByTask(r.Context(), task.ID); err != nil {
+		slog.Warn("fail task: failed to revoke task tokens", "task_id", uuidToString(task.ID), "error", err)
 	}
 
 	slog.Info("task failed", "task_id", taskID, "agent_id", uuidToString(task.AgentID), "task_error", req.Error, "failure_reason", req.FailureReason)

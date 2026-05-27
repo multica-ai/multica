@@ -1,5 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+
+const { getAttachmentTextContentMock } = vi.hoisted(() => ({
+  getAttachmentTextContentMock: vi.fn(),
+}));
+
+vi.mock("@multica/core/api", () => ({
+  api: { getAttachmentTextContent: getAttachmentTextContentMock },
+  PreviewTooLargeError: class extends Error {},
+  PreviewUnsupportedError: class extends Error {},
+}));
 
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
@@ -190,6 +201,42 @@ describe("ReadonlyContent issue mention chip", () => {
     fireEvent.click(anchor!);
     expect(navigation.push).toHaveBeenCalledWith("/test/issues/issue-9");
     expect(navigation.openInNewTab).not.toHaveBeenCalled();
+  });
+});
+
+describe("ReadonlyContent code styling", () => {
+  const literalCode = "uv run --extra dev pytest -q";
+
+  it("renders inline and fenced code through rich-text-editor code selectors", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={[
+          `<code>${literalCode}</code>`,
+          "",
+          "```",
+          literalCode,
+          "```",
+        ].join("\n")}
+      />,
+    );
+
+    const inlineCode = Array.from(container.querySelectorAll("code")).find(
+      (code) => !code.closest("pre"),
+    );
+    const blockCode = container.querySelector("pre code");
+
+    expect(inlineCode?.textContent).toBe(literalCode);
+    expect(blockCode?.textContent).toBe(literalCode);
+  });
+
+  it("keeps editor code literal by disabling font ligatures", () => {
+    const codeCss = readFileSync("editor/styles/code.css", "utf8");
+
+    expect(codeCss).toContain(".rich-text-editor code");
+    expect(codeCss).toContain(".rich-text-editor pre");
+    expect(codeCss).toContain(".rich-text-editor pre code");
+    expect(codeCss).toContain("font-variant-ligatures: none;");
+    expect(codeCss).toContain('font-feature-settings: "liga" 0;');
   });
 });
 

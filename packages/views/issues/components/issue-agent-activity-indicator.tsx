@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   HoverCard,
@@ -46,7 +46,7 @@ interface IssueAgentActivityIndicatorProps {
  * Re-renders on every snapshot invalidation (WS task:* events drive it
  * via use-realtime-sync). 30s staleTime is the offline fallback only.
  */
-export function IssueAgentActivityIndicator({
+export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndicator({
   issueId,
   size = 12,
 }: IssueAgentActivityIndicatorProps) {
@@ -113,4 +113,4 @@ export function IssueAgentActivityIndicator({
       </HoverCardContent>
     </HoverCard>
   );
-}
+});

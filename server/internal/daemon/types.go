@@ -20,7 +20,8 @@ type Runtime struct {
 
 // RepoData holds repository information from the workspace.
 type RepoData struct {
-	URL string `json:"url"`
+	URL         string `json:"url"`
+	Description string `json:"description,omitempty"`
 }
 
 // ProjectResourceData mirrors handler.ProjectResourceData — a single project
@@ -94,11 +95,16 @@ type Task struct {
 	ChatHistory                      []ChatHistoryMessage `json:"chat_history,omitempty"`
 	ChatMessages                     []string             `json:"chat_messages,omitempty"`
 	ChatMessageID                    string               `json:"chat_message_id,omitempty"`
-	TaskToken                        string               `json:"task_token,omitempty"`
+	// AuthToken is the task-scoped credential the server mints at claim time.
+	// The daemon injects it into the spawned agent as MULTICA_TOKEN so the
+	// agent never sees the daemon's own (often workspace-owner) credential.
+	// Empty when the server-side runtime has no owning user — the daemon
+	// then falls back to its own token. See MUL-2600. Replaces the fork's
+	// own TaskToken field (JEH-324), now superseded by upstream's model.
+	AuthToken string `json:"auth_token,omitempty"`
 	// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — pre-created assistant chat_message UUID exposed to the agent as MULTICA_CHAT_MESSAGE_ID so the MCP add_attachment tool can link files to the in-flight chat reply.
 	// CEREBRO-PATCH(daemon-task-chat-messages): cerebro accumulates a list of
 	// CEREBRO-PATCH(daemon-task-user-profile-prompt): compiled per-user
-	// CEREBRO-PATCH(daemon-task-token): TaskToken is a short-lived (~1h),
 	// CEREBRO-PATCH(daemon-task-sandbox-enabled): per-runtime sandbox
 	// CEREBRO-PATCH(daemon-task-persona-spawn): JEH-1080 — spawning user + group memberships piped to the persona-hook as facts.
 	// CEREBRO-PATCH(types): persona integration additions.

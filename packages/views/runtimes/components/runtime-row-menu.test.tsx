@@ -28,7 +28,12 @@ vi.mock("@tanstack/react-query", async () => {
 });
 
 vi.mock("@multica/core/runtimes/mutations", () => ({
-  useDeleteRuntime: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteRuntime: () => ({ mutate: vi.fn(), isPending: false, mutateAsync: vi.fn() }),
+  useArchiveAgentsAndDeleteRuntime: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
 }));
 
 vi.mock("@multica/core/runtimes", () => ({
@@ -38,6 +43,27 @@ vi.mock("@multica/core/runtimes", () => ({
 
 vi.mock("@multica/core/agents", () => ({
   deriveWorkload: () => "idle",
+  useWorkspacePresenceMap: () => ({ byAgent: new Map(), loading: false }),
+}));
+
+// The unified DeleteRuntimeDialog the kebab now opens reaches into auth +
+// the api singleton. The dialog never renders in these tests (`open=false`
+// throughout) but its hooks still mount; stub them so module init is clean.
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (sel: (s: { user: { id: string } }) => unknown) =>
+    sel({ user: { id: "user-me" } }),
+}));
+
+vi.mock("@multica/core/api", () => ({
+  api: {
+    deleteRuntime: vi.fn(),
+    archiveAgentsAndDeleteRuntime: vi.fn(),
+  },
+  ApiError: class ApiError extends Error {},
+}));
+
+vi.mock("sonner", () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
 }));
 
 vi.mock("../../common/use-viewing-timezone", () => ({

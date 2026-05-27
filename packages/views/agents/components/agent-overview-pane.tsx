@@ -204,8 +204,8 @@ export function AgentOverviewPane({
           <TabContent>
             <EnvTab
               agent={agent}
+              // CEREBRO-PATCH(env-tab-redacted-readonly): gate edits when redacted by policy/role.
               readOnly={!canEdit || agent.custom_env_redacted}
-              onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
             />
           </TabContent>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import {
   useQuery,
   useQueryClient,
@@ -33,6 +33,7 @@ import {
   useToggleCommentReaction,
   type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
+import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
@@ -67,8 +68,6 @@ export function useIssueTimeline(issueId: string, userId?: string) {
 
   const timeline = useMemo<TimelineEntry[]>(() => data ?? [], [data]);
 
-  const [submitting, setSubmitting] = useState(false);
-
   // Stable mutation handles. TanStack v5 returns a fresh result wrapper from
   // useMutation per render, but the inner mutateAsync / mutate functions are
   // stable. Pull just those so the useCallback identities downstream don't
@@ -100,7 +99,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           const entry = commentToTimelineEntry(comment);
           if (!old) return [entry];
           if (old.some((e) => e.id === comment.id)) return old;
-          return [...old, entry];
+          return sortTimelineEntriesAsc([...old, entry]);
         });
       },
       [qc, issueId],
@@ -204,7 +203,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
           if (!old) return [entry];
           if (old.some((e) => e.id === entry.id)) return old;
-          return [...old, entry];
+          return sortTimelineEntriesAsc([...old, entry]);
         });
       },
       [qc, issueId],
@@ -261,17 +260,18 @@ export function useIssueTimeline(issueId: string, userId?: string) {
 
   const submitComment = useCallback(
     async (content: string, attachmentIds?: string[]) => {
-      if (!content.trim() || submitting || !userId) return;
-      setSubmitting(true);
+      if (!content.trim() || !userId) return;
       try {
         await createComment({ content, attachmentIds });
-      } catch {
-        toast.error(t(($) => $.comment.send_failed));
-      } finally {
-        setSubmitting(false);
+      } catch (err) {
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.comment.send_failed),
+        );
       }
     },
-    [userId, submitting, createComment, t],
+    [userId, createComment, t],
   );
 
   const submitReply = useCallback(
@@ -408,7 +408,6 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   return {
     timeline: optimisticTimeline,
     loading,
-    submitting,
     submitComment,
     submitReply,
     editComment,

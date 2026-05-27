@@ -28,6 +28,7 @@ interface FileUploadButtonProps {
   disabled?: boolean;
   className?: string;
   size?: "sm" | "default";
+  multiple?: boolean;
 }
 
 function FileUploadButton({
@@ -37,6 +38,7 @@ function FileUploadButton({
   disabled,
   className,
   size = "default",
+  multiple = false,
 }: FileUploadButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pendingImages, setPendingImages] = useState<File[]>([]);
@@ -106,7 +108,7 @@ function FileUploadButton({
       <input
         ref={inputRef}
         type="file"
-        multiple
+        multiple={multiple}
         className="hidden"
         onChange={handleChange}
       />

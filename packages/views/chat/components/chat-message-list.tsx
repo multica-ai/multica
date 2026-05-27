@@ -95,33 +95,36 @@ export function ChatMessageList({
   const showStatusPill = !!pendingTaskId && !pendingAssistantFinalized && !!pendingTask;
 
   return (
-    <div className="relative flex-1 min-h-0">
-      <div ref={scrollRef} style={fadeStyle} className="absolute inset-0 overflow-y-auto">
-        {/* Inner container matches issue / project detail width convention
-         *  (max-w-4xl + mx-auto) so switching between chat and content
-         *  views doesn't jolt the reading width. px-5 is a touch tighter
-         *  than issue-detail's px-8 because the chat window can be narrow. */}
-        <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
-          {messages.map((msg) => (
-            <MessageBubble
-              key={msg.id}
-              message={msg}
-              isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
-            />
-          ))}
-          {hasLive && (
-            <div className="w-full space-y-1.5">
-              <TimelineView items={liveTimeline} isStreaming />
-            </div>
-          )}
-          {showStatusPill && pendingTask && (
-            <TaskStatusPill
-              pendingTask={pendingTask}
-              taskMessages={liveTaskMessages ?? []}
-              availability={availability}
-            />
-          )}
-        </div>
+    <div
+      ref={scrollRef}
+      data-tab-scroll-root
+      style={fadeStyle}
+      className="flex-1 overflow-y-auto"
+    >
+      {/* Inner container matches issue / project detail width convention
+       *  (max-w-4xl + mx-auto) so switching between chat and content
+       *  views doesn't jolt the reading width. px-5 is a touch tighter
+       *  than issue-detail's px-8 because the chat window can be narrow. */}
+      <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
+        {messages.map((msg) => (
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
+          />
+        ))}
+        {hasLive && (
+          <div className="w-full space-y-1.5">
+            <TimelineView items={liveTimeline} isStreaming />
+          </div>
+        )}
+        {showStatusPill && pendingTask && (
+          <TaskStatusPill
+            pendingTask={pendingTask}
+            taskMessages={liveTaskMessages ?? []}
+            availability={availability}
+          />
+        )}
       </div>
       <JumpToLatestButton
         visible={hasNewBelow}
