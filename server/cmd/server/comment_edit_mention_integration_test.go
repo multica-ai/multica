@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-func TestEditCommentMentionDiff(t *testing.T) {
+func TestEditCommentTriggers(t *testing.T) {
 	agentID := getAgentID(t)
-	issueID := createIssue(t, "Edit mention diff integration test")
+	issueID := createIssue(t, "Edit comment triggers integration test")
 	t.Cleanup(func() {
 		clearTasks(t, issueID)
 		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
@@ -84,6 +84,37 @@ func TestEditCommentMentionDiff(t *testing.T) {
 
 		if n := countPendingTasks(t, issueID); n != 1 {
 			t.Errorf("expected 1 pending task after content change re-trigger, got %d", n)
+		}
+	})
+
+	t.Run("edit on agent-assigned issue cancels and re-triggers assignee task", func(t *testing.T) {
+		assignedIssue := createIssueAssignedToAgent(t, "Edit assignee trigger test", agentID)
+		t.Cleanup(func() {
+			clearTasks(t, assignedIssue)
+			resp := authRequest(t, "DELETE", "/api/issues/"+assignedIssue, nil)
+			resp.Body.Close()
+		})
+		clearTasks(t, assignedIssue)
+
+		commentID := postComment(t, assignedIssue, "fix the login page", nil)
+		if n := countPendingTasks(t, assignedIssue); n != 1 {
+			t.Fatalf("expected 1 pending task from on_comment trigger, got %d", n)
+		}
+
+		clearTasks(t, assignedIssue)
+
+		resp := authRequest(t, "PUT", "/api/comments/"+commentID, map[string]any{
+			"content": "actually fix the signup page instead",
+		})
+		if resp.StatusCode != 200 {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("UpdateComment: expected 200, got %d: %s", resp.StatusCode, body)
+		}
+		resp.Body.Close()
+
+		if n := countPendingTasks(t, assignedIssue); n != 1 {
+			t.Errorf("expected 1 pending task after edit re-triggered assignee, got %d", n)
 		}
 	})
 }
