@@ -162,6 +162,18 @@ func (s *TaskService) CommentDelegationContext(ctx context.Context, authorType, 
 		return TaskDelegationContext{}, fmt.Errorf("agent delegation denied: source task does not belong to author")
 	}
 	if !task.OriginalUserID.Valid {
+		// CEREBRO-PATCH(task-delegation-issue-origin): direct issue tasks created before provenance seeding can still inherit a member issue creator.
+		if task.IssueID.Valid {
+			issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+			if err == nil && issue.CreatorType == "member" && issue.CreatorID.Valid {
+				return TaskDelegationContext{
+					OriginalUserID:    issue.CreatorID,
+					DelegatingAgentID: task.AgentID,
+					SourceTaskID:      task.ID,
+					Source:            pgtype.Text{String: source, Valid: true},
+				}, nil
+			}
+		}
 		return TaskDelegationContext{}, fmt.Errorf("agent delegation denied: missing original user")
 	}
 	return TaskDelegationContext{

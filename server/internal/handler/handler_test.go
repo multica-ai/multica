@@ -3641,6 +3641,83 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(task-delegation-issue-origin-test): direct issue tasks without stored original_user_id can still delegate through the member issue creator.
+func TestAgentExplicitMentionFromDirectIssueTaskUsesIssueCreatorOrigin(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentA := createHandlerTestAgent(t, "Direct Issue Handoff Agent A", nil)
+	agentB := createHandlerTestAgent(t, "Direct Issue Handoff Agent B", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Direct issue handoff provenance fallback",
+		"status":        "todo",
+		"assignee_id":   agentA,
+		"assignee_type": "agent",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	var agentATask string
+	var originalUserID *string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text, original_user_id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID, agentA).Scan(&agentATask, &originalUserID); err != nil {
+		t.Fatalf("load direct issue task: %v", err)
+	}
+	if originalUserID != nil {
+		t.Fatalf("test setup expected legacy direct task without original_user_id, got %s", *originalUserID)
+	}
+
+	w = httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": fmt.Sprintf("[@Agent B](mention://agent/%s) please take this from the direct issue task", agentB),
+	})
+	r = withURLParam(r, "id", issueID)
+	r.Header.Set("X-Agent-ID", agentA)
+	r.Header.Set("X-Task-ID", agentATask)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("agent A handoff: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var gotOriginalUserID, delegatingAgentID, sourceTaskID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT original_user_id::text, delegating_agent_id::text, source_task_id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, agentB).Scan(&gotOriginalUserID, &delegatingAgentID, &sourceTaskID); err != nil {
+		t.Fatalf("load delegated mention context: %v", err)
+	}
+	if gotOriginalUserID != testUserID {
+		t.Fatalf("delegated task original_user_id = %s, want %s", gotOriginalUserID, testUserID)
+	}
+	if delegatingAgentID != agentA {
+		t.Fatalf("delegated task delegating_agent_id = %s, want %s", delegatingAgentID, agentA)
+	}
+	if sourceTaskID != agentATask {
+		t.Fatalf("delegated task source_task_id = %s, want %s", sourceTaskID, agentATask)
+	}
+}
+
 func TestAgentExplicitMentionWithoutOriginalUserIsDenied(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
