@@ -194,7 +194,7 @@ describe("createMentionSuggestion", () => {
     ).toBe(true);
   });
 
-  it("hides personal agents owned by someone else from a regular member", () => {
+  it("shows another member's personal agent locked (wontTrigger) so a tag becomes a run-request (FIR-2385)", () => {
     const qc = fakeQc({
       members: [
         { user_id: "u1", name: "Alice", role: "member" },
@@ -233,9 +233,18 @@ describe("createMentionSuggestion", () => {
     const result = config.items!({ query: "a", editor: {} as never });
     const items = result as MentionItem[];
 
-    expect(items.some((i) => i.type === "agent" && i.label === "Athena")).toBe(true);
-    expect(items.some((i) => i.type === "agent" && i.label === "Aether")).toBe(true);
-    expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(false);
+    // Own + workspace agents: visible and triggerable.
+    expect(
+      items.some((i) => i.type === "agent" && i.label === "Athena" && !i.wontTrigger),
+    ).toBe(true);
+    expect(
+      items.some((i) => i.type === "agent" && i.label === "Aether" && !i.wontTrigger),
+    ).toBe(true);
+    // Bob's personal agent now appears, but locked: a tag turns into a
+    // run-request to Bob instead of waking the agent.
+    const atlas = items.find((i) => i.type === "agent" && i.label === "Atlas");
+    expect(atlas).toBeDefined();
+    expect(atlas?.wontTrigger).toBe(true);
   });
 
   it("shows everyone's personal agents to a workspace admin", () => {

@@ -421,11 +421,20 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	// to preserve A2A collaboration; members must be in allowed_principals
 	// (agent owner or workspace owner/admin) to see private agents.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	// CEREBRO-PATCH(private-agent-visible-but-locked): FIR-2385 — flag-gated.
+	privateRequestsEnabled := h.cerebroPrivateAgentRequestsEnabled(r.Context(), workspaceID, userID)
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
+		lockedPrivate := false
 		if a.Visibility == "private" && actorType == "member" {
 			if !memberAllowedForPrivateAgent(a, actorID, member.Role) {
-				continue
+				// CEREBRO-PATCH(private-agent-visible-but-locked): keep the agent
+				// in the response (name + description) marked locked instead of
+				// hiding it; legacy hide when the flag is off (FIR-2385).
+				if !privateRequestsEnabled {
+					continue
+				}
+				lockedPrivate = true
 			}
 		}
 		resp := agentToResponse(a)
@@ -448,6 +457,11 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		} else {
 			_, allowedByGroup := visibleAgents[uuidToString(a.ID)]
 			resp.CanTrigger = allowedByGroup || ownerExempt(a.OwnerID)
+		}
+		// CEREBRO-PATCH(private-agent-visible-but-locked): a locked private agent
+		// exposes only name + description and is never triggerable (FIR-2385).
+		if lockedPrivate {
+			redactLockedPrivateAgent(&resp)
 		}
 		visible = append(visible, resp)
 	}

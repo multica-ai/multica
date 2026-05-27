@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -158,11 +159,13 @@ func TestGetAgent_PrivateAgentForbidsPlainMember(t *testing.T) {
 	}
 }
 
-// TestListAgents_FiltersPrivateForPlainMember verifies that the workspace
-// agents listing hides private agents from members who lack access. This is
-// what makes the @-mention autocomplete picker (which feeds off this list)
-// drop unreachable private agents without any client-side logic.
-func TestListAgents_FiltersPrivateForPlainMember(t *testing.T) {
+// CEREBRO-PATCH(private-agent-visible-but-locked): FIR-2385 test coverage.
+// TestListAgents_PrivateVisibleButLockedForPlainMember verifies FIR-2385: with
+// the default-on flag a plain member SEES a private agent they don't own, but
+// it comes back locked (can_trigger=false) so the @-picker can mark it and turn
+// a tag into a run-request. With the flag overridden off the agent is hidden
+// again — the legacy behavior the @-picker used to rely on.
+func TestListAgents_PrivateVisibleButLockedForPlainMember(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -179,15 +182,54 @@ func TestListAgents_FiltersPrivateForPlainMember(t *testing.T) {
 		t.Fatalf("ListAgents as owner did not include private agent %s", agentID)
 	}
 
-	// Plain member does NOT see the agent.
+	// Default-on: plain member now SEES the agent, but locked.
 	w = httptest.NewRecorder()
 	testHandler.ListAgents(w, newRequestAs(memberID, "GET", "/api/agents", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("ListAgents as plain member: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if listContainsAgent(t, w.Body.Bytes(), agentID) {
-		t.Fatalf("ListAgents as plain member leaked private agent %s", agentID)
+	locked := findAgentInList(t, w.Body.Bytes(), agentID)
+	if locked == nil {
+		t.Fatalf("plain member should now SEE locked private agent %s", agentID)
 	}
+	if locked.CanTrigger {
+		t.Errorf("locked private agent must have can_trigger=false, got true")
+	}
+
+	// Flag overridden off → legacy hide. Wire CerebroQueries so the override is
+	// read, restoring nil afterwards so the rest of the suite is unaffected.
+	testHandler.CerebroQueries = cerebrodb.New(testPool)
+	t.Cleanup(func() { testHandler.CerebroQueries = nil })
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled)
+		VALUES ($1, $2, 'cerebro_private_agent_requests', false)
+		ON CONFLICT (workspace_id, user_id, flag_key) DO UPDATE SET enabled = EXCLUDED.enabled
+	`, testWorkspaceID, memberID); err != nil {
+		t.Fatalf("set flag override: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM cerebro_feature_flags WHERE user_id = $1`, memberID)
+	})
+
+	w = httptest.NewRecorder()
+	testHandler.ListAgents(w, newRequestAs(memberID, "GET", "/api/agents", nil))
+	if listContainsAgent(t, w.Body.Bytes(), agentID) {
+		t.Fatalf("flag off should hide private agent %s from plain member", agentID)
+	}
+}
+
+func findAgentInList(t *testing.T, body []byte, agentID string) *AgentResponse {
+	t.Helper()
+	var resp []AgentResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode ListAgents response: %v", err)
+	}
+	for i := range resp {
+		if resp[i].ID == agentID {
+			return &resp[i]
+		}
+	}
+	return nil
 }
 
 func listContainsAgent(t *testing.T, body []byte, agentID string) bool {

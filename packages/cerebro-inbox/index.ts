@@ -13,6 +13,7 @@ export {
 export { CerebroUnarchiveToolbarButton } from "./components/cerebro-unarchive-toolbar-button";
 export { CerebroInboxTimestamp } from "./components/cerebro-inbox-timestamp";
 export { CerebroInboxReminderRow } from "./components/cerebro-inbox-reminder-row";
+export { CerebroInboxRunRequestRow } from "./components/cerebro-inbox-run-request-row";
 export { useInboxKeyboardShortcuts } from "./use-inbox-keyboard-shortcuts";
 export {
   useMuteInbox,
@@ -20,6 +21,7 @@ export {
   useMarkInboxUnread,
   useUnarchiveInbox,
   useCreateInboxReminder,
+  useRunPrivateAgentRequest,
 } from "./mutations";
 export {
   isMuted,

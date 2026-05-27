@@ -467,7 +467,12 @@ export function createMentionSuggestion(
         (a) =>
           !a.archived_at &&
           (a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q)) &&
-          canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
+          // CEREBRO-PATCH(private-agent-visible-but-locked): FIR-2385 — a private
+          // agent the member can't assign still appears (locked, wontTrigger) so a
+          // tag turns into a run-request to the owner. The backend only returns it
+          // when cerebro_private_agent_requests is on, so this stays flag-gated.
+          (canAssignAgentToIssue(a, { userId, role: myRole }).allowed ||
+            a.visibility === "private"),
       )
       .map((a) => ({
         id: a.id,

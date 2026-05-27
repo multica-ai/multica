@@ -48,7 +48,9 @@
     "reaction_added": "添加了表情反应",
     "quick_create_done": "通过智能体创建",
     "quick_create_failed": "通过智能体创建失败",
-    "reminder": "提醒"
+    "reminder": "提醒",
+    "_comment_cerebro_patch": "CEREBRO-PATCH(inbox-types-locale-zh): FIR-2385 private_agent_run_request label",
+    "private_agent_run_request": "运行请求"
   },
   "labels": {
     "set_status_to": "状态设为",
