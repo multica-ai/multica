@@ -2348,6 +2348,15 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	}
 }
 
+func providerSupportsMcpConfig(provider string) bool {
+	switch provider {
+	case "claude", "cursor":
+		return true
+	default:
+		return false
+	}
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
@@ -2600,6 +2609,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = task.Agent.McpConfig
+	}
+	if len(mcpConfig) > 0 && !providerSupportsMcpConfig(provider) {
+		return TaskResult{}, fmt.Errorf("per-agent mcp_config is not supported by %s provider; supported providers: claude, cursor", provider)
 	}
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If

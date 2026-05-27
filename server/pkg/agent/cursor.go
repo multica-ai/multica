@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -39,6 +41,17 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	args := buildCursorArgs(prompt, opts, b.cfg.Logger)
 	argv0, cmdArgs := chooseCursorInvocation(execName, lookedUp, args, b.cfg.Logger)
 
+	cleanupMcpConfig, err := prepareCursorMcpConfig(opts.Cwd, opts.McpConfig)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	defer func() {
+		if cleanupMcpConfig != nil {
+			cleanupMcpConfig()
+		}
+	}()
+
 	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
@@ -62,6 +75,11 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	b.cfg.Logger.Info("cursor-agent started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
+	// The child process has started and Cursor reads project MCP config from
+	// the workspace during execution, so the cleanup moves to the goroutine.
+	runCleanupMcpConfig := cleanupMcpConfig
+	cleanupMcpConfig = nil
+
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
@@ -69,6 +87,9 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		if runCleanupMcpConfig != nil {
+			defer runCleanupMcpConfig()
+		}
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
@@ -419,4 +440,46 @@ func buildCursorArgs(prompt string, opts ExecOptions, logger *slog.Logger) []str
 	}
 	args = append(args, filterCustomArgs(opts.CustomArgs, cursorBlockedArgs, logger)...)
 	return args
+}
+
+// prepareCursorMcpConfig materializes the per-agent MCP config at Cursor's
+// project discovery path for the lifetime of one run.
+func prepareCursorMcpConfig(cwd string, raw json.RawMessage) (func(), error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if cwd == "" {
+		return nil, fmt.Errorf("cursor mcp_config requires a workspace cwd")
+	}
+
+	cursorDir := filepath.Join(cwd, ".cursor")
+	mcpPath := filepath.Join(cursorDir, "mcp.json")
+
+	var previous []byte
+	existed := false
+	previousMode := os.FileMode(0o600)
+	if data, err := os.ReadFile(mcpPath); err == nil {
+		previous = data
+		existed = true
+		if info, statErr := os.Stat(mcpPath); statErr == nil {
+			previousMode = info.Mode().Perm()
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read cursor mcp config: %w", err)
+	}
+
+	if err := os.MkdirAll(cursorDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create cursor config dir: %w", err)
+	}
+	if err := os.WriteFile(mcpPath, raw, 0o600); err != nil {
+		return nil, fmt.Errorf("write cursor mcp config: %w", err)
+	}
+
+	return func() {
+		if existed {
+			_ = os.WriteFile(mcpPath, previous, previousMode)
+			return
+		}
+		_ = os.Remove(mcpPath)
+	}, nil
 }
