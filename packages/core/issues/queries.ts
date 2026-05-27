@@ -1,4 +1,4 @@
-import { keepPreviousData, queryOptions } from "@tanstack/react-query";
+import { keepPreviousData, queryOptions, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   GroupedIssuesResponse,
@@ -393,25 +393,16 @@ export function childIssuesOptions(wsId: string, id: string) {
 /**
  * Batched variant of {@link childIssuesOptions}: fetches children for all
  * given parents in a single `GET /api/issues/children?parent_ids=…` request.
+ * The queryFn also hydrates each parent's per-parent issueKeys.children cache
+ * so other surfaces (issue-detail sub-issues panel, set-parent modal) hit the
+ * primed cache instead of re-fetching. Hydration happens in queryFn (not a
+ * useEffect) to avoid the setQueryData → re-render → effect loop.
  *
  * Used by SwimLaneView to resolve parent lanes without an N-request fan-out.
- * Returns a Map<parentId, Issue[]> so callers can look up children by lane
- * in O(1). parentIds must be sorted + deduplicated by the caller so the
- * React Query cache key is stable across renders.
- *
- * Enabled only when parentIds is non-empty — callers should skip this
- * query (via `enabled: false`) when there are no parent lanes to resolve.
- */
-/**
- * queryFn that fetches children for all given parents, then immediately
- * writes each parent's slice into the per-parent issueKeys.children cache.
- * Other surfaces (issue-detail sub-issues panel, set-parent modal) that
- * call childIssuesOptions will hit the primed cache instead of re-fetching.
- * Hydration happens in queryFn (not a useEffect) to avoid infinite render
- * loops that would occur if setQueryData triggered a re-render cycle.
+ * parentIds must be sorted + deduplicated by the caller for a stable cache key.
  */
 async function fetchAndHydrateChildrenByParents(
-  qc: import("@tanstack/react-query").QueryClient,
+  qc: QueryClient,
   wsId: string,
   parentIds: readonly string[],
 ) {
@@ -441,7 +432,7 @@ async function fetchAndHydrateChildrenByParents(
 export function childrenByParentsOptions(
   wsId: string,
   parentIds: readonly string[],
-  qc: import("@tanstack/react-query").QueryClient,
+  qc: QueryClient,
 ) {
   return queryOptions({
     queryKey: issueKeys.childrenByParents(wsId, parentIds),
