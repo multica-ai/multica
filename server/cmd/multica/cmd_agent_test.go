@@ -32,6 +32,57 @@ func freshAgentEnvSetCmd() *cobra.Command {
 	return c
 }
 
+func freshAgentMcpConfigCmd() *cobra.Command {
+	c := &cobra.Command{Use: "mcp"}
+	c.Flags().String("mcp-config", "", "")
+	c.Flags().Bool("mcp-config-stdin", false, "")
+	c.Flags().String("mcp-config-file", "", "")
+	return c
+}
+
+func freshAgentCreateCmdForTest() *cobra.Command {
+	c := &cobra.Command{Use: "create"}
+	c.Flags().String("name", "", "")
+	c.Flags().String("description", "", "")
+	c.Flags().String("instructions", "", "")
+	c.Flags().String("runtime-id", "", "")
+	c.Flags().String("from-template", "", "")
+	c.Flags().String("runtime-config", "", "")
+	c.Flags().String("model", "", "")
+	c.Flags().String("custom-args", "", "")
+	c.Flags().String("custom-env", "", "")
+	c.Flags().Bool("custom-env-stdin", false, "")
+	c.Flags().String("custom-env-file", "", "")
+	c.Flags().String("mcp-config", "", "")
+	c.Flags().Bool("mcp-config-stdin", false, "")
+	c.Flags().String("mcp-config-file", "", "")
+	c.Flags().String("visibility", "private", "")
+	c.Flags().Int32("max-concurrent-tasks", 6, "")
+	c.Flags().String("output", "json", "")
+	c.Flags().String("profile", "", "")
+	return c
+}
+
+func freshAgentUpdateCmdForTest() *cobra.Command {
+	c := &cobra.Command{Use: "update"}
+	c.Flags().String("name", "", "")
+	c.Flags().String("description", "", "")
+	c.Flags().String("instructions", "", "")
+	c.Flags().String("runtime-id", "", "")
+	c.Flags().String("runtime-config", "", "")
+	c.Flags().String("model", "", "")
+	c.Flags().String("custom-args", "", "")
+	c.Flags().String("mcp-config", "", "")
+	c.Flags().Bool("mcp-config-stdin", false, "")
+	c.Flags().String("mcp-config-file", "", "")
+	c.Flags().String("visibility", "", "")
+	c.Flags().String("status", "", "")
+	c.Flags().Int32("max-concurrent-tasks", 0, "")
+	c.Flags().String("output", "json", "")
+	c.Flags().String("profile", "", "")
+	return c
+}
+
 // TestResolveWorkspaceID_AgentContextSkipsConfig is a regression test for
 // the cross-workspace contamination bug (#1235). Inside a daemon-spawned
 // agent task (MULTICA_AGENT_ID / MULTICA_TASK_ID set), the CLI must NOT
@@ -278,6 +329,20 @@ func TestParseCustomArgsErrorSanitization(t *testing.T) {
 	}
 }
 
+func TestParseMcpConfigErrorSanitization(t *testing.T) {
+	secretish := `{"mcpServers":{"drive":{"env":{"TOKEN":verySensitiveValue}}}}`
+	_, err := parseMcpConfig(secretish)
+	if err == nil {
+		t.Fatal("expected parse error for invalid JSON")
+	}
+	msg := err.Error()
+	for _, leak := range []string{"TOKEN", "verySensitiveValue", "drive"} {
+		if strings.Contains(msg, leak) {
+			t.Fatalf("parseMcpConfig error leaked input fragment %q: %q", leak, msg)
+		}
+	}
+}
+
 // TestAgentCreateAndEnvSetExposeSecretSafeFlags guarantees the
 // --custom-env-stdin and --custom-env-file alternatives stay wired
 // up on both commands that accept env input (`agent create` and the
@@ -305,6 +370,16 @@ func TestAgentCreateAndEnvSetExposeSecretSafeFlags(t *testing.T) {
 		low := strings.ToLower(c.usage)
 		if !strings.Contains(low, "shell history") || !strings.Contains(low, "'ps'") {
 			t.Fatalf("%s --custom-env usage must warn about shell history and 'ps' exposure; got: %q", c.name, c.usage)
+		}
+	}
+}
+
+func TestAgentCreateAndUpdateExposeMcpConfigFlags(t *testing.T) {
+	for _, cmd := range []*cobra.Command{agentCreateCmd, agentUpdateCmd} {
+		for _, flag := range []string{"mcp-config", "mcp-config-stdin", "mcp-config-file"} {
+			if cmd.Flag(flag) == nil {
+				t.Fatalf("%s must expose --%s", cmd.CommandPath(), flag)
+			}
 		}
 	}
 }
@@ -498,6 +573,186 @@ func TestResolveCustomEnv(t *testing.T) {
 			t.Fatalf("file {}: got %v, want empty map", got)
 		}
 	})
+}
+
+func TestResolveMcpConfig(t *testing.T) {
+	t.Run("not supplied", func(t *testing.T) {
+		cmd := freshAgentMcpConfigCmd()
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || ok || got != nil {
+			t.Fatalf("unset flags: got=%s ok=%v err=%v", string(got), ok, err)
+		}
+	})
+
+	t.Run("inline flag", func(t *testing.T) {
+		cmd := freshAgentMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config", `{"mcpServers":{"drive":{"command":"drive-mcp"}}}`)
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || !ok {
+			t.Fatalf("inline: ok=%v err=%v", ok, err)
+		}
+		if string(got) != `{"mcpServers":{"drive":{"command":"drive-mcp"}}}` {
+			t.Fatalf("inline: got %s", string(got))
+		}
+	})
+
+	t.Run("stdin", func(t *testing.T) {
+		cmd := freshAgentMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-stdin", "true")
+		cmd.SetIn(bytes.NewBufferString(`{"mcpServers":{"gmail":{"command":"gmail-mcp"}}}`))
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || !ok {
+			t.Fatalf("stdin: ok=%v err=%v", ok, err)
+		}
+		if !strings.Contains(string(got), "gmail") {
+			t.Fatalf("stdin: got %s", string(got))
+		}
+	})
+
+	t.Run("file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "mcp.json")
+		if err := os.WriteFile(path, []byte(`{"mcpServers":{"notion":{"command":"notion-mcp"}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshAgentMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-file", path)
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || !ok {
+			t.Fatalf("file: ok=%v err=%v", ok, err)
+		}
+		if !strings.Contains(string(got), "notion") {
+			t.Fatalf("file: got %s", string(got))
+		}
+	})
+
+	t.Run("null is accepted for clear", func(t *testing.T) {
+		cmd := freshAgentMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config", `null`)
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || !ok {
+			t.Fatalf("null: ok=%v err=%v", ok, err)
+		}
+		if string(got) != "null" {
+			t.Fatalf("null: got %s", string(got))
+		}
+	})
+
+	t.Run("mutually exclusive", func(t *testing.T) {
+		cmd := freshAgentMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config", `{}`)
+		_ = cmd.Flags().Set("mcp-config-stdin", "true")
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("expected mutual-exclusion error, got %v", err)
+		}
+	})
+
+	t.Run("empty stdin errors", func(t *testing.T) {
+		cmd := freshAgentMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-stdin", "true")
+		cmd.SetIn(bytes.NewBufferString(" "))
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--mcp-config-stdin") {
+			t.Fatalf("expected --mcp-config-stdin empty-input error, got %v", err)
+		}
+	})
+}
+
+func TestAgentCreateSendsMcpConfig(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/agents" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": got["name"]})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := freshAgentCreateCmdForTest()
+	_ = cmd.Flags().Set("name", "MCP Agent")
+	_ = cmd.Flags().Set("runtime-id", "runtime-1")
+	_ = cmd.Flags().Set("mcp-config", `{"mcpServers":{"drive":{"command":"drive-mcp"}}}`)
+
+	if err := runAgentCreate(cmd, nil); err != nil {
+		t.Fatalf("runAgentCreate: %v", err)
+	}
+	mcp, _ := got["mcp_config"].(map[string]any)
+	servers, _ := mcp["mcpServers"].(map[string]any)
+	if _, ok := servers["drive"]; !ok {
+		t.Fatalf("mcp_config not forwarded: %#v", got["mcp_config"])
+	}
+}
+
+func TestAgentCreateFromTemplateSendsMcpConfig(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/agents/from-template" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"agent": map[string]any{"id": "agent-123", "name": got["name"]}})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := freshAgentCreateCmdForTest()
+	_ = cmd.Flags().Set("name", "Template MCP Agent")
+	_ = cmd.Flags().Set("runtime-id", "runtime-1")
+	_ = cmd.Flags().Set("from-template", "code-reviewer")
+	_ = cmd.Flags().Set("mcp-config", `{"mcpServers":{"notion":{"command":"notion-mcp"}}}`)
+
+	if err := runAgentCreate(cmd, nil); err != nil {
+		t.Fatalf("runAgentCreate from template: %v", err)
+	}
+	mcp, _ := got["mcp_config"].(map[string]any)
+	servers, _ := mcp["mcpServers"].(map[string]any)
+	if _, ok := servers["notion"]; !ok {
+		t.Fatalf("mcp_config not forwarded: %#v", got["mcp_config"])
+	}
+}
+
+func TestAgentUpdateSendsMcpConfigNull(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/agents/agent-123" || r.Method != http.MethodPut {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "Agent"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := freshAgentUpdateCmdForTest()
+	_ = cmd.Flags().Set("mcp-config", `null`)
+
+	if err := runAgentUpdate(cmd, []string{"agent-123"}); err != nil {
+		t.Fatalf("runAgentUpdate: %v", err)
+	}
+	if _, ok := got["mcp_config"]; !ok {
+		t.Fatalf("expected mcp_config key in request: %#v", got)
+	}
+	if got["mcp_config"] != nil {
+		t.Fatalf("expected null mcp_config clear payload, got %#v", got["mcp_config"])
+	}
 }
 
 // TestAgentAvatarHappyPath verifies the full flow: agent pre-check, file upload,

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -121,6 +122,7 @@ type CreateAgentFromTemplateRequest struct {
 	Name               string `json:"name"`
 	RuntimeID          string `json:"runtime_id"`
 	Model              string `json:"model,omitempty"`
+	McpConfig          json.RawMessage `json:"mcp_config,omitempty"`
 	Visibility         string `json:"visibility,omitempty"`
 	MaxConcurrentTasks int32  `json:"max_concurrent_tasks,omitempty"`
 	// Optional overrides — let the picker UI customise the template before
@@ -155,7 +157,8 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	}
 
 	var req CreateAgentFromTemplateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	rawFields, err := decodeJSONBodyWithRawFields(r.Body, &req)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -429,6 +432,10 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	if req.AvatarURL != nil && *req.AvatarURL != "" {
 		avatarURL = pgtype.Text{String: *req.AvatarURL, Valid: true}
 	}
+	var mc []byte
+	if rawMcpConfig, ok := rawFields["mcp_config"]; ok && !bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null")) {
+		mc = append([]byte(nil), rawMcpConfig...)
+	}
 
 	agent, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        wsUUID,
@@ -444,7 +451,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		OwnerID:            creatorUUID,
 		CustomEnv:          ce,
 		CustomArgs:         ca,
-		McpConfig:          nil,
+		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
 	})
 	if err != nil {
@@ -541,7 +548,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 
 	resp := agentToResponse(agent)
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
-	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
+	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 
 	h.Analytics.Capture(analytics.AgentCreated(
 		ownerID,
@@ -561,6 +568,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 			"reused_skill_count", len(reusedIDs),
 		)...)
 
+	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusCreated, CreateAgentFromTemplateResponse{
 		Agent:            resp,
 		ImportedSkillIDs: importedIDs,
@@ -650,4 +658,3 @@ func fetchSkillFromURL(client *http.Client, rawURL string) (*importedSkill, erro
 	}
 	return nil, fmt.Errorf("unknown import source for %s", rawURL)
 }
-
