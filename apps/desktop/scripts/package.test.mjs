@@ -1,4 +1,6 @@
-import { delimiter, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, delimiter, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   builderArgsForTarget,
@@ -8,6 +10,9 @@ import {
   resolveBuildMatrix,
   stripLeadingSeparator,
 } from "./package.mjs";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const desktopRoot = resolve(here, "..");
 
 describe("normalizeGitVersion", () => {
   it("returns null for empty / nullish input", () => {
@@ -269,5 +274,35 @@ describe("envWithLocalBins", () => {
       workspaceBin,
       "runner-bin",
     ]);
+  });
+});
+
+describe("Windows installer CLI PATH hook", () => {
+  it("wires the NSIS installer include into electron-builder", () => {
+    const config = readFileSync(
+      resolve(desktopRoot, "electron-builder.yml"),
+      "utf-8",
+    );
+
+    expect(config).toMatch(/\nnsis:\n\s+include: build\/installer\.nsh\n/);
+  });
+
+  it("adds the actual asar-unpacked bundled CLI directory to the user PATH", () => {
+    const installer = readFileSync(
+      resolve(desktopRoot, "build", "installer.nsh"),
+      "utf-8",
+    );
+
+    expect(installer).toContain(
+      "$INSTDIR\\resources\\app.asar.unpacked\\resources\\bin",
+    );
+    expect(installer).toContain("[Environment]::SetEnvironmentVariable('Path'");
+    expect(installer).toContain("SendMessageTimeout");
+    expect(installer).toContain("Restart open terminals");
+    expect(installer).toContain("customUnInstall");
+    expect(installer).toContain("*\\Multica\\resources\\bin");
+    expect(installer).toContain(
+      "*\\Multica\\resources\\app.asar.unpacked\\resources\\bin",
+    );
   });
 });

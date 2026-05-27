@@ -316,6 +316,13 @@ function bundledCliPath(): string {
   );
 }
 
+function bundledCliDir(): string {
+  return join(app.getAppPath(), "resources", "bin").replace(
+    "app.asar",
+    "app.asar.unpacked",
+  );
+}
+
 async function probeCliBinary(
   bin: string,
   source: "bundled" | "managed" | "path",
@@ -642,7 +649,23 @@ function profileArgs(active: ActiveProfile): string[] {
 // applied by fix-path in main/index.ts — as a top-level const it would
 // snapshot process.env at import time, before that block runs.
 function desktopSpawnEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
+  const pathKey =
+    Object.keys(process.env).find((key) => key.toUpperCase() === "PATH") ??
+    "PATH";
+  const pathValue = process.env[pathKey] ?? "";
+  const separator = process.platform === "win32" ? ";" : ":";
+  const cliDir = bundledCliDir();
+  const nextPath = [
+    cliDir,
+    ...pathValue.split(separator).filter((part) => part !== cliDir),
+  ]
+    .filter(Boolean)
+    .join(separator);
+  return {
+    ...process.env,
+    [pathKey]: nextPath,
+    MULTICA_LAUNCHED_BY: "desktop",
+  };
 }
 
 async function startDaemon(): Promise<{ success: boolean; error?: string }> {
