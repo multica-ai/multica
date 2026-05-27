@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { createSharedIntervalTick } from "../hooks/shared-interval-tick";
 import { agentListOptions } from "../workspace/queries";
 import { runtimeListOptions } from "../runtimes/queries";
 import { agentTaskSnapshotOptions } from "./queries";
@@ -18,15 +19,7 @@ import type { AgentPresenceDetail } from "./types";
 // The earlier 2-minute "clear failed badge" tick was removed when failed
 // became sticky; this one re-introduces ticking with a different motivation.
 const PRESENCE_TICK_MS = 30_000;
-
-function usePresenceTick(): number {
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), PRESENCE_TICK_MS);
-    return () => clearInterval(id);
-  }, []);
-  return tick;
-}
+const usePresenceTick = createSharedIntervalTick(PRESENCE_TICK_MS);
 
 /**
  * Workspace-wide presence map keyed by `agent.id`. **The single entry point
