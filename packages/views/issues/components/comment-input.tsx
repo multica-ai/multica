@@ -74,8 +74,6 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false }
       if (content.includes(url)) activeIds.push(id);
     }
     setSubmitting(true);
-    editorRef.current?.clearContent();
-    setIsEmpty(true);
     try {
       await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
       editorRef.current?.clearContent();

@@ -23,6 +23,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { readOrigin, totalFileCount } from "../lib/origin";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useT } from "../../i18n";
 
 // Per-row data assembled at the page level. The columns reach into
@@ -160,7 +161,7 @@ function AgentAssignees({ agents }: { agents: Agent[] }) {
                 <ActorAvatar
                   name={a.name}
                   initials={a.name.slice(0, 2).toUpperCase()}
-                  avatarUrl={a.avatar_url}
+                  avatarUrl={resolvePublicFileUrl(a.avatar_url)}
                   isAgent
                   size={22}
                 />
@@ -222,7 +223,7 @@ function SourceCell({
           <ActorAvatar
             name={creator.name}
             initials={creator.name.slice(0, 2).toUpperCase()}
-            avatarUrl={creator.avatar_url}
+            avatarUrl={resolvePublicFileUrl(creator.avatar_url)}
             size={14}
           />
           <span className="truncate">{t(($) => $.table.by_creator, { name: creator.name })}</span>

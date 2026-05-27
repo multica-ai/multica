@@ -1,4 +1,4 @@
-import { keepPreviousData, queryOptions } from "@tanstack/react-query";
+import { keepPreviousData, queryOptions, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   GroupedIssuesResponse,
@@ -59,6 +59,12 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "detail", id] as const,
   children: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "children", id] as const,
+  /** Prefix for invalidating all batched-children queries in a workspace. */
+  childrenByParentsAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "children-by-parents"] as const,
+  /** Full key — includes sorted parent ids for cache stability. */
+  childrenByParents: (wsId: string, parentIds: readonly string[]) =>
+    [...issueKeys.childrenByParentsAll(wsId), parentIds] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
   /** Full-issue timeline (single TanStack Query, no cursor). */
@@ -398,6 +404,74 @@ export function childIssuesOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.children(wsId, id),
     queryFn: () => api.listChildIssues(id).then((r) => r.issues),
+  });
+}
+
+/**
+ * Server cap on parent_ids per `GET /api/issues/children` request — must
+ * match `listChildrenByParentsLimit` in server/internal/handler/issue.go.
+ * Exceeding it returns 400, so the client chunks larger requests.
+ */
+export const CHILDREN_BY_PARENTS_CHUNK_SIZE = 200;
+
+/**
+ * Batched variant of {@link childIssuesOptions}: fetches children for all
+ * given parents in `GET /api/issues/children?parent_ids=…` requests, chunked
+ * to {@link CHILDREN_BY_PARENTS_CHUNK_SIZE} parents each. The queryFn also
+ * hydrates each parent's per-parent issueKeys.children cache so other
+ * surfaces (issue-detail sub-issues panel, set-parent modal) hit the primed
+ * cache instead of re-fetching. Hydration happens in queryFn (not a
+ * useEffect) to avoid the setQueryData → re-render → effect loop.
+ *
+ * Used by SwimLaneView to resolve parent lanes without an N-request fan-out.
+ * parentIds must be sorted + deduplicated by the caller for a stable cache key.
+ */
+async function fetchAndHydrateChildrenByParents(
+  qc: QueryClient,
+  wsId: string,
+  parentIds: readonly string[],
+) {
+  // Chunk to respect the server cap (parallel, since chunks are independent).
+  const chunks: string[][] = [];
+  for (let i = 0; i < parentIds.length; i += CHILDREN_BY_PARENTS_CHUNK_SIZE) {
+    chunks.push([...parentIds.slice(i, i + CHILDREN_BY_PARENTS_CHUNK_SIZE)]);
+  }
+  const responses = await Promise.all(chunks.map((c) => api.listChildrenByParents(c)));
+  const grouped = new Map<string, Issue[]>();
+  for (const response of responses) {
+    for (const issue of response.issues) {
+      if (!issue.parent_issue_id) continue;
+      const bucket = grouped.get(issue.parent_issue_id);
+      if (bucket) {
+        bucket.push(issue);
+      } else {
+        grouped.set(issue.parent_issue_id, [issue]);
+      }
+    }
+  }
+  for (const [parentId, children] of grouped) {
+    // Only hydrate if the per-parent cache is empty — don't overwrite a
+    // fresher result that another query (e.g. issue-detail) may have written.
+    // This relies on useUpdateIssue.onMutate writing into the per-parent
+    // cache (not creating an empty one) — if that contract changes, batch
+    // hydration here would silently stop seeding new lanes.
+    const existing = qc.getQueryData<Issue[]>(issueKeys.children(wsId, parentId));
+    if (!existing || existing.length === 0) {
+      qc.setQueryData(issueKeys.children(wsId, parentId), children);
+    }
+  }
+  return grouped;
+}
+
+export function childrenByParentsOptions(
+  wsId: string,
+  parentIds: readonly string[],
+  qc: QueryClient,
+) {
+  return queryOptions({
+    queryKey: issueKeys.childrenByParents(wsId, parentIds),
+    queryFn: () => fetchAndHydrateChildrenByParents(qc, wsId, parentIds),
+    enabled: parentIds.length > 0,
   });
 }
 

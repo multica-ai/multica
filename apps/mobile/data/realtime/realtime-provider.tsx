@@ -29,7 +29,7 @@
  */
 import {
   createContext,
-  useContext,
+  use,
   useEffect,
   useRef,
   useState,
@@ -58,7 +58,7 @@ const RealtimeContext = createContext<WSClient | null>(null);
  *  (cold start, between workspace switches, signed out). Consumers must
  *  guard with `if (!ws) return` in their effect. */
 export function useWSClient(): WSClient | null {
-  return useContext(RealtimeContext);
+  return use(RealtimeContext);
 }
 
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {

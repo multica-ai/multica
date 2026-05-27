@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SwimLaneView } from "./swimlane-view";
 import type { Issue } from "@multica/core/types";
@@ -12,6 +12,17 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 // Mock hooks
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
+}));
+
+// Mock the API so childrenByParentsOptions doesn't fire real HTTP.
+// Individual tests can override listChildrenByParents via mockResolvedValueOnce.
+const mockListChildrenByParents = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ issues: [] }),
+);
+vi.mock("@multica/core/api", () => ({
+  api: { listChildrenByParents: mockListChildrenByParents },
+  getApi: () => ({ listChildrenByParents: mockListChildrenByParents }),
+  setApiInstance: vi.fn(),
 }));
 
 // Mock paths
@@ -310,6 +321,7 @@ describe("SwimLaneView", () => {
     mockViewState.swimlaneGrouping = "parent";
     mockViewState.swimlaneOrders = { parent: [], project: [], assignee: [] };
     mockViewState.collapsedSwimlanes = { parent: [], project: [], assignee: [] };
+    mockListChildrenByParents.mockResolvedValue({ issues: [] });
     useLoadMoreByStatusMock.mockImplementation(() => ({
       total: 0,
       loaded: 0,
@@ -1160,5 +1172,194 @@ describe("SwimLaneView", () => {
         status: "done",
       }),
     );
+  });
+
+  // ------------------------------------------------------------------
+  // Batched children fetch (childrenByParentsOptions)
+  // ------------------------------------------------------------------
+
+  it("fires listChildrenByParents once with all visible parent ids on mount", async () => {
+    // multiParentIssues has parent-1 (Child of A) and parent-2 (Child of B) as
+    // visible parent lanes. Both ids should appear in one batched call.
+    renderWithI18n(
+      <SwimLaneView issues={multiParentIssues} onMoveIssue={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(mockListChildrenByParents).toHaveBeenCalledTimes(1);
+    });
+    const [calledIds] = mockListChildrenByParents.mock.calls[0] as [string[]];
+    expect(calledIds.sort()).toEqual(["parent-1", "parent-2"].sort());
+  });
+
+  it("does not fire listChildrenByParents when there are no parent lanes", async () => {
+    // All issues are top-level — no parent lanes, no batch request.
+    const flatIssues = mockIssues.filter((i) => i.parent_issue_id === null);
+    renderWithI18n(
+      <SwimLaneView issues={flatIssues} onMoveIssue={vi.fn()} />,
+    );
+
+    await act(async () => {});
+    expect(mockListChildrenByParents).not.toHaveBeenCalled();
+  });
+
+  it("merges batch-fetched children into parent lanes so previously-empty cells populate", async () => {
+    // Scenario: grandparent G → parent P (loaded, becomes a lane header) →
+    // grandchild GC (NOT in the initial `issues` set, returned only by the
+    // batch fetch). P's lane should show GC after the batch resolves.
+    //
+    // For the batch to include P.id, the caller must pass childProgressMap
+    // signaling that P has children — without it, batchParentIds only sees
+    // GP.id (from parent.parent_issue_id) and GC is never fetched.
+    const grandparent: Issue = {
+      id: "gp-1",
+      workspace_id: "ws-1",
+      number: 10,
+      identifier: "PROJ-10",
+      kind: "issue",
+      title: "Grandparent",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 10,
+      start_date: null,
+      due_date: null,
+      metadata: {},
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const parent: Issue = {
+      ...grandparent,
+      id: "p-1",
+      number: 11,
+      identifier: "PROJ-11",
+      title: "Parent",
+      parent_issue_id: "gp-1",
+      position: 11,
+    };
+    const grandchild: Issue = {
+      ...grandparent,
+      id: "gc-1",
+      number: 12,
+      identifier: "PROJ-12",
+      title: "Grandchild (batch only)",
+      status: "in_progress",
+      parent_issue_id: "p-1",
+      position: 12,
+    };
+
+    mockListChildrenByParents.mockResolvedValueOnce({ issues: [grandchild] });
+    const childProgressMap = new Map<string, { done: number; total: number }>([
+      ["p-1", { done: 0, total: 1 }],
+    ]);
+
+    renderWithI18n(
+      <SwimLaneView
+        issues={[grandparent, parent]}
+        childProgressMap={childProgressMap}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    // Assert the batch request actually included p-1 — without this the
+    // mock would happily return GC for any request and the merge would
+    // appear to work without exercising the real path.
+    await waitFor(() => {
+      expect(mockListChildrenByParents).toHaveBeenCalled();
+    });
+    const [calledIds] = mockListChildrenByParents.mock.calls[0] as [string[]];
+    expect(calledIds).toEqual(expect.arrayContaining(["p-1"]));
+
+    await waitFor(() => {
+      expect(screen.getByText("Grandchild (batch only)")).toBeInTheDocument();
+    });
+  });
+
+  it("includes visible parents with children (via childProgressMap) in the batch request", async () => {
+    // Even without any loaded child pointing at a parent, if childProgressMap
+    // says the parent has children we should query it so deep-nested
+    // grandchildren are discoverable.
+    const parentWithUnloadedChildren: Issue = {
+      id: "p-only",
+      workspace_id: "ws-1",
+      number: 50,
+      identifier: "PROJ-50",
+      kind: "issue",
+      title: "Standalone parent",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 50,
+      start_date: null,
+      due_date: null,
+      metadata: {},
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const childProgressMap = new Map<string, { done: number; total: number }>([
+      ["p-only", { done: 0, total: 3 }],
+    ]);
+
+    renderWithI18n(
+      <SwimLaneView
+        issues={[parentWithUnloadedChildren]}
+        childProgressMap={childProgressMap}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockListChildrenByParents).toHaveBeenCalled();
+    });
+    const [calledIds] = mockListChildrenByParents.mock.calls[0] as [string[]];
+    expect(calledIds).toEqual(expect.arrayContaining(["p-only"]));
+  });
+
+  it("does not fire listChildrenByParents when swimlaneGrouping is not parent", async () => {
+    mockViewState.swimlaneGrouping = "project";
+
+    renderWithI18n(
+      <SwimLaneView issues={multiParentIssues} onMoveIssue={vi.fn()} />,
+    );
+
+    await act(async () => {});
+    expect(mockListChildrenByParents).not.toHaveBeenCalled();
+  });
+
+  it("does not call onMoveIssue when dropping a card into a lane whose header is that card", () => {
+    // parent-1 (a lane-header card in the No-parent lane) dropped onto a
+    // cell inside its own lane (`swim:parent:parent-1:in_progress`) would
+    // be a self-cycle. The client guard refuses before reaching the API.
+    const mockOnMoveIssue = vi.fn();
+    renderWithI18n(
+      <SwimLaneView issues={mockIssues} onMoveIssue={mockOnMoveIssue} />,
+    );
+
+    act(() => {
+      lastOnDragOver({
+        active: { id: "parent-1" },
+        over: { id: "swim:parent:parent-1:in_progress" },
+      });
+    });
+    act(() => {
+      lastOnDragEnd({
+        active: { id: "parent-1" },
+        over: { id: "swim:parent:parent-1:in_progress" },
+      });
+    });
+
+    expect(mockOnMoveIssue).not.toHaveBeenCalled();
   });
 });

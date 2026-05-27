@@ -58,13 +58,13 @@ WHERE issue_id = $2
 -- name: ReplaceCommentAttachments :exec
 UPDATE attachment
 SET comment_id = CASE
-  WHEN id = ANY($3::uuid[]) THEN $1
+  WHEN id = ANY(sqlc.arg(attachment_ids)::uuid[]) THEN $1
   ELSE NULL
 END
 WHERE issue_id = $2
   AND (
     comment_id = $1
-    OR (comment_id IS NULL AND id = ANY($3::uuid[]))
+    OR (comment_id IS NULL AND id = ANY(sqlc.arg(attachment_ids)::uuid[]))
   );
 
 -- name: LinkAttachmentsToChatMessage :exec

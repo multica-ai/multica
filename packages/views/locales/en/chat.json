@@ -102,6 +102,7 @@
       "offline": "Offline",
       "reconnecting": "Reconnecting",
       "queued": "Queued",
+      "waiting_local_directory": "Waiting for local directory",
       "starting_up": "Starting up",
       "thinking": "Thinking",
       "typing": "Typing"

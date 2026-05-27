@@ -305,6 +305,15 @@ export function useUpdateIssue() {
         });
         qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
       }
+      // Invalidate the batched-children cache only when the parent link
+      // actually changed. The WS path (ws-updaters.ts) invalidates
+      // unconditionally because it doesn't know what the server change
+      // touched; here onMutate already patched issueKeys.children(parent)
+      // optimistically, so we only need to flush when the parent relation
+      // itself moved.
+      if (ctx?.parentId || newParentId) {
+        qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
+      }
     },
   });
 }
@@ -613,11 +622,25 @@ export function useUpdateComment(issueId: string) {
   return useMutation({
     mutationFn: ({ commentId, content, attachmentIds }: { commentId: string; content: string; attachmentIds?: string[] }) =>
       api.updateComment(commentId, content, attachmentIds),
-    onMutate: async ({ commentId, content }) => {
+    onMutate: async ({ commentId, content, attachmentIds }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
+      // Omitting attachmentIds (e.g. channel edits) means "don't touch
+      // attachments" — only filter the optimistic set when the caller sent
+      // an explicit list, matching the server's replace-only-when-present rule.
+      const kept = attachmentIds ? new Set(attachmentIds) : null;
       qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
-        old?.map((e) => (e.id === commentId ? { ...e, content } : e)),
+        old?.map((e) =>
+          e.id === commentId
+            ? {
+                ...e,
+                content,
+                attachments: kept
+                  ? e.attachments?.filter((a) => kept.has(a.id))
+                  : e.attachments,
+              }
+            : e,
+        ),
       );
       return { prev };
     },

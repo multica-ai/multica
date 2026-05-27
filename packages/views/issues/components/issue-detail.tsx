@@ -105,6 +105,7 @@ import { RestrictedRef } from "@multica/cerebro-access/views";
 // cache when viewing an issue in a restricted project so the @mention picker
 // can mark members lacking access synchronously.
 import { useEnsureMentionAccessData } from "@multica/cerebro-access/views";
+import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
@@ -1306,6 +1307,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           to a chat thread. */}
       {!isChat && <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
@@ -1456,6 +1458,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
       {(parentIssue || parentIsRestricted) && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${parentIssueOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setParentIssueOpen(!parentIssueOpen)}
           >
@@ -1510,6 +1513,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
       {!isChat && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
           >
@@ -1552,6 +1556,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
       {/* Details */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setDetailsOpen(!detailsOpen)}
         >
@@ -1582,6 +1587,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
       {usage && (usage.task_count > 0 || usage.subtree_cost_cents > 0) && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${tokenUsageOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setTokenUsageOpen(!tokenUsageOpen)}
           >
@@ -2274,6 +2280,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 </div>
               )}
             </div>
+
+            {/* Upstream MUL-2618: local-directory hint relocated out of the
+                comment composer to surface project-resource context above the
+                activity feed. Renders nothing when project lacks a local_directory. */}
+            <LocalDirectoryHint projectId={issue?.project_id} />
 
             {/* CEREBRO-PATCH(issue-detail-tabs): Agent live output and run/session tabs are task-only.
                 Chat threads run conversationally — there is no agent-run history to surface here. */}

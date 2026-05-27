@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, use, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Workspace } from "../types";
 import { workspaceListOptions } from "../workspace/queries";
@@ -35,7 +35,7 @@ export function WorkspaceSlugProvider({
 
 /** Current workspace slug from URL, or null outside workspace-scoped routes. */
 export function useWorkspaceSlug(): string | null {
-  return useContext(WorkspaceSlugContext);
+  return use(WorkspaceSlugContext);
 }
 
 /** Same as useWorkspaceSlug, but throws if called outside a workspace route. */
