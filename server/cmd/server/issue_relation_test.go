@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -32,7 +33,9 @@ func createRelationTestIssue(t *testing.T, queries *db.Queries, title string) db
 		t.Fatalf("CreateIssue(%q): %v", title, err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issue.ID)
+		if _, err := testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issue.ID); err != nil {
+			t.Logf("cleanup: delete issue %s: %v", util.UUIDToString(issue.ID), err)
+		}
 	})
 	return issue
 }
@@ -81,7 +84,10 @@ func TestIssueRelationPersistence(t *testing.T) {
 	}
 
 	// Forward direction: the source lists the relation.
-	fromSource, err := queries.ListIssueRelationsBySource(ctx, source.ID)
+	fromSource, err := queries.ListIssueRelationsBySource(ctx, db.ListIssueRelationsBySourceParams{
+		WorkspaceID:   parseUUID(testWorkspaceID),
+		SourceIssueID: source.ID,
+	})
 	if err != nil {
 		t.Fatalf("ListIssueRelationsBySource: %v", err)
 	}
@@ -90,7 +96,10 @@ func TestIssueRelationPersistence(t *testing.T) {
 	}
 
 	// Backlink direction: the target lists the same relation.
-	toTarget, err := queries.ListIssueRelationsByTarget(ctx, target.ID)
+	toTarget, err := queries.ListIssueRelationsByTarget(ctx, db.ListIssueRelationsByTargetParams{
+		WorkspaceID:   parseUUID(testWorkspaceID),
+		TargetIssueID: target.ID,
+	})
 	if err != nil {
 		t.Fatalf("ListIssueRelationsByTarget: %v", err)
 	}
@@ -100,13 +109,17 @@ func TestIssueRelationPersistence(t *testing.T) {
 
 	// Explicit delete removes the relation.
 	if err := queries.DeleteIssueRelation(ctx, db.DeleteIssueRelationParams{
+		WorkspaceID:   parseUUID(testWorkspaceID),
 		SourceIssueID: source.ID,
 		TargetIssueID: target.ID,
 		RelationType:  "references",
 	}); err != nil {
 		t.Fatalf("DeleteIssueRelation: %v", err)
 	}
-	after, err := queries.ListIssueRelationsBySource(ctx, source.ID)
+	after, err := queries.ListIssueRelationsBySource(ctx, db.ListIssueRelationsBySourceParams{
+		WorkspaceID:   parseUUID(testWorkspaceID),
+		SourceIssueID: source.ID,
+	})
 	if err != nil {
 		t.Fatalf("ListIssueRelationsBySource (after delete): %v", err)
 	}
@@ -141,7 +154,10 @@ func TestIssueRelationCascadeOnIssueDelete(t *testing.T) {
 		t.Fatalf("delete target issue: %v", err)
 	}
 
-	remaining, err := queries.ListIssueRelationsBySource(ctx, source.ID)
+	remaining, err := queries.ListIssueRelationsBySource(ctx, db.ListIssueRelationsBySourceParams{
+		WorkspaceID:   parseUUID(testWorkspaceID),
+		SourceIssueID: source.ID,
+	})
 	if err != nil {
 		t.Fatalf("ListIssueRelationsBySource: %v", err)
 	}
@@ -168,7 +184,85 @@ func TestIssueRelationRejectsSelfReference(t *testing.T) {
 	})
 	if err == nil {
 		// Clean up in case the constraint was (incorrectly) not enforced.
-		testPool.Exec(ctx, `DELETE FROM issue_relation WHERE source_issue_id = $1`, issue.ID)
+		if _, cerr := testPool.Exec(ctx, `DELETE FROM issue_relation WHERE source_issue_id = $1`, issue.ID); cerr != nil {
+			t.Logf("cleanup: delete stray self-relation: %v", cerr)
+		}
 		t.Fatal("expected self-reference to be rejected by CHECK constraint, got nil error")
+	}
+}
+
+// TestIssueRelationActorConsistency verifies the issue_relation_actor CHECK
+// from 111_issue_relation.up.sql: 'system' rows must have a NULL actor, while
+// 'member'/'agent' rows must name one. The shipped migration is applied inside
+// a transaction that is always rolled back, so the live schema is left
+// untouched while the exact DDL (constraints + indexes) is exercised end-to-end.
+func TestIssueRelationActorConsistency(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+
+	source := createRelationTestIssue(t, queries, "actor source")
+	target := createRelationTestIssue(t, queries, "actor target")
+
+	migration, err := os.ReadFile("../../migrations/111_issue_relation.up.sql")
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer func() {
+		if err := tx.Rollback(ctx); err != nil {
+			t.Logf("tx rollback: %v", err)
+		}
+	}()
+
+	// Re-create the table from the shipped migration inside the rolled-back tx
+	// so the constraint we assert against is the real DDL, not a copy.
+	if _, err := tx.Exec(ctx, `DROP TABLE IF EXISTS issue_relation`); err != nil {
+		t.Fatalf("drop issue_relation in tx: %v", err)
+	}
+	if _, err := tx.Exec(ctx, string(migration)); err != nil {
+		t.Fatalf("apply migration in tx: %v", err)
+	}
+
+	const insert = `INSERT INTO issue_relation
+		(workspace_id, source_issue_id, target_issue_id, relation_type, created_by_type, created_by_id)
+		VALUES ($1, $2, $3, 'references', $4, $5)`
+
+	cases := []struct {
+		name      string
+		actorType string
+		actorID   any
+		wantErr   bool
+	}{
+		{"system with NULL actor accepted", "system", nil, false},
+		{"member with actor accepted", "member", parseUUID(testUserID), false},
+		{"agent with actor accepted", "agent", parseUUID(testUserID), false},
+		{"system with actor rejected", "system", parseUUID(testUserID), true},
+		{"member without actor rejected", "member", nil, true},
+		{"agent without actor rejected", "agent", nil, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Each case runs in its own savepoint so a rejection doesn't abort
+			// the outer tx and the row never collides with the UNIQUE key.
+			sp, err := tx.Begin(ctx)
+			if err != nil {
+				t.Fatalf("savepoint: %v", err)
+			}
+			_, execErr := sp.Exec(ctx, insert, parseUUID(testWorkspaceID), source.ID, target.ID, tc.actorType, tc.actorID)
+			if rbErr := sp.Rollback(ctx); rbErr != nil {
+				t.Logf("savepoint rollback: %v", rbErr)
+			}
+			switch {
+			case tc.wantErr && execErr == nil:
+				t.Errorf("expected CHECK violation, got nil")
+			case !tc.wantErr && execErr != nil:
+				t.Errorf("expected insert to be accepted, got %v", execErr)
+			}
+		})
 	}
 }

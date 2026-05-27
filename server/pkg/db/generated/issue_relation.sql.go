@@ -13,31 +13,44 @@ import (
 
 const deleteIssueRelation = `-- name: DeleteIssueRelation :exec
 DELETE FROM issue_relation
-WHERE source_issue_id = $1
-  AND target_issue_id = $2
-  AND relation_type = $3
+WHERE workspace_id = $1
+  AND source_issue_id = $2
+  AND target_issue_id = $3
+  AND relation_type = $4
 `
 
 type DeleteIssueRelationParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
 	SourceIssueID pgtype.UUID `json:"source_issue_id"`
 	TargetIssueID pgtype.UUID `json:"target_issue_id"`
 	RelationType  string      `json:"relation_type"`
 }
 
 func (q *Queries) DeleteIssueRelation(ctx context.Context, arg DeleteIssueRelationParams) error {
-	_, err := q.db.Exec(ctx, deleteIssueRelation, arg.SourceIssueID, arg.TargetIssueID, arg.RelationType)
+	_, err := q.db.Exec(ctx, deleteIssueRelation,
+		arg.WorkspaceID,
+		arg.SourceIssueID,
+		arg.TargetIssueID,
+		arg.RelationType,
+	)
 	return err
 }
 
 const listIssueRelationsBySource = `-- name: ListIssueRelationsBySource :many
 SELECT id, workspace_id, source_issue_id, target_issue_id, relation_type, created_by_type, created_by_id, created_at FROM issue_relation
-WHERE source_issue_id = $1
+WHERE workspace_id = $1
+  AND source_issue_id = $2
 ORDER BY created_at
 `
 
+type ListIssueRelationsBySourceParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	SourceIssueID pgtype.UUID `json:"source_issue_id"`
+}
+
 // Forward references: issues that this issue points to.
-func (q *Queries) ListIssueRelationsBySource(ctx context.Context, sourceIssueID pgtype.UUID) ([]IssueRelation, error) {
-	rows, err := q.db.Query(ctx, listIssueRelationsBySource, sourceIssueID)
+func (q *Queries) ListIssueRelationsBySource(ctx context.Context, arg ListIssueRelationsBySourceParams) ([]IssueRelation, error) {
+	rows, err := q.db.Query(ctx, listIssueRelationsBySource, arg.WorkspaceID, arg.SourceIssueID)
 	if err != nil {
 		return nil, err
 	}
@@ -67,13 +80,19 @@ func (q *Queries) ListIssueRelationsBySource(ctx context.Context, sourceIssueID 
 
 const listIssueRelationsByTarget = `-- name: ListIssueRelationsByTarget :many
 SELECT id, workspace_id, source_issue_id, target_issue_id, relation_type, created_by_type, created_by_id, created_at FROM issue_relation
-WHERE target_issue_id = $1
+WHERE workspace_id = $1
+  AND target_issue_id = $2
 ORDER BY created_at
 `
 
+type ListIssueRelationsByTargetParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	TargetIssueID pgtype.UUID `json:"target_issue_id"`
+}
+
 // Backlinks: issues that point to this issue.
-func (q *Queries) ListIssueRelationsByTarget(ctx context.Context, targetIssueID pgtype.UUID) ([]IssueRelation, error) {
-	rows, err := q.db.Query(ctx, listIssueRelationsByTarget, targetIssueID)
+func (q *Queries) ListIssueRelationsByTarget(ctx context.Context, arg ListIssueRelationsByTargetParams) ([]IssueRelation, error) {
+	rows, err := q.db.Query(ctx, listIssueRelationsByTarget, arg.WorkspaceID, arg.TargetIssueID)
 	if err != nil {
 		return nil, err
 	}
@@ -103,14 +122,23 @@ func (q *Queries) ListIssueRelationsByTarget(ctx context.Context, targetIssueID 
 
 const upsertIssueRelation = `-- name: UpsertIssueRelation :one
 
-INSERT INTO issue_relation (
-    workspace_id, source_issue_id, target_issue_id, relation_type,
-    created_by_type, created_by_id
+WITH inserted AS (
+    INSERT INTO issue_relation (
+        workspace_id, source_issue_id, target_issue_id, relation_type,
+        created_by_type, created_by_id
+    )
+    VALUES ($1, $2, $3, $4, $5, $6)
+    ON CONFLICT (source_issue_id, target_issue_id, relation_type) DO NOTHING
+    RETURNING id, workspace_id, source_issue_id, target_issue_id, relation_type, created_by_type, created_by_id, created_at
 )
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (source_issue_id, target_issue_id, relation_type)
-DO UPDATE SET source_issue_id = EXCLUDED.source_issue_id
-RETURNING id, workspace_id, source_issue_id, target_issue_id, relation_type, created_by_type, created_by_id, created_at
+SELECT id, workspace_id, source_issue_id, target_issue_id, relation_type, created_by_type, created_by_id, created_at FROM inserted
+UNION ALL
+SELECT id, workspace_id, source_issue_id, target_issue_id, relation_type, created_by_type, created_by_id, created_at FROM issue_relation
+WHERE workspace_id = $1
+  AND source_issue_id = $2
+  AND target_issue_id = $3
+  AND relation_type = $4
+  AND NOT EXISTS (SELECT 1 FROM inserted)
 `
 
 type UpsertIssueRelationParams struct {
@@ -122,15 +150,28 @@ type UpsertIssueRelationParams struct {
 	CreatedByID   pgtype.UUID `json:"created_by_id"`
 }
 
+type UpsertIssueRelationRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	SourceIssueID pgtype.UUID        `json:"source_issue_id"`
+	TargetIssueID pgtype.UUID        `json:"target_issue_id"`
+	RelationType  string             `json:"relation_type"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 // Issue relations / backlinks (ITT-237 Phase 1).
 //
 // A row is a directed cross-reference: source_issue_id references
 // target_issue_id. These are data links only and never notify members or
-// trigger agents.
+// trigger agents. All reads/writes are workspace-scoped to keep the relation
+// graph from ever crossing workspace boundaries.
 // Idempotent: re-linking the same (source, target, type) returns the existing
-// row instead of creating a duplicate. The no-op DO UPDATE lets RETURNING
-// surface the row on conflict.
-func (q *Queries) UpsertIssueRelation(ctx context.Context, arg UpsertIssueRelationParams) (IssueRelation, error) {
+// row without a redundant UPDATE. INSERT ... DO NOTHING avoids creating dead
+// row versions on repeated saves; the fallback SELECT returns the row already
+// present when the insert was a no-op. Exactly one row is always returned.
+func (q *Queries) UpsertIssueRelation(ctx context.Context, arg UpsertIssueRelationParams) (UpsertIssueRelationRow, error) {
 	row := q.db.QueryRow(ctx, upsertIssueRelation,
 		arg.WorkspaceID,
 		arg.SourceIssueID,
@@ -139,7 +180,7 @@ func (q *Queries) UpsertIssueRelation(ctx context.Context, arg UpsertIssueRelati
 		arg.CreatedByType,
 		arg.CreatedByID,
 	)
-	var i IssueRelation
+	var i UpsertIssueRelationRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,

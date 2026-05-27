@@ -27,12 +27,19 @@ CREATE TABLE issue_relation (
     -- re-saving the same reference is idempotent.
     UNIQUE (source_issue_id, target_issue_id, relation_type),
     -- An issue cannot relate to itself.
-    CONSTRAINT issue_relation_no_self CHECK (source_issue_id <> target_issue_id)
+    CONSTRAINT issue_relation_no_self CHECK (source_issue_id <> target_issue_id),
+    -- Creator data must be consistent with the actor kind: 'system' rows have
+    -- no actor (NULL id), while 'member'/'agent' rows must name one.
+    CONSTRAINT issue_relation_actor CHECK (
+        (created_by_type = 'system' AND created_by_id IS NULL)
+        OR (created_by_type IN ('member', 'agent') AND created_by_id IS NOT NULL)
+    )
 );
 
--- Forward lookups: "issues this issue references".
-CREATE INDEX idx_issue_relation_source ON issue_relation(source_issue_id);
--- Backlink lookups: "issues that reference this issue".
-CREATE INDEX idx_issue_relation_target ON issue_relation(target_issue_id);
--- Workspace-scoped maintenance / listing.
-CREATE INDEX idx_issue_relation_workspace ON issue_relation(workspace_id);
+-- Forward lookups: "issues this issue references", workspace-scoped and
+-- ordered by created_at to match the list query access pattern.
+CREATE INDEX idx_issue_relation_source
+    ON issue_relation(workspace_id, source_issue_id, created_at);
+-- Backlink lookups: "issues that reference this issue", same access pattern.
+CREATE INDEX idx_issue_relation_target
+    ON issue_relation(workspace_id, target_issue_id, created_at);
