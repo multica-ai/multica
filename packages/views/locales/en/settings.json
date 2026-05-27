@@ -214,7 +214,7 @@
     "feishu_project_business_lines_tree": "Business lines",
     "feishu_project_refresh_business_lines": "Refresh business lines",
     "feishu_project_business_lines_loading": "Loading business lines from Meego…",
-    "feishu_project_business_lines_empty": "Meego returned no business lines. Check the plugin's permission to read /open_api/<key>/business/all.",
+    "feishu_project_business_lines_empty": "Meego returned no options for this field. Either the field has no select values (it's a text/number field, not a select), or it's a built-in 业务线 field and the plugin lacks /open_api/<key>/business/all permission.",
     "feishu_project_business_lines_refresh_failed": "Failed to load business lines from Meego",
     "feishu_project_routes_needs_basic": "Save the basic configuration (project key + plugin) first, then come back to set up routing.",
     "feishu_project_routes_table_title": "Routes",

@@ -214,7 +214,7 @@
     "feishu_project_business_lines_tree": "业务线",
     "feishu_project_refresh_business_lines": "刷新业务线",
     "feishu_project_business_lines_loading": "正在从 Meego 拉取业务线…",
-    "feishu_project_business_lines_empty": "Meego 未返回业务线，请检查插件是否有 /open_api/<key>/business/all 的权限。",
+    "feishu_project_business_lines_empty": "Meego 未返回该字段的选项。可能字段本身没有可选值（是文本/数字字段而非选项字段），或者它是内置「业务线」类型且插件缺少 /open_api/<key>/business/all 权限。",
     "feishu_project_business_lines_refresh_failed": "从 Meego 拉取业务线失败",
     "feishu_project_routes_needs_basic": "请先保存基础配置（project key 和 plugin），再回来配置路由。",
     "feishu_project_routes_table_title": "路由表",

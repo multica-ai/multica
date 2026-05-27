@@ -1410,14 +1410,18 @@ func (c *FeishuProjectClient) ListWorkItemFields(ctx context.Context, cfg db.Fei
 }
 
 // ListFieldOptions returns the option tree of a specific work-item field. Used by the
-// routing UI: when the operator picks the "business line" field, we show the option
-// list of THAT field rather than the space-wide /business/all tree. This makes routing
-// general — any select field (custom or stock) becomes a valid routing source — and
-// avoids the surprising "tree never changes when I switch field" UX bug.
+// routing UI to populate the business-line tree based on the operator's field choice.
 //
-// Returns nil if the field isn't found OR has no options (e.g. user picked a text
-// field by mistake); caller distinguishes by checking length and showing the right
-// empty-state message.
+// Two cases Meego presents:
+//  1. Custom select fields (`_select` / `_multi_select` / ...) carry their option list
+//     inline in the meta payload — we extract from there.
+//  2. Built-in business-line fields (`_biz_line` type) DON'T carry inline options;
+//     their valid values come from the space-wide /open_api/{key}/business/all tree.
+//     For this case we fall back to that endpoint so the UI doesn't end up empty when
+//     the operator picks the "obvious" 业务线 field.
+//
+// Returns nil only if the field isn't found at all OR has no options under either path.
+// Caller (handler/UI) treats nil as "this field has no selectable values".
 func (c *FeishuProjectClient) ListFieldOptions(ctx context.Context, cfg db.FeishuProjectIntegration, workItemType, fieldKey string) ([]FeishuProjectFieldOption, error) {
 	if workItemType == "" {
 		workItemType = "issue"
@@ -1430,10 +1434,24 @@ func (c *FeishuProjectClient) ListFieldOptions(ctx context.Context, cfg db.Feish
 		return nil, err
 	}
 	field := findFeishuProjectFieldByKey(payload, fieldKey)
-	if field == nil {
+	if field != nil {
+		if tree := extractFeishuProjectFieldOptionTree(field); len(tree) > 0 {
+			return tree, nil
+		}
+	}
+	// Fallback: maybe this is a _biz_line field whose options live in the space tree.
+	// We don't gate on field type because Meego's type keys aren't stable across
+	// space versions; just try the second source and accept whatever comes back.
+	bizPayload, err := c.openAPI(ctx, cfg, http.MethodGet, fmt.Sprintf("/open_api/%s/business/all", cfg.ProjectKey), nil)
+	if err != nil {
+		// Don't mask the original "field has no inline options" with a permission
+		// error from /business/all — return nil and let the caller surface the
+		// empty-state message that points at both possible causes.
+		slog.Info("Feishu Project /business/all fallback failed",
+			"project_key", cfg.ProjectKey, "field_key", fieldKey, "error", err)
 		return nil, nil
 	}
-	return extractFeishuProjectFieldOptionTree(field), nil
+	return parseFeishuProjectBusinessLineTree(bizPayload), nil
 }
 
 // findFeishuProjectFieldByKey walks a meta payload looking for a field entry whose
