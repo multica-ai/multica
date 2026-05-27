@@ -257,5 +257,892 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       },
       copyright: "© {year} Multica. 모든 권리 보유.",
     },
+    changelog: {
+      title: "변경 로그",
+      subtitle: "Multica의 새로운 업데이트와 개선 사항입니다.",
+      toc: "모든 릴리스",
+      categories: {
+        features: "새 기능",
+        improvements: "개선 사항",
+        fixes: "버그 수정",
+      },
+      entries: [
+        {
+          version: "0.3.10",
+          date: "2026-05-27",
+          title: "로컬 작업 디렉터리",
+          changes: [],
+          features: [
+            "프로젝트가 데스크톱의 로컬 작업 디렉터리를 사용할 수 있게 되어, 기존 폴더에서 작업을 실행하고 디렉터리 대기 상태를 확인할 수 있습니다.",
+            "오토파일럿 Webhook 트리거가 작업 시작 전에 이벤트와 액션을 필터링할 수 있으며 설정 흐름에서 문서로 바로 이동할 수 있습니다.",
+            "스윔레인 보기가 상위 이슈, 프로젝트, 담당자 기준 그룹화를 지원해 큰 보드를 팀의 계획 방식에 맞게 볼 수 있습니다.",
+          ],
+          improvements: [
+            "중국어 제품 문구와 공통 화면 접근성, React 코드가 정리되었고 CLI 목록 출력과 스쿼드 목록 표시가 더 읽기 쉬워졌습니다.",
+          ],
+          fixes: [
+            "스윔레인, 하위 이슈 생성, 예약된 오토파일럿 제목, 댓글 편집, 코드 블록, 아바타 경로, 런타임 진단 관련 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.3.9",
+          date: "2026-05-26",
+          title: "스윔레인과 더 예측 가능한 이슈",
+          changes: [],
+          features: [
+            "이슈에 스윔레인 보기가 추가되어 대형 프로젝트의 상위 작업과 상태 열을 함께 검토할 수 있습니다.",
+            "이슈 목록이 드래그 앤 드롭 정렬, 고정 그룹 헤더, 추가 로드 후에도 안정적인 순서를 지원합니다.",
+          ],
+          improvements: [
+            "CLI 상태 출력, 셀프 호스팅 사용량 안내, 에이전트 스킬 설정, 의존성 검사가 더 명확해졌습니다.",
+          ],
+          fixes: [
+            "GitHub PR 자동 종료 조건, 부모/자식 이슈 자동화, 이슈 스레드 순서, 보드 드래그 위치, 채팅 크기 조정 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.3.8",
+          date: "2026-05-25",
+          title: "iOS, Helm 셀프 호스팅, 더 매끄러운 협업",
+          changes: [],
+          features: [
+            "Multica for iOS의 첫 사용 가능한 모바일 클라이언트가 추가되어 로그인, 워크스페이스, 인박스, 이슈, 프로젝트, 채팅, 댓글, 실시간 업데이트를 지원합니다.",
+            "셀프 호스팅 팀은 Helm 차트로 Kubernetes에 배포할 수 있고, Docker 설치는 포트와 URL 설정이 더 명확해졌습니다.",
+            "프로젝트 리소스 선택기에 저장소 검색이 추가되고 런타임 사용량은 주요 모델 비용을 더 정확히 인식합니다.",
+          ],
+          improvements: [
+            "스쿼드와 보드 카드, 데스크톱 탭 전환, 코드/리치 텍스트 표시, 저장소 설명 전달, 문서와 README가 개선되었습니다.",
+          ],
+          fixes: [
+            "이슈 타임라인 순서, Codex와 Pi 실행 입력 처리, 로컬 런타임 삭제, 제목 새로고침, Markdown 코드 표시 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.3.6",
+          date: "2026-05-22",
+          title: "더 똑똑한 환영 흐름과 실시간 작업 신호",
+          changes: [],
+          features: [
+            "신규 사용자는 Multica Helper가 워크스페이스 소개, 투어, 환영 페이지 생성을 도와주는 온보딩을 경험합니다.",
+            "이슈 목록에서 에이전트가 작업 중인지 표시하고, 상세 정보와 작업 중 필터를 제공합니다.",
+            "자식 이슈가 완료되면 상위 이슈에 플랫폼 업데이트를 남기고 올바른 담당자에게 알릴 수 있습니다.",
+          ],
+          improvements: [
+            "이슈 보드 카드, 이슈 생성 속성 바, 비밀 값 가시성, 워크스페이스 목록 로딩, Helper 안내가 개선되었습니다.",
+          ],
+          fixes: [
+            "워크스페이스 컨텍스트 전달, 로컬 런타임 삭제 UI, Pi 응답 표시, SVG/파일 미리보기, 스쿼드 트리거 보호, 셀프 호스팅 기본값을 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.3.5",
+          date: "2026-05-21",
+          title: "로컬 시간대 사용량과 이슈 Custom KV",
+          changes: [],
+          features: [
+            "사용량 화면이 사용자의 표시 시간대를 반영해 워크스페이스와 런타임 사용량을 기대한 날짜 경계로 보여줍니다.",
+            "이슈가 에이전트용 compact 상태를 보관할 수 있어 자동화 진행 상태를 사이드바를 어지럽히지 않고 작업 항목에 연결합니다.",
+            "긴 이슈 토론을 최신 답글부터 읽을 수 있고 프로젝트 목록에 compact/comfortable 레이아웃이 추가되었습니다.",
+          ],
+          improvements: [
+            "CLI 워크스페이스 명령, 모델 선택기, 셀프 호스팅과 에이전트 문서, 예약 경로 보호, 런타임 메타데이터 지침이 정리되었습니다.",
+          ],
+          fixes: [
+            "Codex 재시도, Claude Code 사용량 기록, 깨진 실시간 메시지 처리, 이슈 생성 버튼 안내, 런타임 작업 복구를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.3.4",
+          date: "2026-05-20",
+          title: "더 똑똑한 오토파일럿과 에이전트 제어",
+          changes: [],
+          features: [
+            "오토파일럿이 스쿼드를 통해 새 작업을 할당하고 생성된 이슈를 선택한 프로젝트에 바로 넣을 수 있습니다.",
+            "에이전트 설정에 Claude와 Codex용 추론 제어가 추가되고, 데스크톱 탭 고정과 사용자 프로필 요청자 컨텍스트가 추가되었습니다.",
+            "워크스페이스 설정에 GitHub 전용 페이지가 생겨 일반 멤버도 연결된 설치 정보를 볼 수 있습니다.",
+          ],
+          improvements: [
+            "신규 사용자 런타임 연결, 런타임 페이지, 이슈 breadcrumb, HTML/첨부 미리보기, 스쿼드 보관 확인, 부모/하위 이슈 안내가 개선되었습니다.",
+          ],
+          fixes: [
+            "리스트 편집, Homebrew 실패 시 설치 fallback, 실행 로그 재시도, 임시 task ID 처리, OpenCode 질문 프롬프트, Gemini 아이콘 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.3.3",
+          date: "2026-05-19",
+          title: "프로젝트 타임라인과 더 명확한 이슈 작업",
+          changes: [],
+          features: [
+            "프로젝트에 간트 보기가 추가되어 일정이 있는 작업을 계획 변경과 함께 확인할 수 있습니다.",
+            "워크스페이스 관리자는 이슈 키 접두사를 바꿀 수 있고 CLI는 워크스페이스 전환과 현재 워크스페이스 표시를 지원합니다.",
+            "에이전트는 최신 이슈 토론부터 읽을 수 있으며, 사용량 화면과 에이전트 상세 보드도 개선되었습니다.",
+          ],
+          improvements: [
+            "온보딩 질문 흐름, 내 이슈의 스쿼드 작업 표시, 에이전트 실행 로그 정렬이 개선되었습니다.",
+          ],
+          fixes: [
+            "데스크톱 HTML 미리보기, HTML 소스 보기, 이슈 생성 모드 전환, 런타임 작업 컨텍스트, 셀프 호스팅 세션 기간 설정을 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.3.2",
+          date: "2026-05-18",
+          title: "Webhook 오토파일럿과 더 나은 작업 보드",
+          changes: [],
+          features: [
+            "오토파일럿이 Webhook 이벤트로 시작되고 전달 기록 확인과 재실행을 지원합니다.",
+            "이슈 보드는 담당자 그룹화, 연결된 Pull request 상태, 시작일 표시를 지원합니다.",
+            "런타임 페이지의 machine view, 시간/작업 사용량 차트, 스킬 bulk 복사, HTML 미리보기가 추가되었습니다.",
+          ],
+          improvements: [
+            "실패한 이슈 작업 오류, GitHub PR 상태 표시, 셀프 호스팅 기본값과 검색 결과 품질이 개선되었습니다.",
+          ],
+          fixes: [
+            "오토파일럿 생성 이슈 반복, 런타임 기본 선택, 스쿼드 스크롤, 데스크톱 확대/축소, 인증/로컬 서비스 안정성을 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.3.1",
+          date: "2026-05-15",
+          title: "빠른 탐색과 더 안정적인 스쿼드",
+          changes: [],
+          features: [
+            "멤버와 에이전트 상세 페이지에서 관련 작업을 볼 수 있습니다.",
+            "데스크톱 앱은 업데이트를 백그라운드에서 다운로드하고, 셀프 호스팅은 SMTP 이메일 전송을 지원합니다.",
+            "스쿼드 생성 흐름의 멤버 선택이 팀 조율에 더 적합해졌습니다.",
+          ],
+          improvements: [
+            "페이지 전환, 긴 이슈 활동 접기, Agents/Squads 목록 보기 기억, SSH 저장소 URL 처리, 스쿼드 handoff가 개선되었습니다.",
+          ],
+          fixes: [
+            "셀프 호스팅 파일 카드, 로컬 도구와 스킬 탐색, Claude 사용량, 워크스페이스 전환 후 실시간 업데이트, 좁은 화면 메뉴를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.3.0",
+          date: "2026-05-14",
+          title: "스쿼드와 첨부 파일 미리보기",
+          changes: [],
+          features: [
+            "스쿼드를 통해 작업을 그룹에 할당하고 리더 에이전트가 다음 단계를 조율할 수 있습니다.",
+            "PDF, 오디오, 비디오, Markdown, 코드, 로그, 일반 텍스트 첨부 파일을 제자리에서 미리볼 수 있습니다.",
+            "중국어 이름을 pinyin으로 검색할 수 있습니다.",
+          ],
+          improvements: [
+            "스쿼드 페이지, quick create와 picker 검색, 사용량 차트, CLI 스쿼드 관리, 공유 인터페이스 라벨이 개선되었습니다.",
+          ],
+          fixes: [
+            "스쿼드 리더 라우팅, 스쿼드 멘션, 이슈 목록 새로고침, 첨부 미리보기 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.32",
+          date: "2026-05-13",
+          title: "사용량 인사이트와 채팅 이름 변경",
+          changes: [],
+          features: [
+            "사용량 화면이 워크스페이스, 프로젝트, 런타임 추세, 에이전트 순위를 한곳에 보여줍니다.",
+            "채팅 세션 이름을 채팅 헤더에서 바로 바꿀 수 있고 피드백에 스크린샷과 파일을 첨부할 수 있습니다.",
+          ],
+          improvements: [
+            "사용량 페이지 명명, 새 채팅 업데이트, 셀프 호스팅 GitHub 설정, 사용자 설치 Codex 스킬 자동 사용이 개선되었습니다.",
+          ],
+          fixes: [
+            "빈 성공 응답, instruction editor의 mention 링크, 데스크톱 첨부 다운로드, Gemini/Windows 런타임 시작, 긴 GitHub 저장소 목록을 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.31",
+          date: "2026-05-12",
+          title: "GitHub 연동과 안전한 이슈 탐색",
+          changes: [],
+          features: [
+            "GitHub를 연결해 연결된 Pull request를 Multica 이슈에 표시하고 상태를 동기화하며 PR 종료 시 이슈를 자동으로 닫을 수 있습니다.",
+            "채팅 메시지 첨부 파일과 이미지 미리보기를 지원하고, 에이전트와 런타임 공개 범위를 설정할 수 있습니다.",
+            "단일 에이전트 작업 중지 전에 확인을 요청하고 GitHub 연동 문서를 제공합니다.",
+          ],
+          improvements: [
+            "이슈 링크 정확도, 긴 이슈 타임라인 스크롤, 피드백 GitHub 안내, 셀프 호스팅 Caddy 안내, Linux 앱 아이콘이 개선되었습니다.",
+          ],
+          fixes: [
+            "첨부 파일명, 로컬 첨부 제공, 이슈 생성 대화상자 높이, 런타임 문서 링크를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.30",
+          date: "2026-05-11",
+          title: "Mermaid 이슈, 런타임별 시간대, 워크스페이스 나가기 처리",
+          changes: [],
+          features: [
+            "이슈 설명에서 Mermaid 다이어그램을 렌더링하고 하위 이슈 행에 상태와 담당자 picker가 추가되었습니다.",
+            "토큰 사용량 집계에 런타임별 시간대를 적용하고 private agent visibility와 멤버 제거 시 런타임 회수를 지원합니다.",
+            "관리되지 않는 모델의 사용자 지정 토큰 가격과 랜딩 페이지 변경 로그 링크가 추가되었습니다.",
+          ],
+          improvements: [
+            "데몬 self-healing, 채팅/댓글 전송 단축키, Copilot 모델 카탈로그, ACP 오류 메시지가 개선되었습니다.",
+          ],
+          fixes: [
+            "최근 이슈 누수, 첨부 다운로드 URL, Windows 입력, 데몬 콘솔 팝업, Pi 도구 필터, 인박스 이동, 오토파일럿 CLI 모드 등을 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.29",
+          date: "2026-05-09",
+          title: "Quick Create 프로젝트 선택과 댓글 해결",
+          changes: [],
+          features: [
+            "Quick Create에서 프로젝트를 선택하고 마지막 선택을 기억합니다.",
+            "댓글 스레드를 해결하고 접을 수 있으며, 이슈 live banner가 대기 중인 에이전트 작업을 보여줍니다.",
+            "실패하거나 취소된 작업을 실행 로그에서 한 번에 다시 실행할 수 있습니다.",
+          ],
+          improvements: [
+            "이슈 타임라인 렌더링, 대용량 paste 처리, 오토파일럿 오프라인 dispatch 방지, 인박스 자동 보관, Hermes 요청 전달이 개선되었습니다.",
+          ],
+          fixes: [
+            "잔액 부족 run 상태, 이미지 문제 복구, Pi 모델 목록 파싱, Priority 색상, 긴 에이전트 메시지, 데스크톱 링크 복사 등을 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.28",
+          date: "2026-05-08",
+          title: "데몬 디스크 사용량 CLI와 타임라인 개선",
+          changes: [],
+          features: [
+            "`multica daemon disk-usage`가 작업별, 워크스페이스별 디스크 사용량을 보여줍니다.",
+            "에이전트 설정의 스킬 picker에 검색 상자가 추가되고 데몬 GC 범위가 채팅, 오토파일럿, quick-create 작업까지 확장되었습니다.",
+            "이슈 상세 breadcrumb에 빠른 참조용 식별자가 표시됩니다.",
+          ],
+          improvements: [
+            "타임라인 페이지 크기, 오래된/새로운 항목 보기, task_usage daily rollup, 데몬 health check, 런타임 통계가 개선되었습니다.",
+          ],
+          fixes: [
+            "Linux 데몬 재시작, CLI short ID 라우팅, Windows 입력 파일 플래그, Electron 아이콘, orphaned reply, 타임라인 페이지네이션 예산을 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.27",
+          date: "2026-05-07",
+          title: "더 매끄러운 채팅과 GitHub 스킬 가져오기",
+          changes: [],
+          features: [
+            "GitHub 링크에서 재사용 가능한 스킬을 바로 가져올 수 있습니다.",
+          ],
+          improvements: [
+            "채팅과 인박스, 이슈 작업 액션, 오토파일럿 반복 실패 감지가 더 매끄러워졌습니다.",
+          ],
+          fixes: [
+            "중국어 입력, 데스크톱 업데이트, 긴 이슈 타임라인, live status 업데이트 안정성을 개선했습니다.",
+          ],
+        },
+        {
+          version: "0.2.26",
+          date: "2026-05-06",
+          title: "전체 i18n 적용과 시스템 알림 토글",
+          changes: [],
+          features: [
+            "웹 앱이 간체 중국어로 완전히 번역되고 사용자별 로케일을 지원합니다.",
+            "설정에 시스템 알림 토글, 채팅 세션 삭제, 인박스의 히스토리 패널, Redis 기반 런타임 liveness가 추가되었습니다.",
+            "데스크톱은 런타임 셀프 호스트 설정을 로드하고 CLI는 명확한 대상 지정 플래그를 제공합니다.",
+          ],
+          improvements: [
+            "설정 탭 이름과 URL 반영, 긴 이슈 타임라인, 런타임 poll/heartbeat 분리, Redis 기반 CLI 업데이트 요청, 사용량 쿼리 범위가 개선되었습니다.",
+          ],
+          fixes: [
+            "서버 측 작업 삭제 시 데몬 취소, Codex auth refresh, ACP session resume, OpenCode skills 경로, 404 처리, sidebar pin, S3 URL, Windows installer 등을 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.24",
+          date: "2026-05-03",
+          title: "Repo checkout --ref와 Hermes 재생 수정",
+          changes: [],
+          features: [
+            "`multica repo checkout --ref`가 브랜치, 태그, 특정 커밋을 대상으로 저장소를 가져올 수 있습니다.",
+            "`multica agent avatar`가 CLI에서 에이전트 아바타를 직접 업로드합니다.",
+            "인박스 Done 작업에 보관 버튼이 추가되고 중복 mark-as-done hover 버튼은 제거되었습니다.",
+          ],
+          improvements: [
+            "긴 타임라인 이슈 열기, multi-replica 모델 picker, 데몬 empty-claim cache TTL이 개선되었습니다.",
+          ],
+          fixes: [
+            "새 에이전트 즉시 표시, Hermes 이전 답변 재생, Codex GPT-5.5 모델 표시, `multica login --token`, CLI 업데이트 상태, session resume, Kanban 설정, 오토파일럿 반응형 등을 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.21",
+          date: "2026-04-30",
+          title: "Quick Capture 개편과 Mermaid 다이어그램",
+          changes: [],
+          features: [
+            "기존 새 이슈 대화상자가 Quick Capture로 바뀌어 연속 생성, 파일 업로드, 붙여넣은 URL 자동 보강을 지원합니다.",
+            "Mermaid 다이어그램이 Markdown 안에서 렌더링되고 복잡한 그래프는 전체 화면 lightbox로 볼 수 있습니다.",
+            "프로젝트별 저장소 바인딩과 권한 인식 UI가 추가되었습니다.",
+          ],
+          improvements: [
+            "데몬 claim polling의 Redis fast-path와 Multica Agent 커밋의 Co-authored-by trailer, 데스크톱 reload 차단이 개선되었습니다.",
+          ],
+          fixes: [
+            "Quick Create 요구사항 생성, 인박스 댓글 이동과 자동 보관, 작업 재실행 session, 초대 후 워크스페이스 이동을 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.20",
+          date: "2026-04-29",
+          title: "에이전트로 이슈 만들기와 Presence v3",
+          changes: [],
+          features: [
+            "`c`를 눌러 한 줄을 작성하고 에이전트를 선택하면 에이전트가 비동기로 이슈를 만들고 결과를 인박스에 남깁니다.",
+            "Agent Presence v3가 availability와 last-task를 더 명확히 나누고 실행 로그를 이슈 패널에 표시합니다.",
+            "데몬과 서버 heartbeat가 WebSocket으로 흐르며 task startup latency가 줄었습니다.",
+          ],
+          improvements: [
+            "PAT/daemon token 캐시, agent CLI args env var, 수동/에이전트 이슈 생성 대화상자 공유가 개선되었습니다.",
+          ],
+          fixes: [
+            "에이전트 이슈 생성 queue 정체와 중복 생성, 줄바꿈 렌더링, agent-authored mention loop, Windows Cursor multi-line prompt를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.19",
+          date: "2026-04-28",
+          title: "Kiro CLI 런타임과 데스크톱 알림",
+          changes: [],
+          features: [
+            "Kiro CLI가 로컬 에이전트 런타임 옵션으로 추가되었습니다.",
+            "macOS dock badge와 native notification이 추가되어 읽지 않은 이슈로 바로 이동할 수 있습니다.",
+            "이슈 목록이 라벨 필터를 지원하고 데몬은 WebSocket으로 task wakeup을 받습니다.",
+          ],
+          improvements: [
+            "리스트/보드 상태 그룹 헤더, Markdown 링크 보존, 라벨 optimistic attach, mention picker 검색이 개선되었습니다.",
+          ],
+          fixes: [
+            "댓글 삭제 시 에이전트 작업 취소, stalled Codex timeout, Windows 데몬 종료, 에이전트 간 mention loop를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.18",
+          date: "2026-04-27",
+          title: "이슈 라벨과 Labs 탭",
+          changes: [],
+          features: [
+            "이슈 라벨로 list, board, detail view에서 색상 분류와 필터링을 할 수 있습니다.",
+            "실험 토글을 위한 Labs 설정 탭과 읽지 않은 워크스페이스 초대 표시 dot이 추가되었습니다.",
+          ],
+          improvements: [
+            "프로젝트 picker 아이콘, detail page sidebar highlight, self-host signup gating env var 처리가 개선되었습니다.",
+          ],
+          fixes: [
+            "에이전트 댓글 줄바꿈, Fedora의 Desktop RPM 충돌, Windows 에이전트 multi-line prompt 처리를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.17",
+          date: "2026-04-26",
+          title: "사용자 지정 에이전트 환경 변수와 더 나은 실패 메시지",
+          changes: [],
+          features: [
+            "`multica agent create/update --custom-env KEY=VALUE`가 에이전트 실행에 사용자 지정 환경 변수를 주입합니다.",
+            "에이전트 실패 메시지에 런타임 CLI stderr tail이 포함되어 디버깅이 쉬워졌습니다.",
+            "CLI 업데이트 다운로드 timeout을 설정할 수 있습니다.",
+          ],
+          improvements: [
+            "데몬 cancelled 상태 보고와 agent status reconciliation, server heartbeat 분리와 slow-log가 개선되었습니다.",
+          ],
+          fixes: [
+            "이슈 create/update의 assignee_id 검증, DeleteIssue ID 해석, Pi skills 경로, Windows console popup을 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.16",
+          date: "2026-04-25",
+          title: "Chat V2와 이슈 우클릭 메뉴",
+          changes: [],
+          features: [
+            "Chat V2, 이슈 우클릭 메뉴, 앱 내 피드백 흐름이 추가되었습니다.",
+          ],
+          improvements: [
+            "채팅 사용성, 이슈 액션 접근성, 피드백 수집 흐름이 개선되었습니다.",
+          ],
+          fixes: [
+            "채팅과 이슈 주변의 안정성 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.15",
+          date: "2026-04-24",
+          title: "로컬 스킬, LaTeX, Focus Mode",
+          changes: [],
+          features: [
+            "로컬 스킬, LaTeX 렌더링, Focus Mode, orphan task recovery가 추가되었습니다.",
+          ],
+          improvements: [
+            "에이전트 작업 환경과 집중 작업 흐름이 개선되었습니다.",
+          ],
+          fixes: [
+            "고아 작업 복구와 에디터 주변 안정성 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.11",
+          date: "2026-04-20",
+          title: "크로스 플랫폼 데스크톱 패키징",
+          changes: [],
+          features: [
+            "데스크톱 앱의 크로스 플랫폼 패키징, CLI self-update, 보드 페이지네이션이 추가되었습니다.",
+          ],
+          fixes: [
+            "데스크톱 배포와 보드 로딩 안정성 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.8",
+          date: "2026-04-17",
+          title: "에이전트별 모델과 Kimi 런타임",
+          changes: [],
+          features: [
+            "에이전트별 모델 설정, Kimi 런타임, 셀프 호스트 인증 개선이 추가되었습니다.",
+          ],
+          fixes: [
+            "모델 선택과 인증 흐름의 안정성 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.7",
+          date: "2026-04-16",
+          title: "에디터 하위 이슈와 MCP",
+          changes: [],
+          features: [
+            "에디터 선택 영역에서 하위 이슈를 만들고, 셀프 호스트 gating과 MCP 관련 기능을 사용할 수 있습니다.",
+          ],
+          fixes: [
+            "하위 이슈 생성과 셀프 호스트 설정 주변 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.5",
+          date: "2026-04-14",
+          title: "CLI 오토파일럿, Cmd+K, 데몬 identity",
+          changes: [],
+          features: [
+            "CLI 오토파일럿 명령, Cmd+K 검색/명령 흐름, 데몬 identity 개선이 추가되었습니다.",
+          ],
+          fixes: [
+            "명령 실행과 데몬 식별 주변 안정성 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.2.1",
+          date: "2026-04-10",
+          title: "새 에이전트 런타임",
+          changes: [],
+          features: [
+            "새 에이전트 런타임을 추가해 더 다양한 실행 환경을 지원합니다.",
+          ],
+          fixes: [
+            "런타임 연결과 실행 안정성을 개선했습니다.",
+          ],
+        },
+        {
+          version: "0.2.0",
+          date: "2026-04-09",
+          title: "데스크톱 앱, 오토파일럿, 초대",
+          changes: [],
+          features: [
+            "데스크톱 앱, 오토파일럿, 워크스페이스 초대 흐름이 추가되었습니다.",
+          ],
+          improvements: [
+            "초기 제품 흐름과 런타임 연결 경험이 정리되었습니다.",
+          ],
+          fixes: [
+            "데스크톱, 오토파일럿, 초대 기능의 초기 안정성 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.1.33",
+          date: "2026-04-07",
+          title: "Gemini CLI와 에이전트 환경 변수",
+          changes: [],
+          features: [
+            "Gemini CLI 지원과 에이전트 환경 변수 설정이 추가되었습니다.",
+          ],
+          improvements: [
+            "에이전트 실행 설정 흐름이 더 유연해졌습니다.",
+          ],
+          fixes: [
+            "CLI와 환경 변수 처리 주변 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.1.28",
+          date: "2026-04-02",
+          title: "Windows 지원, 인증, 온보딩",
+          changes: [],
+          features: [
+            "Windows 지원, 인증 흐름, 온보딩 경험이 추가되었습니다.",
+          ],
+          fixes: [
+            "초기 Windows 실행과 로그인 안정성 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.1.27",
+          date: "2026-04-01",
+          title: "원클릭 설정과 셀프 호스팅",
+          changes: [],
+          features: [
+            "원클릭 설정, 셀프 호스팅 안내, 안정성 개선이 추가되었습니다.",
+          ],
+          improvements: [
+            "초기 설치와 운영 경험이 더 단순해졌습니다.",
+          ],
+          fixes: [
+            "설정과 배포 과정의 안정성 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.1.24",
+          date: "2026-03-29",
+          title: "보안과 알림",
+          changes: [],
+          features: [
+            "보안 기능과 알림 경험이 추가되었습니다.",
+          ],
+          improvements: [
+            "팀 사용에 필요한 운영 안전성이 개선되었습니다.",
+          ],
+          fixes: [
+            "알림과 접근 제어 주변 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.1.23",
+          date: "2026-03-28",
+          title: "고정, Cmd+K, 프로젝트",
+          changes: [],
+          features: [
+            "사이드바 고정, Cmd+K, 프로젝트 기능이 추가되었습니다.",
+          ],
+          fixes: [
+            "프로젝트와 탐색 흐름의 초기 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.1.22",
+          date: "2026-03-27",
+          title: "셀프 호스팅, ACP, 문서",
+          changes: [],
+          features: [
+            "셀프 호스팅, ACP, 문서 관련 기능이 추가되었습니다.",
+          ],
+          improvements: [
+            "설치와 운영 문서가 개선되었습니다.",
+          ],
+          fixes: [
+            "셀프 호스팅과 문서 링크 주변 문제를 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.1.21",
+          date: "2026-03-26",
+          title: "프로젝트, 검색, 모노레포",
+          changes: [
+            "프로젝트, 검색, 모노레포 지원을 추가했습니다.",
+          ],
+        },
+        {
+          version: "0.1.20",
+          date: "2026-03-25",
+          title: "하위 이슈, TanStack Query, 사용량 추적",
+          changes: [
+            "하위 이슈, TanStack Query 기반 데이터 흐름, 사용량 추적을 추가했습니다.",
+          ],
+        },
+        {
+          version: "0.1.18",
+          date: "2026-03-23",
+          title: "OAuth, OpenClaw, 이슈 로딩",
+          changes: [
+            "OAuth, OpenClaw 런타임, 이슈 로딩 개선을 추가했습니다.",
+          ],
+        },
+        {
+          version: "0.1.17",
+          date: "2026-03-22",
+          title: "댓글 페이지네이션과 CLI 정리",
+          changes: [
+            "댓글 페이지네이션과 CLI 사용성을 개선했습니다.",
+          ],
+        },
+        {
+          version: "0.1.15",
+          date: "2026-03-20",
+          title: "에디터 개편과 에이전트 생명주기",
+          changes: [
+            "에디터를 개편하고 에이전트 생명주기 관리를 개선했습니다.",
+          ],
+        },
+        {
+          version: "0.1.14",
+          date: "2026-03-19",
+          title: "멘션과 권한",
+          changes: [
+            "멘션과 권한 처리 흐름을 추가했습니다.",
+          ],
+        },
+        {
+          version: "0.1.13",
+          date: "2026-03-18",
+          title: "내 이슈와 i18n",
+          changes: [
+            "내 이슈 화면과 국제화 기반을 추가했습니다.",
+          ],
+        },
+        {
+          version: "0.1.3",
+          date: "2026-03-08",
+          title: "에이전트 지능",
+          changes: [
+            "에이전트 지능과 작업 처리 기반을 추가했습니다.",
+          ],
+        },
+        {
+          version: "0.1.2",
+          date: "2026-03-07",
+          title: "협업",
+          changes: [
+            "팀 협업을 위한 기본 흐름을 추가했습니다.",
+          ],
+        },
+        {
+          version: "0.1.1",
+          date: "2026-03-06",
+          title: "핵심 플랫폼",
+          changes: [
+            "Multica 핵심 플랫폼 기능을 추가했습니다.",
+          ],
+        },
+        {
+          version: "0.1.0",
+          date: "2026-03-05",
+          title: "기반 구축",
+          changes: [
+            "Multica의 초기 기반을 공개했습니다.",
+          ],
+        },
+      ],
+    },
+    about: {
+      title: "Multica 소개",
+      nameLine: {
+        prefix: "Multica — ",
+        mul: "Mul",
+        tiplexed: "tiplexed ",
+        i: "I",
+        nformationAnd: "nformation and ",
+        c: "C",
+        omputing: "omputing ",
+        a: "A",
+        gent: "gent.",
+      },
+      paragraphs: [
+        "Multica라는 이름은 1960년대의 선구적인 운영체제 Multics에서 따왔습니다. Multics는 여러 사용자가 하나의 컴퓨터를 공유하면서도 각자 자기 컴퓨터처럼 사용할 수 있게 한 시분할 개념을 널리 알렸습니다. Unix는 Multics를 의도적으로 단순화하며 탄생했습니다. 한 사용자, 한 작업, 하나의 우아한 철학에 집중한 결과였습니다.",
+        "우리는 비슷한 전환점이 다시 오고 있다고 봅니다. 수십 년 동안 소프트웨어 팀은 사실상 단일 스레드로 일했습니다. 엔지니어 한 명이 한 작업을 맡고, 한 번에 하나의 맥락만 다뤘습니다. AI 에이전트는 이 방정식을 바꿉니다. Multica는 시분할을 다시 가져오되, 이번에는 시스템을 함께 쓰는 사용자가 사람과 자율 에이전트인 시대에 맞게 가져옵니다.",
+        "Multica에서 에이전트는 일급 팀원입니다. 사람 동료처럼 이슈를 할당받고, 진행 상황을 보고하고, 막힌 부분을 알리고, 코드를 배포합니다. 담당자 선택, 활동 타임라인, 작업 생명주기, 런타임 인프라는 모두 이 전제를 중심으로 처음부터 설계되었습니다.",
+        "Multics가 그랬듯 핵심은 multiplexing입니다. 작은 팀이 작게 움직일 필요는 없습니다. 올바른 시스템이 있다면 두 명의 엔지니어와 에이전트 팀은 스무 명처럼 움직일 수 있습니다.",
+        "Multica는 완전한 오픈소스이며 셀프 호스팅할 수 있습니다. 데이터는 여러분의 인프라에 머뭅니다. 모든 코드를 확인하고, API를 확장하고, 원하는 LLM 제공자를 연결하고, 커뮤니티에 기여할 수 있습니다.",
+      ],
+      cta: "GitHub에서 보기",
+    },
+    download: {
+      hero: {
+        macArm64: {
+          title: "macOS용 Multica",
+          sub: "Apple Silicon · 데몬 포함, 별도 설정 없음",
+          primary: "다운로드(.dmg)",
+          altZip: "또는 .zip 다운로드",
+        },
+        macIntel: {
+          title: "macOS용 Multica",
+          sub: "Apple Silicon이 필요합니다. Intel Mac은 아직 지원하지 않습니다.",
+          disabledCta: "Apple Silicon 필요",
+          intelHint:
+            "Intel Mac을 사용 중인가요? 아래 CLI를 사용하세요. 같은 데몬이 실행됩니다.",
+        },
+        winX64: {
+          title: "Windows용 Multica",
+          sub: "데몬 포함, 별도 설정 없음",
+          primary: "다운로드(.exe)",
+        },
+        winArm64: {
+          title: "Windows용 Multica",
+          sub: "ARM · 데몬 포함, 별도 설정 없음",
+          primary: "다운로드(.exe)",
+        },
+        linux: {
+          title: "Linux용 Multica",
+          sub: "데몬 포함, 별도 설정 없음",
+          primary: "AppImage 다운로드",
+          altFormats: "또는 .deb / .rpm",
+        },
+        unknown: {
+          title: "플랫폼 선택",
+          sub: "모든 설치 파일은 아래에 정리되어 있습니다.",
+        },
+        safariMacHint: "Intel Mac을 사용 중인가요? 아래 CLI를 사용하세요.",
+        archFallbackHint: "아키텍처가 맞지 않나요? 아래에서 모든 형식을 확인하세요.",
+      },
+      allPlatforms: {
+        title: "모든 플랫폼",
+        macLabel: "macOS · Apple Silicon",
+        winX64Label: "Windows · x64",
+        winArm64Label: "Windows · ARM64",
+        linuxX64Label: "Linux · x64",
+        linuxArm64Label: "Linux · ARM64",
+        formatDmg: ".dmg",
+        formatZip: ".zip",
+        formatExe: ".exe",
+        formatAppImage: ".AppImage",
+        formatDeb: ".deb",
+        formatRpm: ".rpm",
+        intelNote:
+          "Apple Silicon만 지원합니다. 이번 릴리스에서는 Intel Mac을 지원하지 않습니다.",
+        unavailable: "사용할 수 없음",
+      },
+      cli: {
+        title: "CLI를 선호하시나요?",
+        sub: "서버, 원격 개발 환경, headless 설정에 적합합니다. 데스크톱과 같은 데몬을 터미널로 설치합니다.",
+        installLabel: "설치",
+        startLabel: "데몬 시작",
+        sshNote: "이미 서버에 접속해 있나요? 같은 명령을 SSH에서도 사용할 수 있습니다.",
+        copyLabel: "복사",
+        copiedLabel: "복사했습니다",
+      },
+      cloud: {
+        title: "클라우드 런타임(대기자 명단)",
+        sub: "Multica가 런타임을 호스팅해 드립니다. 아직 제공 전입니다. 이메일을 남기면 준비되는 대로 알려드립니다.",
+      },
+      footer: {
+        releaseNotes: "{version}의 새로운 내용",
+        allReleases: "모든 릴리스 보기",
+        currentVersion: "현재 버전: {version}",
+        versionUnavailable: "버전을 확인할 수 없습니다. GitHub를 확인하세요.",
+      },
+    },
+    contactSales: {
+      pageTitle: "영업팀 문의",
+      pageDescription:
+        "회사에서 사람과 에이전트가 함께 일하는 워크플로를 도입하는 방법을 Multica 팀과 논의하세요.",
+      eyebrow: "영업팀 문의",
+      title: "필요한 내용을 알려주세요",
+      subtitle: "연락드리기 전에 가장 적합한 방안을 준비할 수 있도록 도와주세요.",
+      notice: {
+        badge: "시스템은 비즈니스 이메일 도메인만 인식합니다.",
+        body: "개인 이메일 주소(예: @gmail.com, @outlook.com)로 보낸 요청은 감지되거나 처리되지 않습니다.",
+      },
+      fields: {
+        firstName: "이름",
+        lastName: "성",
+        businessEmail: "비즈니스 이메일",
+        businessEmailHint:
+          "회사 이메일이 필요합니다. 후속 연락을 드릴 수 있도록 유효한 회사 도메인을 사용해 주세요.",
+        companyName: "회사명",
+        companySize: "회사 규모",
+        countryRegion: "국가 / 지역",
+        useCase: "Multica를 어떻게 사용하거나 협업에 활용할 계획인가요?",
+        goals: "목표 또는 현재 과제",
+        goalsHint:
+          "Multica로 달성하고 싶은 일이나 현재 겪는 문제를 알려주세요. 자세히 적어주실수록 더 잘 도와드릴 수 있습니다.",
+        selectPlaceholder: "선택하세요",
+        submit: "제출",
+        submitting: "제출 중...",
+      },
+      companySizes: [
+        { value: "1-10", label: "직원 1-10명" },
+        { value: "11-50", label: "직원 11-50명" },
+        { value: "51-200", label: "직원 51-200명" },
+        { value: "201-500", label: "직원 201-500명" },
+        { value: "501-1000", label: "직원 501-1,000명" },
+        { value: "1000+", label: "직원 1,000명 이상" },
+      ],
+      useCases: [
+        { value: "evaluate", label: "팀 도입을 검토 중" },
+        { value: "adopt_team", label: "팀 또는 회사에 Multica 도입" },
+        { value: "self_host", label: "자체 인프라에 셀프 호스팅" },
+        { value: "integrate", label: "기존 도구와 Multica 연동" },
+        { value: "partner", label: "파트너십 또는 리셀러 문의" },
+        { value: "other", label: "기타" },
+      ],
+      countries: [
+        "미국",
+        "캐나다",
+        "영국",
+        "독일",
+        "프랑스",
+        "네덜란드",
+        "스웨덴",
+        "스위스",
+        "스페인",
+        "이탈리아",
+        "아일랜드",
+        "노르웨이",
+        "덴마크",
+        "핀란드",
+        "벨기에",
+        "포르투갈",
+        "호주",
+        "뉴질랜드",
+        "일본",
+        "대한민국",
+        "싱가포르",
+        "홍콩 특별행정구",
+        "대만",
+        "중국 본토",
+        "인도",
+        "인도네시아",
+        "태국",
+        "베트남",
+        "필리핀",
+        "말레이시아",
+        "아랍에미리트",
+        "사우디아라비아",
+        "이스라엘",
+        "튀르키예",
+        "남아프리카공화국",
+        "브라질",
+        "멕시코",
+        "아르헨티나",
+        "칠레",
+        "기타",
+      ],
+      consent: {
+        intro:
+          "Multica, Inc.는 개인정보를 존중합니다. 제공하신 개인정보는 계정 관리와 요청하신 제품 또는 서비스 제공에만 사용합니다. 때때로 제품 업데이트, 모범 사례, 관련 인사이트를 공유드리고 싶습니다. 소식을 받고 싶으시면 아래에서 알려주세요.",
+        outreach:
+          "서비스 업데이트, 지원 문의, 비즈니스 관련 후속 연락을 포함해 Multica, Inc.의 1:1 연락을 받고 싶습니다.",
+        updates:
+          "Multica의 제품 업데이트, 인사이트, 이벤트 초대 소식을 받고 싶습니다.",
+        unsubscribe:
+          "언제든 수신을 거부할 수 있습니다. 데이터와 개인정보 권리를 처리하는 방식은 다음 문서에서 자세히 확인할 수 있습니다:",
+        submitConsent:
+          "“제출”을 클릭하면 요청한 콘텐츠 제공을 위해 Multica, Inc.가 정보를 저장하고 처리하는 데 동의하게 됩니다.",
+        privacyLinkLabel: "개인정보 처리방침.",
+        privacyLinkHref: "/about",
+      },
+      success: {
+        title: "감사합니다. 요청을 받았습니다.",
+        message:
+          "Multica 팀원이 영업일 기준 3일 이내에 답변드립니다. 그동안 문서를 살펴보거나 GitHub에서 스타를 눌러주세요.",
+        cta: "홈으로 돌아가기",
+      },
+      errors: {
+        generic: "문제가 발생했습니다. 잠시 후 다시 시도하세요.",
+        rateLimit:
+          "최근 이 주소에서 여러 문의가 접수되었습니다. 잠시 후 다시 시도하세요.",
+        freeEmail:
+          "비즈니스 이메일 주소를 사용해 주세요. 무료 이메일 제공자(gmail, outlook 등)는 허용되지 않습니다.",
+        invalidEmail: "유효한 이메일 주소처럼 보이지 않습니다.",
+      },
+    },
   };
 }
