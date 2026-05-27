@@ -39,6 +39,7 @@ var capabilityRegistry = map[string]Capability{
 	"copilot": {
 		StreamDisplay:    true,
 		ToolCallStream:   true,
+		Approval:         true,
 		ResumeSession:    true,
 		StructuredOutput: true,
 	},
