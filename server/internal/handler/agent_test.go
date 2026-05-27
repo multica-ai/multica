@@ -1107,6 +1107,107 @@ func TestUpdateAgent_KeepsMcpConfigForMemberActor(t *testing.T) {
 	}
 }
 
+// TestUpdateAgent_HonorsWorkspaceAlwaysRedact closes the FIR-2394 gap:
+// the create/update/archive/restore mutation responses must apply the same
+// workspace `always_redact_env=true` policy as GetAgent / ListAgents. Before
+// this fix the mutation handlers only redacted for agent actors, so a member
+// or admin in a "never surface secrets" workspace could still scrape
+// mcp_config back via any unrelated mutation. The settings flag's legacy
+// name still says "env" but post-MUL-2600 it governs mcp_config exposure.
+func TestUpdateAgent_HonorsWorkspaceAlwaysRedact(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	prevSettings, err := snapshotWorkspaceSettings(ctx, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("snapshot workspace settings: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = restoreWorkspaceSettings(context.Background(), testWorkspaceID, prevSettings)
+	})
+	if err := setWorkspaceSettings(ctx, testWorkspaceID, []byte(`{"always_redact_env": true}`)); err != nil {
+		t.Fatalf("set workspace settings: %v", err)
+	}
+
+	target := createHandlerTestAgent(t, "mut-mcp-always-redact", []byte(`{"server":"redact-me"}`))
+	req := newRequest(http.MethodPut, "/api/agents/"+target, map[string]any{
+		"description": "owner-visible mutation in always_redact workspace",
+	})
+	req = withURLParam(req, "id", target)
+	w := httptest.NewRecorder()
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.McpConfig) > 0 && !bytes.Equal(bytes.TrimSpace(resp.McpConfig), []byte("null")) {
+		t.Errorf("UpdateAgent leaked mcp_config even though workspace has always_redact_env=true: %s", string(resp.McpConfig))
+	}
+	if !resp.McpConfigRedacted {
+		t.Errorf("UpdateAgent should set mcp_config_redacted=true when workspace policy redacts secrets")
+	}
+}
+
+// TestArchiveAgent_HonorsWorkspaceAlwaysRedact mirrors the UpdateAgent guard
+// for the archive mutation path — same FIR-2394 gap.
+func TestArchiveAgent_HonorsWorkspaceAlwaysRedact(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	prevSettings, err := snapshotWorkspaceSettings(ctx, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("snapshot workspace settings: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = restoreWorkspaceSettings(context.Background(), testWorkspaceID, prevSettings)
+	})
+	if err := setWorkspaceSettings(ctx, testWorkspaceID, []byte(`{"always_redact_env": true}`)); err != nil {
+		t.Fatalf("set workspace settings: %v", err)
+	}
+
+	target := createHandlerTestAgent(t, "arch-mcp-always-redact", []byte(`{"server":"archive-redact-me"}`))
+	req := newRequest(http.MethodPost, "/api/agents/"+target+"/archive", nil)
+	req = withURLParam(req, "id", target)
+	w := httptest.NewRecorder()
+	testHandler.ArchiveAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ArchiveAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.McpConfig) > 0 && !bytes.Equal(bytes.TrimSpace(resp.McpConfig), []byte("null")) {
+		t.Errorf("ArchiveAgent leaked mcp_config even though workspace has always_redact_env=true: %s", string(resp.McpConfig))
+	}
+	if !resp.McpConfigRedacted {
+		t.Errorf("ArchiveAgent should set mcp_config_redacted=true when workspace policy redacts secrets")
+	}
+}
+
+func snapshotWorkspaceSettings(ctx context.Context, wsID string) ([]byte, error) {
+	var settings []byte
+	err := testPool.QueryRow(ctx, `SELECT settings FROM workspace WHERE id = $1`, wsID).Scan(&settings)
+	return settings, err
+}
+
+func setWorkspaceSettings(ctx context.Context, wsID string, settings []byte) error {
+	_, err := testPool.Exec(ctx, `UPDATE workspace SET settings = $1::jsonb WHERE id = $2`, settings, wsID)
+	return err
+}
+
+func restoreWorkspaceSettings(ctx context.Context, wsID string, settings []byte) error {
+	_, err := testPool.Exec(ctx, `UPDATE workspace SET settings = $1::jsonb WHERE id = $2`, settings, wsID)
+	return err
+}
+
 // insertHandlerTestTask creates an in_progress task for the given
 // agent so resolveActor's GetAgentTask lookup succeeds without
 // dragging the full TaskService into the test.

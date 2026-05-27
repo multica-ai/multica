@@ -4,6 +4,7 @@ package handler
 
 import (
 	"bytes"
+	"context" // CEREBRO-PATCH(mcp-config-mutation-redact): needed by redactAgentMcpConfigOnMutation.
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -732,7 +733,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		isFirstAgent,
 	))
 
-	redactAgentResponseForActor(&resp, actorType)
+	// CEREBRO-PATCH(mcp-config-mutation-redact): FIR-2394 — honor workspace always_redact_env + per-row gate, not just actor=agent.
+	h.redactAgentMcpConfigOnMutation(r.Context(), created, &resp, actorType, ownerID, member.Role)
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -838,6 +840,34 @@ func redactMcpConfig(resp *AgentResponse) {
 // target's mcp_config from the mutation response. MUL-2600.
 func redactAgentResponseForActor(resp *AgentResponse, actorType string) {
 	if actorType == "agent" {
+		redactMcpConfig(resp)
+	}
+}
+
+// CEREBRO-PATCH(mcp-config-mutation-redact): FIR-2394 — apply the same
+// three-gate mcp_config redaction as GetAgent/ListAgents to mutation
+// responses. The prior `redactAgentResponseForActor` only stripped on
+// agent actors, so a workspace with `always_redact_env=true` still
+// surfaced freshly written or untouched mcp_config secrets on the
+// create/update/archive/restore response bodies. Loading the workspace
+// once per mutation is acceptable for the security guarantee.
+func (h *Handler) redactAgentMcpConfigOnMutation(ctx context.Context, agent db.Agent, resp *AgentResponse, actorType, userID, memberRole string) {
+	if actorType == "agent" {
+		redactMcpConfig(resp)
+		return
+	}
+	ws, err := h.Queries.GetWorkspace(ctx, agent.WorkspaceID)
+	if err != nil {
+		// Fail closed: if we cannot confirm the workspace policy, do not
+		// surface secret-bearing content on the response.
+		redactMcpConfig(resp)
+		return
+	}
+	if workspaceAlwaysRedactSecrets(ws.Settings) {
+		redactMcpConfig(resp)
+		return
+	}
+	if !canViewAgentSecrets(agent, userID, memberRole) {
 		redactMcpConfig(resp)
 	}
 }
@@ -1104,7 +1134,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(updated.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
-	redactAgentResponseForActor(&resp, actorType)
+	// CEREBRO-PATCH(mcp-config-mutation-redact): FIR-2394 — honor workspace always_redact_env + per-row gate, not just actor=agent.
+	h.redactAgentMcpConfigOnMutation(r.Context(), updated, &resp, actorType, userID, member.Role)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1129,7 +1160,8 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.canManageAgent(w, r, agent); !ok {
+	member, ok := h.canManageAgent(w, r, agent)
+	if !ok {
 		return
 	}
 	if agent.ArchivedAt.Valid {
@@ -1165,7 +1197,8 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	resp.CanTrigger = h.cerebroCanTrigger(r.Context(), r, wsID, archived.ID, archived.OwnerID)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentArchived, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
-	redactAgentResponseForActor(&resp, actorType)
+	// CEREBRO-PATCH(mcp-config-mutation-redact): FIR-2394 — honor workspace always_redact_env + per-row gate, not just actor=agent.
+	h.redactAgentMcpConfigOnMutation(r.Context(), archived, &resp, actorType, userID, member.Role)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1175,7 +1208,8 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.canManageAgent(w, r, agent); !ok {
+	member, ok := h.canManageAgent(w, r, agent)
+	if !ok {
 		return
 	}
 	if !agent.ArchivedAt.Valid {
@@ -1198,7 +1232,8 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
-	redactAgentResponseForActor(&resp, actorType)
+	// CEREBRO-PATCH(mcp-config-mutation-redact): FIR-2394 — honor workspace always_redact_env + per-row gate, not just actor=agent.
+	h.redactAgentMcpConfigOnMutation(r.Context(), restored, &resp, actorType, userID, member.Role)
 	writeJSON(w, http.StatusOK, resp)
 }
 
