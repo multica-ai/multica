@@ -20,7 +20,7 @@ images:
   - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-server
     newTag: "0.2.45-fix-meeogo"
   - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-web
-    newTag: "0.2.45-fix-meeogo"
+    newTag: "0.2.45-fix-meeogo-ui"
 
 # Test runs at 1/1 — single web pod is enough for smoke testing and matches
 # the server's single-replica constraint (in-memory WS hub).
