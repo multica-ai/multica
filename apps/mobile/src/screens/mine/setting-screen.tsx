@@ -13,7 +13,7 @@ import { ScreenTitleBar } from "../../components/ui/screen-title-bar";
 import { useMobileLocale } from "../../i18n/mobile-locale";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { colors, radii, spacing } from "../../theme/tokens";
-import appIcon from "../../../assets/icon.png";
+import appIcon from "../../../assets/icon-android.png";
 
 type SettingNavigation = NativeStackNavigationProp<RootStackParamList>;
 
