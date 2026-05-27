@@ -2696,6 +2696,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			rtCfg = task.Agent.RuntimeConfig
 		}
 		policy := protocol.ResolveApprovalPolicy(rtCfg)
+		execOpts.ApprovalPolicy = policy
 		if capability.Approval {
 			if provider == "claude" && effectiveRunMode == protocol.TaskRunModePlan {
 				execOpts.OnApproval = BuildPlanAwareApprovalCallback(policy, task.ID, provider, d.client)

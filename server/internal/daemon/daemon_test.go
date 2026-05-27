@@ -21,6 +21,7 @@ import (
 	daemonnotifier "github.com/multica-ai/multica/server/internal/daemon/notifier"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type stubNotifier struct {
@@ -2295,5 +2296,33 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 	// given that the runner blocks on runCtx.Done().
 	if usageIdx < pollStatusIdx {
 		t.Fatalf("usage reported before poll-status (order: %v) — poll-status must come first", order)
+	}
+}
+
+func TestApprovalPolicyPropagatedToExecOpts(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		config string
+		want   string
+	}{
+		{"deny from runtime_config", `{"approval_policy":"deny"}`, "deny"},
+		{"prompt from runtime_config", `{"approval_policy":"prompt"}`, "prompt"},
+		{"auto from runtime_config", `{"approval_policy":"auto"}`, "auto"},
+		{"empty config defaults to auto", `{}`, "auto"},
+		{"nil config defaults to auto", "", "auto"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var rtCfg json.RawMessage
+			if tt.config != "" {
+				rtCfg = json.RawMessage(tt.config)
+			}
+			got := protocol.ResolveApprovalPolicy(rtCfg)
+			if got != tt.want {
+				t.Errorf("ResolveApprovalPolicy(%s) = %q, want %q", tt.config, got, tt.want)
+			}
+		})
 	}
 }

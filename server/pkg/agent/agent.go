@@ -92,6 +92,7 @@ type ExecOptions struct {
 	CustomArgs                []string         // per-agent CLI arguments appended after ExtraArgs
 	McpConfig                 json.RawMessage  // if non-nil, MCP server config to pass via --mcp-config
 	OnApproval                ApprovalCallback // nil = auto-approve (default behaviour)
+	ApprovalPolicy            string           // "auto", "prompt", or "deny"; empty treated as "auto"
 	TraceCallback             TraceCallback    // nil = no trace recording (default)
 	ClaudePermissionMode      string           // optional controlled override: default, plan, acceptEdits
 	ClaudeUseSDKBridge        bool             // route Claude execution through the Agent SDK bridge
