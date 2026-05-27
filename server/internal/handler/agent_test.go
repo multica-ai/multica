@@ -325,8 +325,87 @@ func TestCopyAgentCopiesConfigFields(t *testing.T) {
 	if len(resp.Skills) != 1 || resp.Skills[0].ID != skillID {
 		t.Fatalf("skills = %#v, want skill %s", resp.Skills, skillID)
 	}
+	if resp.CustomEnv["TOKEN"] != "secret" || resp.CustomEnv["EMPTY"] != "" {
+		t.Fatalf("custom_env values should be preserved when copying own agent, got %#v", resp.CustomEnv)
+	}
+	if resp.CustomEnvCopiedPending {
+		t.Fatal("custom_env_copied_pending = true, want false for own agent copy")
+	}
+}
+
+func TestCopyAgentStripsEnvValuesForOtherOwners(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	suffix := uuid.NewString()
+	ownerEmail := "copy-env-owner-" + suffix + "@multica.test"
+	sourceName := "copy-env-other-source-" + suffix
+	copyName := "copy-env-other-target-" + suffix
+
+	var sourceOwnerID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Copy Env Source Owner', $1)
+		RETURNING id
+	`, ownerEmail).Scan(&sourceOwnerID); err != nil {
+		t.Fatalf("create source owner: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, sourceOwnerID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, sourceOwnerID); err != nil {
+		t.Fatalf("add source owner as workspace member: %v", err)
+	}
+
+	var sourceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args
+		)
+		VALUES (
+			$1, $2, 'source description', 'cloud', '{}'::jsonb,
+			$3, 'workspace', 1, $4,
+			'source instructions', '{"TOKEN":"secret","EMPTY":""}'::jsonb,
+			'[]'::jsonb
+		)
+		RETURNING id
+	`, testWorkspaceID, sourceName, handlerTestRuntimeID(t), sourceOwnerID).Scan(&sourceID); err != nil {
+		t.Fatalf("insert source agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, sourceID)
+	})
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/agents/"+sourceID+"/copy", map[string]any{
+		"name": copyName,
+	}), "id", sourceID)
+	testHandler.CopyAgent(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CopyAgent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, resp.ID)
+	})
+
+	if resp.OwnerID == nil || *resp.OwnerID != testUserID {
+		t.Fatalf("owner_id = %v, want requester %s", resp.OwnerID, testUserID)
+	}
 	if resp.CustomEnv["TOKEN"] != "" || resp.CustomEnv["EMPTY"] != "" {
-		t.Fatalf("custom_env values should be stripped on copy, got %#v", resp.CustomEnv)
+		t.Fatalf("custom_env values should be stripped when copying another owner's agent, got %#v", resp.CustomEnv)
 	}
 	if !resp.CustomEnvCopiedPending {
 		t.Fatal("custom_env_copied_pending = false, want true")
