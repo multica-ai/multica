@@ -1181,6 +1181,8 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			for _, want := range []string{
 				"Final results MUST be delivered via `multica issue comment add`",
 				"does NOT see your terminal output",
+				"Before ending any issue task, verify that you have called `multica issue comment add`",
+				"If you have not posted a Multica issue comment, the task is not complete",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s: Output warning missing %q", tc.name, want)
@@ -3522,10 +3524,10 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			want: withSection,
 		},
 		{
-			name:                "assignment_triggered",
-			ctx:                 TaskContextForEnv{IssueID: "issue-md-2"},
-			provider:            "claude",
-			filename:            "CLAUDE.md",
+			name:     "assignment_triggered",
+			ctx:      TaskContextForEnv{IssueID: "issue-md-2"},
+			provider: "claude",
+			filename: "CLAUDE.md",
 			workflowStepPresent: []string{
 				"multica issue metadata list issue-md-2 --output json",
 				"See the `## Issue Metadata` section above",
