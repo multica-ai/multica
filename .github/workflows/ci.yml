@@ -17,24 +17,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
-        with:
-          # Pin to the version declared in package.json#packageManager. Without
-          # this, action-setup installs the latest pnpm (v11), whose stricter
-          # peer-dependency resolution rejects the v10-authored lockfile that
-          # upstream ships (ERR_PNPM_LOCKFILE_MISSING_DEPENDENCY). Reproducible
-          # builds require CI to run the same pnpm the lockfile was built with.
-          version: 10.28.2
-
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
-          cache: pnpm
+
+      # Provision pnpm through corepack, which strictly honours the version in
+      # package.json#packageManager (pnpm@10.28.2). The previous pnpm/action-setup
+      # step "switched" the runner's pre-installed pnpm v11 down to v10, leaving a
+      # mixed v11/v10 layout whose peer resolution rejected the v10-authored
+      # lockfile (ERR_PNPM_LOCKFILE_MISSING_DEPENDENCY on @tanstack/react-query).
+      # corepack gives a clean install of exactly the declared version, so CI runs
+      # the same pnpm the lockfile was built with.
+      - name: Enable corepack (pnpm@10.28.2 from packageManager)
+        run: corepack enable
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Test self-host env derivation
         run: bash scripts/selfhost-config.test.sh
