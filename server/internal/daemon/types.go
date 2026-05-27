@@ -67,6 +67,11 @@ type Task struct {
 	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	SquadID                 string                `json:"squad_id,omitempty"`                  // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
+
+	// Knowledge base context.
+	PinnedDocuments      []DocumentData      `json:"pinned_documents,omitempty"`
+	DocumentIndex        []DocumentIndexData `json:"document_index,omitempty"`
+	IssueLinkedDocuments []DocumentData      `json:"issue_linked_documents,omitempty"`
 	ParentIssueID           string                `json:"parent_issue_id,omitempty"`           // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
 	ParentIssueIdentifier   string                `json:"parent_issue_identifier,omitempty"`   // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, used in prompt context
 	// RequestingUserName + RequestingUserProfileDescription describe the human
@@ -94,6 +99,21 @@ type ChatAttachmentMeta struct {
 	ID          string `json:"id"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type,omitempty"`
+}
+
+// DocumentData represents a KB document with full content.
+type DocumentData struct {
+	Path        string `json:"path"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Content     string `json:"content"`
+}
+
+// DocumentIndexData represents a compact KB index entry.
+type DocumentIndexData struct {
+	Path        string `json:"path"`
+	Description string `json:"description,omitempty"`
+	Pinned      bool   `json:"pinned,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

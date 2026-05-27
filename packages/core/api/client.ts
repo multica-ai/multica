@@ -102,6 +102,17 @@ import type {
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
+  WorkspaceDocument,
+  DocumentIndexEntry,
+  DocumentRevision,
+  DocumentRevisionSummary,
+  UpsertDocumentRequest,
+  PatchDocumentRequest,
+  RenameDocumentRequest,
+  UpdateDocumentTagsRequest,
+  RestoreDocumentRequest,
+  LinkIssueDocumentRequest,
+  ListDocumentsParams,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -1861,5 +1872,106 @@ export class ApiClient {
 
   async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
     return this.fetch(`/api/issues/${issueId}/pull-requests`);
+  }
+
+  // Documents
+  async listDocuments(params?: ListDocumentsParams): Promise<WorkspaceDocument[]> {
+    const search = new URLSearchParams();
+    if (params?.path_prefix) search.set("path-prefix", params.path_prefix);
+    if (params?.tag) search.set("tag", params.tag);
+    if (params?.pinned) search.set("pinned", "true");
+    return this.fetch(`/api/documents?${search}`);
+  }
+
+  async getDocumentIndex(): Promise<DocumentIndexEntry[]> {
+    return this.fetch("/api/documents/index");
+  }
+
+  async getDocument(id: string): Promise<WorkspaceDocument> {
+    return this.fetch(`/api/documents/${id}`);
+  }
+
+  async getDocumentByPath(path: string): Promise<WorkspaceDocument> {
+    return this.fetch(`/api/documents/by-path/${path}`);
+  }
+
+  async upsertDocumentByPath(path: string, data: UpsertDocumentRequest): Promise<WorkspaceDocument> {
+    return this.fetch(`/api/documents/by-path/${path}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async patchDocument(id: string, data: PatchDocumentRequest): Promise<WorkspaceDocument> {
+    return this.fetch(`/api/documents/${id}/patch`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async renameDocument(id: string, data: RenameDocumentRequest): Promise<WorkspaceDocument> {
+    return this.fetch(`/api/documents/${id}/rename`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateDocumentTags(id: string, data: UpdateDocumentTagsRequest): Promise<WorkspaceDocument> {
+    return this.fetch(`/api/documents/${id}/tags`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async pinDocument(id: string): Promise<void> {
+    await this.fetch(`/api/documents/${id}/pin`, { method: "POST" });
+  }
+
+  async unpinDocument(id: string): Promise<void> {
+    await this.fetch(`/api/documents/${id}/unpin`, { method: "POST" });
+  }
+
+  async archiveDocument(id: string, reason?: string): Promise<void> {
+    await this.fetch(`/api/documents/${id}/archive`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  async listDocumentRevisions(id: string): Promise<DocumentRevisionSummary[]> {
+    return this.fetch(`/api/documents/${id}/revisions`);
+  }
+
+  async getDocumentRevision(id: string, revisionNumber: number): Promise<DocumentRevision> {
+    return this.fetch(`/api/documents/${id}/revisions/${revisionNumber}`);
+  }
+
+  async restoreDocument(id: string, data: RestoreDocumentRequest): Promise<WorkspaceDocument> {
+    return this.fetch(`/api/documents/${id}/restore`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async searchDocuments(q: string, limit?: number): Promise<WorkspaceDocument[]> {
+    const search = new URLSearchParams({ q });
+    if (limit) search.set("limit", String(limit));
+    return this.fetch(`/api/documents/search?${search}`);
+  }
+
+  // Issue ↔ Document Links
+  async linkIssueDocument(issueId: string, data: LinkIssueDocumentRequest): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/documents/links`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async unlinkIssueDocument(issueId: string, documentId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/documents/links/${documentId}`, { method: "DELETE" });
+  }
+
+  async listIssueDocumentLinks(issueId: string): Promise<WorkspaceDocument[]> {
+    return this.fetch(`/api/issues/${issueId}/documents/links`);
   }
 }

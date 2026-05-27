@@ -141,6 +141,28 @@ func (c *APIClient) GetJSON(ctx context.Context, path string, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// GetRaw performs a GET request and returns the raw response. The caller is
+// responsible for closing the response body.
+func (c *APIClient) GetRaw(ctx context.Context, path string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		return nil, fmt.Errorf("GET %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	return resp, nil
+}
+
 // GetJSONWithHeaders performs a GET request, decodes the JSON response, and
 // returns the response headers. Useful when callers need header values like
 // X-Total-Count for pagination.

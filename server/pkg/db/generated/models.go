@@ -366,6 +366,13 @@ type IssueDependency struct {
 	Type             string      `json:"type"`
 }
 
+type IssueDocumentLink struct {
+	IssueID    pgtype.UUID        `json:"issue_id"`
+	DocumentID pgtype.UUID        `json:"document_id"`
+	LinkType   string             `json:"link_type"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type IssueLabel struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -643,17 +650,52 @@ type WebhookDelivery struct {
 }
 
 type Workspace struct {
-	ID           pgtype.UUID        `json:"id"`
-	Name         string             `json:"name"`
-	Slug         string             `json:"slug"`
-	Description  pgtype.Text        `json:"description"`
-	Settings     []byte             `json:"settings"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	Context      pgtype.Text        `json:"context"`
-	Repos        []byte             `json:"repos"`
-	IssuePrefix  string             `json:"issue_prefix"`
-	IssueCounter int32              `json:"issue_counter"`
+	ID                      pgtype.UUID        `json:"id"`
+	Name                    string             `json:"name"`
+	Slug                    string             `json:"slug"`
+	Description             pgtype.Text        `json:"description"`
+	Settings                []byte             `json:"settings"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	Context                 pgtype.Text        `json:"context"`
+	Repos                   []byte             `json:"repos"`
+	IssuePrefix             string             `json:"issue_prefix"`
+	IssueCounter            int32              `json:"issue_counter"`
+	DocumentsAgentWriteMode string             `json:"documents_agent_write_mode"`
+}
+
+type WorkspaceDocument struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	Path              string             `json:"path"`
+	Title             pgtype.Text        `json:"title"`
+	Description       pgtype.Text        `json:"description"`
+	Content           string             `json:"content"`
+	Format            string             `json:"format"`
+	Tags              []string           `json:"tags"`
+	Pinned            bool               `json:"pinned"`
+	ArchivedAt        pgtype.Timestamptz `json:"archived_at"`
+	CurrentRevisionID pgtype.UUID        `json:"current_revision_id"`
+	CreatedBy         pgtype.UUID        `json:"created_by"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkspaceDocumentRevision struct {
+	ID             pgtype.UUID        `json:"id"`
+	DocumentID     pgtype.UUID        `json:"document_id"`
+	RevisionNumber int32              `json:"revision_number"`
+	ParentRevision pgtype.UUID        `json:"parent_revision"`
+	Title          pgtype.Text        `json:"title"`
+	Description    pgtype.Text        `json:"description"`
+	Content        string             `json:"content"`
+	Tags           []string           `json:"tags"`
+	AuthorType     string             `json:"author_type"`
+	AuthorID       pgtype.UUID        `json:"author_id"`
+	TaskID         pgtype.UUID        `json:"task_id"`
+	Operation      string             `json:"operation"`
+	ChangeSummary  pgtype.Text        `json:"change_summary"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type WorkspaceInvitation struct {

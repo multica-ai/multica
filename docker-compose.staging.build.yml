@@ -1,0 +1,18 @@
+# Development override: build staging backend/web images from this checkout.
+
+services:
+  backend-staging:
+    image: multica-backend:staging-dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+  frontend-staging:
+    image: multica-web:staging-dev
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        REMOTE_API_URL: http://backend-staging:8080
+        NEXT_PUBLIC_WS_URL: ${STAGING_NEXT_PUBLIC_WS_URL:-}
+        NEXT_PUBLIC_APP_VERSION: staging-dev

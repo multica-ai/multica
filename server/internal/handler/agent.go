@@ -212,6 +212,12 @@ type AgentTaskResponse struct {
 	RequestingUserName               string `json:"requesting_user_name,omitempty"`
 	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
 	Kind                             string `json:"kind"` // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+
+	// Knowledge base context for agent prompt injection.
+	PinnedDocuments      []DocumentData      `json:"pinned_documents,omitempty"`
+	DocumentIndex        []DocumentIndexData `json:"document_index,omitempty"`
+	IssueLinkedDocuments []DocumentData      `json:"issue_linked_documents,omitempty"`
+
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request
@@ -221,6 +227,21 @@ type AgentTaskResponse struct {
 	// (cloud / system runtimes that pre-date per-task tokens); in that case
 	// the daemon falls back to its own credential. See MUL-2600.
 	AuthToken string `json:"auth_token,omitempty"`
+}
+
+// DocumentData represents a KB document for the claim response.
+type DocumentData struct {
+	Path        string `json:"path"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Content     string `json:"content"`
+}
+
+// DocumentIndexData represents a compact KB index entry.
+type DocumentIndexData struct {
+	Path        string `json:"path"`
+	Description string `json:"description,omitempty"`
+	Pinned      bool   `json:"pinned,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in

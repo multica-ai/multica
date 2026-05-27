@@ -1,0 +1,123 @@
+{
+  "page": {
+    "title": "Documents",
+    "tagline": "Shared knowledge base for your workspace.",
+    "new_document": "New document",
+    "search_placeholder": "Search documents…",
+    "select_prompt": "Select a document to view or edit",
+    "empty": {
+      "title": "No documents yet",
+      "description": "Create your first document to start building a shared knowledge base for your workspace."
+    },
+    "no_matches": {
+      "title": "No matches",
+      "with_query": "No documents match \"{{query}}\".",
+      "try_different": " Try a different query."
+    },
+    "list_error": {
+      "title": "Couldn't load documents",
+      "fallback": "Something went wrong fetching the document list.",
+      "retry": "Try again"
+    }
+  },
+  "tree": {
+    "all_documents": "All documents",
+    "filter_by_tag": "Filter by tag…",
+    "pinned": "Pinned"
+  },
+  "editor": {
+    "placeholder": "Write markdown content…",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "unsaved": "Unsaved changes",
+    "save_now": "Save now",
+    "save_shortcut": "(Ctrl+S)",
+    "tab": "Editor"
+  },
+  "header": {
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "archive": "Archive",
+    "archive_confirm_title": "Archive document?",
+    "archive_confirm_description": "This will hide \"{{path}}\" from the document list. You can restore it later.",
+    "archive_confirm_action": "Archive",
+    "archive_cancel": "Cancel"
+  },
+  "tags": {
+    "label": "Tags",
+    "add_placeholder": "Add tag…",
+    "empty": "No tags"
+  },
+  "history": {
+    "title": "History",
+    "revision": "Revision {{number}}",
+    "no_revisions": "No revisions yet",
+    "restore": "Restore",
+    "restore_confirm_title": "Restore revision?",
+    "restore_confirm_description": "This will create a new revision with the content from revision {{number}}. No data is lost.",
+    "restore_confirm_action": "Restore",
+    "restore_cancel": "Cancel",
+    "view_diff": "View diff",
+    "latest": "latest",
+    "author_human": "Human",
+    "author_agent": "Agent",
+    "operation": {
+      "create": "Created",
+      "edit": "Edited",
+      "rename": "Renamed",
+      "restore": "Restored",
+      "tag": "Tagged",
+      "pin": "Pinned",
+      "archive": "Archived"
+    }
+  },
+  "diff": {
+    "title": "Diff",
+    "old_revision": "Revision {{number}}",
+    "new_revision": "Current",
+    "close": "Close"
+  },
+  "linked_issues": {
+    "title": "Linked issues",
+    "empty": "No linked issues",
+    "type": {
+      "referenced": "Referenced",
+      "produced": "Produced",
+      "consumed": "Consumed"
+    }
+  },
+  "create_dialog": {
+    "title": "New document",
+    "path_label": "Path",
+    "path_placeholder": "e.g. clients/acme/brief.md",
+    "path_hint": "Use forward slashes for folder structure. Must end with .md",
+    "title_label": "Title",
+    "title_placeholder": "Optional title",
+    "description_label": "Description",
+    "description_placeholder": "One-line summary shown in the index",
+    "cancel": "Cancel",
+    "create": "Create document",
+    "creating": "Creating…",
+    "toast_created": "Document created",
+    "toast_create_failed": "Failed to create document",
+    "errors": {
+      "empty_path": "Path cannot be empty.",
+      "invalid_path": "Path must match: lowercase letters, numbers, dashes, underscores, forward slashes, ending with .md",
+      "absolute_path": "Absolute paths are not allowed.",
+      "double_dot": "Paths cannot contain \"..\"."
+    }
+  },
+  "detail": {
+    "not_found": {
+      "title": "Document not found",
+      "fallback": "This document may have been deleted or archived.",
+      "back": "Back to Documents"
+    },
+    "toast_saved": "Document saved",
+    "toast_save_failed": "Failed to save document",
+    "toast_archived": "Document archived",
+    "toast_restored": "Revision restored",
+    "toast_pinned": "Document pinned",
+    "toast_unpinned": "Document unpinned"
+  }
+}

@@ -2491,6 +2491,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 		WorkspaceContext:                 task.WorkspaceContext,
+		PinnedDocuments:                  convertDocsForEnv(task.PinnedDocuments),
+		DocumentIndex:                    convertDocIndexForEnv(task.DocumentIndex),
+		IssueLinkedDocuments:             convertDocsForEnv(task.IssueLinkedDocuments),
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
@@ -3360,6 +3363,37 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 			ResourceType: r.ResourceType,
 			ResourceRef:  r.ResourceRef,
 			Label:        r.Label,
+		}
+	}
+	return result
+}
+
+func convertDocsForEnv(docs []DocumentData) []execenv.DocumentForEnv {
+	if len(docs) == 0 {
+		return nil
+	}
+	result := make([]execenv.DocumentForEnv, len(docs))
+	for i, d := range docs {
+		result[i] = execenv.DocumentForEnv{
+			Path:        d.Path,
+			Title:       d.Title,
+			Description: d.Description,
+			Content:     d.Content,
+		}
+	}
+	return result
+}
+
+func convertDocIndexForEnv(entries []DocumentIndexData) []execenv.DocumentIndexEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	result := make([]execenv.DocumentIndexEntry, len(entries))
+	for i, e := range entries {
+		result[i] = execenv.DocumentIndexEntry{
+			Path:        e.Path,
+			Description: e.Description,
+			Pinned:      e.Pinned,
 		}
 	}
 	return result

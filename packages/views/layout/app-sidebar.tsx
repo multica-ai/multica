@@ -34,6 +34,8 @@ import {
   X,
   Zap,
   Users,
+  FileText,
+  Sparkles,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -112,6 +114,7 @@ type NavKey =
   | "agents"
   | "squads"
   | "usage"
+  | "documents"
   | "runtimes"
   | "skills"
   | "settings";
@@ -126,6 +129,7 @@ type NavLabelKey =
   | "agents"
   | "squads"
   | "usage"
+  | "documents"
   | "runtimes"
   | "skills"
   | "settings";
@@ -142,6 +146,7 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "squads", labelKey: "squads", icon: Users },
   { key: "usage", labelKey: "usage", icon: BarChart3 },
+  { key: "documents", labelKey: "documents", icon: FileText },
 ];
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
@@ -717,6 +722,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     </SidebarMenuItem>
                   );
                 })}
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    className="text-muted-foreground cursor-default"
+                  >
+                    <Sparkles />
+                    <span>CHAROLANDA</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
