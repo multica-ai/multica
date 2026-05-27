@@ -6,17 +6,17 @@ import type { Agent, MemberWithUser } from "@multica/core/types";
 
 export function getReplyTargetAgents({
   markdown,
-  replyTargetAgentId,
+  triggerAgentId,
   agents,
 }: {
   markdown: string;
-  replyTargetAgentId?: string;
+  triggerAgentId?: string;
   agents: Agent[];
 }): Agent[] {
   const mentionedAgentIds = extractMentionedAgentIds(markdown);
   const ids = mentionedAgentIds.length > 0
     ? mentionedAgentIds
-    : replyTargetAgentId ? [replyTargetAgentId] : [];
+    : triggerAgentId ? [triggerAgentId] : [];
   const byId = new Map(agents.map((agent) => [agent.id, agent]));
   return ids
     .map((id) => byId.get(id))

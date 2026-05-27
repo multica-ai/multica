@@ -11,31 +11,21 @@
 // draft / caret / pending upload survives the pin toggle. Auto-unpins on
 // submit and scrolls back to the originating thread.
 
-import { useCallback, useId, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUp, Loader2, Maximize2, Minimize2, UserPlus } from "lucide-react";
+import { useCallback, useId, useRef, useState } from "react";
+import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { ContentEditor, type ContentEditorRef } from "../../editor/content-editor";
 import { FileDropOverlay } from "../../editor/file-drop-overlay";
 import { useFileDropZone } from "../../editor/use-file-drop-zone";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { getCurrentWsId } from "@multica/core/platform";
-import { useAuthStore } from "@multica/core/auth";
-import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
-import type { Agent, MemberWithUser } from "@multica/core/types";
-import { canTriggerPrivateAgentMention } from "@multica/cerebro-access/views";
 import { cn } from "@multica/ui/lib/utils";
 import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
 import { PinButton, useFloatPosition, useInputPin } from "@multica/cerebro-pin-input";
 import { useT } from "../../i18n";
-import {
-  getReplyTargetAgents,
-  memberMentionMarkdown,
-} from "./reply-targets";
+import { TriggerTargetBar, memberMentionMarkdown } from "./trigger-target-bar";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,11 +39,13 @@ interface ReplyInputProps {
   onSubmit: (content: string, attachmentIds?: string[]) => Promise<void>;
   size?: "sm" | "default";
   /**
-   * CEREBRO-PATCH(reply-target-agent-indicator): when replying to an
-   * agent-authored comment, show which agent will receive an untagged reply.
-   * Explicit agent @mentions in the draft replace this fallback target.
+   * CEREBRO-PATCH(reply-target-agent-indicator): the agent the backend
+   * trigger will actually wake when the draft has no @agent mentions —
+   * issue assignee (or squad leader). Explicit agent @mentions in the draft
+   * replace this fallback target. Plumbed in from `issue-detail.tsx` so the
+   * indicator matches the trigger logic exactly (FIR-2392).
    */
-  replyTargetAgentId?: string;
+  triggerAgentId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +59,7 @@ function ReplyInput({
   avatarId,
   onSubmit,
   size = "default",
-  replyTargetAgentId,
+  triggerAgentId,
 }: ReplyInputProps) {
   const { t } = useT("issues");
   const placeholderText = placeholder ?? t(($) => $.reply.placeholder);
@@ -90,21 +82,6 @@ function ReplyInput({
   const { enabled: pinEnabled, isPinned, togglePin, unpin } = useInputPin(pinKey, true);
   const floatRect = useFloatPosition(anchorRef, isPinned, { mode: "sticky-bottom" });
   const isFloating = floatRect !== null;
-  const wsId = getCurrentWsId();
-  const userId = useAuthStore((s) => s.user?.id ?? null);
-  const { data: agents = [] } = useQuery({
-    ...agentListOptions(wsId ?? ""),
-    enabled: !!wsId,
-  });
-  const { data: members = [] } = useQuery({
-    ...memberListOptions(wsId ?? ""),
-    enabled: !!wsId,
-  });
-  const myRole = members.find((m) => m.user_id === userId)?.role ?? null;
-  const targetAgents = useMemo(
-    () => getReplyTargetAgents({ markdown, replyTargetAgentId, agents }),
-    [agents, markdown, replyTargetAgentId],
-  );
 
   const handleUpload = useCallback(async (file: File) => {
     const result = await uploadWithToast(file, { issueId });
@@ -129,6 +106,7 @@ function ReplyInput({
       await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
       editorRef.current?.clearContent();
       setIsEmpty(true);
+      setMarkdown("");
       uploadMapRef.current.clear();
       if (isPinned) {
         unpin();
@@ -189,11 +167,9 @@ function ReplyInput({
             className="mt-0.5 shrink-0 hidden sm:block"
           />
           <div className="min-w-0 flex-1">
-            <ReplyTargetBar
-              agents={targetAgents}
-              members={members}
-              userId={userId}
-              role={myRole}
+            <TriggerTargetBar
+              markdown={markdown}
+              triggerAgentId={triggerAgentId}
               onTagOwner={(owner) => {
                 editorRef.current?.insertText(` ${memberMentionMarkdown(owner)} `);
               }}
@@ -285,97 +261,6 @@ function ReplyInput({
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-interface ReplyTargetBarProps {
-  agents: Agent[];
-  members: MemberWithUser[];
-  userId: string | null;
-  role: "owner" | "admin" | "member" | null;
-  onTagOwner: (owner: MemberWithUser) => void;
-}
-
-function ReplyTargetBar({
-  agents,
-  members,
-  userId,
-  role,
-  onTagOwner,
-}: ReplyTargetBarProps) {
-  const { t } = useT("issues");
-  if (agents.length === 0) return null;
-
-  return (
-    <div className="mb-1 flex min-h-7 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-      <span className="shrink-0 font-medium">{t(($) => $.reply.target_label)}</span>
-      {agents.map((agent) => {
-        const decision = canTriggerPrivateAgentMention(agent, { userId, role });
-        const triggerInactiveLabel = t(($) => $.reply.target_trigger_inactive);
-        const owner = agent.owner_id
-          ? members.find((member) => member.user_id === agent.owner_id) ?? null
-          : null;
-
-        if (!decision.allowed) {
-          return (
-            <Popover key={agent.id}>
-              <PopoverTrigger
-                render={
-                  <button
-                    type="button"
-                    className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-red-500/45 bg-red-500/10 px-1.5 py-0.5 font-medium text-red-700 transition-colors hover:bg-red-500/15 dark:text-red-300"
-                    aria-label={`${agent.name} ${triggerInactiveLabel}`}
-                  >
-                    <AlertTriangle className="size-3 shrink-0" />
-                    <span className="truncate">{agent.name}</span>
-                    <span className="shrink-0">{triggerInactiveLabel}</span>
-                  </button>
-                }
-              />
-              <PopoverContent side="top" align="start" className="w-72">
-                <div className="space-y-2 text-xs">
-                  <div>
-                    <div className="font-medium text-foreground">{t(($) => $.reply.target_trigger_title, { name: agent.name })}</div>
-                    <div className="mt-0.5 text-muted-foreground">
-                      {t(($) => $.reply.target_trigger_description)}
-                    </div>
-                  </div>
-                  {owner ? (
-                    <div className="flex items-center gap-2 rounded-md border bg-card p-2">
-                      <ActorAvatar actorType="member" actorId={owner.user_id} size={20} />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium text-foreground">{owner.name}</div>
-                        <div className="truncate text-muted-foreground">{t(($) => $.reply.target_owner_label)}</div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => onTagOwner(owner)}
-                        className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 font-medium text-foreground hover:bg-accent"
-                      >
-                        <UserPlus className="size-3.5" />
-                        {t(($) => $.reply.target_tag_owner)}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="text-muted-foreground">{t(($) => $.reply.target_owner_missing)}</div>
-                  )}
-                </div>
-              </PopoverContent>
-            </Popover>
-          );
-        }
-
-        return (
-          <span
-            key={agent.id}
-            className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-medium text-emerald-700 dark:text-emerald-300"
-          >
-            <ActorAvatar actorType="agent" actorId={agent.id} size={14} />
-            <span className="truncate">{agent.name}</span>
-          </span>
-        );
-      })}
     </div>
   );
 }

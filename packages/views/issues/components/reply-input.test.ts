@@ -19,20 +19,20 @@ const makeMember = (name: string, userId: string): MemberWithUser =>
   }) as MemberWithUser;
 
 describe("ReplyInput target resolution", () => {
-  it("uses the replied-to agent when the draft has no agent tags", () => {
-    const fallback = makeAgent("agent-fallback", "Fallback Agent");
+  it("uses the trigger agent (issue assignee / squad leader) when the draft has no agent tags", () => {
+    const assignee = makeAgent("agent-assignee", "Assignee Agent");
     const tagged = makeAgent("agent-tagged", "Tagged Agent");
 
     expect(
       getReplyTargetAgents({
         markdown: "plain reply",
-        replyTargetAgentId: fallback.id,
-        agents: [fallback, tagged],
+        triggerAgentId: assignee.id,
+        agents: [assignee, tagged],
       }).map((agent) => agent.id),
-    ).toEqual([fallback.id]);
+    ).toEqual([assignee.id]);
   });
 
-  it("does not show a target when there is no replied-to agent or agent tag", () => {
+  it("does not show a target when there is no trigger agent or agent tag", () => {
     const agent = makeAgent("agent-1", "Agent One");
 
     expect(
@@ -44,14 +44,14 @@ describe("ReplyInput target resolution", () => {
   });
 
   it("switches to explicitly tagged agents", () => {
-    const fallback = makeAgent("agent-fallback", "Fallback Agent");
+    const assignee = makeAgent("agent-assignee", "Assignee Agent");
     const tagged = makeAgent("agent-tagged", "Tagged Agent");
 
     expect(
       getReplyTargetAgents({
         markdown: "ping [@Tagged Agent](mention://agent/agent-tagged)",
-        replyTargetAgentId: fallback.id,
-        agents: [fallback, tagged],
+        triggerAgentId: assignee.id,
+        agents: [assignee, tagged],
       }).map((agent) => agent.id),
     ).toEqual([tagged.id]);
   });
