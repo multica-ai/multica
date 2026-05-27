@@ -138,6 +138,19 @@ function GeminiLogo({ className }: { className: string }) {
   );
 }
 
+// Grok Build / xAI — compact xAI-style mark for small runtime badges.
+function GrokLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#050505" />
+      <path
+        d="M6 6.5h3.1l3 3.7 3-3.7H18l-4.4 5.3L18.3 18h-3.1l-3.2-4-3.2 4H5.7l4.7-5.7L6 6.5Z"
+        fill="#FFFFFF"
+      />
+    </svg>
+  );
+}
+
 // Kiro CLI — official icon sourced from kiro.dev/icon.svg.
 function KiroLogo({ className }: { className: string }) {
   const maskId = `kiro-logo-mask-${useId().replace(/:/g, "")}`;
@@ -207,6 +220,8 @@ export function ProviderLogo({
       return <KiroLogo className={className} />;
     case "gemini":
       return <GeminiLogo className={className} />;
+    case "grok":
+      return <GrokLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

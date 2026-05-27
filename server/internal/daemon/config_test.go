@@ -89,6 +89,21 @@ func TestBuildLoginShellResolveScript_ShapeAndContent(t *testing.T) {
 	}
 }
 
+func TestDefaultAgentCommandNamesIncludesGrok(t *testing.T) {
+	t.Parallel()
+
+	found := false
+	for _, name := range defaultAgentCommandNames {
+		if name == "grok" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("defaultAgentCommandNames must include grok so GUI-launched daemons can resolve ~/.local/bin/grok via login shell: %v", defaultAgentCommandNames)
+	}
+}
+
 // TestResolveAgentsViaLoginShell_ResolvesViaInteractiveShell verifies the
 // motivating bug scenario: a binary that lives in a directory which is NOT on
 // the daemon's PATH but IS added to PATH by the user's interactive shell rc

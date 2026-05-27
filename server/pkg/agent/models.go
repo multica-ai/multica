@@ -102,6 +102,8 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return models, nil
 	case "gemini":
 		return geminiStaticModels(), nil
+	case "grok":
+		return grokStaticModels(), nil
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
@@ -226,6 +228,12 @@ func geminiStaticModels() []Model {
 		{ID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro", Provider: "google"},
 		{ID: "gemini-2.5-flash", Label: "Gemini 2.5 Flash", Provider: "google"},
 		{ID: "gemini-2.5-flash-lite", Label: "Gemini 2.5 Flash Lite", Provider: "google"},
+	}
+}
+
+func grokStaticModels() []Model {
+	return []Model{
+		{ID: "grok-build", Label: "Grok Build", Provider: "xai", Default: true},
 	}
 }
 
