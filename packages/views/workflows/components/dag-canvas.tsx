@@ -12,6 +12,7 @@ interface DAGCanvasProps {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   onNodeMoved?: (nodeId: string, x: number, y: number) => void;
+  onNodeDragEnd?: (nodeId: string, x: number, y: number) => void;
   onEdgeCreate?: (sourceNodeId: string, targetNodeId: string) => void;
   onNodeClick?: (nodeId: string) => void;
   onNodeDoubleClick?: (nodeId: string) => void;
@@ -49,6 +50,7 @@ export function DAGCanvas({
   nodes,
   edges,
   onNodeMoved,
+  onNodeDragEnd,
   onEdgeCreate,
   onNodeClick,
   onNodeDoubleClick,
@@ -169,6 +171,12 @@ export function DAGCanvas({
     };
 
     const handleWindowUp = () => {
+      if (dragging && onNodeDragEnd) {
+        const rect = rectMap.get(dragging.nodeId);
+        if (rect) {
+          onNodeDragEnd(dragging.nodeId, rect.x, rect.y);
+        }
+      }
       setDragging(null);
       setPanning(null);
     };

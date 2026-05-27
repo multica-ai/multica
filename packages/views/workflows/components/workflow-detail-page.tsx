@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Wand, Trash2, Power } from "lucide-react";
+import { Plus, Wand, Trash2, Power, ArrowLeft } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   workflowDetailOptions,
@@ -56,12 +56,18 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
 
+  const queryClient = useQueryClient();
+
   const [editingTitle, setEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
 
   const handleNodeMoved = useCallback((nodeId: string, x: number, y: number) => {
-    updateNodeMutation.mutate({ nodeId, position_x: x, position_y: y });
-  }, [updateNodeMutation]);
+    queryClient.setQueryData<typeof nodes>(workflowNodesOptions(wsId, id!).queryKey, (old) => {
+      if (!old) return old;
+      return old.map((n) => n.id === nodeId ? { ...n, position_x: x, position_y: y } : n);
+    });
+    useWorkflowEditorStore.getState().cacheNodeEdits(nodeId, { position_x: x, position_y: y });
+  }, [wsId, id, queryClient]);
 
   const handleEdgeCreate = useCallback(async (sourceNodeId: string, targetNodeId: string) => {
     try {
@@ -152,6 +158,27 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
       {/* Toolbar */}
       <PageHeader className="justify-between px-5 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0"
+            onClick={async () => {
+              const hasEdits = Object.keys(nodeEdits).length > 0;
+              if (hasEdits && mode === "edit") {
+                const save = confirm("You have unsaved changes. Save before leaving?");
+                if (save) {
+                  await handleSave();
+                } else {
+                  for (const k of Object.keys(nodeEdits)) clearNodeEdits(k);
+                }
+              }
+              useWorkflowEditorStore.getState().reset();
+              navigation.push(wsPaths.workflows());
+            }}
+            title="Back to workflows"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
           {editingTitle ? (
             <input
               className="h-7 px-2 text-sm font-medium border rounded bg-background w-48"
@@ -258,9 +285,9 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
           )}
         </div>
 
-        {/* Right sidebar: config panel */}
+        {/* Right sidebar: config panel (absolute overlay — don't resize DAG) */}
         {selectedNode && (
-          <div className="w-96 shrink-0 h-full">
+          <div className="absolute right-0 top-0 bottom-0 w-96 z-10 h-full">
             <NodeConfigPanel
               node={selectedNode}
               workflowId={id!}

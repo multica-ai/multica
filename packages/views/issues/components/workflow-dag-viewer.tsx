@@ -79,12 +79,12 @@ function isCriticDone(status: string): boolean {
   return ["critic_approved", "completed"].includes(status);
 }
 
-function isWorkerClickable(workerType: string, status: string): boolean {
+function isWorkerClickable(_workerType: string, status: string): boolean {
   if (["pending", "format_checking", "format_ok"].includes(status)) return false;
   return true;
 }
 
-function isCriticClickable(criticType: string, status: string): boolean {
+function isCriticClickable(_criticType: string, status: string): boolean {
   if (!["awaiting_critic", "critic_reviewing", "critic_approved", "completed"].includes(status)) return false;
   return true;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Workflow as WorkflowIcon, Play, Pause, FileText, Archive, Zap, History } from "lucide-react";
+import { Plus, Workflow as WorkflowIcon, Play, Pause, FileText, Archive, Zap, History, Eye } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { workflowListOptions, useCreateWorkflow } from "@multica/core/workflows/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -10,6 +10,8 @@ import { AppLink, useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { Dialog, DialogContent, DialogHeader } from "@multica/ui/components/ui/dialog";
+import { DAGCanvas } from "./dag-canvas";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import type { Workflow, WorkflowStatus } from "@multica/core/types";
@@ -37,6 +39,109 @@ const STATUS_LABEL_KEY: Record<WorkflowStatus, string> = {
 
 function getStatusKey(status: string): string {
   return STATUS_LABEL_KEY[status as WorkflowStatus] ?? status;
+}
+
+interface WorkflowTemplate {
+  id: string;
+  name: string;
+  description: string;
+  templateKey: string;
+  nodes: Array<{
+    id: string;
+    title: string;
+    description: string;
+    position_x: number;
+    position_y: number;
+  }>;
+  edges: Array<{
+    id: string;
+    source_node_id: string;
+    target_node_id: string;
+  }>;
+}
+
+const TEMPLATES: WorkflowTemplate[] = [
+  {
+    id: "ai-coding",
+    name: "AI Coding 全链路",
+    description: "需求分析 → 架构设计 → 任务拆分 → 编码 → 测试，覆盖完整软件开发生命周期。",
+    templateKey: "ai-coding",
+    nodes: [
+      { id: "tpl-1", title: "需求分析", description: "分析需求并产出需求文档", position_x: 100, position_y: 200 },
+      { id: "tpl-2", title: "架构设计", description: "基于需求文档设计技术架构", position_x: 380, position_y: 200 },
+      { id: "tpl-3", title: "任务拆分", description: "将架构设计拆分为具体开发任务", position_x: 660, position_y: 200 },
+      { id: "tpl-4", title: "编码", description: "根据任务拆分进行编码实现", position_x: 940, position_y: 200 },
+      { id: "tpl-5", title: "测试", description: "对编码结果进行全面测试", position_x: 1220, position_y: 200 },
+    ],
+    edges: [
+      { id: "tpl-e1", source_node_id: "tpl-1", target_node_id: "tpl-2" },
+      { id: "tpl-e2", source_node_id: "tpl-2", target_node_id: "tpl-3" },
+      { id: "tpl-e3", source_node_id: "tpl-3", target_node_id: "tpl-4" },
+      { id: "tpl-e4", source_node_id: "tpl-4", target_node_id: "tpl-5" },
+    ],
+  },
+];
+
+const THUMB_NODE_W = 110;
+const THUMB_NODE_H = 36;
+
+function TemplateThumbnail({ nodes, edges }: { nodes: WorkflowTemplate["nodes"]; edges: WorkflowTemplate["edges"] }) {
+  // Compact layout for thumbnail — keep original order, tight spacing.
+  const thumbNodes = nodes.map((n, i) => ({
+    ...n,
+    x: 60 + i * 170,
+    y: 70,
+  }));
+  const nodeMap = new Map(thumbNodes.map((n) => [n.id, n]));
+  const totalW = 60 + (nodes.length - 1) * 170 + THUMB_NODE_W + 60;
+  return (
+    <svg
+      className="w-full h-36 rounded-md bg-muted/30 border"
+      viewBox={`0 0 ${totalW} 200`}
+      preserveAspectRatio="xMidYMid meet"
+    >
+      {edges.map((e) => {
+        const s = nodeMap.get(e.source_node_id);
+        const t = nodeMap.get(e.target_node_id);
+        if (!s || !t) return null;
+        const sx = s.x + THUMB_NODE_W;
+        const sy = s.y + THUMB_NODE_H / 2;
+        const tx = t.x;
+        const ty = t.y + THUMB_NODE_H / 2;
+        return (
+          <g key={e.id}>
+            <line x1={sx} y1={sy} x2={tx - 4} y2={ty} stroke="#94a3b8" strokeWidth="2.5" />
+            <polygon points={`${tx},${ty} ${tx - 7},${ty - 5} ${tx - 7},${ty + 5}`} fill="#94a3b8" />
+          </g>
+        );
+      })}
+      {thumbNodes.map((n) => (
+        <g key={n.id}>
+          <rect
+            x={n.x}
+            y={n.y}
+            width={THUMB_NODE_W}
+            height={THUMB_NODE_H}
+            rx="6"
+            fill="currentColor"
+            className="text-card"
+            stroke="#94a3b8"
+            strokeWidth="1.5"
+          />
+          <text
+            x={n.x + THUMB_NODE_W / 2}
+            y={n.y + THUMB_NODE_H / 2}
+            textAnchor="middle"
+            dominantBaseline="central"
+            className="fill-foreground"
+            style={{ fontSize: "13px" }}
+          >
+            {n.title}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
 }
 
 function WorkflowRow({ workflow }: { workflow: Workflow }) {
@@ -84,17 +189,10 @@ export function WorkflowsPage() {
   const createWorkflow = useCreateWorkflow(wsId);
   const workflows = data?.workflows ?? [];
   const [statusFilter, setStatusFilter] = useState<WorkflowStatus | "all">("all");
+  const [previewTemplate, setPreviewTemplate] = useState<WorkflowTemplate | null>(null);
 
   const handleCreate = async () => {
     const workflow = await createWorkflow.mutateAsync({ title: "Untitled Workflow" });
-    push(wsPaths.workflowDetail(workflow.id));
-  };
-
-  const handleCreateFromTemplate = async () => {
-    const workflow = await createWorkflow.mutateAsync({
-      title: "AI Coding 全链路",
-      template: "ai-coding",
-    });
     push(wsPaths.workflowDetail(workflow.id));
   };
 
@@ -116,11 +214,38 @@ export function WorkflowsPage() {
           <Plus className="h-3.5 w-3.5 mr-1" />
           {t(($) => $.page.new_workflow)}
         </Button>
-        <Button size="sm" onClick={handleCreateFromTemplate} disabled={createWorkflow.isPending}>
-          <Zap className="h-3.5 w-3.5 mr-1" />
-          使用模板
-        </Button>
       </PageHeader>
+
+      {/* Template preview cards */}
+      <div className="px-5 py-3 border-b">
+        <div className="flex items-center gap-2 mb-2">
+          <Zap className="h-3.5 w-3.5 text-amber-500" />
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Templates</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {TEMPLATES.map((tmpl) => (
+            <button
+              key={tmpl.id}
+              type="button"
+              className="flex flex-col items-start gap-1.5 rounded-lg border px-4 py-3 text-left transition-colors hover:bg-accent/40 hover:border-primary/30"
+              onClick={() => setPreviewTemplate(tmpl)}
+            >
+              <TemplateThumbnail nodes={tmpl.nodes} edges={tmpl.edges} />
+              <div className="flex items-center gap-2 w-full mt-1.5">
+                <WorkflowIcon className="h-4 w-4 shrink-0 text-primary" />
+                <span className="text-sm font-medium truncate">{tmpl.name}</span>
+              </div>
+              <p className="text-xs text-muted-foreground line-clamp-2">{tmpl.description}</p>
+              <div className="flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5">
+                <Eye className="h-3 w-3" />
+                Preview
+                <span className="mx-1">·</span>
+                {tmpl.nodes.length} nodes
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
@@ -176,6 +301,60 @@ export function WorkflowsPage() {
           </>
         )}
       </div>
+
+      {/* Template preview dialog */}
+      <Dialog open={!!previewTemplate} onOpenChange={(open) => { if (!open) setPreviewTemplate(null); }}>
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <span className="text-sm font-medium">{previewTemplate?.name}</span>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground -mt-2">{previewTemplate?.description}</p>
+          {previewTemplate && (
+            <>
+              <div className="h-[400px] overflow-hidden rounded-lg border bg-muted/20">
+                <DAGCanvas
+                  nodes={previewTemplate.nodes.map((n) => ({
+                    ...n,
+                    worker_type: "agent",
+                    critic_type: "human",
+                    worker_id: null,
+                    critic_id: null,
+                    format_schema: null,
+                    worker_instructions: "",
+                    critic_instructions: "",
+                    critic_api_url: null,
+                    sort_order: 0,
+                    created_at: "",
+                    updated_at: "",
+                  })) as any}
+                  edges={previewTemplate.edges as any}
+                  initialScale={2.5}
+                />
+              </div>
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-xs text-muted-foreground">
+                  {previewTemplate.nodes.length} nodes · {previewTemplate.edges.length} edges
+                </span>
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    const workflow = await createWorkflow.mutateAsync({
+                      title: previewTemplate.name,
+                      template: previewTemplate.templateKey,
+                    });
+                    setPreviewTemplate(null);
+                    push(wsPaths.workflowDetail(workflow.id));
+                  }}
+                  disabled={createWorkflow.isPending}
+                >
+                  <Zap className="h-3.5 w-3.5 mr-1" />
+                  {createWorkflow.isPending ? "Creating..." : "Use this template"}
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
