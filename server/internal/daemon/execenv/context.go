@@ -392,6 +392,7 @@ func renderAutopilotContext(ctx TaskContextForEnv) string {
 
 	b.WriteString("## Quick Start\n\n")
 	b.WriteString("This is a run-only autopilot task with no assigned issue. Do not run `multica issue get` unless the autopilot instructions explicitly ask you to create or update an issue.\n\n")
+	b.WriteString("You may inspect workspace issues and add comments to existing issues only when the autopilot instructions explicitly require that action. If there are no actionable findings, exit silently without creating issues or comments.\n\n")
 	if ctx.AutopilotID != "" {
 		fmt.Fprintf(&b, "Run `multica autopilot get %s --output json` if you need the full autopilot configuration.\n\n", ctx.AutopilotID)
 	}

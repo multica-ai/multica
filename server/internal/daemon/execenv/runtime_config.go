@@ -344,7 +344,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			fmt.Fprintf(&b, "- Run `multica autopilot get %s --output json` if you need the full autopilot configuration\n", ctx.AutopilotID)
 		}
 		b.WriteString("- Complete the autopilot instructions directly\n")
-		b.WriteString("- Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n\n")
+		b.WriteString("- Do not run `multica issue get` or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n")
+		b.WriteString("- You may inspect candidate issues and run `multica issue comment add` against existing issues only when the autopilot instructions explicitly require a comment\n")
+		b.WriteString("- If there are no actionable findings, exit silently without creating issues or comments\n\n")
 	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")

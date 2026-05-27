@@ -452,6 +452,8 @@ func TestWriteContextFilesAutopilotRunOnly(t *testing.T) {
 		"Check dependencies and report outdated packages.",
 		"multica autopilot get autopilot-1 --output json",
 		"no assigned issue",
+		"add comments to existing issues only when the autopilot instructions explicitly require that action",
+		"exit silently without creating issues or comments",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("autopilot context missing %q\n---\n%s", want, s)
@@ -1396,6 +1398,9 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 		"Autopilot run ID: `run-1`",
 		"Check dependencies and report outdated packages.",
 		"multica autopilot get autopilot-1 --output json",
+		"multica issue comment add",
+		"only when the autopilot instructions explicitly require a comment",
+		"exit silently without creating issues or comments",
 		"Your final assistant output is captured automatically as the autopilot run result",
 	} {
 		if !strings.Contains(s, want) {

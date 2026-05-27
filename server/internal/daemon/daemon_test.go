@@ -345,6 +345,8 @@ func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 		"Check dependencies and report outdated packages.",
 		"multica autopilot get autopilot-1 --output json",
 		"Do not run `multica issue get`",
+		"add comments to existing issues only when the autopilot instructions explicitly require that action",
+		"exit silently without creating issues or comments",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("autopilot prompt missing %q\n---\n%s", want, prompt)

@@ -223,5 +223,6 @@ func buildAutopilotPrompt(task Task) string {
 		b.WriteString("Complete the instructions above.\n")
 	}
 	b.WriteString("Do not run `multica issue get`; this run does not have an issue ID.\n")
+	b.WriteString("You may inspect workspace issues and add comments to existing issues only when the autopilot instructions explicitly require that action. If there are no actionable findings, exit silently without creating issues or comments.\n")
 	return b.String()
 }
