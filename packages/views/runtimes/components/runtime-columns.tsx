@@ -47,6 +47,7 @@ import { HealthIcon, useHealthLabel } from "./shared";
 import {
   computeCostInWindow,
   formatLastSeen,
+  isSelfHealingRuntime,
   isVersionNewer,
   pctChange,
 } from "../utils";
@@ -485,8 +486,13 @@ function RowMenu({
   const { t } = useT("runtimes");
   const deleteMutation = useDeleteRuntime(wsId);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // Delete is currently the only row action; if the row can't run it, drop
+  // the kebab entirely so the column doesn't render an empty popover. The
+  // self-healing case (local + online) is the runtime-detail parity fix —
+  // see isSelfHealingRuntime for the rationale.
+  const selfHealing = isSelfHealingRuntime(runtime);
 
-  if (!canDelete) {
+  if (!canDelete || selfHealing) {
     return <span aria-hidden />;
   }
 

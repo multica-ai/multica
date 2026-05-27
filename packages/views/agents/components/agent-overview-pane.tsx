@@ -174,8 +174,6 @@ export function AgentOverviewPane({
           <TabContent>
             <EnvTab
               agent={agent}
-              readOnly={!canEdit || agent.custom_env_redacted}
-              onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
             />
           </TabContent>

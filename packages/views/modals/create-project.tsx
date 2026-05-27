@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { ChevronRight, Maximize2, Minimize2, X as XIcon, UserMinus } from "lucide-react";
+import { ChevronRight, Maximize2, Minimize2, Search, X as XIcon, UserMinus } from "lucide-react";
 
 /**
  * GitHub mark — lucide-react v1 dropped brand icons, so we inline the
@@ -136,8 +136,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   // persisted until handleSubmit fires the createProjectResource calls.
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [repoPopoverOpen, setRepoPopoverOpen] = useState(false);
+  const [repoSearch, setRepoSearch] = useState("");
   const [customRepoUrl, setCustomRepoUrl] = useState("");
   const workspaceRepos = workspace?.repos ?? [];
+  const repoQuery = repoSearch.trim().toLowerCase();
+  const filteredWorkspaceRepos = workspaceRepos.filter((repo) =>
+    repo.url.toLowerCase().includes(repoQuery),
+  );
 
   // Sync field changes to draft store
   const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
@@ -451,7 +456,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             </PopoverContent>
           </Popover>
 
-          <Popover open={repoPopoverOpen} onOpenChange={setRepoPopoverOpen}>
+          <Popover
+            open={repoPopoverOpen}
+            onOpenChange={(v) => {
+              setRepoPopoverOpen(v);
+              if (!v) setRepoSearch("");
+            }}
+          >
             <PopoverTrigger
               render={
                 <PillButton>
@@ -469,31 +480,49 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 {t(($) => $.create_project.repos_heading)}
               </div>
               {workspaceRepos.length > 0 ? (
-                <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {workspaceRepos.map((repo) => {
-                    const checked = selectedRepos.includes(repo.url);
-                    return (
-                      <button
-                        type="button"
-                        key={repo.url}
-                        onClick={() => toggleRepo(repo.url)}
-                        className={cn(
-                          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent transition-colors",
-                          checked && "bg-accent",
-                        )}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          readOnly
-                          className="size-3.5"
-                        />
-                        <GithubIcon className="size-3.5" />
-                        <RepoUrlText url={repo.url} />
-                      </button>
-                    );
-                  })}
-                </div>
+                <>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={repoSearch}
+                      onChange={(e) => setRepoSearch(e.target.value)}
+                      aria-label={t(($) => $.create_project.repos_search_placeholder)}
+                      placeholder={t(($) => $.create_project.repos_search_placeholder)}
+                      className="h-8 w-full rounded-md border bg-transparent pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+                    />
+                  </div>
+                  <div className="max-h-48 space-y-1 overflow-y-auto">
+                    {filteredWorkspaceRepos.length === 0 && repoQuery && (
+                      <p className="py-2 text-center text-xs text-muted-foreground">
+                        {t(($) => $.create_project.repos_search_empty)}
+                      </p>
+                    )}
+                    {filteredWorkspaceRepos.map((repo) => {
+                      const checked = selectedRepos.includes(repo.url);
+                      return (
+                        <button
+                          type="button"
+                          key={repo.url}
+                          onClick={() => toggleRepo(repo.url)}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent transition-colors",
+                            checked && "bg-accent",
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            readOnly
+                            className="size-3.5"
+                          />
+                          <GithubIcon className="size-3.5" />
+                          <RepoUrlText url={repo.url} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
               ) : (
                 <p className="text-xs text-muted-foreground">
                   {t(($) => $.create_project.repos_empty)}

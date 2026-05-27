@@ -2436,6 +2436,53 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 	return i, err
 }
 
+const updateAgentCustomEnv = `-- name: UpdateAgentCustomEnv :one
+UPDATE agent
+SET custom_env = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level
+`
+
+type UpdateAgentCustomEnvParams struct {
+	ID        pgtype.UUID `json:"id"`
+	CustomEnv []byte      `json:"custom_env"`
+}
+
+// Replaces an agent's custom_env map wholesale. Used by the dedicated
+// env-management endpoint (POST/PUT /api/agents/{id}/env), which is the
+// only post-creation write path for env. UpdateAgent has been stripped
+// of custom_env handling so all env mutations flow through here and the
+// handler's audit-log + **** sentinel guard.
+func (q *Queries) UpdateAgentCustomEnv(ctx context.Context, arg UpdateAgentCustomEnvParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, updateAgentCustomEnv, arg.ID, arg.CustomEnv)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+	)
+	return i, err
+}
+
 const updateAgentStatus = `-- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1

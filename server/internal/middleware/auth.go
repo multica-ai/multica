@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -33,6 +34,11 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// X-Actor-Source is server-set only — any value supplied by
+			// the client is untrusted and discarded before the auth branches run.
+			// Only the mat_ branch below re-sets it.
+			r.Header.Del("X-Actor-Source")
+
 			candidates := extractTokenCandidates(r)
 			if len(candidates) == 0 {
 				slog.Debug("auth: no token found", "path", r.URL.Path)
@@ -54,19 +60,54 @@ func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.
 					continue
 				}
 
-				// PAT: tokens starting with "mul_"
-				if strings.HasPrefix(tokenString, "mul_") {
+				// Agent task token: "mat_" prefix. Minted by the server at
+				// task-claim time and injected by the daemon into the agent
+				// process. Authoritative for actor identity: bound IDs are written
+				// into request headers here, overriding whatever the client sent.
+				if strings.HasPrefix(tokenString, "mat_") {
 					if queries == nil {
 						continue
 					}
 					hash := auth.HashToken(tokenString)
+					tt, err := queries.GetTaskTokenByHash(r.Context(), hash)
+					if err != nil {
+						slog.Warn("auth: invalid task token", "path", r.URL.Path, "source", candidate.source, "error", err)
+						continue
+					}
+					r.Header.Set("X-User-ID", uuidToString(tt.UserID))
+					r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
+					r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
+					r.Header.Set("X-Workspace-ID", uuidToString(tt.WorkspaceID))
+					r.Header.Set("X-Actor-Source", "task_token")
+					next.ServeHTTP(w, r)
+					return
+				}
+
+				// PAT: tokens starting with "mul_"
+				if strings.HasPrefix(tokenString, "mul_") {
+					hash := auth.HashToken(tokenString)
+					if userID, ok := patCache.Get(r.Context(), hash); ok {
+						r.Header.Set("X-User-ID", userID)
+						next.ServeHTTP(w, r)
+						return
+					}
+					if queries == nil {
+						continue
+					}
 					pat, err := queries.GetPersonalAccessTokenByHash(r.Context(), hash)
 					if err != nil {
-						slog.Warn("auth: invalid PAT", "path", r.URL.Path, "error", err)
+						slog.Warn("auth: invalid PAT", "path", r.URL.Path, "source", candidate.source, "error", err)
 						continue
 					}
 
-					r.Header.Set("X-User-ID", uuidToString(pat.UserID))
+					userID := uuidToString(pat.UserID)
+					r.Header.Set("X-User-ID", userID)
+
+					var expiresAt time.Time
+					if pat.ExpiresAt.Valid {
+						expiresAt = pat.ExpiresAt.Time
+					}
+					patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
 
 					// Best-effort: update last_used_at
 					go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)

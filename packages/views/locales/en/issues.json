@@ -248,7 +248,9 @@
     "squad_leader_failed_reason": "evaluation failed: {{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} activity",
-    "activity_count_other": "{{count}} activities"
+    "activity_count_other": "{{count}} activities",
+    "show_more_activities_one": "Show {{count}} more activity",
+    "show_more_activities_other": "Show {{count}} more activities"
   },
   "comment": {
     "delete_title": "Delete comment",

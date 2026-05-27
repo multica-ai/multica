@@ -81,7 +81,7 @@
     "all_runtimes": "全部运行时",
     "read_only": "只读",
     "delete_button": "删除运行时",
-    "delete_disabled_tooltip": "该运行时由正在运行的本地 daemon 托管，删除后会在数秒内自动重新注册。需停止 daemon 进程才能彻底移除。",
+    "delete_disabled_tooltip": "该运行时由正在运行的本地守护进程托管，删除后会在数秒内自动重新注册。需停止守护进程才能彻底移除。",
     "last_seen": "最后活跃 {{when}}",
     "fact_owner": "所有者",
     "fact_device": "设备",

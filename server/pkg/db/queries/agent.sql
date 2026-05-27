@@ -72,6 +72,17 @@ UPDATE agent SET mcp_config = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateAgentCustomEnv :one
+-- Replaces an agent's custom_env map wholesale. Used by the dedicated
+-- env-management endpoint (POST/PUT /api/agents/{id}/env), which is the
+-- only post-creation write path for env. UpdateAgent has been stripped
+-- of custom_env handling so all env mutations flow through here and the
+-- handler's audit-log + **** sentinel guard.
+UPDATE agent
+SET custom_env = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: ArchiveAgent :one
 UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
