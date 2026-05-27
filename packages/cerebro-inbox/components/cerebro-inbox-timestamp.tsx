@@ -22,6 +22,18 @@ export function CerebroInboxTimestamp({
 }) {
   const { i18n } = useTranslation();
   const strings = useCerebroInboxStrings();
+  // CEREBRO-PATCH(inbox-reminder-snooze-signal): existing inbox rows use
+  // muted_until for reminders without changing their original notification type.
+  if (item.muted_until && isReminderOverdue(item.muted_until)) {
+    const planned = formatPlannedDateTime(item.muted_until, i18n.language);
+    if (planned) {
+      return (
+        <span className="font-semibold text-destructive">
+          {`${strings.reminder_overdue_prefix} ${planned}`}
+        </span>
+      );
+    }
+  }
   if (item.type === "reminder") {
     const plannedAt = item.details?.planned_at ?? item.muted_until;
     const planned = formatPlannedDateTime(plannedAt, i18n.language);
