@@ -3,6 +3,7 @@
 import { toast } from "sonner";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useCurrentMember } from "@multica/core/permissions";
+import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { ButtonGroup } from "@multica/ui/components/ui/button-group";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -11,6 +12,8 @@ import {
   COST_SAVINGS,
   type CostSavingDefinition,
   type CostSavingMode,
+  runtimeScopeBadge,
+  runtimeScopeNote,
 } from "../registry";
 import { useSavingMode } from "../store";
 import { useCostOptimizationQuery, useSetSavingModeMutation } from "./api";
@@ -37,6 +40,8 @@ function SavingRow({
 }) {
   const mode = useSavingMode(def.key);
   const mutation = useSetSavingModeMutation();
+  const scopeBadge = runtimeScopeBadge(def.runtimeScope);
+  const scopeNote = runtimeScopeNote(def.runtimeScope);
 
   const handleSelect = (next: CostSavingMode) => {
     if (next === mode) return;
@@ -56,8 +61,14 @@ function SavingRow({
     <Card>
       <CardContent className="space-y-3">
         <div className="space-y-1">
-          <Label className="text-sm font-medium">{def.label}</Label>
+          <div className="flex items-center gap-2">
+            <Label className="text-sm font-medium">{def.label}</Label>
+            {scopeBadge && <Badge variant="secondary">{scopeBadge}</Badge>}
+          </div>
           <p className="text-xs text-muted-foreground">{def.description}</p>
+          {scopeNote && (
+            <p className="text-xs text-muted-foreground">{scopeNote}</p>
+          )}
           <p className="text-xs text-muted-foreground italic">{def.estimateNote}</p>
         </div>
         <ButtonGroup aria-label={`${def.label} mode`}>

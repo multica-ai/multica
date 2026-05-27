@@ -203,6 +203,8 @@ type AgentTaskResponse struct {
 	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
+	IssueSnapshot           string                `json:"issue_snapshot,omitempty"`            // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
+	BundleContextHint       bool                  `json:"bundle_context_hint,omitempty"`       // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
 	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `multica attachment download <id>` per entry
@@ -421,11 +423,20 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	// to preserve A2A collaboration; members must be in allowed_principals
 	// (agent owner or workspace owner/admin) to see private agents.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	// CEREBRO-PATCH(private-agent-visible-but-locked): FIR-2385 — flag-gated.
+	privateRequestsEnabled := h.cerebroPrivateAgentRequestsEnabled(r.Context(), workspaceID, userID)
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
+		lockedPrivate := false
 		if a.Visibility == "private" && actorType == "member" {
 			if !memberAllowedForPrivateAgent(a, actorID, member.Role) {
-				continue
+				// CEREBRO-PATCH(private-agent-visible-but-locked): keep the agent
+				// in the response (name + description) marked locked instead of
+				// hiding it; legacy hide when the flag is off (FIR-2385).
+				if !privateRequestsEnabled {
+					continue
+				}
+				lockedPrivate = true
 			}
 		}
 		resp := agentToResponse(a)
@@ -448,6 +459,11 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		} else {
 			_, allowedByGroup := visibleAgents[uuidToString(a.ID)]
 			resp.CanTrigger = allowedByGroup || ownerExempt(a.OwnerID)
+		}
+		// CEREBRO-PATCH(private-agent-visible-but-locked): a locked private agent
+		// exposes only name + description and is never triggerable (FIR-2385).
+		if lockedPrivate {
+			redactLockedPrivateAgent(&resp)
 		}
 		visible = append(visible, resp)
 	}

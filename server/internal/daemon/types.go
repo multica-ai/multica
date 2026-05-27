@@ -50,32 +50,36 @@ type Task struct {
 	// prompt set in Settings → General). Server populates this on every claim
 	// regardless of task kind so the daemon can inject `## Workspace Context`
 	// into the brief. Empty when the owner hasn't set one.
-	WorkspaceContext        string                `json:"workspace_context,omitempty"`
-	Agent                   *AgentData            `json:"agent,omitempty"`
-	Repos                   []RepoData            `json:"repos,omitempty"`
-	ProjectID               string                `json:"project_id,omitempty"`                // issue's project, when present
-	ProjectTitle            string                `json:"project_title,omitempty"`             // human-readable project title for context injection
-	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`         // project-scoped resources to expose to the agent
-	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
-	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
-	TriggerCommentID        string                `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
-	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
-	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind for the triggering comment
-	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
-	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
-	ChatMessage             string                `json:"chat_message,omitempty"`              // user message content for chat tasks
-	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
-	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot run_only tasks
-	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this run
-	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
-	AutopilotDescription    string                `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
-	AutopilotSource         string                `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
-	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
-	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
-	SquadID                 string                `json:"squad_id,omitempty"`                  // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
-	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
-	ParentIssueID           string                `json:"parent_issue_id,omitempty"`           // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
-	ParentIssueIdentifier   string                `json:"parent_issue_identifier,omitempty"`   // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, used in prompt context
+	WorkspaceContext      string                `json:"workspace_context,omitempty"`
+	Agent                 *AgentData            `json:"agent,omitempty"`
+	Repos                 []RepoData            `json:"repos,omitempty"`
+	ProjectID             string                `json:"project_id,omitempty"`              // issue's project, when present
+	ProjectTitle          string                `json:"project_title,omitempty"`           // human-readable project title for context injection
+	ProjectResources      []ProjectResourceData `json:"project_resources,omitempty"`       // project-scoped resources to expose to the agent
+	PriorSessionID        string                `json:"prior_session_id,omitempty"`        // Claude session ID from a previous task on this issue
+	PriorWorkDir          string                `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on this issue
+	TriggerCommentID      string                `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
+	TriggerCommentContent string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
+	TriggerAuthorType     string                `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind for the triggering comment
+	TriggerAuthorName     string                `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
+	// CEREBRO-PATCH(daemon-task-issue-snapshot): FIR-2384 — pre-rendered issue + recent thread, set only when the workspace's snapshot_prompt cost saving is "on"; inlined into the start prompt so the agent skips the issue get + comment list reads.
+	IssueSnapshot string `json:"issue_snapshot,omitempty"`
+	// CEREBRO-PATCH(daemon-task-bundle-context-hint): FIR-2384 — set when the workspace's bundled_read cost saving is "on"; the start prompt then points the agent at a single `multica issue context` call instead of separate issue get + comment list reads.
+	BundleContextHint       bool                 `json:"bundle_context_hint,omitempty"`
+	ChatSessionID           string               `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
+	ChatMessage             string               `json:"chat_message,omitempty"`              // user message content for chat tasks
+	ChatMessageAttachments  []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`  // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
+	AutopilotRunID          string               `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot run_only tasks
+	AutopilotID             string               `json:"autopilot_id,omitempty"`              // autopilot that spawned this run
+	AutopilotTitle          string               `json:"autopilot_title,omitempty"`           // autopilot title used as task context
+	AutopilotDescription    string               `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
+	AutopilotSource         string               `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
+	AutopilotTriggerPayload json.RawMessage      `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
+	QuickCreatePrompt       string               `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	SquadID                 string               `json:"squad_id,omitempty"`                  // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
+	SquadName               string               `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
+	ParentIssueID           string               `json:"parent_issue_id,omitempty"`           // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
+	ParentIssueIdentifier   string               `json:"parent_issue_identifier,omitempty"`   // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, used in prompt context
 	// RequestingUserName + RequestingUserProfileDescription describe the human
 	// the agent is working on behalf of. v1 sources them from the runtime
 	// owner (the user who registered the daemon). Empty when the runtime has
@@ -140,7 +144,7 @@ type AgentData struct {
 	// secrets arrive over the already-TLS-protected claim path. FIR-2192.
 	InfisicalSecrets map[string]string `json:"infisical_secrets,omitempty"`
 	Model            string            `json:"model,omitempty"`
-	ThinkingLevel    string               `json:"thinking_level,omitempty"`
+	ThinkingLevel    string            `json:"thinking_level,omitempty"`
 	// CEREBRO-PATCH(daemon-agent-sandbox-allowlist): admin-set list of
 	SandboxAllowlist      []string `json:"sandbox_allowlist,omitempty"`
 	PersonaSandbox        string   `json:"persona_sandbox,omitempty"`

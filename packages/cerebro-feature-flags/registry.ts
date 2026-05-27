@@ -36,7 +36,9 @@ export type CerebroFlagKey =
   | "cerebro_agent_passes"
   | "cerebro_references"
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
-  | "cerebro_agent_avatar";
+  | "cerebro_agent_avatar"
+  // FIR-2385: private agents visible-but-locked + tag → run-request to owner.
+  | "cerebro_private_agent_requests";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -82,6 +84,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_references: true,
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
   cerebro_agent_avatar: true,
+  // FIR-2385: private agents are visible-but-locked and a non-owner tag turns
+  // into a run-request in the owner's inbox. Off restores the old behavior
+  // (private agents hidden, tags silently dropped).
+  cerebro_private_agent_requests: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -269,5 +275,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "AI agent avatar generation",
     description:
       "Show a 'Generate AI avatar' button in the agent creation dialog. Uses the Firtal Data Registry AI Gateway with a Scandinavian-appearance prompt. Requires FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL and FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY.",
+  },
+  {
+    key: "cerebro_private_agent_requests",
+    label: "Private agent run requests",
+    description:
+      "Show private agents you don't own as visible-but-locked in the agent list and @-picker (name + description only). Tagging one no longer silently drops — it sends a run-request to the agent's owner, who can run it from their inbox. The owner stays in control; server-side foreign-trigger blocking is unchanged. FIR-2385.",
   },
 ];

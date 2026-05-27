@@ -23,6 +23,22 @@ commit. So each saving has three modes:
 3. `model_routing` — cheap model by default, escalate only when needed.
 4. `prune_tool_results` — drop stale tool results from context mid-run.
 
+## Runtime scope (`runtimeScope`)
+
+A saving only saves where it can act. Two runtimes exist: the **daemon** (local
+agents that claim tasks from the server, on a fixed plan) and the **gateway**
+(cloud agents the server runs and bills per token).
+
+- `snapshot_prompt`, `bundled_read` → **both** — applied server-side at task
+  claim, so they cut platform calls for daemon and gateway alike.
+- `model_routing`, `prune_tool_results` → **gateway only** — the server owns the
+  model choice and the context window only in the gateway. On the daemon's fixed
+  plan they change no cost.
+
+The settings UI badges the gateway-only savings ("Cloud runtime only") with a
+one-line note, so a daemon-only workspace sees a scoped toggle — not a dead
+button, and no false promise that it touches local agents.
+
 ## Owns
 
 - The `COST_SAVINGS` registry (keys, defaults, display metadata, metric).

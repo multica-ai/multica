@@ -336,7 +336,13 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	}
 
 	b.WriteString("## Quick Start\n\n")
-	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
+	if ctx.IssueSnapshotInlined { // CEREBRO-PATCH(runtime-config-snapshot): issue+thread already inlined in the start prompt; do not re-instruct the fetch (FIR-2384)
+		b.WriteString("The issue and its recent thread are already inlined in your task prompt — they have been fetched for you. Do not re-run `multica issue get`; fetch additional history only if you need more than what is shown.\n\n")
+	} else if ctx.BundleContextHint { // CEREBRO-PATCH(runtime-config-bundled): bundled_read on — one `multica issue context` call replaces the separate reads (FIR-2384)
+		fmt.Fprintf(&b, "Run `multica issue context %s --output json` to fetch the issue, its recent thread, the workspace members, and the labels in ONE call — use it instead of separate `multica issue get` / `multica issue comment list` reads.\n\n", ctx.IssueID)
+	} else {
+		fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
+	}
 
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Agent Skills\n\n")

@@ -63,6 +63,12 @@ type GatewayCompletion struct {
 	// across the tool loop. It feeds the prune_tool_results cost measurement
 	// (FIR-2325); it is summed alongside Usage and is 0 for tool-free runs.
 	ToolResultChars int64
+	// PrunedToolResultChars is the characters of superseded tool-result content
+	// actually dropped from the transcript mid-run when the prune_tool_results
+	// saving is "on" (FIR-2325). 0 when the saving is off/shadow or when no round
+	// was ever superseded. This is the *measured* saving, as opposed to
+	// ToolResultChars which is the would-save estimate.
+	PrunedToolResultChars int64
 }
 
 type GatewayRequestMeta struct {

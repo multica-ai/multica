@@ -71,6 +71,61 @@ func (q *Queries) ClearInboxMuteByIssue(ctx context.Context, arg ClearInboxMuteB
 	return result.RowsAffected(), nil
 }
 
+const createPrivateAgentRunRequest = `-- name: CreatePrivateAgentRunRequest :one
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title, body,
+    actor_type, actor_id, details, route
+) VALUES ($1, 'member', $2, 'private_agent_run_request', 'action_required', $3, $4, $5, 'member', $6, $7, 'inbox')
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+`
+
+type CreatePrivateAgentRunRequestParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	Title       string      `json:"title"`
+	Body        pgtype.Text `json:"body"`
+	ActorID     pgtype.UUID `json:"actor_id"`
+	Details     []byte      `json:"details"`
+}
+
+// FIR-2385: a non-owner tagged a private agent. Instead of waking the agent we
+// drop a run-request in the owner's inbox; the owner runs it from there. The
+// recipient is the agent owner; actor is the requester who tagged.
+func (q *Queries) CreatePrivateAgentRunRequest(ctx context.Context, arg CreatePrivateAgentRunRequestParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, createPrivateAgentRunRequest,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.IssueID,
+		arg.Title,
+		arg.Body,
+		arg.ActorID,
+		arg.Details,
+	)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+	)
+	return i, err
+}
+
 const createReminderInboxItem = `-- name: CreateReminderInboxItem :one
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
@@ -164,6 +219,60 @@ func (q *Queries) FindPendingReminder(ctx context.Context, arg FindPendingRemind
 		arg.Column3,
 		arg.Title,
 		arg.Body,
+	)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+	)
+	return i, err
+}
+
+const findPrivateAgentRunRequest = `-- name: FindPrivateAgentRunRequest :one
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+FROM inbox_item
+WHERE workspace_id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND type = 'private_agent_run_request'
+  AND archived = false
+  AND details->>'agent_id' = $3::text
+  AND details->>'comment_id' = $4::text
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type FindPrivateAgentRunRequestParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	Column3     string      `json:"column_3"`
+	Column4     string      `json:"column_4"`
+}
+
+// FIR-2385 dedup guard: a repeated tag of the same private agent on the same
+// comment must not spam the owner with duplicate run-requests. Matches on the
+// (owner recipient, agent, comment) triple carried in details.
+func (q *Queries) FindPrivateAgentRunRequest(ctx context.Context, arg FindPrivateAgentRunRequestParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, findPrivateAgentRunRequest,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.Column3,
+		arg.Column4,
 	)
 	var i InboxItem
 	err := row.Scan(

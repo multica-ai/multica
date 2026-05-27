@@ -2364,6 +2364,14 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(inbox-run-private-agent-client): FIR-2385 — the agent owner
+  // accepts a private_agent_run_request; the server enqueues the agent on the
+  // tagged comment and archives the request. Returns a small ack, not a full
+  // InboxItem (the row is removed from the active inbox on settle).
+  async runPrivateAgentRunRequest(id: string): Promise<{ id: string; status: string }> {
+    return this.fetch(`/api/inbox/${id}/run-private-agent`, { method: "POST" });
+  }
+
   async getUnreadInboxCount(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/unread-count");
   }
