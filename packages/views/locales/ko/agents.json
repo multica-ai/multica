@@ -94,7 +94,7 @@
     "cancel_dialog_impact_one": "{{summary}} 작업이 취소됩니다.",
     "cancel_dialog_impact_other": "{{summary}} 작업이 취소됩니다.",
     "cancel_dialog_running_note": " 실행 중인 작업이 완전히 멈추기까지 최대 5초가 걸릴 수 있습니다.",
-    "cancel_dialog_irreversible": " 취소한 작업은 다시 이어서 실행할 수 없습니다.",
+    "cancel_dialog_irreversible": " 취소한 작업은 재개할 수 없습니다.",
     "cancel_dialog_keep": "계속 실행",
     "cancel_dialog_confirm": "모든 작업 취소",
     "archive_dialog_title": "\"{{name}}\"을(를) 보관할까요?",
@@ -176,7 +176,7 @@
     "thinking_default": "CLI 설정 따르기",
     "thinking_tooltip": "추론 · {{value}}",
     "thinking_clear": "CLI 설정 따르기",
-    "thinking_clear_title": "재정의를 지우고 로컬 CLI 설정(claude/codex)이 추론 수준을 결정하게 합니다"
+    "thinking_clear_title": "재정의를 지우고 추론 수준을 로컬 CLI 설정(claude/codex)에 맡깁니다"
   },
   "model_dropdown": {
     "label": "모델",
@@ -382,7 +382,7 @@
   "live_peek": {
     "current_issue_label": "현재 작업",
     "no_current_issue": "작업 없음",
-    "last_activity_label": "마지막 활동",
+    "last_activity_label": "마지막 접속",
     "no_recent_activity": "최근 활동 없음",
     "failed_indicator": "실패"
   },

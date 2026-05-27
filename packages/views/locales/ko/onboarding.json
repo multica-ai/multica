@@ -8,7 +8,7 @@
     "headline_line2": "하나의",
     "headline_emphasis": "워크스페이스에서.",
     "lede": "동료에게 일을 맡기듯 작업을 할당하세요. 에이전트가 이슈를 맡고, 상태를 업데이트하고, 끝나면 댓글을 남깁니다.",
-    "lede_web": "데스크톱에는 런타임이 포함되어 있어 설치할 것이 없습니다. 웹에서 계속하려면 내 CLI를 연결하세요.",
+    "lede_web": "데스크톱에는 런타임이 포함되어 있어 따로 설치할 게 없습니다. 웹에서 계속하려면 내 CLI를 연결하세요.",
     "lede_desktop": "끝나면 실제 에이전트가 첫 이슈에 답하고 있을 겁니다.",
     "download_desktop": "데스크톱 다운로드",
     "continue_on_web": "웹에서 계속",
@@ -210,7 +210,7 @@
       },
       "success": {
         "title": "준비 완료!",
-        "subtitle": "{{agentName}}이(가) 처리 중입니다",
+        "subtitle": "잠시만요 — {{agentName}}이(가) 작업 중입니다 ☕",
         "tip_inbox": "진행 상황이 생기면 인박스에서 볼 수 있습니다.",
         "tip_chat": "실시간으로 채팅하고 싶다면 오른쪽 아래 채팅 버튼을 누르세요.",
         "got_it": "알겠습니다 →"
@@ -226,7 +226,7 @@
       "cards": {
         "install_runtime": {
           "title": "런타임 연결",
-          "subtitle": "Codex 또는 Kimi를 설치해 에이전트를 온라인으로 전환하세요."
+          "subtitle": "Codex 또는 Kimi를 설치해 에이전트를 작동시키세요."
         },
         "create_agent": {
           "title": "첫 에이전트 만들기",
@@ -276,7 +276,7 @@
     "perk_chat": "이슈를 만들지 않고 에이전트와 채팅",
     "perk_invite": "팀원 초대 — 이 워크스페이스만 보입니다",
     "perk_switch": "왼쪽 위에서 언제든 다른 워크스페이스로 전환",
-    "next_runtime": "에이전트가 실행될 컴퓨터 연결",
+    "next_runtime": "에이전트를 실행할 컴퓨터 연결",
     "next_agent": "연결된 런타임에서 Multica Helper 만들기",
     "next_starter": "다음 단계를 위한 온보딩 이슈 열기",
     "preview": {
