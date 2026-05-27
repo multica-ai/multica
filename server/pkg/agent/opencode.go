@@ -81,6 +81,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
+	prepareOpenCodeCommand(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
@@ -105,39 +106,64 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	cmd.Env = env
 
-	stdout, err := cmd.StdoutPipe()
+	stdoutReader, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("opencode stdout pipe: %w", err)
 	}
+	cmd.Stdout = stdoutWriter
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[opencode:stderr] ")
 
 	if err := cmd.Start(); err != nil {
 		cancel()
+		_ = stdoutReader.Close()
+		_ = stdoutWriter.Close()
 		return nil, fmt.Errorf("start opencode: %w", err)
 	}
+	_ = stdoutWriter.Close()
 
 	b.cfg.Logger.Info("opencode started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	// Close stdout when the context is cancelled so the scanner unblocks.
+	waitCh := make(chan error, 1)
 	go func() {
-		<-runCtx.Done()
-		_ = stdout.Close()
+		waitCh <- cmd.Wait()
+	}()
+
+	stopCancelCleanup := make(chan struct{})
+	// Terminate the whole OpenCode process group when the context is cancelled,
+	// and close stdout so any inherited writer cannot keep the scanner blocked.
+	go func() {
+		select {
+		case <-runCtx.Done():
+			terminateOpenCodeProcessGroup(cmd)
+			_ = stdoutReader.Close()
+		case <-stopCancelCleanup:
+		}
 	}()
 
 	go func() {
 		defer cancel()
+		defer close(stopCancelCleanup)
 		defer close(msgCh)
 		defer close(resCh)
 
 		startTime := time.Now()
-		scanResult := b.processEvents(stdout, msgCh)
+		scanCh := make(chan eventResult, 1)
+		go func() {
+			scanCh <- b.processEvents(stdoutReader, msgCh)
+		}()
 
 		// Wait for process exit.
-		exitErr := cmd.Wait()
+		exitErr := <-waitCh
+		backgroundAlive := openCodeProcessGroupAlive(cmd)
+		if backgroundAlive {
+			_ = stdoutReader.Close()
+		}
+
+		scanResult := <-scanCh
 		duration := time.Since(startTime)
 
 		if runCtx.Err() == context.DeadlineExceeded {
@@ -146,9 +172,15 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		} else if runCtx.Err() == context.Canceled {
 			scanResult.status = "aborted"
 			scanResult.errMsg = "execution cancelled"
+		} else if exitErr == nil && backgroundAlive {
+			scanResult.status = "failed"
+			scanResult.errMsg = "opencode exited before background processes completed"
 		} else if exitErr != nil && scanResult.status == "completed" {
 			scanResult.status = "failed"
 			scanResult.errMsg = fmt.Sprintf("opencode exited with error: %v", exitErr)
+		}
+		if backgroundAlive {
+			terminateOpenCodeProcessGroup(cmd)
 		}
 
 		b.cfg.Logger.Info("opencode finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
