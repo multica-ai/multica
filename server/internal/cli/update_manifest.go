@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -242,4 +244,126 @@ return "", fmt.Errorf("replace binary: %w", err)
 }
 
 return fmt.Sprintf("Downloaded %s from manifest and replaced %s", archiveName, exePath), nil
+}
+
+// forkVersionRe matches the git-describe style version used by Fork builds:
+// v<major>.<minor>.<patch>-<commitCount>-g<hash> with optional trailing segments
+// (e.g. "-dirty" or a second describe layer like "-14-g12d314f5c").
+// Examples:
+//   - v0.3.6-767-g16a0ca0a1
+//   - v0.3.6-767-g16a0ca0a1-14-g12d314f5c
+//
+// NOT matched (treated as dirty dev build):
+//   - v0.3.6-767-g16a0ca0a1-dirty
+var forkVersionRe = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)-(\d+)-g([0-9a-f]+)(?:-(\d+)-g([0-9a-f]+))?$`)
+
+// IsForkVersion reports whether v looks like a Fork release version produced
+// by `git describe` (e.g. "v0.3.6-767-g16a0ca0a1"). Versions with a "-dirty"
+// suffix are NOT considered fork releases — those are local dev builds.
+func IsForkVersion(v string) bool {
+	s := strings.TrimSpace(v)
+	if strings.HasSuffix(s, "-dirty") {
+		return false
+	}
+	return forkVersionRe.MatchString(s)
+}
+
+// forkVersion holds the parsed components of a fork-style version string.
+type forkVersion struct {
+	Major, Minor, Patch int
+	CommitCount         int
+	// SecondCount captures the second commit-count segment in stacked describe
+	// versions like v0.3.6-767-g16a0ca0a1-14-g12d314f5c (the "14").
+	SecondCount int
+}
+
+// parseForkVersion extracts structured version info from a fork version string.
+// Returns (parsed, true) on success; (zero, false) if v is not a valid fork version.
+func parseForkVersion(v string) (forkVersion, bool) {
+	s := strings.TrimSpace(v)
+	if strings.HasSuffix(s, "-dirty") {
+		return forkVersion{}, false
+	}
+	m := forkVersionRe.FindStringSubmatch(s)
+	if m == nil {
+		return forkVersion{}, false
+	}
+	major, _ := strconv.Atoi(m[1])
+	minor, _ := strconv.Atoi(m[2])
+	patch, _ := strconv.Atoi(m[3])
+	commitCount, _ := strconv.Atoi(m[4])
+	var secondCount int
+	if m[6] != "" {
+		secondCount, _ = strconv.Atoi(m[6])
+	}
+	return forkVersion{
+		Major:       major,
+		Minor:       minor,
+		Patch:       patch,
+		CommitCount: commitCount,
+		SecondCount: secondCount,
+	}, true
+}
+
+// IsNewerForkVersion reports whether latest is strictly newer than current,
+// where both are fork-style version strings. Comparison order:
+// major > minor > patch > commitCount > secondCount.
+func IsNewerForkVersion(latest, current string) bool {
+	l, lok := parseForkVersion(latest)
+	if !lok {
+		return false
+	}
+	c, cok := parseForkVersion(current)
+	if !cok {
+		return false
+	}
+	if l.Major != c.Major {
+		return l.Major > c.Major
+	}
+	if l.Minor != c.Minor {
+		return l.Minor > c.Minor
+	}
+	if l.Patch != c.Patch {
+		return l.Patch > c.Patch
+	}
+	if l.CommitCount != c.CommitCount {
+		return l.CommitCount > c.CommitCount
+	}
+	return l.SecondCount > c.SecondCount
+}
+
+// IsUpdatableVersion reports whether v is eligible for auto-update — either a
+// clean tagged release (official) or a fork release (git-describe style).
+func IsUpdatableVersion(v string) bool {
+	return IsReleaseVersion(v) || IsForkVersion(v)
+}
+
+// IsNewerUpdatableVersion reports whether latest is strictly newer than current
+// for any version style supported by the auto-update system. Both versions must
+// be of the same style (both release or both fork) for comparison to succeed.
+// Returns false if either side cannot be parsed or the styles mismatch.
+func IsNewerUpdatableVersion(latest, current string) bool {
+	// Try official release comparison first.
+	if IsReleaseVersion(latest) && IsReleaseVersion(current) {
+		return IsNewerVersion(latest, current)
+	}
+	// Try fork comparison.
+	if IsForkVersion(latest) && IsForkVersion(current) {
+		return IsNewerForkVersion(latest, current)
+	}
+	return false
+}
+
+// FetchLatestManifestReleaseAsGitHubRelease adapts FetchLatestManifestRelease
+// into the *GitHubRelease shape expected by the auto-update loop's
+// fetchLatestRelease indirection. This lets the loop use the OBS manifest as
+// its version source without changing the loop's core mechanics.
+func FetchLatestManifestReleaseAsGitHubRelease() (*GitHubRelease, error) {
+	manifest, err := FetchLatestManifestRelease()
+	if err != nil {
+		return nil, err
+	}
+	return &GitHubRelease{
+		TagName: manifest.Version,
+	}, nil
 }

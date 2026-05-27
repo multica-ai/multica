@@ -234,8 +234,12 @@ func TestAutoUpdateLoop_EarlyExits(t *testing.T) {
 			cfg:  Config{AutoUpdateEnabled: true, CLIVersion: "v0.1.13", LaunchedBy: "desktop"},
 		},
 		{
-			name: "dev build",
-			cfg:  Config{AutoUpdateEnabled: true, CLIVersion: "v0.1.13-235-gabcdef0"},
+			name: "dirty dev build",
+			cfg:  Config{AutoUpdateEnabled: true, CLIVersion: "v0.1.13-235-gabcdef0-dirty"},
+		},
+		{
+			name: "unparseable garbage version",
+			cfg:  Config{AutoUpdateEnabled: true, CLIVersion: "garbage"},
 		},
 	}
 	for _, tt := range tests {
@@ -254,5 +258,63 @@ func TestAutoUpdateLoop_EarlyExits(t *testing.T) {
 			}()
 			<-done
 		})
+	}
+}
+
+// TestTryAutoUpdate_ForkVersionUpgrade verifies the auto-update loop correctly
+// compares fork versions and triggers an upgrade when the manifest reports a
+// newer fork build.
+func TestTryAutoUpdate_ForkVersionUpgrade(t *testing.T) {
+	d, restartCalls := newAutoUpdateTestDaemon(t, "v0.3.6-767-g16a0ca0a1")
+	withStubRelease(t, &cli.GitHubRelease{TagName: "v0.3.6-780-gabcdef0"}, nil)
+
+	var upgradedTo string
+	d.runUpdateFn = func(target string) (string, error) {
+		upgradedTo = target
+		return "upgraded", nil
+	}
+
+	d.tryAutoUpdate(context.Background())
+
+	if upgradedTo != "v0.3.6-780-gabcdef0" {
+		t.Fatalf("runUpdateFn called with %q, want v0.3.6-780-gabcdef0", upgradedTo)
+	}
+	if restartCalls.Load() != 1 {
+		t.Fatalf("triggerRestart fired %d times, want 1", restartCalls.Load())
+	}
+}
+
+// TestTryAutoUpdate_ForkVersionSameNoUpgrade confirms no upgrade is triggered
+// when the manifest version equals the running fork version.
+func TestTryAutoUpdate_ForkVersionSameNoUpgrade(t *testing.T) {
+	d, restartCalls := newAutoUpdateTestDaemon(t, "v0.3.6-767-g16a0ca0a1")
+	withStubRelease(t, &cli.GitHubRelease{TagName: "v0.3.6-767-gabcdef0"}, nil)
+
+	d.tryAutoUpdate(context.Background())
+
+	if restartCalls.Load() != 0 {
+		t.Fatalf("triggerRestart fired even though manifest version == current (same commit count)")
+	}
+}
+
+// TestTryAutoUpdate_ForkVersionBaseVersionBump verifies that a base version
+// bump (e.g. after a rebase onto a new tag) is detected as newer.
+func TestTryAutoUpdate_ForkVersionBaseVersionBump(t *testing.T) {
+	d, restartCalls := newAutoUpdateTestDaemon(t, "v0.3.6-780-gabcdef0")
+	withStubRelease(t, &cli.GitHubRelease{TagName: "v0.3.7-5-g1234567"}, nil)
+
+	var upgradedTo string
+	d.runUpdateFn = func(target string) (string, error) {
+		upgradedTo = target
+		return "upgraded", nil
+	}
+
+	d.tryAutoUpdate(context.Background())
+
+	if upgradedTo != "v0.3.7-5-g1234567" {
+		t.Fatalf("runUpdateFn called with %q, want v0.3.7-5-g1234567", upgradedTo)
+	}
+	if restartCalls.Load() != 1 {
+		t.Fatalf("triggerRestart fired %d times, want 1", restartCalls.Load())
 	}
 }
