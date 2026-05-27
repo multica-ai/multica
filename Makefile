@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-run selfhost-build selfhost-build-run selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -60,6 +60,9 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 		bash -c 'set -euo pipefail; MULTICA_INSTALL_SH_SOURCE_ONLY=1 . scripts/install.sh; JWT=$$(random_hex 32); POSTGRES_PASSWORD=$$(random_hex 24); DATABASE_URL=$$(env_file_value .env DATABASE_URL ""); set_env_file_value .env JWT_SECRET "$$JWT"; set_env_file_value .env POSTGRES_PASSWORD "$$POSTGRES_PASSWORD"; if [ -n "$$DATABASE_URL" ]; then set_env_file_value .env DATABASE_URL "$$(postgres_url_with_password "$$DATABASE_URL" "$$POSTGRES_PASSWORD")"; fi'; \
 		echo "==> Generated random JWT_SECRET and POSTGRES_PASSWORD"; \
 	fi
+	@$(MAKE) selfhost-run
+
+selfhost-run:
 	@echo "==> Pulling official Multica images..."
 	@if ! docker compose -f docker-compose.selfhost.yml pull; then \
 		echo ""; \
@@ -105,6 +108,9 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 		bash -c 'set -euo pipefail; MULTICA_INSTALL_SH_SOURCE_ONLY=1 . scripts/install.sh; JWT=$$(random_hex 32); POSTGRES_PASSWORD=$$(random_hex 24); DATABASE_URL=$$(env_file_value .env DATABASE_URL ""); set_env_file_value .env JWT_SECRET "$$JWT"; set_env_file_value .env POSTGRES_PASSWORD "$$POSTGRES_PASSWORD"; if [ -n "$$DATABASE_URL" ]; then set_env_file_value .env DATABASE_URL "$$(postgres_url_with_password "$$DATABASE_URL" "$$POSTGRES_PASSWORD")"; fi'; \
 		echo "==> Generated random JWT_SECRET and POSTGRES_PASSWORD"; \
 	fi
+	@$(MAKE) selfhost-build-run
+
+selfhost-build-run:
 	@echo "==> Building Multica from the current checkout..."
 	docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
 	@echo "==> Waiting for backend to be ready..."

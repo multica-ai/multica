@@ -190,8 +190,64 @@ test_postgres_url_password_replacement_preserves_connection_parts() {
   fi
 }
 
+test_make_selfhost_uses_generated_postgres_password() {
+  local tmp repo log generated_password
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  repo="$tmp/repo"
+  log="$tmp/docker-env.log"
+  mkdir -p "$repo/scripts" "$tmp/stub-bin"
+  cp "$ROOT_DIR/Makefile" "$repo/Makefile"
+  cp "$ROOT_DIR/.env.example" "$repo/.env.example"
+  cp "$ROOT_DIR/scripts/install.sh" "$repo/scripts/install.sh"
+
+  cat >"$tmp/stub-bin/docker" <<'STUB'
+#!/usr/bin/env bash
+printf '%s POSTGRES_PASSWORD=%s DATABASE_URL=%s\n' "$*" "$POSTGRES_PASSWORD" "$DATABASE_URL" >>"$MULTICA_TEST_DOCKER_ENV_LOG"
+exit 0
+STUB
+  chmod +x "$tmp/stub-bin/docker"
+
+  cat >"$tmp/stub-bin/curl" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x "$tmp/stub-bin/curl"
+
+  PATH="$tmp/stub-bin:/usr/bin:/bin" \
+    MULTICA_TEST_DOCKER_ENV_LOG="$log" \
+    make -C "$repo" selfhost >/dev/null
+
+  generated_password="$(grep '^POSTGRES_PASSWORD=' "$repo/.env" | cut -d= -f2-)"
+  if [[ -z "$generated_password" || "$generated_password" == "multica" ]]; then
+    echo "expected make selfhost to generate a non-default POSTGRES_PASSWORD" >&2
+    cat "$repo/.env" >&2
+    return 1
+  fi
+
+  if grep -q 'POSTGRES_PASSWORD=multica' "$log"; then
+    echo "expected docker compose commands to receive the generated POSTGRES_PASSWORD, not the Makefile default" >&2
+    cat "$log" >&2
+    return 1
+  fi
+
+  if ! grep -q "POSTGRES_PASSWORD=$generated_password" "$log"; then
+    echo "expected docker compose commands to receive the generated POSTGRES_PASSWORD" >&2
+    cat "$log" >&2
+    return 1
+  fi
+
+  if ! grep -q "DATABASE_URL=postgres://multica:$generated_password@localhost:5432/multica?sslmode=disable" "$log"; then
+    echo "expected docker compose commands to receive DATABASE_URL with the generated POSTGRES_PASSWORD" >&2
+    cat "$log" >&2
+    return 1
+  fi
+}
+
 test_brew_install_failure_falls_back_to_release_binary
 test_brew_tap_failure_falls_back_to_release_binary
 test_generated_selfhost_env_randomizes_postgres_password
 test_postgres_url_password_replacement_preserves_connection_parts
+test_make_selfhost_uses_generated_postgres_password
 echo "install.sh tests passed"
