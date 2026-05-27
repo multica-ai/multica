@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -118,6 +119,94 @@ func newRequestAs(userID, method, path string, body any) *http.Request {
 	req := newRequest(method, path, body)
 	req.Header.Set("X-User-ID", userID)
 	return req
+}
+
+func createWorkspaceMemberUser(t *testing.T, name, email string) string {
+	t.Helper()
+
+	ctx := context.Background()
+	var userID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ($1, $2)
+		RETURNING id
+	`, name, email).Scan(&userID); err != nil {
+		t.Fatalf("create user %s: %v", email, err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, userID); err != nil {
+		t.Fatalf("add workspace member %s: %v", email, err)
+	}
+
+	return userID
+}
+
+func allowedPrincipalUserIDs(t *testing.T, agentID string) []string {
+	t.Helper()
+
+	rows, err := testHandler.Queries.ListAgentAllowedPrincipals(
+		context.Background(),
+		util.MustParseUUID(agentID),
+	)
+	if err != nil {
+		t.Fatalf("list allowed principals: %v", err)
+	}
+
+	userIDs := make([]string, len(rows))
+	for i, row := range rows {
+		userIDs[i] = uuidToString(row.PrincipalID)
+	}
+	slices.Sort(userIDs)
+	return userIDs
+}
+
+func TestUpdateAgentAllowedPrincipals_AdditivePatchPreservesExistingUsers(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, ownerID, firstAllowedID := privateAgentTestFixture(t)
+	secondAllowedID := createWorkspaceMemberUser(t, "Second Allowed", "second-allowed@multica.test")
+	thirdAllowedID := createWorkspaceMemberUser(t, "Third Allowed", "third-allowed@multica.test")
+
+	req := withURLParam(
+		newRequestAs(ownerID, http.MethodPut, "/api/agents/"+agentID+"/allowed-principals", map[string]any{
+			"user_ids": []string{firstAllowedID},
+		}),
+		"id",
+		agentID,
+	)
+	w := httptest.NewRecorder()
+	testHandler.UpdateAgentAllowedPrincipals(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("initial replace: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	req = withURLParam(
+		newRequestAs(ownerID, http.MethodPut, "/api/agents/"+agentID+"/allowed-principals", map[string]any{
+			"add_user_ids": []string{secondAllowedID, thirdAllowedID},
+		}),
+		"id",
+		agentID,
+	)
+	w = httptest.NewRecorder()
+	testHandler.UpdateAgentAllowedPrincipals(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("additive update: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	got := allowedPrincipalUserIDs(t, agentID)
+	want := []string{firstAllowedID, secondAllowedID, thirdAllowedID}
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("allowed principals after additive update = %v, want %v", got, want)
+	}
 }
 
 // TestGetAgent_PrivateAgentAllowsPlainMember verifies the OPE-817 policy:

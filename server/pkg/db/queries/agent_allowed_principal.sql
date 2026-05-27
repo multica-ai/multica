@@ -38,3 +38,20 @@ SELECT sqlc.arg('workspace_id')::uuid,
        unnest(sqlc.arg('principal_ids')::uuid[]),
        sqlc.arg('created_by')::uuid
 ON CONFLICT (agent_id, principal_type, principal_id) DO NOTHING;
+
+-- name: AddAgentAllowedPrincipals :exec
+INSERT INTO agent_allowed_principal (
+    workspace_id, agent_id, principal_type, principal_id, created_by
+)
+SELECT sqlc.arg('workspace_id')::uuid,
+       sqlc.arg('agent_id')::uuid,
+       'member',
+       unnest(sqlc.arg('principal_ids')::uuid[]),
+       sqlc.arg('created_by')::uuid
+ON CONFLICT (agent_id, principal_type, principal_id) DO NOTHING;
+
+-- name: RemoveAgentAllowedPrincipals :exec
+DELETE FROM agent_allowed_principal
+WHERE agent_id = sqlc.arg('agent_id')::uuid
+  AND principal_type = 'member'
+  AND principal_id = ANY(sqlc.arg('principal_ids')::uuid[]);

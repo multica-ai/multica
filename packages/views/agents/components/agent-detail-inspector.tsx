@@ -13,6 +13,7 @@ import type {
   Agent,
   AgentRuntime,
   MemberWithUser,
+  UpdateAgentAllowedPrincipalsRequest,
 } from "@multica/core/types";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
@@ -81,7 +82,7 @@ interface InspectorProps {
   allowedPrincipalUserIds: string[];
   allowedPrincipalsLoading?: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
-  onUpdateAllowedPrincipals: (userIds: string[]) => Promise<void>;
+  onUpdateAllowedPrincipals: (data: UpdateAgentAllowedPrincipalsRequest) => Promise<void>;
 }
 
 /**
@@ -324,11 +325,12 @@ function AllowedUsersPicker({
   allowedUserIds: string[];
   canEdit: boolean;
   loading: boolean;
-  onSave: (userIds: string[]) => Promise<void>;
+  onSave: (data: UpdateAgentAllowedPrincipalsRequest) => Promise<void>;
 }) {
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string[]>(allowedUserIds);
+  const [draftBase, setDraftBase] = useState<string[]>(allowedUserIds);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -338,6 +340,7 @@ function AllowedUsersPicker({
     if (next && loading) return;
     if (next) {
       setDraft(allowedUserIds);
+      setDraftBase(allowedUserIds);
       setSearch("");
     }
     setOpen(next);
@@ -366,7 +369,7 @@ function AllowedUsersPicker({
       : selectedMembers.length === 1
         ? selectedMembers[0]!.name
         : t(($) => $.inspector.allowed_users_count, { count: selectedMembers.length });
-  const dirty = !sameStringSet(allowedUserIds, draft);
+  const dirty = !sameStringSet(draftBase, draft);
 
   const toggle = (userId: string) => {
     setDraft((current) =>
@@ -377,9 +380,17 @@ function AllowedUsersPicker({
   };
 
   const commit = async () => {
+    const baseSet = new Set(draftBase);
+    const draftSet = new Set(draft);
+    const addUserIds = draft.filter((id) => !baseSet.has(id));
+    const removeUserIds = draftBase.filter((id) => !draftSet.has(id));
+
     setSaving(true);
     try {
-      await onSave(draft);
+      await onSave({
+        add_user_ids: addUserIds,
+        remove_user_ids: removeUserIds,
+      });
       setOpen(false);
     } finally {
       setSaving(false);

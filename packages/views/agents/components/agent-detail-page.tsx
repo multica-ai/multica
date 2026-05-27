@@ -11,7 +11,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Agent, CopyAgentRequest, UpdateAgentRequest } from "@multica/core/types";
+import type {
+  Agent,
+  AgentAllowedPrincipal,
+  CopyAgentRequest,
+  UpdateAgentAllowedPrincipalsRequest,
+  UpdateAgentRequest,
+} from "@multica/core/types";
 import {
   agentAllowedPrincipalKeys,
   agentAllowedPrincipalsOptions,
@@ -105,7 +111,11 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const { canEdit } = useAgentPermissions(agent, wsId);
   const canManageAllowedPrincipals =
     !!agent?.owner_id && agent.owner_id === currentUser?.id;
-  const { data: allowedPrincipals = [], isLoading: allowedPrincipalsLoading } =
+  const {
+    data: allowedPrincipals = [],
+    isLoading: allowedPrincipalsLoading,
+    isFetching: allowedPrincipalsFetching,
+  } =
     useQuery({
       ...agentAllowedPrincipalsOptions(wsId, agentId),
       enabled: !!agent && agent.visibility === "private" && canManageAllowedPrincipals,
@@ -175,10 +185,16 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     }
   };
 
-  const handleUpdateAllowedPrincipals = async (userIds: string[]) => {
+  const handleUpdateAllowedPrincipals = async (
+    data: UpdateAgentAllowedPrincipalsRequest,
+  ) => {
     if (!canManageAllowedPrincipals || !agent) return;
     try {
-      await api.updateAgentAllowedPrincipals(agent.id, { user_ids: userIds });
+      const updated = await api.updateAgentAllowedPrincipals(agent.id, data);
+      qc.setQueryData<AgentAllowedPrincipal[]>(
+        agentAllowedPrincipalKeys.detail(wsId, agent.id),
+        updated,
+      );
       await Promise.all([
         qc.invalidateQueries({
           queryKey: agentAllowedPrincipalKeys.detail(wsId, agent.id),
@@ -347,7 +363,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           canEdit={canEdit.allowed}
           canManageAllowedPrincipals={canManageAllowedPrincipals}
           allowedPrincipalUserIds={allowedPrincipalUserIds}
-          allowedPrincipalsLoading={allowedPrincipalsLoading}
+          allowedPrincipalsLoading={allowedPrincipalsLoading || allowedPrincipalsFetching}
           onUpdate={handleUpdate}
           onUpdateAllowedPrincipals={handleUpdateAllowedPrincipals}
         />

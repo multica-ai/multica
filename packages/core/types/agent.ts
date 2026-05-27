@@ -194,7 +194,9 @@ export interface AgentAllowedPrincipal {
 }
 
 export interface UpdateAgentAllowedPrincipalsRequest {
-  user_ids: string[];
+  user_ids?: string[];
+  add_user_ids?: string[];
+  remove_user_ids?: string[];
 }
 
 /** Optional body for POST /api/agents/:id/copy */
