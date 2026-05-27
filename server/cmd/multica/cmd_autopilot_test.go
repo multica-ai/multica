@@ -65,19 +65,32 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 		t.Fatalf("os.Pipe: %v", err)
 	}
 	os.Stdout = w
+	defer func() {
+		os.Stdout = old
+		_ = w.Close()
+		_ = r.Close()
+	}()
+
+	type readResult struct {
+		out []byte
+		err error
+	}
+	readCh := make(chan readResult, 1)
+	go func() {
+		out, err := io.ReadAll(r)
+		readCh <- readResult{out: out, err: err}
+	}()
 
 	runErr := fn()
 	closeErr := w.Close()
-	os.Stdout = old
-	out, readErr := io.ReadAll(r)
-	_ = r.Close()
+	result := <-readCh
 	if closeErr != nil {
 		t.Fatalf("close stdout pipe: %v", closeErr)
 	}
-	if readErr != nil {
-		t.Fatalf("read stdout pipe: %v", readErr)
+	if result.err != nil {
+		t.Fatalf("read stdout pipe: %v", result.err)
 	}
-	return string(out), runErr
+	return string(result.out), runErr
 }
 
 func TestResolveAgent(t *testing.T) {
