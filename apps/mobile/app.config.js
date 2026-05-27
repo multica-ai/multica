@@ -17,6 +17,7 @@ export default {
     wsUrl: process.env.EXPO_PUBLIC_WS_URL || app.expo.extra.wsUrl,
   },
   plugins: [
+    "./plugins/with-multica-android-native.cjs",
     ...(app.expo.plugins || []),
     ...(googleIosUrlScheme
       ? [
