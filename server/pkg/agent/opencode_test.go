@@ -1276,6 +1276,56 @@ func equalStringSlice(a, b []string) bool {
 	return true
 }
 
+func TestOpencodeToolObservationTriggersOnPromptPolicy(t *testing.T) {
+	t.Parallel()
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+
+	tests := []struct {
+		name       string
+		policy     string
+		hasTrace   bool
+		wantEmit   bool
+	}{
+		{"prompt+trace emits observation", "prompt", true, true},
+		{"auto+trace does NOT emit", "auto", true, false},
+		{"prompt without trace does NOT emit", "prompt", false, false},
+		{"empty policy does NOT emit", "", true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var emitted bool
+			var trace TraceCallback
+			if tt.hasTrace {
+				trace = func(channel, content, raw string) {
+					if channel == "display_event" && strings.Contains(content, `"tool_observation"`) {
+						emitted = true
+					}
+				}
+			}
+			opts := ExecOptions{
+				ApprovalPolicy: tt.policy,
+				TraceCallback:  trace,
+			}
+			ch := make(chan Message, 10)
+			event := opencodeEvent{
+				Type: "tool_use",
+				Part: opencodeEventPart{
+					Tool:   "bash",
+					CallID: "call_1",
+					State:  &opencodeToolState{Status: "running"},
+				},
+			}
+			b.handleToolUseEvent(context.Background(), event, ch, opts)
+			if emitted != tt.wantEmit {
+				t.Errorf("policy=%q trace=%v: tool_observation emitted=%v, want %v",
+					tt.policy, tt.hasTrace, emitted, tt.wantEmit)
+			}
+		})
+	}
+}
+
 func TestOpencodeBuildRunArgs_ApprovalPolicy(t *testing.T) {
 	t.Parallel()
 	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}

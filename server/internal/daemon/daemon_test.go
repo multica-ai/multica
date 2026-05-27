@@ -2299,7 +2299,7 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 	}
 }
 
-func TestApprovalPolicyPropagatedToExecOpts(t *testing.T) {
+func TestApprovalPolicyResolution(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string

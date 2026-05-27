@@ -310,8 +310,9 @@ func (b *opencodeBackend) handleToolUseEvent(ctx context.Context, event opencode
 	input := inputFromToolState(event.Part.State)
 
 	// In prompt mode, record all tool invocations in the trace for
-	// post-hoc visibility.
-	if opts.OnApproval != nil && opts.TraceCallback != nil {
+	// post-hoc auditing (OpenCode has no interactive approval, so we
+	// key off policy rather than callback presence).
+	if opts.ApprovalPolicy == "prompt" && opts.TraceCallback != nil {
 		title := event.Part.Tool
 		if cmd, _ := input["command"].(string); cmd != "" {
 			title = cmd
