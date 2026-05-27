@@ -613,6 +613,34 @@ func TestOpencodeProcessEventsSessionIDExtracted(t *testing.T) {
 	close(ch)
 }
 
+func TestOpencodeProcessEventsStepFinishUsageKeepsReasoningInsideOutput(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	lines := strings.Join([]string{
+		`{"type":"step_finish","timestamp":1775116676180,"sessionID":"ses_usage","part":{"id":"prt_789","reason":"stop","snapshot":"abc123","messageID":"msg_456","sessionID":"ses_usage","type":"step-finish","tokens":{"total":14674,"input":14585,"output":89,"reasoning":82,"cache":{"write":11,"read":7}},"cost":0}}`,
+		`{"type":"step_finish","sessionID":"ses_usage","part":{"tokens":{"input":50,"output":10,"reasoning":3,"cache":{"read":2,"write":4}}}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+	close(ch)
+
+	if result.usage.InputTokens != 14635 {
+		t.Fatalf("input = %d, want 14635", result.usage.InputTokens)
+	}
+	if result.usage.OutputTokens != 99 {
+		t.Fatalf("output = %d, want 99", result.usage.OutputTokens)
+	}
+	if result.usage.CacheReadTokens != 9 {
+		t.Fatalf("cache read = %d, want 9", result.usage.CacheReadTokens)
+	}
+	if result.usage.CacheWriteTokens != 15 {
+		t.Fatalf("cache write = %d, want 15", result.usage.CacheWriteTokens)
+	}
+}
+
 func TestOpencodeProcessEventsScannerError(t *testing.T) {
 	t.Parallel()
 

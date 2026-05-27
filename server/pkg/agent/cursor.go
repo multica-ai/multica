@@ -182,8 +182,9 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					}
 					u := stepUsage[model]
 					u.InputTokens += int64(part.Tokens.Input)
-					u.OutputTokens += int64(part.Tokens.Output)
+					u.OutputTokens += int64(part.Tokens.Output + part.Tokens.Reasoning)
 					u.CacheReadTokens += int64(part.Tokens.Cache.Read)
+					u.CacheWriteTokens += int64(part.Tokens.Cache.Write)
 					stepUsage[model] = u
 				}
 			}
@@ -274,8 +275,9 @@ func (b *cursorBackend) accumulateResultUsage(usage map[string]TokenUsage, evt *
 	}
 	u := usage[model]
 	u.InputTokens += evt.Usage.InputTokens
-	u.OutputTokens += evt.Usage.OutputTokens
+	u.OutputTokens += evt.Usage.OutputTokens + evt.Usage.ReasoningOutputTokens
 	u.CacheReadTokens += evt.Usage.CacheReadInputTokens
+	u.CacheWriteTokens += evt.Usage.CacheWriteInputTokens
 	usage[model] = u
 }
 
@@ -320,9 +322,11 @@ func (evt *cursorStreamEvent) readSessionID() string {
 }
 
 type cursorUsage struct {
-	InputTokens          int64 `json:"input_tokens"`
-	OutputTokens         int64 `json:"output_tokens"`
-	CacheReadInputTokens int64 `json:"cached_input_tokens"`
+	InputTokens           int64 `json:"input_tokens"`
+	OutputTokens          int64 `json:"output_tokens"`
+	CacheReadInputTokens  int64 `json:"cached_input_tokens"`
+	CacheWriteInputTokens int64 `json:"cache_creation_input_tokens"`
+	ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
 }
 
 type cursorAssistantMessage struct {
@@ -345,10 +349,12 @@ type cursorTextPart struct {
 
 type cursorStepFinishPart struct {
 	Tokens struct {
-		Input  int `json:"input"`
-		Output int `json:"output"`
-		Cache  struct {
-			Read int `json:"read"`
+		Input     int `json:"input"`
+		Output    int `json:"output"`
+		Reasoning int `json:"reasoning"`
+		Cache     struct {
+			Read  int `json:"read"`
+			Write int `json:"write"`
 		} `json:"cache"`
 	} `json:"tokens"`
 	Cost float64 `json:"cost"`

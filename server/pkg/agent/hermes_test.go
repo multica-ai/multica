@@ -846,7 +846,7 @@ func TestHermesClientHandleUsageUpdate(t *testing.T) {
 		pending: make(map[int]*pendingRPC),
 	}
 
-	line := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"usage_update","usage":{"inputTokens":500,"outputTokens":200,"cachedReadTokens":100}}}}`
+	line := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"usage_update","usage":{"inputTokens":500,"outputTokens":200,"thoughtTokens":25,"cachedReadTokens":100,"cacheCreationInputTokens":40}}}}`
 	c.handleLine(line)
 
 	c.usageMu.Lock()
@@ -855,11 +855,14 @@ func TestHermesClientHandleUsageUpdate(t *testing.T) {
 	if c.usage.InputTokens != 500 {
 		t.Errorf("inputTokens: got %d, want 500", c.usage.InputTokens)
 	}
-	if c.usage.OutputTokens != 200 {
-		t.Errorf("outputTokens: got %d, want 200", c.usage.OutputTokens)
+	if c.usage.OutputTokens != 225 {
+		t.Errorf("outputTokens: got %d, want 225", c.usage.OutputTokens)
 	}
 	if c.usage.CacheReadTokens != 100 {
 		t.Errorf("cacheReadTokens: got %d, want 100", c.usage.CacheReadTokens)
+	}
+	if c.usage.CacheWriteTokens != 40 {
+		t.Errorf("cacheWriteTokens: got %d, want 40", c.usage.CacheWriteTokens)
 	}
 }
 
@@ -900,7 +903,7 @@ func TestHermesClientExtractPromptResult(t *testing.T) {
 		},
 	}
 
-	data := json.RawMessage(`{"stopReason":"end_turn","usage":{"inputTokens":1000,"outputTokens":200,"cachedReadTokens":50}}`)
+	data := json.RawMessage(`{"stopReason":"end_turn","usage":{"inputTokens":1000,"outputTokens":200,"cachedReadTokens":50,"cacheCreationInputTokens":20}}`)
 	c.extractPromptResult(data)
 
 	if got.stopReason != "end_turn" {
@@ -914,6 +917,9 @@ func TestHermesClientExtractPromptResult(t *testing.T) {
 	}
 	if got.usage.CacheReadTokens != 50 {
 		t.Errorf("cacheReadTokens: got %d, want 50", got.usage.CacheReadTokens)
+	}
+	if got.usage.CacheWriteTokens != 20 {
+		t.Errorf("cacheWriteTokens: got %d, want 20", got.usage.CacheWriteTokens)
 	}
 }
 

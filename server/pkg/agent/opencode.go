@@ -419,9 +419,10 @@ type opencodeEventPart struct {
 
 // opencodeTokens represents token usage in a step_finish event.
 type opencodeTokens struct {
-	Input  int64                `json:"input"`
-	Output int64                `json:"output"`
-	Cache  *opencodeCacheTokens `json:"cache,omitempty"`
+	Input     int64                `json:"input"`
+	Output    int64                `json:"output"`
+	Reasoning int64                `json:"reasoning"`
+	Cache     *opencodeCacheTokens `json:"cache,omitempty"`
 }
 
 type opencodeCacheTokens struct {

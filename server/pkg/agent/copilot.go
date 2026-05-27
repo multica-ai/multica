@@ -171,6 +171,9 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 		if evt.SessionID != "" {
 			st.sessionID = evt.SessionID
 		}
+		if evt.Usage != nil {
+			mergeCopilotResultUsage(evt.Usage, st)
+		}
 		if evt.ExitCode != 0 {
 			st.finalStatus = "failed"
 			st.finalError = withCopilotExitCode(st.finalError, evt.ExitCode)
@@ -405,10 +408,80 @@ type copilotSessionWarning struct {
 
 // copilotResultUsage is the usage on the final "result" line.
 type copilotResultUsage struct {
+	raw                json.RawMessage
 	PremiumRequests    float64             `json:"premiumRequests"`
 	TotalAPIDurationMs int64               `json:"totalApiDurationMs"`
 	SessionDurationMs  int64               `json:"sessionDurationMs"`
 	CodeChanges        *copilotCodeChanges `json:"codeChanges,omitempty"`
+}
+
+func (u *copilotResultUsage) UnmarshalJSON(data []byte) error {
+	type alias copilotResultUsage
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*u = copilotResultUsage(a)
+	u.raw = append(u.raw[:0], data...)
+	return nil
+}
+
+func mergeCopilotResultUsage(resultUsage *copilotResultUsage, st *copilotEventState) {
+	if resultUsage == nil {
+		return
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(resultUsage.raw, &raw); err != nil {
+		return
+	}
+
+	modelUsage := copilotModelUsage(raw)
+	if len(modelUsage) > 0 {
+		for model, snapshot := range modelUsage {
+			if !tokenUsageHasTokens(snapshot) {
+				continue
+			}
+			st.usage[model] = mergeTokenUsageSnapshot(st.usage[model], snapshot)
+		}
+		return
+	}
+
+	// As of Copilot CLI v1.0.x, result.usage only contains premium request
+	// counters and durations; no prompt/input token fields are emitted. This
+	// parser is intentionally tolerant so newer CLIs that add token fields start
+	// reporting input tokens without changing the daemon again.
+	snapshot := tokenUsageFromMap(raw)
+	if !tokenUsageHasTokens(snapshot) {
+		return
+	}
+	model := st.activeModel
+	if model == "" {
+		model = "copilot"
+	}
+	st.usage[model] = mergeTokenUsageSnapshot(st.usage[model], snapshot)
+}
+
+func copilotModelUsage(raw map[string]any) map[string]TokenUsage {
+	for _, key := range []string{"modelUsage", "model_usage", "models"} {
+		container, ok := tokenUsageNestedMap(raw, key)
+		if !ok {
+			continue
+		}
+		result := make(map[string]TokenUsage, len(container))
+		for model, value := range container {
+			usageMap, ok := tokenUsageAsMap(value)
+			if !ok {
+				continue
+			}
+			if u := tokenUsageFromMap(usageMap); tokenUsageHasTokens(u) {
+				result[model] = u
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
+	}
+	return nil
 }
 
 type copilotCodeChanges struct {

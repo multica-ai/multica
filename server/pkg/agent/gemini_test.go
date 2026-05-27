@@ -46,6 +46,37 @@ func TestBuildGeminiArgsWithModel(t *testing.T) {
 	}
 }
 
+func TestGeminiAccumulateUsageFallsBackToTopLevelStats(t *testing.T) {
+	t.Parallel()
+
+	b := &geminiBackend{cfg: Config{Logger: slog.Default()}}
+	usage := make(map[string]TokenUsage)
+
+	b.accumulateUsage(usage, &geminiStreamStats{
+		InputTokens:  123,
+		OutputTokens: 45,
+	}, "gemini-2.5-pro")
+
+	u := usage["gemini-2.5-pro"]
+	if u.InputTokens != 123 || u.OutputTokens != 45 {
+		t.Fatalf("usage = %+v, want input=123 output=45", u)
+	}
+}
+
+func TestGeminiFallbackUsageModel(t *testing.T) {
+	t.Parallel()
+
+	if got := geminiFallbackUsageModel("gemini-3-pro-preview", "gemini-2.5-pro"); got != "gemini-3-pro-preview" {
+		t.Fatalf("event model should win, got %q", got)
+	}
+	if got := geminiFallbackUsageModel("", "gemini-2.5-pro"); got != "gemini-2.5-pro" {
+		t.Fatalf("opts model should be fallback, got %q", got)
+	}
+	if got := geminiFallbackUsageModel("", ""); got != "gemini" {
+		t.Fatalf("empty fallback = %q, want gemini", got)
+	}
+}
+
 func TestBuildGeminiArgsWithResume(t *testing.T) {
 	t.Parallel()
 

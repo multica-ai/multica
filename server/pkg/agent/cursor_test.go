@@ -261,16 +261,18 @@ func TestCursorAccumulateResultUsage(t *testing.T) {
 	evt := &cursorStreamEvent{
 		Model: "gpt-5.3",
 		Usage: &cursorUsage{
-			InputTokens:          200,
-			OutputTokens:         100,
-			CacheReadInputTokens: 50,
+			InputTokens:           200,
+			OutputTokens:          100,
+			CacheReadInputTokens:  50,
+			CacheWriteInputTokens: 12,
+			ReasoningOutputTokens: 8,
 		},
 	}
 
 	b.accumulateResultUsage(usage, evt)
 
 	u := usage["gpt-5.3"]
-	if u.InputTokens != 200 || u.OutputTokens != 100 || u.CacheReadTokens != 50 {
+	if u.InputTokens != 200 || u.OutputTokens != 108 || u.CacheReadTokens != 50 || u.CacheWriteTokens != 12 {
 		t.Fatalf("unexpected usage: %+v", u)
 	}
 }
@@ -311,11 +313,11 @@ func TestCursorStepFinishParsing(t *testing.T) {
 	t.Parallel()
 
 	part := cursorStepFinishPart{}
-	data := `{"tokens":{"input":500,"output":200,"cache":{"read":100}},"cost":0.01}`
+	data := `{"tokens":{"input":500,"output":200,"reasoning":25,"cache":{"read":100,"write":12}},"cost":0.01}`
 	if err := json.Unmarshal([]byte(data), &part); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if part.Tokens.Input != 500 || part.Tokens.Output != 200 || part.Tokens.Cache.Read != 100 {
+	if part.Tokens.Input != 500 || part.Tokens.Output != 200 || part.Tokens.Reasoning != 25 || part.Tokens.Cache.Read != 100 || part.Tokens.Cache.Write != 12 {
 		t.Fatalf("unexpected part: %+v", part)
 	}
 }
@@ -338,10 +340,10 @@ func TestCursorUsageNoDoubleCount(t *testing.T) {
 		{
 			name: "result_only — use result usage",
 			lines: []string{
-				`{"type":"result","model":"gpt-5","usage":{"input_tokens":1000,"output_tokens":500,"cached_input_tokens":200}}`,
+				`{"type":"result","model":"gpt-5","usage":{"input_tokens":1000,"output_tokens":500,"reasoning_output_tokens":20,"cached_input_tokens":200,"cache_creation_input_tokens":30}}`,
 			},
 			want: map[string]TokenUsage{
-				"gpt-5": {InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200},
+				"gpt-5": {InputTokens: 1000, OutputTokens: 520, CacheReadTokens: 200, CacheWriteTokens: 30},
 			},
 		},
 		{
@@ -410,8 +412,9 @@ func TestCursorUsageNoDoubleCount(t *testing.T) {
 						}
 						u := stepUsage[model]
 						u.InputTokens += int64(part.Tokens.Input)
-						u.OutputTokens += int64(part.Tokens.Output)
+						u.OutputTokens += int64(part.Tokens.Output + part.Tokens.Reasoning)
 						u.CacheReadTokens += int64(part.Tokens.Cache.Read)
+						u.CacheWriteTokens += int64(part.Tokens.Cache.Write)
 						stepUsage[model] = u
 					}
 				}
