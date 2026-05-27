@@ -338,6 +338,8 @@ func main() {
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
+	// CEREBRO-PATCH(inbox-reminders-due): due reminders re-enter inbox live and can fire reminder-only mobile push.
+	go runReminderDueSweeper(sweepCtx, queries, bus)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
 	// CEREBRO-PATCH(cerebro-account-token-retention): bound token telemetry storage to the rolling windows.
@@ -354,7 +356,7 @@ func main() {
 		os.Exit(1)
 	} else if gatewayCfg.Enabled {
 		gatewayExecutor := cerebroruntime.NewFirtalGatewayExecutor(gatewayCfg, queries, cerebrodb.New(pool), taskSvc, bus, nil, nil, cerebroruntime.NewRegistry(pool)) // CEREBRO-PATCH(main-firtal-gateway-tool-registry): give server runtime DB-backed tool grants.
-		cerebroruntime.MaybeEnableApprovalGate(gatewayExecutor, cerebrodb.New(pool), pool, bus) // CEREBRO-PATCH(main-firtal-gateway-approval-gate): FIR-2193 default-off approval enforcement gate, controlled rollout via env.
+		cerebroruntime.MaybeEnableApprovalGate(gatewayExecutor, cerebrodb.New(pool), pool, bus)                                                                        // CEREBRO-PATCH(main-firtal-gateway-approval-gate): FIR-2193 default-off approval enforcement gate, controlled rollout via env.
 		go gatewayExecutor.Run(gatewayRuntimeCtx)
 		// CEREBRO-PATCH(main-seed-kristian): JEH-1353 — seed Kristian's approved
 		// Multica MCP tool package on every startup (idempotent upsert).

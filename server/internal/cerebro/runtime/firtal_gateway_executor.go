@@ -305,6 +305,19 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		return
 	}
 
+	// FIR-2325: resolve the workspace's cost-saving modes once and apply the
+	// model_routing saving when it is "on". Default (no override) is off, so the
+	// requested model is unchanged for every workspace that hasn't opted in.
+	// Phase 5: a random holdout share of routed runs is kept on the requested
+	// (expensive) model as a control arm, so the dashboard can compare real cost.
+	costModes := e.loadCostSavingModes(parent, plan.workspaceID)
+	requestedModel := agent.Model.String
+	routingOn := costModes[savingModelRouting] == savingModeOn && e.cfg.CheapModel != ""
+	routingHeldOut := routingOn && costSavingHeldOut(task.ID, savingModelRouting, e.cfg.costSavingHoldoutPct())
+	if routingOn && !routingHeldOut {
+		agent.Model = pgtype.Text{String: e.cfg.CheapModel, Valid: true}
+	}
+
 	runCtx, cancel := context.WithTimeout(parent, cfg.TaskTimeout)
 	defer cancel()
 	meta := GatewayRequestMeta{
@@ -327,6 +340,15 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	defer finalCancel()
 	e.recordTaskMessage(finalCtx, task, completion.Output)
 	e.recordTaskUsage(finalCtx, task, plan.workspaceID, completion)
+	e.recordCostSavingMeasurements(finalCtx, plan.workspaceID, task.ID, costModes, CostSavingRunFacts{
+		RequestedModel:      requestedModel,
+		EffectiveModel:      completion.Model,
+		Usage:               pricing.Usage{InputTokens: completion.Usage.InputTokens, OutputTokens: completion.Usage.OutputTokens, CacheReadTokens: completion.Usage.CacheReadTokens, CacheWriteTokens: completion.Usage.CacheWriteTokens},
+		ActualCostCents:     completionCostCents(completion),
+		InlinedContextReads: plan.inlinedContextReads,
+		ToolResultChars:     completion.ToolResultChars,
+		RoutingHeldOut:      routingHeldOut,
+	})
 
 	result, _ := json.Marshal(protocol.TaskCompletedPayload{
 		TaskID: taskID,
@@ -345,6 +367,10 @@ type taskPlan struct {
 	workspaceID       pgtype.UUID
 	messagesWithLimit func(limit int) []GatewayMessage
 	emptyMessageError string
+	// inlinedContextReads is how many platform reads this runtime folds into the
+	// start prompt instead of leaving the agent to fetch them — the input to the
+	// snapshot_prompt / bundled_read cost measurements (FIR-2325).
+	inlinedContextReads int
 }
 
 func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.AgentTaskQueue, agent db.Agent) (taskPlan, error) {
@@ -364,6 +390,8 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 				return buildGatewayMessages(agent, history, task.StartedAt, limit)
 			},
 			emptyMessageError: "chat task has no user message to answer",
+			// Chat history is inlined; a daemon agent would list it itself.
+			inlinedContextReads: 1,
 		}, nil
 
 	case task.IssueID.Valid:
@@ -386,12 +414,19 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 				triggerComment = &c
 			}
 		}
+		// Issue + comments are inlined; a daemon agent would fetch each itself
+		// (get_issue, list_comments, plus the trigger comment when present).
+		inlinedReads := 2
+		if triggerComment != nil {
+			inlinedReads = 3
+		}
 		return taskPlan{
 			workspaceID: issue.WorkspaceID,
 			messagesWithLimit: func(limit int) []GatewayMessage {
 				return buildGatewayIssueMessages(agent, issue, comments, triggerComment, task.StartedAt, limit)
 			},
-			emptyMessageError: "issue task has no user message to answer",
+			emptyMessageError:   "issue task has no user message to answer",
+			inlinedContextReads: inlinedReads,
 		}, nil
 
 	case task.AutopilotRunID.Valid:
@@ -634,10 +669,12 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 				"duration_ms", dur.Milliseconds(),
 				"is_error", result.IsError,
 			)
+			resultText := toolResultText(result)
+			acc.ToolResultChars += int64(len(resultText))
 			history = append(history, GatewayMessage{
 				Role:       "tool",
 				ToolCallID: call.ID,
-				Content:    toolResultText(result),
+				Content:    resultText,
 			})
 		}
 	}
@@ -752,6 +789,7 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 				"duration_ms", time.Since(start).Milliseconds(),
 				"is_error", isError,
 			)
+			acc.ToolResultChars += int64(len(resultText))
 			history = append(history, GatewayMessage{
 				Role:       "tool",
 				ToolCallID: call.ID,
@@ -927,6 +965,7 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 				"is_error", isError,
 			)
 
+			acc.ToolResultChars += int64(len(resultText))
 			toolResultBlocks = append(toolResultBlocks, AnthropicContentBlock{
 				Type:      "tool_result",
 				ToolUseID: call.ID,

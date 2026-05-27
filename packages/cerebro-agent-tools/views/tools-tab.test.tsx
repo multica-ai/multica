@@ -127,6 +127,32 @@ describe("CerebroToolsTab", () => {
     expect(screen.queryByText(/Tools på agenten/i)).not.toBeInTheDocument();
   });
 
+  it("renders the simple table when only the simple flag is on", async () => {
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_simple_tool_policy",
+    );
+    renderToolsTab();
+
+    expect(
+      await screen.findByTestId("simple-tool-policy-table"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Tools på agenten/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tool-policy-table")).not.toBeInTheDocument();
+  });
+
+  it("the rich power-view wins when both tool-policy flags are on", async () => {
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) =>
+        key === "cerebro_tool_policy" || key === "cerebro_simple_tool_policy",
+    );
+    renderToolsTab();
+
+    expect(await screen.findByTestId("tool-policy-table")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("simple-tool-policy-table"),
+    ).not.toBeInTheDocument();
+  });
+
   it("binds the agent's owner as the user ceiling on the agent page", async () => {
     mockUseFeatureFlag.mockImplementation(
       (key: string) => key === "cerebro_tool_policy",

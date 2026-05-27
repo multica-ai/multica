@@ -25,3 +25,24 @@ func TestAgentBackfillStatusRouteIsNotShadowedByAgentID(t *testing.T) {
 		t.Fatalf("GET /api/agents/backfill-avatars was routed as agent id %q", id)
 	}
 }
+
+// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 verify the
+// per-workspace saving-mode routes are mounted at the expected method+path.
+func TestCostOptimizationRoutesAreMounted(t *testing.T) {
+	router := NewRouter(nil, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil, nil)
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{"GET", "/api/workspaces/11111111-1111-1111-1111-111111111111/cost-optimization"},
+		{"PUT", "/api/workspaces/11111111-1111-1111-1111-111111111111/cost-optimization/snapshot_prompt"},
+		{"DELETE", "/api/workspaces/11111111-1111-1111-1111-111111111111/cost-optimization/snapshot_prompt"},
+	}
+	for _, c := range cases {
+		rctx := chi.NewRouteContext()
+		if !router.Match(rctx, c.method, c.path) {
+			t.Fatalf("expected %s %s to match a mounted route", c.method, c.path)
+		}
+	}
+}

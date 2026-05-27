@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -493,7 +494,8 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 	if delegationErr != nil {
 		t.Fatalf("member delegation context: %v", delegationErr)
 	}
-	testHandler.enqueueMentionedAgentTasks(ctx, nil, issue, comment, nil, "member", testUserID, delegation, nil)
+	// CEREBRO-PATCH(private-autopilot-member-agent-push): pass empty private autopilot owner for non-autopilot mention tests.
+	testHandler.enqueueMentionedAgentTasks(ctx, nil, issue, comment, nil, "member", testUserID, delegation, nil, pgtype.UUID{})
 
 	var afterCount int
 	if err := testPool.QueryRow(ctx,

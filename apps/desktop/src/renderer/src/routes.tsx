@@ -52,6 +52,7 @@ import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags/settings-tabs";
+import { cerebroCostOptimizationTabs } from "@multica/cerebro-cost-optimization/views";
 import { IssueListReferenceFilter } from "@multica/cerebro-references/views";
 import { ReferencesByObjectPage } from "@multica/cerebro-references/views/pages";
 
@@ -105,6 +106,7 @@ function SettingsRoute() {
           content: <UpdatesSettingsTab />,
         },
         agentCapabilitiesSettingsTab,
+        ...cerebroCostOptimizationTabs,
         ...cerebroFeatureFlagTabs,
       ]}
       membersTabCerebroExtras={membersTabCerebroExtras}

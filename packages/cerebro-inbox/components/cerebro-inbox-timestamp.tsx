@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import type { InboxItem } from "@multica/core/types";
-import { formatMutedUntilTime, formatPlannedDateTime } from "../mute-time";
+import { formatMutedUntilTime, formatPlannedDateTime, isReminderOverdue } from "../mute-time";
 import { useCerebroInboxStrings } from "../strings";
 
 /**
@@ -25,6 +25,13 @@ export function CerebroInboxTimestamp({
   if (item.type === "reminder") {
     const plannedAt = item.details?.planned_at ?? item.muted_until;
     const planned = formatPlannedDateTime(plannedAt, i18n.language);
+    if (planned && isReminderOverdue(plannedAt)) {
+      return (
+        <span className="font-semibold text-destructive">
+          {`${strings.reminder_overdue_prefix} ${planned}`}
+        </span>
+      );
+    }
     if (planned) return <>{`${strings.planned_for_prefix} ${planned}`}</>;
   }
   const time = formatMutedUntilTime(item.muted_until, i18n.language);

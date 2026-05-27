@@ -217,8 +217,10 @@ func (h *Handler) CreateReminder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	details, _ := json.Marshal(map[string]string{
-		"planned_at": plannedAt.Format(time.RFC3339),
-		"text":       text,
+		// CEREBRO-PATCH(inbox-reminders-due): due sweeper only claims reminders explicitly marked pending.
+		"due_pending": "true",
+		"planned_at":  plannedAt.Format(time.RFC3339),
+		"text":        text,
 	})
 	existing, err := h.Cerebro.FindPendingReminder(r.Context(), cerebrodb.FindPendingReminderParams{
 		WorkspaceID: wsUUID,

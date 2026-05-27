@@ -41,6 +41,7 @@ type StringTable = {
   /** Prefix shown on a row in the Muted filter, e.g. "Muted til 08:00". */
   muted_until_prefix: string;
   planned_for_prefix: string;
+  reminder_overdue_prefix: string;
   // FIR-2115 — "Group by → Action" bucket headers. English in every locale by
   // product decision. Names follow the agreed product wording: Unread, Running,
   // Done, Waiting.
@@ -85,6 +86,7 @@ const en: StringTable = {
   drawer_title: "Actions",
   muted_until_prefix: "Muted until",
   planned_for_prefix: "Planned for",
+  reminder_overdue_prefix: "Overdue since",
   ...actionLabels,
 };
 
@@ -115,6 +117,7 @@ const da: StringTable = {
   drawer_title: "Handlinger",
   muted_until_prefix: "Muted til",
   planned_for_prefix: "Planlagt til",
+  reminder_overdue_prefix: "Forfalden siden",
   ...actionLabels,
 };
 
@@ -149,6 +152,7 @@ const zhHans: StringTable = {
   drawer_title: "操作",
   muted_until_prefix: "静音至",
   planned_for_prefix: "计划于",
+  reminder_overdue_prefix: "已逾期",
   ...actionLabels,
 };
 

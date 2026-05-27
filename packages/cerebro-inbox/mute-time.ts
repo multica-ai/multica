@@ -47,12 +47,23 @@ export function formatPlannedDateTime(
   locale?: string,
 ): string | null {
   if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
   return new Intl.DateTimeFormat(locale, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(value));
+  }).format(date);
+}
+
+export function isReminderOverdue(
+  plannedAt: string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!plannedAt) return false;
+  const plannedTime = new Date(plannedAt).getTime();
+  return !Number.isNaN(plannedTime) && plannedTime <= now.getTime();
 }
 
 export function nextLocalNineAm(now: Date = new Date()): Date {

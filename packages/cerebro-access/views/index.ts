@@ -9,3 +9,4 @@ export {
   getMentionAccessContext,
   useEnsureMentionAccessData,
 } from "./mention-access";
+export { canTriggerPrivateAgentMention } from "./agent-trigger";

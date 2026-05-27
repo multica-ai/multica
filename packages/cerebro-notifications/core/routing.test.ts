@@ -11,6 +11,7 @@ import {
 describe("getChannelChoice", () => {
   test("falls back to per-channel default when no preferences", () => {
     expect(getChannelChoice(undefined, "inbox", "issue_assigned")).toBe("on");
+    expect(getChannelChoice(undefined, "inbox", "reminder")).toBe("on");
     expect(getChannelChoice(undefined, "notifications", "issue_assigned")).toBe(
       "off",
     );
@@ -95,7 +96,7 @@ describe("CHANNELS / DEFAULT_CHANNEL_CHOICES coverage", () => {
   test("every channel has a default entry for every routing key", () => {
     for (const channel of CHANNELS) {
       const defaults = DEFAULT_CHANNEL_CHOICES[channel];
-      expect(Object.keys(defaults).length).toBe(12);
+      expect(Object.keys(defaults).length).toBe(13);
     }
   });
 });

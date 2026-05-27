@@ -42,6 +42,9 @@ import { matchesPinyin } from "./pinyin-match";
 // decorator. Returns a synchronously-resolved set of restricted user IDs from
 // the TanStack Query cache, so the picker can mute them with a lock badge.
 import { getMentionAccessContext } from "@multica/cerebro-access/views";
+// CEREBRO-PATCH(private-agent-owner-only-trigger): owner-only @mention trigger
+// rule — flags private agents a non-owner can see but cannot wake (FIR-2349).
+import { canTriggerPrivateAgentMention } from "@multica/cerebro-access/views";
 import { Lock } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -59,6 +62,10 @@ export interface MentionItem {
   // CEREBRO-PATCH(mention-restricted-flag): JEH-1250 — when true, this user
   // lacks access to the current issue's restricted project; render dimmed.
   restricted?: boolean;
+  // CEREBRO-PATCH(private-agent-owner-only-trigger): when true, this is a
+  // private agent the current user does not own — the mention won't wake it,
+  // so the row reads "won't trigger" (FIR-2349).
+  wontTrigger?: boolean;
 }
 
 interface MentionListProps {
@@ -336,15 +343,26 @@ function MentionRow({
   // lock badge when the user lacks access to the current issue's restricted
   // project. The row stays clickable so admins/owners can still mention them.
   const accessLabel = t(($) => $.mention.no_project_access);
+  // CEREBRO-PATCH(private-agent-owner-only-trigger): non-owner sees a muted row
+  // + "won't trigger" tooltip for a personal agent it cannot wake (FIR-2349).
+  const noTriggerLabel = t(($) => $.mention.no_trigger_private);
+  const dimmed = item.restricted || item.wontTrigger;
   return (
     <button
       ref={buttonRef}
       data-restricted={item.restricted ? "" : undefined}
+      data-no-trigger={item.wontTrigger ? "" : undefined}
       className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
         selected ? "bg-accent" : "hover:bg-accent/50"
-      } ${item.restricted ? "opacity-60" : ""}`}
+      } ${dimmed ? "opacity-60" : ""}`}
       onClick={onSelect}
-      title={item.restricted ? accessLabel : undefined}
+      title={
+        item.restricted
+          ? accessLabel
+          : item.wontTrigger
+            ? noTriggerLabel
+            : undefined
+      }
     >
       <ActorAvatar
         actorType={item.type === "all" ? "member" : item.type}
@@ -361,7 +379,13 @@ function MentionRow({
           className="ml-auto size-3 shrink-0 text-muted-foreground"
         />
       )}
-      {item.type === "agent" && !item.restricted && (
+      {item.type === "agent" && !item.restricted && item.wontTrigger && (
+        <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
+          <Lock aria-label={noTriggerLabel} className="size-3 shrink-0" />
+          {noTriggerLabel}
+        </span>
+      )}
+      {item.type === "agent" && !item.restricted && !item.wontTrigger && (
         // "Agent" is a glossary-protected product term — kept un-translated.
         // eslint-disable-next-line i18next/no-literal-string
         <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1.5">Agent</Badge>
@@ -445,7 +469,16 @@ export function createMentionSuggestion(
           (a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q)) &&
           canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
       )
-      .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
+      .map((a) => ({
+        id: a.id,
+        label: a.name,
+        type: "agent" as const,
+        // CEREBRO-PATCH(private-agent-owner-only-trigger): flag visible-but-
+        // non-triggerable private agents (e.g. an admin seeing another member's
+        // personal agent) so the row warns the mention won't wake it (FIR-2349).
+        wontTrigger: !canTriggerPrivateAgentMention(a, { userId, role: myRole })
+          .allowed,
+      }));
 
     const squadItems: MentionItem[] = squads
       .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)))

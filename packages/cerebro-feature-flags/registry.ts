@@ -30,6 +30,7 @@ export type CerebroFlagKey =
   | "cerebro_skill_mention"
   | "cerebro_grants"
   | "cerebro_tool_policy"
+  | "cerebro_simple_tool_policy"
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
   | "cerebro_agent_passes"
@@ -69,6 +70,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_skill_mention: true,
   cerebro_grants: false,
   cerebro_tool_policy: false,
+  cerebro_simple_tool_policy: false,
   // Deliberately ON (FIR-2230 phase 5): the legacy duplicate "Pending" tab on
   // the Access page was removed, so the approvals inbox is now the ONLY surface
   // for needs_approval asks. Leaving this off would leave prod with no approvals
@@ -230,6 +232,12 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Unified tool permissions",
     description:
       "Enable the unified per-tool permission table (Tool · Source · Runtime · This agent · Effective) on agent and runtime pages, backed by the four-layer Runtime › Agent › Group › User chain. GET /api/workspaces/{id}/tool-policy (member) + PUT/DELETE (admin/owner). FIR-2230.",
+  },
+  {
+    key: "cerebro_simple_tool_policy",
+    label: "Simple tool permissions",
+    description:
+      "Show the simplified, user-facing tool permission table on the agent Tools tab: one Allow/Ask/Block toggle per tool, grouped into Read · Execute · Fetch · Destructive. Reuses the cerebro_tool_policy data layer — writes the agent layer only. The rich Effective-chain table stays behind cerebro_tool_policy as a power-view. FIR-2358.",
   },
   {
     key: "cerebro_approvals",

@@ -392,6 +392,30 @@ type CerebroChannelArchived struct {
 	ArchivedAt pgtype.Timestamptz `json:"archived_at"`
 }
 
+type CerebroCostOptimization struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SavingKey   string             `json:"saving_key"`
+	Mode        string             `json:"mode"`
+	UpdatedBy   pgtype.UUID        `json:"updated_by"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroCostOptimizationMeasurement struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	TaskID          pgtype.UUID        `json:"task_id"`
+	SavingKey       string             `json:"saving_key"`
+	Mode            string             `json:"mode"`
+	Applied         bool               `json:"applied"`
+	Metric          string             `json:"metric"`
+	BaselineValue   int64              `json:"baseline_value"`
+	EffectiveValue  int64              `json:"effective_value"`
+	SavedCents      int64              `json:"saved_cents"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	HeldOut         bool               `json:"held_out"`
+	ActualCostCents int64              `json:"actual_cost_cents"`
+}
+
 type CerebroCredential struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

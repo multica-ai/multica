@@ -81,6 +81,29 @@ INSERT INTO inbox_item (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING *;
 
+-- name: ClaimDueReminderInboxItems :many
+-- CEREBRO-PATCH(inbox-reminders-due): atomically claim reminders whose
+-- muted_until has passed, force them unread, and stamp due_notified_at so
+-- the live/push sweeper only rings once.
+UPDATE inbox_item
+SET read = false,
+    details = COALESCE(details, '{}'::jsonb) || jsonb_build_object('due_notified_at', NOW(), 'due_pending', false)
+WHERE id IN (
+  SELECT id
+  FROM inbox_item
+  WHERE type = 'reminder'
+    AND route = 'inbox'
+    AND archived = false
+    AND muted_until IS NOT NULL
+    AND muted_until <= NOW()
+    AND details->>'due_pending' = 'true'
+    AND COALESCE(details->>'due_notified_at', '') = ''
+  ORDER BY muted_until ASC
+  LIMIT $1
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
 -- name: MarkInboxRead :one
 UPDATE inbox_item SET read = true
 WHERE id = $1

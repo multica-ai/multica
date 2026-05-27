@@ -1431,6 +1431,10 @@ func TestPrivateAutopilotCommentSuppressesMentionedAgentTask(t *testing.T) {
 	ctx := context.Background()
 	agentA := createHandlerTestAgent(t, "Private Autopilot Mention Agent A", nil)
 	agentB := createHandlerTestAgent(t, "Private Autopilot Mention Agent B", nil)
+	otherOwnerID := createWorkspaceMemberUser(t, "member")
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET owner_id = $1 WHERE id = $2`, otherOwnerID, agentB); err != nil {
+		t.Fatalf("move mentioned agent to different owner: %v", err)
+	}
 	title := fmt.Sprintf("Private autopilot mention suppression %d", time.Now().UnixNano())
 	var autopilotID, runID, issueID string
 	defer func() {
@@ -1507,6 +1511,90 @@ func TestPrivateAutopilotCommentSuppressesMentionedAgentTask(t *testing.T) {
 	}
 	if queued != 0 {
 		t.Fatalf("private autopilot comment enqueued %d tasks for mentioned agent, want 0", queued)
+	}
+}
+
+// CEREBRO-PATCH(private-autopilot-member-agent-push): private autopilots may delegate to the same member's private agents (FIR-2349).
+func TestPrivateAutopilotCommentAllowsSameOwnerPrivateAgentTask(t *testing.T) {
+	ctx := context.Background()
+	agentA := createHandlerTestAgent(t, "Private Autopilot Same Owner Agent A", nil)
+	agentB := createHandlerTestAgent(t, "Private Autopilot Same Owner Agent B", nil)
+	title := fmt.Sprintf("Private autopilot same owner push %d", time.Now().UnixNano())
+	var autopilotID, runID, issueID string
+	defer func() {
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+		if runID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot_run WHERE id = $1`, runID)
+		}
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Private same-owner delegation autopilot",
+		"assignee_id":          agentA,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+		"is_private":           true,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+
+	ap, err := db.New(testPool).GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	runID = uuidToString(run.ID)
+	issueID = uuidToString(run.IssueID)
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID, agentA).Scan(&taskID); err != nil {
+		t.Fatalf("load private autopilot task: %v", err)
+	}
+
+	comment := httptest.NewRecorder()
+	commentReq := withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments?workspace_id="+testWorkspaceID, map[string]any{
+		"content": fmt.Sprintf("[@Agent B](mention://agent/%s) continue this private autopilot flow", agentB),
+	}), "id", issueID)
+	commentReq.Header.Set("X-Agent-ID", agentA)
+	commentReq.Header.Set("X-Task-ID", taskID)
+	testHandler.CreateComment(comment, commentReq)
+	if comment.Code != http.StatusCreated {
+		t.Fatalf("private autopilot comment: expected 201, got %d: %s", comment.Code, comment.Body.String())
+	}
+
+	var queued int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, agentB).Scan(&queued); err != nil {
+		t.Fatalf("count same-owner mentioned agent tasks: %v", err)
+	}
+	if queued != 1 {
+		t.Fatalf("private autopilot comment enqueued %d same-owner tasks, want 1", queued)
 	}
 }
 
@@ -3894,6 +3982,83 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	}
 	if originalUserID != testUserID {
 		t.Fatalf("delegated task original_user_id = %s, want %s", originalUserID, testUserID)
+	}
+	if delegatingAgentID != agentA {
+		t.Fatalf("delegated task delegating_agent_id = %s, want %s", delegatingAgentID, agentA)
+	}
+	if sourceTaskID != agentATask {
+		t.Fatalf("delegated task source_task_id = %s, want %s", sourceTaskID, agentATask)
+	}
+}
+
+// CEREBRO-PATCH(task-delegation-issue-origin-test): direct issue tasks without stored original_user_id can still delegate through the member issue creator.
+func TestAgentExplicitMentionFromDirectIssueTaskUsesIssueCreatorOrigin(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentA := createHandlerTestAgent(t, "Direct Issue Handoff Agent A", nil)
+	agentB := createHandlerTestAgent(t, "Direct Issue Handoff Agent B", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Direct issue handoff provenance fallback",
+		"status":        "todo",
+		"assignee_id":   agentA,
+		"assignee_type": "agent",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	var agentATask string
+	var originalUserID *string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text, original_user_id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID, agentA).Scan(&agentATask, &originalUserID); err != nil {
+		t.Fatalf("load direct issue task: %v", err)
+	}
+	if originalUserID != nil {
+		t.Fatalf("test setup expected legacy direct task without original_user_id, got %s", *originalUserID)
+	}
+
+	w = httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": fmt.Sprintf("[@Agent B](mention://agent/%s) please take this from the direct issue task", agentB),
+	})
+	r = withURLParam(r, "id", issueID)
+	r.Header.Set("X-Agent-ID", agentA)
+	r.Header.Set("X-Task-ID", agentATask)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("agent A handoff: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var gotOriginalUserID, delegatingAgentID, sourceTaskID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT original_user_id::text, delegating_agent_id::text, source_task_id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, agentB).Scan(&gotOriginalUserID, &delegatingAgentID, &sourceTaskID); err != nil {
+		t.Fatalf("load delegated mention context: %v", err)
+	}
+	if gotOriginalUserID != testUserID {
+		t.Fatalf("delegated task original_user_id = %s, want %s", gotOriginalUserID, testUserID)
 	}
 	if delegatingAgentID != agentA {
 		t.Fatalf("delegated task delegating_agent_id = %s, want %s", delegatingAgentID, agentA)

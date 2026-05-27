@@ -38,6 +38,36 @@ func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, act
 	return roleAllowed(member.Role, "owner", "admin")
 }
 
+// canTriggerPrivateAgent gates the @mention / @squad TRIGGER path for private
+// agents. CEREBRO-PATCH(private-agent-owner-only-trigger): unlike
+// canAccessPrivateAgent (which governs view / chat / edit / assign and grants
+// the owner + workspace admins + all agents), *waking* a private agent via a
+// mention is restricted to the owning member's sphere — the owning member, or
+// an agent owned by that same member. Workspace admins and cross-owner agents
+// cannot trigger someone else's personal agent (FIR-2349). Public
+// (workspace-visibility) agents are unrestricted. The private-autopilot push
+// path keeps its own same-owner gate in comment.go and is not routed here.
+func (h *Handler) canTriggerPrivateAgent(ctx context.Context, agent db.Agent, actorType, actorID string) bool {
+	if agent.Visibility != "private" {
+		return true
+	}
+	if !agent.OwnerID.Valid {
+		return false
+	}
+	targetOwner := uuidToString(agent.OwnerID)
+	switch actorType {
+	case "member":
+		return actorID == targetOwner
+	case "agent":
+		actor, err := h.Queries.GetAgent(ctx, parseUUID(actorID))
+		if err != nil || !actor.OwnerID.Valid {
+			return false
+		}
+		return uuidToString(actor.OwnerID) == targetOwner
+	}
+	return false
+}
+
 // memberAllowedForPrivateAgent is the pure predicate used by both
 // canAccessPrivateAgent and the ListAgents filter loop. Caller must have
 // already confirmed agent.Visibility == "private".
