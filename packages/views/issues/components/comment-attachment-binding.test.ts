@@ -1,5 +1,3 @@
-// @vitest-environment node
-//
 // FIR-2394 — regression guard for comment-edit attachment binding (data-loss
 // class). When a comment is edited, the client recomputes which attachments
 // stay bound and the server replaces the binding set with exactly that list
