@@ -175,6 +175,8 @@
     "allowed_users_count": "{{count}} users",
     "allowed_users_empty": "No other users",
     "allowed_users_loading": "Loading",
+    "allowed_users_search_placeholder": "Search users",
+    "allowed_users_no_results": "No matching users",
     "save": "Save",
     "cancel": "Cancel"
   },

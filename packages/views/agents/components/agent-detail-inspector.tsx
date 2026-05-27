@@ -2,11 +2,12 @@
 
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import { Camera, Check, Loader2, Pencil, Users } from "lucide-react";
+import { Camera, Check, Loader2, Pencil, Search, Users } from "lucide-react";
 import { toast } from "sonner";
 import type {
   Agent,
@@ -329,10 +330,12 @@ function AllowedUsersPicker({
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string[]>(allowedUserIds);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     if (!open) {
       setDraft(allowedUserIds);
+      setSearch("");
     }
   }, [allowedUserIds, open]);
 
@@ -348,6 +351,19 @@ function AllowedUsersPicker({
   const draftSet = new Set(draft);
   const selectableMembers = members.filter((member) => member.user_id !== agent.owner_id);
   const selectedMembers = members.filter((member) => allowedSet.has(member.user_id));
+
+  // Sort: selected users first, then filter by search term
+  const filteredMembers = useMemo(() => {
+    const selected = new Set(draft);
+    const sorted = [...selectableMembers].sort((a, b) => {
+      const aSelected = selected.has(a.user_id) ? 0 : 1;
+      const bSelected = selected.has(b.user_id) ? 0 : 1;
+      return aSelected - bSelected;
+    });
+    const query = search.trim().toLowerCase();
+    if (!query) return sorted;
+    return sorted.filter((m) => m.name.toLowerCase().includes(query));
+  }, [selectableMembers, draft, search]);
   const selectedLabel =
     selectedMembers.length === 0
       ? t(($) => $.inspector.allowed_users_none)
@@ -403,14 +419,26 @@ function AllowedUsersPicker({
           <div className="px-2 pb-2 text-xs font-medium">
             {t(($) => $.inspector.allowed_users_title)}
           </div>
+          <div className="relative px-2 pb-2">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              autoFocus
+              placeholder={t(($) => $.inspector.allowed_users_search_placeholder)}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-7 pl-7 text-xs"
+            />
+          </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {selectableMembers.length === 0 ? (
+            {filteredMembers.length === 0 ? (
               <div className="px-2 py-5 text-center text-xs text-muted-foreground">
-                {t(($) => $.inspector.allowed_users_empty)}
+                {search.trim()
+                  ? t(($) => $.inspector.allowed_users_no_results)
+                  : t(($) => $.inspector.allowed_users_empty)}
               </div>
             ) : (
               <div className="space-y-1">
-                {selectableMembers.map((member) => {
+                {filteredMembers.map((member) => {
                   const checked = draftSet.has(member.user_id);
                   return (
                     <label
