@@ -42,6 +42,8 @@ type StringTable = {
   muted_until_prefix: string;
   planned_for_prefix: string;
   reminder_overdue_prefix: string;
+  /** Badge label on the dedicated reminder row (FIR-2364). */
+  reminder_label: string;
   // FIR-2115 — "Group by → Action" bucket headers. English in every locale by
   // product decision. Names follow the agreed product wording: Unread, Running,
   // Done, Waiting.
@@ -87,6 +89,7 @@ const en: StringTable = {
   muted_until_prefix: "Muted until",
   planned_for_prefix: "Planned for",
   reminder_overdue_prefix: "Overdue since",
+  reminder_label: "Reminder",
   ...actionLabels,
 };
 
@@ -118,6 +121,7 @@ const da: StringTable = {
   muted_until_prefix: "Muted til",
   planned_for_prefix: "Planlagt til",
   reminder_overdue_prefix: "Forfalden siden",
+  reminder_label: "Påmindelse",
   ...actionLabels,
 };
 
@@ -153,6 +157,7 @@ const zhHans: StringTable = {
   muted_until_prefix: "静音至",
   planned_for_prefix: "计划于",
   reminder_overdue_prefix: "已逾期",
+  reminder_label: "提醒",
   ...actionLabels,
 };
 

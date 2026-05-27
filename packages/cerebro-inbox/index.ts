@@ -12,6 +12,7 @@ export {
 } from "./components/cerebro-inbox-row-actions";
 export { CerebroUnarchiveToolbarButton } from "./components/cerebro-unarchive-toolbar-button";
 export { CerebroInboxTimestamp } from "./components/cerebro-inbox-timestamp";
+export { CerebroInboxReminderRow } from "./components/cerebro-inbox-reminder-row";
 export { useInboxKeyboardShortcuts } from "./use-inbox-keyboard-shortcuts";
 export {
   useMuteInbox,

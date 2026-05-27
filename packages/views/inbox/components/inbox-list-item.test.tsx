@@ -68,6 +68,10 @@ vi.mock("@multica/cerebro-inbox", () => {
     CerebroSwipeArchive: Archive,
     CerebroUnarchiveAction: Unarchive,
     CerebroInboxTimestamp: ({ fallback }: { fallback: string }) => <>{fallback}</>,
+    CerebroInboxReminderRow: ({ item }: { item: InboxItem }) =>
+      item.type === "reminder" || item.muted_until === "2000-01-01T11:00:00.000Z" ? (
+        <span>Reminder</span>
+      ) : null,
     isReminderOverdue: (value: string | null | undefined) =>
       value === "2000-01-01T11:00:00.000Z",
   };
