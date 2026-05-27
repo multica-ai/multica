@@ -51,6 +51,12 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint Helm chart
+        run: helm lint deploy/helm/multica
+
       - name: Run tests
         run: cd server && go test ./...
 
@@ -321,6 +327,67 @@ jobs:
         run: |
           docker buildx imagetools inspect \
             ghcr.io/${{ github.repository_owner }}/multica-web:${{ steps.meta.outputs.version }}
+
+  helm-chart:
+    needs: [verify, docker-backend-merge, docker-web-merge]
+    if: github.repository_owner == 'multica-ai'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-helm-chart-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Compute chart metadata
+        id: chart_meta
+        shell: bash
+        run: |
+          tag="${{ needs.verify.outputs.tag_name }}"
+          chart_version="${tag#v}"
+          echo "chart_version=$chart_version" >> "$GITHUB_OUTPUT"
+          echo "chart_ref=oci://ghcr.io/${{ github.repository_owner }}/charts/multica" >> "$GITHUB_OUTPUT"
+
+      - name: Lint Helm chart
+        run: helm lint deploy/helm/multica
+
+      - name: Package Helm chart
+        run: |
+          mkdir -p /tmp/helm-package
+          helm package deploy/helm/multica \
+            --version "${{ steps.chart_meta.outputs.chart_version }}" \
+            --app-version "${{ needs.verify.outputs.tag_name }}" \
+            --destination /tmp/helm-package
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
+            --username "${{ github.actor }}" \
+            --password-stdin
+
+      - name: Push Helm chart
+        run: |
+          helm push \
+            "/tmp/helm-package/multica-${{ steps.chart_meta.outputs.chart_version }}.tgz" \
+            "oci://ghcr.io/${{ github.repository_owner }}/charts"
+
+      - name: Verify chart can be pulled
+        env:
+          HELM_CACHE_HOME: /tmp/helm-verify/cache
+          HELM_CONFIG_HOME: /tmp/helm-verify/config
+          HELM_DATA_HOME: /tmp/helm-verify/data
+        run: |
+          mkdir -p /tmp/helm-pull "$HELM_CACHE_HOME" "$HELM_CONFIG_HOME" "$HELM_DATA_HOME"
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
+            --username "${{ github.actor }}" \
+            --password-stdin
+          helm pull "${{ steps.chart_meta.outputs.chart_ref }}" \
+            --version "${{ steps.chart_meta.outputs.chart_version }}" \
+            --destination /tmp/helm-pull
+          helm show chart "/tmp/helm-pull/multica-${{ steps.chart_meta.outputs.chart_version }}.tgz"
 
   # Build the Desktop installers for Linux and Windows and upload them to
   # the GitHub Release that the `release` job above just published. macOS

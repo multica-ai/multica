@@ -4,11 +4,15 @@
 images:
   backend:
     repository: ghcr.io/multica-ai/multica-backend
-    tag: latest
+    # Empty defaults to Chart.appVersion. Released chart artifacts set
+    # appVersion to the Multica tag, so installs use matching images.
+    tag: ""
     pullPolicy: IfNotPresent
   frontend:
     repository: ghcr.io/multica-ai/multica-web
-    tag: latest
+    # Empty defaults to Chart.appVersion. Released chart artifacts set
+    # appVersion to the Multica tag, so installs use matching images.
+    tag: ""
     pullPolicy: IfNotPresent
   postgres:
     repository: pgvector/pgvector

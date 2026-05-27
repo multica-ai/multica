@@ -139,7 +139,7 @@ multica daemon status
 
 ## Kubernetes Deployment (Alternative)
 
-If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose using the Helm chart at [`deploy/helm/multica/`](deploy/helm/multica/). It targets a typical k3s / k8s setup with an Ingress controller and a default `ReadWriteOnce` StorageClass — authored against k3s + Traefik + `local-path`, and should work on any cluster with minor tweaks.
+If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose using the published Helm chart at `oci://ghcr.io/multica-ai/charts/multica`. It targets a typical k3s / k8s setup with an Ingress controller and a default `ReadWriteOnce` StorageClass — authored against k3s + Traefik + `local-path`, and should work on any cluster with minor tweaks.
 
 The chart creates the following resources in the target namespace:
 
@@ -195,16 +195,24 @@ Leave optional values empty for now — you can fill them in later (see [Step 5 
 
 ### Step 4 — Install the chart
 
+Chart versions match Multica release tags without the leading `v`: release `v0.2.4` publishes chart version `0.2.4`. Released charts set `appVersion` to the full release tag, and the backend/frontend image tags default to that value.
+
 ```bash
-helm install multica deploy/helm/multica -n multica
+helm pull oci://ghcr.io/multica-ai/charts/multica --version 0.2.4
+
+helm install multica oci://ghcr.io/multica-ai/charts/multica \
+  --version 0.2.4 \
+  -n multica
 ```
 
-To override defaults, copy `deploy/helm/multica/values.yaml`, edit it, and pass it with `-f`:
+To override defaults, create a values file and pass it with `-f`:
 
 ```bash
-cp deploy/helm/multica/values.yaml my-values.yaml
 # edit my-values.yaml — e.g. change ingress hosts, image tags, resource limits
-helm install multica deploy/helm/multica -n multica -f my-values.yaml
+helm install multica oci://ghcr.io/multica-ai/charts/multica \
+  --version 0.2.4 \
+  -n multica \
+  -f my-values.yaml
 ```
 
 Watch the pods come up:
@@ -245,7 +253,8 @@ The chart defaults to `APP_ENV=production` (set in `values.yaml` under `backend.
 - **Deterministic local/private testing:** set `backend.config.appEnv: development` in your values file and `MULTICA_DEV_VERIFICATION_CODE=888888` in the Secret, then `helm upgrade` and restart. This fixed code is ignored when `APP_ENV=production`.
 
   ```bash
-  helm upgrade multica deploy/helm/multica -n multica \
+  helm upgrade multica oci://ghcr.io/multica-ai/charts/multica -n multica \
+    --version 0.2.4 \
     -f my-values.yaml --set backend.config.appEnv=development
   kubectl -n multica patch secret multica-secrets --type=merge \
     -p '{"stringData":{"MULTICA_DEV_VERIFICATION_CODE":"888888"}}'
@@ -270,13 +279,22 @@ Make sure the machine running the daemon has the same `/etc/hosts` (or DNS) entr
 
 ### Updating
 
-To pull the latest images without changing the chart version:
+To upgrade to a newer Multica release, install the matching chart version:
+
+```bash
+helm upgrade --install multica oci://ghcr.io/multica-ai/charts/multica \
+  --version 0.2.5 \
+  -n multica \
+  -f my-values.yaml
+```
+
+To pull rebuilt images without changing the chart version:
 
 ```bash
 kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend
 ```
 
-To pin a specific Multica release, set the image tags in your values file:
+To override images independently from the chart version, set the image tags in your values file:
 
 ```yaml
 images:
@@ -289,7 +307,10 @@ images:
 Then upgrade:
 
 ```bash
-helm upgrade multica deploy/helm/multica -n multica -f my-values.yaml
+helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+  --version 0.2.5 \
+  -n multica \
+  -f my-values.yaml
 ```
 
 To roll back if an upgrade goes sideways:

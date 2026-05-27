@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: "{{ .Values.images.frontend.repository }}:{{ .Values.images.frontend.tag }}"
+          image: "{{ .Values.images.frontend.repository }}:{{ default .Chart.AppVersion .Values.images.frontend.tag }}"
           imagePullPolicy: {{ .Values.images.frontend.pullPolicy }}
           ports:
             - containerPort: 3000

@@ -52,7 +52,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          image: "{{ .Values.images.backend.repository }}:{{ default .Chart.AppVersion .Values.images.backend.tag }}"
           imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
           ports:
             - containerPort: 8080

@@ -200,7 +200,7 @@ Full reference — including the Kubernetes `CronJob` template and the upgrade o
 
 ## Kubernetes deployment (alternative)
 
-If you already run a Kubernetes cluster, the repo also ships a Helm chart at `deploy/helm/multica/`. It's the equivalent of `make selfhost` for k8s — same backend image, frontend image, and `pgvector/pgvector:pg17` Postgres, packaged as Deployments / Services / Ingresses with one `ConfigMap` rendered from `values.yaml`. Authored against k3s + Traefik + `local-path` and should work on any cluster with an Ingress controller and a default `ReadWriteOnce` StorageClass.
+If you already run a Kubernetes cluster, Multica publishes a Helm chart to GHCR at `oci://ghcr.io/multica-ai/charts/multica`. It's the equivalent of `make selfhost` for k8s — same backend image, frontend image, and `pgvector/pgvector:pg17` Postgres, packaged as Deployments / Services / Ingresses with one `ConfigMap` rendered from `values.yaml`. Authored against k3s + Traefik + `local-path` and should work on any cluster with an Ingress controller and a default `ReadWriteOnce` StorageClass.
 
 The chart **does not template secret values**. It references a Secret named `multica-secrets` by name, so real JWT / DB / Resend / Google keys never need to live in git or in `values.yaml`. Create the namespace + Secret once with kubectl:
 
@@ -216,15 +216,17 @@ kubectl -n multica create secret generic multica-secrets \
   --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
 ```
 
-Then install the chart:
+Then install the chart. Chart versions match Multica release tags without the leading `v`: release `v0.2.4` publishes chart version `0.2.4`, and the chart defaults its backend/frontend image tags to that release tag.
 
 ```bash
-git clone https://github.com/multica-ai/multica.git
-cd multica
-helm install multica deploy/helm/multica -n multica
+helm pull oci://ghcr.io/multica-ai/charts/multica --version 0.2.4
+
+helm install multica oci://ghcr.io/multica-ai/charts/multica \
+  --version 0.2.4 \
+  -n multica
 ```
 
-Defaults assume the hostnames `multica.dev.lan` (web) and `api.multica.dev.lan` (backend). Add them to `/etc/hosts` (or local DNS) pointing at any node IP where your Ingress is reachable. To use different hostnames, copy `deploy/helm/multica/values.yaml`, edit `ingress.frontend.host` / `ingress.backend.host` and the matching `backend.config.appUrl` / `frontendOrigin` / `localUploadBaseUrl` / `googleRedirectUri`, then install with `-f my-values.yaml`.
+Defaults assume the hostnames `multica.dev.lan` (web) and `api.multica.dev.lan` (backend). Add them to `/etc/hosts` (or local DNS) pointing at any node IP where your Ingress is reachable. To use different hostnames, create a values file that sets `ingress.frontend.host` / `ingress.backend.host` and the matching `backend.config.appUrl` / `frontendOrigin` / `localUploadBaseUrl` / `googleRedirectUri`, then install with `-f my-values.yaml`.
 
 On a cold cluster the backend can stay `Running` but not `Ready` for a few minutes while it waits on Postgres and runs migrations — a startupProbe absorbs this, so the pod should not restart. Once it's `Ready`:
 
@@ -241,7 +243,16 @@ multica setup self-host \
   --app-url http://multica.dev.lan
 ```
 
-To pull the latest images without changing the chart, `kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend`. To pin a specific Multica release, set `images.backend.tag` / `images.frontend.tag` in your values file and `helm upgrade`. `helm -n multica uninstall multica` removes the workloads but keeps the PVCs and Secret; `kubectl delete namespace multica` wipes everything.
+To upgrade to a newer release, install the matching chart version:
+
+```bash
+helm upgrade --install multica oci://ghcr.io/multica-ai/charts/multica \
+  --version 0.2.5 \
+  -n multica \
+  -f my-values.yaml
+```
+
+To pull rebuilt images without changing the chart, `kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend`. To override the image tag independently from the chart, set `images.backend.tag` / `images.frontend.tag` in your values file and `helm upgrade`. `helm -n multica uninstall multica` removes the workloads but keeps the PVCs and Secret; `kubectl delete namespace multica` wipes everything.
 
 The full reference — three login modes, the `backend` ExternalName workaround for the build-time-baked `REMOTE_API_URL` in the web image, resource limits, and TLS — lives in the repo's [`SELF_HOSTING.md`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative).
 
