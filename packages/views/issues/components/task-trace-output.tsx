@@ -721,6 +721,12 @@ function DisplayTraceLine({
           <div className="font-medium text-warning">{title}</div>
         </WorkLogBlock>
       );
+    case "approval_degraded":
+      return (
+        <WorkLogBlock title={title} tone="info" icon={<ShieldAlert className="h-3.5 w-3.5" />}>
+          <div className="text-info">{content || title}</div>
+        </WorkLogBlock>
+      );
     case "error":
       return (
         <WorkLogBlock title="Error" tone="error">
@@ -758,7 +764,7 @@ function WorkLogBlock({
   title: string;
   children: ReactNode;
   icon?: ReactNode;
-  tone?: "assistant" | "thinking" | "plan" | "command" | "result" | "read" | "file" | "warning" | "error";
+  tone?: "assistant" | "thinking" | "plan" | "command" | "result" | "read" | "file" | "warning" | "error" | "info";
   muted?: boolean;
 }) {
   return (
@@ -773,6 +779,7 @@ function WorkLogBlock({
       tone === "file" && "border-amber-200 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/25",
       tone === "warning" && "border-warning/40 bg-warning/15",
       tone === "error" && "border-destructive/40 bg-destructive/10",
+      tone === "info" && "border-info/40 bg-info/10",
       !tone && muted && "border-border/50 bg-muted/20",
       !tone && !muted && "border-border/70 bg-card/50",
     )}>
@@ -788,6 +795,7 @@ function WorkLogBlock({
           tone === "file" && "text-amber-700 dark:text-amber-300",
           tone === "warning" && "text-warning",
           tone === "error" && "text-destructive",
+          tone === "info" && "text-info",
           (!tone || muted) && "text-muted-foreground",
         )}>
           {icon}

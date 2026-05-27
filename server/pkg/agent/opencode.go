@@ -301,24 +301,6 @@ func (b *opencodeBackend) handleToolUseEvent(ctx context.Context, event opencode
 	// Extract input from state.input (the tool invocation parameters).
 	input := inputFromToolState(event.Part.State)
 
-	// In prompt mode, record all tool invocations in the trace for
-	// post-hoc auditing (OpenCode has no interactive approval, so we
-	// key off policy rather than callback presence).
-	if opts.ApprovalPolicy == "prompt" && opts.TraceCallback != nil {
-		title := event.Part.Tool
-		if cmd, _ := input["command"].(string); cmd != "" {
-			title = cmd
-		} else if path, _ := input["file_path"].(string); path != "" {
-			title = event.Part.Tool + ": " + path
-		}
-		emitDisplayEvent(opts.TraceCallback, "tool_observation", title, "", map[string]any{
-			"provider":        "opencode",
-			"tool":            event.Part.Tool,
-			"call_id":         event.Part.CallID,
-			"approval_policy": opts.ApprovalPolicy,
-		})
-	}
-
 	// Emit the tool-use message.
 	trySend(ch, Message{
 		Type:   MessageToolUse,
