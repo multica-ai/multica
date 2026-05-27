@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"time"
@@ -97,6 +98,15 @@ type Client struct {
 	platform string
 	version  string
 	os       string
+}
+
+type AttachmentInfo struct {
+	ID          string `json:"id"`
+	Filename    string `json:"filename"`
+	URL         string `json:"url"`
+	DownloadURL string `json:"download_url"`
+	ContentType string `json:"content_type"`
+	SizeBytes   int64  `json:"size_bytes"`
 }
 
 // NewClient creates a new daemon API client.
@@ -276,6 +286,45 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, erro
 		return "", err
 	}
 	return resp.Status, nil
+}
+
+func (c *Client) GetAttachment(ctx context.Context, attachmentID string) (*AttachmentInfo, error) {
+	var resp AttachmentInfo
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/attachments/%s", attachmentID), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *Client) DownloadFile(ctx context.Context, rawURL string) ([]byte, error) {
+	if rawURL == "" {
+		return nil, fmt.Errorf("missing attachment url")
+	}
+	downloadURL := rawURL
+	if u, err := url.Parse(rawURL); err == nil && !u.IsAbs() {
+		downloadURL = c.baseURL + rawURL
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if strings.HasPrefix(downloadURL, c.baseURL) && c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	c.setIdentityHeaders(req)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, &requestError{Method: http.MethodGet, Path: rawURL, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+	}
+	const maxDownloadSize = 100 << 20
+	return io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
 }
 
 // HeartbeatResponse, PendingUpdate, etc. alias the wire types so HTTP and WS

@@ -16,7 +16,7 @@ import (
 // Windows).
 func BuildPrompt(task Task, provider string) string {
 	if task.ChatSessionID != "" {
-		return buildChatPrompt(task)
+		return buildChatPrompt(task, provider)
 	}
 	if task.TriggerCommentID != "" {
 		return buildCommentPrompt(task, provider)
@@ -165,7 +165,7 @@ func buildCommentPrompt(task Task, provider string) string {
 }
 
 // buildChatPrompt constructs a prompt for interactive chat tasks.
-func buildChatPrompt(task Task) string {
+func buildChatPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
@@ -174,8 +174,9 @@ func buildChatPrompt(task Task) string {
 	// the CLI. We deliberately do NOT inline the URL: chat attachments
 	// live behind a signed CDN with a short TTL, so by the time the agent
 	// has finished thinking the URL embedded in the markdown body may
-	// have expired. `multica attachment download <id>` re-signs at click
-	// time and is the only reliable path.
+	// have expired. Claude gets supported image attachments as native
+	// image blocks; other providers use `multica attachment download <id>`
+	// to re-sign at read time.
 	if len(task.ChatMessageAttachments) > 0 {
 		b.WriteString("\nAttachments on this message:\n")
 		for _, a := range task.ChatMessageAttachments {
@@ -185,9 +186,22 @@ func buildChatPrompt(task Task) string {
 				fmt.Fprintf(&b, "- id=%s filename=%q\n", a.ID, a.Filename)
 			}
 		}
-		b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it.\n")
+		if provider == "claude" && hasClaudeVisionAttachment(task.ChatMessageAttachments) {
+			b.WriteString("Supported image attachments are also sent to Claude as native image inputs. Use `multica attachment download <id>` only if you need local file bytes or need to inspect non-image files.\n")
+		} else {
+			b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it.\n")
+		}
 	}
 	return b.String()
+}
+
+func hasClaudeVisionAttachment(attachments []ChatAttachmentMeta) bool {
+	for _, a := range attachments {
+		if isClaudeVisionContentType(a.ContentType) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildAutopilotPrompt constructs a prompt for run_only autopilot tasks.

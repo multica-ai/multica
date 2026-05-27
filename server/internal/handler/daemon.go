@@ -1342,6 +1342,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 									ID:          uuidToString(a.ID),
 									Filename:    a.Filename,
 									ContentType: a.ContentType,
+									SizeBytes:   a.SizeBytes,
 								}
 							}
 						}

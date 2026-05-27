@@ -341,6 +341,43 @@ func TestBuildPromptDefaultMentionsRecent(t *testing.T) {
 	}
 }
 
+func TestBuildChatPromptMentionsClaudeNativeImages(t *testing.T) {
+	out := BuildPrompt(Task{
+		ChatSessionID: "chat-1",
+		ChatMessage:   "what is in this screenshot?",
+		ChatMessageAttachments: []ChatAttachmentMeta{
+			{ID: "att-1", Filename: "screen.png", ContentType: "image/png"},
+		},
+	}, "claude")
+
+	for _, s := range []string{
+		"content_type=image/png",
+		"native image inputs",
+		"Use `multica attachment download <id>` only if",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("buildChatPrompt missing Claude image guidance %q\n--- output ---\n%s", s, out)
+		}
+	}
+}
+
+func TestBuildChatPromptKeepsDownloadInstructionForNonClaude(t *testing.T) {
+	out := BuildPrompt(Task{
+		ChatSessionID: "chat-1",
+		ChatMessage:   "what is in this screenshot?",
+		ChatMessageAttachments: []ChatAttachmentMeta{
+			{ID: "att-1", Filename: "screen.png", ContentType: "image/png"},
+		},
+	}, "codex")
+
+	if !strings.Contains(out, "Use `multica attachment download <id>` to fetch each file locally before referring to it.") {
+		t.Errorf("buildChatPrompt must keep manual download guidance for non-Claude providers\n--- output ---\n%s", out)
+	}
+	if strings.Contains(out, "native image inputs") {
+		t.Errorf("buildChatPrompt must not claim native image input delivery for non-Claude providers\n--- output ---\n%s", out)
+	}
+}
+
 // TestBuildPromptNonSquadLeaderNoRule verifies that non-squad-leader agents
 // do NOT get the squad leader no_action rule injected.
 func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {

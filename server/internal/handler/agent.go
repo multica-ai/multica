@@ -233,6 +233,7 @@ type ChatAttachmentMeta struct {
 	ID          string `json:"id"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type,omitempty"`
+	SizeBytes   int64  `json:"size_bytes,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon

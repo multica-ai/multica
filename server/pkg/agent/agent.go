@@ -35,6 +35,7 @@ type ExecOptions struct {
 	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
 	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
 	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	ImageAttachments          []ImageAttachment
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
 	// medium|high|xhigh"). Empty means "use the runtime/model default" —
@@ -44,6 +45,15 @@ type ExecOptions struct {
 	// field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
+}
+
+// ImageAttachment is an image payload that should be sent to providers with
+// native vision support instead of being described as an opaque file.
+type ImageAttachment struct {
+	ID          string
+	Filename    string
+	ContentType string
+	Data        []byte
 }
 
 // Session represents a running agent execution.

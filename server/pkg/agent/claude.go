@@ -3,11 +3,13 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"os"
 	"os/exec"
 	"strings"
@@ -97,7 +99,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
-	if err := writeClaudeInput(stdin, prompt); err != nil {
+	if err := writeClaudeInput(stdin, prompt, opts.ImageAttachments); err != nil {
 		// claude almost certainly died during startup (broken pipe). The
 		// real reason is sitting in stderrBuf — surface it the same way the
 		// post-handshake error path does, otherwise the daemon log is the
@@ -518,8 +520,8 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	return args
 }
 
-func writeClaudeInput(w io.Writer, prompt string) error {
-	data, err := buildClaudeInput(prompt)
+func writeClaudeInput(w io.Writer, prompt string, images []ImageAttachment) error {
+	data, err := buildClaudeInput(prompt, images)
 	if err != nil {
 		return err
 	}
@@ -529,17 +531,30 @@ func writeClaudeInput(w io.Writer, prompt string) error {
 	return nil
 }
 
-func buildClaudeInput(prompt string) ([]byte, error) {
+func buildClaudeInput(prompt string, images []ImageAttachment) ([]byte, error) {
+	content := make([]map[string]any, 0, 1+len(images))
+	content = append(content, map[string]any{
+		"type": "text",
+		"text": prompt,
+	})
+	for _, img := range images {
+		if !isSupportedClaudeImageContentType(img.ContentType) || len(img.Data) == 0 {
+			continue
+		}
+		content = append(content, map[string]any{
+			"type": "image",
+			"source": map[string]string{
+				"type":       "base64",
+				"media_type": img.ContentType,
+				"data":       base64.StdEncoding.EncodeToString(img.Data),
+			},
+		})
+	}
 	payload := map[string]any{
 		"type": "user",
 		"message": map[string]any{
-			"role": "user",
-			"content": []map[string]string{
-				{
-					"type": "text",
-					"text": prompt,
-				},
-			},
+			"role":    "user",
+			"content": content,
 		},
 	}
 	data, err := json.Marshal(payload)
@@ -547,6 +562,19 @@ func buildClaudeInput(prompt string) ([]byte, error) {
 		return nil, fmt.Errorf("marshal claude input: %w", err)
 	}
 	return append(data, '\n'), nil
+}
+
+func isSupportedClaudeImageContentType(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = contentType
+	}
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
+		return true
+	default:
+		return false
+	}
 }
 
 // resolveSessionID decides which session id to report on the Result. When the

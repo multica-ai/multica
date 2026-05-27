@@ -322,7 +322,7 @@ func TestBuildClaudeArgsFiltersBlockedCustomArgs(t *testing.T) {
 func TestBuildClaudeInputEncodesUserMessage(t *testing.T) {
 	t.Parallel()
 
-	data, err := buildClaudeInput("say pong")
+	data, err := buildClaudeInput("say pong", nil)
 	if err != nil {
 		t.Fatalf("buildClaudeInput: %v", err)
 	}
@@ -356,6 +356,53 @@ func TestBuildClaudeInputEncodesUserMessage(t *testing.T) {
 	}
 	if block["type"] != "text" || block["text"] != "say pong" {
 		t.Fatalf("unexpected content block: %v", block)
+	}
+}
+
+func TestBuildClaudeInputIncludesImageAttachments(t *testing.T) {
+	t.Parallel()
+
+	data, err := buildClaudeInput("describe this", []ImageAttachment{
+		{
+			ID:          "att-1",
+			Filename:    "screen.png",
+			ContentType: "image/png",
+			Data:        []byte{0x89, 0x50, 0x4e, 0x47},
+		},
+		{
+			ID:          "att-2",
+			Filename:    "notes.txt",
+			ContentType: "text/plain",
+			Data:        []byte("not an image"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildClaudeInput: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(data), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	message := payload["message"].(map[string]any)
+	content := message["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("expected text plus one image block, got %v", content)
+	}
+
+	imageBlock := content[1].(map[string]any)
+	if imageBlock["type"] != "image" {
+		t.Fatalf("expected image block, got %v", imageBlock)
+	}
+	source := imageBlock["source"].(map[string]any)
+	if source["type"] != "base64" {
+		t.Fatalf("expected base64 image source, got %v", source)
+	}
+	if source["media_type"] != "image/png" {
+		t.Fatalf("expected image/png media_type, got %v", source["media_type"])
+	}
+	if source["data"] != "iVBORw==" {
+		t.Fatalf("expected base64 image data, got %v", source["data"])
 	}
 }
 

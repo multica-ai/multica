@@ -2743,6 +2743,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		McpConfig:                 mcpConfig,
 		ThinkingLevel:             thinkingLevel,
 	}
+	if provider == "claude" {
+		execOpts.ImageAttachments = d.loadClaudeImageAttachments(ctx, task, taskLog)
+	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
 	//   - openclaw is pinned to the task workdir via the per-task config we
