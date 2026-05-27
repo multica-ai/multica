@@ -98,22 +98,26 @@ const commentHardCap = 2000
 //     comment plus every descendant. The anchor may be a root or any reply;
 //     the server walks up to the root via a recursive CTE, so callers do not
 //     need to know whether the id they have is a root.
+//
 //   - tail=<N> — only valid with thread. Cap the reply count at the N most
 //     recent replies (per (created_at, id)). The thread root is always
 //     returned, even when N=0, so the reader keeps the "what is this thread
 //     about" context. Without tail, thread returns the entire thread (the
 //     pre-MUL-2421 behavior).
+//
 //   - recent=<N> — return the N most recently active threads (root + every
 //     descendant per thread). A thread's recency is MAX(created_at) across
 //     the whole subtree, so a stale-but-recently-replied thread ranks ahead
 //     of an active-but-quiet one. Row-based "newest N comments" is
 //     deliberately NOT exposed — it surfaces unrelated thread tails and
 //     hides relevant history (#2340).
+//
 //   - before=<RFC3339> + before-id=<uuid> — cursor. The pair's meaning is
 //     context-dependent so the flag surface stays small:
 //
 //   - with recent: a *thread* cursor — (last_activity_at, root_id) — and
 //     the next page returns threads strictly less recent.
+//
 //   - with thread + tail: a *reply* cursor — (created_at, id) — and the
 //     next page returns replies in the same thread strictly older than
 //     that reply.
@@ -773,8 +777,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// agent comments inherit it from X-Task-ID or default-deny the enqueue.
 	commentDelegation, delegationErr := h.TaskService.CommentDelegationContext(r.Context(), authorType, authorID, r.Header.Get("X-Task-ID"), "comment")
 	mentionDelegation, mentionDelegationErr := h.TaskService.CommentDelegationContext(r.Context(), authorType, authorID, r.Header.Get("X-Task-ID"), "mention")
-	// CEREBRO-PATCH(private-autopilot-mention-suppression): comments emitted from private autopilot tasks must not wake non-owner targets (JEH-1749).
-	privateAutopilotComment := h.commentFromPrivateAutopilotTask(r.Context(), issue, r.Header.Get("X-Task-ID"), authorType)
+	// CEREBRO-PATCH(private-autopilot-member-agent-push): comments emitted
+	// from private autopilot tasks may only wake private agents owned by the
+	// same member who configured the autopilot (FIR-2349).
+	privateAutopilotOwnerID, privateAutopilotComment := h.privateAutopilotTaskOwner(r.Context(), issue, r.Header.Get("X-Task-ID"), authorType)
 
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
 	// Skip when the comment comes from the assigned agent itself to avoid loops.
@@ -807,10 +813,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
 	// Pass parentComment so that replies inherit mentions from the thread root.
-	if !privateAutopilotComment {
-		// CEREBRO-PATCH(mention-trigger-gate-hook): JEH-1917 — pass r to the relocated gate.
-		h.enqueueMentionedAgentTasks(r.Context(), r, issue, comment, parentComment, authorType, authorID, mentionDelegation, mentionDelegationErr)
-	}
+	// CEREBRO-PATCH(mention-trigger-gate-hook): JEH-1917 — pass r to the relocated gate.
+	h.enqueueMentionedAgentTasks(r.Context(), r, issue, comment, parentComment, authorType, authorID, mentionDelegation, mentionDelegationErr, privateAutopilotOwnerID)
 
 	// CEREBRO-PATCH(channel-listen-mode): trigger non-mentioned, non-assignee
 	// agents subscribed to the channel whose listen_mode is 'always'.
@@ -831,34 +835,40 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-func (h *Handler) commentFromPrivateAutopilotTask(ctx context.Context, issue db.Issue, taskIDHeader, authorType string) bool {
+func (h *Handler) privateAutopilotTaskOwner(ctx context.Context, issue db.Issue, taskIDHeader, authorType string) (pgtype.UUID, bool) {
 	if authorType != "agent" {
-		return false
+		return pgtype.UUID{}, false
 	}
 	if issue.OriginType.Valid && issue.OriginType.String == "autopilot" && issue.OriginID.Valid {
 		autopilot, err := h.Queries.GetAutopilot(ctx, issue.OriginID)
-		return err == nil && autopilot.IsPrivate
+		if err == nil && autopilot.IsPrivate && autopilot.CreatedByType == "member" {
+			return autopilot.CreatedByID, true
+		}
+		return pgtype.UUID{}, false
 	}
 	if taskIDHeader == "" {
-		return false
+		return pgtype.UUID{}, false
 	}
 	taskUUID, err := util.ParseUUID(taskIDHeader)
 	if err != nil {
-		return false
+		return pgtype.UUID{}, false
 	}
 	task, err := h.Queries.GetAgentTask(ctx, taskUUID)
 	if err != nil || !task.AutopilotRunID.Valid {
-		return false
+		return pgtype.UUID{}, false
 	}
 	run, err := h.Queries.GetAutopilotRun(ctx, task.AutopilotRunID)
 	if err != nil {
-		return false
+		return pgtype.UUID{}, false
 	}
 	autopilot, err := h.Queries.GetAutopilot(ctx, run.AutopilotID)
 	if err != nil {
-		return false
+		return pgtype.UUID{}, false
 	}
-	return autopilot.IsPrivate
+	if autopilot.IsPrivate && autopilot.CreatedByType == "member" {
+		return autopilot.CreatedByID, true
+	}
+	return pgtype.UUID{}, false
 }
 
 // commentMentionsOthersButNotAssignee returns true if the comment @mentions
@@ -996,14 +1006,18 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // dedupe and the natural queued/dispatched coalescing of the task queue.
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
-func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Request, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string, delegation service.TaskDelegationContext, delegationErr error) {
+func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Request, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string, delegation service.TaskDelegationContext, delegationErr error, privateAutopilotOwnerID pgtype.UUID) {
 	wsID := uuidToString(issue.WorkspaceID)
+	privateAutopilotComment := privateAutopilotOwnerID.Valid
 	mentions := util.ParseMentions(comment.Content)
 	if shouldInheritParentMentions(parentComment, mentions, authorType) {
 		mentions = util.ParseMentions(parentComment.Content)
 	}
 	for _, m := range mentions {
 		if m.Type == "squad" {
+			if privateAutopilotComment {
+				continue
+			}
 			// @squad mention → trigger the squad's leader agent.
 			squadUUID := parseUUID(m.ID)
 			squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
@@ -1080,9 +1094,15 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Reques
 		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 			continue
 		}
+		// CEREBRO-PATCH(private-autopilot-member-agent-push): private
+		// autopilots may only push onward to agents owned by the same member.
+		if privateAutopilotComment && uuidToString(agent.OwnerID) != uuidToString(privateAutopilotOwnerID) {
+			continue
+		}
 		// Private-agent gate (member→private requires allowed_principals;
-		// agent→agent always passes).
-		if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
+		// agent→agent always passes). Private autopilot comments already ran
+		// the stricter owner match above.
+		if !privateAutopilotComment && !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
 			continue
 		}
 		if h.MentionTriggerGate != nil { // CEREBRO-PATCH(mention-trigger-gate-hook): JEH-1917.

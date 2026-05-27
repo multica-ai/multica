@@ -1407,6 +1407,10 @@ func TestPrivateAutopilotCommentSuppressesMentionedAgentTask(t *testing.T) {
 	ctx := context.Background()
 	agentA := createHandlerTestAgent(t, "Private Autopilot Mention Agent A", nil)
 	agentB := createHandlerTestAgent(t, "Private Autopilot Mention Agent B", nil)
+	otherOwnerID := createWorkspaceMemberUser(t, "member")
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET owner_id = $1 WHERE id = $2`, otherOwnerID, agentB); err != nil {
+		t.Fatalf("move mentioned agent to different owner: %v", err)
+	}
 	title := fmt.Sprintf("Private autopilot mention suppression %d", time.Now().UnixNano())
 	var autopilotID, runID, issueID string
 	defer func() {
@@ -1483,6 +1487,90 @@ func TestPrivateAutopilotCommentSuppressesMentionedAgentTask(t *testing.T) {
 	}
 	if queued != 0 {
 		t.Fatalf("private autopilot comment enqueued %d tasks for mentioned agent, want 0", queued)
+	}
+}
+
+// CEREBRO-PATCH(private-autopilot-member-agent-push): private autopilots may delegate to the same member's private agents (FIR-2349).
+func TestPrivateAutopilotCommentAllowsSameOwnerPrivateAgentTask(t *testing.T) {
+	ctx := context.Background()
+	agentA := createHandlerTestAgent(t, "Private Autopilot Same Owner Agent A", nil)
+	agentB := createHandlerTestAgent(t, "Private Autopilot Same Owner Agent B", nil)
+	title := fmt.Sprintf("Private autopilot same owner push %d", time.Now().UnixNano())
+	var autopilotID, runID, issueID string
+	defer func() {
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+		if runID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot_run WHERE id = $1`, runID)
+		}
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Private same-owner delegation autopilot",
+		"assignee_id":          agentA,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+		"is_private":           true,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+
+	ap, err := db.New(testPool).GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	runID = uuidToString(run.ID)
+	issueID = uuidToString(run.IssueID)
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID, agentA).Scan(&taskID); err != nil {
+		t.Fatalf("load private autopilot task: %v", err)
+	}
+
+	comment := httptest.NewRecorder()
+	commentReq := withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments?workspace_id="+testWorkspaceID, map[string]any{
+		"content": fmt.Sprintf("[@Agent B](mention://agent/%s) continue this private autopilot flow", agentB),
+	}), "id", issueID)
+	commentReq.Header.Set("X-Agent-ID", agentA)
+	commentReq.Header.Set("X-Task-ID", taskID)
+	testHandler.CreateComment(comment, commentReq)
+	if comment.Code != http.StatusCreated {
+		t.Fatalf("private autopilot comment: expected 201, got %d: %s", comment.Code, comment.Body.String())
+	}
+
+	var queued int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, agentB).Scan(&queued); err != nil {
+		t.Fatalf("count same-owner mentioned agent tasks: %v", err)
+	}
+	if queued != 1 {
+		t.Fatalf("private autopilot comment enqueued %d same-owner tasks, want 1", queued)
 	}
 }
 
