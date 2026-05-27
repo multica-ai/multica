@@ -484,6 +484,13 @@ export function AgentTranscriptDialog({
                 })}
               </MetadataChip>
             )}
+
+            {/* Work directory — strip everything up to and including "workspaces/" */}
+            {task.work_dir && (
+              <MetadataChip icon={<Cpu className="h-3 w-3" />}>
+                {stripBeforeWorkspaces(task.work_dir)}
+              </MetadataChip>
+            )}
           </div>
         </div>
 
@@ -610,6 +617,11 @@ function formatProvider(provider: string): string {
     pi: "Pi",
   };
   return map[provider.toLowerCase()] ?? provider;
+}
+
+function stripBeforeWorkspaces(path: string): string {
+  const idx = path.indexOf("workspaces/");
+  return idx === -1 ? path : path.slice(idx + "workspaces/".length);
 }
 
 // ─── Timeline bar (colored segments) ────────────────────────────────────────
