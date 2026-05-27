@@ -85,6 +85,24 @@ func TestPostJSON(t *testing.T) {
 		}
 	})
 
+	t.Run("raw output preserves response bytes", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"token":`)
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "", "test-token")
+		var out json.RawMessage
+		err := client.PostJSON(context.Background(), "/test", reqBody{}, &out)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(out) != `{"token":` {
+			t.Fatalf("raw response = %q, want %q", string(out), `{"token":`)
+		}
+	})
+
 	t.Run("workspace and agent context headers", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if ws := r.Header.Get("X-Workspace-ID"); ws != "ws-abc" {

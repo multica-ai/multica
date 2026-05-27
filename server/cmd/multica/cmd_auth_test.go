@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -223,6 +225,49 @@ func TestLoginTokenFlagParsing(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseCreateAccessTokenResponse(t *testing.T) {
+	t.Run("accepts current object response shape", func(t *testing.T) {
+		token, err := parseCreateAccessTokenResponse(json.RawMessage(`{"id":"tok_123","token":"mul_abc123","token_prefix":"mul_abc"}`))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if token != "mul_abc123" {
+			t.Fatalf("token = %q, want %q", token, "mul_abc123")
+		}
+	})
+
+	t.Run("reports array response as server compatibility error", func(t *testing.T) {
+		_, err := parseCreateAccessTokenResponse(json.RawMessage(`[{"token":"mul_abc123"}]`))
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "incompatible access-token response") || !strings.Contains(msg, "got an array") {
+			t.Fatalf("error = %q, want compatibility message for array response", msg)
+		}
+	})
+
+	t.Run("reports missing token field", func(t *testing.T) {
+		_, err := parseCreateAccessTokenResponse(json.RawMessage(`{"id":"tok_123","token_prefix":"mul_abc"}`))
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "missing token field") {
+			t.Fatalf("error = %q, want missing token field message", err.Error())
+		}
+	})
+
+	t.Run("reports malformed JSON response", func(t *testing.T) {
+		_, err := parseCreateAccessTokenResponse(json.RawMessage(`{"token":`))
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "invalid access-token response") {
+			t.Fatalf("error = %q, want invalid response message", err.Error())
+		}
+	})
 }
 
 func TestNormalizeAPIBaseURL(t *testing.T) {

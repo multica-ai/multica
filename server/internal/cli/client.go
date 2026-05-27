@@ -248,6 +248,14 @@ func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any
 	if out == nil {
 		return nil
 	}
+	if raw, ok := out.(*json.RawMessage); ok {
+		respData, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if err != nil {
+			return err
+		}
+		*raw = respData
+		return nil
+	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 

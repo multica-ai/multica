@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -290,9 +291,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	patName := fmt.Sprintf("CLI (%s)", hostname)
 	expiresInDays := 90
 
-	var patResp struct {
-		Token string `json:"token"`
-	}
+	var patResp json.RawMessage
 	err = client.PostJSON(ctx, "/api/tokens", map[string]any{
 		"name":            patName,
 		"expires_in_days": expiresInDays,
@@ -300,9 +299,13 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("failed to create access token: %w", err)
 	}
+	patToken, err := parseCreateAccessTokenResponse(patResp)
+	if err != nil {
+		return fmt.Errorf("failed to create access token: %w", err)
+	}
 
 	// Verify the PAT works.
-	patClient := cli.NewAPIClient(serverURL, "", patResp.Token)
+	patClient := cli.NewAPIClient(serverURL, "", patToken)
 	var me struct {
 		Name  string `json:"name"`
 		Email string `json:"email"`
@@ -316,7 +319,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	cfg.WorkspaceID = ""
-	cfg.Token = patResp.Token
+	cfg.Token = patToken
 	cfg.ServerURL = serverURL
 	cfg.AppURL = appURL
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
@@ -325,6 +328,27 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 
 	fmt.Fprintf(os.Stderr, "Authenticated as %s (%s)\nToken saved to config.\n", me.Name, me.Email)
 	return nil
+}
+
+func parseCreateAccessTokenResponse(data json.RawMessage) (string, error) {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return "", fmt.Errorf("server returned an empty access-token response")
+	}
+	if strings.HasPrefix(trimmed, "[") {
+		return "", fmt.Errorf("server returned an incompatible access-token response; expected a JSON object with a token field, got an array. Upgrade the self-host Multica server or use a CLI version compatible with that server")
+	}
+
+	var resp struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return "", fmt.Errorf("server returned an invalid access-token response: %w", err)
+	}
+	if strings.TrimSpace(resp.Token) == "" {
+		return "", fmt.Errorf("server returned an invalid access-token response: missing token field")
+	}
+	return resp.Token, nil
 }
 
 func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
