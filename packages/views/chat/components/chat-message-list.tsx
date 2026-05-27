@@ -210,7 +210,11 @@ function AssistantMessage({
   return (
     <div className="w-full space-y-1.5">
       {timeline.length > 0 ? (
-        <TimelineView items={timeline} attachments={message.attachments} />
+        <TimelineView
+          items={timeline}
+          attachments={message.attachments}
+          finalContent={message.content}
+        />
       ) : (
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
           <Markdown attachments={message.attachments}>{message.content}</Markdown>
@@ -395,12 +399,17 @@ function TimelineView({
   items,
   isStreaming,
   attachments,
+  finalContent,
 }: {
   items: ChatTimelineItem[];
   isStreaming?: boolean;
   attachments?: import("@multica/core/types").Attachment[];
+  finalContent?: string;
 }) {
   const { preface, middle, final } = splitTimeline(items);
+  const answer = finalContent?.trim() ? finalContent : null;
+  const processItems = answer && middle.length > 0 ? [...middle, ...final] : middle;
+  const timelineFinal = answer ? [] : final;
 
   return (
     <>
@@ -411,18 +420,23 @@ function TimelineView({
           </Markdown>
         </div>
       )}
-      {middle.length > 0 && (
+      {processItems.length > 0 && (
         <OuterProcessFold
-          items={middle}
+          items={processItems}
           defaultOpen={!!isStreaming}
           attachments={attachments}
         />
       )}
-      {final.length > 0 && (
+      {timelineFinal.length > 0 && (
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
           <Markdown attachments={attachments}>
-            {final.map((t) => t.content ?? "").join("")}
+            {timelineFinal.map((t) => t.content ?? "").join("")}
           </Markdown>
+        </div>
+      )}
+      {answer && (
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+          <Markdown attachments={attachments}>{answer}</Markdown>
         </div>
       )}
     </>
@@ -456,7 +470,7 @@ function OuterProcessFold({
       <CollapsibleContent>
         <div className="mt-1 rounded-lg border bg-muted/20 p-2 space-y-0.5">
           {items.map((item) =>
-            item.type === "text" ? (
+            item.type === "text" || item.type === "final" ? (
               <MiddleTextRow key={item.seq} item={item} attachments={attachments} />
             ) : (
               <ItemRow key={item.seq} item={item} />
