@@ -107,13 +107,22 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// at this branch rather than treating the token as a
 			// JWT/PAT — failing closed avoids a misconfigured prod
 			// silently downgrading auth.
+			//
+			// After Cloud confirms the token, we also confirm that
+			// the returned owner_id maps to a real local user. The
+			// Cloud `owner_id` and our `users.id` share the same UUID
+			// space by contract, so this is a defense in depth: a
+			// missing user means the local row was deleted out from
+			// under a still-active node, or something is forging
+			// owner_ids — either way we must not let the request
+			// pass with a phantom X-User-ID.
 			if strings.HasPrefix(tokenString, auth.CloudPATPrefix) {
 				if cloudPAT == nil {
 					slog.Warn("auth: mcn_ token presented but cloud verifier not configured", "path", r.URL.Path)
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}
-				identity, err := cloudPAT.Verify(r.Context(), tokenString)
+				identity, err := cloudPAT.Verify(r.Context(), tokenString, ownerLookupFor(queries))
 				if err != nil {
 					if errors.Is(err, auth.ErrCloudPATInvalid) {
 						slog.Warn("auth: cloud rejected mcn_ token", "path", r.URL.Path, "error", err)

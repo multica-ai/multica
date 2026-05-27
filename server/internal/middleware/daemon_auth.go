@@ -141,13 +141,15 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			// downstream daemon handlers (which then check workspace
 			// membership the usual way). Same fail-closed semantics:
 			// no Fleet URL configured → 401, Fleet unreachable → 503.
+			// We additionally require the owner_id to map to a real
+			// local user — see the Auth comment for the rationale.
 			if strings.HasPrefix(tokenString, auth.CloudPATPrefix) {
 				if cloudPAT == nil {
 					slog.Warn("daemon_auth: mcn_ token presented but cloud verifier not configured", "path", r.URL.Path)
 					writeError(w, http.StatusUnauthorized, "invalid token")
 					return
 				}
-				identity, err := cloudPAT.Verify(r.Context(), tokenString)
+				identity, err := cloudPAT.Verify(r.Context(), tokenString, ownerLookupFor(queries))
 				if err != nil {
 					if errors.Is(err, auth.ErrCloudPATInvalid) {
 						slog.Warn("daemon_auth: cloud rejected mcn_ token", "path", r.URL.Path, "error", err)

@@ -107,6 +107,12 @@ type CloudPATIdentity struct {
 // token was rejected without exposing the reason in the 401 body —
 // per the Cloud doc, callers shouldn't differentiate token_not_found
 // vs token_revoked for security decisions.
+//
+// The "owner_unknown" reason is also produced locally by Verify when
+// Cloud accepted the token but the returned owner_id does not map to
+// a real user in our DB. Treating that as a Cloud-style "invalid"
+// keeps the middleware's response shape uniform — the result is the
+// same: 401, drop the token.
 type CloudPATInvalidError struct {
 	Reason string
 }
@@ -124,6 +130,31 @@ func (e *CloudPATInvalidError) Error() string {
 func (e *CloudPATInvalidError) Is(target error) bool {
 	return target == ErrCloudPATInvalid
 }
+
+// CloudPATInvalidReasonOwnerUnknown is the synthetic reason emitted
+// when Cloud verified the token but the returned owner_id was not
+// found in the local users table. The Cloud `owner_id` and our
+// `users.id` share the same UUID space by contract; a mismatch means
+// either the user has been deleted on our side after the node was
+// minted, or (worse) something is impersonating Cloud and trying to
+// surface a forged owner_id. Either way the request must be rejected.
+const CloudPATInvalidReasonOwnerUnknown = "owner_unknown"
+
+// OwnerLookupFunc is the user-existence check Verify runs against
+// Cloud's owner_id before caching / returning the identity. The
+// caller (typically the middleware closure) wires it to a
+// queries.GetUser call.
+//
+// Return semantics:
+//   - (true, nil)  → owner_id is a valid local user; Verify returns success.
+//   - (false, nil) → owner_id does not exist locally; Verify returns
+//     ErrCloudPATInvalid with reason="owner_unknown" and does NOT
+//     cache (a missing user can be re-created later, and we don't
+//     want to lock that retry out for a TTL window).
+//   - (_, err)     → infrastructure error (DB unreachable, etc.);
+//     Verify wraps as ErrCloudPATUnavailable so the caller emits 503,
+//     not 401.
+type OwnerLookupFunc func(ctx context.Context, ownerID string) (bool, error)
 
 // CloudPATVerifier resolves mcn_ PATs by calling
 // POST <fleetURL>/api/v1/pat/verify and caches verified results in
@@ -191,23 +222,35 @@ func (v *CloudPATVerifier) Configured() bool {
 // Verify resolves token to a CloudPATIdentity by consulting (in order):
 //
 //  1. Redis cache, keyed by sha256(token). Hit → return cached
-//     identity, no Fleet round-trip.
+//     identity, no Fleet round-trip and no DB lookup. The cache only
+//     ever contains identities that have already passed both Cloud's
+//     verify AND the local owner-existence check, so a cache hit is
+//     a fully-validated decision.
 //  2. Fleet POST /api/v1/pat/verify. The response distinguishes:
-//     - HTTP 200 + valid=true   → success, cache + return
+//     - HTTP 200 + valid=true   → continues to step 3
 //     - HTTP 200 + valid=false  → CloudPATInvalidError{Reason:...}
 //     (also wraps as ErrCloudPATInvalid via Is)
 //     - HTTP 4xx/5xx, network, timeout, decode failure
 //     → ErrCloudPATUnavailable
+//  3. Local owner-existence check via lookup(owner_id):
+//     - exists  → cache + return success
+//     - missing → ErrCloudPATInvalid (reason="owner_unknown"), NOT cached
+//     - error   → ErrCloudPATUnavailable
 //
-// We deliberately do NOT cache valid=false responses — per the Cloud
-// doc, negative results can flip back to positive on Fleet's side
-// (e.g. lazy-revoke reconciliation), and a stale negative would
-// permanently lock out a freshly minted token within the TTL window.
+// `lookup` may be nil — Verify then skips step 3. Production callers
+// (Auth / DaemonAuth) always supply one; nil mode is for unit tests
+// that exercise the verifier in isolation from the DB.
+//
+// We deliberately do NOT cache valid=false responses or
+// owner_unknown rejections — per the Cloud doc, negative results can
+// flip back to positive (lazy-revoke reconciliation, owner created
+// later in our DB), and a stale negative would permanently lock out
+// a freshly minted token within the TTL window.
 //
 // On a nil receiver returns ErrCloudPATNotConfigured so the
 // middleware can map mcn_ tokens to 401 cleanly when the deployment
 // has no Fleet URL.
-func (v *CloudPATVerifier) Verify(ctx context.Context, token string) (CloudPATIdentity, error) {
+func (v *CloudPATVerifier) Verify(ctx context.Context, token string, lookup OwnerLookupFunc) (CloudPATIdentity, error) {
 	if v == nil || v.baseURL == "" {
 		return CloudPATIdentity{}, ErrCloudPATNotConfigured
 	}
@@ -223,6 +266,27 @@ func (v *CloudPATVerifier) Verify(ctx context.Context, token string) (CloudPATId
 	id, err := v.fetch(ctx, token)
 	if err != nil {
 		return CloudPATIdentity{}, err
+	}
+
+	if lookup != nil {
+		exists, lookupErr := lookup(ctx, id.OwnerID)
+		if lookupErr != nil {
+			// Treat a DB / infrastructure error the same as a Cloud
+			// outage: surface 503 so the caller retries instead of
+			// throwing out a still-valid token. The cache is NOT
+			// populated, so a transient blip resolves on the next
+			// request.
+			slog.Warn("cloud_pat: owner lookup failed; treating as unavailable", "error", lookupErr)
+			return CloudPATIdentity{}, ErrCloudPATUnavailable
+		}
+		if !exists {
+			// Cloud accepted the token, but the owner_id it returned
+			// is not a user we know. Reject without caching — if the
+			// user is created later, the next request must succeed
+			// without waiting for the TTL.
+			slog.Warn("cloud_pat: cloud-verified owner_id has no local user", "owner_id", id.OwnerID)
+			return CloudPATIdentity{}, &CloudPATInvalidError{Reason: CloudPATInvalidReasonOwnerUnknown}
+		}
 	}
 
 	v.cacheSet(ctx, hash, id)

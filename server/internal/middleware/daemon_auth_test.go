@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/auth"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // TestDaemonAuth_DaemonTokenCacheHit pins the daemon-token cache short-circuit:
@@ -225,5 +226,44 @@ func TestDaemonAuth_MCN_FleetUnreachable(t *testing.T) {
 
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503 when fleet is unavailable, got %d", w.Code)
+	}
+}
+
+
+// TestDaemonAuth_MCN_OwnerNotInLocalDB pins the new owner-existence
+// guard end-to-end through the middleware. Cloud verifies the token
+// successfully and returns an owner_id that does not exist in our
+// local user table — DaemonAuth must reject with 401 (not 503) and
+// MUST NOT call the next handler with a phantom X-User-ID.
+func TestDaemonAuth_MCN_OwnerNotInLocalDB(t *testing.T) {
+	pool := openPool(t)
+	defer pool.Close()
+	queries := db.New(pool)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Owner_id is syntactically valid but not seeded in the DB.
+		_, _ = w.Write([]byte(`{
+			"valid": true,
+			"owner_id": "00000000-0000-0000-0000-0000000feed1",
+			"instance_id": "i-99"
+		}`))
+	}))
+	defer srv.Close()
+
+	verifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{FleetBaseURL: srv.URL})
+
+	mw := DaemonAuth(queries, nil, nil, verifier)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next must not be called when owner_id has no local user")
+	}))
+
+	req := httptest.NewRequest("POST", "/api/daemon/heartbeat", nil)
+	req.Header.Set("Authorization", "Bearer mcn_phantom_owner")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when local user is missing, got %d", w.Code)
 	}
 }
