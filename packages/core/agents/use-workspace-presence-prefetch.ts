@@ -4,6 +4,22 @@ import { useQuery } from "@tanstack/react-query";
 import { agentListOptions, squadListOptions } from "../workspace/queries";
 import { runtimeListOptions } from "../runtimes/queries";
 import { agentTaskSnapshotOptions } from "./queries";
+import type { AgentTask } from "../types";
+
+const ACTIVE_AGENT_TASK_STATUSES = new Set<AgentTask["status"]>([
+  "queued",
+  "dispatched",
+  "running",
+  "waiting_local_directory",
+]);
+
+const ACTIVE_TASK_REFETCH_INTERVAL_MS = 15_000;
+
+export function hasActiveAgentTasks(
+  snapshot: readonly AgentTask[] | undefined,
+): boolean {
+  return snapshot?.some((task) => ACTIVE_AGENT_TASK_STATUSES.has(task.status)) ?? false;
+}
 
 // Subscribe to the queries that power agent presence and the @mention
 // suggestion list so they're warm by the time any hover card / inline
@@ -24,6 +40,13 @@ import { agentTaskSnapshotOptions } from "./queries";
 export function useWorkspacePresencePrefetch(wsId: string | undefined): void {
   useQuery({ ...agentListOptions(wsId ?? ""), enabled: !!wsId });
   useQuery({ ...runtimeListOptions(wsId ?? ""), enabled: !!wsId });
-  useQuery({ ...agentTaskSnapshotOptions(wsId ?? ""), enabled: !!wsId });
+  useQuery({
+    ...agentTaskSnapshotOptions(wsId ?? ""),
+    enabled: !!wsId,
+    refetchInterval: (query) =>
+      hasActiveAgentTasks(query.state.data)
+        ? ACTIVE_TASK_REFETCH_INTERVAL_MS
+        : false,
+  });
   useQuery({ ...squadListOptions(wsId ?? ""), enabled: !!wsId });
 }
