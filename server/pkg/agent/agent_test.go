@@ -133,3 +133,22 @@ func TestCapabilityValues(t *testing.T) {
 		t.Fatalf("unknown capability = %+v", got)
 	}
 }
+
+func TestStreamDisplayGatingForUnknownProvider(t *testing.T) {
+	t.Parallel()
+
+	cap := CapabilityOrDefault("unregistered_provider")
+	if cap.StreamDisplay {
+		t.Fatal("unknown provider must default to StreamDisplay=false")
+	}
+
+	for _, name := range []string{"claude", "codex", "copilot", "opencode"} {
+		cap, ok := CapabilityFor(name)
+		if !ok {
+			t.Fatalf("missing %s", name)
+		}
+		if !cap.StreamDisplay {
+			t.Fatalf("%s must have StreamDisplay=true", name)
+		}
+	}
+}
