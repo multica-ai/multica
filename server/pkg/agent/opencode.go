@@ -229,7 +229,7 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			// Accumulate token usage from step_finish events.
 			if t := event.Part.Tokens; t != nil {
 				usage.InputTokens += t.Input
-				usage.OutputTokens += t.Output + t.Reasoning
+				usage.OutputTokens += t.Output
 				if t.Cache != nil {
 					usage.CacheReadTokens += t.Cache.Read
 					usage.CacheWriteTokens += t.Cache.Write
