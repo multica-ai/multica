@@ -50,6 +50,7 @@ type TaskContext struct {
 	SquadID          string `json:"squad_id,omitempty"`
 	SquadName        string `json:"squad_name,omitempty"`
 	LeaderTaskSource string `json:"leader_task_source,omitempty"`
+	RetryInstruction string `json:"retry_instruction,omitempty"`
 }
 
 const LeaderTaskSourceSquadMention = "squad_mention"
@@ -62,6 +63,24 @@ type TaskWakeupNotifier interface {
 // transmit (it ends up in every task list response). 200 is enough for a
 // recognisable preview of a one-paragraph comment.
 const triggerSummaryMaxLen = 200
+
+// TaskContextWithRetryInstruction merges a retry note into an existing task
+// context while preserving other task-scoped fields such as run mode or squad
+// routing metadata.
+func TaskContextWithRetryInstruction(taskContext []byte, retryInstruction string) ([]byte, error) {
+	retryInstruction = strings.TrimSpace(retryInstruction)
+	if retryInstruction == "" {
+		return taskContext, nil
+	}
+	var cfg TaskContext
+	if len(taskContext) > 0 {
+		if err := json.Unmarshal(taskContext, &cfg); err != nil {
+			return nil, fmt.Errorf("decode task context: %w", err)
+		}
+	}
+	cfg.RetryInstruction = retryInstruction
+	return json.Marshal(cfg)
+}
 
 // truncateForSummary returns s shortened to maxRunes, with a trailing
 // `…` when truncated. Operates on runes (not bytes) so multibyte characters
@@ -1481,7 +1500,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 // Tasks owned by other agents on the same issue (e.g. a parallel
 // @-mention agent) are left alone — rerun must not collateral-cancel
 // them.
-func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourceTaskID pgtype.UUID, triggerCommentID pgtype.UUID) (*db.AgentTaskQueue, error) {
+func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourceTaskID pgtype.UUID, triggerCommentID pgtype.UUID, retryInstruction string) (*db.AgentTaskQueue, error) {
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("load issue: %w", err)
@@ -1545,7 +1564,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader)
+	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader, retryInstruction)
 	if err != nil {
 		return nil, err
 	}
@@ -1567,12 +1586,16 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 // stays in sync; otherwise (squad member, prior assignee that has since been
 // reassigned, mention agent) we use the mention path with the same
 // force_fresh_session=true contract.
-func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, retryInstruction string) (db.AgentTaskQueue, error) {
+	taskContext, err := TaskContextWithRetryInstruction(nil, retryInstruction)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTask(ctx, issue, triggerCommentID, nil, true)
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, taskContext, true)
 	}
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, nil, isLeader, true)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, taskContext, isLeader, true)
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of

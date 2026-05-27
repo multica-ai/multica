@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Copy, Link2, MoreHorizontal, Pencil, RotateCcw, RotateCw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Copy, Link2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, RotateCw, Trash2 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -40,6 +40,7 @@ import { issueKeys } from "@multica/core/issues/queries";
 import type { Agent } from "@multica/core/types/agent";
 import { useNavigation } from "../../navigation";
 import { ReplyInput, type ReplyInputRef } from "./reply-input";
+import { RetryWithNoteDialog } from "./retry-with-note-dialog";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
@@ -303,7 +304,7 @@ function useRetryAgentComment(issueId: string, commentId: string) {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: () => api.retryAgentComment(commentId),
+    mutationFn: (retryInstruction?: string) => api.retryAgentComment(commentId, retryInstruction),
     onSuccess: () => {
       toast.success(t(($) => $.comment.retry_success));
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
@@ -391,6 +392,7 @@ function CommentRow({
   const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [retryWithNoteOpen, setRetryWithNoteOpen] = useState(false);
   const isAgent = isAgentComment(entry);
   const agentMeta = isAgent ? agents.find((agent) => agent.id === entry.actor_id) : undefined;
   const memberAncestor = isAgent ? findMemberAncestorComment(entry, commentById) : null;
@@ -503,10 +505,19 @@ function CommentRow({
               {canRetryAgentComment && (
                 <DropdownMenuItem
                   disabled={retryAgentComment.isPending}
-                  onClick={() => retryAgentComment.mutate()}
+                  onClick={() => retryAgentComment.mutate(undefined)}
                 >
                   <RotateCw className="h-3.5 w-3.5" />
                   {t(($) => $.comment.retry_action)}
+                </DropdownMenuItem>
+              )}
+              {canRetryAgentComment && (
+                <DropdownMenuItem
+                  disabled={retryAgentComment.isPending}
+                  onClick={() => setRetryWithNoteOpen(true)}
+                >
+                  <MessageSquarePlus className="h-3.5 w-3.5" />
+                  {t(($) => $.retry_with_note.action)}
                 </DropdownMenuItem>
               )}
               {(canEditEntry || canDeleteEntry) && (
@@ -533,6 +544,12 @@ function CommentRow({
             open={confirmDelete}
             onOpenChange={setConfirmDelete}
             onConfirm={() => onDelete(entry.id)}
+          />
+          <RetryWithNoteDialog
+            open={retryWithNoteOpen}
+            pending={retryAgentComment.isPending}
+            onOpenChange={setRetryWithNoteOpen}
+            onSubmit={(note) => retryAgentComment.mutateAsync(note)}
           />
           </div>
         )}
@@ -668,6 +685,7 @@ function CommentCardImpl({
   const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [retryWithNoteOpen, setRetryWithNoteOpen] = useState(false);
   const isAgent = isAgentComment(entry);
   const agentMeta = isAgent ? agents.find((agent) => agent.id === entry.actor_id) : undefined;
   const memberAncestor = isAgent ? findMemberAncestorComment(entry, commentById) : null;
@@ -869,10 +887,19 @@ function CommentCardImpl({
                   {canRetryAgentComment && (
                     <DropdownMenuItem
                       disabled={retryAgentComment.isPending}
-                      onClick={() => retryAgentComment.mutate()}
+                      onClick={() => retryAgentComment.mutate(undefined)}
                     >
                       <RotateCw className="h-3.5 w-3.5" />
                       {t(($) => $.comment.retry_action)}
+                    </DropdownMenuItem>
+                  )}
+                  {canRetryAgentComment && (
+                    <DropdownMenuItem
+                      disabled={retryAgentComment.isPending}
+                      onClick={() => setRetryWithNoteOpen(true)}
+                    >
+                      <MessageSquarePlus className="h-3.5 w-3.5" />
+                      {t(($) => $.retry_with_note.action)}
                     </DropdownMenuItem>
                   )}
                   {(canEditEntry || canDeleteEntry) && (
@@ -900,6 +927,12 @@ function CommentCardImpl({
                 onOpenChange={setConfirmDelete}
                 onConfirm={() => onDelete(entry.id)}
                 hasReplies
+              />
+              <RetryWithNoteDialog
+                open={retryWithNoteOpen}
+                pending={retryAgentComment.isPending}
+                onOpenChange={setRetryWithNoteOpen}
+                onSubmit={(note) => retryAgentComment.mutateAsync(note)}
               />
               </div>
             )}

@@ -939,8 +939,11 @@ export class ApiClient {
   }
 
   /** Re-queue the agent for this reply (issue threads only). */
-  async retryAgentComment(commentId: string): Promise<void> {
-    await this.fetch(`/api/comments/${commentId}/retry-agent`, { method: "POST" });
+  async retryAgentComment(commentId: string, retryInstruction?: string): Promise<void> {
+    await this.fetch(`/api/comments/${commentId}/retry-agent`, {
+      method: "POST",
+      body: retryInstruction ? JSON.stringify({ retry_instruction: retryInstruction }) : undefined,
+    });
   }
 
   async resolveComment(commentId: string): Promise<Comment> {
@@ -1646,10 +1649,13 @@ export class ApiClient {
     });
   }
 
-  async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
+  async rerunIssue(issueId: string, taskId?: string, retryInstruction?: string): Promise<AgentTask> {
+    const body: { task_id?: string; retry_instruction?: string } = {};
+    if (taskId) body.task_id = taskId;
+    if (retryInstruction) body.retry_instruction = retryInstruction;
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
-      body: JSON.stringify(taskId ? { task_id: taskId } : {}),
+      body: JSON.stringify(body),
     });
   }
 

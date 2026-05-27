@@ -445,6 +445,17 @@
     "update_failed": "更新标签失败",
     "delete_failed": "删除标签失败"
   },
+  "retry_with_note": {
+    "action": "带说明重试",
+    "title": "带说明重试",
+    "description": "为下一次 agent 运行补充纠偏说明。",
+    "label": "这次希望 agent 注意什么？",
+    "placeholder": "说明这次重试需要改变或重点关注的内容...",
+    "hint": "这段说明会注入下一次 task prompt。",
+    "too_long": "说明不能超过 {{max}} 个字符。",
+    "cancel": "取消",
+    "submit": "重试"
+  },
   "backlog_hint": {
     "title": "智能体在 backlog 状态下暂停",
     "description": "这个 issue 处于待规划状态，被分配的智能体会等待。准备启动时把它移到 todo。",
