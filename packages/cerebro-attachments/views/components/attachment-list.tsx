@@ -2,7 +2,7 @@
 
 // CEREBRO-PATCH(attachment-list-cerebro): cerebro modification of upstream file
 
-import { Download, FileText, Eye } from "lucide-react";
+import { Download, FileText, Eye, X } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import type { Attachment } from "@multica/core/types";
 import { isViewableAttachment } from "@multica/cerebro-attachments/core/viewable";
@@ -28,10 +28,13 @@ export function AttachmentList({
   attachments,
   content,
   className,
+  onRemove,
 }: {
   attachments?: Attachment[];
   content?: string;
   className?: string;
+  // CEREBRO-PATCH(attachment-list-onremove): edit-time attachment removal (upstream multi-attachment feature).
+  onRemove?: (attachmentId: string) => void;
 }) {
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
@@ -111,6 +114,17 @@ export function AttachmentList({
                 }
               >
                 <Download className="size-3.5" />
+              </button>
+            )}
+            {onRemove && (
+              <button
+                type="button"
+                aria-label="Remove attachment"
+                title="Remove attachment"
+                className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                onClick={() => onRemove(a.id)}
+              >
+                <X className="size-3.5" />
               </button>
             )}
           </div>

@@ -283,6 +283,16 @@ func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTas
 		s.taskAnalyticsContext(ctx, task),
 		taskDurationMS(task),
 	))
+	// Revoke any mat_ task tokens minted for this task. Cancellation is
+	// a terminal transition, so the running agent process no longer
+	// needs to call back; eagerly deleting the token closes the
+	// window where a compromised process could keep authenticating
+	// against the API until the 24h expiry. Failure is non-fatal — the
+	// expiry / FK cascade are the durable guards. MUL-2600.
+	if err := s.Queries.DeleteTaskTokensByTask(ctx, task.ID); err != nil {
+		slog.Warn("cancel task: failed to revoke task tokens",
+			"task_id", util.UUIDToString(task.ID), "error", err)
+	}
 }
 
 func (s *TaskService) captureTaskEvent(ctx context.Context, event analytics.Event) {
@@ -949,7 +959,7 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 	// running agent can't keep posting comments after we say stop. Outside
 	// the cancel tx so a token-revoke failure can't roll back the cancel
 	// (and the persisted chat_message that goes with it).
-	if err := s.Queries.RevokeTaskTokensForTask(ctx, taskID); err != nil {
+	if err := s.Queries.DeleteTaskTokensByTask(ctx, taskID); err != nil {
 		slog.Warn("revoke task tokens on cancel failed (non-fatal)", "task_id", util.UUIDToString(taskID), "error", err)
 	}
 
@@ -1285,7 +1295,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		// Revoke the per-task token in the same transaction so a
 		// completed task can no longer be acted on through its token,
 		// even if the TTL hasn't elapsed.
-		if err := qtx.RevokeTaskTokensForTask(ctx, taskID); err != nil {
+		if err := qtx.DeleteTaskTokensByTask(ctx, taskID); err != nil {
 			return fmt.Errorf("revoke task tokens: %w", err)
 		}
 
@@ -1492,7 +1502,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		task = t
 
 		// Same revoke-on-terminal-state contract as CompleteTask.
-		if err := qtx.RevokeTaskTokensForTask(ctx, taskID); err != nil {
+		if err := qtx.DeleteTaskTokensByTask(ctx, taskID); err != nil {
 			return fmt.Errorf("revoke task tokens: %w", err)
 		}
 

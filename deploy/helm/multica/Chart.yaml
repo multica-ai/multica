@@ -1,0 +1,16 @@
+apiVersion: v2
+name: multica
+description: |
+  AI-native task management — like Linear, but with AI agents as first-class citizens.
+  Self-host the backend, frontend, and PostgreSQL (pgvector) on a Kubernetes cluster.
+type: application
+version: 0.1.0
+appVersion: "latest"
+home: https://multica.ai
+sources:
+  - https://github.com/multica-ai/multica
+keywords:
+  - multica
+  - issue-tracker
+  - ai-agents
+  - self-host

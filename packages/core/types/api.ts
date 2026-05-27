@@ -57,10 +57,12 @@ export interface ListIssuesParams {
    */
   scheduled?: boolean;
   /**
-   * Cerebro edge-reference filter encoded as `<object>:<ref_id>`, for example
-   * `github_pr:firtal-group/firtal-cerebro#525`.
+   * CEREBRO-PATCH(issue-reference-filter): edge-reference filter encoded as
+   * `<object>:<ref_id>`, for example `github_pr:firtal-group/firtal-cerebro#525`.
    */
   reference?: string;
+  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_direction?: "asc" | "desc";
 }
 
 export interface IssueActorRef {
@@ -95,6 +97,8 @@ export interface ListGroupedIssuesParams {
   reference?: string;
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
+  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_direction?: "asc" | "desc";
 }
 
 /** Raw backend response shape for `GET /api/issues`. */

@@ -18,9 +18,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
-import { FileText, Image as ImageIcon, Loader2, Download } from "lucide-react";
-import { isImageUrl } from "@multica/ui/markdown";
-import { useT } from "../../i18n";
+import { Attachment } from "../attachment";
 
 
 // ---------------------------------------------------------------------------
@@ -28,80 +26,23 @@ import { useT } from "../../i18n";
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// React NodeView
+// React NodeView — thin wrapper, all rendering lives in <Attachment>
 // ---------------------------------------------------------------------------
 
-function FileCardView({ node, editor, getPos }: NodeViewProps) {
-  const { t } = useT("editor");
+export function FileCardView({ node, editor, deleteNode }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
-  const isEditable = editor.isEditable;
-  const canEmbed = !uploading && href && isImageUrl(href);
-
-  const openFile = () => {
-    window.open(href, "_blank", "noopener,noreferrer");
-  };
-
-  const handleEmbedAsImage = () => {
-    const pos = typeof getPos === "function" ? getPos() : undefined;
-    if (typeof pos !== "number") return;
-    editor
-      .chain()
-      .focus()
-      .insertContentAt(
-        { from: pos, to: pos + node.nodeSize },
-        {
-          type: "image",
-          attrs: { src: href, alt: filename || "image" },
-        },
-      )
-      .run();
-  };
+  const editable = editor?.isEditable ?? false;
 
   return (
     <NodeViewWrapper as="div" className="file-card-node" data-type="fileCard">
-      <div
-        className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted"
-        contentEditable={false}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        {uploading ? (
-          <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
-        ) : (
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
-        )}
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm">{uploading ? t(($) => $.file_card.uploading, { filename }) : filename}</p>
-        </div>
-        {canEmbed && isEditable && (
-          <button
-            type="button"
-            className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            title="Embed as image"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              handleEmbedAsImage();
-            }}
-          >
-            <ImageIcon className="size-3.5" />
-          </button>
-        )}
-        {!uploading && href && (
-          <button
-            type="button"
-            className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            title="Download"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              openFile();
-            }}
-          >
-            <Download className="size-3.5" />
-          </button>
-        )}
+      <div contentEditable={false}>
+        <Attachment
+          attachment={{ kind: "url", url: href, filename, uploading }}
+          editable={editable}
+          onDelete={editable ? deleteNode : undefined}
+        />
       </div>
     </NodeViewWrapper>
   );

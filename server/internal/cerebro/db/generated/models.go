@@ -929,6 +929,7 @@ type IssuePullRequest struct {
 	LinkedByType  pgtype.Text        `json:"linked_by_type"`
 	LinkedByID    pgtype.UUID        `json:"linked_by_id"`
 	LinkedAt      pgtype.Timestamptz `json:"linked_at"`
+	CloseIntent   bool               `json:"close_intent"`
 }
 
 type IssueReaction struct {
@@ -1163,15 +1164,14 @@ type TaskMessage struct {
 }
 
 type TaskToken struct {
-	TokenHash   []byte             `json:"token_hash"`
+	ID          pgtype.UUID        `json:"id"`
+	TokenHash   string             `json:"token_hash"`
 	TaskID      pgtype.UUID        `json:"task_id"`
-	IssueID     pgtype.UUID        `json:"issue_id"`
 	AgentID     pgtype.UUID        `json:"agent_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Scope       string             `json:"scope"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UserID      pgtype.UUID        `json:"user_id"`
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
-	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type TaskUsage struct {

@@ -66,18 +66,17 @@ func GenerateDaemonToken() (string, error) {
 	return "mdt_" + hex.EncodeToString(b), nil
 }
 
-// TaskTokenPrefix is the unique marker for short-lived per-task tokens.
-// These tokens are scope-limited (single issue) and TTL-limited so a
-// compromised agent cannot use them for general API access.
-const TaskTokenPrefix = "mtt_"
-
-// GenerateTaskToken creates a new per-task scoped token: "mtt_" + 40 random hex chars.
-func GenerateTaskToken() (string, error) {
+// GenerateAgentTaskToken creates a new task-scoped agent auth token:
+// "mat_" + 40 random hex chars. The token is single-purpose — bound to a
+// specific (agent_id, task_id) pair on the server side — and is what the
+// daemon injects into the agent process in place of its own owner PAT.
+// See MUL-2600.
+func GenerateAgentTaskToken() (string, error) {
 	b := make([]byte, 20)
 	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generate task token: %w", err)
+		return "", fmt.Errorf("generate agent task token: %w", err)
 	}
-	return TaskTokenPrefix + hex.EncodeToString(b), nil
+	return "mat_" + hex.EncodeToString(b), nil
 }
 
 // HashToken returns the hex-encoded SHA-256 hash of a token string.

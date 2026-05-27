@@ -978,6 +978,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/infisical-folders", h.ReplaceAgentInfisicalFolders)
 					// Folders the agent owner is allowed to grant — drives the picker.
 					r.Get("/infisical-allowed-folders", h.ListAgentAllowedInfisicalFolders)
+					// Dedicated env-management endpoint. Owner/admin only;
+					// agent actors are denied. Every reveal / write is
+					// audited to activity_log. See MUL-2600 and
+					// internal/handler/agent_env.go.
+					r.Get("/env", h.GetAgentEnv)
+					r.Put("/env", h.UpdateAgentEnv)
 				})
 			})
 
@@ -1072,6 +1078,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/tools/{toolName}/users/{userId}", h.AddRuntimeToolUserGrant)
 					r.Delete("/tools/{toolName}/users/{userId}", h.RemoveRuntimeToolUserGrant)
 					r.Delete("/", h.DeleteAgentRuntime)
+					// Cascade variant of DELETE: archive every active agent
+					// bound to this runtime, cancel their tasks, then delete
+					// the runtime — all in one transaction. Used by the
+					// DeleteRuntimeDialog when the strict DELETE refused with
+					// `runtime_has_active_agents` and the user confirmed the
+					// cascade plan.
+					r.Post("/archive-agents-and-delete", h.ArchiveAgentsAndDeleteRuntime)
 				})
 			})
 

@@ -45,7 +45,6 @@ const baseAgent: Agent = {
   avatar_url: null,
   runtime_mode: "cloud",
   runtime_config: {},
-  custom_env: {},
   custom_args: [],
   custom_env_redacted: false,
   visibility: "workspace",

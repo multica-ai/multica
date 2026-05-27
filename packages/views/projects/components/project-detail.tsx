@@ -14,7 +14,15 @@ import { projectTreeOptions, useSetProjectParent, useSetProjectShowDescendants }
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
-import { myIssueAssigneeGroupsOptions, myIssueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
+import {
+  myIssueAssigneeGroupsOptions,
+  myIssueListOptions,
+  projectGanttIssuesOptions,
+  childIssueProgressOptions,
+  type AssigneeGroupedIssuesFilter,
+  type IssueSortParam,
+  type MyIssuesFilter,
+} from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
@@ -38,6 +46,8 @@ import { ProjectResourcesSection } from "./project-resources-section";
 import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
+import { GanttView } from "../../issues/components/gantt-view";
+import { SwimLaneView } from "../../issues/components/swimlane-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -122,6 +132,8 @@ function ProjectIssuesContent({
   assigneeGroupFilter,
   scope,
   filter,
+  sort,
+  ganttIssues,
 }: {
   projectId: string;
   projectIssues: Issue[];
@@ -130,6 +142,8 @@ function ProjectIssuesContent({
   assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
   scope: string;
   filter: MyIssuesFilter;
+  sort?: IssueSortParam;
+  ganttIssues: Issue[];
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -157,8 +171,23 @@ function ProjectIssuesContent({
     [displayIssues],
   );
 
+  // CEREBRO-PATCH(project-detail-sub-issues): suppress progress indicators when sub-issues are hidden.
   const { data: serverProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
   const childProgressMap = subIssueDisplay === "hidden" ? new Map() : serverProgressMap;
+
+  // Status-unfiltered companion for Swimlane.
+  const swimlaneIssues = useMemo(
+    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
+    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+  );
+
+  // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
+  // to wait for every status bucket to paginate in. View-store filters still
+  // apply so toggling priority / assignee / label hides the same bars.
+  const filteredGanttIssues = useMemo(
+    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
+    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+  );
 
   // Build children-by-parent map for inline nesting in "on-parent" mode
   const childrenMap = useMemo(() => {
@@ -187,16 +216,29 @@ function ProjectIssuesContent({
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
-    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
+    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position" | "parent_issue_id">, onSettled?: () => void) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
-        { onError: () => toast.error(t(($) => $.detail.toast_move_issue_failed)) },
+        {
+          onError: (err) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.toast_move_issue_failed),
+            ),
+          onSettled: () => onSettled?.(),
+        },
       );
     },
     [updateIssueMutation, t],
   );
 
-  if (projectIssues.length === 0) {
+  // Gantt and Swimlane have their own data sources and empty states —
+  // we never short-circuit them here, otherwise an unscheduled/unparented
+  // but non-empty project would surface a misleading "no issues" CTA.
+  // For Board/List the bucketed cache really is the ground truth,
+  // so an empty result means an empty project.
+  if (viewMode !== "gantt" && viewMode !== "swimlane" && projectIssues.length === 0) {
     return (
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
         <ListTodo className="h-10 w-10 text-muted-foreground/40" />
@@ -232,6 +274,8 @@ function ProjectIssuesContent({
           myIssuesScope={scope}
           myIssuesFilter={filter}
           createIssueData={{ project_id: projectId }}
+          sort={sort}
+          projectId={projectId}
         />
       ) : (
         <ListView
@@ -243,6 +287,24 @@ function ProjectIssuesContent({
           myIssuesFilter={filter}
           doneTotal={doneColumnCount}
           createIssueData={{ project_id: projectId }}
+          sort={sort}
+          projectId={projectId}
+          onMoveIssue={handleMoveIssue}
+        />
+      )}
+      {viewMode === "gantt" && <GanttView issues={filteredGanttIssues} />}
+      {viewMode === "swimlane" && (
+        <SwimLaneView
+          issues={issues}
+          unfilteredIssues={swimlaneIssues}
+          visibleStatuses={visibleStatuses}
+          hiddenStatuses={hiddenStatuses}
+          onMoveIssue={handleMoveIssue}
+          childProgressMap={childProgressMap}
+          myIssuesScope={scope}
+          myIssuesFilter={filter}
+          sort={sort}
+          projectId={projectId}
         />
       )}
     </div>
@@ -261,6 +323,8 @@ function ProjectIssuesSurface({
   const wsId = useWorkspaceId();
   const viewMode = useViewStore((s) => s.viewMode);
   const grouping = useViewStore((s) => s.grouping);
+  const sortBy = useViewStore((s) => s.sortBy);
+  const sortDirection = useViewStore((s) => s.sortDirection);
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);
@@ -268,6 +332,16 @@ function ProjectIssuesSurface({
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
+  const usesGantt = viewMode === "gantt";
+
+  const sort = useMemo(
+    () => ({
+      sort_by: sortBy,
+      sort_direction: sortBy !== "position" ? sortDirection : undefined,
+    } as const),
+    [sortBy, sortDirection],
+  );
+
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
       ...filter,
@@ -284,22 +358,30 @@ function ProjectIssuesSurface({
     wsId,
     scope,
     assigneeGroupFilter,
+    undefined,
+    sort,
   );
   const statusIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, scope, filter),
-    enabled: !usesAssigneeBoard,
+    ...myIssueListOptions(wsId, scope, filter, undefined, sort),
+    enabled: !usesAssigneeBoard && !usesGantt,
   });
   const assigneeGroupsQuery = useQuery({
     ...assigneeGroupsOptions,
     enabled: usesAssigneeBoard,
   });
-  const projectIssues = usesAssigneeBoard
+  const ganttIssuesQuery = useQuery({
+    ...projectGanttIssuesOptions(wsId, projectId),
+    enabled: usesGantt,
+  });
+  const ganttIssues = ganttIssuesQuery.data ?? [];
+  const bucketedIssues = usesAssigneeBoard
     ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
     : (statusIssuesQuery.data ?? []);
+  const projectIssues = usesGantt ? ganttIssues : bucketedIssues;
 
   return (
     <>
-      <IssuesHeader scopedIssues={projectIssues} />
+      <IssuesHeader scopedIssues={projectIssues} allowGantt />
       <ProjectIssuesContent
         projectId={projectId}
         projectIssues={projectIssues}
@@ -308,6 +390,8 @@ function ProjectIssuesSurface({
         assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
         scope={scope}
         filter={filter}
+        sort={sort}
+        ganttIssues={ganttIssues}
       />
       <BatchActionToolbar />
     </>

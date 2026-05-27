@@ -238,7 +238,7 @@ export function ActorIssuesPanel({
             </p>
           </div>
         ) : (
-          <div className="flex flex-1 min-h-0 flex-col">
+          <div className="flex flex-1 min-h-0 flex-col p-1">
             {viewMode === "board" ? (
               <BoardView
                 issues={usesAssigneeBoard ? actorIssues : issues}
