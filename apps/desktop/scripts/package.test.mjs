@@ -296,6 +296,8 @@ describe("Windows installer CLI PATH hook", () => {
     expect(installer).toContain(
       "$INSTDIR\\resources\\app.asar.unpacked\\resources\\bin",
     );
+    expect(installer).toContain("param([string]$$bin)");
+    expect(installer).not.toContain("$$bin = '$INSTDIR");
     expect(installer).toContain("[Environment]::SetEnvironmentVariable('Path'");
     expect(installer).toContain("SendMessageTimeout");
     expect(installer).toContain("Restart open terminals");
