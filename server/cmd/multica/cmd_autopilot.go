@@ -124,6 +124,7 @@ func init() {
 	autopilotCreateCmd.Flags().String("priority", "none", "Priority for created issues (none, low, medium, high, urgent)")
 	autopilotCreateCmd.Flags().String("project", "", "Project ID (optional)")
 	autopilotCreateCmd.Flags().String("issue-title-template", "", "Template for issue titles (create_issue mode). Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected at create-time.")
+	autopilotCreateCmd.Flags().Bool("skip-if-running", true, "Skip dispatch when this autopilot already has an active run")
 	autopilotCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// update
@@ -135,6 +136,7 @@ func init() {
 	autopilotUpdateCmd.Flags().String("status", "", "New status (active, paused)")
 	autopilotUpdateCmd.Flags().String("mode", "", "New execution mode (create_issue or run_only)")
 	autopilotUpdateCmd.Flags().String("issue-title-template", "", "New issue title template. Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected.")
+	autopilotUpdateCmd.Flags().Bool("skip-if-running", true, "Skip dispatch when this autopilot already has an active run")
 	autopilotUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// delete
@@ -203,7 +205,7 @@ func runAutopilotList(cmd *cobra.Command, _ []string) error {
 
 	fullID, _ := cmd.Flags().GetBool("full-id")
 	actors := loadActorDisplayLookup(ctx, client)
-	headers := []string{"ID", "TITLE", "STATUS", "MODE", "ASSIGNEE", "LAST_RUN"}
+	headers := []string{"ID", "TITLE", "STATUS", "MODE", "SKIP_RUNNING", "ASSIGNEE", "LAST_RUN"}
 	rows := make([][]string, 0, len(resp.Autopilots))
 	for _, a := range resp.Autopilots {
 		rows = append(rows, []string{
@@ -211,12 +213,24 @@ func runAutopilotList(cmd *cobra.Command, _ []string) error {
 			strVal(a, "title"),
 			strVal(a, "status"),
 			strVal(a, "execution_mode"),
+			boolDisplay(a["skip_if_running"]),
 			actors.agent(strVal(a, "assignee_id")),
 			strVal(a, "last_run_at"),
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+func boolDisplay(v any) string {
+	b, ok := v.(bool)
+	if !ok {
+		return "-"
+	}
+	if b {
+		return "yes"
+	}
+	return "no"
 }
 
 func runAutopilotGet(cmd *cobra.Command, args []string) error {
@@ -245,12 +259,13 @@ func runAutopilotGet(cmd *cobra.Command, args []string) error {
 
 	ap, _ := resp["autopilot"].(map[string]any)
 	actors := loadActorDisplayLookup(ctx, client)
-	headers := []string{"ID", "TITLE", "STATUS", "MODE", "ASSIGNEE", "LAST_RUN"}
+	headers := []string{"ID", "TITLE", "STATUS", "MODE", "SKIP_RUNNING", "ASSIGNEE", "LAST_RUN"}
 	rows := [][]string{{
 		strVal(ap, "id"),
 		strVal(ap, "title"),
 		strVal(ap, "status"),
 		strVal(ap, "execution_mode"),
+		boolDisplay(ap["skip_if_running"]),
 		actors.agent(strVal(ap, "assignee_id")),
 		strVal(ap, "last_run_at"),
 	}}
@@ -312,6 +327,10 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("issue-title-template"); v != "" {
 		body["issue_title_template"] = v
+	}
+	if cmd.Flags().Changed("skip-if-running") {
+		v, _ := cmd.Flags().GetBool("skip-if-running")
+		body["skip_if_running"] = v
 	}
 
 	var result map[string]any
@@ -388,6 +407,10 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("issue-title-template") {
 		v, _ := cmd.Flags().GetString("issue-title-template")
 		body["issue_title_template"] = v
+	}
+	if cmd.Flags().Changed("skip-if-running") {
+		v, _ := cmd.Flags().GetBool("skip-if-running")
+		body["skip_if_running"] = v
 	}
 
 	if len(body) == 0 {

@@ -247,6 +247,7 @@
     "section_project": "Project",
     "no_project": "No project",
     "section_output_mode": "Output mode",
+    "section_overlap": "Run overlap",
     "section_schedule": "Schedule",
     "section_trigger_kind": "Trigger",
     "trigger_kind_schedule": "Schedule",
@@ -260,6 +261,10 @@
     "webhook_created_done": "Done",
     "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
     "next_run_label": "Next run:",
+    "skip_if_running": {
+      "label": "Skip if already running",
+      "description": "Avoid starting another run while one is active"
+    },
     "output_modes": {
       "create_issue": {
         "label": "Create issue",

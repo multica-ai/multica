@@ -11,7 +11,10 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-const schedulerInterval = 30 * time.Second
+const (
+	schedulerInterval              = 30 * time.Second
+	staleAutopilotAdmissionTimeout = 10 * time.Minute
+)
 
 // runAutopilotScheduler polls for due schedule triggers and dispatches them.
 func runAutopilotScheduler(ctx context.Context, queries *db.Queries, svc *service.AutopilotService) {
@@ -26,8 +29,20 @@ func runAutopilotScheduler(ctx context.Context, queries *db.Queries, svc *servic
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			sweepStaleAutopilotAdmissionRuns(ctx, svc)
 			tickScheduledAutopilots(ctx, queries, svc)
 		}
+	}
+}
+
+func sweepStaleAutopilotAdmissionRuns(ctx context.Context, svc *service.AutopilotService) {
+	failedRuns, err := svc.SweepStaleAdmissionRuns(ctx, staleAutopilotAdmissionTimeout)
+	if err != nil {
+		slog.Warn("autopilot scheduler: failed to sweep stale admission runs", "error", err)
+		return
+	}
+	if failedRuns > 0 {
+		slog.Info("autopilot scheduler: failed stale admission runs", "count", failedRuns)
 	}
 }
 
