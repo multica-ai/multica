@@ -8,6 +8,7 @@ const {
   mockLoginWithGoogle,
   mockListWorkspaces,
   mockListMyInvitations,
+  mockGoogleLogin,
   mockSetQueryData,
 } = vi.hoisted(() => ({
   mockPush: vi.fn(),
@@ -15,6 +16,7 @@ const {
   mockLoginWithGoogle: vi.fn(),
   mockListWorkspaces: vi.fn(),
   mockListMyInvitations: vi.fn(),
+  mockGoogleLogin: vi.fn(),
   mockSetQueryData: vi.fn(),
 }));
 
@@ -64,7 +66,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     listWorkspaces: mockListWorkspaces,
     listMyInvitations: mockListMyInvitations,
-    googleLogin: vi.fn(),
+    googleLogin: mockGoogleLogin,
   },
 }));
 
@@ -80,8 +82,49 @@ describe("CallbackPage", () => {
     );
     mockSearchParams.set("code", "test-code");
     mockLoginWithGoogle.mockResolvedValue(makeUser());
+    mockGoogleLogin.mockResolvedValue({ token: "google-jwt", user: makeUser() });
     mockListWorkspaces.mockResolvedValue([]);
     mockListMyInvitations.mockResolvedValue([]);
+  });
+
+  it("redirects Google OAuth CLI login back to the original callback URL", async () => {
+    mockSearchParams.set(
+      "state",
+      "cli_callback:http%3A%2F%2F100.66.88.103%3A49221%2Fcallback,cli_state:cli-state-123",
+    );
+    const hrefSetter = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        origin: "http://localhost:3000",
+        set href(value: string) {
+          hrefSetter(value);
+        },
+      },
+    });
+
+    try {
+      render(<CallbackPage />);
+
+      await waitFor(() => {
+        expect(mockGoogleLogin).toHaveBeenCalledWith(
+          "test-code",
+          "http://localhost:3000/auth/callback",
+        );
+        expect(hrefSetter).toHaveBeenCalledWith(
+          "http://100.66.88.103:49221/callback?token=google-jwt&state=cli-state-123",
+        );
+      });
+      expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
   });
 
   it("unonboarded user honors a safe next= (e.g. /invite/{id}) so invitees aren't trapped", async () => {

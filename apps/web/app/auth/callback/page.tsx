@@ -16,6 +16,26 @@ import {
 } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
 import { Loader2 } from "lucide-react";
+import { validateCliCallback } from "@multica/views/auth";
+
+function redirectToCliCallback(url: string, token: string, state: string) {
+  const separator = url.includes("?") ? "&" : "?";
+  window.location.href = `${url}${separator}token=${encodeURIComponent(token)}&state=${encodeURIComponent(state)}`;
+}
+
+function getStatePart(parts: string[], prefix: string): string | null {
+  const part = parts.find((p) => p.startsWith(prefix));
+  return part ? part.slice(prefix.length) : null;
+}
+
+function decodeStatePart(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
 
 function CallbackContent() {
   const router = useRouter();
@@ -41,14 +61,27 @@ function CallbackContent() {
     const state = searchParams.get("state") || "";
     const stateParts = state.split(",");
     const isDesktop = stateParts.includes("platform:desktop");
-    const nextPart = stateParts.find((p) => p.startsWith("next:"));
+    const nextPart = getStatePart(stateParts, "next:");
     // Strip "next:" prefix, then drop anything that isn't a safe relative path
     // so an attacker-controlled `state=next:https://evil` cannot redirect here.
-    const nextUrl = sanitizeNextUrl(nextPart ? nextPart.slice(5) : null);
+    const nextUrl = sanitizeNextUrl(nextPart);
+    const cliCallbackEncoded = getStatePart(stateParts, "cli_callback:");
+    const cliCallback = decodeStatePart(cliCallbackEncoded);
+    const cliStateEncoded = getStatePart(stateParts, "cli_state:");
+    const cliState = decodeStatePart(cliStateEncoded) ?? "";
 
     const redirectUri = `${window.location.origin}/auth/callback`;
 
-    if (isDesktop) {
+    if (cliCallback && validateCliCallback(cliCallback)) {
+      api
+        .googleLogin(code, redirectUri)
+        .then(({ token }) => {
+          redirectToCliCallback(cliCallback, token, cliState);
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Login failed");
+        });
+    } else if (isDesktop) {
       // Desktop flow: exchange code for token, then redirect via deep link
       api
         .googleLogin(code, redirectUri)

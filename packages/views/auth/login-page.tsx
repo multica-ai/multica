@@ -74,8 +74,9 @@ function redirectToCliCallback(url: string, token: string, state: string) {
 
 /**
  * Validate that a CLI callback URL points to a safe host over HTTP.
- * Allows localhost and private/LAN IPs (RFC 1918) to support self-hosted setups
- * on local VMs while blocking arbitrary public hosts.
+ * Allows localhost, private/LAN IPs (RFC 1918), and CGNAT/Tailscale IPs
+ * (100.64.0.0/10) to support self-hosted setups on local VMs and WSL2 while
+ * blocking arbitrary public hosts.
  */
 export function validateCliCallback(cliCallback: string): boolean {
   try {
@@ -85,6 +86,7 @@ export function validateCliCallback(cliCallback: string): boolean {
     if (h === "localhost" || h === "127.0.0.1") return true;
     // Allow RFC 1918 private IPs: 10.x.x.x, 172.16-31.x.x, 192.168.x.x
     if (/^10\./.test(h)) return true;
+    if (/^100\.(6[4-9]|[78]\d|9\d|1[01]\d|12[0-7])\./.test(h)) return true;
     if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
     if (/^192\.168\./.test(h)) return true;
     return false;

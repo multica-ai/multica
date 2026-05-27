@@ -77,6 +77,10 @@ function LoginPageContent() {
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
   const [desktopError, setDesktopError] = useState("");
   const hasOnboarded = useHasOnboarded();
+  const cliCallback =
+    cliCallbackRaw && validateCliCallback(cliCallbackRaw)
+      ? { url: cliCallbackRaw, state: cliState }
+      : undefined;
 
   // Already authenticated — honor ?next= or fall back to first workspace
   // (or /onboarding if the user has none). Skip this entire path when
@@ -110,7 +114,17 @@ function LoginPageContent() {
     void resolveLoggedInDestination(qc, hasOnboarded, list).then((dest) =>
       router.replace(dest),
     );
-  }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, hasOnboarded, qc]);
+  }, [
+    isLoading,
+    user,
+    router,
+    nextUrl,
+    cliCallbackRaw,
+    isDesktopHandoff,
+    hasOnboarded,
+    qc,
+    t,
+  ]);
 
   const handleSuccess = async () => {
     // Read the latest user snapshot directly — the closure's `hasOnboarded`
@@ -131,6 +145,8 @@ function LoginPageContent() {
   const googleState = [
     platform === "desktop" ? "platform:desktop" : "",
     nextUrl ? `next:${nextUrl}` : "",
+    cliCallback ? `cli_callback:${encodeURIComponent(cliCallback.url)}` : "",
+    cliCallback ? `cli_state:${encodeURIComponent(cliCallback.state)}` : "",
   ]
     .filter(Boolean)
     .join(",") || undefined;
@@ -198,9 +214,7 @@ function LoginPageContent() {
           : undefined
       }
       cliCallback={
-        cliCallbackRaw && validateCliCallback(cliCallbackRaw)
-          ? { url: cliCallbackRaw, state: cliState }
-          : undefined
+        cliCallback
       }
       onTokenObtained={setLoggedInCookie}
       extra={

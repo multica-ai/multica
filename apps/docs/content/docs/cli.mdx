@@ -21,6 +21,8 @@ Your browser opens automatically. After you approve in the web app, the CLI save
 For CI or headless environments, skip the browser flow: create a PAT in the web app under **Settings → Personal Access Tokens**, then run `multica login --token <mul_...>` to supply it directly.
 </Callout>
 
+In WSL2 or another headless shell where the CLI cannot open a browser, `multica login --callback-host <host-or-ip>` prints a manual login URL. Open that URL in a browser that can reach the printed callback host; after email-code or Google sign-in, the browser redirects back to the CLI listener so the token can be saved locally.
+
 For the difference between token types, see [Authentication and tokens](/auth-tokens).
 
 ## Auth and setup

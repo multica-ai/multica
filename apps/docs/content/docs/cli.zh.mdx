@@ -21,6 +21,8 @@ multica login
 CI / 无浏览器环境跳过浏览器流程：先在 Web 端 **Settings → Personal Access Tokens** 创建一个 PAT，然后 `multica login --token <mul_...>` 直接填入。
 </Callout>
 
+在 WSL2 或其他无浏览器 shell 中，可以运行 `multica login --callback-host <主机名或 IP>`，CLI 会打印一个手动登录 URL。用能访问该 callback host 的浏览器打开它；完成邮箱验证码或 Google 登录后，浏览器会跳回 CLI 监听地址，让 CLI 把 token 存到本机。
+
 Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 
 ## 认证与初始化

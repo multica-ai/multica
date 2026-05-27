@@ -389,6 +389,13 @@ describe("LoginPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("validateCliCallback allows CGNAT/Tailscale callback hosts", () => {
+    expect(validateCliCallback("http://100.64.0.1:9876/callback")).toBe(true);
+    expect(validateCliCallback("http://100.66.88.103:9876/callback")).toBe(true);
+    expect(validateCliCallback("http://100.127.255.254:9876/callback")).toBe(true);
+    expect(validateCliCallback("http://100.128.0.1:9876/callback")).toBe(false);
+  });
+
   // -------------------------------------------------------------------------
   // CLI callback — existing session
   // -------------------------------------------------------------------------

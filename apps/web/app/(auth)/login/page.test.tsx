@@ -25,12 +25,16 @@ const {
   mockSendCode,
   mockVerifyCode,
   mockIssueCliToken,
+  mockGetMe,
+  configStateRef,
   searchParamsState,
   authStateRef,
 } = vi.hoisted(() => ({
   mockSendCode: vi.fn(),
   mockVerifyCode: vi.fn(),
   mockIssueCliToken: vi.fn(),
+  mockGetMe: vi.fn(),
+  configStateRef: { state: { googleClientId: undefined as string | undefined } },
   searchParamsState: { params: new URLSearchParams() },
   authStateRef: {
     state: {
@@ -68,6 +72,11 @@ vi.mock("@multica/core/auth", async () => {
   return { ...actual, useAuthStore };
 });
 
+vi.mock("@multica/core/config", () => ({
+  useConfigStore: (selector: (s: typeof configStateRef.state) => unknown) =>
+    selector(configStateRef.state),
+}));
+
 // Mock auth-cookie
 vi.mock("@/features/auth/auth-cookie", () => ({
   setLoggedInCookie: vi.fn(),
@@ -79,7 +88,7 @@ vi.mock("@multica/core/api", () => ({
     listWorkspaces: vi.fn().mockResolvedValue([]),
     verifyCode: vi.fn(),
     setToken: vi.fn(),
-    getMe: vi.fn(),
+    getMe: mockGetMe,
     issueCliToken: mockIssueCliToken,
   },
 }));
@@ -92,6 +101,8 @@ describe("LoginPage", () => {
     searchParamsState.params = new URLSearchParams();
     authStateRef.state.user = null;
     authStateRef.state.isLoading = false;
+    configStateRef.state.googleClientId = undefined;
+    mockGetMe.mockRejectedValue(new Error("unauthorized"));
   });
 
   it("renders login form with email input and continue button", () => {
@@ -197,6 +208,37 @@ describe("LoginPage", () => {
       expect(
         await screen.findByRole("button", { name: "Open Multica Desktop" }),
       ).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
+  });
+
+  it("preserves validated CLI callback and state in Google OAuth state", async () => {
+    searchParamsState.params = new URLSearchParams({
+      cli_callback: "http://100.66.88.103:49221/callback",
+      cli_state: "cli-state-123",
+    });
+    configStateRef.state.googleClientId = "google-client-id";
+    const user = userEvent.setup();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, href: "http://localhost:3000/login" },
+    });
+
+    try {
+      render(<LoginPage />, { wrapper: createWrapper() });
+
+      await user.click(screen.getByRole("button", { name: "Continue with Google" }));
+
+      const googleUrl = new URL(window.location.href);
+      expect(googleUrl.hostname).toBe("accounts.google.com");
+      expect(googleUrl.searchParams.get("state")).toBe(
+        "cli_callback:http%3A%2F%2F100.66.88.103%3A49221%2Fcallback,cli_state:cli-state-123",
+      );
     } finally {
       Object.defineProperty(window, "location", {
         configurable: true,
