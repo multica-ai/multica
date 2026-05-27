@@ -55,6 +55,17 @@ func isTaskNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(reqErr.Body), "task not found")
 }
 
+// isUnauthorizedError returns true if the error is a 401 from the server.
+// Used by the token-renewal loop to surface a clear "re-login required"
+// message instead of a generic transport-level retry.
+func isUnauthorizedError(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	return reqErr.StatusCode == http.StatusUnauthorized
+}
+
 // isRuntimeNotFoundError returns true if the error is a 404 with "runtime not
 // found" body. The daemon uses this to detect that the runtime row was deleted
 // server-side (UI Delete, 7-day offline GC) while the daemon was still
@@ -313,6 +324,27 @@ func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, re
 type WorkspaceInfo struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// RenewTokenResponse mirrors handler.RenewPATResponse — kept loose (string +
+// bool) because the daemon never parses the timestamp itself; it just logs it
+// for operator visibility.
+type RenewTokenResponse struct {
+	ExpiresAt string `json:"expires_at"`
+	Renewed   bool   `json:"renewed"`
+}
+
+// RenewToken asks the server to extend the daemon's current PAT in place when
+// it's within the server-side renewal window. The server is authoritative on
+// the threshold — the daemon doesn't know the token's expires_at locally —
+// so this is safe to call on any cadence; the only thing extra calls cost is
+// one round trip and one cheap SELECT.
+func (c *Client) RenewToken(ctx context.Context) (*RenewTokenResponse, error) {
+	var resp RenewTokenResponse
+	if err := c.postJSON(ctx, "/api/tokens/current/renew", map[string]any{}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // ListWorkspaces fetches all workspaces the authenticated user belongs to.
