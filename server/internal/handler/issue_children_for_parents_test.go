@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // childrenBatchFixture creates two parents with a couple of children each,
@@ -159,5 +161,59 @@ func TestListChildrenByParents_RejectsTooManyParents(t *testing.T) {
 	testHandler.ListChildrenByParents(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+// TestListChildrenByParents_IgnoresForeignWorkspaceParents pins the
+// workspace_id filter in the SQL query: a parent that exists but lives in a
+// different workspace must yield zero children from the caller's workspace,
+// not the foreign workspace's tree. If a future refactor drops the
+// workspace_id predicate from the query, this test fails.
+func TestListChildrenByParents_IgnoresForeignWorkspaceParents(t *testing.T) {
+	ctx := context.Background()
+
+	var foreignWorkspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, "Foreign Children Workspace", "foreign-children-"+uuid.New().String()[:8],
+		"Cross-tenant test workspace", "FCW").Scan(&foreignWorkspaceID); err != nil {
+		t.Fatalf("setup: create foreign workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM issue WHERE workspace_id = $1`, foreignWorkspaceID)
+		testPool.Exec(context.Background(),
+			`DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID)
+	})
+
+	var foreignParentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, number, title, status, position, creator_type, creator_id)
+		VALUES ($1, 1, 'foreign parent', 'todo', 1, 'member', $2)
+		RETURNING id
+	`, foreignWorkspaceID, testUserID).Scan(&foreignParentID); err != nil {
+		t.Fatalf("setup: insert foreign parent: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue (workspace_id, number, title, status, position, parent_issue_id, creator_type, creator_id)
+		VALUES ($1, 2, 'foreign child', 'todo', 2, $2, 'member', $3)
+	`, foreignWorkspaceID, foreignParentID, testUserID); err != nil {
+		t.Fatalf("setup: insert foreign child: %v", err)
+	}
+
+	// Call the endpoint from testWorkspaceID with the foreign parent's id.
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/children?workspace_id="+testWorkspaceID+
+		"&parent_ids="+foreignParentID, nil)
+	testHandler.ListChildrenByParents(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	got := decodeIssueBatch(t, w)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 children (foreign workspace isolation), got %d (first child id=%s)",
+			len(got), got[0].ID)
 	}
 }

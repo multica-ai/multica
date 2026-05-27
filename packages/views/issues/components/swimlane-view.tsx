@@ -219,6 +219,9 @@ interface LaneGroup {
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_PROJECTS: Project[] = [];
+// Stable reference for non-parent groupings — keeps the `statusTotals` /
+// `cells` memos from busting on every render when there are no headers.
+const EMPTY_HEADER_IDS = new Set<string>();
 
 /**
  * Build parent-grouping lanes. The "No parent" lane is always pinned at the
@@ -510,32 +513,46 @@ export function SwimLaneView({
     [t],
   );
 
-  // Batched children fetch — parent grouping only. Fetches all children for
-  // visible parent lanes in a single request so grandparent lanes are never
-  // empty due to pagination. Only runs when grouping === "parent".
+  // Candidate parents for the batch fetch (parent grouping only). Union of:
+  //   - parent_issue_id of visible issues (child loaded, parent past page)
+  //   - id of visible issues with children per childProgressMap (parent
+  //     loaded, grandchild past page — the bug this PR fixes)
   const qc = useQueryClient();
   const batchParentIds = useMemo(() => {
     if (swimlaneGrouping !== "parent") return [];
     const ids = new Set<string>();
-    for (const issue of issues) {
-      if (!issue.parent_issue_id) continue;
-      if (qc.getQueryData(issueKeys.children(wsId, issue.parent_issue_id)) === undefined) {
-        ids.add(issue.parent_issue_id);
+    const consider = (id: string | null | undefined) => {
+      if (!id) return;
+      if (qc.getQueryData(issueKeys.children(wsId, id)) === undefined) {
+        ids.add(id);
       }
+    };
+    for (const issue of issues) {
+      consider(issue.parent_issue_id);
+      const progress = childProgressMap.get(issue.id);
+      if (progress && progress.total > 0) consider(issue.id);
     }
     return Array.from(ids).sort();
-  }, [swimlaneGrouping, issues]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [swimlaneGrouping, issues, childProgressMap]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: batchChildrenMap } = useQuery(
     childrenByParentsOptions(wsId, batchParentIds, qc),
   );
 
   // Grows monotonically so lanes don't lose children when the batch key
-  // changes — once a parent's cache is hydrated it stays observed.
+  // changes — once a parent's cache is hydrated it stays observed. Reset
+  // when grouping leaves "parent" so a long session that toggles groupings
+  // doesn't accumulate dead subscriptions.
   const subscribedRef = useRef<Set<string>>(new Set());
   const sortedSubscribedRef = useRef<string[]>([]);
   const subscribedParentIds = useMemo(() => {
-    if (swimlaneGrouping !== "parent") return [];
+    if (swimlaneGrouping !== "parent") {
+      if (subscribedRef.current.size > 0) {
+        subscribedRef.current = new Set();
+        sortedSubscribedRef.current = [];
+      }
+      return sortedSubscribedRef.current;
+    }
     let changed = false;
     const add = (id: string | null | undefined) => {
       if (!id || subscribedRef.current.has(id)) return;
@@ -599,11 +616,9 @@ export function SwimLaneView({
     if (swimlaneGrouping === "assignee") {
       return buildAssigneeLanes(issues, getActorName, swimlaneOrder, laneLabels);
     }
-    // Lane discovery uses `mergedIssues` so batch-fetched children (beyond
-    // the first page) can promote their parents to lane headers. Metadata
-    // lookup uses `laneSourceIssues` so headers resolve even for parents in
-    // hidden statuses. buildParentLanes only creates a lane when it can
-    // resolve the parent in the metadata map, so phantom lanes can't appear.
+    // Discovery uses `mergedIssues` so batch-fetched grandchildren can
+    // promote their parents to lane headers. Metadata uses `laneSourceIssues`
+    // so headers resolve for parents in hidden statuses.
     return buildParentLanes(mergedIssues, laneSourceIssues, swimlaneOrder, laneLabels);
   }, [
     swimlaneGrouping,
@@ -621,7 +636,7 @@ export function SwimLaneView({
   // never collide this way (lanes are projects/actors, not issues), so the
   // set is empty there.
   const headerIssueIds = useMemo(() => {
-    if (swimlaneGrouping !== "parent") return new Set<string>();
+    if (swimlaneGrouping !== "parent") return EMPTY_HEADER_IDS;
     return new Set(
       laneGroups
         .filter((g) => g.parentIssue !== null)
@@ -645,8 +660,6 @@ export function SwimLaneView({
         ? laneGroups.find((g) => g.isOrphan) ?? null
         : null;
 
-    // For parent grouping use mergedIssues so batch-fetched children
-    // (beyond the first page) are included in lane cells.
     const issueSource = swimlaneGrouping === "parent" ? mergedIssues : issues;
     const sorted = sortIssues(issueSource, sortBy, sortDirection);
     for (const issue of sorted) {
@@ -654,12 +667,9 @@ export function SwimLaneView({
       for (const lane of laneGroups) {
         if (lane.isOrphan) continue;
         if (lane.matches(issue)) {
-          // Parent grouping, "No parent" lane: exclude issues that are
-          // themselves lane headers. They already render as their own lane
-          // header below — showing the duplicate card in "No parent" would
-          // be redundant noise. Real-parent lanes still render their
-          // header-child as a card so grandparent lanes are never empty
-          // (dual-render is intentional for multi-level nesting).
+          // "No parent" lane only: skip issues that are themselves lane
+          // headers (avoid duplicate card + header). Real-parent lanes keep
+          // the dual render so grandparent lanes are never empty.
           if (
             swimlaneGrouping === "parent" &&
             lane.rawId === NONE_LANE_ID &&
@@ -828,6 +838,16 @@ export function SwimLaneView({
           return prev;
         }
 
+        // Self-parent guard — see handleDragEnd for rationale.
+        const overLane = laneByKey.get(overCell.laneKey);
+        if (
+          overLane &&
+          overLane.parentIssue !== null &&
+          overLane.parentIssue.id === activeId
+        ) {
+          return prev;
+        }
+
         recentlyMovedRef.current = true;
 
         if (activeCell.laneKey === overCell.laneKey) {
@@ -947,6 +967,20 @@ export function SwimLaneView({
       if (
         laneByKey.get(activeCell.laneKey)?.isOrphan ||
         laneByKey.get(overCell.laneKey)?.isOrphan
+      ) {
+        reset();
+        return;
+      }
+
+      // Self-parent guard (parent grouping only): refuse drops where the
+      // dragged card is the same issue as the target lane's parent. The
+      // backend rejects this as a self-cycle; intercepting client-side
+      // avoids the optimistic-move → rollback flicker.
+      const targetLaneForGuard = laneByKey.get(overCell.laneKey);
+      if (
+        targetLaneForGuard &&
+        targetLaneForGuard.parentIssue !== null &&
+        targetLaneForGuard.parentIssue.id === activeId
       ) {
         reset();
         return;

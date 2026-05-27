@@ -305,6 +305,12 @@ export function useUpdateIssue() {
         });
         qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
       }
+      // Invalidate the batched-children cache only when the parent link
+      // actually changed. The WS path (ws-updaters.ts) invalidates
+      // unconditionally because it doesn't know what the server change
+      // touched; here onMutate already patched issueKeys.children(parent)
+      // optimistically, so we only need to flush when the parent relation
+      // itself moved.
       if (ctx?.parentId || newParentId) {
         qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
       }

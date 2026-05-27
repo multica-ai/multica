@@ -1192,6 +1192,10 @@ describe("SwimLaneView", () => {
     // Scenario: grandparent G → parent P (loaded, becomes a lane header) →
     // grandchild GC (NOT in the initial `issues` set, returned only by the
     // batch fetch). P's lane should show GC after the batch resolves.
+    //
+    // For the batch to include P.id, the caller must pass childProgressMap
+    // signaling that P has children — without it, batchParentIds only sees
+    // GP.id (from parent.parent_issue_id) and GC is never fetched.
     const grandparent: Issue = {
       id: "gp-1",
       workspace_id: "ws-1",
@@ -1235,17 +1239,75 @@ describe("SwimLaneView", () => {
     };
 
     mockListChildrenByParents.mockResolvedValueOnce({ issues: [grandchild] });
+    const childProgressMap = new Map<string, { done: number; total: number }>([
+      ["p-1", { done: 0, total: 1 }],
+    ]);
 
     renderWithI18n(
       <SwimLaneView
         issues={[grandparent, parent]}
+        childProgressMap={childProgressMap}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    // Assert the batch request actually included p-1 — without this the
+    // mock would happily return GC for any request and the merge would
+    // appear to work without exercising the real path.
+    await waitFor(() => {
+      expect(mockListChildrenByParents).toHaveBeenCalled();
+    });
+    const [calledIds] = mockListChildrenByParents.mock.calls[0] as [string[]];
+    expect(calledIds).toEqual(expect.arrayContaining(["p-1"]));
+
+    await waitFor(() => {
+      expect(screen.getByText("Grandchild (batch only)")).toBeInTheDocument();
+    });
+  });
+
+  it("includes visible parents with children (via childProgressMap) in the batch request", async () => {
+    // Even without any loaded child pointing at a parent, if childProgressMap
+    // says the parent has children we should query it so deep-nested
+    // grandchildren are discoverable.
+    const parentWithUnloadedChildren: Issue = {
+      id: "p-only",
+      workspace_id: "ws-1",
+      number: 50,
+      identifier: "PROJ-50",
+      title: "Standalone parent",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 50,
+      start_date: null,
+      due_date: null,
+      metadata: {},
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const childProgressMap = new Map<string, { done: number; total: number }>([
+      ["p-only", { done: 0, total: 3 }],
+    ]);
+
+    renderWithI18n(
+      <SwimLaneView
+        issues={[parentWithUnloadedChildren]}
+        childProgressMap={childProgressMap}
         onMoveIssue={vi.fn()}
       />,
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Grandchild (batch only)")).toBeInTheDocument();
+      expect(mockListChildrenByParents).toHaveBeenCalled();
     });
+    const [calledIds] = mockListChildrenByParents.mock.calls[0] as [string[]];
+    expect(calledIds).toEqual(expect.arrayContaining(["p-only"]));
   });
 
   it("does not fire listChildrenByParents when swimlaneGrouping is not parent", async () => {
@@ -1257,5 +1319,30 @@ describe("SwimLaneView", () => {
 
     await act(async () => {});
     expect(mockListChildrenByParents).not.toHaveBeenCalled();
+  });
+
+  it("does not call onMoveIssue when dropping a card into a lane whose header is that card", () => {
+    // parent-1 (a lane-header card in the No-parent lane) dropped onto a
+    // cell inside its own lane (`swim:parent:parent-1:in_progress`) would
+    // be a self-cycle. The client guard refuses before reaching the API.
+    const mockOnMoveIssue = vi.fn();
+    renderWithI18n(
+      <SwimLaneView issues={mockIssues} onMoveIssue={mockOnMoveIssue} />,
+    );
+
+    act(() => {
+      lastOnDragOver({
+        active: { id: "parent-1" },
+        over: { id: "swim:parent:parent-1:in_progress" },
+      });
+    });
+    act(() => {
+      lastOnDragEnd({
+        active: { id: "parent-1" },
+        over: { id: "swim:parent:parent-1:in_progress" },
+      });
+    });
+
+    expect(mockOnMoveIssue).not.toHaveBeenCalled();
   });
 });
