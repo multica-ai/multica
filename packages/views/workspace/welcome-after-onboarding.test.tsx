@@ -67,6 +67,7 @@ vi.mock("@multica/core/paths", async () => {
 
 vi.mock("@multica/core/api", () => ({
   api: {
+    getBaseUrl: () => "http://127.0.0.1:8080",
     listAgents: (...args: unknown[]) => mockListAgents(...args),
     createAgent: (...args: unknown[]) => mockCreateAgent(...args),
     createIssue: (...args: unknown[]) => mockCreateIssue(...args),
@@ -178,7 +179,9 @@ describe("WelcomeAfterOnboarding", () => {
       expect(
         screen.getByText("Walk me through the core features"),
       ).toBeInTheDocument();
-      expect(screen.getByText("Make me a welcome page")).toBeInTheDocument();
+      expect(
+        screen.getByText("Show me what Multica can do for me — as slides"),
+      ).toBeInTheDocument();
     });
 
     it("reuses an existing Multica Helper agent instead of creating duplicates", async () => {
@@ -246,7 +249,9 @@ describe("WelcomeAfterOnboarding", () => {
 
       // Toggle two cards.
       fireEvent.click(screen.getByText("Introduce Multica to me"));
-      fireEvent.click(screen.getByText("Make me a welcome page"));
+      fireEvent.click(
+        screen.getByText("Show me what Multica can do for me — as slides"),
+      );
 
       // CTA enables and reflects the count.
       const cta = await screen.findByRole("button", { name: /assign 2/i });
@@ -257,7 +262,7 @@ describe("WelcomeAfterOnboarding", () => {
       const titles = mockCreateIssue.mock.calls.map(([args]) => args.title);
       expect(titles).toEqual([
         "Introduce Multica to me",
-        "Make me a welcome page",
+        "Show me what Multica can do for me — as slides",
       ]);
       // Both assigned to the same Helper agent.
       mockCreateIssue.mock.calls.forEach(([args]) => {

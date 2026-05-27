@@ -8,10 +8,21 @@
     "dev:docs": "turbo dev --filter=@multica/docs",
     "dev:desktop": "turbo dev --filter=@multica/desktop",
     "dev:desktop:staging": "turbo dev:staging --filter=@multica/desktop",
-    "build": "turbo build",
-    "typecheck": "turbo typecheck",
-    "test": "turbo test",
-    "lint": "turbo lint",
+    "dev:mobile": "pnpm -C apps/mobile dev",
+    "dev:mobile:staging": "pnpm -C apps/mobile dev:staging",
+    "dev:mobile:prod": "pnpm -C apps/mobile dev:prod",
+    "ios:mobile": "pnpm -C apps/mobile ios",
+    "ios:mobile:staging": "pnpm -C apps/mobile ios:staging",
+    "ios:mobile:prod": "pnpm -C apps/mobile ios:prod",
+    "ios:mobile:device": "pnpm -C apps/mobile ios:device",
+    "ios:mobile:device:staging": "pnpm -C apps/mobile ios:device:staging",
+    "ios:mobile:device:staging:release": "pnpm -C apps/mobile ios:device:staging:release",
+    "ios:mobile:device:prod": "pnpm -C apps/mobile ios:device:prod",
+    "ios:mobile:device:prod:release": "pnpm -C apps/mobile ios:device:prod:release",
+    "build": "turbo build --filter=!@multica/mobile",
+    "typecheck": "turbo typecheck --filter=!@multica/mobile",
+    "test": "turbo test --filter=!@multica/mobile",
+    "lint": "turbo lint --filter=!@multica/mobile",
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add",
     "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs"
@@ -24,7 +35,8 @@
     ],
     "overrides": {
       "@types/react": "catalog:",
-      "@types/react-dom": "catalog:"
+      "@types/react-dom": "catalog:",
+      "@xmldom/xmldom": "^0.8.13"
     }
   },
   "devDependencies": {
@@ -34,5 +46,10 @@
     "pg": "^8.20.0",
     "turbo": "^2.5.4",
     "typescript": "catalog:"
+  },
+  "dependencies": {
+    "expo": "~55.0.23",
+    "react": "19.2.0",
+    "react-native": "0.83.6"
   }
 }

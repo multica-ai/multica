@@ -413,6 +413,7 @@ export function AgentTranscriptDialog({
                 </DropdownMenu>
               )}
               <button
+                type="button"
                 onClick={handleCopyAll}
                 className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
@@ -420,6 +421,7 @@ export function AgentTranscriptDialog({
                 {copied ? t(($) => $.transcript.copied) : selectedTools.size > 0 ? t(($) => $.transcript.copy_filtered) : t(($) => $.transcript.copy_all)}
               </button>
               <button
+                type="button"
                 onClick={() => onOpenChange(false)}
                 className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
@@ -649,6 +651,7 @@ function TimelineBar({
 
         return (
           <button
+            type="button"
             key={seg.startIdx}
             className={cn(
               "h-full transition-all duration-150 hover:opacity-80 relative group",

@@ -475,6 +475,8 @@ function AdditionalMembersPicker({
             <div
               role="combobox"
               aria-haspopup="listbox"
+              aria-expanded={open}
+              aria-controls="squad-member-listbox"
               tabIndex={0}
               className="flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             >
@@ -522,7 +524,7 @@ function AdditionalMembersPicker({
               className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
             />
           </div>
-          <div className="max-h-72 overflow-y-auto p-1">
+          <div id="squad-member-listbox" role="listbox" className="max-h-72 overflow-y-auto p-1">
             {filteredMine.length > 0 && (
               <PickerSection label={t(($) => $.create_squad.group_my_agents)}>
                 {filteredMine.map((a) => (

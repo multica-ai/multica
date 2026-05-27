@@ -205,7 +205,7 @@
           "subtitle": "陪你走一遍 issue、agent、squad、autopilot 怎么配合。"
         },
         "welcome_page": {
-          "subtitle": "给你写一个小 HTML 页面，庆祝上手 Multica。"
+          "subtitle": "我用单文件 HTML 演示稿介绍 Multica 能为你做什么，按你的角色定制，复制下来双击就能在浏览器里打开。"
         }
       },
       "success": {
@@ -282,7 +282,7 @@
     "preview": {
       "inbox_label": "收件箱",
       "inbox_meta": "你的通知",
-      "issues_label": "issue",
+      "issues_label": "Issues",
       "issues_meta": "共享任务面板",
       "agents_label": "智能体",
       "agents_meta": "你的 AI 队友",
@@ -292,7 +292,7 @@
       "autopilot_meta": "定时自动化",
       "runtimes_label": "运行时",
       "runtimes_meta": "智能体跑的地方",
-      "skills_label": "skill",
+      "skills_label": "Skills",
       "skills_meta": "可复用的剧本",
       "more_label": "更多",
       "more_meta": "等等"

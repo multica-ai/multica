@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -27,9 +28,24 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 // TTL (auth.AuthCacheTTL). On cache hit the middleware skips both the DB
 // SELECT and the last_used_at UPDATE — last_used_at is therefore refreshed
 // at most once per TTL window per token, not per request.
-func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.Handler {
+//
+// cloudPAT is optional; when non-nil, tokens with the mcn_ prefix are
+// validated by calling the Multica Cloud Fleet service rather than the
+// local DB. When nil (Fleet URL unset) mcn_ tokens are rejected at the
+// prefix branch — we don't fall through to the mul_ / JWT paths, since
+// an mcn_ string is by construction not a valid mul_ PAT or JWT.
+func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// X-Actor-Source is server-set only — any value supplied by
+			// the client is untrusted and discarded before the auth
+			// branches run. Only the mat_ branch below re-sets it. This
+			// is what prevents a client from sending a normal mul_ PAT
+			// plus a forged `X-Actor-Source: member` (or anything else)
+			// to convince a downstream handler that its request came
+			// from a non-task-token path.
+			r.Header.Del("X-Actor-Source")
+
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
 				slog.Debug("auth: no token found", "path", r.URL.Path)
@@ -41,6 +57,87 @@ func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.
 			if fromCookie && !auth.ValidateCSRF(r) {
 				slog.Debug("auth: CSRF validation failed", "path", r.URL.Path)
 				http.Error(w, `{"error":"CSRF validation failed"}`, http.StatusForbidden)
+				return
+			}
+
+			// Agent task token: "mat_" prefix. Minted by the server at
+			// task-claim time and injected by the daemon into the agent
+			// process. Authoritative for actor identity — the bound
+			// (user_id, agent_id, task_id, workspace_id) triple is
+			// written into request headers here, OVERRIDING whatever the
+			// client sent, so a downstream actor-resolver cannot be
+			// tricked by a client that strips or forges X-Agent-ID /
+			// X-Task-ID. Owner-only endpoints (e.g. agent env
+			// management) reject requests authenticated this way; see
+			// `actorSourceFromRequest`. MUL-2600.
+			if strings.HasPrefix(tokenString, "mat_") {
+				if queries == nil {
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				hash := auth.HashToken(tokenString)
+				tt, err := queries.GetTaskTokenByHash(r.Context(), hash)
+				if err != nil {
+					slog.Warn("auth: invalid task token", "path", r.URL.Path, "error", err)
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				r.Header.Set("X-User-ID", uuidToString(tt.UserID))
+				r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
+				r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
+				r.Header.Set("X-Workspace-ID", uuidToString(tt.WorkspaceID))
+				// X-Actor-Source flags the auth path so resolveActor and
+				// any owner-only handler can deny without re-querying the
+				// token table. The value "task_token" is the only signal
+				// this header is allowed to carry — strip anything else a
+				// client tried to send.
+				r.Header.Set("X-Actor-Source", "task_token")
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Cloud Node PAT: "mcn_" prefix. Verified by calling the
+			// Multica Cloud Fleet service — Cloud (not us) is the
+			// authoritative owner of the token's status and owner_id
+			// binding. We never look at the local
+			// personal_access_tokens table for this prefix; an mcn_
+			// string is not a valid mul_ value, so falling through
+			// would just be a redundant DB miss. When the verifier
+			// is unconfigured (no MULTICA_CLOUD_FLEET_URL) we reject
+			// at this branch rather than treating the token as a
+			// JWT/PAT — failing closed avoids a misconfigured prod
+			// silently downgrading auth.
+			//
+			// After Cloud confirms the token, we also confirm that
+			// the returned owner_id maps to a real local user. The
+			// Cloud `owner_id` and our `users.id` share the same UUID
+			// space by contract, so this is a defense in depth: a
+			// missing user means the local row was deleted out from
+			// under a still-active node, or something is forging
+			// owner_ids — either way we must not let the request
+			// pass with a phantom X-User-ID.
+			if strings.HasPrefix(tokenString, auth.CloudPATPrefix) {
+				if cloudPAT == nil {
+					slog.Warn("auth: mcn_ token presented but cloud verifier not configured", "path", r.URL.Path)
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				identity, err := cloudPAT.Verify(r.Context(), tokenString, ownerLookupFor(queries))
+				if err != nil {
+					if errors.Is(err, auth.ErrCloudPATInvalid) {
+						slog.Warn("auth: cloud rejected mcn_ token", "path", r.URL.Path, "error", err)
+						http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+						return
+					}
+					// Cloud unreachable / 5xx / decode error. We surface
+					// 503 so callers (CLI / daemon) can retry — a 401
+					// here would tell them to throw out a valid token.
+					slog.Warn("auth: cloud pat verify unavailable", "path", r.URL.Path, "error", err)
+					http.Error(w, `{"error":"cloud pat verifier unavailable"}`, http.StatusServiceUnavailable)
+					return
+				}
+				r.Header.Set("X-User-ID", identity.OwnerID)
+				next.ServeHTTP(w, r)
 				return
 			}
 

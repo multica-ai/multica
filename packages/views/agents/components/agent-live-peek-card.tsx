@@ -6,16 +6,16 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
   agentTaskSnapshotOptions,
   useAgentPresenceDetail,
 } from "@multica/core/agents";
 import { issueDetailOptions } from "@multica/core/issues";
-import { timeAgo } from "@multica/core/utils";
 import type { AgentTask } from "@multica/core/types";
 import { AlertTriangle } from "lucide-react";
 import { AppLink } from "../../navigation";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
 import { workloadConfig } from "../presence";
 
 interface AgentLivePeekCardProps {
@@ -83,7 +83,7 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
         <ActorAvatarBase
           name={agent.name}
           initials={initials}
-          avatarUrl={agent.avatar_url}
+          avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
           isAgent
           size={40}
           className="rounded-md"
@@ -200,6 +200,7 @@ function LastActivityRow({
   emptyLabel: string;
   failedLabel: string;
 }) {
+  const timeAgo = useTimeAgo();
   return (
     <div className="flex items-center gap-1.5">
       <span className="w-16 shrink-0 text-muted-foreground">{label}</span>

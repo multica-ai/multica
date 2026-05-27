@@ -70,7 +70,19 @@ export interface AgentTask {
   // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
   // which source produced it.
   issue_id: string;
-  status: "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
+  // `waiting_local_directory` is the daemon-emitted hold state for the
+  // local_directory flow: a task that has been dispatched but is parked
+  // because another task currently owns the same on-disk path lock.
+  // Treated as an active (non-terminal) state alongside queued/dispatched/
+  // running by every consumer that buckets tasks into "active vs done".
+  status:
+    | "queued"
+    | "dispatched"
+    | "waiting_local_directory"
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelled";
   priority: number;
   dispatched_at: string | null;
   started_at: string | null;
@@ -123,9 +135,24 @@ export interface Agent {
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
-  custom_env: Record<string, string>;
   custom_args: string[];
-  custom_env_redacted: boolean;
+  /**
+   * Coarse metadata signalling whether the agent has any custom env
+   * vars configured, without exposing the keys or values. Reads of
+   * the real map go through the dedicated `GET /api/agents/{id}/env`
+   * endpoint (owner/admin only, audited). MUL-2600.
+   *
+   * Optional in the type so older backends (pre-MUL-2600) that omit
+   * the field don't crash the renderer; downstream code should treat
+   * `undefined` as "unknown — assume no env" rather than "definitely
+   * has env".
+   */
+  has_custom_env?: boolean;
+  /**
+   * Number of keys in the agent's custom_env map. Always present
+   * alongside `has_custom_env`. Treat `undefined` as zero. MUL-2600.
+   */
+  custom_env_key_count?: number;
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
@@ -258,7 +285,15 @@ export interface UpdateAgentRequest {
   avatar_url?: string;
   runtime_id?: string;
   runtime_config?: Record<string, unknown>;
-  custom_env?: Record<string, string>;
+  /**
+   * NOTE: `custom_env` is intentionally NOT updatable through this
+   * request shape. Env edits flow through `client.updateAgentEnv` /
+   * `PUT /api/agents/{id}/env` — that path is owner/admin only,
+   * denies agent actors, and writes a persistent audit row. The
+   * server REJECTS any `PUT /api/agents/{id}` body that includes
+   * `custom_env` with a 400; do not put the field in this payload.
+   * MUL-2600.
+   */
   custom_args?: string[];
   visibility?: AgentVisibility;
   status?: AgentStatus;
@@ -273,6 +308,28 @@ export interface UpdateAgentRequest {
    *     runtime's provider enum, rejected with 400 if not recognised
    */
   thinking_level?: string;
+}
+
+/**
+ * Wire shape for the dedicated env-management endpoints
+ * (`GET /api/agents/{id}/env` and `PUT /api/agents/{id}/env`). Kept
+ * deliberately separate from `Agent` so generic agent reads cannot
+ * accidentally surface env values. MUL-2600.
+ */
+export interface AgentEnvResponse {
+  agent_id: string;
+  custom_env: Record<string, string>;
+}
+
+/**
+ * Body for `PUT /api/agents/{id}/env`. Values equal to `"****"` are
+ * treated by the server as "preserve the existing value for this key"
+ * — a defence-in-depth guard so a UI that round-trips a masked map
+ * cannot accidentally clobber real secrets. Submit only the keys
+ * touched in the form; omitted keys are removed by the server.
+ */
+export interface UpdateAgentEnvRequest {
+  custom_env: Record<string, string>;
 }
 
 // Skills

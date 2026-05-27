@@ -191,6 +191,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		finalStatus := "completed"
 		var finalError string
 		var sessionID string
+		effectiveModel := strings.TrimSpace(opts.Model)
 
 		// 1. Initialize handshake.
 		_, err := c.request(runCtx, "initialize", map[string]any{
@@ -234,6 +235,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					"actual", sessionID,
 				)
 			}
+			if effectiveModel == "" {
+				effectiveModel = extractACPCurrentModelID(result)
+			}
 		} else {
 			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
 			if err != nil {
@@ -248,6 +252,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				finalError = "hermes session/new returned no session ID"
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
+			}
+			if effectiveModel == "" {
+				effectiveModel = extractACPCurrentModelID(result)
 			}
 		}
 
@@ -324,6 +331,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				c.usageMu.Lock()
 				c.usage.InputTokens += pr.usage.InputTokens
 				c.usage.OutputTokens += pr.usage.OutputTokens
+				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
 				c.usageMu.Unlock()
 			default:
 			}
@@ -367,7 +375,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		var usageMap map[string]TokenUsage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 {
-			model := opts.Model
+			model := effectiveModel
 			if model == "" {
 				model = "unknown"
 			}
@@ -1133,6 +1141,35 @@ func extractACPSessionID(result json.RawMessage) string {
 		return ""
 	}
 	return r.SessionID
+}
+
+// extractACPCurrentModelID pulls the model selected by the ACP runtime out of
+// a session/new or session/resume response. Hermes returns this when it uses
+// its own default model, so token usage can still be attributed to a real model
+// even when Multica did not pass an explicit agent.model override.
+func extractACPCurrentModelID(result json.RawMessage) string {
+	var r struct {
+		Models struct {
+			CurrentModelID      string `json:"currentModelId"`
+			CurrentModelIDSnake string `json:"current_model_id"`
+		} `json:"models"`
+		CurrentModelID      string `json:"currentModelId"`
+		CurrentModelIDSnake string `json:"current_model_id"`
+	}
+	if err := json.Unmarshal(result, &r); err != nil {
+		return ""
+	}
+	for _, candidate := range []string{
+		r.Models.CurrentModelID,
+		r.Models.CurrentModelIDSnake,
+		r.CurrentModelID,
+		r.CurrentModelIDSnake,
+	} {
+		if model := strings.TrimSpace(candidate); model != "" {
+			return model
+		}
+	}
+	return ""
 }
 
 // resolveResumedSessionID picks which session id we should treat as live

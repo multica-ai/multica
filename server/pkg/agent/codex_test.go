@@ -456,11 +456,28 @@ func TestCodexRawErrorNotificationTerminal(t *testing.T) {
 
 	c, _, _ := newTestCodexClient(t)
 	c.notificationProtocol = "raw"
+	done := false
+	var activities []string
+	c.onSemanticActivity = func(activity string) {
+		activities = append(activities, activity)
+	}
+	c.onTurnDone = func(aborted bool) {
+		if aborted {
+			t.Fatal("terminal error should not mark the turn aborted")
+		}
+		done = true
+	}
 
 	c.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"boom"},"willRetry":false}}`)
 
 	if got := c.getTurnError(); got != "boom" {
 		t.Fatalf("expected terminal error captured, got %q", got)
+	}
+	if !done {
+		t.Fatal("terminal error should finish the turn")
+	}
+	if got, want := strings.Join(activities, ","), "error:terminal"; got != want {
+		t.Fatalf("semantic activity = %q, want %q", got, want)
 	}
 }
 
@@ -469,11 +486,50 @@ func TestCodexRawErrorNotificationRetryingIgnored(t *testing.T) {
 
 	c, _, _ := newTestCodexClient(t)
 	c.notificationProtocol = "raw"
+	var activities []string
+	c.onSemanticActivity = func(activity string) {
+		activities = append(activities, activity)
+	}
+	c.onTurnDone = func(aborted bool) {
+		t.Fatal("retrying error should not finish the turn")
+	}
 
 	c.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"reconnecting"},"willRetry":true}}`)
 
 	if got := c.getTurnError(); got != "" {
 		t.Fatalf("retrying error should not be captured, got %q", got)
+	}
+	if got, want := strings.Join(activities, ","), "error:retry"; got != want {
+		t.Fatalf("semantic activity = %q, want %q", got, want)
+	}
+}
+
+func TestCodexFirstTurnProgressActivity(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		activity string
+		want     bool
+	}{
+		{activity: "", want: false},
+		{activity: "status:running", want: false},
+		{activity: "error:retry", want: false},
+		{activity: "error", want: true},
+		{activity: "text", want: true},
+		{activity: "tool-use:exec_command", want: true},
+		{activity: "tool-result:exec_command", want: true},
+		{activity: "item/started:commandExecution:cmd-1", want: true},
+		{activity: "item/completed:agentMessage:msg-1", want: true},
+		{activity: "error:terminal", want: true},
+		{activity: "turn:completed", want: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.activity, func(t *testing.T) {
+			if got := isCodexFirstTurnProgressActivity(tc.activity); got != tc.want {
+				t.Fatalf("isCodexFirstTurnProgressActivity(%q) = %v, want %v", tc.activity, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -1107,6 +1163,112 @@ func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-stuck"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-stuck","turn":{"id":"turn-stuck"}}}'`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`sleep 5`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	for _, want := range []string{
+		CodexFirstTurnNoProgressMarker,
+		"thr-stuck",
+		"turn-stuck",
+		`model="default(empty)"`,
+		`codex_version="codex-cli 0.0.0-test"`,
+		"model catalog refresh timed out",
+		"codex stderr:",
+		codexModelCatalogRefreshTimeoutSignal,
+	} {
+		if !strings.Contains(result.Error, want) {
+			t.Fatalf("expected error to contain %q, got %q", want, result.Error)
+		}
+	}
+}
+
+func TestCodexExecuteFirstTurnRetryErrorDoesNotSatisfyProgress(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-retry"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-retry","turn":{"id":"turn-retry"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"thr-retry","error":{"message":"temporary reconnect"},"willRetry":true}}'`+"\n"+
+		`sleep 5`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 200 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, CodexFirstTurnNoProgressMarker) {
+		t.Fatalf("expected first-turn no-progress error, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, CodexSemanticInactivityMarker) {
+		t.Fatalf("retrying error should not demote first-turn timeout to semantic inactivity, got %q", result.Error)
+	}
+}
+
+func TestCodexExecuteLegacyFirstTurnMessageSatisfiesProgress(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-legacy"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_started"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"legacy alive"}}}'`+"\n"+
+		`sleep 0.07`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_complete"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "legacy alive" {
+		t.Fatalf("expected legacy output, got %q", result.Output)
+	}
+}
+
 func TestCodexExecuteSemanticInactivityAllowsContinuousMessages(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -1156,7 +1318,6 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousDeltaProgress(t *testing.
 		`read line`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-delta","turn":{"id":"turn-delta"}}}'`+"\n"+
-		`sleep 0.05`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"item/commandExecution/outputDelta","params":{"threadId":"thr-delta","item":{"type":"commandExecution","id":"cmd-1"},"delta":"line 1\n"}}'`+"\n"+
 		`sleep 0.05`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-delta","item":{"type":"agentMessage","id":"msg-1"},"delta":"thinking"}}'`+"\n"+
@@ -1209,7 +1370,9 @@ func TestCodexExecuteSemanticInactivityDoesNotAffectNormalTurnCompletion(t *test
 func writeFakeCodexAppServer(t *testing.T, body string) string {
 	t.Helper()
 	fakePath := filepath.Join(t.TempDir(), "codex")
-	script := "#!/bin/sh\n" + body
+	script := "#!/bin/sh\n" +
+		`if [ "$1" = "--version" ]; then echo "codex-cli 0.0.0-test"; exit 0; fi` + "\n" +
+		body
 	writeTestExecutable(t, fakePath, []byte(script))
 	return fakePath
 }

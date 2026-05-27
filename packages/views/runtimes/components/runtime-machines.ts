@@ -168,7 +168,7 @@ function finalizeRuntimeMachine(
   draft: RuntimeMachineDraft,
   options: RuntimeMachineOptions,
 ): RuntimeMachine {
-  const runtimes = [...draft.runtimes].sort((a, b) =>
+  const runtimes = draft.runtimes.toSorted((a, b) =>
     a.provider.localeCompare(b.provider),
   );
   const first = runtimes[0];

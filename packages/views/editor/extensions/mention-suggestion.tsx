@@ -303,6 +303,7 @@ function MentionRow({
     const isClosed = item.status === "done" || item.status === "cancelled";
     return (
       <button
+        type="button"
         ref={buttonRef}
         className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
           selected ? "bg-accent" : "hover:bg-accent/50"
@@ -326,6 +327,7 @@ function MentionRow({
 
   return (
     <button
+      type="button"
       ref={buttonRef}
       className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
         selected ? "bg-accent" : "hover:bg-accent/50"
@@ -388,7 +390,8 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     const members: MemberWithUser[] = qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
     const agents: Agent[] = qc.getQueryData(workspaceKeys.agents(wsId)) ?? [];
     const squads: Squad[] = qc.getQueryData(workspaceKeys.squads(wsId)) ?? [];
-    const cachedResponse = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
+    const listQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+    const cachedResponse = listQueries[0]?.[1];
     const cachedIssues: Issue[] = cachedResponse ? flattenIssueBuckets(cachedResponse) : [];
 
     // Read current user identity imperatively — this factory runs outside

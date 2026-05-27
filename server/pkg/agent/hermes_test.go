@@ -51,6 +51,43 @@ func TestExtractACPSessionIDInvalidJSON(t *testing.T) {
 	}
 }
 
+// ── extractACPCurrentModelID ──
+
+func TestExtractACPCurrentModelID(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{
+		"sessionId": "ses_123",
+		"models": {
+			"currentModelId": "nous:moonshotai/kimi-k2.6"
+		}
+	}`)
+	got := extractACPCurrentModelID(raw)
+	if got != "nous:moonshotai/kimi-k2.6" {
+		t.Errorf("got %q, want current model", got)
+	}
+}
+
+func TestExtractACPCurrentModelIDSnakeCase(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{
+		"session_id": "ses_123",
+		"models": {
+			"current_model_id": "openrouter:anthropic/claude-sonnet-4.6"
+		}
+	}`)
+	got := extractACPCurrentModelID(raw)
+	if got != "openrouter:anthropic/claude-sonnet-4.6" {
+		t.Errorf("got %q, want current model", got)
+	}
+}
+
+func TestExtractACPCurrentModelIDMissing(t *testing.T) {
+	t.Parallel()
+	if got := extractACPCurrentModelID(json.RawMessage(`{"sessionId":"ses_123"}`)); got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
+
 // ── resolveResumedSessionID ──
 
 func TestResolveResumedSessionIDMatching(t *testing.T) {
@@ -1036,6 +1073,74 @@ func TestHermesProviderErrorSnifferBoundedBuffer(t *testing.T) {
 	}
 	if len(s.lines) > acpMaxErrorLines {
 		t.Errorf("sniffer kept %d lines, limit is %d", len(s.lines), acpMaxErrorLines)
+	}
+}
+
+func fakeHermesACPUsageWithDefaultModelScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_model","models":{"currentModelId":"nous:moonshotai/kimi-k2.6","availableModels":[{"modelId":"nous:moonshotai/kimi-k2.6","name":"moonshotai/kimi-k2.6"}]}}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":17,"outputTokens":5,"cachedReadTokens":3}}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func TestHermesBackendAttributesUsageToACPDefaultModel(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesACPUsageWithDefaultModelScript()))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+		if _, ok := result.Usage["unknown"]; ok {
+			t.Fatalf("usage should not be attributed to unknown: %+v", result.Usage)
+		}
+		usage, ok := result.Usage["nous:moonshotai/kimi-k2.6"]
+		if !ok {
+			t.Fatalf("expected usage under Hermes current model, got %+v", result.Usage)
+		}
+		if usage.InputTokens != 17 || usage.OutputTokens != 5 || usage.CacheReadTokens != 3 {
+			t.Fatalf("usage = %+v, want input=17 output=5 cache_read=3", usage)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
 	}
 }
 

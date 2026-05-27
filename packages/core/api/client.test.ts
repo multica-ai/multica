@@ -152,7 +152,7 @@ describe("ApiClient", () => {
     expect(headers["X-Client-OS"]).toBeUndefined();
   });
 
-  it("uses the Cloud Runtime node API contract and forwards bootstrap PAT on create", async () => {
+  it("uses the Cloud Runtime node API contract", async () => {
     const node = {
       id: "node-1",
       owner_id: "user-1",
@@ -195,7 +195,6 @@ describe("ApiClient", () => {
     expect(listCall[0]).toBe(
       "https://api.example.test/api/cloud-runtime/nodes?limit=20&offset=5",
     );
-    expect((listCall[1]!.headers as Record<string, string>)["X-User-PAT"]).toBeUndefined();
     expect(createCall[0]).toBe(
       "https://api.example.test/api/cloud-runtime/nodes",
     );
@@ -206,7 +205,6 @@ describe("ApiClient", () => {
         name: "gpu-dev-01",
       }),
     });
-    expect((createCall[1]!.headers as Record<string, string>)["X-User-PAT"]).toBeUndefined();
   });
 
   it("falls back when Cloud Runtime node responses drift", async () => {
@@ -234,21 +232,21 @@ describe("ApiClient", () => {
     ).resolves.toMatchObject({ id: "", status: "" });
   });
 
-  it("deleteCloudRuntimeNode sends DELETE with JSON body containing node id", async () => {
+  it("deleteCloudRuntimeNode sends DELETE with JSON body containing instance id", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(null, { status: 204 }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await client.deleteCloudRuntimeNode("node-abc-123");
+    await client.deleteCloudRuntimeNode("i-0123456789abcdef0");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, opts] = fetchMock.mock.calls[0]!;
     expect(url).toBe("https://api.example.test/api/cloud-runtime/nodes");
     expect(opts).toMatchObject({
       method: "DELETE",
-      body: JSON.stringify({ id: "node-abc-123" }),
+      body: JSON.stringify({ instance_id: "i-0123456789abcdef0" }),
     });
     expect((opts.headers as Record<string, string>)["Content-Type"]).toBe(
       "application/json",

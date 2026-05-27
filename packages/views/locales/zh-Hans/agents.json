@@ -123,7 +123,7 @@
   "inspector": {
     "section_properties": "属性",
     "section_details": "详情",
-    "section_skills": "skill",
+    "section_skills": "Skills",
     "prop_runtime": "运行时",
     "prop_model": "模型",
     "prop_thinking": "思考",
@@ -186,9 +186,9 @@
   },
   "tabs": {
     "activity": "动态",
-    "tasks": "task",
+    "tasks": "Tasks",
     "instructions": "指令",
-    "skills": "skill",
+    "skills": "Skills",
     "environment": "环境变量",
     "custom_args": "自定义参数",
     "discard_dialog_title": "放弃未保存的修改？",
@@ -229,7 +229,7 @@
       "editor_placeholder": "写下这个智能体该做什么、关注什么、要避开什么…"
     },
     "skills_section": {
-      "label": "Skill",
+      "label": "Skills",
       "placeholder": "从工作区添加 skill",
       "selected_other": "已选 {{count}} 个 —— 点击修改",
       "collapse": "收起",
@@ -258,7 +258,7 @@
       "placeholder": "定义这个智能体的角色、专长和工作风格。\n\n# 示例\n你是一名专注 React 和 TypeScript 的前端工程师。\n\n## 工作风格\n- 写小而聚焦的 PR —— 每个逻辑变更一个 commit\n- 优先组合而不是继承\n- 新组件总是配单元测试\n\n## 约束\n- 未经明确批准不要修改 shared/ 下的 type\n- 遵循 features/ 中现有的组件模式"
     },
     "env": {
-      "intro_readonly": "在智能体进程启动时注入。值已隐藏 —— 只有智能体所有者或工作区管理员可以查看和编辑。",
+      "intro_readonly": "在智能体进程启动时注入。只有工作区所有者 / 管理员可以查看或编辑值；每次解锁和编辑都会写入工作区审计日志。",
       "empty_readonly": "尚未配置环境变量。",
       "intro_prefix": "在智能体进程启动时注入（例如 ",
       "intro_separator": "、",
@@ -270,7 +270,14 @@
       "remove_aria": "移除变量",
       "duplicate_keys_toast": "环境变量 key 重复",
       "saved_toast": "已保存环境变量",
-      "save_failed_toast": "保存环境变量失败"
+      "save_failed_toast": "保存环境变量失败",
+      "not_revealed_title_other": "已配置 {{count}} 个变量",
+      "not_revealed_empty": "尚未配置环境变量。",
+      "not_revealed_hint": "在解锁前所有值保持隐藏。每次解锁与编辑都会写入工作区审计日志。",
+      "reveal_action": "解锁并编辑",
+      "revealing": "正在解锁…",
+      "reveal_failed_toast": "加载环境变量值失败",
+      "empty_editable": "尚未配置环境变量。新增一条即可在智能体启动时注入。"
     },
     "custom_args": {
       "intro": "在智能体命令启动时追加的额外 CLI 参数。多 token 的参数可以共用一行 —— 在传给 CLI 前会按空白拆分。",
@@ -284,7 +291,6 @@
     "skills": {
       "intro": "分配给该智能体的工作区 skill。本地运行时 skill 会自动可用。",
       "add_action": "添加 skill",
-      "import_hint": "导入会在工作区创建一份副本，团队可以编辑和复用。",
       "empty_title": "尚未分配 skill",
       "empty_hint": "添加工作区 skill，把团队知识共享给这个智能体。",
       "remove_failed_toast": "移除 skill 失败",
@@ -318,7 +324,7 @@
       "success_pct": "{{percent}}% 成功",
       "avg_duration": "平均 {{value}}",
       "failed_count": "{{count}} 次失败",
-      "source_issue": "issue",
+      "source_issue": "Issue",
       "source_chat": "聊天",
       "source_autopilot": "自动化",
       "source_untracked": "未追踪",
@@ -326,7 +332,7 @@
       "source_creating_issue": "正在创建 issue",
       "source_chat_session": "聊天会话",
       "source_autopilot_run": "自动化运行",
-      "issue_short_fallback": "issue {{prefix}}...",
+      "issue_short_fallback": "Issue {{prefix}}...",
       "triggered_by": "触发来源",
       "open_issue_aria": "打开 issue",
       "open_issue_tooltip": "打开 issue",
@@ -360,7 +366,7 @@
     "unavailable": "智能体不可用",
     "detail_link": "详情 →",
     "runtime_label": "运行时",
-    "skills_label": "skill",
+    "skills_label": "Skills",
     "owner_label": "所有者",
     "unknown_runtime": "未知运行时"
   },

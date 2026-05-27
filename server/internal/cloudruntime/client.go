@@ -34,7 +34,6 @@ type Request struct {
 	Query     url.Values
 	Body      []byte
 	UserID    string
-	UserPAT   string
 	RequestID string
 }
 
@@ -99,9 +98,6 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	}
 	if req.UserID != "" {
 		httpReq.Header.Set("X-User-ID", req.UserID)
-	}
-	if req.UserPAT != "" {
-		httpReq.Header.Set("X-User-PAT", req.UserPAT)
 	}
 	if req.RequestID != "" {
 		httpReq.Header.Set("X-Request-ID", req.RequestID)

@@ -1780,6 +1780,44 @@ func TestRunIssueCommentList_RecentStillLabelsCursorAsThread(t *testing.T) {
 	}
 }
 
+// TestRunIssueCommentList_DoesNotPrintShowingPreamble locks in the removal of
+// the "Showing N comments." stderr preamble. The line was the only
+// `list --output json` subcommand that emitted a human-readable count, which
+// polluted stdout/stderr-merged consumers (agent harnesses, CI `2>&1`).
+// Tracks GitHub issue #3303.
+func TestRunIssueCommentList_DoesNotPrintShowingPreamble(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		w.Write([]byte(`[{"id":"c1"},{"id":"c2"}]`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	stderr := captureStderr(t)
+	defer stderr.restore()
+
+	cmd := newIssueCommentListTestCmd()
+	if err := cmd.Flags().Set("output", "json"); err != nil {
+		t.Fatalf("set output: %v", err)
+	}
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	if got := stderr.read(); strings.Contains(got, "Showing") {
+		t.Errorf("stderr must not contain a 'Showing ...' preamble, got: %q", got)
+	}
+}
+
 func TestValidIssueStatuses(t *testing.T) {
 	expected := map[string]bool{
 		"backlog":     true,

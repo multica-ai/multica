@@ -274,20 +274,31 @@ func requestUserID(r *http.Request) string {
 }
 
 // resolveActor determines whether the request is from an agent or a human member.
-// To claim "agent" identity the request MUST carry both X-Agent-ID and a valid
-// X-Task-ID, and the task must belong to the claimed agent. Otherwise we fall
-// back to "member" using the user ID from the session.
+//
+// First-class signal: X-Actor-Source set to "task_token" means the request
+// authenticated via an `mat_` task-scoped token. The auth middleware sets
+// that header (and stripped any client-supplied value first), so it is
+// authoritative — the bound (agent_id, task_id) cannot be forged or
+// stripped by the agent process. This is the path MUL-2600 relies on to
+// reject agent-process traffic on owner-only endpoints.
+//
+// Fallback signal (legacy CLI / member-token paths): the request MUST
+// carry both X-Agent-ID and a valid X-Task-ID, and the task must belong
+// to the claimed agent. Otherwise we fall back to "member".
 //
 // X-Agent-ID alone is not trusted: any workspace member can guess or observe
 // an agent's UUID, and a member-supplied X-Agent-ID would otherwise let that
 // member impersonate the agent and bypass the private-agent gate (#2359
-// review). The daemon always pairs the two headers — X-Agent-ID names the
-// agent claiming the request, X-Task-ID names the in-flight task that
-// authorizes it — so requiring both has no effect on legitimate agent
-// callers but closes the impersonation path.
+// review). The daemon always pairs the two headers, so requiring both has
+// no effect on legitimate agent callers but closes the impersonation path.
 //
 // Returns ("agent", agentID) on success, ("member", userID) otherwise.
 func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		// Server-set header — auth middleware also forced X-Agent-ID
+		// from the token row. Trust it directly without re-querying.
+		return "agent", r.Header.Get("X-Agent-ID")
+	}
 	agentID := r.Header.Get("X-Agent-ID")
 	if agentID == "" {
 		return "member", userID

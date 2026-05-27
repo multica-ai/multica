@@ -23,6 +23,8 @@ export type WSEventType =
   | "agent:restored"
   | "task:queued"
   | "task:dispatch"
+  | "task:running"
+  | "task:waiting_local_directory"
   | "task:progress"
   | "task:completed"
   | "task:failed"
@@ -239,6 +241,28 @@ export interface TaskDispatchPayload {
   chat_session_id?: string;
 }
 
+export interface TaskRunningPayload {
+  task_id: string;
+  agent_id: string;
+  issue_id: string;
+  chat_session_id?: string;
+  status: string;
+}
+
+// task:waiting_local_directory fires when the daemon dequeues a task but
+// can't immediately acquire the on-disk path lock — another task on this
+// daemon is already executing in the same local_directory. The optional
+// `wait_reason` mirrors the server-side hint (path / holder task id), but
+// is not yet surfaced end-to-end; the UI today only reads the status.
+export interface TaskWaitingLocalDirectoryPayload {
+  task_id: string;
+  agent_id: string;
+  issue_id: string;
+  chat_session_id?: string;
+  status: string;
+  wait_reason?: string;
+}
+
 export interface TaskCompletedPayload {
   task_id: string;
   agent_id: string;
@@ -351,3 +375,100 @@ export interface InvitationRevokedPayload {
   invitation_id: string;
   invitee_email: string;
 }
+
+/**
+ * Maps every WSEventType to its payload interface. Events whose payload
+ * shape isn't formally typed (server emits an object the client doesn't
+ * meaningfully consume yet) fall back to `unknown` — callers must narrow
+ * before access.
+ *
+ * Use via `WSEventPayload<E>` rather than indexing the map directly:
+ *   const handler = (payload: WSEventPayload<"issue:created">) => { ... };
+ *
+ * Adding a new event: extend WSEventType first (above), then append a key
+ * here. TS will compile-error every WSClient.on("new:event", …) site that
+ * forgets the payload shape — that's the whole point.
+ */
+export interface WSEventPayloadMap {
+  "issue:created": IssueCreatedPayload;
+  "issue:updated": IssueUpdatedPayload;
+  "issue:deleted": IssueDeletedPayload;
+  "issue_labels:changed": IssueLabelsChangedPayload;
+  "issue_reaction:added": IssueReactionAddedPayload;
+  "issue_reaction:removed": IssueReactionRemovedPayload;
+  "comment:created": CommentCreatedPayload;
+  "comment:updated": CommentUpdatedPayload;
+  "comment:deleted": CommentDeletedPayload;
+  "comment:resolved": CommentResolvedPayload;
+  "comment:unresolved": CommentUnresolvedPayload;
+  "reaction:added": ReactionAddedPayload;
+  "reaction:removed": ReactionRemovedPayload;
+  "agent:status": AgentStatusPayload;
+  "agent:created": AgentCreatedPayload;
+  "agent:archived": AgentArchivedPayload;
+  "agent:restored": AgentRestoredPayload;
+  "task:queued": TaskQueuedPayload;
+  "task:dispatch": TaskDispatchPayload;
+  "task:running": TaskRunningPayload;
+  "task:waiting_local_directory": TaskWaitingLocalDirectoryPayload;
+  "task:completed": TaskCompletedPayload;
+  "task:failed": TaskFailedPayload;
+  "task:message": TaskMessagePayload;
+  "task:cancelled": TaskCancelledPayload;
+  "task:progress": unknown;
+  "inbox:new": InboxNewPayload;
+  "inbox:read": InboxReadPayload;
+  "inbox:archived": InboxArchivedPayload;
+  "inbox:batch-read": InboxBatchReadPayload;
+  "inbox:batch-archived": InboxBatchArchivedPayload;
+  "workspace:updated": WorkspaceUpdatedPayload;
+  "workspace:deleted": WorkspaceDeletedPayload;
+  "member:added": MemberAddedPayload;
+  "member:updated": MemberUpdatedPayload;
+  "member:removed": MemberRemovedPayload;
+  "subscriber:added": SubscriberAddedPayload;
+  "subscriber:removed": SubscriberRemovedPayload;
+  "activity:created": ActivityCreatedPayload;
+  "chat:message": ChatMessageEventPayload;
+  "chat:done": ChatDonePayload;
+  "chat:session_read": ChatSessionReadPayload;
+  "chat:session_deleted": ChatSessionDeletedPayload;
+  "chat:session_updated": unknown;
+  "project:created": ProjectCreatedPayload;
+  "project:updated": ProjectUpdatedPayload;
+  "project:deleted": ProjectDeletedPayload;
+  "invitation:created": InvitationCreatedPayload;
+  "invitation:accepted": InvitationAcceptedPayload;
+  "invitation:declined": InvitationDeclinedPayload;
+  "invitation:revoked": InvitationRevokedPayload;
+  // No formal payload interfaces yet — server emits domain objects clients
+  // currently consume as opaque triggers (refetch on receipt).
+  "daemon:heartbeat": unknown;
+  "daemon:register": unknown;
+  "skill:created": unknown;
+  "skill:updated": unknown;
+  "skill:deleted": unknown;
+  "squad:created": unknown;
+  "squad:updated": unknown;
+  "squad:deleted": unknown;
+  "label:created": unknown;
+  "label:updated": unknown;
+  "label:deleted": unknown;
+  "pin:created": unknown;
+  "pin:deleted": unknown;
+  "pin:reordered": unknown;
+  "github_installation:created": unknown;
+  "github_installation:deleted": unknown;
+  "pull_request:linked": unknown;
+  "pull_request:updated": unknown;
+  "pull_request:unlinked": unknown;
+}
+
+/**
+ * Payload type for a given event. Lookup against WSEventPayloadMap with
+ * `unknown` as the safety net — if a future WSEventType is added without
+ * a map entry, callers see `unknown` (forced narrow) rather than `any`
+ * (silent unsafe access).
+ */
+export type WSEventPayload<E extends WSEventType> =
+  E extends keyof WSEventPayloadMap ? WSEventPayloadMap[E] : unknown;

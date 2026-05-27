@@ -83,6 +83,31 @@ var agentSkillsCmd = &cobra.Command{
 	Short: "Manage agent skill assignments",
 }
 
+// Agent env subcommands. Live behind a dedicated `agent env` group because
+// they're the ONLY post-creation path for reading or writing
+// custom_env values — `multica agent list / get / update` no longer
+// expose env on the wire. Each call hits the audited
+// `/api/agents/{id}/env` endpoint. See MUL-2600.
+
+var agentEnvCmd = &cobra.Command{
+	Use:   "env",
+	Short: "Read and update an agent's custom environment variables (audited)",
+}
+
+var agentEnvGetCmd = &cobra.Command{
+	Use:   "get <agent-id>",
+	Short: "Print an agent's custom_env as a JSON map (workspace owner/admin only; every call is recorded)",
+	Args:  exactArgs(1),
+	RunE:  runAgentEnvGet,
+}
+
+var agentEnvSetCmd = &cobra.Command{
+	Use:   "set <agent-id>",
+	Short: "Replace an agent's custom_env (workspace owner/admin only; values equal to **** preserve the existing entry)",
+	Args:  exactArgs(1),
+	RunE:  runAgentEnvSet,
+}
+
 var agentSkillsListCmd = &cobra.Command{
 	Use:   "list <agent-id>",
 	Short: "List skills assigned to an agent",
@@ -107,9 +132,13 @@ func init() {
 	agentCmd.AddCommand(agentTasksCmd)
 	agentCmd.AddCommand(agentAvatarCmd)
 	agentCmd.AddCommand(agentSkillsCmd)
+	agentCmd.AddCommand(agentEnvCmd)
 
 	agentSkillsCmd.AddCommand(agentSkillsListCmd)
 	agentSkillsCmd.AddCommand(agentSkillsSetCmd)
+
+	agentEnvCmd.AddCommand(agentEnvGetCmd)
+	agentEnvCmd.AddCommand(agentEnvSetCmd)
 
 	// agent list
 	agentListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -147,9 +176,9 @@ func init() {
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
-	agentUpdateCmd.Flags().String("custom-env", "", "New custom environment variables as JSON object, e.g. '{\"KEY\":\"value\"}'. Treated as secret material — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --custom-env-stdin or --custom-env-file for real secrets. Pass '{}' to clear the map; omit the flag to leave it unchanged.")
-	agentUpdateCmd.Flags().Bool("custom-env-stdin", false, "Read the new --custom-env JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --custom-env and --custom-env-file.")
-	agentUpdateCmd.Flags().String("custom-env-file", "", "Read the new --custom-env JSON object from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
+	// custom_env is intentionally NOT part of `agent update`. Use
+	// `multica agent env set <id>` — that path is owner/admin-only,
+	// denies agent actors, and writes a persisted audit trail.
 	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks")
@@ -174,6 +203,17 @@ func init() {
 	// agent skills set
 	agentSkillsSetCmd.Flags().StringSlice("skill-ids", nil, "Skill IDs to assign (comma-separated)")
 	agentSkillsSetCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// agent env get
+	agentEnvGetCmd.Flags().String("output", "json", "Output format: json or table")
+
+	// agent env set. Same three secret-safe input channels as `agent
+	// create` so scripts can keep secrets out of shell history. Mutual
+	// exclusion + empty-input handling is enforced by resolveCustomEnv.
+	agentEnvSetCmd.Flags().String("custom-env", "", "Replacement custom_env as a JSON object, e.g. '{\"KEY\":\"value\"}'. Values equal to '****' preserve the existing entry. Treated as secret material — values passed on the command line are visible to shell history and 'ps'; prefer --custom-env-stdin or --custom-env-file for real secrets. Pass '{}' to clear all keys.")
+	agentEnvSetCmd.Flags().Bool("custom-env-stdin", false, "Read the replacement custom_env JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --custom-env and --custom-env-file.")
+	agentEnvSetCmd.Flags().String("custom-env-file", "", "Read the replacement custom_env JSON object from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
+	agentEnvSetCmd.Flags().String("output", "json", "Output format: json or table")
 }
 
 // resolveProfile returns the --profile flag value (empty string means default profile).
@@ -526,11 +566,6 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		}
 		body["custom_args"] = ca
 	}
-	if ce, ok, err := resolveCustomEnv(cmd); err != nil {
-		return err
-	} else if ok {
-		body["custom_env"] = ce
-	}
 	if cmd.Flags().Changed("model") {
 		v, _ := cmd.Flags().GetString("model")
 		body["model"] = v
@@ -549,7 +584,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --custom-env (or --custom-env-stdin, --custom-env-file), --visibility, --status, or --max-concurrent-tasks")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -803,6 +838,83 @@ func runAgentSkillsSet(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Skills updated for agent %s\n", args[0])
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Agent env subcommands
+// ---------------------------------------------------------------------------
+
+// runAgentEnvGet fetches the plaintext custom_env for a single agent
+// via the audited `/env` endpoint. The CLI prints raw JSON in JSON
+// mode and a key/value table otherwise; we never truncate or mask
+// values here — the security gate is on the server, not the printer.
+func runAgentEnvGet(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var resp map[string]any
+	if err := client.GetJSON(ctx, "/api/agents/"+args[0]+"/env", &resp); err != nil {
+		return fmt.Errorf("get agent env: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, resp)
+	}
+
+	headers := []string{"KEY", "VALUE"}
+	env, _ := resp["custom_env"].(map[string]any)
+	rows := make([][]string, 0, len(env))
+	for k, v := range env {
+		rows = append(rows, []string{k, fmt.Sprintf("%v", v)})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+// runAgentEnvSet replaces an agent's custom_env wholesale via the
+// audited `/env` endpoint. The three secret-safe input channels
+// (--custom-env, --custom-env-stdin, --custom-env-file) are required
+// — at least one must be supplied — and the server treats any value
+// equal to "****" as "preserve the existing entry" (see the **** guard
+// in the handler).
+func runAgentEnvSet(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ce, ok, err := resolveCustomEnv(cmd)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("specify the new env via --custom-env, --custom-env-stdin, or --custom-env-file (pass '{}' to clear)")
+	}
+
+	body := map[string]any{"custom_env": ce}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PutJSON(ctx, "/api/agents/"+args[0]+"/env", body, &result); err != nil {
+		return fmt.Errorf("update agent env: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	env, _ := result["custom_env"].(map[string]any)
+	fmt.Printf("Env updated for agent %s (%d keys)\n", args[0], len(env))
 	return nil
 }
 

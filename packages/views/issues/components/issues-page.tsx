@@ -15,14 +15,19 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { PageHeader } from "../../layout/page-header";
 import { IssuesHeader } from "./issues-header";
 import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
+import { SwimLaneView } from "./swimlane-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
+import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
+
+const EMPTY_CHILD_PROGRESS = new Map<string, ChildProgress>();
 
 export function IssuesPage() {
   const { t } = useT("issues");
@@ -40,7 +45,33 @@ export function IssuesPage() {
   const projectFilters = useIssueViewStore((s) => s.projectFilters);
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
   const labelFilters = useIssueViewStore((s) => s.labelFilters);
+  const sortBy = useIssueViewStore((s) => s.sortBy);
+  const sortDirection = useIssueViewStore((s) => s.sortDirection);
+  const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
+
+  const sort = useMemo(
+    () => ({
+      sort_by: sortBy,
+      sort_direction: sortBy !== "position" ? sortDirection : undefined,
+    } as const),
+    [sortBy, sortDirection],
+  );
+
+  // Derive the set of issue ids that currently have at least one
+  // `running` agent task. Used by the workspace agents-working filter
+  // chip. Subscribing the page here (not deep in filter.ts) keeps the
+  // filter pure and lets the snapshot stay cached at one workspace-
+  // scoped place — every issue card already subscribes for its own
+  // indicator, so this is a no-op extra fetch.
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const runningIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of snapshot) {
+      if (t.status === "running" && t.issue_id) ids.add(t.issue_id);
+    }
+    return ids;
+  }, [snapshot]);
 
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(() => {
     const filter: AssigneeGroupedIssuesFilter = {
@@ -58,9 +89,9 @@ export function IssuesPage() {
     return filter;
   }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, scope, statusFilters]);
 
-  const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter);
+  const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, sort);
   const statusIssuesQuery = useQuery({
-    ...issueListOptions(wsId),
+    ...issueListOptions(wsId, sort),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({
@@ -98,13 +129,20 @@ export function IssuesPage() {
   const headerIssues = usesAssigneeBoard ? assigneeIssues : scopedIssues;
 
   const issues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters }),
-    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters],
+    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
+    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+  );
+
+  // Status-unfiltered companion for Swimlane — same narrowing as `issues`
+  // minus the status filter.
+  const swimlaneIssues = useMemo(
+    () => filterIssues(scopedIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
+    [scopedIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
   );
 
   // Fetch sub-issue progress from the backend so counts are accurate
   // regardless of client-side pagination or filtering of done issues.
-  const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
+  const { data: childProgressMap = EMPTY_CHILD_PROGRESS } = useQuery(childIssueProgressOptions(wsId));
 
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)
@@ -118,7 +156,7 @@ export function IssuesPage() {
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
-    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
+    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position" | "parent_issue_id">, onSettled?: () => void) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
         {
@@ -128,55 +166,33 @@ export function IssuesPage() {
                 ? err.message
                 : t(($) => $.page.move_failed),
             ),
+          onSettled: () => onSettled?.(),
         },
       );
     },
     [updateIssueMutation, t],
   );
 
-  if (loading) {
-    return (
-      <div className="flex flex-1 min-h-0 flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-          <Skeleton className="h-5 w-5 rounded" />
-          <Skeleton className="h-4 w-32" />
+  const contentSkeleton = viewMode === "list" ? (
+    <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <Skeleton key={i} className="h-10 w-full rounded-lg" />
+      ))}
+    </div>
+  ) : (
+    <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="flex min-w-52 flex-1 flex-col gap-2">
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-24 w-full rounded-lg" />
+          <Skeleton className="h-24 w-full rounded-lg" />
         </div>
-        <div className="flex h-12 shrink-0 items-center justify-between px-4">
-          <div className="flex items-center gap-1">
-            <Skeleton className="h-8 w-14 rounded-md" />
-            <Skeleton className="h-8 w-20 rounded-md" />
-            <Skeleton className="h-8 w-16 rounded-md" />
-          </div>
-          <div className="flex items-center gap-1">
-            <Skeleton className="h-8 w-8 rounded-md" />
-            <Skeleton className="h-8 w-8 rounded-md" />
-            <Skeleton className="h-8 w-8 rounded-md" />
-          </div>
-        </div>
-        {viewMode === "list" ? (
-          <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-10 w-full rounded-lg" />
-            ))}
-          </div>
-        ) : (
-          <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex min-w-52 flex-1 flex-col gap-2">
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-24 w-full rounded-lg" />
-                <Skeleton className="h-24 w-full rounded-lg" />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
+      ))}
+    </div>
+  );
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      {/* Header 1: Workspace breadcrumb */}
       <PageHeader className="gap-1.5">
         <WorkspaceAvatar name={workspace?.name ?? "W"} size="sm" />
         <span className="text-sm text-muted-foreground">
@@ -187,11 +203,9 @@ export function IssuesPage() {
       </PageHeader>
 
       <ViewStoreProvider store={useIssueViewStore}>
-        {/* Header 2: Scope tabs + filters */}
         <IssuesHeader scopedIssues={headerIssues} />
 
-        {/* Content: scrollable */}
-        {headerIssues.length === 0 ? (
+        {loading ? contentSkeleton : headerIssues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <ListTodo className="h-10 w-10 text-muted-foreground/40" />
             <p className="text-sm">{t(($) => $.page.empty_title)}</p>
@@ -209,9 +223,20 @@ export function IssuesPage() {
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
+                sort={sort}
+              />
+            ) : viewMode === "swimlane" ? (
+              <SwimLaneView
+                issues={issues}
+                unfilteredIssues={swimlaneIssues}
+                visibleStatuses={visibleStatuses}
+                hiddenStatuses={hiddenStatuses}
+                onMoveIssue={handleMoveIssue}
+                childProgressMap={childProgressMap}
+                sort={sort}
               />
             ) : (
-              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} />
+              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} sort={sort} onMoveIssue={handleMoveIssue} />
             )}
           </div>
         )}

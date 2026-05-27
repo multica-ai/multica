@@ -10,6 +10,12 @@ export interface IssueFilters {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  // When `agentRunningFilter` is true, only keep issues whose id is in
+  // `runningIssueIds`. The set is derived by the caller from
+  // `agentTaskSnapshot` (one pass over running tasks) so filter.ts stays
+  // free of any data-fetching dependency.
+  agentRunningFilter?: boolean;
+  runningIssueIds?: ReadonlySet<string>;
 }
 
 /**
@@ -22,11 +28,18 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
+  // Empty set passed without `agentRunningFilter` is a no-op. When the
+  // filter is on but the set is missing/empty, hide everything — the
+  // user opted into "only running" and there is nothing running.
+  const applyAgentRunning = agentRunningFilter === true;
 
   return issues.filter((issue) => {
+    if (applyAgentRunning && !(runningIssueIds?.has(issue.id) ?? false))
+      return false;
+
     if (statusFilters.length > 0 && !statusFilters.includes(issue.status))
       return false;
 

@@ -7,6 +7,7 @@ import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWelcomeStore } from "@multica/core/onboarding";
 import { paths, useCurrentWorkspace } from "@multica/core/paths";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { Agent, CreateIssueRequest, Issue } from "@multica/core/types";
@@ -560,7 +561,7 @@ function RuntimeWelcome({
       >
         <div className="flex flex-col items-center gap-3 pt-4 animate-onboarding-enter">
           <img
-            src={agent.avatar_url || HELPER_AVATAR_URL}
+            src={resolvePublicFileUrl(agent.avatar_url) ?? HELPER_AVATAR_URL}
             alt=""
             aria-hidden
             className="h-14 w-14 rounded-xl ring-1 ring-foreground/10"

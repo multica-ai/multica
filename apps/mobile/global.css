@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme tokens — RNR template (verbatim) + Multica custom tokens appended.
+ *
+ * When changing any variable here, also update apps/mobile/lib/theme.ts —
+ * they mirror each other. See apps/mobile/docs/rnr-migration.md §5.
+ *
+ * Dark-mode values for the Multica custom tokens currently mirror their
+ * light values — they will be tuned when a screen using them actually
+ * needs dark-mode treatment. Don't pre-author (per §3.1 "defaults first").
+ */
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    /* Border tuned to L 84% — gives a 6% darker step from surface-2 (the
+     * darkest elevated tier above page) and 16% from page, so borders are
+     * visible across every tier in the elevation scale (surface-1 / -2 /
+     * secondary). Within Refactoring UI's "border 5-10% darker than
+     * adjacent surface" guidance. */
+    --border: 0 0% 84%;
+    --input: 0 0% 84%;
+    --ring: 0 0% 63%;
+    --radius: 0.625rem;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+
+    /* Multica custom tokens */
+    --brand: 225 71% 58%;
+    --brand-foreground: 0 0% 98%;
+    --success: 142 71% 45%;
+    --warning: 48 89% 47%;
+    --info: 217 91% 60%;
+    --priority: 25 95% 53%;
+    --code-surface: 240 4% 92%;
+
+    /* Surface elevation scale — a 5-tier ladder above page bg, calibrated
+     * to Refactoring UI's "≥5% L difference is the perceptibility threshold"
+     * + Material 3 surface-container scale. shadcn's `secondary` /
+     * `muted` / `accent` slot (L 96.1%) stays untouched; we sandwich
+     * `surface-1` above it and `surface-2` below for cases shadcn doesn't
+     * cover (notably nested elevated cards like comment bubbles + their
+     * internal code/table elements).
+     *
+     *   L 100   page bg / card / popover            (page floor)
+     *   L 98    surface-1   subtle elevated         (comment bubble — feels
+     *                                                like an iOS settings cell:
+     *                                                visible boundary but the
+     *                                                fill is almost-page)
+     *   L 96.1  secondary / muted / accent          (shadcn default — button
+     *                                                hover, chips, skeleton)
+     *   L 90    surface-2   nested in surface-1     (code block / table header
+     *                                                inside a comment bubble —
+     *                                                8% darker than the bubble
+     *                                                so the inner box is
+     *                                                clearly delineated)
+     *   L 84    border                              (visible across all tiers)
+     *
+     * Future tiers extend as surface-3 etc. Dark mode mirrors this scale
+     * inverted (lighter = higher elevation), see .dark:root below. */
+    --surface-1: 0 0% 98%;
+    --surface-2: 0 0% 90%;
+  }
+
+  .dark:root {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 70.9% 59.4%;
+    --destructive-foreground: 0 0% 98%;
+    /* Border at L 25% — mirrors the light-mode logic: 6% lighter than
+     * surface-2 (the topmost elevated tier), 21% lighter than page (3.9%).
+     * Visible across every tier of the dark elevation scale. */
+    --border: 0 0% 25%;
+    --input: 0 0% 25%;
+    --ring: 300 0% 45%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+
+    /* Multica custom tokens — dark mirrors light until a screen demands tuning */
+    --brand: 225 71% 58%;
+    --brand-foreground: 0 0% 98%;
+    --success: 142 71% 45%;
+    --warning: 48 89% 47%;
+    --info: 217 91% 60%;
+    --priority: 25 95% 53%;
+    /* code-surface is the ONE exception that needs a real dark value —
+     * the light value (240 4% 92%) is near-white and would render code
+     * blocks with a brighter background than the page in dark mode. */
+    --code-surface: 240 4% 18%;
+
+    /* Dark elevation scale — mirrors the light scale but lightness
+     * INCREASES with elevation (shadows don't read on dark, so tonal
+     * lift is the elevation cue). Comment bubble uses surface-1 (L 8%);
+     * nested code/table inside the bubble uses surface-2 (L 19%, 11%
+     * lighter than the bubble — well over Refactoring UI's 5% threshold).
+     *
+     *   L 3.9    page bg / card / popover
+     *   L 8      surface-1   subtle elevated         (comment bubble)
+     *   L 14.9   secondary / muted / accent          (shadcn default)
+     *   L 19     surface-2   nested in surface-1     (code/table inside bubble)
+     *   L 25     border                              (visible across all tiers)
+     */
+    --surface-1: 0 0% 8%;
+    --surface-2: 0 0% 19%;
+  }
+}

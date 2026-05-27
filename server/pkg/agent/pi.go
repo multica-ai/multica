@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -18,6 +19,158 @@ import (
 // stream on stdout.
 type piBackend struct {
 	cfg Config
+}
+
+var (
+	piControlTokenRE = regexp.MustCompile(`<\|[A-Za-z0-9_-]+>[A-Za-z0-9_-]*|<[A-Za-z0-9_-]+\|>`)
+)
+
+func stripPiToolCallMarkup(s string) string {
+	s = stripPiStructuredToolMarkup(s)
+	return piControlTokenRE.ReplaceAllString(s, "")
+}
+
+func drainPiTextBuffer(buf *strings.Builder, delta string) string {
+	buf.WriteString(delta)
+	emit, pending := drainPiSanitizedText(buf.String())
+	buf.Reset()
+	buf.WriteString(pending)
+	return emit
+}
+
+func flushPiTextBuffer(buf *strings.Builder) string {
+	s := buf.String()
+	buf.Reset()
+	emit, pending := drainPiSanitizedText(s)
+	emit += piControlTokenRE.ReplaceAllString(pending, "")
+	return emit
+}
+
+func drainPiSanitizedText(s string) (string, string) {
+	var out strings.Builder
+	for i := 0; i < len(s); {
+		start, prefixLen := nextPiToolMarkupPrefix(s, i)
+		if start == -1 {
+			safeLen := safePiTextEmitLen(s[i:])
+			out.WriteString(s[i : i+safeLen])
+			return piControlTokenRE.ReplaceAllString(out.String(), ""), s[i+safeLen:]
+		}
+		out.WriteString(s[i:start])
+		end, ok := scanPiToolMarkupEnd(s, start+prefixLen)
+		if !ok {
+			return piControlTokenRE.ReplaceAllString(out.String(), ""), s[start:]
+		}
+		i = end
+	}
+	return piControlTokenRE.ReplaceAllString(out.String(), ""), ""
+}
+
+func stripPiStructuredToolMarkup(s string) string {
+	var out strings.Builder
+	for i := 0; i < len(s); {
+		start, prefixLen := nextPiToolMarkupPrefix(s, i)
+		if start == -1 {
+			out.WriteString(s[i:])
+			break
+		}
+		out.WriteString(s[i:start])
+		end, ok := scanPiToolMarkupEnd(s, start+prefixLen)
+		if !ok {
+			out.WriteString(s[start:])
+			break
+		}
+		i = end
+	}
+	return out.String()
+}
+
+func safePiTextEmitLen(s string) int {
+	hold := 0
+	for _, prefix := range []string{"call:", "response:"} {
+		for n := 1; n < len(prefix) && n <= len(s); n++ {
+			if strings.HasSuffix(s, prefix[:n]) && n > hold {
+				hold = n
+			}
+		}
+	}
+	if i := strings.LastIndexByte(s, '<'); i >= 0 && looksLikePiControlTokenPrefix(s[i:]) {
+		if len(s)-i > hold {
+			hold = len(s) - i
+		}
+	}
+	return len(s) - hold
+}
+
+func looksLikePiControlTokenPrefix(s string) bool {
+	if len(s) == 0 || s[0] != '<' || len(s) > 64 {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		b := s[i]
+		if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_' || b == '-' || b == '|' || b == '>' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func nextPiToolMarkupPrefix(s string, from int) (int, int) {
+	best := -1
+	bestLen := 0
+	for _, prefix := range []string{"call:", "response:"} {
+		if i := strings.Index(s[from:], prefix); i >= 0 {
+			abs := from + i
+			if best == -1 || abs < best {
+				best = abs
+				bestLen = len(prefix)
+			}
+		}
+	}
+	return best, bestLen
+}
+
+func scanPiToolMarkupEnd(s string, i int) (int, bool) {
+	nameStart := i
+	for i < len(s) && isPiToolNameByte(s[i]) {
+		i++
+	}
+	if i == nameStart || i >= len(s) || s[i] != '{' {
+		return 0, false
+	}
+
+	const quoteMarker = `<|"|>`
+	depth := 0
+	inQuote := false
+	for i < len(s) {
+		if strings.HasPrefix(s[i:], quoteMarker) {
+			inQuote = !inQuote
+			i += len(quoteMarker)
+			continue
+		}
+
+		if !inQuote {
+			switch s[i] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					i++
+					if strings.HasPrefix(s[i:], "<tool_call|>") {
+						i += len("<tool_call|>")
+					}
+					return i, true
+				}
+			}
+		}
+		i++
+	}
+	return 0, false
+}
+
+func isPiToolNameByte(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_' || b == '-'
 }
 
 func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
@@ -67,12 +220,26 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		cancel()
 		return nil, fmt.Errorf("pi stdout pipe: %w", err)
 	}
+	// Attach an explicit stdin pipe so we can close it ourselves. Pi reads
+	// its prompt from argv (positional, see buildPiArgs) and never expects
+	// interactive input, but when the parent leaves cmd.Stdin nil and the
+	// daemon is run under systemd, Pi has been observed to block in its
+	// event loop awaiting stdin events instead of progressing to "done"
+	// (#2188). Closing the pipe immediately after Start delivers an
+	// explicit EOF on a FIFO, which unblocks Pi's readable side.
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("pi stdin pipe: %w", err)
+	}
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[pi:stderr] ")
 
 	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
 		cancel()
 		return nil, fmt.Errorf("start pi: %w", err)
 	}
+	_ = stdin.Close()
 
 	b.cfg.Logger.Info("pi started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -100,6 +267,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		// Pi message_update events can be large (they embed the full message
 		// partial on each delta), so give the scanner generous headroom.
 		scanner.Buffer(make([]byte, 0, 1024*1024), 32*1024*1024)
+		var textBuffer strings.Builder
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -121,7 +289,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				}
 				switch evt.AssistantMessageEvent.Type {
 				case "text_delta":
-					if d := evt.AssistantMessageEvent.Delta; d != "" {
+					if d := drainPiTextBuffer(&textBuffer, evt.AssistantMessageEvent.Delta); d != "" {
 						output.WriteString(d)
 						trySend(msgCh, Message{Type: MessageText, Content: d})
 					}
@@ -186,6 +354,10 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				}
 			}
 		}
+		if d := flushPiTextBuffer(&textBuffer); d != "" {
+			output.WriteString(d)
+			trySend(msgCh, Message{Type: MessageText, Content: d})
+		}
 
 		waitErr := cmd.Wait()
 		duration := time.Since(startTime)
@@ -249,9 +421,9 @@ type piAssistantMessageEvent struct {
 }
 
 type piMessage struct {
-	Role    string   `json:"role,omitempty"`
-	Model   string   `json:"model,omitempty"`
-	Usage   *piUsage `json:"usage,omitempty"`
+	Role  string   `json:"role,omitempty"`
+	Model string   `json:"model,omitempty"`
+	Usage *piUsage `json:"usage,omitempty"`
 }
 
 type piUsage struct {
