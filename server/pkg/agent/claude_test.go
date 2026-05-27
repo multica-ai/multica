@@ -223,6 +223,107 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 	}
 }
 
+func TestClaudeArgsUseBypassPermissions(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{
+			name: "daemon default permission mode",
+			args: buildClaudeArgs(ExecOptions{}, slog.Default()),
+			want: true,
+		},
+		{
+			name: "legacy dangerous flag",
+			args: []string{"-p", "--dangerously-skip-permissions"},
+			want: true,
+		},
+		{
+			name: "inline permission mode",
+			args: []string{"-p", "--permission-mode=bypassPermissions"},
+			want: true,
+		},
+		{
+			name: "non-bypass permission mode",
+			args: []string{"-p", "--permission-mode", "plan"},
+			want: false,
+		},
+		{
+			name: "missing permission mode value",
+			args: []string{"-p", "--permission-mode"},
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := claudeArgsUseBypassPermissions(tc.args); got != tc.want {
+				t.Fatalf("claudeArgsUseBypassPermissions(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPreflightClaudeRootSudo(t *testing.T) {
+	savedEUID := currentEUID
+	savedEnvLookup := currentEnvLookup
+	t.Cleanup(func() {
+		currentEUID = savedEUID
+		currentEnvLookup = savedEnvLookup
+	})
+
+	currentEnvLookup = func(string) (string, bool) { return "", false }
+	bypassArgs := buildClaudeArgs(ExecOptions{}, slog.Default())
+
+	t.Run("blocks root with bypass permissions", func(t *testing.T) {
+		currentEUID = func() int { return 0 }
+
+		err := preflightClaudeRootSudo(bypassArgs, nil)
+		if err == nil {
+			t.Fatal("expected preflight error")
+		}
+		if !strings.Contains(err.Error(), "cannot run with --dangerously-skip-permissions") {
+			t.Fatalf("expected actionable Claude root/sudo error, got %q", err.Error())
+		}
+		if !strings.Contains(err.Error(), "regular non-root user") {
+			t.Fatalf("expected non-root remediation, got %q", err.Error())
+		}
+	})
+
+	t.Run("blocks sudo environment with bypass permissions", func(t *testing.T) {
+		currentEUID = func() int { return 1000 }
+
+		err := preflightClaudeRootSudo(bypassArgs, map[string]string{"SUDO_UID": "1000"})
+		if err == nil {
+			t.Fatal("expected preflight error")
+		}
+		if !strings.Contains(err.Error(), "root or through sudo") {
+			t.Fatalf("expected sudo-specific explanation, got %q", err.Error())
+		}
+	})
+
+	t.Run("allows non-root without sudo", func(t *testing.T) {
+		currentEUID = func() int { return 1000 }
+
+		if err := preflightClaudeRootSudo(bypassArgs, nil); err != nil {
+			t.Fatalf("expected non-root preflight to pass, got %v", err)
+		}
+	})
+
+	t.Run("allows root when bypass permissions are absent", func(t *testing.T) {
+		currentEUID = func() int { return 0 }
+
+		if err := preflightClaudeRootSudo([]string{"-p", "--permission-mode", "plan"}, nil); err != nil {
+			t.Fatalf("expected non-bypass preflight to pass, got %v", err)
+		}
+	})
+}
+
 func TestFilterCustomArgsBlocksProtocolFlags(t *testing.T) {
 	t.Parallel()
 

@@ -36,6 +36,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
 	args := buildClaudeArgs(opts, b.cfg.Logger)
+	if err := preflightClaudeRootSudo(args, b.cfg.Env); err != nil {
+		cancel()
+		return nil, err
+	}
 
 	// If the caller provided an MCP config, write it to a temp file and pass
 	// --mcp-config <path> so the agent uses a controlled set of MCP servers
@@ -516,6 +520,48 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args = append(args, filterCustomArgs(opts.ExtraArgs, claudeBlockedArgs, logger)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, claudeBlockedArgs, logger)...)
 	return args
+}
+
+var (
+	currentEUID      = os.Geteuid
+	currentEnvLookup = os.LookupEnv
+)
+
+func preflightClaudeRootSudo(args []string, extraEnv map[string]string) error {
+	if !claudeArgsUseBypassPermissions(args) || !runningAsRootOrSudo(extraEnv) {
+		return nil
+	}
+	return errors.New("Claude Code cannot run with --dangerously-skip-permissions as root or through sudo. Run the Multica daemon as a regular non-root user, then restart the daemon and retry the task")
+}
+
+func claudeArgsUseBypassPermissions(args []string) bool {
+	for i, arg := range args {
+		if arg == "--dangerously-skip-permissions" {
+			return true
+		}
+		if arg == "--permission-mode=bypassPermissions" {
+			return true
+		}
+		if arg == "--permission-mode" && i+1 < len(args) && args[i+1] == "bypassPermissions" {
+			return true
+		}
+	}
+	return false
+}
+
+func runningAsRootOrSudo(extraEnv map[string]string) bool {
+	if currentEUID() == 0 {
+		return true
+	}
+	for _, key := range []string{"SUDO_UID", "SUDO_USER", "SUDO_COMMAND"} {
+		if v, ok := currentEnvLookup(key); ok && v != "" {
+			return true
+		}
+		if v, ok := extraEnv[key]; ok && v != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func writeClaudeInput(w io.Writer, prompt string) error {

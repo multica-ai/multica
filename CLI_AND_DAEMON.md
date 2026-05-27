@@ -103,6 +103,8 @@ multica daemon start
 
 By default, the daemon runs in the background and logs to `~/.multica/daemon.log`.
 
+Run the daemon as your normal user, not with `sudo` or as `root`. Claude Code refuses its autonomous bypass-permissions mode under root/sudo privileges, and Multica uses that mode for Claude-backed agents so tasks can run headlessly.
+
 To run in the foreground (useful for debugging):
 
 ```bash
