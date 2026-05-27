@@ -9,6 +9,7 @@ import {
   sortMentionTargetsByFrequency,
   type WorkspaceMentionTarget,
 } from "./mentions";
+import { resolvePublicFileUrl } from "./avatar-url";
 import {
   memberListOptions,
   agentListOptions,

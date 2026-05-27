@@ -1,4 +1,4 @@
-import { keepPreviousData, queryOptions, type QueryClient } from "@tanstack/react-query";
+import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   GroupedIssuesResponse,
@@ -19,18 +19,21 @@ export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
   list: (wsId: string, filter?: IssueListFilter) =>
     [...issueKeys.all(wsId), "list", ...(filter ? [filter] : [])] as const,
+  /** FULL KEY for queryOptions — includes sort. */
+  listSorted: (wsId: string, sort?: IssueSortParam) =>
+    [...issueKeys.all(wsId), "list", sort ?? {}] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
     [...issueKeys.assigneeGroupsAll(wsId), filter] as const,
   /** All "my issues" queries — use for bulk invalidation. */
   myAll: (wsId: string) => [...issueKeys.all(wsId), "my"] as const,
-  /** PREFIX for per-scope invalidation — no sort. */
+  /** Per-scope "my issues" list with filter identity baked into the key. */
   myList: (wsId: string, scope: string, filter: MyIssuesFilter) =>
     [...issueKeys.myAll(wsId), scope, filter] as const,
   /** FULL KEY for queryOptions — includes sort. */
   myListSorted: (wsId: string, scope: string, filter: MyIssuesFilter, sort?: IssueSortParam) =>
-    [...issueKeys.myList(wsId, scope, filter), sort ?? {}] as const,
+    [...issueKeys.myAll(wsId), scope, filter, sort ?? {}] as const,
   myAssigneeGroupsAll: (wsId: string) =>
     [...issueKeys.myAll(wsId), "assignee-groups"] as const,
   myAssigneeGroups: (
@@ -172,11 +175,11 @@ async function fetchFirstPages(filter: IssueListFilter = {}): Promise<ListIssues
  * total — pagination on the "All" scope is out of scope; the first
  * 50-per-status × 3 widening (deduped) is what the page renders.
  */
-async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Promise<ListIssuesCache> {
+async function fetchAllMyFirstPages(userId: string): Promise<ListIssuesCache> {
   const [byAssignee, byCreator, byInvolves] = await Promise.all([
-    fetchFirstPages({ assignee_id: userId }, sort),
-    fetchFirstPages({ creator_id: userId }, sort),
-    fetchFirstPages({ involves_user_id: userId }, sort),
+    fetchFirstPages({ assignee_id: userId }),
+    fetchFirstPages({ creator_id: userId }),
+    fetchFirstPages({ involves_user_id: userId }),
   ]);
   const byStatus: ListIssuesCache["byStatus"] = {};
   for (const status of PAGINATED_STATUSES) {
@@ -206,7 +209,6 @@ async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Prom
 async function fetchAllMyAssigneeGroups(
   userId: string,
   filter: AssigneeGroupedIssuesFilter,
-  sort?: IssueSortParam,
 ): Promise<GroupedIssuesResponse> {
   const variants: AssigneeGroupedIssuesFilter[] = [
     { ...filter, assignee_id: userId },
@@ -219,7 +221,6 @@ async function fetchAllMyAssigneeGroups(
         group_by: "assignee",
         limit: ISSUE_PAGE_SIZE,
         offset: 0,
-        ...sort,
         ...f,
       }),
     ),
@@ -266,7 +267,6 @@ export function issueListOptions(wsId: string, filter?: IssueListFilter) {
     queryKey: issueKeys.list(wsId, filter),
     queryFn: () => fetchFirstPages(requestFilter),
     select: flattenIssueBuckets,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -282,10 +282,8 @@ export function issueAssigneeGroupsOptions(
         group_by: "assignee",
         limit: ISSUE_PAGE_SIZE,
         offset: 0,
-        ...sort,
         ...filter,
       }),
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -308,10 +306,9 @@ export function myIssueListOptions(
     queryKey: issueKeys.myListSorted(wsId, scope, filter, sort),
     queryFn: () =>
       scope === "all" && userId
-        ? fetchAllMyFirstPages(userId, sort)
-        : fetchFirstPages(filter, sort),
+        ? fetchAllMyFirstPages(userId)
+        : fetchFirstPages(filter),
     select: flattenIssueBuckets,
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -381,15 +378,13 @@ export function myIssueAssigneeGroupsOptions(
     queryKey: issueKeys.myAssigneeGroups(wsId, scope, { ...filter, ...sort }),
     queryFn: () =>
       scope === "all" && userId
-        ? fetchAllMyAssigneeGroups(userId, filter, sort)
+        ? fetchAllMyAssigneeGroups(userId, filter)
         : api.listGroupedIssues({
             group_by: "assignee",
             limit: ISSUE_PAGE_SIZE,
             offset: 0,
-            ...sort,
             ...filter,
           }),
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -418,74 +413,6 @@ export function childIssuesOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.children(wsId, id),
     queryFn: () => api.listChildIssues(id).then((r) => r.issues),
-  });
-}
-
-/**
- * Server cap on parent_ids per `GET /api/issues/children` request — must
- * match `listChildrenByParentsLimit` in server/internal/handler/issue.go.
- * Exceeding it returns 400, so the client chunks larger requests.
- */
-export const CHILDREN_BY_PARENTS_CHUNK_SIZE = 200;
-
-/**
- * Batched variant of {@link childIssuesOptions}: fetches children for all
- * given parents in `GET /api/issues/children?parent_ids=…` requests, chunked
- * to {@link CHILDREN_BY_PARENTS_CHUNK_SIZE} parents each. The queryFn also
- * hydrates each parent's per-parent issueKeys.children cache so other
- * surfaces (issue-detail sub-issues panel, set-parent modal) hit the primed
- * cache instead of re-fetching. Hydration happens in queryFn (not a
- * useEffect) to avoid the setQueryData → re-render → effect loop.
- *
- * Used by SwimLaneView to resolve parent lanes without an N-request fan-out.
- * parentIds must be sorted + deduplicated by the caller for a stable cache key.
- */
-async function fetchAndHydrateChildrenByParents(
-  qc: QueryClient,
-  wsId: string,
-  parentIds: readonly string[],
-) {
-  // Chunk to respect the server cap (parallel, since chunks are independent).
-  const chunks: string[][] = [];
-  for (let i = 0; i < parentIds.length; i += CHILDREN_BY_PARENTS_CHUNK_SIZE) {
-    chunks.push([...parentIds.slice(i, i + CHILDREN_BY_PARENTS_CHUNK_SIZE)]);
-  }
-  const responses = await Promise.all(chunks.map((c) => api.listChildrenByParents(c)));
-  const grouped = new Map<string, Issue[]>();
-  for (const response of responses) {
-    for (const issue of response.issues) {
-      if (!issue.parent_issue_id) continue;
-      const bucket = grouped.get(issue.parent_issue_id);
-      if (bucket) {
-        bucket.push(issue);
-      } else {
-        grouped.set(issue.parent_issue_id, [issue]);
-      }
-    }
-  }
-  for (const [parentId, children] of grouped) {
-    // Only hydrate if the per-parent cache is empty — don't overwrite a
-    // fresher result that another query (e.g. issue-detail) may have written.
-    // This relies on useUpdateIssue.onMutate writing into the per-parent
-    // cache (not creating an empty one) — if that contract changes, batch
-    // hydration here would silently stop seeding new lanes.
-    const existing = qc.getQueryData<Issue[]>(issueKeys.children(wsId, parentId));
-    if (!existing || existing.length === 0) {
-      qc.setQueryData(issueKeys.children(wsId, parentId), children);
-    }
-  }
-  return grouped;
-}
-
-export function childrenByParentsOptions(
-  wsId: string,
-  parentIds: readonly string[],
-  qc: QueryClient,
-) {
-  return queryOptions({
-    queryKey: issueKeys.childrenByParents(wsId, parentIds),
-    queryFn: () => fetchAndHydrateChildrenByParents(qc, wsId, parentIds),
-    enabled: parentIds.length > 0,
   });
 }
 
@@ -538,6 +465,60 @@ export function issueAttachmentsOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.attachments(issueId),
     queryFn: () => api.listAttachments(issueId),
+  });
+}
+
+/**
+ * The maximum number of parent IDs per request. Must stay ≤ the server's
+ * `listChildrenByParentsLimit` (handler/issue.go). Client chunks larger
+ * requests to avoid a 400.
+ */
+export const CHILDREN_BY_PARENTS_CHUNK_SIZE = 200;
+
+/**
+ * Batched variant of childIssuesOptions: fetches children for all given
+ * parents in chunked requests. Hydrates per-parent cache for other surfaces.
+ */
+async function fetchAndHydrateChildrenByParents(
+  qc: QueryClient,
+  wsId: string,
+  parentIds: readonly string[],
+) {
+  const chunks: string[][] = [];
+  for (let i = 0; i < parentIds.length; i += CHILDREN_BY_PARENTS_CHUNK_SIZE) {
+    chunks.push([...parentIds.slice(i, i + CHILDREN_BY_PARENTS_CHUNK_SIZE)]);
+  }
+  const responses = await Promise.all(chunks.map((c) => api.listChildrenByParents(c)));
+  const grouped = new Map<string, Issue[]>();
+  for (const response of responses) {
+    for (const issue of response.issues) {
+      if (!issue.parent_issue_id) continue;
+      const bucket = grouped.get(issue.parent_issue_id);
+      if (bucket) {
+        bucket.push(issue);
+      } else {
+        grouped.set(issue.parent_issue_id, [issue]);
+      }
+    }
+  }
+  for (const [parentId, children] of grouped) {
+    const existing = qc.getQueryData<Issue[]>(issueKeys.children(wsId, parentId));
+    if (!existing || existing.length === 0) {
+      qc.setQueryData(issueKeys.children(wsId, parentId), children);
+    }
+  }
+  return grouped;
+}
+
+export function childrenByParentsOptions(
+  wsId: string,
+  parentIds: readonly string[],
+  qc: QueryClient,
+) {
+  return queryOptions({
+    queryKey: issueKeys.childrenByParents(wsId, parentIds),
+    queryFn: () => fetchAndHydrateChildrenByParents(qc, wsId, parentIds),
+    enabled: parentIds.length > 0,
   });
 }
 

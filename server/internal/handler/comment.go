@@ -640,7 +640,7 @@ func (h *Handler) resolveCommentTargetAgentIDs(ctx context.Context, issue db.Iss
 		targets = append(targets, agentID)
 	}
 
-	if authorType == "member" && h.shouldEnqueueOnComment(ctx, issue) &&
+	if authorType == "member" && h.shouldEnqueueOnComment(ctx, issue, authorType, authorID) &&
 		!h.commentMentionsOthersButNotAssignee(content, issue) &&
 		!h.isReplyToMemberThread(ctx, parentComment, content, issue) {
 		addTarget(uuidToString(issue.AssigneeID))
@@ -865,17 +865,8 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 		h.enqueueSquadLeaderTask(ctx, issue, comment.ID, actorType, actorID)
 	}
 
-
-		}
-	}
-
-	if h.shouldEnqueueSquadLeaderOnComment(ctx, issue, comment.Content, actorType, actorID) {
-		h.enqueueSquadLeaderTask(ctx, issue, comment.ID, actorType, actorID)
-	}
-
 	h.enqueueMentionedAgentTasks(ctx, issue, comment, parentComment, actorType, actorID, taskContext)
 	h.trackMentionFrequency(ctx, issue.WorkspaceID, actorType, actorID, comment.Content)
-
 }
 
 func (h *Handler) createCommentWithIssueProgress(ctx context.Context, issue db.Issue, params db.CreateCommentParams) (db.Comment, *db.Issue, string, error) {
@@ -1441,7 +1432,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID)
+			h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, nil)
 		}
 	}
 

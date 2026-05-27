@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useMemo } from "react";
+import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import {
   useQuery,
   useQueryClient,
@@ -70,6 +70,7 @@ export function useIssueTimeline(
 
   const query = useQuery(issueTimelineOptions(issueId, aroundCommentId));
   const { data, isLoading: loading } = query;
+  const [submitting, setSubmitting] = useState(false);
 
   const timeline = useMemo<TimelineEntry[]>(() => data ?? [], [data]);
 

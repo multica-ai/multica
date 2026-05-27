@@ -9,7 +9,7 @@
  * that decision out of this file so this stays a single-purpose row UI.
  */
 
-import { Download, Eye, FileText, Loader2, Maximize2 } from "lucide-react";
+import { Download, Eye, FileText, Loader2, Maximize2, Trash2 } from "lucide-react";
 import { useT } from "../i18n";
 import { getPreviewKind } from "./utils/preview";
 
@@ -18,9 +18,11 @@ interface AttachmentCardChromeProps {
   uploading?: boolean;
   canPreview: boolean;
   canDownload: boolean;
+  canDelete?: boolean;
   canExpand?: boolean;
   onPreview: () => void;
   onDownload: () => void;
+  onDelete?: () => void;
   onExpand?: () => void;
 }
 
@@ -29,9 +31,11 @@ function AttachmentCardChrome({
   uploading,
   canPreview,
   canDownload,
+  canDelete,
   canExpand,
   onPreview,
   onDownload,
+  onDelete,
   onExpand,
 }: AttachmentCardChromeProps) {
   const { t } = useT("editor");
@@ -139,6 +143,8 @@ export interface AttachmentCardProps {
   onDownload: () => void;
   /** Expand to inline preview (image types in editor). */
   onExpandToPreview?: () => void;
+  /** Remove attachment from comment (edit mode only). */
+  onDelete?: () => void;
 }
 
 export function AttachmentCard({
@@ -151,6 +157,7 @@ export function AttachmentCard({
   onPreview,
   onDownload,
   onExpandToPreview,
+  onDelete,
 }: AttachmentCardProps) {
   const kind = filename ? getPreviewKind(contentType, filename) : null;
   // Media kinds (pdf/video/audio) are previewable from a URL alone — the
@@ -170,9 +177,11 @@ export function AttachmentCard({
         uploading={uploading}
         canPreview={canPreview}
         canDownload={!!href}
+        canDelete={!!onDelete}
         canExpand={!!onExpandToPreview}
         onPreview={onPreview}
         onDownload={onDownload}
+        onDelete={onDelete}
         onExpand={onExpandToPreview}
       />
     </div>

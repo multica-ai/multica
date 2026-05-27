@@ -48,7 +48,8 @@
     "preview_unsupported": "This file type can't be previewed.",
     "close": "Close",
     "open_in_new_tab": "Open in new tab",
-    "expand_to_preview": "Show as inline preview"
+    "expand_to_preview": "Show as inline preview",
+    "remove": "Remove attachment"
   },
   "link_hover": {
     "copy_link": "Copy link",

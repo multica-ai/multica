@@ -1,1 +1,5 @@
-export { WikiPage as default } from "@multica/views/wiki";
+import { WikiPage } from "@multica/views/wiki";
+
+export default function Page() {
+  return <WikiPage />;
+}

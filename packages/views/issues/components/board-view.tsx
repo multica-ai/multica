@@ -15,7 +15,7 @@ import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
 import type { Issue, IssueAssigneeGroup, IssueStatus } from "@multica/core/types";
 import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { AssigneeGroupedIssuesFilter, IssueListFilter } from "@multica/core/issues/queries";
+import type { AssigneeGroupedIssuesFilter, IssueListFilter, IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -140,6 +140,7 @@ export function BoardView({
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: IssueListFilter;
+  sort?: IssueSortParam;
   /** When set, the per-column "+" pre-fills the project on the create form. */
   projectId?: string;
   /** Optional display count override for callers that apply client-side filters. */
@@ -419,6 +420,7 @@ export function BoardView({
                 issueListTarget={issueListTarget}
                 projectId={projectId}
                 displayCount={columnCounts?.[group.status]}
+                sortLabel={sortLabel}
               />
             ) : (
               assigneeGroupQueryKey && assigneeGroupFilter ? (
@@ -453,8 +455,8 @@ export function BoardView({
         {grouping === "status" && hiddenStatuses.length > 0 && (
           <BoardHiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
-            issueListTarget={issueListTarget}
-            columnCounts={columnCounts}
+            myIssuesOpts={issueListTarget as { scope: string; filter: IssueListFilter } | undefined}
+            sort={sort}
           />
         )}
       </div>
@@ -527,6 +529,7 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   issueListTarget,
   projectId,
   displayCount,
+  sortLabel,
 }: {
   group: BoardColumnGroup & { status: IssueStatus };
   issueIds: string[];
@@ -535,10 +538,11 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   issueListTarget?: { scope?: string; filter?: IssueListFilter };
   projectId?: string;
   displayCount?: number;
+  sortLabel?: string | null;
 }) {
-  const { loadMore, hasMore, isLoading, total, isLoaded } = useLoadMoreByStatus(
+  const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     group.status,
-    issueListTarget,
+    issueListTarget as { scope: string; filter: IssueListFilter } | undefined,
   );
   return (
     <BoardColumn
@@ -546,7 +550,7 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
       issueIds={issueIds}
       issueMap={issueMap}
       childProgressMap={childProgressMap}
-      totalCount={displayCount ?? (isLoaded ? total : issueIds.length)}
+      totalCount={displayCount ?? total}
       projectId={projectId}
       sortLabel={sortLabel}
       footer={
@@ -558,81 +562,40 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   );
 });
 
-function HiddenColumnsPanel({
-  hiddenStatuses,
-  issueListTarget,
-  columnCounts,
-}: {
-  hiddenStatuses: IssueStatus[];
-  issueListTarget?: { scope?: string; filter?: IssueListFilter };
-  columnCounts?: Partial<Record<IssueStatus, number>>;
-}) {
-  const { t } = useT("issues");
-  return (
-    <div className="flex w-[240px] shrink-0 flex-col">
-      <div className="mb-2 flex items-center gap-2 px-1">
-        <span className="text-sm font-medium text-muted-foreground">
-          {t(($) => $.board.hidden_columns_label)}
-        </span>
-      </div>
-      <div className="flex-1 space-y-0.5">
-        {hiddenStatuses.map((status) => (
-          <HiddenColumnRow
-            key={status}
-            status={status}
-            issueListTarget={issueListTarget}
-            displayCount={columnCounts?.[status]}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
 
-function HiddenColumnRow({
+function BoardHiddenColumnRow({
   status,
-  issueListTarget,
-  displayCount,
+  myIssuesOpts,
+  sort,
 }: {
   status: IssueStatus;
-  issueListTarget?: { scope?: string; filter?: IssueListFilter };
-  displayCount?: number;
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  sort?: IssueSortParam;
 }) {
-  const { t } = useT("issues");
-  const viewStoreApi = useViewStoreApi();
-  const { total, isLoaded } = useLoadMoreByStatus(status, issueListTarget);
+  const { total } = useLoadMoreByStatus(status, myIssuesOpts, sort);
+  return <HiddenColumnRow status={status} total={total} />;
+}
+
+function BoardHiddenColumnsPanel({
+  hiddenStatuses,
+  myIssuesOpts,
+  sort,
+}: {
+  hiddenStatuses: IssueStatus[];
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  sort?: IssueSortParam;
+}) {
   return (
-    <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
-      <div className="flex items-center gap-2">
-        <StatusIcon status={status} className="h-3.5 w-3.5" />
-        <span className="text-sm">{t(($) => $.status[status])}</span>
-      </div>
-      <div className="flex items-center gap-1.5">
-        <span className="text-xs text-muted-foreground">
-          {displayCount ?? (isLoaded ? total : "-")}
-        </span>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="rounded-full text-muted-foreground"
-              >
-                <MoreHorizontal className="size-3.5" />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              onClick={() => viewStoreApi.getState().showStatus(status)}
-            >
-              <Eye className="size-3.5" />
-              {t(($) => $.board.show_column)}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
+    <HiddenColumnsPanel
+      hiddenStatuses={hiddenStatuses}
+      renderRow={(status) => (
+        <BoardHiddenColumnRow
+          key={status}
+          status={status}
+          myIssuesOpts={myIssuesOpts}
+          sort={sort}
+        />
+      )}
+    />
   );
 }

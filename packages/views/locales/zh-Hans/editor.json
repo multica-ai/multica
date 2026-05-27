@@ -48,7 +48,8 @@
     "preview_unsupported": "该文件类型暂不支持预览。",
     "close": "关闭",
     "open_in_new_tab": "在新标签页打开",
-    "expand_to_preview": "显示为内联预览"
+    "expand_to_preview": "显示为内联预览",
+    "remove": "移除附件"
   },
   "link_hover": {
     "copy_link": "复制链接",

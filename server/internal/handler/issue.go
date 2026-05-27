@@ -937,162 +937,154 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		scheduledFilter = pgtype.Bool{Bool: true, Valid: true}
 	}
 
-// Parse sort and direction params for dynamic ORDER BY.
-// Manual sort (position) is always ASC — direction is ignored because
-// the user defines order through drag-and-drop, reversing it has no
-// product meaning.
-sortCol := "position"
-if s := r.URL.Query().Get("sort"); s != "" {
-switch s {
-case "position", "title", "created_at", "start_date", "due_date":
-sortCol = s
-case "priority":
-sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
-default:
-writeError(w, http.StatusBadRequest, "invalid sort value")
-return
-}
-}
-sortDir := "ASC"
-if sortCol != "position" {
-if d := r.URL.Query().Get("direction"); d != "" {
-switch strings.ToLower(d) {
-case "asc":
-sortDir = "ASC"
-case "desc":
-sortDir = "DESC"
-default:
-writeError(w, http.StatusBadRequest, "invalid direction value")
-return
-}
-}
-}
+	// Parse sort and direction params for dynamic ORDER BY.
+	// Manual sort (position) is always ASC — direction is ignored because
+	// the user defines order through drag-and-drop, reversing it has no
+	// product meaning.
+	sortCol := "position"
+	if s := r.URL.Query().Get("sort"); s != "" {
+	switch s {
+	case "position", "title", "created_at", "start_date", "due_date":
+	sortCol = s
+	case "priority":
+	sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
+	default:
+	writeError(w, http.StatusBadRequest, "invalid sort value")
+	return
+	}
+	}
+	sortDir := "ASC"
+	if sortCol != "position" {
+	if d := r.URL.Query().Get("direction"); d != "" {
+	switch strings.ToLower(d) {
+	case "asc":
+	sortDir = "ASC"
+	case "desc":
+	sortDir = "DESC"
+	default:
+	writeError(w, http.StatusBadRequest, "invalid direction value")
+	return
+	}
+	}
+	}
 
-// Build dynamic SQL — same approach as ListGroupedIssues.
-where := []string{"i.workspace_id = $1"}
-args := []any{wsUUID}
-addArg := func(v any) string {
-args = append(args, v)
-return "$" + strconv.Itoa(len(args))
-}
+	// Build dynamic SQL — same approach as ListGroupedIssues.
+	where := []string{"i.workspace_id = $1"}
+	args := []any{wsUUID}
+	addArg := func(v any) string {
+	args = append(args, v)
+	return "$" + strconv.Itoa(len(args))
+	}
 
-if statusFilter.Valid {
-where = append(where, fmt.Sprintf("i.status = %s", addArg(statusFilter.String)))
-}
-if priorityFilter.Valid {
-where = append(where, fmt.Sprintf("i.priority = %s", addArg(priorityFilter.String)))
-}
-if len(priorityFilters) > 0 {
-where = append(where, fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(priorityFilters)))
-}
-if len(assigneeTypesFilter) > 0 {
-where = append(where, fmt.Sprintf("i.assignee_type = ANY(%s::text[])", addArg(assigneeTypesFilter)))
-}
-if assigneeFilter.Valid {
-where = append(where, fmt.Sprintf("i.assignee_id = %s::uuid", addArg(assigneeFilter)))
-}
-if len(assigneeIdsFilter) > 0 {
-where = append(where, fmt.Sprintf("i.assignee_id = ANY(%s::uuid[])", addArg(assigneeIdsFilter)))
-}
-if len(assigneePairs) > 0 {
-pairClauses := make([]string, 0, len(assigneePairs))
-for _, p := range assigneePairs {
-pairClauses = append(pairClauses, fmt.Sprintf("(i.assignee_type = %s AND i.assignee_id = %s::uuid)", addArg(p.Type), addArg(p.ID)))
-}
-where = append(where, "("+strings.Join(pairClauses, " OR ")+")")
-}
-if includeNoAssignee {
-// Widen filter: include issues with NULL assignee
-where = append(where, "(i.assignee_id IS NOT NULL OR i.assignee_id IS NULL)")
-}
-if creatorFilter.Valid {
-where = append(where, fmt.Sprintf("i.creator_id = %s::uuid", addArg(creatorFilter)))
-}
-if len(creatorPairs) > 0 {
-pairClauses := make([]string, 0, len(creatorPairs))
-for _, p := range creatorPairs {
-pairClauses = append(pairClauses, fmt.Sprintf("(i.creator_type = %s AND i.creator_id = %s::uuid)", addArg(p.Type), addArg(p.ID)))
-}
-where = append(where, "("+strings.Join(pairClauses, " OR ")+")")
-}
-if projectFilter.Valid {
-where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(projectFilter)))
-}
-if len(projectIdsFilter) > 0 {
-where = append(where, fmt.Sprintf("i.project_id = ANY(%s::uuid[])", addArg(projectIdsFilter)))
-}
-if includeNoProject {
-where = append(where, "(i.project_id IS NOT NULL OR i.project_id IS NULL)")
-}
-if len(labelIdsFilter) > 0 {
-where = append(where, fmt.Sprintf("EXISTS (SELECT 1 FROM issue_label il WHERE il.issue_id = i.id AND il.label_id = ANY(%s::uuid[]))", addArg(labelIdsFilter)))
-}
-if scheduledFilter.Valid {
-where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
-}
-if metadataFilter != nil {
-where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
-}
-if involvesUserFilter.Valid {
-ref := addArg(involvesUserFilter)
-where = append(where, fmt.Sprintf(`(
-    (i.assignee_type = 'agent' AND i.assignee_id IN (
-       SELECT a.id FROM agent a
-        WHERE a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-    ))
-    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'member'
-          AND sm.member_id   = %[1]s::uuid
-       UNION
-       SELECT s.id
-         FROM squad s
-         JOIN agent a ON a.id = s.leader_id
-        WHERE s.workspace_id = $1
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-       UNION
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-         JOIN agent a ON a.id = sm.member_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'agent'
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-    ))
-)`, ref))
-}
+	if statusFilter.Valid {
+	where = append(where, fmt.Sprintf("i.status = %s", addArg(statusFilter.String)))
+	}
+	if priorityFilter.Valid {
+	where = append(where, fmt.Sprintf("i.priority = %s", addArg(priorityFilter.String)))
+	}
+	if len(priorityFilters) > 0 {
+	where = append(where, fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(priorityFilters)))
+	}
+	if len(assigneeTypesFilter) > 0 {
+	where = append(where, fmt.Sprintf("i.assignee_type = ANY(%s::text[])", addArg(assigneeTypesFilter)))
+	}
+	if assigneeFilter.Valid {
+	where = append(where, fmt.Sprintf("i.assignee_id = %s::uuid", addArg(assigneeFilter)))
+	}
+	if len(assigneeIdsFilter) > 0 {
+	where = append(where, fmt.Sprintf("i.assignee_id = ANY(%s::uuid[])", addArg(assigneeIdsFilter)))
+	}
+	if len(assigneePairs) > 0 {
+		where = append(where, fmt.Sprintf("(i.assignee_id IS NOT NULL AND (i.assignee_type || ':' || i.assignee_id::text) = ANY(%s::text[]))", addArg(assigneePairs)))
+	}
+	if includeNoAssignee.Valid && includeNoAssignee.Bool {
+		// Widen filter: include issues with NULL assignee
+		where = append(where, "(i.assignee_id IS NOT NULL OR i.assignee_id IS NULL)")
+	}
+	if creatorFilter.Valid {
+		where = append(where, fmt.Sprintf("i.creator_id = %s::uuid", addArg(creatorFilter)))
+	}
+	if len(creatorPairs) > 0 {
+		where = append(where, fmt.Sprintf("(i.creator_type || ':' || i.creator_id::text) = ANY(%s::text[])", addArg(creatorPairs)))
+	}
+	if projectFilter.Valid {
+		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(projectFilter)))
+	}
+	if len(projectIdsFilter) > 0 {
+		where = append(where, fmt.Sprintf("i.project_id = ANY(%s::uuid[])", addArg(projectIdsFilter)))
+	}
+	if includeNoProject.Valid && includeNoProject.Bool {
+		where = append(where, "(i.project_id IS NOT NULL OR i.project_id IS NULL)")
+	}
+	if len(labelIdsFilter) > 0 {
+		where = append(where, fmt.Sprintf("EXISTS (SELECT 1 FROM issue_label il WHERE il.issue_id = i.id AND il.label_id = ANY(%s::uuid[]))", addArg(labelIdsFilter)))
+	}
+	if scheduledFilter.Valid {
+	where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
+	}
+	if metadataFilter != nil {
+	where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
+	}
+	if involvesUserFilter.Valid {
+	ref := addArg(involvesUserFilter)
+	where = append(where, fmt.Sprintf(`(
+	    (i.assignee_type = 'agent' AND i.assignee_id IN (
+	       SELECT a.id FROM agent a
+	        WHERE a.workspace_id = $1
+	          AND a.owner_id     = %[1]s::uuid
+	    ))
+	    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
+	       SELECT sm.squad_id
+	         FROM squad_member sm
+	         JOIN squad s ON s.id = sm.squad_id
+	        WHERE s.workspace_id = $1
+	          AND sm.member_type = 'member'
+	          AND sm.member_id   = %[1]s::uuid
+	       UNION
+	       SELECT s.id
+	         FROM squad s
+	         JOIN agent a ON a.id = s.leader_id
+	        WHERE s.workspace_id = $1
+	          AND a.workspace_id = $1
+	          AND a.owner_id     = %[1]s::uuid
+	       UNION
+	       SELECT sm.squad_id
+	         FROM squad_member sm
+	         JOIN squad s ON s.id = sm.squad_id
+	         JOIN agent a ON a.id = sm.member_id
+	        WHERE s.workspace_id = $1
+	          AND sm.member_type = 'agent'
+	          AND a.workspace_id = $1
+	          AND a.owner_id     = %[1]s::uuid
+	    ))
+	)`, ref))
+	}
 
-whereSql := strings.Join(where, " AND ")
+	whereSql := strings.Join(where, " AND ")
 
-// Build ORDER BY clause.
-orderBy := sortCol
-if !strings.HasPrefix(sortCol, "CASE") {
-orderBy = "i." + sortCol
-}
-orderBy += " " + sortDir
-if sortCol == "start_date" || sortCol == "due_date" {
-orderBy += " NULLS LAST"
-}
-orderBy += ", i.created_at DESC"
+	// Build ORDER BY clause.
+	orderBy := sortCol
+	if !strings.HasPrefix(sortCol, "CASE") {
+	orderBy = "i." + sortCol
+	}
+	orderBy += " " + sortDir
+	if sortCol == "start_date" || sortCol == "due_date" {
+	orderBy += " NULLS LAST"
+	}
+	orderBy += ", i.created_at DESC"
 
-offsetRef := addArg(int64(offset))
-limitRef := addArg(int64(limit))
+	offsetRef := addArg(int64(offset))
+	limitRef := addArg(int64(limit))
 
-query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
-       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
-FROM issue i
-WHERE %s
-ORDER BY %s
-LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
+	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+	       i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+	       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+	FROM issue i
+	WHERE %s
+	ORDER BY %s
+	LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 
-rows, err := h.DB.Query(ctx, query, args...)
+	rows, err := h.DB.Query(ctx, query, args...)
 	if err != nil {
 		slog.Warn("ListIssues query failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list issues")

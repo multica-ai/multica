@@ -19,6 +19,7 @@ import {
   childIssueProgressOptions,
   type AssigneeGroupedIssuesFilter,
   type IssueListFilter,
+  type IssueSortParam,
   type MyIssuesFilter,
 } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -139,6 +140,7 @@ export function ProjectIssuesContent({
   assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
   scope: string;
   filter: IssueListFilter;
+  sort?: IssueSortParam;
   ganttIssues: Issue[];
   scopedLabelFilters?: string[];
 }) {
@@ -290,6 +292,13 @@ export function ProjectIssuesSurface({
   const grouping = useViewStore((s) => s.grouping);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
+  const sort = useMemo(
+    () => ({
+      sort_by: sortBy,
+      sort_direction: sortBy !== "position" ? sortDirection : undefined,
+    } as const),
+    [sortBy, sortDirection],
+  );
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);

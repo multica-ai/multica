@@ -19,7 +19,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { IssueListFilter } from "@multica/core/issues/queries";
+import type { IssueListFilter, IssueSortParam } from "@multica/core/issues/queries";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -380,11 +380,19 @@ function StatusAccordionItem({
   const deselect = useIssueSelectionStore((s) => s.deselect);
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     status,
-    issueListTarget,
+    issueListTarget as { scope: string; filter: IssueListFilter } | undefined,
+  );
+
+  const issues = useMemo(
+    () => issueIds.flatMap((id) => {
+      const issue = issueMap.get(id);
+      return issue ? [issue] : [];
+    }),
+    [issueIds, issueMap],
   );
 
   const selectedCount = issueIds.filter((id) => selectedIds.has(id)).length;
-  const allSelected = issues.length > 0 && selectedCount === issues.length;
+  const allSelected = issueIds.length > 0 && selectedCount === issueIds.length;
   const someSelected = selectedCount > 0;
 
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
