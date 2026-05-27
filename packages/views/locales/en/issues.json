@@ -307,6 +307,7 @@
     "is_working": "{{name}} is working",
     "is_queued": "{{name}} is queued",
     "is_waiting_local_directory": "{{name}} is waiting for the local directory",
+    "unsupported_user_question": "{{name}} asked for input, but this runtime cannot receive answers here",
     "queued_elapsed_prefix": "queued for {{elapsed}}",
     "fallback_name": "Agent",
     "tool_count_one": "{{count}} tool",

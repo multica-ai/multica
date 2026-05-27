@@ -301,6 +301,7 @@
     "is_working": "{{name}} 正在处理",
     "is_queued": "{{name}} 排队中",
     "is_waiting_local_directory": "{{name}} 正在等待本地目录",
+    "unsupported_user_question": "{{name}} 请求输入，但此运行时无法在这里接收回答",
     "queued_elapsed_prefix": "已排队 {{elapsed}}",
     "fallback_name": "智能体",
     "tool_count_other": "{{count}} 次工具调用",

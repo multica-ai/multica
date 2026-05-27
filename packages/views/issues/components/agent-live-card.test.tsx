@@ -251,6 +251,32 @@ describe("AgentLiveCard queued rendering", () => {
     expect(screen.getByText("Stop")).toBeTruthy();
   });
 
+  it("surfaces AskUserQuestion tool events as unsupported input requests", async () => {
+    const runningTask = makeTask("task-r", { status: "running" });
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [runningTask] });
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/is working/)).toBeTruthy();
+    });
+
+    act(() => {
+      fireEvent("task:message", {
+        task_id: "task-r",
+        issue_id: "issue-1",
+        seq: 1,
+        type: "tool_use",
+        tool: "AskUserQuestion",
+        input: { question: "Which branch should I update?" },
+      });
+    });
+
+    expect(screen.getByText(/asked for input, but this runtime cannot receive answers here/)).toBeTruthy();
+    expect(screen.getByText("Which branch should I update?")).toBeTruthy();
+    expect(screen.getByTestId("transcript-button")).toBeTruthy();
+  });
+
   it("Stop button opens a confirm dialog and only calls cancelTask after the user confirms", async () => {
     const runningTask = makeTask("task-r", { status: "running" });
     mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [runningTask] });

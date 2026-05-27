@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, Clock, Loader2, Square } from "lucide-react";
+import { AlertCircle, Bot, Clock, Loader2, Square } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import type { TaskMessagePayload } from "@multica/core/types/events";
@@ -48,6 +48,22 @@ interface TaskState {
 
 interface AgentLiveCardProps {
   issueId: string;
+}
+
+function isUserQuestionTool(item: TimelineItem): boolean {
+  if (item.type !== "tool_use") return false;
+  const tool = item.tool?.toLowerCase().replace(/[^a-z]/g, "");
+  return tool === "askuserquestion" || tool === "question";
+}
+
+function getUserQuestionPrompt(item: TimelineItem | undefined): string {
+  if (!item?.input) return "";
+  const question =
+    item.input.question ??
+    item.input.prompt ??
+    item.input.message ??
+    item.input.text;
+  return typeof question === "string" ? question.trim() : "";
 }
 
 export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
@@ -287,6 +303,9 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const isQueued = task.status === "queued";
+  const userQuestionItem = [...items].reverse().find(isUserQuestionTool);
+  const userQuestionPrompt = getUserQuestionPrompt(userQuestionItem);
+  const isUnsupportedUserQuestion = Boolean(userQuestionItem);
   // `waiting_local_directory` is the daemon-parked stage of an otherwise-
   // active task: it's been dispatched (no longer pure-queued) but hasn't
   // entered the running phase yet because another task on this daemon
@@ -294,7 +313,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
   const isWaitingLocalDirectory = task.status === "waiting_local_directory";
   // Treat parked + queued the same visually (non-shimmering, muted accent),
   // but the label below is distinct so the user sees the specific reason.
-  const isParked = isQueued || isWaitingLocalDirectory;
+  const isParked = isQueued || isWaitingLocalDirectory || isUnsupportedUserQuestion;
 
   // Elapsed time — ticks every second so users see the agent is alive.
   // For queued tasks neither started_at nor dispatched_at is set yet, so
@@ -339,20 +358,24 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
           </div>
         )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
-          {isParked ? (
+          {isUnsupportedUserQuestion ? (
+            <AlertCircle className="h-3 w-3 text-warning shrink-0" />
+          ) : isParked ? (
             <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
           ) : (
             <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
           )}
           <span className="font-medium text-foreground truncate">
-            {isWaitingLocalDirectory
+            {isUnsupportedUserQuestion
+              ? t(($) => $.agent_live.unsupported_user_question, { name: agentName })
+              : isWaitingLocalDirectory
               ? t(($) => $.agent_live.is_waiting_local_directory, { name: agentName })
               : isQueued
                 ? t(($) => $.agent_live.is_queued, { name: agentName })
                 : t(($) => $.agent_live.is_working, { name: agentName })}
           </span>
           <span className="text-muted-foreground tabular-nums shrink-0">
-            {isParked
+            {isParked && !isUnsupportedUserQuestion
               ? t(($) => $.agent_live.queued_elapsed_prefix, { elapsed })
               : elapsed}
           </span>
@@ -360,8 +383,13 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             <span className="text-muted-foreground shrink-0">{t(($) => $.agent_live.tool_count, { count: toolCount })}</span>
           )}
         </div>
+        {isUnsupportedUserQuestion && userQuestionPrompt && (
+          <div className="min-w-0 flex-1 text-xs text-muted-foreground truncate">
+            {userQuestionPrompt}
+          </div>
+        )}
         <div className="ml-auto flex items-center gap-1 shrink-0">
-          {!isParked && (
+          {(!isParked || isUnsupportedUserQuestion) && (
             <TranscriptButton
               task={task}
               agentName={agentName}
