@@ -1070,3 +1070,101 @@ func TestCapabilityOrDefaultUnknownProvider(t *testing.T) {
 		t.Fatalf("expected zero-value Capability for unknown provider, got %+v", cap)
 	}
 }
+
+func TestCopilotHandleLineNoRawProviderTraces(t *testing.T) {
+	t.Parallel()
+
+	var traceChannels []string
+	c := &copilotACPClient{
+		cfg:     Config{Logger: slog.Default()},
+		pending: make(map[int]*pendingRPC),
+		traceCallback: func(channel, _, _ string) {
+			traceChannels = append(traceChannels, channel)
+		},
+	}
+
+	// Use ACP JSON-RPC notification messages (the format handleLine expects).
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"}}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","title":"terminal: pwd","kind":"execute","status":"pending","rawInput":{"command":"pwd"}}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed","kind":"execute","rawOutput":"file.go"}}}}`)
+
+	for _, tc := range traceChannels {
+		if tc == "raw_stdout" || tc == "provider_event" {
+			t.Errorf("standardized provider must not emit %q trace to user-visible stream", tc)
+		}
+	}
+
+	hasDisplay := false
+	for _, tc := range traceChannels {
+		if tc == "display_event" {
+			hasDisplay = true
+			break
+		}
+	}
+	if !hasDisplay {
+		t.Fatal("expected display_event traces to be emitted")
+	}
+}
+
+func TestCopilotACPClientAutoApprovesTrustedPlatformCommands(t *testing.T) {
+	t.Parallel()
+
+	w := &bufferWriter{}
+	approved := false
+	c := &copilotACPClient{
+		cfg:     Config{Logger: slog.Default()},
+		stdin:   w,
+		pending: make(map[int]*pendingRPC),
+		runCtx:  context.Background(),
+		onApproval: func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+			approved = true
+			return "allow_once", true, nil
+		},
+	}
+
+	// "multica preview start" is a trusted platform command — must be
+	// auto-approved without calling the approval callback.
+	c.handleLine(`{"jsonrpc":"2.0","id":10,"method":"session/request_permission","params":{"sessionId":"ses_1","options":[{"optionId":"allow_once","name":"Allow once","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}],"toolCall":{"toolCallId":"tc_trusted","title":"Run multica command","kind":"execute","rawInput":{"command":"multica preview start"}}}}`)
+
+	if approved {
+		t.Fatal("trusted platform command should be auto-approved without calling onApproval callback")
+	}
+
+	var resp struct {
+		Result struct {
+			Outcome struct {
+				OptionID string `json:"optionId"`
+			} `json:"outcome"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(w.String())), &resp); err != nil {
+		t.Fatalf("reply is not valid JSON: %q err=%v", w.String(), err)
+	}
+	if resp.Result.Outcome.OptionID != "allow_once" {
+		t.Fatalf("expected auto-approve of trusted command, got optionId %q", resp.Result.Outcome.OptionID)
+	}
+}
+
+func TestCopilotACPClientRoutesUntrustedCommandsToApproval(t *testing.T) {
+	t.Parallel()
+
+	w := &bufferWriter{}
+	var gotReq ApprovalRequest
+	c := &copilotACPClient{
+		cfg:     Config{Logger: slog.Default()},
+		stdin:   w,
+		pending: make(map[int]*pendingRPC),
+		runCtx:  context.Background(),
+		onApproval: func(_ context.Context, req ApprovalRequest) (string, bool, error) {
+			gotReq = req
+			return "deny", false, nil
+		},
+	}
+
+	// "rm -rf /tmp" is NOT a trusted platform command — must go through approval.
+	c.handleLine(`{"jsonrpc":"2.0","id":11,"method":"session/request_permission","params":{"sessionId":"ses_1","options":[{"optionId":"allow_once","name":"Allow once","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}],"toolCall":{"toolCallId":"tc_untrusted","title":"Shell","kind":"execute","rawInput":{"command":"rm -rf /tmp"}}}}`)
+
+	if gotReq.Type != "permission_request" {
+		t.Fatal("untrusted command should have been routed through onApproval callback")
+	}
+}

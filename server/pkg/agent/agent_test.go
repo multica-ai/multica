@@ -92,7 +92,7 @@ func TestCapabilityRegistryCoversSupportedBackends(t *testing.T) {
 	t.Parallel()
 
 	supported := []string{
-		"claude", "codex", "copilot", "opencode", "openclaw", "hermes",
+		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes",
 		"gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI",
 	}
 	for _, provider := range supported {
@@ -149,6 +149,33 @@ func TestStreamDisplayGatingForUnknownProvider(t *testing.T) {
 		}
 		if !cap.StreamDisplay {
 			t.Fatalf("%s must have StreamDisplay=true", name)
+		}
+	}
+}
+
+func TestCapabilityRegistryNoDriftFromSupportedBackends(t *testing.T) {
+	t.Parallel()
+
+	backends := SupportedBackends()
+	providers := RegisteredProviders()
+
+	backendSet := make(map[string]bool, len(backends))
+	for _, b := range backends {
+		backendSet[b] = true
+	}
+	providerSet := make(map[string]bool, len(providers))
+	for _, p := range providers {
+		providerSet[p] = true
+	}
+
+	for _, b := range backends {
+		if !providerSet[b] {
+			t.Errorf("supported backend %q missing from capability registry", b)
+		}
+	}
+	for _, p := range providers {
+		if !backendSet[p] {
+			t.Errorf("capability registry entry %q not in supported backends", p)
 		}
 	}
 }
