@@ -485,7 +485,7 @@ export function AgentTranscriptDialog({
               </MetadataChip>
             )}
 
-            {/* Work directory — strip the workspaces root prefix */}
+{/* Work directory — strip the workspaces root prefix */}
             {task.work_dir && (
               <MetadataChip icon={<Cpu className="h-3 w-3" />}>
                 {stripBeforeWorkspaces(task.work_dir, task.issue_id, task.id)}
