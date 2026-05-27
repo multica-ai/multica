@@ -16,7 +16,7 @@ import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
 import { useUpdatableRuntimeIds } from "@multica/core/runtimes/hooks";
 import { useWSEvent } from "@multica/core/realtime";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
@@ -131,6 +131,7 @@ export function RuntimesPage({
   );
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
 
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
@@ -170,9 +171,17 @@ export function RuntimesPage({
 
   const machineCounts = useMemo(() => runtimeMachineCounts(machines), [machines]);
 
+  const ownerNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of members) {
+      map.set(m.user_id, m.name);
+    }
+    return map;
+  }, [members]);
+
   const filteredMachines = useMemo(
-    () => filterRuntimeMachines(machines, machineSearch, machineFilter),
-    [machines, machineSearch, machineFilter],
+    () => filterRuntimeMachines(machines, machineSearch, machineFilter, ownerNames),
+    [machines, machineSearch, machineFilter, ownerNames],
   );
 
   useEffect(() => {

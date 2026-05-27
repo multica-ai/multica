@@ -517,7 +517,8 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	var runtimes []db.AgentRuntime
 	var err error
 
-	if ownerFilter := r.URL.Query().Get("owner"); ownerFilter == "me" {
+	switch {
+	case r.URL.Query().Get("owner") == "me":
 		userID, ok := requireUserID(w, r)
 		if !ok {
 			return
@@ -526,7 +527,16 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: parseUUID(workspaceID),
 			OwnerID:     parseUUID(userID),
 		})
-	} else {
+	case r.URL.Query().Get("owner_id") != "":
+		ownerID := r.URL.Query().Get("owner_id")
+		if _, ok := parseUUIDOrBadRequest(w, ownerID, "owner_id"); !ok {
+			return
+		}
+		runtimes, err = h.Queries.ListAgentRuntimesByOwner(r.Context(), db.ListAgentRuntimesByOwnerParams{
+			WorkspaceID: parseUUID(workspaceID),
+			OwnerID:     parseUUID(ownerID),
+		})
+	default:
 		runtimes, err = h.Queries.ListAgentRuntimes(r.Context(), parseUUID(workspaceID))
 	}
 
