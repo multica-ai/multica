@@ -141,6 +141,8 @@ type Daemon struct {
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 
+	taskProviders sync.Map // taskID (string) -> provider (string); set on task start, deleted on completion
+
 	// bgSyncs tracks background goroutines started by registerTaskRepos so
 	// callers (notably tests using t.TempDir-backed cache roots) can wait for
 	// them to drain before tearing the daemon down. Without this the bg
@@ -2391,6 +2393,9 @@ func taskAgentName(task Task) string {
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
+	d.taskProviders.Store(task.ID, provider)
+	defer d.taskProviders.Delete(task.ID)
+
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
 	// CLI would otherwise silently fall back to the user-global config — a
@@ -2718,7 +2723,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				execOpts.OnApproval = BuildApprovalCallback(policy, task.ID, provider, d.client)
 			}
 		}
-		traceEnabled := protocol.ResolveTraceEnabled(rtCfg)
+		traceEnabled := protocol.ResolveTraceEnabled(rtCfg) && capability.StreamDisplay
 		if traceEnabled {
 			if providerSupportsNativePlan(provider) && effectiveRunMode == protocol.TaskRunModePlan && policy == protocol.ApprovalPolicyAuto {
 				execOpts.OnApproval = WithApprovalTraceFilter(execOpts.OnApproval, d.traceStore, task.ID, traceRunID, provider, func(req agent.ApprovalRequest) bool {

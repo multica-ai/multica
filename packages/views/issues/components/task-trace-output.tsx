@@ -1213,6 +1213,7 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [streamNonce, setStreamNonce] = useState(0);
+  const [streamGated, setStreamGated] = useState(false);
   const [interactions, setInteractions] = useState<TaskInteraction[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -1293,9 +1294,10 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
       });
       source.addEventListener("ready", (event) => {
         try {
-          const payload = JSON.parse((event as MessageEvent).data) as { run_id?: string };
+          const payload = JSON.parse((event as MessageEvent).data) as { run_id?: string; stream_display?: boolean };
           const nextRunId = payload.run_id ?? "";
           if (nextRunId) setRunId(nextRunId);
+          if (payload.stream_display === false) setStreamGated(true);
         } catch {
           // Ignore malformed ready events.
         }
@@ -1447,7 +1449,12 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
             fill ? "flex-1 min-h-0" : compact ? "max-h-[55vh]" : "max-h-72",
           )}
         >
-          {loading && lines.length === 0 ? (
+          {streamGated ? (
+            <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+              <Radio className="h-3 w-3" />
+              此 provider 不支持实时流输出，任务完成后将展示结果。
+            </div>
+          ) : loading && lines.length === 0 ? (
             <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
               Loading stream...
