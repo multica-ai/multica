@@ -23,7 +23,17 @@ export default defineConfig({
       alias: {
         "@": resolve("src/renderer/src"),
       },
-      dedupe: ["react", "react-dom"],
+      // `@tanstack/react-query` MUST be deduped alongside react/react-dom.
+      // It's a dependency of packages/core (which provides QueryProvider)
+      // and packages/views, but NOT of apps/desktop — and App.tsx imports
+      // useQuery/useQueryClient directly. Without dedupe, Rollup resolves
+      // those imports via two different node_modules paths and bundles two
+      // copies, producing two distinct QueryClientContext objects: the
+      // provider writes to one, useQueryClient reads the other → "No
+      // QueryClient set" → white screen. dev hides this because esbuild's
+      // optimizeDeps pre-bundles to a single instance; only the production
+      // rollup build splits. See the 0.2.47 blank-window regression.
+      dedupe: ["react", "react-dom", "@tanstack/react-query"],
     },
   },
 });
