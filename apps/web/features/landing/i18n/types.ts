@@ -1,7 +1,7 @@
 import type { SupportedLocale } from "@multica/core/i18n";
 
 export type Locale = SupportedLocale;
-export type LandingDictionaryLocale = "en" | "zh";
+export type LandingDictionaryLocale = "en" | "zh" | "ko";
 
 export const locales: Locale[] = ["en", "zh-Hans", "ko"];
 
@@ -14,6 +14,7 @@ export const localeLabels: Record<Locale, string> = {
 export function toLandingDictionaryLocale(
   locale: Locale,
 ): LandingDictionaryLocale {
+  if (locale === "ko") return "ko";
   return locale === "zh-Hans" ? "zh" : "en";
 }
 
