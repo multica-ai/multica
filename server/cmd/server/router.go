@@ -262,7 +262,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-inbox-routes): mounts cerebro-only inbox actions
 	// (mute/unmute/mark-unread). Adding new endpoints here keeps the conflict
 	// surface to a single line per cerebro inbox feature.
-	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries, h.TaskService) // CEREBRO-PATCH(cerebro-inbox-routes): FIR-2385 task service for owner-run endpoint.
+	// CEREBRO-PATCH(cerebro-inbox-realtime): FIR-2394 event bus fans inbox metadata mutations out to other sessions; FIR-2385 task service backs the owner-run endpoint.
+	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries, bus, h.TaskService)
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler instance
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-dictation-routes): JEH-729 workspace-scoped WebSocket proxy; inference deploy stays out of this slice.

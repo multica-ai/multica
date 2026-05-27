@@ -12,10 +12,24 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+)
+
+// Inbox metadata WS event types. They carry the `inbox:` prefix so the client's
+// generic realtime refreshMap (which fires onInboxInvalidate for any inbox:*
+// event other than inbox:new) re-fetches the inbox list + unread counts on
+// every connected tab/device. Without these, a mute/unmute/mark-unread/
+// unarchive done in one session left other sessions' unread badge stale until
+// a manual refresh (FIR-2394).
+const (
+	eventInboxMuted      = "inbox:muted"
+	eventInboxUnmuted    = "inbox:unmuted"
+	eventInboxUnread     = "inbox:unread"
+	eventInboxUnarchived = "inbox:unarchived"
 )
 
 // Handler exposes the cerebro-only inbox HTTP endpoints. Carries both the
@@ -24,15 +38,38 @@ import (
 type Handler struct {
 	Upstream *db.Queries
 	Cerebro  *cerebrodb.Queries
+	// Bus publishes inbox metadata events so other sessions refresh in
+	// realtime. Nil-safe: when unset (e.g. older tests) publishing is skipped.
+	Bus *events.Bus
 	// Tasks enqueues the agent run when the owner accepts a
 	// private_agent_run_request (FIR-2385). nil disables only that endpoint.
 	Tasks *service.TaskService
 }
 
-// New constructs the handler. The router wires both query packages and the
-// task service in.
-func New(upstream *db.Queries, cerebro *cerebrodb.Queries, tasks *service.TaskService) *Handler {
-	return &Handler{Upstream: upstream, Cerebro: cerebro, Tasks: tasks}
+// New constructs the handler. The router wires both query packages, the event
+// bus, and the task service in (bus may be nil in tests that don't exercise
+// realtime fan-out).
+func New(upstream *db.Queries, cerebro *cerebrodb.Queries, bus *events.Bus, tasks *service.TaskService) *Handler {
+	return &Handler{Upstream: upstream, Cerebro: cerebro, Bus: bus, Tasks: tasks}
+}
+
+// publishInboxEvent fans an inbox metadata change out to the recipient's other
+// sessions. Workspace-scoped broadcast mirrors the upstream inbox handler;
+// each client invalidates only its own inbox cache on receipt.
+func (h *Handler) publishInboxEvent(eventType string, item cerebrodb.InboxItem) {
+	if h.Bus == nil {
+		return
+	}
+	h.Bus.Publish(events.Event{
+		Type:        eventType,
+		WorkspaceID: util.UUIDToString(item.WorkspaceID),
+		ActorType:   "member",
+		ActorID:     util.UUIDToString(item.RecipientID),
+		Payload: map[string]any{
+			"item_id":      util.UUIDToString(item.ID),
+			"recipient_id": util.UUIDToString(item.RecipientID),
+		},
+	})
 }
 
 // inboxItemResponse is the JSON shape returned by mute / unmute / unread.
@@ -95,6 +132,7 @@ func (h *Handler) MuteInboxItem(w http.ResponseWriter, r *http.Request) {
 			MutedUntil:    pgtype.Timestamptz{Time: parsed, Valid: true},
 		})
 	}
+	h.publishInboxEvent(eventInboxMuted, item)
 	writeJSON(w, http.StatusOK, toResponse(item))
 }
 
@@ -117,6 +155,7 @@ func (h *Handler) UnmuteInboxItem(w http.ResponseWriter, r *http.Request) {
 			IssueID:       item.IssueID,
 		})
 	}
+	h.publishInboxEvent(eventInboxUnmuted, item)
 	writeJSON(w, http.StatusOK, toResponse(item))
 }
 
@@ -134,6 +173,7 @@ func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to mark inbox item unread")
 		return
 	}
+	h.publishInboxEvent(eventInboxUnread, item)
 	writeJSON(w, http.StatusOK, toResponse(item))
 }
 
@@ -160,6 +200,7 @@ func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 			IssueID:       item.IssueID,
 		})
 	}
+	h.publishInboxEvent(eventInboxUnarchived, item)
 	writeJSON(w, http.StatusOK, toResponse(item))
 }
 
