@@ -14,9 +14,9 @@ import { SUPPORTED_LOCALES, type SupportedLocale } from "./types";
 // Mounts inside CoreProvider so it has access to the auth store + locale
 // adapter + i18n instance. Renders nothing.
 //
-// Loop safety: reload only fires when user.language is a supported locale AND
-// differs from the active i18n.language. After reload, pickLocale reads the
-// freshly-persisted value from the adapter, locales match, effect no-ops.
+// Loop safety: changeLanguage only fires when user.language is a supported
+// locale and differs from the active i18n language. The persisted adapter value
+// keeps the next app boot aligned with the explicit server-stored preference.
 export function UserLocaleSync() {
   const userLanguage = useAuthStore((s) => s.user?.language ?? null);
   const adapter = useLocaleAdapter();
@@ -28,9 +28,10 @@ export function UserLocaleSync() {
       return;
     }
     if (userLanguage === i18n.language) return;
-    adapter.persist(userLanguage as SupportedLocale);
-    if (typeof window !== "undefined") window.location.reload();
-  }, [userLanguage, i18n.language, adapter]);
+    const next = userLanguage as SupportedLocale;
+    adapter.persist(next);
+    void i18n.changeLanguage(next);
+  }, [userLanguage, i18n, i18n.language, adapter]);
 
   return null;
 }

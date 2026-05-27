@@ -80,9 +80,9 @@ export function CoreProvider({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth, identity), []);
 
-  // I18nProvider wraps everything else: server and client must use the same
-  // (locale, resources) to avoid hydration mismatch. Language switching goes
-  // through window.location.reload(), never client-side changeLanguage.
+  // I18nProvider wraps everything else: the initial locale must match the
+  // server render to avoid hydration mismatch. Preloaded resources let later
+  // language changes happen client-side.
   const tree = (
     <QueryProvider>
       <AuthInitializer

@@ -114,7 +114,6 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const locale = await getRequestLocale();
-  const resources = { [locale]: RESOURCES[locale] };
 
   return (
     <html
@@ -124,7 +123,7 @@ export default async function RootLayout({
     >
       <body className="h-full overflow-hidden">
         <ThemeProvider>
-          <WebProviders locale={locale} resources={resources}>
+          <WebProviders locale={locale} resources={RESOURCES}>
             {children}
           </WebProviders>
           <Toaster />

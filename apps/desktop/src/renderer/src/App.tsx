@@ -291,17 +291,13 @@ export default function App() {
     () => ({ platform: "desktop", version, os }),
     [version, os],
   );
-  // Locale resolution happens once at app boot. Switching language goes
-  // through window.location.reload() to avoid hydration mismatch.
+  // Locale resolution happens once at app boot. All locale resources are
+  // preloaded so explicit language changes can happen client-side.
   const localeAdapter = useMemo(
     () => createDesktopLocaleAdapter(systemLocale),
     [systemLocale],
   );
   const locale = useMemo(() => pickLocale(localeAdapter), [localeAdapter]);
-  const resources = useMemo(
-    () => ({ [locale]: RESOURCES[locale] }),
-    [locale],
-  );
 
   // React to OS-level language changes detected by main on focus regain.
   // Only act when the user is following the system signal (no explicit
@@ -330,7 +326,7 @@ export default function App() {
           onLogout={handleDaemonLogout}
           identity={identity}
           locale={locale}
-          resources={resources}
+          resources={RESOURCES}
           localeAdapter={localeAdapter}
         >
           <AppContent />

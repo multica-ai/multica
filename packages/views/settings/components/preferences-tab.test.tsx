@@ -1,11 +1,14 @@
 import type { ReactNode } from "react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, act, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enAuth from "../../locales/en/auth.json";
 import enSettings from "../../locales/en/settings.json";
+import zhHansCommon from "../../locales/zh-Hans/common.json";
+import zhHansAuth from "../../locales/zh-Hans/auth.json";
+import zhHansSettings from "../../locales/zh-Hans/settings.json";
 
 const mockPersist = vi.hoisted(() => vi.fn());
 const mockUpdateMe = vi.hoisted(() => vi.fn());
@@ -69,6 +72,11 @@ import { PreferencesTab } from "./preferences-tab";
 
 const TEST_RESOURCES = {
   en: { common: enCommon, auth: enAuth, settings: enSettings },
+  "zh-Hans": {
+    common: zhHansCommon,
+    auth: zhHansAuth,
+    settings: zhHansSettings,
+  },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -106,7 +114,7 @@ describe("PreferencesTab — Language switcher", () => {
     expect(mockReload).not.toHaveBeenCalled();
   });
 
-  it("when not logged in: persists + reloads, no PATCH", async () => {
+  it("when not logged in: persists + changes language in place, no PATCH", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
@@ -114,11 +122,15 @@ describe("PreferencesTab — Language switcher", () => {
 
     expect(mockPersist).toHaveBeenCalledWith("zh-Hans");
     expect(mockUpdateMe).not.toHaveBeenCalled();
-    expect(mockReload).toHaveBeenCalledTimes(1);
+    expect(mockReload).not.toHaveBeenCalled();
     expect(mockToastWarning).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(document.documentElement.lang).toBe("zh-CN");
+      expect(screen.getByRole("heading", { name: "语言" })).toBeInTheDocument();
+    });
   });
 
-  it("when logged in + PATCH success: persists + PATCH + reload immediately", async () => {
+  it("when logged in + PATCH success: persists + PATCH + changes language in place", async () => {
     userRef.current = { id: "user-1" };
     mockUpdateMe.mockResolvedValueOnce({});
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -129,10 +141,13 @@ describe("PreferencesTab — Language switcher", () => {
     expect(mockPersist).toHaveBeenCalledWith("zh-Hans");
     expect(mockUpdateMe).toHaveBeenCalledWith({ language: "zh-Hans" });
     expect(mockToastWarning).not.toHaveBeenCalled();
-    expect(mockReload).toHaveBeenCalledTimes(1);
+    expect(mockReload).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "语言" })).toBeInTheDocument();
+    });
   });
 
-  it("when logged in + PATCH fails: shows toast and delays reload by 2.5s", async () => {
+  it("when logged in + PATCH fails: shows toast and still changes language in place", async () => {
     userRef.current = { id: "user-1" };
     mockUpdateMe.mockRejectedValueOnce(new Error("network"));
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -145,13 +160,10 @@ describe("PreferencesTab — Language switcher", () => {
     expect(mockUpdateMe).toHaveBeenCalledWith({ language: "zh-Hans" });
     // Toast surfaced the sync failure.
     expect(mockToastWarning).toHaveBeenCalledTimes(1);
-    // Reload deferred so the toast is visible.
     expect(mockReload).not.toHaveBeenCalled();
-
-    act(() => {
-      vi.advanceTimersByTime(2500);
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "语言" })).toBeInTheDocument();
     });
-    expect(mockReload).toHaveBeenCalledTimes(1);
   });
 });
 
