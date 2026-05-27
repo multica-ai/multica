@@ -1,44 +1,44 @@
 {
-  "title": "Search",
-  "description": "Search pages, issues, projects, and members",
-  "placeholder": "Type a command or search...",
+  "title": "검색",
+  "description": "페이지, 이슈, 프로젝트, 멤버를 검색합니다",
+  "placeholder": "명령어를 입력하거나 검색하세요...",
   "groups": {
-    "pages": "Pages",
-    "commands": "Commands",
-    "members": "Members",
-    "projects": "Projects",
-    "issues": "Issues",
-    "recent": "Recent"
+    "pages": "페이지",
+    "commands": "명령어",
+    "members": "멤버",
+    "projects": "프로젝트",
+    "issues": "이슈",
+    "recent": "최근 항목"
   },
   "pages": {
-    "inbox": "Inbox",
-    "my_issues": "My Issues",
-    "issues": "Issues",
-    "projects": "Projects",
-    "agents": "Agents",
-    "runtimes": "Runtimes",
-    "skills": "Skills",
-    "settings": "Settings"
+    "inbox": "인박스",
+    "my_issues": "내 이슈",
+    "issues": "이슈",
+    "projects": "프로젝트",
+    "agents": "에이전트",
+    "runtimes": "런타임",
+    "skills": "스킬",
+    "settings": "설정"
   },
   "commands": {
-    "current_theme_aria": "Current theme",
-    "new_issue": "New Issue",
-    "new_project": "New Project",
-    "copy_issue_link": "Copy Issue Link",
-    "copy_identifier": "Copy Identifier ({{identifier}})",
-    "switch_to_light": "Switch to Light Theme",
-    "switch_to_dark": "Switch to Dark Theme",
-    "use_system_theme": "Use System Theme"
+    "current_theme_aria": "현재 테마",
+    "new_issue": "새 이슈",
+    "new_project": "새 프로젝트",
+    "copy_issue_link": "이슈 링크 복사",
+    "copy_identifier": "식별자 복사 ({{identifier}})",
+    "switch_to_light": "라이트 테마로 전환",
+    "switch_to_dark": "다크 테마로 전환",
+    "use_system_theme": "시스템 테마 사용"
   },
   "toast": {
-    "link_copied": "Link copied",
-    "copied_identifier": "Copied {{identifier}}"
+    "link_copied": "링크를 복사했습니다",
+    "copied_identifier": "{{identifier}}를 복사했습니다"
   },
   "empty": {
-    "no_results": "No results found.",
-    "type_to_search": "Type to search issues and projects"
+    "no_results": "검색 결과가 없습니다.",
+    "type_to_search": "이슈와 프로젝트를 검색해 보세요"
   },
   "trigger": {
-    "label": "Search..."
+    "label": "검색..."
   }
 }

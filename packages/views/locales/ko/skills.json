@@ -1,248 +1,248 @@
 {
   "page": {
-    "title": "Skills",
-    "tagline": "Instructions any agent in this workspace can use.",
-    "learn_more": "Learn more →",
-    "new_skill": "New skill",
-    "search_placeholder": "Search skills…",
+    "title": "스킬",
+    "tagline": "이 워크스페이스의 모든 에이전트가 사용할 수 있는 지침입니다.",
+    "learn_more": "자세히 보기 →",
+    "new_skill": "새 스킬",
+    "search_placeholder": "스킬 검색...",
     "scopes": {
-      "all": { "label": "All", "description": "All skills in this workspace" },
-      "used": { "label": "In use", "description": "Skills assigned to at least one agent" },
-      "unused": { "label": "Unused", "description": "Skills not assigned to any agent" },
-      "mine": { "label": "Created by me", "description": "Skills you created" }
+      "all": { "label": "전체", "description": "이 워크스페이스의 모든 스킬" },
+      "used": { "label": "사용 중", "description": "하나 이상의 에이전트에 할당된 스킬" },
+      "unused": { "label": "미사용", "description": "어떤 에이전트에도 할당되지 않은 스킬" },
+      "mine": { "label": "내가 만든 스킬", "description": "내가 생성한 스킬" }
     },
     "empty": {
-      "title": "No skills yet",
-      "description": "Create your first skill, import one from a URL, or copy one from a connected runtime — and every agent in the workspace can use it."
+      "title": "아직 스킬이 없습니다",
+      "description": "첫 스킬을 만들거나, URL에서 가져오거나, 연결된 런타임에서 복사하세요. 워크스페이스의 모든 에이전트가 사용할 수 있습니다."
     },
     "no_matches": {
-      "title": "No matches",
-      "with_query": "No skills match \"{{query}}\"{{filterSuffix}}.",
-      "with_query_filter_suffix": " in this filter",
-      "filter_only": "No skills match this filter.",
-      "try_different": " Try a different query."
+      "title": "일치하는 결과 없음",
+      "with_query": "\"{{query}}\"와 일치하는 스킬이 없습니다{{filterSuffix}}.",
+      "with_query_filter_suffix": " (이 필터 기준)",
+      "filter_only": "이 필터와 일치하는 스킬이 없습니다.",
+      "try_different": " 다른 검색어를 시도해 보세요."
     },
     "intro_banner": {
-      "title": "Shared with your workspace.",
-      "body": "Anyone can create a skill, import one from a URL, or copy one from their local runtime — and every agent can use it.",
-      "highlight": "Local runtime skills stay private until you copy one here."
+      "title": "워크스페이스와 공유됩니다.",
+      "body": "누구나 스킬을 만들거나 URL에서 가져오거나 로컬 런타임에서 복사할 수 있으며, 모든 에이전트가 사용할 수 있습니다.",
+      "highlight": "로컬 런타임 스킬은 여기로 복사하기 전까지 비공개로 유지됩니다."
     },
     "list_error": {
-      "title": "Couldn't load skills",
-      "fallback": "Something went wrong fetching the skill list.",
-      "retry": "Try again"
+      "title": "스킬을 불러오지 못했습니다",
+      "fallback": "스킬 목록을 가져오는 중 문제가 발생했습니다.",
+      "retry": "다시 시도"
     },
-    "supporting_data_warning": "Some workspace data failed to load. Creator attribution, runtime names, or edit permissions may appear incomplete."
+    "supporting_data_warning": "일부 워크스페이스 데이터를 불러오지 못했습니다. 생성자 표시, 런타임 이름, 수정 권한이 불완전하게 보일 수 있습니다."
   },
   "table": {
-    "name": "Name",
-    "used_by": "Used by",
-    "source": "Source · Added by",
-    "updated": "Updated",
-    "no_description": "No description",
-    "lock_tooltip": "Read-only — only creator or admin can edit",
-    "unused": "— unused",
-    "by_creator": "by {{name}}",
-    "source_manual": "Created manually",
-    "source_runtime_named": "From {{name}}",
-    "source_runtime_provider": "From {{provider}} runtime",
-    "source_runtime_unknown": "From a runtime",
-    "source_clawhub": "From ClawHub",
-    "source_skills_sh": "From Skills.sh",
-    "source_github": "From GitHub"
+    "name": "이름",
+    "used_by": "사용 중",
+    "source": "출처 · 추가한 사람",
+    "updated": "수정일",
+    "no_description": "설명 없음",
+    "lock_tooltip": "읽기 전용 — 생성자 또는 관리자만 수정할 수 있습니다",
+    "unused": "— 미사용",
+    "by_creator": "{{name}}님",
+    "source_manual": "직접 생성",
+    "source_runtime_named": "{{name}}에서 가져옴",
+    "source_runtime_provider": "{{provider}} 런타임에서 가져옴",
+    "source_runtime_unknown": "런타임에서 가져옴",
+    "source_clawhub": "ClawHub에서 가져옴",
+    "source_skills_sh": "Skills.sh에서 가져옴",
+    "source_github": "GitHub에서 가져옴"
   },
   "detail": {
-    "all_skills": "All skills",
-    "read_only": "Read-only",
-    "delete_aria": "Delete skill",
-    "delete_tooltip": "Delete skill",
-    "supporting_data_warning": "Some workspace data failed to load. Creator attribution, runtime names, or edit permissions may appear incomplete until the next refresh.",
-    "files_label": "Files · {{count}}",
-    "add_file_aria": "Add file",
-    "add_file_tooltip": "Add file",
-    "delete_file": "Delete file",
-    "name_aria": "Skill name",
+    "all_skills": "모든 스킬",
+    "read_only": "읽기 전용",
+    "delete_aria": "스킬 삭제",
+    "delete_tooltip": "스킬 삭제",
+    "supporting_data_warning": "일부 워크스페이스 데이터를 불러오지 못했습니다. 다음 새로고침 전까지 생성자 표시, 런타임 이름, 수정 권한이 불완전하게 보일 수 있습니다.",
+    "files_label": "파일 · {{count}}",
+    "add_file_aria": "파일 추가",
+    "add_file_tooltip": "파일 추가",
+    "delete_file": "파일 삭제",
+    "name_aria": "스킬 이름",
     "name_placeholder": "skill-name",
-    "description_label": "Description",
-    "description_placeholder": "One sentence describing when an agent should use this skill…",
+    "description_label": "설명",
+    "description_placeholder": "에이전트가 이 스킬을 언제 써야 하는지 한 문장으로 설명하세요...",
     "subline": {
-      "origin_runtime_named": "Local runtime · {{name}}",
-      "origin_runtime_provider": "Local runtime · {{provider}}",
-      "origin_runtime_unknown": "Local runtime",
-      "origin_clawhub": "Imported · ClawHub",
-      "origin_skills_sh": "Imported · Skills.sh",
-      "origin_github": "Imported · GitHub",
-      "origin_workspace": "Workspace",
-      "updated_label": "Updated {{when}}",
-      "by_creator": "by {{name}}"
+      "origin_runtime_named": "로컬 런타임 · {{name}}",
+      "origin_runtime_provider": "로컬 런타임 · {{provider}}",
+      "origin_runtime_unknown": "로컬 런타임",
+      "origin_clawhub": "가져옴 · ClawHub",
+      "origin_skills_sh": "가져옴 · Skills.sh",
+      "origin_github": "가져옴 · GitHub",
+      "origin_workspace": "워크스페이스",
+      "updated_label": "{{when}} 수정됨",
+      "by_creator": "{{name}}님"
     },
     "conflict_banner": {
-      "title": "Someone else updated this skill",
-      "body": "Your edits are preserved. Discard to pull their changes, or Save to overwrite."
+      "title": "다른 사람이 이 스킬을 업데이트했습니다",
+      "body": "내 수정 내용은 보존되어 있습니다. 버리기를 누르면 상대 변경사항을 가져오고, 저장을 누르면 덮어씁니다."
     },
     "save_bar": {
-      "unsaved": "Unsaved changes — will overwrite the live skill on save",
-      "discard": "Discard",
-      "save": "Save changes",
-      "saving": "Saving…"
+      "unsaved": "저장하지 않은 변경사항 — 저장하면 현재 스킬을 덮어씁니다",
+      "discard": "버리기",
+      "save": "변경사항 저장",
+      "saving": "저장하는 중..."
     },
     "sidebar": {
-      "metadata": "Metadata",
-      "created": "Created",
-      "updated": "Updated",
-      "created_by": "Created by",
-      "files": "Files",
+      "metadata": "메타데이터",
+      "created": "생성일",
+      "updated": "수정일",
+      "created_by": "생성자",
+      "files": "파일",
       "id": "ID",
-      "origin": "Origin",
-      "used_by_one": "Used by {{count}} agent",
-      "used_by_other": "Used by {{count}} agents",
-      "permissions": "Permissions",
-      "permissions_owner": "You can edit and delete this skill. Changes take effect on the next agent run.",
-      "permissions_locked_creator": "Only the creator ({{name}}) or a workspace admin can edit this skill.",
-      "permissions_locked": "Only the creator or a workspace admin can edit this skill.",
-      "used_by_empty": "Not assigned to any agent yet. Open an agent's Skills tab to assign."
+      "origin": "출처",
+      "used_by_one": "에이전트 {{count}}개가 사용 중",
+      "used_by_other": "에이전트 {{count}}개가 사용 중",
+      "permissions": "권한",
+      "permissions_owner": "이 스킬을 수정하고 삭제할 수 있습니다. 변경사항은 다음 에이전트 실행부터 적용됩니다.",
+      "permissions_locked_creator": "생성자({{name}}) 또는 워크스페이스 관리자만 이 스킬을 수정할 수 있습니다.",
+      "permissions_locked": "생성자 또는 워크스페이스 관리자만 이 스킬을 수정할 수 있습니다.",
+      "used_by_empty": "아직 어떤 에이전트에도 할당되지 않았습니다. 에이전트의 스킬 탭에서 할당하세요."
     },
     "origin_card": {
-      "imported_runtime": "Imported from local runtime",
-      "imported_clawhub": "Imported from ClawHub",
-      "imported_skills_sh": "Imported from Skills.sh",
-      "imported_github": "Imported from GitHub",
-      "provider": "provider · {{provider}}"
+      "imported_runtime": "로컬 런타임에서 가져옴",
+      "imported_clawhub": "ClawHub에서 가져옴",
+      "imported_skills_sh": "Skills.sh에서 가져옴",
+      "imported_github": "GitHub에서 가져옴",
+      "provider": "제공자 · {{provider}}"
     },
     "not_found": {
-      "title": "Skill not found",
-      "fallback": "This skill may have been deleted or you lost access.",
-      "back": "Back to Skills"
+      "title": "스킬을 찾을 수 없습니다",
+      "fallback": "이 스킬이 삭제되었거나 접근 권한을 잃었을 수 있습니다.",
+      "back": "스킬로 돌아가기"
     },
-    "toast_saved": "Skill saved",
-    "toast_save_failed": "Failed to save skill",
-    "toast_deleted": "Skill deleted",
-    "toast_delete_failed": "Failed to delete skill",
+    "toast_saved": "스킬을 저장했습니다",
+    "toast_save_failed": "스킬을 저장하지 못했습니다",
+    "toast_deleted": "스킬을 삭제했습니다",
+    "toast_delete_failed": "스킬을 삭제하지 못했습니다",
     "delete_dialog": {
-      "title": "Delete skill?",
-      "description_with_agents_one": "This will permanently delete \"{{name}}\" and remove it from {{count}} agent currently using it.",
-      "description_with_agents_other": "This will permanently delete \"{{name}}\" and remove it from {{count}} agents currently using it.",
-      "description_no_agents": "This will permanently delete \"{{name}}\" and remove it from all agents.",
-      "warning": "This action cannot be undone.",
-      "cancel": "Cancel",
-      "confirm": "Delete permanently",
-      "deleting": "Deleting…"
+      "title": "스킬을 삭제할까요?",
+      "description_with_agents_one": "\"{{name}}\"을(를) 영구 삭제하고 현재 사용 중인 에이전트 {{count}}개에서 제거합니다.",
+      "description_with_agents_other": "\"{{name}}\"을(를) 영구 삭제하고 현재 사용 중인 에이전트 {{count}}개에서 제거합니다.",
+      "description_no_agents": "\"{{name}}\"을(를) 영구 삭제하고 모든 에이전트에서 제거합니다.",
+      "warning": "이 작업은 되돌릴 수 없습니다.",
+      "cancel": "취소",
+      "confirm": "영구 삭제",
+      "deleting": "삭제하는 중..."
     },
     "add_file": {
       "placeholder": "templates/review.md",
-      "add": "Add",
-      "cancel": "Cancel",
+      "add": "추가",
+      "cancel": "취소",
       "errors": {
-        "empty": "Path cannot be empty.",
-        "absolute": "Absolute paths are not allowed.",
-        "double_dot": "Paths cannot contain \"..\".",
-        "reserved": "SKILL.md is reserved for the main file.",
-        "exists": "A file at this path already exists."
+        "empty": "경로는 비워둘 수 없습니다.",
+        "absolute": "절대 경로는 사용할 수 없습니다.",
+        "double_dot": "경로에 \"..\"을(를) 포함할 수 없습니다.",
+        "reserved": "SKILL.md는 메인 파일용으로 예약되어 있습니다.",
+        "exists": "이 경로에 이미 파일이 있습니다."
       }
     }
   },
   "create": {
-    "back": "Back",
-    "back_aria": "Back to method chooser",
-    "close": "Close",
-    "close_aria": "Close",
+    "back": "뒤로",
+    "back_aria": "방식 선택으로 돌아가기",
+    "close": "닫기",
+    "close_aria": "닫기",
     "method": {
       "chooser": {
-        "title": "New skill",
-        "desc": "Choose how you want to add a skill to this workspace."
+        "title": "새 스킬",
+        "desc": "이 워크스페이스에 스킬을 추가할 방식을 선택하세요."
       },
       "manual": {
-        "title": "Create manually",
-        "desc": "Write a new SKILL.md from scratch."
+        "title": "직접 만들기",
+        "desc": "새 SKILL.md를 처음부터 작성합니다."
       },
       "url": {
-        "title": "Import from URL",
-        "desc": "Fetch a published skill by URL. Files are pulled server-side."
+        "title": "URL에서 가져오기",
+        "desc": "공개된 스킬을 URL로 가져옵니다. 파일은 서버 측에서 가져옵니다."
       },
       "runtime": {
-        "title": "Copy from runtime",
-        "desc": "Scan a local runtime and promote one of its on-disk skills into this workspace."
+        "title": "런타임에서 복사",
+        "desc": "로컬 런타임을 스캔해 디스크에 있는 스킬을 이 워크스페이스로 승격합니다."
       }
     },
     "method_card": {
-      "manual_title": "Create manually",
-      "manual_desc": "Start from a blank SKILL.md and write your own instructions.",
-      "url_title": "Import from URL",
-      "url_desc": "Pull a published skill from ClawHub or Skills.sh.",
-      "runtime_title": "Copy from runtime",
-      "runtime_desc": "Promote a skill already installed on your local runtime."
+      "manual_title": "직접 만들기",
+      "manual_desc": "빈 SKILL.md에서 시작해 직접 지침을 작성합니다.",
+      "url_title": "URL에서 가져오기",
+      "url_desc": "ClawHub 또는 Skills.sh의 공개 스킬을 가져옵니다.",
+      "runtime_title": "런타임에서 복사",
+      "runtime_desc": "로컬 런타임에 이미 설치된 스킬을 워크스페이스로 가져옵니다."
     },
     "manual": {
-      "name_label": "Name",
-      "name_placeholder": "e.g. review-helper",
-      "name_hint": "Must be unique within the workspace.",
-      "description_label": "Description",
-      "description_placeholder": "One sentence on when to assign this skill to an agent.",
-      "name_conflict_hint": " Try a different name and submit again.",
-      "fallback_error": "Failed to create skill",
-      "cancel": "Cancel",
-      "submit": "Create skill",
-      "submitting": "Creating…",
-      "toast_created": "Skill created"
+      "name_label": "이름",
+      "name_placeholder": "예: review-helper",
+      "name_hint": "워크스페이스 안에서 고유해야 합니다.",
+      "description_label": "설명",
+      "description_placeholder": "이 스킬을 에이전트에 언제 할당해야 하는지 한 문장으로 적어 주세요.",
+      "name_conflict_hint": " 다른 이름으로 다시 제출하세요.",
+      "fallback_error": "스킬을 만들지 못했습니다",
+      "cancel": "취소",
+      "submit": "스킬 만들기",
+      "submitting": "만드는 중...",
+      "toast_created": "스킬을 만들었습니다"
     },
     "url": {
-      "url_label": "Skill URL",
-      "supported_sources": "Supported sources",
-      "import": "Import",
-      "importing": "Importing…",
-      "importing_clawhub": "Importing from ClawHub…",
-      "importing_skills_sh": "Importing from Skills.sh…",
-      "importing_github": "Importing from GitHub…",
-      "name_conflict_hint": " The imported skill's name already exists — delete the existing one before retrying.",
-      "fallback_error": "Import failed",
-      "cancel": "Cancel",
-      "toast_imported": "Skill imported"
+      "url_label": "스킬 URL",
+      "supported_sources": "지원 출처",
+      "import": "가져오기",
+      "importing": "가져오는 중...",
+      "importing_clawhub": "ClawHub에서 가져오는 중...",
+      "importing_skills_sh": "Skills.sh에서 가져오는 중...",
+      "importing_github": "GitHub에서 가져오는 중...",
+      "name_conflict_hint": " 가져온 스킬 이름이 이미 있습니다. 다시 시도하기 전에 기존 스킬을 삭제하세요.",
+      "fallback_error": "가져오기 실패",
+      "cancel": "취소",
+      "toast_imported": "스킬을 가져왔습니다"
     }
   },
   "runtime_import": {
-    "runtime_label": "Runtime",
-    "runtime_placeholder": "Select a local runtime",
-    "no_local_runtimes_title": "No local runtimes available",
-    "no_local_runtimes_hint": "Connect a local runtime to browse and import its local skills.",
-    "choose_runtime": "Choose a runtime to continue",
-    "must_be_online": "Runtime must be online to browse local skills.",
-    "load_failed": "Failed to load runtime local skills",
-    "not_supported": "This runtime provider does not expose local skill inventory yet.",
-    "no_skills_title": "No local skills found",
-    "no_skills_hint": "This runtime does not have any discoverable local skills yet.",
-    "ignored_files_hint": "Symlinks, unreadable files, oversized files, and very large bundles are ignored during import.",
-    "ready": "Ready to import",
-    "into_workspace": "into this workspace.",
-    "select_skill": "Select a skill to continue.",
-    "import_button": "Import to Workspace",
-    "importing": "Importing…",
-    "skill_files_one": "{{count}} file",
-    "skill_files_other": "{{count}} files",
-    "skill_name_label": "Workspace skill name",
-    "skill_description_label": "Description",
-    "skill_description_placeholder": "Optional — describe when an agent should use this skill.",
-    "toast_imported": "Skill imported",
-    "toast_import_failed": "Failed to import skill",
-    "select_all": "Select all ({{count}})",
-    "bulk_ready": "{{count}} skills selected",
-    "bulk_import_button": "Import {{count}} Skills",
-    "bulk_progress": "Importing {{completed}} / {{total}}…",
-    "bulk_cancel_button": "Cancel",
-    "bulk_complete_hint": "Import complete.",
-    "bulk_cancelled_hint": "Import cancelled.",
-    "bulk_done_button": "Done",
-    "bulk_summary_imported": "Imported",
-    "bulk_summary_skipped": "Skipped",
-    "bulk_summary_failed": "Failed"
+    "runtime_label": "런타임",
+    "runtime_placeholder": "로컬 런타임 선택",
+    "no_local_runtimes_title": "사용 가능한 로컬 런타임이 없습니다",
+    "no_local_runtimes_hint": "로컬 스킬을 탐색하고 가져오려면 로컬 런타임을 연결하세요.",
+    "choose_runtime": "계속하려면 런타임을 선택하세요",
+    "must_be_online": "로컬 스킬을 탐색하려면 런타임이 온라인이어야 합니다.",
+    "load_failed": "런타임의 로컬 스킬을 불러오지 못했습니다",
+    "not_supported": "이 런타임 제공자는 아직 로컬 스킬 목록을 노출하지 않습니다.",
+    "no_skills_title": "로컬 스킬을 찾을 수 없습니다",
+    "no_skills_hint": "이 런타임에는 아직 검색 가능한 로컬 스킬이 없습니다.",
+    "ignored_files_hint": "심볼릭 링크, 읽을 수 없는 파일, 너무 큰 파일과 번들은 가져오기에서 제외됩니다.",
+    "ready": "가져올 준비 완료",
+    "into_workspace": "이 워크스페이스로 가져옵니다.",
+    "select_skill": "계속하려면 스킬을 선택하세요.",
+    "import_button": "워크스페이스로 가져오기",
+    "importing": "가져오는 중...",
+    "skill_files_one": "파일 {{count}}개",
+    "skill_files_other": "파일 {{count}}개",
+    "skill_name_label": "워크스페이스 스킬 이름",
+    "skill_description_label": "설명",
+    "skill_description_placeholder": "선택 사항 — 에이전트가 이 스킬을 언제 써야 하는지 설명하세요.",
+    "toast_imported": "스킬을 가져왔습니다",
+    "toast_import_failed": "스킬을 가져오지 못했습니다",
+    "select_all": "전체 선택({{count}})",
+    "bulk_ready": "스킬 {{count}}개 선택됨",
+    "bulk_import_button": "스킬 {{count}}개 가져오기",
+    "bulk_progress": "가져오는 중 {{completed}} / {{total}}...",
+    "bulk_cancel_button": "취소",
+    "bulk_complete_hint": "가져오기가 완료되었습니다.",
+    "bulk_cancelled_hint": "가져오기가 취소되었습니다.",
+    "bulk_done_button": "완료",
+    "bulk_summary_imported": "가져옴",
+    "bulk_summary_skipped": "건너뜀",
+    "bulk_summary_failed": "실패"
   },
   "file_tree": {
-    "no_files": "No files"
+    "no_files": "파일 없음"
   },
   "file_viewer": {
-    "edit_tooltip": "Edit",
-    "preview_tooltip": "Preview",
-    "no_content": "*No content yet*",
-    "markdown_placeholder": "Write markdown content...",
-    "raw_placeholder": "File content..."
+    "edit_tooltip": "수정",
+    "preview_tooltip": "미리보기",
+    "no_content": "*아직 내용이 없습니다*",
+    "markdown_placeholder": "Markdown 내용 작성...",
+    "raw_placeholder": "파일 내용..."
   }
 }

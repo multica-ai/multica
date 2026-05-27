@@ -162,7 +162,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       headlineLine2: "오픈소스.",
       description:
         "Multica는 완전한 오픈소스입니다. 코드를 직접 확인하고, 원하는 환경에 셀프 호스팅하고, 사람과 AI 에이전트가 함께 일하는 방식을 함께 만들어 갈 수 있습니다.",
-      cta: "GitHub에서 Star 누르기",
+      cta: "GitHub에서 스타하기",
       highlights: [
         {
           title: "어디서든 셀프 호스팅",
@@ -172,7 +172,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           title: "벤더 종속 없음",
           description:
-            "원하는 LLM provider를 쓰고, 에이전트 backend를 바꾸고, API를 확장하세요. 스택 전체를 직접 통제할 수 있습니다.",
+            "원하는 LLM 제공자를 쓰고, 에이전트 백엔드를 바꾸고, API를 확장하세요. 스택 전체를 직접 통제할 수 있습니다.",
         },
         {
           title: "투명한 구조",
@@ -182,7 +182,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           title: "커뮤니티 중심",
           description:
-            "커뮤니티를 위해 만드는 데서 그치지 않고, 커뮤니티와 함께 만듭니다. 모두에게 도움이 되는 스킬, 연동, 에이전트 backend를 기여할 수 있습니다.",
+            "커뮤니티를 위해 만드는 데서 그치지 않고, 커뮤니티와 함께 만듭니다. 모두에게 도움이 되는 스킬, 연동, 에이전트 백엔드를 기여할 수 있습니다.",
         },
       ],
     },
@@ -193,7 +193,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 11개 코딩 도구를 기본 지원합니다. 데몬은 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 backend를 추가할 수도 있습니다.",
+            "Multica는 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 11개 코딩 도구를 기본 지원합니다. 데몬은 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅이 필요한가요, 클라우드 버전도 있나요?",
@@ -255,7 +255,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           ],
         },
       },
-      copyright: "© {year} Multica. All rights reserved.",
+      copyright: "© {year} Multica. 모든 권리 보유.",
     },
   };
 }

@@ -1,11 +1,11 @@
 {
   "nav": {
-    "inbox": "받은함",
+    "inbox": "인박스",
     "my_issues": "내 이슈",
     "issues": "이슈",
     "projects": "프로젝트",
-    "autopilots": "Autopilot",
-    "agents": "Agent",
+    "autopilots": "오토파일럿",
+    "agents": "에이전트",
     "squads": "스쿼드",
     "usage": "사용량",
     "runtimes": "런타임",
@@ -28,7 +28,7 @@
     "create_workspace": "워크스페이스 만들기",
     "pending_invitations_label": "대기 중인 초대",
     "invitation_workspace_fallback": "워크스페이스",
-    "invitation_join": "참여",
+    "invitation_join": "참가",
     "invitation_decline": "거절",
     "log_out": "로그아웃",
     "new_issue": "새 이슈",
