@@ -32,6 +32,117 @@ import { Slice } from "@tiptap/pm/model";
 
 const LARGE_PASTE_TEXT_THRESHOLD = 50_000;
 
+// Standard HTML elements — CommonMark §6.6 treats any <word> as inline HTML.
+// Non-standard tags get silently dropped by ProseMirror's schema. We escape
+// only tags NOT in this set so legitimate HTML passes through normally.
+const STANDARD_HTML_ELEMENTS = new Set([
+  "a", "abbr", "address", "area", "article", "aside", "audio",
+  "b", "base", "bdi", "bdo", "blockquote", "body", "br", "button",
+  "canvas", "caption", "cite", "code", "col", "colgroup",
+  "data", "datalist", "dd", "del", "details", "dfn", "dialog", "div", "dl", "dt",
+  "em", "embed",
+  "fieldset", "figcaption", "figure", "footer", "form",
+  "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hgroup", "hr", "html",
+  "i", "iframe", "img", "input", "ins",
+  "kbd",
+  "label", "legend", "li", "link",
+  "main", "map", "mark", "math", "menu", "meta", "meter",
+  "nav", "noscript",
+  "object", "ol", "optgroup", "option", "output",
+  "p", "param", "picture", "pre", "progress",
+  "q",
+  "rp", "rt", "ruby",
+  "s", "samp", "script", "search", "section", "select", "slot", "small", "source", "span", "strong", "style", "sub", "summary", "sup", "svg",
+  "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "time", "title", "tr", "track",
+  "u", "ul",
+  "var", "video",
+  "wbr",
+]);
+
+function escapeTagsInSegment(segment: string): string {
+  return segment.replace(
+    /<(\/?[a-zA-Z][a-zA-Z0-9-]*)(?:\s[^>]*)?\/?>/g,
+    (match, tagPart: string) => {
+      const tagName = tagPart.replace(/^\//, "").toLowerCase();
+      if (STANDARD_HTML_ELEMENTS.has(tagName)) return match;
+      return match.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    },
+  );
+}
+
+function escapeTagsOutsideCodeSpans(line: string): string {
+  const parts: string[] = [];
+  let i = 0;
+
+  while (i < line.length) {
+    if (line[i] === "`") {
+      let count = 0;
+      while (i + count < line.length && line[i + count] === "`") count++;
+      const delimiter = "`".repeat(count);
+      const afterOpener = i + count;
+
+      let closerIdx = afterOpener;
+      let found = false;
+      while (closerIdx <= line.length - count) {
+        const idx = line.indexOf(delimiter, closerIdx);
+        if (idx === -1) break;
+        if (
+          (idx + count >= line.length || line[idx + count] !== "`") &&
+          (idx === 0 || line[idx - 1] !== "`")
+        ) {
+          parts.push(line.slice(i, idx + count));
+          i = idx + count;
+          found = true;
+          break;
+        }
+        closerIdx = idx + 1;
+      }
+
+      if (!found) {
+        parts.push(escapeTagsInSegment(delimiter));
+        i = afterOpener;
+      }
+      continue;
+    }
+
+    const nextBacktick = line.indexOf("`", i);
+    const end = nextBacktick === -1 ? line.length : nextBacktick;
+    parts.push(escapeTagsInSegment(line.slice(i, end)));
+    i = end;
+  }
+
+  return parts.join("");
+}
+
+export function escapeNonStandardHtmlTags(text: string): string {
+  const lines = text.split("\n");
+  let inFencedBlock = false;
+  let fenceChar = "";
+  let fenceLen = 0;
+
+  const processed = lines.map((line) => {
+    const fenceMatch = line.match(/^(`{3,}|~{3,})/);
+    const fence = fenceMatch?.[1];
+    if (fence) {
+      if (!inFencedBlock) {
+        inFencedBlock = true;
+        fenceChar = fence.charAt(0);
+        fenceLen = fence.length;
+        return line;
+      }
+      if (fence.charAt(0) === fenceChar && fence.length >= fenceLen) {
+        inFencedBlock = false;
+        return line;
+      }
+    }
+
+    if (inFencedBlock) return line;
+    return escapeTagsOutsideCodeSpans(line);
+  });
+
+  return processed.join("\n");
+}
+
 type PasteMode = "native" | "literal" | "markdown";
 
 interface PasteClassificationInput {
@@ -110,14 +221,12 @@ export function createMarkdownPasteExtension() {
 
               // Everything else (VS Code, text editors, .md files, terminals,
               // web pages): parse text/plain as Markdown.
-              const json = editor.markdown.parse(text);
+              const preprocessed = escapeNonStandardHtmlTags(text);
+              const json = editor.markdown.parse(preprocessed);
               const node = editor.schema.nodeFromJSON(json);
 
-              // CommonMark treats <word> as inline HTML (spec §6.6). When the
-              // entire input is an unknown HTML tag (e.g. <T>), the parser
-              // produces a doc with only an empty paragraph — all visible
-              // text was consumed as unrecognized HTML. Fall back to literal
-              // insertion so the user sees their text instead of nothing.
+              // Safety net: if parsing still produces an empty doc despite
+              // non-empty input, fall back to literal insertion.
               const first = node.content.firstChild;
               const parsedEmpty =
                 node.content.childCount === 0 ||

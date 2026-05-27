@@ -2,7 +2,10 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
-import { createMarkdownPasteExtension } from "./markdown-paste";
+import {
+  createMarkdownPasteExtension,
+  escapeNonStandardHtmlTags,
+} from "./markdown-paste";
 
 interface FakeClipboard {
   files: never[];
@@ -178,7 +181,7 @@ describe("markdownPaste — code block context", () => {
     expectLiteralPaste(editor, text);
   });
 
-  it("falls back to literal when markdown parse drops content (e.g. <T>)", () => {
+  it("preserves single unknown HTML-like tag (e.g. <T>)", () => {
     editor = makeEditor({
       type: "doc",
       content: [{ type: "paragraph" }],
@@ -191,7 +194,7 @@ describe("markdownPaste — code block context", () => {
     expect(editor.getText()).toBe("<T>");
   });
 
-  it("falls back to literal for any unknown HTML-like tag", () => {
+  it("preserves any unknown HTML-like tag (e.g. <MyComponent>)", () => {
     editor = makeEditor({
       type: "doc",
       content: [{ type: "paragraph" }],
@@ -202,6 +205,25 @@ describe("markdownPaste — code block context", () => {
     const handled = paste(editor, "<MyComponent>");
     expect(handled).toBe(true);
     expect(editor.getText()).toBe("<MyComponent>");
+  });
+
+  it("preserves unknown tags in mixed multi-line content", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    editor.commands.setTextSelection(1);
+
+    const text = "<t>\n\n裸 `<tag>` 做转\n\n<tag>\n\n<t>";
+    const handled = paste(editor, text);
+    expect(handled).toBe(true);
+
+    const editorText = editor.getText();
+    expect(editorText).toContain("<t>");
+    expect(editorText).toContain("<tag>");
+    expect(editorText).toContain("裸");
+    expect(editorText).toContain("做转");
   });
 
   it("does not parse oversized bracketed plain text as JSON", () => {
@@ -216,5 +238,57 @@ describe("markdownPaste — code block context", () => {
 
     expectLiteralPaste(editor, text);
     expect(parseJsonSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("escapeNonStandardHtmlTags", () => {
+  it("escapes unknown tags", () => {
+    expect(escapeNonStandardHtmlTags("<T>")).toBe("&lt;T&gt;");
+    expect(escapeNonStandardHtmlTags("<tag>")).toBe("&lt;tag&gt;");
+    expect(escapeNonStandardHtmlTags("<MyComponent>")).toBe(
+      "&lt;MyComponent&gt;",
+    );
+    expect(escapeNonStandardHtmlTags("</tag>")).toBe("&lt;/tag&gt;");
+  });
+
+  it("preserves standard HTML tags", () => {
+    expect(escapeNonStandardHtmlTags("<div>")).toBe("<div>");
+    expect(escapeNonStandardHtmlTags("<br>")).toBe("<br>");
+    expect(escapeNonStandardHtmlTags("</div>")).toBe("</div>");
+    expect(escapeNonStandardHtmlTags('<img src="x">')).toBe('<img src="x">');
+  });
+
+  it("does not escape inside inline code spans", () => {
+    expect(escapeNonStandardHtmlTags("`<tag>`")).toBe("`<tag>`");
+    expect(escapeNonStandardHtmlTags("text `<T>` more")).toBe(
+      "text `<T>` more",
+    );
+    expect(escapeNonStandardHtmlTags("``<tag>``")).toBe("``<tag>``");
+  });
+
+  it("does not escape inside fenced code blocks", () => {
+    expect(escapeNonStandardHtmlTags("```\n<T>\n```")).toBe("```\n<T>\n```");
+    expect(escapeNonStandardHtmlTags("~~~\n<tag>\n~~~")).toBe(
+      "~~~\n<tag>\n~~~",
+    );
+  });
+
+  it("escapes unknown tags while preserving standard tags in mixed content", () => {
+    expect(escapeNonStandardHtmlTags("<T> and <div>")).toBe(
+      "&lt;T&gt; and <div>",
+    );
+  });
+
+  it("handles multi-line mixed content", () => {
+    const input = "<t>\n\n裸 `<tag>` 做转\n\n<tag>\n\n<t>";
+    const result = escapeNonStandardHtmlTags(input);
+    expect(result).toBe(
+      "&lt;t&gt;\n\n裸 `<tag>` 做转\n\n&lt;tag&gt;\n\n&lt;t&gt;",
+    );
+  });
+
+  it("does not touch math expressions", () => {
+    expect(escapeNonStandardHtmlTags("1 < 2 > 0")).toBe("1 < 2 > 0");
+    expect(escapeNonStandardHtmlTags("x<y")).toBe("x<y");
   });
 });
