@@ -1105,7 +1105,7 @@ describe("IssueDetail (shared)", () => {
     await flushAnimationFrame();
 
     const jumpToCommentBox = await screen.findByRole("button", { name: "Jump to comment box" });
-    expect(jumpToCommentBox).toHaveClass("absolute", "bottom-[calc(env(safe-area-inset-bottom)+1rem)]");
+    expect(jumpToCommentBox).toHaveClass("absolute", "bottom-2");
     expect(jumpToCommentBox).not.toHaveClass("fixed", "right-2", "bottom-14");
     fireEvent.click(jumpToCommentBox);
     expect(virtuosoScrollToIndexSpy).toHaveBeenCalledWith({
@@ -1187,7 +1187,7 @@ describe("IssueDetail (shared)", () => {
 
     const jumpToCommentBox = await screen.findByRole("button", { name: "Jump to comment box" });
     expect(jumpToCommentBox).toHaveClass("min-h-10", "max-w-[calc(100%-2rem)]", "touch-manipulation");
-    expect(jumpToCommentBox).toHaveClass("bottom-[calc(env(safe-area-inset-bottom)+1rem)]");
+    expect(jumpToCommentBox).toHaveClass("bottom-2");
     expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
   });
 
