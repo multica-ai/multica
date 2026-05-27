@@ -1107,6 +1107,8 @@ func TestUpdateAgent_KeepsMcpConfigForMemberActor(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(mcp-config-mutation-redact): FIR-2394 regression tests for the
+// workspace always_redact_env policy on mutation responses (see agent.go).
 // TestUpdateAgent_HonorsWorkspaceAlwaysRedact closes the FIR-2394 gap:
 // the create/update/archive/restore mutation responses must apply the same
 // workspace `always_redact_env=true` policy as GetAgent / ListAgents. Before
