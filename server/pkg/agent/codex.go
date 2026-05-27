@@ -30,6 +30,9 @@ const (
 	defaultCodexSemanticInactivityTimeout  = 10 * time.Minute
 	defaultCodexFirstTurnNoProgressTimeout = 30 * time.Second
 	codexVersionDiagnosticTimeout          = 2 * time.Second
+	codexClientName                        = "multica-agent-sdk"
+	codexClientTitle                       = "Multica Agent SDK"
+	codexClientVersion                     = "0.2.0"
 )
 
 // CodexSemanticInactivityMarker prefixes timeout errors emitted when Codex
@@ -41,6 +44,8 @@ const CodexSemanticInactivityMarker = "codex semantic inactivity timeout"
 const CodexFirstTurnNoProgressMarker = "codex app-server no progress timeout"
 
 const codexModelCatalogRefreshTimeoutSignal = "failed to refresh available models: timeout waiting for child process to exit"
+
+const codexSessionServiceName = "multica-agent-sdk"
 
 type codexTimeoutKind int
 
@@ -206,16 +211,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		var finalError string
 
 		// 1. Initialize handshake
-		_, err := c.request(runCtx, "initialize", map[string]any{
-			"clientInfo": map[string]any{
-				"name":    "multica-agent-sdk",
-				"title":   "Multica Agent SDK",
-				"version": "0.2.0",
-			},
-			"capabilities": map[string]any{
-				"experimentalApi": true,
-			},
-		})
+		_, err := c.request(runCtx, "initialize", buildCodexInitializeParams())
 		if err != nil {
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
@@ -470,6 +466,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"includeApplyPatchTool":  nil,
 		"experimentalRawEvents":  false,
 		"persistExtendedHistory": true,
+		"serviceName":            codexSessionServiceName,
 	}
 	applyCodexReasoningEffort(startParams, opts.ThinkingLevel)
 	startResult, err := c.request(ctx, "thread/start", startParams)
@@ -481,6 +478,19 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		return "", false, fmt.Errorf("codex thread/start returned no thread ID")
 	}
 	return threadID, false, nil
+}
+
+func buildCodexInitializeParams() map[string]any {
+	return map[string]any{
+		"clientInfo": map[string]any{
+			"name":    codexClientName,
+			"title":   codexClientTitle,
+			"version": codexClientVersion,
+		},
+		"capabilities": map[string]any{
+			"experimentalApi": true,
+		},
+	}
 }
 
 // applyCodexReasoningEffort writes the per-agent thinking_level into a

@@ -862,6 +862,9 @@ func TestCodexStartOrResumeThreadStartsFresh(t *testing.T) {
 				if params["persistExtendedHistory"] != true {
 					t.Error("expected persistExtendedHistory=true on thread/start")
 				}
+				if params["serviceName"] != codexSessionServiceName {
+					t.Errorf("serviceName = %v, want %q", params["serviceName"], codexSessionServiceName)
+				}
 			},
 		},
 	})
@@ -876,6 +879,33 @@ func TestCodexStartOrResumeThreadStartsFresh(t *testing.T) {
 	}
 	if resumed {
 		t.Error("resumed should be false when no prior session is provided")
+	}
+}
+
+func TestCodexInitializeParamsIdentifyMulticaClient(t *testing.T) {
+	t.Parallel()
+
+	params := buildCodexInitializeParams()
+	clientInfo, ok := params["clientInfo"].(map[string]any)
+	if !ok {
+		t.Fatalf("clientInfo has wrong type %T", params["clientInfo"])
+	}
+	if clientInfo["name"] != codexClientName {
+		t.Errorf("clientInfo.name = %v, want %q", clientInfo["name"], codexClientName)
+	}
+	if clientInfo["title"] != codexClientTitle {
+		t.Errorf("clientInfo.title = %v, want %q", clientInfo["title"], codexClientTitle)
+	}
+	if clientInfo["version"] != codexClientVersion {
+		t.Errorf("clientInfo.version = %v, want %q", clientInfo["version"], codexClientVersion)
+	}
+
+	capabilities, ok := params["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatalf("capabilities has wrong type %T", params["capabilities"])
+	}
+	if capabilities["experimentalApi"] != true {
+		t.Errorf("experimentalApi = %v, want true", capabilities["experimentalApi"])
 	}
 }
 
