@@ -111,6 +111,11 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 		if !entry.IsDir() {
 			continue
 		}
+		// Issue-level squad shared directories live under .issues/ and are
+		// not per-task env roots — skip them here.
+		if entry.Name() == ".issues" {
+			continue
+		}
 		taskDir := filepath.Join(wsDir, entry.Name())
 		action := d.shouldCleanTaskDir(ctx, taskDir)
 		switch action {

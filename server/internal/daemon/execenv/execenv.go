@@ -42,9 +42,15 @@ type PrepareParams struct {
 	Task           TaskContextForEnv // context data for writing files
 }
 
+// issueSharedSubdir is the workspace-relative folder that holds per-issue shared
+// directories. Using a dedicated prefix keeps the GC loop from treating issue
+// shared roots as per-task env directories.
+const issueSharedSubdir = ".issues"
+
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
 	IssueID                 string
+	IssueSharedDir          string // squad-visible shared directory for this issue (empty when not applicable)
 	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
 	AgentID                 string // unique ID of the dispatched agent
 	AgentName               string
@@ -113,6 +119,9 @@ type Environment struct {
 	// directory holding the wrapper file. Empty when no $include is
 	// emitted (fresh install).
 	OpenclawIncludeRoot string
+	// IssueSharedDir is the squad-visible shared directory for the task's
+	// issue. All agents working on the same issue read/write this path.
+	IssueSharedDir string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -125,6 +134,26 @@ func PredictRootDir(workspacesRoot, workspaceID, taskID string) string {
 		return ""
 	}
 	return filepath.Join(workspacesRoot, workspaceID, shortID(taskID))
+}
+
+// PredictIssueSharedDir returns the squad-shared directory path for an issue
+// without performing any I/O.
+func PredictIssueSharedDir(workspacesRoot, workspaceID, issueID string) string {
+	if workspacesRoot == "" || workspaceID == "" || issueID == "" {
+		return ""
+	}
+	return filepath.Join(workspacesRoot, workspaceID, issueSharedSubdir, shortID(issueID), "shared")
+}
+
+func ensureIssueSharedDir(workspacesRoot, workspaceID, issueID string) (string, error) {
+	dir := PredictIssueSharedDir(workspacesRoot, workspaceID, issueID)
+	if dir == "" {
+		return "", nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("execenv: create issue shared dir: %w", err)
+	}
+	return dir, nil
 }
 
 // Prepare creates an isolated execution environment for a task.
@@ -158,10 +187,16 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}
 	}
 
+	issueSharedDir, err := ensureIssueSharedDir(params.WorkspacesRoot, params.WorkspaceID, params.Task.IssueID)
+	if err != nil {
+		return nil, err
+	}
+
 	env := &Environment{
-		RootDir: envRoot,
-		WorkDir: workDir,
-		logger:  logger,
+		RootDir:        envRoot,
+		WorkDir:        workDir,
+		IssueSharedDir: issueSharedDir,
+		logger:         logger,
 	}
 
 	// Write context files into workdir (skills go to provider-native paths).
@@ -204,11 +239,13 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 // the per-provider knobs (CodexVersion, OpenclawBin) so callers can pass
 // the same resolved binary path on both first-run and reuse paths.
 type ReuseParams struct {
-	WorkDir      string
-	Provider     string
-	CodexVersion string            // only used when Provider == "codex"
-	OpenclawBin  string            // only used when Provider == "openclaw"; empty = PATH lookup
-	Task         TaskContextForEnv // refreshed context files / skills
+	WorkspacesRoot string
+	WorkspaceID    string
+	WorkDir        string
+	Provider       string
+	CodexVersion   string            // only used when Provider == "codex"
+	OpenclawBin    string            // only used when Provider == "openclaw"; empty = PATH lookup
+	Task           TaskContextForEnv // refreshed context files / skills
 }
 
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
@@ -218,10 +255,16 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		return nil
 	}
 
+	issueSharedDir, err := ensureIssueSharedDir(params.WorkspacesRoot, params.WorkspaceID, params.Task.IssueID)
+	if err != nil {
+		logger.Warn("execenv: ensure issue shared dir failed", "error", err)
+	}
+
 	env := &Environment{
-		RootDir: filepath.Dir(params.WorkDir),
-		WorkDir: params.WorkDir,
-		logger:  logger,
+		RootDir:        filepath.Dir(params.WorkDir),
+		WorkDir:        params.WorkDir,
+		IssueSharedDir: issueSharedDir,
+		logger:         logger,
 	}
 
 	// Refresh context files (issue_context.md, skills).
