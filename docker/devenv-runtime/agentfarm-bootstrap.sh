@@ -7,6 +7,9 @@
 #
 # Reads from secret bag (env):   MULTICA_PAT, MULTICA_WORKSPACE_ID, LITELLM_API_KEY
 # Reads from Downward API (env): WORKSPACE_SLUG (set from metadata.namespace)
+# Optional from secret bag:      GIT_USER_EMAIL, JIRA_PAT
+#                                (both together trigger acli auth; either missing skips)
+# Defaulted constant:            ATLASSIAN_SITE (https://g2crowd.atlassian.net)
 # Hardcoded constants:           MULTICA_SERVER_URL, LITELLM_BASE_URL (workspace-invariant)
 # Reads from image:              /etc/multica/agent-templates/
 
@@ -41,6 +44,22 @@ cat > "${config_dir}/config.json" <<JSON
   "workspace_id": "${MULTICA_WORKSPACE_ID}"
 }
 JSON
+
+# ── 1a. Optional: acli Atlassian auth (jira). ────────────────────────────────
+#    --token reads from stdin — keeps JIRA_PAT off argv and /proc/<pid>/cmdline.
+#    acli --site wants the bare hostname; strip the scheme from ATLASSIAN_SITE.
+: "${ATLASSIAN_SITE:=https://g2crowd.atlassian.net}"
+ATLASSIAN_SITE_HOST="${ATLASSIAN_SITE#*//}"
+
+if [[ -n "${GIT_USER_EMAIL:-}" && -n "${JIRA_PAT:-}" ]]; then
+  printf '%s' "${JIRA_PAT}" | acli jira auth login \
+    --site  "${ATLASSIAN_SITE_HOST}" \
+    --email "${GIT_USER_EMAIL}" \
+    --token
+  echo "agentfarm-bootstrap: acli authenticated against ${ATLASSIAN_SITE_HOST} as ${GIT_USER_EMAIL}"
+else
+  echo "agentfarm-bootstrap: GIT_USER_EMAIL or JIRA_PAT unset — skipping acli auth (acli still on PATH, just unauthenticated)"
+fi
 
 # ── 2. Start the daemon in the background. ────────────────────────────────────
 #    --device-name keys the (workspace_id, daemon_id, provider) upsert — must be

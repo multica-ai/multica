@@ -27,6 +27,9 @@ on is the entrypoint that boots `opencode serve`.
 | `OPENCODE_PORT`     | `4096`      | Matches the upstream `opencode serve` default.                           |
 | `OPENCODE_EXTRA_ARGS` | (empty)    | Appended verbatim, e.g. `--cors https://devenv-jshuff.development.g2.com`. |
 | `KUBECTL_MINOR`       | `v1.31`    | Selects the upstream Kubernetes apt repo. Keep aligned with EKS control-plane minor. |
+| `ATLASSIAN_SITE`    | `https://g2crowd.atlassian.net` | Agentfarm mode only. Atlassian Cloud site URL. Defaults to the g2crowd instance; override only to target a different Atlassian site. The bootstrap strips the scheme before passing to `acli --site`. |
+| `GIT_USER_EMAIL`    | (empty)    | Agentfarm mode only. Atlassian account email used for `acli jira auth login`. Per the gandalf provisioning contract this is the git-config email collected at workspace creation time. When set together with `JIRA_PAT`, bootstrap authenticates acli non-interactively. Either missing skips auth. |
+| `JIRA_PAT`          | (empty)    | Agentfarm mode only. Atlassian API token from `id.atlassian.com` → Security → API tokens. Piped to `acli` via stdin — never appears on argv. See `GIT_USER_EMAIL`. |
 
 ## Smoke test
 

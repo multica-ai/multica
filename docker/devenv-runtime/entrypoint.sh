@@ -27,6 +27,8 @@
 #   flip the runtime public, and provision the bundled agents (Engineer + Reviewer
 #   by default; extras are opt-in installs from ai-enhancement-hub). The daemon
 #   runs in the background; opencode serve is always PID 1.
+#   Optional: GIT_USER_EMAIL + JIRA_PAT — when both set, bootstrap authenticates
+#   acli non-interactively. ATLASSIAN_SITE defaults to https://g2crowd.atlassian.net.
 
 set -euo pipefail
 
