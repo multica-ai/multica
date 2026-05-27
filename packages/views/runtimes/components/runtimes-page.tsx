@@ -17,6 +17,7 @@ import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries"
 import { useUpdatableRuntimeIds } from "@multica/core/runtimes/hooks";
 import { useWSEvent } from "@multica/core/realtime";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import type { MemberWithUser } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
@@ -28,6 +29,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
 import { PageHeader } from "../../layout/page-header";
+import { ActorAvatar } from "../../common/actor-avatar";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { ProviderLogo } from "./provider-logo";
@@ -230,6 +232,7 @@ export function RuntimesPage({
         <div className="flex min-h-0 flex-1 flex-col border-t bg-background">
           <MachineSidebar
             machines={filteredMachines}
+            members={members}
             scope={scope}
             setScope={setScope}
             totalMachines={machines.length}
@@ -268,6 +271,7 @@ export function RuntimesPage({
             >
               <MachineSidebar
                 machines={filteredMachines}
+                members={members}
                 scope={scope}
                 setScope={setScope}
                 totalMachines={machines.length}
@@ -358,6 +362,7 @@ function PageHeaderBar({
 
 function MachineSidebar({
   machines,
+  members,
   scope,
   setScope,
   totalMachines,
@@ -371,6 +376,7 @@ function MachineSidebar({
   className,
 }: {
   machines: RuntimeMachine[];
+  members: MemberWithUser[];
   scope: RuntimeScope;
   setScope: (value: RuntimeScope) => void;
   totalMachines: number;
@@ -384,6 +390,11 @@ function MachineSidebar({
   className?: string;
 }) {
   const { t } = useT("runtimes");
+  const memberByUserId = useMemo(() => {
+    const map = new Map<string, MemberWithUser>();
+    for (const m of members) map.set(m.user_id, m);
+    return map;
+  }, [members]);
   const sections = [
     {
       key: "local" as const,
@@ -445,14 +456,19 @@ function MachineSidebar({
                 <span className="h-px flex-1 bg-border" />
               </div>
               <div>
-                {section.machines.map((machine) => (
-                  <MachineRow
-                    key={machine.id}
-                    machine={machine}
-                    active={machine.id === selectedMachineId}
-                    onClick={() => onSelect(machine.id)}
-                  />
-                ))}
+                {section.machines.map((machine) => {
+                  const ownerId = machine.runtimes[0]?.owner_id;
+                  const ownerMember = ownerId ? memberByUserId.get(ownerId) ?? null : null;
+                  return (
+                    <MachineRow
+                      key={machine.id}
+                      machine={machine}
+                      ownerMember={ownerMember}
+                      active={machine.id === selectedMachineId}
+                      onClick={() => onSelect(machine.id)}
+                    />
+                  );
+                })}
               </div>
             </div>
           ))
@@ -554,10 +570,12 @@ function MachineFilterChip({
 
 function MachineRow({
   machine,
+  ownerMember,
   active,
   onClick,
 }: {
   machine: RuntimeMachine;
+  ownerMember: MemberWithUser | null;
   active: boolean;
   onClick: () => void;
 }) {
@@ -567,6 +585,9 @@ function MachineRow({
   const runtimeCount = t(($) => $.machine.runtime_count, {
     count: machine.runtimes.length,
   });
+  const displayTitle = ownerMember
+    ? `${ownerMember.name} · ${machine.title}`
+    : machine.title;
   return (
     <button
       type="button"
@@ -576,8 +597,19 @@ function MachineRow({
         active ? "bg-accent" : "hover:bg-accent/50",
       )}
     >
-      <span className="relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
-        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+      <span className="relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center">
+        {ownerMember ? (
+          <ActorAvatar
+            actorType="member"
+            actorId={ownerMember.user_id}
+            size={28}
+            enableHoverCard
+          />
+        ) : (
+          <span className="flex h-7 w-7 items-center justify-center rounded-md border bg-background">
+            <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+          </span>
+        )}
         <HealthDot
           health={machine.health}
           className="absolute -bottom-0.5 -right-0.5 ring-2 ring-background"
@@ -593,7 +625,7 @@ function MachineRow({
                 : (machine.subtitle ?? undefined)
             }
           >
-            {machine.title}
+            {displayTitle}
           </span>
           {machine.isCurrent && (
             <span className="shrink-0 rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background">
