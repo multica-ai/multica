@@ -178,17 +178,35 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Outbound card patcher: subscribe to task / chat-done
 				// events on the existing bus so any task born from a
 				// Lark-bound chat_session gets its card kept in sync
-				// (thinking → streaming → final | error). The stub
-				// APIClient surfaces ErrAPIClientNotConfigured on
-				// transport — once the real Lark client lands, swap
-				// it in here without touching the subscription.
-				larkClient := lark.NewStubAPIClient(slog.Default())
+				// (thinking → streaming → final | error).
+				//
+				// APIClient selection: when MULTICA_LARK_HTTP_ENABLED is
+				// "true" the real Lark Open Platform HTTP client is wired
+				// (IM v1 send/patch + binding-prompt). Otherwise the stub
+				// stays in place and every outbound call surfaces
+				// ErrAPIClientNotConfigured — useful for deployments that
+				// want the inbound dispatcher / database surface online
+				// without committing to a Lark app yet.
+				//
+				// MULTICA_LARK_HTTP_BASE_URL overrides the default
+				// open.feishu.cn host (set to https://open.larksuite.com
+				// for the Lark international tenant, or to a mock for
+				// integration tests).
+				var larkClient lark.APIClient
+				if strings.EqualFold(strings.TrimSpace(os.Getenv("MULTICA_LARK_HTTP_ENABLED")), "true") {
+					larkClient = lark.NewHTTPAPIClient(lark.HTTPClientConfig{
+						BaseURL: strings.TrimSpace(os.Getenv("MULTICA_LARK_HTTP_BASE_URL")),
+						Logger:  slog.Default(),
+					})
+					slog.Info("lark http api client enabled")
+				} else {
+					larkClient = lark.NewStubAPIClient(slog.Default())
+				}
 				// Expose the APIClient to handlers so the install
 				// surface can short-circuit when no real transport is
-				// wired (IsConfigured() == false). Replace this with
-				// the real Lark HTTP client once it lands; the
-				// install_supported flag will flip automatically and
-				// the UI will reveal the install entry points.
+				// wired (IsConfigured() == false). With the real HTTP
+				// client wired the install_supported flag flips and the
+				// UI reveals the install entry points.
 				h.LarkAPIClient = larkClient
 				patcher := lark.NewPatcher(queries, installSvc, larkClient, lark.PatcherConfig{})
 				patcher.Register(bus)
@@ -207,11 +225,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					FrontendSuccessURL: strings.TrimSpace(os.Getenv("MULTICA_LARK_OAUTH_SUCCESS_URL")),
 				}
 				if oauthCfg.Enabled() {
-					// The real APIClient lands in a follow-up; until
-					// then OAuth callbacks surface ErrAPIClientNotConfigured
-					// loudly instead of silently failing.
-					stub := lark.NewStubAPIClient(slog.Default())
-					oauthSvc, oerr := lark.NewOAuthService(oauthCfg, stub, installSvc, h.LarkBindingTokens)
+					// OAuth callback delegates the code→credentials
+					// exchange to APIClient.ExchangeOAuthCode. The HTTP
+					// client returns ErrAPIClientNotConfigured for that
+					// path until the PersonalAgent install-time response
+					// shape lands, so operators still rely on the manual-
+					// paste InstallationService until then.
+					oauthSvc, oerr := lark.NewOAuthService(oauthCfg, larkClient, installSvc, h.LarkBindingTokens)
 					if oerr != nil {
 						slog.Error("lark: OAuthService init failed; oauth disabled", "error", oerr)
 					} else {
