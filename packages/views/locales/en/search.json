@@ -2,6 +2,7 @@
   "title": "Search",
   "description": "Search pages, issues, projects, and members",
   "placeholder": "Type a command or search...",
+  "close_aria": "Close search",
   "groups": {
     "pages": "Pages",
     "commands": "Commands",

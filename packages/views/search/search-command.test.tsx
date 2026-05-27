@@ -208,6 +208,22 @@ describe("SearchCommand", () => {
     expect(screen.queryByPlaceholderText("Type a command or search...")).not.toBeInTheDocument();
   });
 
+  it("shows a visible close button that dismisses the search dialog", async () => {
+    const user = userEvent.setup();
+
+    renderSearch();
+
+    const closeButton = screen.getByRole("button", { name: "Close search" });
+    expect(closeButton).toBeInTheDocument();
+
+    await user.click(closeButton);
+
+    await waitFor(() => {
+      expect(useSearchStore.getState().open).toBe(false);
+    });
+    expect(screen.queryByPlaceholderText("Type a command or search...")).not.toBeInTheDocument();
+  });
+
   it("shows only New Issue by default and hides Pages / low-frequency commands until query", () => {
     renderSearch();
 
