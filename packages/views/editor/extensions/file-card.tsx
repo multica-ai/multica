@@ -24,28 +24,19 @@ const FILE_CARD_MARKDOWN_RE = new RegExp(
   `^!file\\[([^\\]]*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)`,
 );
 
-type AttachmentDisplayStorage = {
-  attachmentDisplay?: {
-    hideAttachments: boolean;
-  };
-};
-
 // ---------------------------------------------------------------------------
 // React NodeView — thin wrapper, all rendering lives in <Attachment>
 // ---------------------------------------------------------------------------
 
-export function FileCardView({ node, editor }: NodeViewProps) {
+export function FileCardView({ node }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
-  const hidden = Boolean(
-    (editor.storage as AttachmentDisplayStorage).attachmentDisplay?.hideAttachments,
-  );
 
   return (
     <NodeViewWrapper
       as="div"
-      className={hidden ? "file-card-node attachment-hidden-node" : "file-card-node"}
+      className="file-card-node"
       data-type="fileCard"
     >
       <div contentEditable={false}>

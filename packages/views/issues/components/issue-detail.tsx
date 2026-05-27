@@ -1550,8 +1550,9 @@ export function IssueDetail({
     onDrop: (files) => descEditorRef.current?.uploadFiles(files),
   });
   // Pending uploads in the description editor. We bind them immediately after
-  // upload so IssueAttachmentList can be the canonical display surface while
-  // the description editor keeps the attachment markdown hidden.
+  // upload so IssueAttachmentList can show the compact attachment index while
+  // the description keeps rendering attachments inline at their markdown
+  // positions.
   const [descPendingAttachments, setDescPendingAttachments] = useState<Attachment[]>([]);
   useEffect(() => {
     setDescPendingAttachments([]);
@@ -2485,7 +2486,6 @@ export function IssueDetail({
               debounceMs={1500}
               currentIssueId={resolvedId}
               attachments={descEditorAttachments}
-              hideAttachments
               selectionQuoteActions={{
                 onQuoteToNewComment: handleEditorQuoteToNewComment,
                 onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,

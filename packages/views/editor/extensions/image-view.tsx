@@ -12,24 +12,15 @@ import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Attachment } from "../attachment";
 
-type AttachmentDisplayStorage = {
-  attachmentDisplay?: {
-    hideAttachments: boolean;
-  };
-};
-
 function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
   const src = (node.attrs.src as string) || "";
   const alt = (node.attrs.alt as string) || "";
   const uploading = node.attrs.uploading as boolean;
-  const hidden = Boolean(
-    (editor.storage as AttachmentDisplayStorage).attachmentDisplay?.hideAttachments,
-  );
 
   // <Attachment> emits its own .image-node wrapper, so the NodeViewWrapper
   // stays unclassed — no double image-node.
   return (
-    <NodeViewWrapper className={hidden ? "attachment-hidden-node" : undefined}>
+    <NodeViewWrapper>
       <Attachment
         attachment={{
           kind: "url",
