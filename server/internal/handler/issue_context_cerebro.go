@@ -204,8 +204,10 @@ func (h *Handler) recordBundledReadUsage(r *http.Request, issue db.Issue) {
 	if err != nil {
 		return
 	}
-	if h.bundledReadMode(r.Context(), issue.WorkspaceID) != costSavingModeOn {
-		return // only the committed "on" state credits a real save here
+	bundledMode := h.bundledReadMode(r.Context(), issue.WorkspaceID)
+	snapshotMode := h.snapshotSavingMode(r.Context(), issue.WorkspaceID)
+	if !shouldCreditBundledReadUsage(bundledMode, snapshotMode) {
+		return
 	}
 	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(r.Context(), bundledReadMeasurementParams(issue.WorkspaceID, taskUUID, costSavingModeOn)); err != nil {
 		slog.Warn("bundled-read cost-saving: record usage failed", "task_id", ts.TaskID, "error", err)

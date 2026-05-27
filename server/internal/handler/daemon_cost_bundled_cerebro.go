@@ -91,6 +91,19 @@ func bundledReadMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) 
 	}
 }
 
+// shouldCreditBundledReadUsage decides whether a real `multica issue context`
+// call this run earns a bundled_read measurement row. It credits only when
+// bundled_read is committed "on" AND snapshot_prompt is not "on": snapshot has
+// precedence — when it is on the claim handler already inlined and credited the
+// issue+thread reads, and bundled_read deferred — so crediting bundled_read too
+// would double-count the overlapping reads. This mirrors applyBundledReadSaving's
+// claim-time precedence (it returns early when a snapshot was inlined) at the
+// measurement layer, so the no-double-count guarantee holds regardless of whether
+// the agent ignores the prompt and calls `issue context` during a snapshot run.
+func shouldCreditBundledReadUsage(bundledMode, snapshotMode string) bool {
+	return bundledMode == costSavingModeOn && snapshotMode != costSavingModeOn
+}
+
 // bundledReadMode returns the workspace's mode for the bundled_read saving
 // ("on"/"shadow"), or "" when off/absent or on lookup error.
 func (h *Handler) bundledReadMode(ctx context.Context, workspaceID pgtype.UUID) string {

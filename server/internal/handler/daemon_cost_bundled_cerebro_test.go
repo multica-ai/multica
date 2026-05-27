@@ -33,3 +33,32 @@ func TestBundledReadMeasurementParams(t *testing.T) {
 		t.Fatalf("shadow would-save must share baseline=%d effective=1, got baseline=%d effective=%d", bundledReadBaseline, shadow.BaselineValue, shadow.EffectiveValue)
 	}
 }
+
+// TestShouldCreditBundledReadUsage: a real `issue context` call earns a
+// bundled_read row only when bundled_read is "on" AND snapshot_prompt is not
+// "on". Snapshot precedence (no double-count) must hold even if the agent calls
+// the endpoint during a snapshot run.
+func TestShouldCreditBundledReadUsage(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		bundled    string
+		snapshot   string
+		wantCredit bool
+	}{
+		{"bundled on, snapshot off", costSavingModeOn, "", true},
+		{"bundled on, snapshot shadow", costSavingModeOn, costSavingModeShadow, true},
+		{"bundled on, snapshot on -> snapshot wins, no double-count", costSavingModeOn, costSavingModeOn, false},
+		{"bundled shadow -> claim-time records, endpoint does not", costSavingModeShadow, "", false},
+		{"bundled off", "", "", false},
+		{"bundled off, snapshot on", "", costSavingModeOn, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldCreditBundledReadUsage(tc.bundled, tc.snapshot); got != tc.wantCredit {
+				t.Fatalf("shouldCreditBundledReadUsage(%q, %q) = %v, want %v", tc.bundled, tc.snapshot, got, tc.wantCredit)
+			}
+		})
+	}
+}
