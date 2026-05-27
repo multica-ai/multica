@@ -3,10 +3,14 @@
 import { useCallback } from "react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
+import { getCurrentSlug } from "@multica/core/platform";
 import { useT } from "../i18n";
 
 interface DesktopBridge {
-  downloadURL?: (u: string) => Promise<void> | void;
+  downloadURL?: (
+    u: string,
+    options?: { filename?: string; headers?: Record<string, string> },
+  ) => Promise<void> | void;
 }
 
 // Detected at call time, not module load — the bridge is injected by the
@@ -16,6 +20,34 @@ function hasDesktopDownloadBridge(): boolean {
   if (typeof window === "undefined") return false;
   const bridge = (window as unknown as { desktopAPI?: DesktopBridge }).desktopAPI;
   return Boolean(bridge?.downloadURL);
+}
+
+function desktopDownloadOptions(
+  downloadURL: string,
+  filename?: string,
+): {
+  url: string;
+  options: { filename?: string; headers?: Record<string, string> };
+} {
+  const baseUrl = api.getBaseUrl();
+  const url = new URL(downloadURL, baseUrl);
+  const apiOrigin = new URL(baseUrl).origin;
+  const options: { filename?: string; headers?: Record<string, string> } = {
+    filename,
+  };
+
+  // Same-origin/self-host URLs rely on the app's token-mode auth headers.
+  // Do not send those headers to signed CDN/S3 origins.
+  if (url.origin === apiOrigin && typeof window !== "undefined") {
+    const headers: Record<string, string> = {};
+    const token = window.localStorage.getItem("multica_token");
+    const slug = getCurrentSlug();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    if (slug) headers["X-Workspace-Slug"] = slug;
+    if (Object.keys(headers).length > 0) options.headers = headers;
+  }
+
+  return { url: url.toString(), options };
 }
 
 /**
@@ -53,10 +85,14 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
             failed();
             return;
           }
+          const { url, options } = desktopDownloadOptions(
+            fresh.download_url,
+            fresh.filename,
+          );
           const bridge = (
             window as unknown as { desktopAPI?: DesktopBridge }
           ).desktopAPI;
-          await bridge!.downloadURL!(fresh.download_url);
+          await bridge!.downloadURL!(url, options);
         } catch {
           failed();
         }

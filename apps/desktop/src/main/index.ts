@@ -366,13 +366,20 @@ if (!gotTheLock) {
       return openExternalSafely(url);
     });
 
-    ipcMain.handle("file:download-url", (_event, url: string) => {
-      if (!mainWindow) {
-        console.warn("[download] ignored file:download-url — mainWindow torn down");
-        return;
-      }
-      downloadURLSafely(mainWindow, url);
-    });
+    ipcMain.handle(
+      "file:download-url",
+      (
+        _event,
+        url: string,
+        options?: { filename?: string; headers?: Record<string, string> },
+      ) => {
+        if (!mainWindow) {
+          console.warn("[download] ignored file:download-url — mainWindow torn down");
+          throw new Error("No active window for download");
+        }
+        return downloadURLSafely(mainWindow, url, options);
+      },
+    );
 
     // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so
     // preload can attach the values to `desktopAPI.appInfo` before any renderer

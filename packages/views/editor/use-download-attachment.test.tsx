@@ -6,7 +6,14 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 const getAttachmentMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", () => ({
-  api: { getAttachment: getAttachmentMock },
+  api: {
+    getAttachment: getAttachmentMock,
+    getBaseUrl: () => "https://api.example.test",
+  },
+}));
+
+vi.mock("@multica/core/platform", () => ({
+  getCurrentSlug: () => "acme",
 }));
 
 vi.mock("sonner", () => ({
@@ -29,6 +36,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  window.localStorage.clear();
   // Scrub the desktop bridge between tests so suites don't leak state.
   delete (window as unknown as { desktopAPI?: unknown }).desktopAPI;
 });
@@ -42,7 +50,11 @@ describe("useDownloadAttachment (web)", () => {
       filename: "file.md",
     });
 
-    const placeholder = { opener: window, location: { href: "about:blank" }, close: vi.fn() };
+    const placeholder = {
+      opener: window,
+      location: { href: "about:blank" },
+      close: vi.fn(),
+    };
     const openSpy = vi.spyOn(window, "open").mockReturnValue(placeholder as unknown as Window);
 
     const { result } = renderHook(() => useDownloadAttachment());
@@ -62,7 +74,11 @@ describe("useDownloadAttachment (web)", () => {
 
   it("closes the placeholder and shows a toast when the fetch fails", async () => {
     getAttachmentMock.mockRejectedValueOnce(new Error("boom"));
-    const placeholder = { opener: window, location: { href: "about:blank" }, close: vi.fn() };
+    const placeholder = {
+      opener: window,
+      location: { href: "about:blank" },
+      close: vi.fn(),
+    };
     vi.spyOn(window, "open").mockReturnValue(placeholder as unknown as Window);
 
     const { result } = renderHook(() => useDownloadAttachment());
@@ -79,9 +95,9 @@ describe("useDownloadAttachment (web)", () => {
 describe("useDownloadAttachment (desktop)", () => {
   it("skips the placeholder tab and hands the signed URL to the desktop download bridge", async () => {
     const downloadURL = vi.fn();
-    (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {
-      downloadURL,
-    };
+    (
+      window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }
+    ).desktopAPI = { downloadURL };
     getAttachmentMock.mockResolvedValueOnce({
       id: "att-1",
       url: "https://static.example.test/file.md",
@@ -99,14 +115,47 @@ describe("useDownloadAttachment (desktop)", () => {
     // No placeholder — Electron's setWindowOpenHandler would reject
     // about:blank, so we go straight to the platform's IPC bridge.
     expect(openSpy).not.toHaveBeenCalled();
-    expect(downloadURL).toHaveBeenCalledWith(SIGNED_URL);
+    expect(downloadURL).toHaveBeenCalledWith(SIGNED_URL, {
+      filename: "file.md",
+    });
+  });
+
+  it("resolves same-origin relative URLs and sends desktop auth headers", async () => {
+    const downloadURL = vi.fn();
+    (
+      window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }
+    ).desktopAPI = { downloadURL };
+    window.localStorage.setItem("multica_token", "token-1");
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "att-1",
+      url: "/uploads/file.md",
+      download_url: "/uploads/file.md",
+      filename: "file.md",
+    });
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(downloadURL).toHaveBeenCalledWith(
+      "https://api.example.test/uploads/file.md",
+      {
+        filename: "file.md",
+        headers: {
+          Authorization: "Bearer token-1",
+          "X-Workspace-Slug": "acme",
+        },
+      },
+    );
   });
 
   it("shows a toast when the API rejects on desktop", async () => {
     const downloadURL = vi.fn();
-    (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {
-      downloadURL,
-    };
+    (
+      window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }
+    ).desktopAPI = { downloadURL };
     getAttachmentMock.mockRejectedValueOnce(new Error("network failure"));
 
     const { result } = renderHook(() => useDownloadAttachment());

@@ -1,11 +1,27 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+const writeFileMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const showSaveDialogMock = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ canceled: false, filePath: "/tmp/report.html" }),
+);
+
 vi.mock("electron", () => ({
+  dialog: { showSaveDialog: showSaveDialogMock },
   shell: { openExternal: vi.fn().mockResolvedValue(undefined) },
 }));
 
+vi.mock("node:fs/promises", () => ({
+  default: { writeFile: writeFileMock },
+  writeFile: writeFileMock,
+}));
+
 import { shell } from "electron";
-import { isSafeExternalHttpUrl, openExternalSafely } from "./external-url";
+import type { BrowserWindow } from "electron";
+import {
+  downloadURLSafely,
+  isSafeExternalHttpUrl,
+  openExternalSafely,
+} from "./external-url";
 
 describe("isSafeExternalHttpUrl", () => {
   it("allows http and https URLs", () => {
@@ -69,5 +85,74 @@ describe("openExternalSafely", () => {
     openExternalSafely("javascript:alert(1)");
     openExternalSafely("not a url");
     expect(shell.openExternal).not.toHaveBeenCalled();
+  });
+});
+
+describe("downloadURLSafely", () => {
+  beforeEach(() => {
+    showSaveDialogMock.mockClear();
+    writeFileMock.mockClear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        arrayBuffer: () =>
+          Promise.resolve(new TextEncoder().encode("body").buffer),
+      }),
+    );
+  });
+
+  it("prompts for a save path, fetches the URL, and writes the response body", async () => {
+    await downloadURLSafely(
+      {} as BrowserWindow,
+      "https://api.example.test/uploads/report.html",
+      {
+        filename: "report.html",
+        headers: {
+          Authorization: "Bearer token",
+          "X-Workspace-Slug": "acme",
+          "X-Unsafe": "blocked",
+        },
+      },
+    );
+
+    expect(showSaveDialogMock).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ defaultPath: "report.html" }),
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.example.test/uploads/report.html",
+      {
+        headers: {
+          Authorization: "Bearer token",
+          "X-Workspace-Slug": "acme",
+        },
+      },
+    );
+    expect(writeFileMock).toHaveBeenCalledWith(
+      "/tmp/report.html",
+      Buffer.from("body"),
+    );
+  });
+
+  it("rejects unsafe URLs instead of silently doing nothing", async () => {
+    await expect(
+      downloadURLSafely({} as BrowserWindow, "/uploads/report.html"),
+    ).rejects.toThrow("Blocked unsafe download URL");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch when the save dialog is cancelled", async () => {
+    showSaveDialogMock.mockResolvedValueOnce({ canceled: true });
+
+    await downloadURLSafely(
+      {} as BrowserWindow,
+      "https://api.example.test/uploads/report.html",
+    );
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(writeFileMock).not.toHaveBeenCalled();
   });
 });
