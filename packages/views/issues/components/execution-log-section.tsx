@@ -55,6 +55,7 @@ const TRIGGER_MASK_STYLE: React.CSSProperties = {
 
 interface ExecutionLogSectionProps {
   issueId: string;
+  agentId?: string;
 }
 
 // Past-runs sort priority: failed first (needs attention), then
@@ -66,10 +67,10 @@ const PAST_STATUS_RANK: Record<string, number> = {
   completed: 2,
 };
 
-export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
+export function ExecutionLogSection({ issueId, agentId }: ExecutionLogSectionProps) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
-  const [showPast, setShowPast] = useState(false);
+  const [showPast, setShowPast] = useState(true);
 
   // Cache key registered in `issueKeys.tasks` (packages/core/issues/queries.ts)
   // so the global useRealtimeSync `task:` prefix path invalidates it via
@@ -83,19 +84,24 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
     refetchOnWindowFocus: true,
   });
 
+  const filteredTasks = useMemo(
+    () => agentId ? tasks.filter((t) => t.agent_id === agentId) : tasks,
+    [tasks, agentId],
+  );
+
   const activeTasks = useMemo(
     () =>
-      tasks.filter(
+      filteredTasks.filter(
         (t) =>
           t.status === "queued" ||
           t.status === "dispatched" ||
           t.status === "running",
       ),
-    [tasks],
+    [filteredTasks],
   );
 
   const pastTasks = useMemo(() => {
-    const past = tasks.filter(
+    const past = filteredTasks.filter(
       (t) =>
         t.status === "completed" ||
         t.status === "failed" ||
@@ -113,7 +119,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
       const bt = b.completed_at ?? b.created_at;
       return new Date(bt).getTime() - new Date(at).getTime();
     });
-  }, [tasks]);
+  }, [filteredTasks]);
 
   if (activeTasks.length === 0 && pastTasks.length === 0) return null;
 

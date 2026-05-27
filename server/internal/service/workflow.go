@@ -530,7 +530,7 @@ func (s *WorkflowService) SubmitWorkerOutput(ctx context.Context, nodeRunID pgty
 }
 
 // ReviewNodeRun handles the Critic's approval or rework decision.
-func (s *WorkflowService) ReviewNodeRun(ctx context.Context, nodeRunID pgtype.UUID, approved bool, comment string) error {
+func (s *WorkflowService) ReviewNodeRun(ctx context.Context, nodeRunID pgtype.UUID, approved bool, comment string, criticOutput json.RawMessage) error {
 	var nodeRun db.WorkflowNodeRun
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		nr, err := qtx.GetWorkflowNodeRun(ctx, nodeRunID)
@@ -550,10 +550,12 @@ func (s *WorkflowService) ReviewNodeRun(ctx context.Context, nodeRunID pgtype.UU
 			if err != nil {
 				return fmt.Errorf("approve node run: %w", err)
 			}
-			// Then complete.
-			updated, err = qtx.UpdateWorkflowNodeRunStatus(ctx, db.UpdateWorkflowNodeRunStatusParams{
-				ID:     nr.ID,
-				Status: NodeRunStatusCompleted,
+			// Store critic output.
+			updated, err = qtx.SetWorkflowNodeRunCriticOutput(ctx, db.SetWorkflowNodeRunCriticOutputParams{
+				ID:            nr.ID,
+				CriticOutput:  criticOutput,
+				CriticComment: pgtype.Text{String: comment, Valid: comment != ""},
+				Status:        NodeRunStatusCompleted,
 			})
 			if err != nil {
 				return fmt.Errorf("complete node run: %w", err)
@@ -1050,7 +1052,7 @@ func (s *WorkflowService) HandleWorkflowTaskCompletion(ctx context.Context, task
 				approved = !strings.Contains(strings.ToLower(output.Output), "不通过") &&
 					!strings.Contains(strings.ToLower(output.Output), "reject")
 			}
-			return s.ReviewNodeRun(ctx, nodeRun.ID, approved, output.Comment)
+			return s.ReviewNodeRun(ctx, nodeRun.ID, approved, output.Comment, task.Result)
 		}
 	}
 

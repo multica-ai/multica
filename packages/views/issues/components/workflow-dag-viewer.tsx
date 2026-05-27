@@ -71,6 +71,24 @@ function workerTypeToActorType(t: string): string {
   return "member";
 }
 
+function isWorkerDone(status: string): boolean {
+  return ["awaiting_critic", "critic_reviewing", "critic_approved", "completed"].includes(status);
+}
+
+function isCriticDone(status: string): boolean {
+  return ["critic_approved", "completed"].includes(status);
+}
+
+function isWorkerClickable(workerType: string, status: string): boolean {
+  if (["pending", "format_checking", "format_ok"].includes(status)) return false;
+  return true;
+}
+
+function isCriticClickable(criticType: string, status: string): boolean {
+  if (!["awaiting_critic", "critic_reviewing", "critic_approved", "completed"].includes(status)) return false;
+  return true;
+}
+
 function isWorkerPhase(status: string): boolean {
   return ["worker_assigned", "working"].includes(status);
 }
@@ -110,6 +128,7 @@ export function WorkflowDagViewer({
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [taskLogOpen, setTaskLogOpen] = useState(false);
+  const [taskLogAgentId, setTaskLogAgentId] = useState<string | null>(null);
 
   // Map node run ID → sub-issue ID (via origin_id)
   const subIssueByNodeRunId = new Map<string, string>();
@@ -154,6 +173,14 @@ export function WorkflowDagViewer({
     : null;
 
   const subIssueId = selectedNodeRun ? (subIssueByNodeRunId.get(selectedNodeRun.id) ?? null) : null;
+
+  const taskLogAgentName = taskLogAgentId && selectedNodeRun
+    ? (() => {
+        const isCritic = taskLogAgentId === selectedNodeRun.critic_id;
+        const type = workerTypeToActorType(isCritic ? selectedNodeRun.critic_type : selectedNodeRun.worker_type);
+        return getActorName(type, taskLogAgentId);
+      })()
+    : null;
 
   return (
     <div>
@@ -230,9 +257,20 @@ export function WorkflowDagViewer({
           <div className="space-y-1.5 pt-2 border-t">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Executor</span>
-              {isWorkerPhase(selectedNodeRun.status) && (
-                <Badge variant="secondary" className="text-[10px] px-1 h-3.5 animate-pulse">Active</Badge>
-              )}
+              <div className="flex items-center gap-1">
+                {isWorkerPhase(selectedNodeRun.status) && (
+                  <span className="flex items-center gap-1 text-[10px] text-blue-600 dark:text-blue-400">
+                    <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                    Active
+                  </span>
+                )}
+                {isWorkerDone(selectedNodeRun.status) && (
+                  <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+                    <svg className="h-3 w-3" viewBox="0 0 15 15" fill="none"><path d="M11.4669 3.72684C11.7558 3.91574 11.8369 4.30308 11.648 4.59198L7.39799 11.092C7.29783 11.2452 7.13556 11.3467 6.95402 11.3699C6.77247 11.3931 6.58989 11.3355 6.45446 11.2124L3.70446 8.71241C3.44905 8.48022 3.43023 8.08494 3.66242 7.82953C3.89461 7.57412 4.28989 7.55529 4.5453 7.78749L6.75292 9.79441L10.6018 3.90792C10.7907 3.61902 11.178 3.53795 11.4669 3.72684Z" fill="currentColor"/></svg>
+                    Done
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground w-10 shrink-0">Type</span>
@@ -241,13 +279,19 @@ export function WorkflowDagViewer({
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground w-10 shrink-0">Name</span>
               {selectedNodeRun.worker_id ? (
-                <button
-                  type="button"
-                  className="text-primary hover:underline text-left"
-                  onClick={() => setTaskLogOpen(true)}
-                >
-                  {getActorName(workerTypeToActorType(selectedNodeRun.worker_type), selectedNodeRun.worker_id)}
-                </button>
+                isWorkerClickable(selectedNodeRun.worker_type, selectedNodeRun.status) ? (
+                  <button
+                    type="button"
+                    className="text-primary underline underline-offset-2 decoration-dotted hover:decoration-solid cursor-pointer text-left"
+                    onClick={() => { setTaskLogAgentId(selectedNodeRun.worker_id); setTaskLogOpen(true); }}
+                  >
+                    {getActorName(workerTypeToActorType(selectedNodeRun.worker_type), selectedNodeRun.worker_id)}
+                  </button>
+                ) : (
+                  <span className="text-muted-foreground">
+                    {getActorName(workerTypeToActorType(selectedNodeRun.worker_type), selectedNodeRun.worker_id)}
+                  </span>
+                )
               ) : (
                 <span>—</span>
               )}
@@ -268,9 +312,20 @@ export function WorkflowDagViewer({
           <div className="space-y-1.5 pt-2 border-t">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Reviewer</span>
-              {isCriticPhase(selectedNodeRun.status) && (
-                <Badge variant="secondary" className="text-[10px] px-1 h-3.5 animate-pulse">Active</Badge>
-              )}
+              <div className="flex items-center gap-1">
+                {isCriticPhase(selectedNodeRun.status) && (
+                  <span className="flex items-center gap-1 text-[10px] text-purple-600 dark:text-purple-400">
+                    <span className="h-2 w-2 rounded-full bg-purple-500 animate-pulse" />
+                    Active
+                  </span>
+                )}
+                {isCriticDone(selectedNodeRun.status) && (
+                  <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+                    <svg className="h-3 w-3" viewBox="0 0 15 15" fill="none"><path d="M11.4669 3.72684C11.7558 3.91574 11.8369 4.30308 11.648 4.59198L7.39799 11.092C7.29783 11.2452 7.13556 11.3467 6.95402 11.3699C6.77247 11.3931 6.58989 11.3355 6.45446 11.2124L3.70446 8.71241C3.44905 8.48022 3.43023 8.08494 3.66242 7.82953C3.89461 7.57412 4.28989 7.55529 4.5453 7.78749L6.75292 9.79441L10.6018 3.90792C10.7907 3.61902 11.178 3.53795 11.4669 3.72684Z" fill="currentColor"/></svg>
+                    Done
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground w-10 shrink-0">Type</span>
@@ -279,13 +334,19 @@ export function WorkflowDagViewer({
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground w-10 shrink-0">Name</span>
               {selectedNodeRun.critic_id ? (
-                <button
-                  type="button"
-                  className="text-primary hover:underline text-left"
-                  onClick={() => setTaskLogOpen(true)}
-                >
-                  {getActorName(workerTypeToActorType(selectedNodeRun.critic_type), selectedNodeRun.critic_id)}
-                </button>
+                isCriticClickable(selectedNodeRun.critic_type, selectedNodeRun.status) ? (
+                  <button
+                    type="button"
+                    className="text-primary underline underline-offset-2 decoration-dotted hover:decoration-solid cursor-pointer text-left"
+                    onClick={() => { setTaskLogAgentId(selectedNodeRun.critic_id); setTaskLogOpen(true); }}
+                  >
+                    {getActorName(workerTypeToActorType(selectedNodeRun.critic_type), selectedNodeRun.critic_id)}
+                  </button>
+                ) : (
+                  <span className="text-muted-foreground">
+                    {getActorName(workerTypeToActorType(selectedNodeRun.critic_type), selectedNodeRun.critic_id)}
+                  </span>
+                )
               ) : (
                 <span>—</span>
               )}
@@ -331,12 +392,21 @@ export function WorkflowDagViewer({
         <DialogContent className="sm:max-w-lg max-h-[80vh] flex flex-col">
           <DialogHeader>
             <span className="text-sm font-medium">
-              {selectedNode?.title ?? "Node"} — Agent Activity
+              {taskLogAgentName ?? selectedNode?.title ?? "Node"} — Agent Activity
             </span>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto min-h-0">
             {subIssueId ? (
-              <ExecutionLogSection issueId={subIssueId} />
+              selectedNodeRun && (
+                (taskLogAgentId === selectedNodeRun.worker_id && selectedNodeRun.worker_type === "human") ||
+                (taskLogAgentId === selectedNodeRun.critic_id && selectedNodeRun.critic_type === "human")
+              ) ? (
+                <p className="text-xs text-muted-foreground py-4">
+                  This is a human task. No agent execution log available. Check the sub-issue for updates.
+                </p>
+              ) : (
+                <ExecutionLogSection issueId={subIssueId} agentId={taskLogAgentId ?? undefined} />
+              )
             ) : (
               <p className="text-xs text-muted-foreground">No sub-issue found for this node.</p>
             )}

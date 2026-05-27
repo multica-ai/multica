@@ -360,7 +360,7 @@ func (h *Handler) ReviewNodeRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.WorkflowService.ReviewNodeRun(r.Context(), nodeRunUUID, req.Approved, req.Comment); err != nil {
+	if err := h.WorkflowService.ReviewNodeRun(r.Context(), nodeRunUUID, req.Approved, req.Comment, nil); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
