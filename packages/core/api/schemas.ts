@@ -163,6 +163,8 @@ const IssueSchema = z.object({
   project_id: z.string().nullable(),
   workflow_id: z.string().nullable().default(null),
   workflow_run_id: z.string().nullable().default(null),
+  origin_type: z.string().nullable().default(null),
+  origin_id: z.string().nullable().default(null),
   position: z.number(),
   start_date: z.string().nullable(),
   due_date: z.string().nullable(),

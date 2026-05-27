@@ -49,6 +49,8 @@ export interface Issue {
   project_id: string | null;
   workflow_id: string | null;
   workflow_run_id: string | null;
+  origin_type?: string | null;
+  origin_id?: string | null;
   position: number;
   start_date: string | null;
   due_date: string | null;

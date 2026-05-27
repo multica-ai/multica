@@ -62,6 +62,8 @@ type IssueResponse struct {
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
 	Labels *[]LabelResponse `json:"labels,omitempty"`
+	OriginType *string `json:"origin_type,omitempty"`
+	OriginID   *string `json:"origin_id,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -89,6 +91,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		WorkflowID:    uuidToPtr(i.WorkflowID),
 		WorkflowRunID: uuidToPtr(i.WorkflowRunID),
 		Metadata:      parseIssueMetadata(i.Metadata),
+		OriginType:    textToPtr(i.OriginType),
+		OriginID:      uuidToPtr(i.OriginID),
 	}
 }
 

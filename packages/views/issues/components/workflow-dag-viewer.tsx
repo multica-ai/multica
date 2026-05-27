@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { DAGCanvas } from "../../workflows/components";
 import {
@@ -10,11 +10,13 @@ import {
   workflowNodeRunsOptions,
   useCancelWorkflowRun,
 } from "@multica/core/workflows/queries";
-import { taskMessagesOptions } from "@multica/core/chat/queries";
+import { issueKeys } from "@multica/core/issues/queries";
+import { api } from "@multica/core/api";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@multica/ui/components/ui/dialog";
+import { ExecutionLogSection } from "./execution-log-section";
 import { cn } from "@multica/ui/lib/utils";
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
@@ -81,10 +83,12 @@ export function WorkflowDagViewer({
   workflowId,
   runId,
   wsId,
+  parentIssueId,
 }: {
   workflowId: string;
   runId: string | null;
   wsId: string;
+  parentIssueId?: string;
 }) {
   const { data: nodes = [] } = useQuery(workflowNodesOptions(wsId, workflowId));
   const { data: edges = [] } = useQuery(workflowEdgesOptions(wsId, workflowId));
@@ -96,9 +100,26 @@ export function WorkflowDagViewer({
   const cancelRunMutation = useCancelWorkflowRun(wsId);
   const { getActorName } = useActorName();
 
+  // Fetch child issues to map node runs → sub-issues
+  const { data: childIssues } = useQuery({
+    queryKey: [...issueKeys.detail(wsId, parentIssueId ?? ""), "children"],
+    queryFn: () => api.listChildIssues(parentIssueId ?? ""),
+    enabled: !!parentIssueId,
+    select: (data) => data.issues,
+  });
+
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [taskLogOpen, setTaskLogOpen] = useState(false);
-  const [taskLogTarget, setTaskLogTarget] = useState<"executor" | "reviewer">("executor");
+
+  // Map node run ID → sub-issue ID (via origin_id)
+  const subIssueByNodeRunId = new Map<string, string>();
+  if (childIssues) {
+    for (const child of childIssues) {
+      if (child.origin_type === "workflow" && child.origin_id) {
+        subIssueByNodeRunId.set(child.origin_id, child.id);
+      }
+    }
+  }
 
   const nodeStatusColors: Record<string, string> = {};
   const nodeStatuses: Record<string, { status: string; isRunning: boolean }> = {};
@@ -132,31 +153,7 @@ export function WorkflowDagViewer({
     ? nodes.find((n) => n.id === selectedNodeId) ?? null
     : null;
 
-  const taskId = selectedNodeRun
-    ? (taskLogTarget === "reviewer"
-        ? (selectedNodeRun.critic_agent_task_id || selectedNodeRun.agent_task_id)
-        : (selectedNodeRun.worker_agent_task_id || selectedNodeRun.agent_task_id)) ?? ""
-    : "";
-  const { data: taskMessages = [] } = useQuery({
-    ...taskMessagesOptions(taskId),
-    enabled: !!taskId,
-  });
-
-  const logRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [taskMessages]);
-
-  const taskAgentName = selectedNodeRun
-    ? (() => {
-        const isCritic = taskLogTarget === "reviewer";
-        const type = workerTypeToActorType(
-          isCritic ? selectedNodeRun.critic_type : selectedNodeRun.worker_type
-        );
-        const id = isCritic ? selectedNodeRun.critic_id : selectedNodeRun.worker_id;
-        return id ? getActorName(type, id) : null;
-      })()
-    : null;
+  const subIssueId = selectedNodeRun ? (subIssueByNodeRunId.get(selectedNodeRun.id) ?? null) : null;
 
   return (
     <div>
@@ -247,7 +244,7 @@ export function WorkflowDagViewer({
                 <button
                   type="button"
                   className="text-primary hover:underline text-left"
-                  onClick={() => { setTaskLogTarget("executor"); setTaskLogOpen(true); }}
+                  onClick={() => setTaskLogOpen(true)}
                 >
                   {getActorName(workerTypeToActorType(selectedNodeRun.worker_type), selectedNodeRun.worker_id)}
                 </button>
@@ -285,7 +282,7 @@ export function WorkflowDagViewer({
                 <button
                   type="button"
                   className="text-primary hover:underline text-left"
-                  onClick={() => { setTaskLogTarget("reviewer"); setTaskLogOpen(true); }}
+                  onClick={() => setTaskLogOpen(true)}
                 >
                   {getActorName(workerTypeToActorType(selectedNodeRun.critic_type), selectedNodeRun.critic_id)}
                 </button>
@@ -329,41 +326,21 @@ export function WorkflowDagViewer({
         </div>
       )}
 
-      {/* Task execution log dialog */}
+      {/* Agent execution log dialog */}
       <Dialog open={taskLogOpen} onOpenChange={setTaskLogOpen}>
         <DialogContent className="sm:max-w-lg max-h-[80vh] flex flex-col">
           <DialogHeader>
             <span className="text-sm font-medium">
-              Task Log{taskAgentName ? ` — ${taskAgentName}` : ""}
+              {selectedNode?.title ?? "Node"} — Agent Activity
             </span>
           </DialogHeader>
-          {taskMessages.length > 0 ? (
-            <div ref={logRef} className="flex-1 overflow-y-auto space-y-1 min-h-0">
-              {taskMessages.map((msg, i) => (
-                <div
-                  key={i}
-                  className={cn(
-                    "text-[11px] px-2 py-1 rounded",
-                    msg.type === "error" && "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300",
-                    msg.type === "thinking" && "bg-muted/30 text-muted-foreground italic",
-                    msg.type === "tool_use" && "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
-                    msg.type === "tool_result" && "bg-muted/20 text-muted-foreground",
-                    msg.type === "text" && "text-foreground",
-                  )}
-                >
-                  {msg.type === "tool_use" && msg.tool && (
-                    <span className="font-medium">Tool: {msg.tool}</span>
-                  )}
-                  {msg.content && <p className="whitespace-pre-wrap break-all">{msg.content}</p>}
-                  {msg.type === "tool_result" && msg.output && (
-                    <p className="whitespace-pre-wrap break-all text-[10px]">{msg.output}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">Task is queued — no execution messages yet. The agent may be offline or busy.</p>
-          )}
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {subIssueId ? (
+              <ExecutionLogSection issueId={subIssueId} />
+            ) : (
+              <p className="text-xs text-muted-foreground">No sub-issue found for this node.</p>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 

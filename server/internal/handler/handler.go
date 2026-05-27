@@ -170,6 +170,16 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	// when the workflow run finishes successfully.
 	workflowSvc.OnNodeStatusChanged = func(ctx context.Context, nodeRun db.WorkflowNodeRun) {
 		h.syncSubIssueForNodeRun(ctx, nodeRun)
+		// Publish WS event so frontend DAG refreshes immediately.
+		if run, err := h.Queries.GetWorkflowRun(ctx, nodeRun.WorkflowRunID); err == nil {
+			if wf, err := h.Queries.GetWorkflow(ctx, run.WorkflowID); err == nil {
+				h.publish("workflow:node_run_updated", uuidToString(wf.WorkspaceID), "system", uuidToString(wf.ID), map[string]any{
+					"node_run_id": uuidToString(nodeRun.ID),
+					"run_id":      uuidToString(run.ID),
+					"status":      nodeRun.Status,
+				})
+			}
+		}
 	}
 	workflowSvc.OnRunTerminal = func(ctx context.Context, run db.WorkflowRun, status string) {
 		h.handleWorkflowRunTerminal(ctx, run, status)
