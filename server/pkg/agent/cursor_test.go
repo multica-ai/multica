@@ -29,7 +29,6 @@ func TestBuildCursorArgs(t *testing.T) {
 	expected := []string{
 		"-p", "do something",
 		"--output-format", "stream-json",
-		"--yolo",
 		"--workspace", "/tmp/work",
 		"--model", "composer-1.5",
 	}
@@ -66,7 +65,7 @@ func TestBuildCursorArgsMinimal(t *testing.T) {
 	t.Parallel()
 
 	args := buildCursorArgs("hello", ExecOptions{}, slog.Default())
-	expected := []string{"-p", "hello", "--output-format", "stream-json", "--yolo"}
+	expected := []string{"-p", "hello", "--output-format", "stream-json"}
 
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
@@ -100,36 +99,38 @@ func TestBuildCursorArgsCustomArgs(t *testing.T) {
 		CustomArgs: []string{"--extra", "val", "--yolo", "--output-format", "text"},
 	}, slog.Default())
 
-	// --extra val should be present; --yolo and --output-format should be filtered out
+	// --extra val should be present; --yolo and --output-format should be filtered out.
 	hasExtra := false
-	hasBlockedYolo := false
 	hasBlockedFormat := false
 	for i, a := range args {
 		if a == "--extra" && i+1 < len(args) && args[i+1] == "val" {
 			hasExtra = true
 		}
 	}
-	// Count occurrences of --yolo (should be exactly 1 — the hardcoded one)
-	yoloCount := 0
 	for _, a := range args {
 		if a == "--yolo" {
-			yoloCount++
+			t.Fatalf("--yolo should be filtered from cursor-agent args, got %v", args)
 		}
 		if a == "text" {
 			hasBlockedFormat = true
 		}
 	}
-	if yoloCount > 1 {
-		hasBlockedYolo = true
-	}
 	if !hasExtra {
 		t.Fatalf("expected --extra val in args, got %v", args)
 	}
-	if hasBlockedYolo {
-		t.Fatalf("--yolo from custom args should be filtered, got %v", args)
-	}
 	if hasBlockedFormat {
 		t.Fatalf("--output-format from custom args should be filtered, got %v", args)
+	}
+}
+
+func TestBuildCursorArgsDoesNotEmitYolo(t *testing.T) {
+	t.Parallel()
+
+	args := buildCursorArgs("task", ExecOptions{}, slog.Default())
+	for _, a := range args {
+		if a == "--yolo" {
+			t.Fatalf("cursor-agent rejects --yolo in affected versions; got %v", args)
+		}
 	}
 }
 

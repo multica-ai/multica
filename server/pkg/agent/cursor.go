@@ -385,25 +385,24 @@ func cursorErrorText(evt *cursorStreamEvent) string {
 	return ""
 }
 
-// cursorBlockedArgs are flags hardcoded by the daemon that must not be
-// overridden by user-configured custom_args. Overriding these would break
-// the daemon↔cursor-agent communication protocol.
+// cursorBlockedArgs are flags user-configured custom_args must not pass
+// through. Protocol flags are owned by the daemon; unsupported flags are
+// blocked here so custom_args cannot reintroduce known launch failures.
 var cursorBlockedArgs = map[string]blockedArgMode{
 	"-p":              blockedStandalone, // non-interactive print mode
 	"--output-format": blockedWithValue,  // stream-json protocol
-	"--yolo":          blockedStandalone, // auto-approval for autonomous operation
+	"--yolo":          blockedStandalone, // unsupported by cursor-agent versions that reject unknown flags
 }
 
 // buildCursorArgs assembles the argv for a one-shot cursor-agent invocation.
 //
 // Usage: cursor-agent -p <prompt> --output-format stream-json
 //
-//	--workspace <cwd> --yolo [--model <m>] [--resume <id>]
+//	--workspace <cwd> [--model <m>] [--resume <id>]
 func buildCursorArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
 		"-p", prompt,
 		"--output-format", "stream-json",
-		"--yolo",
 	}
 	if opts.Cwd != "" {
 		args = append(args, "--workspace", opts.Cwd)
