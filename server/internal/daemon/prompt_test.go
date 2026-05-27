@@ -43,10 +43,33 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 		// hard rules
 		"never invent requirements",
 		"never reduce multi-sentence input",
+		// no-scaffolding rule (AOL-180): the description body must read as
+		// plain prose, never wrapped in a fixed "## User request" /
+		// "## Context" heading. Lock both the positive guidance and the
+		// explicit prohibition so a future rewrite can't reintroduce the
+		// scaffolding that prompted this fix.
+		"plain prose",
+		"do NOT wrap it in fixed section headings",
+		"never add a fixed `## User request` heading",
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
 			t.Errorf("buildQuickCreatePrompt output missing required rule: %q", s)
+		}
+	}
+
+	// And the prompt must NOT instruct the agent to use the legacy
+	// "two-section structure" with a numbered `1. **User request**` /
+	// `2. **Context**` recipe — the very phrasing that produced the fixed
+	// "## User request" heading users complained about in AOL-180.
+	mustNotContain := []string{
+		"two-section structure",
+		"1. **User request**",
+		"2. **Context**",
+	}
+	for _, s := range mustNotContain {
+		if strings.Contains(out, s) {
+			t.Errorf("buildQuickCreatePrompt must NOT carry legacy scaffolding %q\n--- output ---\n%s", s, out)
 		}
 	}
 }
