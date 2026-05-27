@@ -648,13 +648,26 @@ export function SwimLaneView({
     // For parent grouping use mergedIssues so batch-fetched children
     // (beyond the first page) are included in lane cells.
     const issueSource = swimlaneGrouping === "parent" ? mergedIssues : issues;
-    const filtered = issueSource.filter((i) => !headerIssueIds.has(i.id));
-    const sorted = sortIssues(filtered, sortBy, sortDirection);
+    const sorted = sortIssues(issueSource, sortBy, sortDirection);
     for (const issue of sorted) {
       let placed = false;
       for (const lane of laneGroups) {
         if (lane.isOrphan) continue;
         if (lane.matches(issue)) {
+          // Parent grouping, "No parent" lane: exclude issues that are
+          // themselves lane headers. They already render as their own lane
+          // header below — showing the duplicate card in "No parent" would
+          // be redundant noise. Real-parent lanes still render their
+          // header-child as a card so grandparent lanes are never empty
+          // (dual-render is intentional for multi-level nesting).
+          if (
+            swimlaneGrouping === "parent" &&
+            lane.rawId === NONE_LANE_ID &&
+            headerIssueIds.has(issue.id)
+          ) {
+            placed = true;
+            break;
+          }
           const status = issue.status;
           if (result[lane.key]?.[status]) {
             result[lane.key]![status]!.push(issue.id);
