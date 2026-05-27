@@ -87,10 +87,10 @@ type ExecOptions struct {
 	MaxTurns                  int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
-	ResumeSessionID           string          // if non-empty, resume a previous agent session
-	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
-	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
-	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	ResumeSessionID           string           // if non-empty, resume a previous agent session
+	ExtraArgs                 []string         // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
+	CustomArgs                []string         // per-agent CLI arguments appended after ExtraArgs
+	McpConfig                 json.RawMessage  // if non-nil, MCP server config to pass via --mcp-config
 	OnApproval                ApprovalCallback // nil = auto-approve (default behaviour)
 	TraceCallback             TraceCallback    // nil = no trace recording (default)
 	ClaudePermissionMode      string           // optional controlled override: default, plan, acceptEdits
@@ -164,49 +164,6 @@ type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, cbc, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, DeepSeek-TUI)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
-}
-
-type PlanCapability struct {
-	PromptPlan          bool
-	NativePlan          string // "", "experimental", or "verified"
-	NativeApproval      bool
-	NativeUserInput     bool
-	StructuredStreaming bool
-}
-
-func Capabilities(agentType string) PlanCapability {
-	switch agentType {
-	case "claude", "codebuddy":
-		// CodeBuddy reuses Claude Code's stream-json + control_request
-		// protocol and exposes the same `--permission-mode plan`
-		// option, so plan/approval/streaming capabilities are identical.
-		return PlanCapability{
-			PromptPlan:          true,
-			NativePlan:          "experimental",
-			NativeApproval:      true,
-			StructuredStreaming: true,
-		}
-	case "codex":
-		return PlanCapability{
-			PromptPlan:          true,
-			NativeApproval:      true,
-			NativeUserInput:     true,
-			StructuredStreaming: true,
-		}
-	case "hermes", "kimi", "kiro":
-		return PlanCapability{
-			PromptPlan:          true,
-			NativeApproval:      true,
-			StructuredStreaming: true,
-		}
-	case "copilot", "cursor", "gemini", "opencode", "openclaw", "pi":
-		return PlanCapability{
-			PromptPlan:          true,
-			StructuredStreaming: true,
-		}
-	default:
-		return PlanCapability{}
-	}
 }
 
 // New creates a Backend for the given agent type.

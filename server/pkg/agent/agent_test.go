@@ -72,7 +72,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
 		"claude", "codex", "copilot", "cursor", "gemini",
-		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
+		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "DeepSeek-TUI",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {
@@ -88,25 +88,48 @@ func TestLaunchHeaderReturnsEmptyForUnknownType(t *testing.T) {
 	}
 }
 
-func TestCapabilities(t *testing.T) {
+func TestCapabilityRegistryCoversSupportedBackends(t *testing.T) {
 	t.Parallel()
 
-	claude := Capabilities("claude")
-	if !claude.PromptPlan || claude.NativePlan != "experimental" || !claude.NativeApproval || !claude.StructuredStreaming {
-		t.Fatalf("unexpected claude capabilities: %+v", claude)
+	supported := []string{
+		"claude", "codex", "copilot", "opencode", "openclaw", "hermes",
+		"gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI",
+	}
+	for _, provider := range supported {
+		if _, ok := CapabilityFor(provider); !ok {
+			t.Fatalf("CapabilityFor(%q) missing registry entry", provider)
+		}
+	}
+}
+
+func TestCapabilityValues(t *testing.T) {
+	t.Parallel()
+
+	claude, ok := CapabilityFor("claude")
+	if !ok {
+		t.Fatal("missing claude capability")
+	}
+	if !claude.StreamDisplay || !claude.ToolCallStream || !claude.Approval || !claude.ResumeSession || !claude.PlanMode || !claude.StructuredOutput {
+		t.Fatalf("unexpected claude capability: %+v", claude)
 	}
 
-	codex := Capabilities("codex")
-	if !codex.PromptPlan || codex.NativePlan != "" || !codex.NativeApproval || !codex.NativeUserInput {
-		t.Fatalf("unexpected codex capabilities: %+v", codex)
+	codex, ok := CapabilityFor("codex")
+	if !ok {
+		t.Fatal("missing codex capability")
+	}
+	if !codex.StreamDisplay || !codex.ToolCallStream || !codex.Approval || !codex.ResumeSession || codex.PlanMode || !codex.StructuredOutput {
+		t.Fatalf("unexpected codex capability: %+v", codex)
 	}
 
-	gemini := Capabilities("gemini")
-	if !gemini.PromptPlan || gemini.NativePlan != "" || gemini.NativeApproval {
-		t.Fatalf("unexpected gemini capabilities: %+v", gemini)
+	gemini, ok := CapabilityFor("gemini")
+	if !ok {
+		t.Fatal("missing gemini capability")
+	}
+	if !gemini.StreamDisplay || !gemini.ToolCallStream || gemini.Approval || !gemini.ResumeSession || gemini.PlanMode || !gemini.StructuredOutput {
+		t.Fatalf("unexpected gemini capability: %+v", gemini)
 	}
 
-	if got := Capabilities("unknown"); got != (PlanCapability{}) {
-		t.Fatalf("unknown capabilities = %+v", got)
+	if got := CapabilityOrDefault("unknown"); got != (Capability{}) {
+		t.Fatalf("unknown capability = %+v", got)
 	}
 }
