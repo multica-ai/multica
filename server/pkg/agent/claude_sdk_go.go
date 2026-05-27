@@ -42,6 +42,7 @@ func (b *claudeBackend) executeWithGoSDK(ctx context.Context, prompt string, opt
 		usage := make(map[string]TokenUsage)
 		preservePlanOutput := false
 		var mu sync.Mutex // protects plan state accessed from canUseTool callback
+		toolState := newClaudeToolUseState()
 
 		// Build canUseTool callback that bridges SDK permission requests to Multica's approval flow
 		if opts.OnApproval != nil {
@@ -79,17 +80,19 @@ func (b *claudeBackend) executeWithGoSDK(ctx context.Context, prompt string, opt
 							trySend(msgCh, Message{Type: MessageThinking, Content: bl.Thinking})
 							emitDisplayEvent(opts.TraceCallback, "thinking", "Thinking", bl.Thinking, map[string]any{"bridge": "sdk_go"})
 						case *claudecode.ToolUseBlock:
-							trySend(msgCh, Message{Type: MessageToolUse, Tool: bl.Name, CallID: bl.ToolUseID, Input: bl.Input})
-							if opts.TraceCallback != nil {
-								opts.TraceCallback("normalized", "[tool_use: "+bl.Name+"]", "")
+							if shouldDeferClaudeToolUse(bl.Name, bl.Input) {
+								toolState.deferToolUse(bl.ToolUseID, bl.Name, bl.Input)
+								continue
 							}
-							emitDisplayEvent(opts.TraceCallback, "tool_call", bl.Name, "", map[string]any{"call_id": bl.ToolUseID, "input": bl.Input, "bridge": "sdk_go"})
+							toolState.discardToolUse(bl.ToolUseID)
+							emitClaudeToolUse(msgCh, opts.TraceCallback, bl.Name, bl.ToolUseID, bl.Input, map[string]any{"bridge": "sdk_go"})
 						case *claudecode.ToolResultBlock:
 							content := toolResultContent(bl)
 							trySend(msgCh, Message{Type: MessageToolResult, CallID: bl.ToolUseID, Output: content})
 							if opts.TraceCallback != nil {
 								opts.TraceCallback("normalized", "[tool_result: "+bl.ToolUseID+"]", content)
 							}
+							toolState.discardToolUse(bl.ToolUseID)
 							emitDisplayEvent(opts.TraceCallback, "tool_result", "Tool result", content, map[string]any{"call_id": bl.ToolUseID, "bridge": "sdk_go"})
 						}
 					}

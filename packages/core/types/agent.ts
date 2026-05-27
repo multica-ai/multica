@@ -35,14 +35,19 @@ export interface RuntimeDevice {
 export type AgentRuntime = RuntimeDevice;
 
 // Coarse classifier set by the backend when a task transitions to "failed".
-// Mirrors the migration-055 enum in agent_task_queue.failure_reason. Used by
-// the agent presence derivation and the UI failure-message lookup.
+// Mirrors the unified failure taxonomy defined in daemon/failure_taxonomy.go.
+// Used by the agent presence derivation and the UI failure-message lookup.
 export type TaskFailureReason =
   | "agent_error"
+  | "cancelled"
   | "timeout"
-  | "codex_semantic_inactivity"
+  | "rate_limited"
+  | "parse_error"
+  | "upstream_failure"
   | "runtime_offline"
   | "runtime_recovery"
+  | "queued_expired"
+  | "unknown"
   | "manual";
 
 // One daily bucket for the Agents-list ACTIVITY sparkline. The back-end

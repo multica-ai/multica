@@ -428,10 +428,16 @@ func taskErrorType(reason string) string {
 	switch reason {
 	case "runtime_offline", "runtime_recovery":
 		return "runtime"
-	case "timeout", "codex_semantic_inactivity":
+	case "timeout", "idle_watchdog":
 		return "timeout"
-	case "iteration_limit", "agent_fallback_message":
+	case "rate_limited":
+		return "rate_limited"
+	case "iteration_limit", "agent_fallback_message", "parse_error":
 		return "agent_output"
+	case "api_invalid_request", "upstream_failure":
+		return "upstream"
+	case "queued_expired":
+		return "queued_expired"
 	case "cancelled", "user_cancelled":
 		return "cancelled"
 	default:
@@ -1393,16 +1399,14 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
 var retryableReasons = map[string]bool{
-	"runtime_offline":           true,
-	"runtime_recovery":          true,
-	"timeout":                   true,
-	"codex_semantic_inactivity": true,
+	"runtime_offline":  true,
+	"runtime_recovery": true,
+	"timeout":          true,
+	"idle_watchdog":    true,
 }
 
 func resumeUnsafeFailureReason(reason string) bool {
 	switch reason {
-	// Keep in sync with GetLastTaskSession / GetLastChatTaskSession and
-	// CreateRetryTask's fresh-session CASE WHEN.
 	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity":
 		return true
 	default:

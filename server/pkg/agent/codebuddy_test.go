@@ -33,8 +33,8 @@ func TestNewCodebuddyHonoursExplicitPath(t *testing.T) {
 }
 
 func TestCodebuddyCapabilitiesMatchClaude(t *testing.T) {
-	claude := Capabilities("claude")
-	cb := Capabilities("codebuddy")
+	claude := CapabilityOrDefault("claude")
+	cb := CapabilityOrDefault("codebuddy")
 	if claude != cb {
 		t.Errorf("codebuddy capabilities %+v differ from claude %+v", cb, claude)
 	}
