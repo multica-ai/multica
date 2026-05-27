@@ -1,5 +1,5 @@
 import { source } from "@/lib/source";
-import { i18n } from "@/lib/i18n";
+import { docsContentLang, i18n } from "@/lib/i18n";
 
 // Canonical production origin and basePath for the docs app. Used by the
 // sitemap and per-page hreflang metadata — anywhere we need to construct
@@ -36,8 +36,16 @@ export function docsAlternates(slugs: string[]): {
 } {
   const languages: Record<string, string> = {};
   for (const lang of i18n.languages) {
-    const page = source.getPage(slugs, lang);
-    if (page) languages[lang] = absoluteDocsUrl(page.url);
+    const contentLang = docsContentLang(lang);
+    const page = source.getPage(slugs, contentLang);
+    if (!page) continue;
+    const relative =
+      lang === contentLang
+        ? page.url
+        : page.url === "/"
+          ? `/${lang}`
+          : `/${lang}${page.url}`;
+    languages[lang] = absoluteDocsUrl(relative);
   }
 
   const canonical =

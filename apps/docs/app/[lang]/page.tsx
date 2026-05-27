@@ -5,7 +5,7 @@ import defaultMdxComponents from "fumadocs-ui/mdx";
 import type { Metadata } from "next";
 import { DocsHero } from "@/components/hero";
 import { Byline, NumberedCards, NumberedCard, NumberedSteps, Step } from "@/components/editorial";
-import { i18n, type Lang } from "@/lib/i18n";
+import { docsContentLang, i18n, type Lang } from "@/lib/i18n";
 import { homeCopy } from "@/lib/translations";
 import { docsAlternates } from "@/lib/site";
 import { DocsLocaleProvider, LocaleLink } from "@/components/locale-link";
@@ -31,7 +31,7 @@ export default async function Page({
 }) {
   const { lang: rawLang } = await params;
   const lang = asLang(rawLang);
-  const page = source.getPage([], lang);
+  const page = source.getPage([], docsContentLang(lang));
   if (!page) notFound();
 
   const MDX = page.data.body;
@@ -77,7 +77,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { lang: rawLang } = await params;
   const lang = asLang(rawLang);
-  const page = source.getPage([], lang);
+  const page = source.getPage([], docsContentLang(lang));
   if (!page) notFound();
 
   return {

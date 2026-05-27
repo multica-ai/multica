@@ -7,7 +7,7 @@ import type { Metadata } from "next";
 import { cn } from "@multica/ui/lib/utils";
 import { baseOptions } from "@/app/layout.config";
 import { source } from "@/lib/source";
-import { i18n, type Lang } from "@/lib/i18n";
+import { docsContentLang, i18n, type Lang } from "@/lib/i18n";
 import { uiTranslations, localeLabels } from "@/lib/translations";
 import { DocsSettings } from "@/components/docs-settings";
 
@@ -18,8 +18,11 @@ const inter = Inter({
     "-apple-system",
     "BlinkMacSystemFont",
     "Segoe UI",
+    "Apple SD Gothic Neo",
+    "Malgun Gothic",
     "PingFang SC",
     "Microsoft YaHei",
+    "Noto Sans CJK KR",
     "Noto Sans CJK SC",
     "sans-serif",
   ],
@@ -99,7 +102,7 @@ export default async function Layout({
           search={{ options: { api: "/docs/api/search" } }}
         >
           <DocsLayout
-            tree={source.getPageTree(lang)}
+            tree={source.getPageTree(docsContentLang(lang))}
             // Suppress Fumadocs's default sidebar-footer icons (theme +
             // language + search). Our custom <DocsSettings> is mounted as
             // the sidebar footer instead — two labelled buttons, not three

@@ -16,6 +16,8 @@ export const i18n = defineI18n({
 export type UseCaseLang = (typeof i18n.languages)[number];
 
 export function getUseCaseLangForLocale(locale: SupportedLocale): UseCaseLang {
+  // Korean use-case route chrome is localized, but MDX content falls back to
+  // English until `*.ko.mdx` files are added.
   return locale === "zh-Hans" ? "zh" : "en";
 }
 

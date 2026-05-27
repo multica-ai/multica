@@ -1,40 +1,40 @@
 {
   "preferences": {
     "theme": {
-      "title": "Theme",
-      "light": "Light",
-      "dark": "Dark",
-      "system": "System"
+      "title": "테마",
+      "light": "라이트",
+      "dark": "다크",
+      "system": "시스템"
     },
     "language": {
-      "title": "Language",
+      "title": "언어",
       "english": "English",
       "chinese": "中文",
       "korean": "한국어",
-      "sync_failed": "Language saved on this device, but failed to sync to your account. Other devices may show the previous language."
+      "sync_failed": "이 기기에는 언어가 저장되었지만 계정 동기화에 실패했습니다. 다른 기기에서는 이전 언어가 표시될 수 있습니다."
     },
     "timezone": {
-      "title": "Viewing Timezone",
-      "browser_suffix": " (browser)",
-      "hint": "Used for dashboards, charts, and any 'today' label shown to you. It's a personal preference that applies across all your workspaces.",
-      "sync_failed": "Failed to save your timezone preference."
+      "title": "표시 시간대",
+      "browser_suffix": " (브라우저)",
+      "hint": "대시보드, 차트, 사용자에게 표시되는 '오늘' 레이블에 사용됩니다. 모든 워크스페이스에 적용되는 개인 설정입니다.",
+      "sync_failed": "시간대 설정을 저장하지 못했습니다."
     }
   },
   "page": {
-    "title": "Settings",
-    "my_account": "My Account",
-    "workspace_fallback": "Workspace",
+    "title": "설정",
+    "my_account": "내 계정",
+    "workspace_fallback": "워크스페이스",
     "tabs": {
-      "profile": "Profile",
-      "preferences": "Preferences",
-      "notifications": "Notifications",
-      "tokens": "API Tokens",
-      "general": "General",
-      "repositories": "Repositories",
+      "profile": "프로필",
+      "preferences": "환경설정",
+      "notifications": "알림",
+      "tokens": "API 토큰",
+      "general": "일반",
+      "repositories": "저장소",
       "github": "GitHub",
-      "integrations": "Integrations",
-      "labs": "Labs",
-      "members": "Members"
+      "integrations": "연동",
+      "labs": "실험실",
+      "members": "멤버"
     }
   },
   "account": {

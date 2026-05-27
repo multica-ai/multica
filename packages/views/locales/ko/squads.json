@@ -1,0 +1,75 @@
+{
+  "page": {
+    "title": "Squads",
+    "new_button": "New Squad",
+    "empty_no_squads": "No squads yet. Create one to get started.",
+    "empty_no_match": "No squads match your filters."
+  },
+  "inspector": {
+    "details_section": "Details",
+    "archive_button": "Archive"
+  },
+  "archive_dialog": {
+    "title": "Archive this squad?",
+    "description": "\"{{name}}\" will be archived. Issues currently assigned to this squad will be transferred to its leader. This can't be undone — create a new squad if you need the routing back.",
+    "cancel": "Cancel",
+    "confirm": "Archive",
+    "archiving": "Archiving…"
+  },
+  "name_editor": {
+    "cancel": "Cancel"
+  },
+  "add_member_dialog": {
+    "title": "Add Member",
+    "description": "Add a workspace member or agent to this squad.",
+    "label_member": "Member",
+    "label_role": "Role",
+    "label_optional": "(optional)",
+    "placeholder_role_inline": "Add role…",
+    "cancel": "Cancel"
+  },
+  "description_dialog": {
+    "title": "Edit description",
+    "placeholder_empty": "Add a description",
+    "cancel": "Cancel"
+  },
+  "discard_changes_dialog": {
+    "title": "Discard unsaved changes?",
+    "description": "You have unsaved changes on this tab. Switching tabs will discard them.",
+    "keep_editing": "Keep editing",
+    "discard_button": "Discard"
+  },
+  "members_tab": {
+    "section_title": "Members",
+    "section_count_one": "{{count}} member in this squad",
+    "section_count_other": "{{count}} members in this squad",
+    "add_member_button": "Add Member",
+    "create_agent_button": "Create Agent",
+    "leader_chip": "Leader",
+    "view_agent_tooltip": "Open agent detail",
+    "make_leader_tooltip": "Make squad leader",
+    "remove_member_tooltip": "Remove from squad",
+    "status_working": "Working",
+    "status_idle": "Idle",
+    "status_offline": "Offline",
+    "status_unstable": "Unstable",
+    "issue_status_blocked": "blocked",
+    "active_issue_more": "and {{count}} more",
+    "last_active_label": "last active {{time}}"
+  },
+  "profile_card": {
+    "unavailable": "Squad unavailable",
+    "detail_link": "Detail →",
+    "archived": "Archived",
+    "member_count_one": "{{count}} member",
+    "member_count_other": "{{count}} members",
+    "members_section": "Members",
+    "more_members_one": "+{{count}} more",
+    "more_members_other": "+{{count}} more"
+  },
+  "instructions_tab": {
+    "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",
+    "unsaved_changes": "Unsaved changes",
+    "save_button": "Save"
+  }
+}

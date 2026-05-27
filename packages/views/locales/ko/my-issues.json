@@ -1,0 +1,45 @@
+{
+  "page": {
+    "breadcrumb": "My Issues",
+    "workspace_fallback": "Workspace",
+    "empty_title": "No issues assigned to you",
+    "empty_description": "Issues you create or are assigned to will appear here."
+  },
+  "header": {
+    "scope": {
+      "all_label": "All",
+      "all_description": "Assigned to me, created by me, or involving my agents and squads",
+      "assigned_label": "Assigned",
+      "assigned_description": "Issues assigned to me",
+      "created_label": "Created",
+      "created_description": "Issues I created",
+      "agents_label": "My Agents and Squads",
+      "agents_description": "Issues assigned to my agents"
+    },
+    "filter_button": "Filter",
+    "filter_status": "Status",
+    "filter_priority": "Priority",
+    "issue_count_one": "{{count}} issue",
+    "issue_count_other": "{{count}} issues",
+    "reset_filters": "Reset all filters",
+    "display_settings": "Display settings",
+    "grouping": "Grouping",
+    "group_status": "Status",
+    "group_assignee": "Assignee",
+    "ordering": "Ordering",
+    "ascending": "Ascending",
+    "descending": "Descending",
+    "card_properties": "Card properties",
+    "view_board": "Board view",
+    "view_list": "List view",
+    "view_swimlane": "Swimlane view",
+    "view_label": "View",
+    "view_board_short": "Board",
+    "view_list_short": "List",
+    "view_swimlane_short": "Swimlane",
+    "sort_manual": "Manual"
+  },
+  "errors": {
+    "move_failed": "Failed to move issue"
+  }
+}
