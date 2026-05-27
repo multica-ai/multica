@@ -14,6 +14,7 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -40,12 +41,16 @@ type Handler struct {
 	// Bus publishes inbox metadata events so other sessions refresh in
 	// realtime. Nil-safe: when unset (e.g. older tests) publishing is skipped.
 	Bus *events.Bus
+	// Tasks enqueues the agent run when the owner accepts a
+	// private_agent_run_request (FIR-2385). nil disables only that endpoint.
+	Tasks *service.TaskService
 }
 
-// New constructs the handler. The router wires both query packages + the event
-// bus in (bus may be nil in tests that don't exercise realtime fan-out).
-func New(upstream *db.Queries, cerebro *cerebrodb.Queries, bus *events.Bus) *Handler {
-	return &Handler{Upstream: upstream, Cerebro: cerebro, Bus: bus}
+// New constructs the handler. The router wires both query packages, the event
+// bus, and the task service in (bus may be nil in tests that don't exercise
+// realtime fan-out).
+func New(upstream *db.Queries, cerebro *cerebrodb.Queries, bus *events.Bus, tasks *service.TaskService) *Handler {
+	return &Handler{Upstream: upstream, Cerebro: cerebro, Bus: bus, Tasks: tasks}
 }
 
 // publishInboxEvent fans an inbox metadata change out to the recipient's other

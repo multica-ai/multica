@@ -123,7 +123,7 @@ import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOpt
 import { useDeleteIssue } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { issueLabelsOptions } from "@multica/core/labels";
-import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
@@ -647,6 +647,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — squad list is
+  // needed to resolve the squad leader when an issue is assigned to a
+  // squad, so the reply/comment indicators show the agent the trigger
+  // logic actually wakes.
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
   // Workspace owners and admins moderate any comment authored by anyone
   // (mirrors backend `comment.go:507-512`). Computed here so per-comment
   // rendering doesn't have to re-derive it for every row.
@@ -1046,6 +1051,19 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   // CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 gate the thread lift UI.
   const moveCommentToSubIssueEnabled = useFeatureFlag("cerebro_move_comment_to_subissue");
   const issueKind = issue?.kind ?? "issue";
+  // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — resolve the
+  // agent the backend trigger logic will wake when a member posts a
+  // comment/reply without an @agent mention. Mirrors the backend's
+  // `shouldEnqueueOnComment` + squad-leader fallback so the indicator and
+  // the trigger never disagree. `undefined` for member / unassigned issues.
+  const triggerAgentId = useMemo<string | undefined>(() => {
+    if (!issue?.assignee_type || !issue.assignee_id) return undefined;
+    if (issue.assignee_type === "agent") return issue.assignee_id;
+    if (issue.assignee_type === "squad") {
+      return squads.find((s) => s.id === issue.assignee_id)?.leader_id;
+    }
+    return undefined;
+  }, [issue?.assignee_type, issue?.assignee_id, squads]);
   const isChannel = channelsEnabled && issueKind === "channel";
   const isDM = channelsEnabled && issueKind === "dm";
   const isChat = isChannel || isDM;
@@ -2346,6 +2364,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                         onMoveToSubIssue={handleMoveCommentToSubIssue}
                         onCollapseResolved={isResolved ? () => toggleResolvedExpand(entry.id, false) : undefined}
                         highlightedCommentId={highlightedId}
+                        triggerAgentId={triggerAgentId}
                       />
                     </div>
                   );
@@ -2382,7 +2401,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   this input into the pin toggle. Channels/DMs (which also
                   mount CommentInput via channel-detail.tsx) leave pinnable
                   off so chat-style surfaces stay unchanged. */}
-              <CommentInput issueId={id} onSubmit={submitComment} pinnable />
+              <CommentInput issueId={id} onSubmit={submitComment} pinnable triggerAgentId={triggerAgentId} />
             </div>
               </TabsContent>
             </Tabs>

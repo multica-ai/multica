@@ -30,6 +30,15 @@ vi.mock("@multica/cerebro-pin-input", () => ({
   useInputPin: () => ({ enabled: false, isPinned: false, togglePin: () => {}, unpin: () => {} }),
 }));
 
+// FIR-2392: the trigger-target bar reaches for the auth + workspace stores
+// and the agent/squad/member lists. None of that is in scope for these
+// autofocus / click-to-focus tests — stub the bar so CommentInput renders
+// without spinning up the platform layer.
+vi.mock("./trigger-target-bar", () => ({
+  TriggerTargetBar: () => null,
+  memberMentionMarkdown: () => "",
+}));
+
 vi.mock("../../editor", () => {
   const ContentEditor = forwardRef(
     (

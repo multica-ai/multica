@@ -32,6 +32,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     quick_create_done: t(($) => $.types.quick_create_done),
     quick_create_failed: t(($) => $.types.quick_create_failed),
     reminder: t(($) => $.types.reminder), // CEREBRO-PATCH(inbox-reminders-label): render reminder type labels.
+    private_agent_run_request: t(($) => $.types.private_agent_run_request), // CEREBRO-PATCH(inbox-run-request-label): FIR-2385.
   };
 }
 

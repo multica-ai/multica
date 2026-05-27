@@ -29,7 +29,7 @@ func TestPublishInboxEvent_EmitsWorkspaceScopedEvent(t *testing.T) {
 		hits++
 	})
 
-	h := New(nil, nil, bus)
+	h := New(nil, nil, bus, nil)
 	item := cerebrodb.InboxItem{
 		ID:          uuidVal(t),
 		WorkspaceID: uuidVal(t),
@@ -53,7 +53,7 @@ func TestPublishInboxEvent_EmitsWorkspaceScopedEvent(t *testing.T) {
 }
 
 func TestPublishInboxEvent_NilBusIsSafe(t *testing.T) {
-	h := New(nil, nil, nil)
+	h := New(nil, nil, nil, nil)
 	// Must not panic when no bus is wired (older tests / non-realtime paths).
 	h.publishInboxEvent(eventInboxMuted, cerebrodb.InboxItem{})
 }

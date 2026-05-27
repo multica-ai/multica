@@ -51,6 +51,11 @@ type StringTable = {
   action_watching: string;
   action_waiting: string;
   action_calm: string;
+  // FIR-2385 — private-agent run-request row.
+  run_request_label: string;
+  run_request_by_prefix: string;
+  run_request_run: string;
+  run_request_running: string;
 };
 
 /** Action-bucket headers, identical across locales (see StringTable note). */
@@ -90,6 +95,10 @@ const en: StringTable = {
   planned_for_prefix: "Planned for",
   reminder_overdue_prefix: "Overdue since",
   reminder_label: "Reminder",
+  run_request_label: "Run request",
+  run_request_by_prefix: "Requested by",
+  run_request_run: "Run",
+  run_request_running: "Starting…",
   ...actionLabels,
 };
 
@@ -122,6 +131,10 @@ const da: StringTable = {
   planned_for_prefix: "Planlagt til",
   reminder_overdue_prefix: "Forfalden siden",
   reminder_label: "Påmindelse",
+  run_request_label: "Kør-anmodning",
+  run_request_by_prefix: "Anmodet af",
+  run_request_run: "Kør",
+  run_request_running: "Starter…",
   ...actionLabels,
 };
 
@@ -158,6 +171,10 @@ const zhHans: StringTable = {
   planned_for_prefix: "计划于",
   reminder_overdue_prefix: "已逾期",
   reminder_label: "提醒",
+  run_request_label: "运行请求",
+  run_request_by_prefix: "请求者",
+  run_request_run: "运行",
+  run_request_running: "正在启动…",
   ...actionLabels,
 };
 

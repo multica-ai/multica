@@ -166,6 +166,33 @@ export function useMarkInboxUnread() {
   });
 }
 
+/**
+ * FIR-2385 — the agent owner accepts a private_agent_run_request from their
+ * inbox. The server enqueues the agent on the tagged comment and archives the
+ * request, so optimistically drop the row from the active inbox.
+ */
+export function useRunPrivateAgentRequest() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.runPrivateAgentRunRequest(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+        old?.filter((item) => item.id !== id),
+      );
+      return { prev };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+    },
+  });
+}
+
 export function useCreateInboxReminder() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

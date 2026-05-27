@@ -621,6 +621,10 @@
       "gate": "self_only"
     },
     {
+      "id": "POST /api/inbox/{id}/run-private-agent",
+      "gate": "self_only"
+    },
+    {
       "id": "POST /api/inbox/{id}/unarchive",
       "gate": "self_only"
     },
