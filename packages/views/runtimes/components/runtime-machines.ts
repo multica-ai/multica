@@ -76,7 +76,7 @@ export function buildRuntimeMachines(
   const drafts = new Map<string, RuntimeMachineDraft>();
 
   for (const runtime of runtimes) {
-    const id = runtimeMachineId(runtime);
+    const id = runtimeMachineId(runtime, options);
     const draft =
       drafts.get(id) ??
       ({
@@ -98,6 +98,10 @@ export function buildRuntimeMachines(
   }
 
   return machines.sort(compareRuntimeMachines);
+}
+
+function localMachineKey(options: RuntimeMachineOptions): string | null {
+  return normalizeMachineName(options.localMachineName);
 }
 
 function placeholderLocalMachine(
@@ -173,8 +177,7 @@ function finalizeRuntimeMachine(
   );
   const first = runtimes[0];
   const providerNames = Array.from(new Set(runtimes.map((r) => r.provider))).sort();
-  const isCurrent =
-    !!options.localDaemonId && draft.daemonId === options.localDaemonId;
+  const isCurrent = runtimes.some((runtime) => isCurrentRuntime(runtime, options));
   const title = machineTitle(runtimes, {
     isCurrent,
     localMachineName: options.localMachineName,
@@ -231,20 +234,62 @@ function finalizeRuntimeMachine(
   };
 }
 
-function runtimeMachineId(runtime: AgentRuntime): string {
+function runtimeMachineId(
+  runtime: AgentRuntime,
+  options: RuntimeMachineOptions,
+): string {
+  if (isCurrentRuntime(runtime, options)) {
+    return options.localDaemonId
+      ? `local:${options.localDaemonId}`
+      : `local:device:${localMachineKey(options)}`;
+  }
   if (runtime.daemon_id) return `${runtime.runtime_mode}:${runtime.daemon_id}`;
   const deviceName = runtimeDeviceName(runtime);
   if (deviceName) return `${runtime.runtime_mode}:device:${deviceName}`;
   return `${runtime.runtime_mode}:runtime:${runtime.id}`;
 }
 
+function isCurrentRuntime(
+  runtime: AgentRuntime,
+  options: RuntimeMachineOptions,
+): boolean {
+  if (options.localDaemonId && runtime.daemon_id === options.localDaemonId) {
+    return true;
+  }
+
+  const localKey = localMachineKey(options);
+  if (!localKey || runtime.runtime_mode !== "local") return false;
+  return runtimeMachineNameKeys(runtime).includes(localKey);
+}
+
 function runtimeDeviceName(runtime: AgentRuntime): string | null {
+  return runtimeMachineNames(runtime)[0] ?? null;
+}
+
+function runtimeMachineNameKeys(runtime: AgentRuntime): string[] {
+  return runtimeMachineNames(runtime)
+    .map((name) => normalizeMachineName(name))
+    .filter((name): name is string => Boolean(name));
+}
+
+function runtimeMachineNames(runtime: AgentRuntime): string[] {
+  const names: string[] = [];
   const host = splitRuntimeName(runtime.name).hostname;
-  if (host) return host;
+  if (host) names.push(host);
 
   const raw = runtime.device_info?.trim();
-  if (!raw) return null;
-  return raw.split(" · ")[0]?.trim() || null;
+  const deviceName = raw?.split(" · ")[0]?.trim();
+  if (deviceName && deviceName !== host) names.push(deviceName);
+  return names;
+}
+
+function normalizeMachineName(name: string | null | undefined): string | null {
+  const normalized = name
+    ?.trim()
+    .toLowerCase()
+    .replace(/\.local$/, "")
+    .replace(/\s+/g, " ");
+  return normalized || null;
 }
 
 function machineTitle(

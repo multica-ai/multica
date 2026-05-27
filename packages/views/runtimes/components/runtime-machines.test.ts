@@ -157,6 +157,110 @@ describe("runtime machine grouping", () => {
     });
   });
 
+  it("keeps exact daemon id matching as the current machine signal", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          daemon_id: "daemon-1",
+          name: "Claude (different-host.local)",
+          device_info: "different-host.local",
+        }),
+      ],
+      {
+        now: NOW,
+        localDaemonId: "daemon-1",
+        localMachineName: "dev-machine.local",
+        ensureLocalMachine: true,
+      },
+    );
+
+    expect(machines).toHaveLength(1);
+    expect(machines[0]).toMatchObject({
+      id: "local:daemon-1",
+      title: "dev-machine.local",
+      section: "local",
+      isCurrent: true,
+    });
+  });
+
+  it("falls back to the local hostname when the daemon id has drifted", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          id: "rt-claude",
+          daemon_id: "stale-daemon-1",
+          provider: "claude",
+          name: "Claude (dev-machine.local)",
+          device_info: "dev-machine.local · claude 1.0.0",
+        }),
+        makeRuntime({
+          id: "rt-codex",
+          daemon_id: "stale-daemon-2",
+          provider: "codex",
+          name: "Codex (dev-machine.local)",
+          device_info: "dev-machine.local · codex-cli 0.118.0",
+        }),
+      ],
+      {
+        now: NOW,
+        localDaemonId: "current-daemon",
+        localMachineName: "dev-machine",
+        ensureLocalMachine: true,
+      },
+    );
+
+    expect(machines).toHaveLength(1);
+    expect(machines[0]).toMatchObject({
+      id: "local:current-daemon",
+      title: "dev-machine",
+      section: "local",
+      isCurrent: true,
+      onlineCount: 2,
+      providerNames: ["claude", "codex"],
+    });
+  });
+
+  it("does not group unrelated remote local runtimes into the local fallback", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          id: "rt-local",
+          daemon_id: "stale-daemon-1",
+          name: "Claude (dev-machine.local)",
+          device_info: "dev-machine.local",
+        }),
+        makeRuntime({
+          id: "rt-remote",
+          daemon_id: "remote-daemon",
+          name: "Claude (remote-machine.local)",
+          device_info: "remote-machine.local",
+        }),
+      ],
+      {
+        now: NOW,
+        localDaemonId: "current-daemon",
+        localMachineName: "dev-machine.local",
+        ensureLocalMachine: true,
+      },
+    );
+
+    expect(machines).toHaveLength(2);
+    expect(machines.find((machine) => machine.isCurrent)).toMatchObject({
+      id: "local:current-daemon",
+      runtimes: expect.arrayContaining([
+        expect.objectContaining({ id: "rt-local" }),
+      ]),
+    });
+    expect(machines.find((machine) => machine.daemonId === "remote-daemon"))
+      .toMatchObject({
+        section: "remote",
+        isCurrent: false,
+        runtimes: expect.arrayContaining([
+          expect.objectContaining({ id: "rt-remote" }),
+        ]),
+      });
+  });
+
   it("keeps cloud runtimes as cloud workers when they have no daemon", () => {
     const machines = buildRuntimeMachines(
       [
