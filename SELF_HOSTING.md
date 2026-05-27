@@ -417,11 +417,17 @@ cd multica
 cp .env.example .env
 ```
 
-Edit `.env` — at minimum, change `JWT_SECRET`:
+Edit `.env` — at minimum, change `JWT_SECRET`, `POSTGRES_PASSWORD`, and the password segment in `DATABASE_URL`:
 
 ```bash
 JWT_SECRET=$(openssl rand -hex 32)
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
+DATABASE_URL=postgres://multica:${POSTGRES_PASSWORD}@localhost:5432/multica?sslmode=disable
 ```
+
+If you already have a self-hosted install with `POSTGRES_PASSWORD=multica`,
+do not only edit `.env`: rotate the matching password inside Postgres during
+planned downtime, then restart the stack with the updated `.env`.
 
 Then start everything:
 

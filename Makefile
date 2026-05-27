@@ -57,13 +57,8 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 	@if [ ! -f .env ]; then \
 		echo "==> Creating .env from .env.example..."; \
 		cp .env.example .env; \
-		JWT=$$(openssl rand -hex 32); \
-		if [ "$$(uname)" = "Darwin" ]; then \
-			sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
-		else \
-			sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
-		fi; \
-		echo "==> Generated random JWT_SECRET"; \
+		bash -c 'set -euo pipefail; MULTICA_INSTALL_SH_SOURCE_ONLY=1 . scripts/install.sh; JWT=$$(random_hex 32); POSTGRES_PASSWORD=$$(random_hex 24); DATABASE_URL=$$(env_file_value .env DATABASE_URL ""); set_env_file_value .env JWT_SECRET "$$JWT"; set_env_file_value .env POSTGRES_PASSWORD "$$POSTGRES_PASSWORD"; if [ -n "$$DATABASE_URL" ]; then set_env_file_value .env DATABASE_URL "$$(postgres_url_with_password "$$DATABASE_URL" "$$POSTGRES_PASSWORD")"; fi'; \
+		echo "==> Generated random JWT_SECRET and POSTGRES_PASSWORD"; \
 	fi
 	@echo "==> Pulling official Multica images..."
 	@if ! docker compose -f docker-compose.selfhost.yml pull; then \
@@ -107,13 +102,8 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 	@if [ ! -f .env ]; then \
 		echo "==> Creating .env from .env.example..."; \
 		cp .env.example .env; \
-		JWT=$$(openssl rand -hex 32); \
-		if [ "$$(uname)" = "Darwin" ]; then \
-			sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
-		else \
-			sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$$JWT/" .env; \
-		fi; \
-		echo "==> Generated random JWT_SECRET"; \
+		bash -c 'set -euo pipefail; MULTICA_INSTALL_SH_SOURCE_ONLY=1 . scripts/install.sh; JWT=$$(random_hex 32); POSTGRES_PASSWORD=$$(random_hex 24); DATABASE_URL=$$(env_file_value .env DATABASE_URL ""); set_env_file_value .env JWT_SECRET "$$JWT"; set_env_file_value .env POSTGRES_PASSWORD "$$POSTGRES_PASSWORD"; if [ -n "$$DATABASE_URL" ]; then set_env_file_value .env DATABASE_URL "$$(postgres_url_with_password "$$DATABASE_URL" "$$POSTGRES_PASSWORD")"; fi'; \
+		echo "==> Generated random JWT_SECRET and POSTGRES_PASSWORD"; \
 	fi
 	@echo "==> Building Multica from the current checkout..."
 	docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build

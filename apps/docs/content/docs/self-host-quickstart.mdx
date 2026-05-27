@@ -30,7 +30,7 @@ make selfhost
 
 `make selfhost` will:
 
-1. Generate a `.env` from `.env.example` if missing, with a **random JWT_SECRET**
+1. Generate a `.env` from `.env.example` if missing, with a **random JWT_SECRET** and **random Postgres password**
 2. Pull the official Docker images (PostgreSQL, Multica backend, Multica frontend)
 3. Bring up every service using `docker-compose.selfhost.yml`
 4. Wait until the backend's `/health` endpoint is ready
@@ -51,6 +51,10 @@ Once it's up:
 
 <Callout type="info">
 **Ports listen on `127.0.0.1` only.** `docker-compose.selfhost.yml` binds every published port to loopback — `ss -tlnp` will not show `0.0.0.0:8080`, and the services are unreachable from other machines by design. The default `JWT_SECRET` and Postgres credentials must never sit on the open internet. For cross-machine access, front the stack with a reverse proxy that terminates TLS — see [Step 5b — Cross-machine: front with a reverse proxy](#5b-cross-machine-front-with-a-reverse-proxy).
+</Callout>
+
+<Callout type="warning">
+**Existing installs are not rotated automatically.** If your `.env` still has `POSTGRES_PASSWORD=multica`, schedule downtime, update both `POSTGRES_PASSWORD` and the password segment in `DATABASE_URL`, then rotate the matching password inside Postgres before restarting the stack.
 </Callout>
 
 ## 2. Important: keep production safety on

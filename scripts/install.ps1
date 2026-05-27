@@ -56,6 +56,55 @@ function Get-EnvFileValue {
     return $value
 }
 
+function Set-EnvFileValue {
+    param(
+        [string]$Path,
+        [string]$Name,
+        [string]$Value
+    )
+
+    $lines = if (Test-Path $Path) { @(Get-Content $Path) } else { @() }
+    $prefix = "$Name="
+    $replaced = $false
+    $updated = foreach ($line in $lines) {
+        if ($line.StartsWith($prefix)) {
+            $replaced = $true
+            "$Name=$Value"
+        } else {
+            $line
+        }
+    }
+    if (-not $replaced) {
+        $updated += "$Name=$Value"
+    }
+    $updated | Set-Content $Path
+}
+
+function New-RandomHex {
+    param([int]$Bytes)
+
+    $bytes = [byte[]]::new($Bytes)
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    } finally {
+        $rng.Dispose()
+    }
+    return -join ($bytes | ForEach-Object { "{0:x2}" -f $_ })
+}
+
+function Update-PostgresUrlPassword {
+    param(
+        [string]$Url,
+        [string]$Password
+    )
+
+    if ($Url -match '^(postgres(?:ql)?://)([^:@/]+):([^@]*)@(.+)$') {
+        return "$($Matches[1])$($Matches[2]):$Password@$($Matches[4])"
+    }
+    return $Url
+}
+
 function Get-SelfHostBackendPort {
     foreach ($name in @("BACKEND_PORT", "API_PORT", "SERVER_PORT", "PORT")) {
         $value = Get-EnvFileValue -Path (Join-Path $InstallDir ".env") -Name $name -Default ""
@@ -411,11 +460,17 @@ function Install-Server {
     Write-Ok "Repository ready at $InstallDir ($serverRef)"
 
     if (-not (Test-Path ".env")) {
-        Write-Info "Creating .env with random JWT_SECRET..."
+        Write-Info "Creating .env with random secrets..."
         Copy-Item ".env.example" ".env"
-        $jwt = -join ((1..32) | ForEach-Object { "{0:x2}" -f (Get-Random -Maximum 256) })
-        (Get-Content ".env") -replace '^JWT_SECRET=.*', "JWT_SECRET=$jwt" | Set-Content ".env"
-        Write-Ok "Generated .env with random JWT_SECRET"
+        $jwt = New-RandomHex 32
+        $postgresPassword = New-RandomHex 24
+        $databaseUrl = Get-EnvFileValue -Path ".env" -Name "DATABASE_URL" -Default ""
+        Set-EnvFileValue -Path ".env" -Name "JWT_SECRET" -Value $jwt
+        Set-EnvFileValue -Path ".env" -Name "POSTGRES_PASSWORD" -Value $postgresPassword
+        if (-not [string]::IsNullOrWhiteSpace($databaseUrl)) {
+            Set-EnvFileValue -Path ".env" -Name "DATABASE_URL" -Value (Update-PostgresUrlPassword -Url $databaseUrl -Password $postgresPassword)
+        }
+        Write-Ok "Generated .env with random JWT_SECRET and POSTGRES_PASSWORD"
     } else {
         Write-Ok "Using existing .env"
     }

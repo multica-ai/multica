@@ -64,6 +64,53 @@ env_file_value() {
   fi
 }
 
+set_env_file_value() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  local tmp
+  tmp="$(mktemp)"
+  awk -v key="$key" -v value="$value" '
+    BEGIN { replaced = 0 }
+    $0 ~ "^" key "=" {
+      print key "=" value
+      replaced = 1
+      next
+    }
+    { print }
+    END {
+      if (!replaced) {
+        print key "=" value
+      }
+    }
+  ' "$file" >"$tmp"
+  mv "$tmp" "$file"
+}
+
+postgres_url_with_password() {
+  local url="$1"
+  local password="$2"
+  local scheme rest userinfo host_and_path username
+
+  case "$url" in
+    postgres://*:*@*|postgresql://*:*@*) ;;
+    *) printf "%s" "$url"; return ;;
+  esac
+
+  scheme="${url%%://*}"
+  rest="${url#*://}"
+  userinfo="${rest%%@*}"
+  host_and_path="${rest#*@}"
+  username="${userinfo%%:*}"
+
+  printf "%s://%s:%s@%s" "$scheme" "$username" "$password" "$host_and_path"
+}
+
+random_hex() {
+  local bytes="$1"
+  openssl rand -hex "$bytes"
+}
+
 selfhost_backend_port() {
   local file="${1:-.env}"
   local value
@@ -357,16 +404,18 @@ setup_server() {
 
   # Generate .env if needed
   if [ ! -f .env ]; then
-    info "Creating .env with random JWT_SECRET..."
+    info "Creating .env with random secrets..."
     cp .env.example .env
-    local jwt
-    jwt=$(openssl rand -hex 32)
-    if [ "$(uname -s)" = "Darwin" ]; then
-      sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$jwt/" .env
-    else
-      sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$jwt/" .env
+    local jwt postgres_password database_url
+    jwt=$(random_hex 32)
+    postgres_password=$(random_hex 24)
+    database_url="$(env_file_value .env DATABASE_URL "")"
+    set_env_file_value .env JWT_SECRET "$jwt"
+    set_env_file_value .env POSTGRES_PASSWORD "$postgres_password"
+    if [ -n "$database_url" ]; then
+      set_env_file_value .env DATABASE_URL "$(postgres_url_with_password "$database_url" "$postgres_password")"
     fi
-    ok "Generated .env with random JWT_SECRET"
+    ok "Generated .env with random JWT_SECRET and POSTGRES_PASSWORD"
   else
     ok "Using existing .env"
   fi
@@ -532,4 +581,6 @@ main() {
   esac
 }
 
-main "$@"
+if [ "${MULTICA_INSTALL_SH_SOURCE_ONLY:-0}" != "1" ]; then
+  main "$@"
+fi
