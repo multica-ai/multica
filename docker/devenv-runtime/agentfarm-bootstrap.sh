@@ -80,7 +80,7 @@ echo "agentfarm-bootstrap: runtime ${CLAUDE_RUNTIME_ID} set to public"
 #    Both providers route through the same litellm virtual key.
 #    - Anthropic at root, OpenAI at /v1 — matches SDK suffix conventions baked
 #      into agent-runtime-base/Dockerfile:174-175.
-#    - GEMINI_API_KEY deliberately omitted: all six MVP templates pin
+#    - GEMINI_API_KEY deliberately omitted: bundled templates pin
 #      claude-sonnet-4-6; gandalf does not write a Gemini key per workspace.
 CUSTOM_ENV_FILE="$(mktemp)"
 chmod 600 "${CUSTOM_ENV_FILE}"
@@ -96,7 +96,10 @@ jq -n \
     OPENAI_API_KEY:     $openai_key
   }' > "${CUSTOM_ENV_FILE}"
 
-# ── 6. Loop the six templates. ───────────────────────────────────────────────
+# ── 6. Loop the bundled templates. ───────────────────────────────────────────
+#    Default kit ships two: Engineer (lifecycle-triggered) + Reviewer (on-demand,
+#    invoked by issue reassignment). Extras (PM, Architect, DevOps, etc.) are
+#    opt-in installs from ai-enhancement-hub — not part of the default kit.
 #    409 = agent_workspace_name_unique constraint = already exists = idempotent skip.
 for tmpl in /etc/multica/agent-templates/*.yaml; do
   name="$(yq -r '.name' "${tmpl}")"

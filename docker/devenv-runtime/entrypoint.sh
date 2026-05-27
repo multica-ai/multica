@@ -24,7 +24,8 @@
 #   LITELLM_API_KEY      — LiteLLM virtual key injected via secret.
 #   WORKSPACE_SLUG       — namespace injected via Downward API (fieldRef: metadata.namespace).
 #   When all four are set, agentfarm-bootstrap.sh runs first to register the daemon,
-#   flip the runtime public, and provision the six standard agents. The daemon
+#   flip the runtime public, and provision the bundled agents (Engineer + Reviewer
+#   by default; extras are opt-in installs from ai-enhancement-hub). The daemon
 #   runs in the background; opencode serve is always PID 1.
 
 set -euo pipefail
