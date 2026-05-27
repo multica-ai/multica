@@ -194,6 +194,25 @@ func TestParseRateLimitReset(t *testing.T) {
 			want:   time.Time{},
 			wantOK: false,
 		},
+		{
+			// FIR-2388 — Codex emits "You've hit your usage limit. Try
+			// again at HH:MM" as a normal assistant turn. The wall-clock
+			// "Try again at 18:00" is parsed to an exact reset time; the
+			// "usage limit" detector phrase just confirms the signal.
+			name:   "codex usage-limit reply with wall-clock reset",
+			input:  "You've hit your usage limit. Try again at 18:00.",
+			want:   time.Date(2026, 5, 4, 18, 0, 0, 0, time.Local).UTC(),
+			wantOK: true,
+		},
+		{
+			// FIR-2388 — bare codex usage-limit reply (no time). Falls
+			// back to the 5-minute backoff so the sweeper keeps re-pausing
+			// every 5 min until the cap window clears.
+			name:   "codex usage-limit reply fallback",
+			input:  "You've hit your usage limit.",
+			want:   now.Add(DefaultRateLimitBackoff),
+			wantOK: true,
+		},
 	}
 
 	for _, tc := range cases {

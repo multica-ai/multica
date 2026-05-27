@@ -102,6 +102,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `agent-codex-semantic-inactivity-test` | server/pkg/agent/codex_test.go | 3 | Make semantic-inactivity progress tests scheduler-tolerant while still verifying real inactivity timeouts |
 | `agent-claude-cerebro` | server/pkg/agent/claude.go | 123 | Cerebro additions to agent runtime |
 | `agent-claude-provider-limit-output` | server/pkg/agent/claude.go<br>server/pkg/agent/claude_test.go | 50 | JEH-1442 — classify short standalone Claude monthly usage-cap output emitted as assistant text with exit 0 as a failed task so the existing runtime auto-pause path runs. |
+| `agent-codex-provider-limit-output` | server/pkg/agent/codex.go<br>server/internal/cerebro/codexlimit/detector.go (new)<br>server/internal/cerebro/codexlimit/detector_test.go (new) | 7 inline + ~140 new | FIR-2388 — classify short standalone Codex "You've hit your usage limit. Try again at HH:MM" output (emitted as a normal assistant turn that exits cleanly) as a failed task so the runtime auto-pause path fires. Classifier lives in cerebro zone (`codexlimit` package); upstream `codex.go` only imports and calls it. |
 | `agent-copilot-cerebro` | server/pkg/agent/copilot.go | 13 | Cerebro additions to agent runtime |
 | `agent-cursor-cerebro` | server/pkg/agent/cursor.go | 13 | Cerebro additions to agent runtime |
 | `agent-gemini-cerebro` | server/pkg/agent/gemini.go | 13 | Cerebro additions to agent runtime |

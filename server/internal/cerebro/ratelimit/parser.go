@@ -18,7 +18,8 @@ const DefaultBackoff = 5 * time.Minute
 var rateLimitDetectorRe = regexp.MustCompile(
 	`rate[ -]?limit(?:ed|ing)?|ratelimit|limiting requests|\b429\b|` +
 		`quota exceeded|insufficient_quota|monthly usage limit|` +
-		`org's monthly usage|out of tokens|out of extra usage|401 invalid authentication`,
+		`org's monthly usage|out of tokens|out of extra usage|401 invalid authentication|` +
+		`hit your usage limit|usage limit reached|usage limit has been reached|reached your usage limit`,
 )
 
 // ParseReset extracts a runtime-unpause timestamp from a free-form

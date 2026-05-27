@@ -12,6 +12,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	// CEREBRO-PATCH(agent-codex-provider-limit-output): cerebro classifier
+	// for short standalone Codex usage-limit replies (FIR-2388).
+	"github.com/multica-ai/multica/server/internal/cerebro/codexlimit"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
@@ -382,6 +386,16 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		outputMu.Lock()
 		finalOutput := output.String()
 		outputMu.Unlock()
+
+		// CEREBRO-PATCH(agent-codex-provider-limit-output): Codex emits
+		// "You've hit your usage limit. Try again at HH:MM" as a normal
+		// assistant turn and exits the turn cleanly. Without this guard
+		// the daemon posts the limit-message as a successful agent reply
+		// and the runtime keeps draining credits. FIR-2388.
+		if finalStatus == "completed" && finalError == "" && codexlimit.IsProviderLimitOutput(finalOutput) {
+			finalStatus = "failed"
+			finalError = finalOutput
+		}
 
 		// Build usage map from accumulated codex usage.
 		// First check JSON-RPC notifications (often empty for Codex).
