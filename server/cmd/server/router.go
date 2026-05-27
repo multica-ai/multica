@@ -166,6 +166,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.DaemonTokenCache = daemonTokenCache
 	h.MembershipCache = auth.NewMembershipCache(rdb)
 
+	// Cloud PAT verifier: validates mcn_ tokens against Multica Cloud
+	// Fleet. Returns nil when no Fleet URL is configured — the Auth /
+	// DaemonAuth middlewares treat nil as "mcn_ not supported" and
+	// reject with 401, instead of falling through to mul_/JWT paths.
+	// Reuses MULTICA_CLOUD_FLEET_URL (the same URL the cloud-runtime
+	// proxy uses) so a deployment doesn't need a second config knob.
+	cloudPATVerifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{
+		FleetBaseURL: signupConfig.CloudRuntimeFleetURL,
+		Redis:        rdb,
+	})
+
 	// Empty-claim cache: lets the daemon poll path skip a Postgres
 	// scan when a recent check confirmed the runtime had no queued
 	// task. Returns nil when rdb is nil — TaskService treats that
@@ -267,7 +278,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
-		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache))
+		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier))
 
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
@@ -303,7 +314,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Protected API routes
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(queries, patCache))
+		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
 		// --- User-scoped routes (no workspace context required) ---
