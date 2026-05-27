@@ -14,6 +14,7 @@ interface DAGCanvasProps {
   onNodeMoved?: (nodeId: string, x: number, y: number) => void;
   onNodeDragEnd?: (nodeId: string, x: number, y: number) => void;
   onEdgeCreate?: (sourceNodeId: string, targetNodeId: string) => void;
+  onEdgeDelete?: (edgeId: string) => void;
   onNodeClick?: (nodeId: string) => void;
   onNodeDoubleClick?: (nodeId: string) => void;
   onAutoLayout?: () => void;
@@ -52,6 +53,7 @@ export function DAGCanvas({
   onNodeMoved,
   onNodeDragEnd,
   onEdgeCreate,
+  onEdgeDelete,
   onNodeClick,
   onNodeDoubleClick,
   nodeStatusColors,
@@ -69,12 +71,18 @@ export function DAGCanvas({
   const [panning, setPanning] = useState<{ startX: number; startY: number; startOffsetX: number; startOffsetY: number } | null>(null);
   const pannedRef = useRef(false);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [scale, setScale] = useState(initialScale ?? 1.5);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const scaleRef = useRef(scale);
   const offsetRef = useRef(offset);
   scaleRef.current = scale;
   offsetRef.current = offset;
+
+  const ANCHOR_R = 5;
+  const isEdgeMode = mode === "edit" || mode === "connect";
+  const showAnchors = isEdgeMode && !pendingEdgeSource;
 
   const rects = nodes.map((n) => getNodeRect(n, nodeStatuses?.[n.id] ? NODE_HEIGHT + 20 : undefined));
   const rectMap = new Map(rects.map((r) => [r.id, r]));
@@ -198,10 +206,23 @@ export function DAGCanvas({
   };
 
   const handleCanvasClick = () => {
+    setSelectedEdgeId(null);
     if (mode === "connect" && pendingEdgeSource) {
       setPendingEdgeSource(null);
     } else if (!pannedRef.current) {
       selectNode(null);
+    }
+  };
+
+  const handleAnchorClick = (e: React.MouseEvent, nodeId: string) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!pendingEdgeSource) {
+      setPendingEdgeSource(nodeId);
+      selectNode(null);
+    } else if (pendingEdgeSource !== nodeId) {
+      onEdgeCreate?.(pendingEdgeSource, nodeId);
+      setPendingEdgeSource(null);
     }
   };
 
@@ -267,45 +288,49 @@ export function DAGCanvas({
         const s = nodeCenter(source);
         const t = nodeCenter(target);
 
-	        const isSelected = selectedNodeId === edge.id;
+		const isNodeSelected = selectedNodeId === edge.id;
 
-	        // Compute line endpoints at node edges (not centers)
-	        const angle = Math.atan2(t.cy - s.cy, t.cx - s.cx);
-	        const shw = source.w / 2, shh = source.h / 2;
-	        const thw = target.w / 2, thh = target.h / 2;
-	        // Source: start at rect edge
-	        const sEdgeX = s.cx + (shw / Math.abs(Math.cos(angle)) < shh / Math.abs(Math.sin(angle)) ? shw / Math.abs(Math.cos(angle)) : shh / Math.abs(Math.sin(angle))) * Math.cos(angle) * 1.05;
-	        const sEdgeY = s.cy + (shw / Math.abs(Math.cos(angle)) < shh / Math.abs(Math.sin(angle)) ? shw / Math.abs(Math.cos(angle)) : shh / Math.abs(Math.sin(angle))) * Math.sin(angle) * 1.05;
-	        const sx = Math.abs(Math.cos(angle)) < 0.001 ? s.cx : sEdgeX;
-	        const sy = Math.abs(Math.sin(angle)) < 0.001 ? s.cy : sEdgeY;
-	        // Target: stop at rect edge
-	        const tEdgeX = t.cx - (thw / Math.abs(Math.cos(angle)) < thh / Math.abs(Math.sin(angle)) ? thw / Math.abs(Math.cos(angle)) : thh / Math.abs(Math.sin(angle))) * Math.cos(angle) * 1.05;
-	        const tEdgeY = t.cy - (thw / Math.abs(Math.cos(angle)) < thh / Math.abs(Math.sin(angle)) ? thw / Math.abs(Math.cos(angle)) : thh / Math.abs(Math.sin(angle))) * Math.sin(angle) * 1.05;
-	        const tx = Math.abs(Math.cos(angle)) < 0.001 ? t.cx : tEdgeX;
-	        const ty = Math.abs(Math.sin(angle)) < 0.001 ? t.cy : tEdgeY;
-	        // Arrowhead
-	        const aw = 9, ah = 5;
-	        const a1x = tx - aw * Math.cos(angle) + ah * Math.sin(angle);
-	        const a1y = ty - aw * Math.sin(angle) - ah * Math.cos(angle);
-	        const a2x = tx - aw * Math.cos(angle) - ah * Math.sin(angle);
-	        const a2y = ty - aw * Math.sin(angle) + ah * Math.cos(angle);
+		// Orthogonal edge: source right -> midX -> target left
+		const esx = source.x + source.w;
+		const esy = s.cy;
+		const etx = target.x;
+		const ety = t.cy;
+		const midX = (esx + etx) / 2;
+
+	        // Midpoint for delete button
+	        const isSelected = selectedEdgeId === edge.id;
 
 	        return (
 	          <g key={edge.id}>
-	            <line
-	              x1={sx}
-	              y1={sy}
-	              x2={tx}
-	              y2={ty}
+            <polyline
+	              points={`${esx},${esy} ${midX},${esy} ${midX},${ety} ${etx},${ety}`}
+              stroke="transparent" strokeWidth={12}
+              fill="none"
+	              className="cursor-pointer"
+	              onClick={(e) => { e.stopPropagation(); setSelectedEdgeId(isSelected ? null : edge.id); }}
+	            />
+	            <path
+	              d={`M ${esx},${esy} L ${midX},${esy} L ${midX},${ety} L ${etx},${ety}`}
 	              stroke="#64748b"
-	              className={cn(isSelected && "stroke-primary")}
-	              strokeWidth={1.5}
+	              fill="none"
+	              className={cn(isNodeSelected && "stroke-primary")}
+	              strokeWidth={isSelected ? 2 : 1.5}
 	            />
 	            <polygon
-	              points={`${tx},${ty} ${a1x},${a1y} ${a2x},${a2y}`}
+	              points={`${etx},${ety} ${etx - 8},${ety - 4} ${etx - 8},${ety + 4}`}
 	              fill="#64748b"
-	              className={cn(isSelected && "fill-primary")}
+	              className={cn(isNodeSelected && "fill-primary")}
 	            />
+	            {isSelected && isEdgeMode && onEdgeDelete && (
+	              <g
+	                className="cursor-pointer"
+	                onClick={(e) => { e.stopPropagation(); onEdgeDelete(edge.id); setSelectedEdgeId(null); }}
+	              >
+	                <circle cx={midX} cy={(esy + ety) / 2} r={10} fill="white" stroke="currentColor" className="text-destructive stroke-[2]" />
+                <line x1={midX - 4} y1={(esy + ety) / 2 - 4} x2={midX + 4} y2={(esy + ety) / 2 + 4} stroke="currentColor" className="text-destructive" strokeWidth="1.5" />
+                <line x1={midX + 4} y1={(esy + ety) / 2 - 4} x2={midX - 4} y2={(esy + ety) / 2 + 4} stroke="currentColor" className="text-destructive" strokeWidth="1.5" />
+	              </g>
+	            )}
 	          </g>
 	        );
       })}
@@ -316,7 +341,7 @@ export function DAGCanvas({
         if (!source) return null;
         const s = nodeCenter(source);
         return (
-          <line
+            <polyline
             x1={s.cx}
             y1={s.cy}
             x2={mousePos.x}
@@ -344,6 +369,8 @@ export function DAGCanvas({
             onMouseDown={(e) => handleMouseDown(e, rect.id)}
             onDoubleClick={(e) => handleDoubleClick(e, rect.id)}
             onClick={(e) => e.stopPropagation()}
+            onMouseEnter={() => setHoveredNodeId(rect.id)}
+            onMouseLeave={() => setHoveredNodeId(null)}
           >
             <rect
               x={rect.x}
@@ -354,8 +381,8 @@ export function DAGCanvas({
               fill={statusColor ?? "currentColor"}
               className={cn(
                 "text-card",
-                isSelected && "stroke-primary stroke-[2]",
-                !isSelected && "stroke-border"
+                (isSelected || pendingEdgeSource === rect.id) && "stroke-primary stroke-[2]",
+                !isSelected && pendingEdgeSource !== rect.id && "stroke-border"
               )}
               strokeWidth={1}
             />
@@ -379,6 +406,24 @@ export function DAGCanvas({
                 )}
               </div>
             </foreignObject>
+            {/* Anchor points — shown on hover in edit/connect mode */}
+            {showAnchors && hoveredNodeId === rect.id && [
+              { cx: rect.x + rect.w / 2, cy: rect.y },
+              { cx: rect.x + rect.w, cy: rect.y + h / 2 },
+              { cx: rect.x + rect.w / 2, cy: rect.y + h },
+              { cx: rect.x, cy: rect.y + h / 2 },
+            ].map((a, i) => (
+              <circle
+                key={i}
+                cx={a.cx}
+                cy={a.cy}
+                r={ANCHOR_R}
+                fill="white"
+                stroke="currentColor"
+                className="text-primary stroke-[2] cursor-crosshair"
+                onClick={(e) => handleAnchorClick(e, rect.id)}
+              />
+            ))}
           </g>
         );
       })}

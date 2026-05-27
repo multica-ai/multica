@@ -14,6 +14,7 @@ import {
   useCreateEdge,
   useUpdateWorkflow,
   useDeleteWorkflow,
+  useDeleteEdge,
 } from "@multica/core/workflows/queries";
 import { useWorkflowEditorStore } from "@multica/core/workflows/store";
 import { useNavigation } from "../../navigation";
@@ -51,6 +52,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   const createNodeMutation = useCreateNode(wsId, id!);
   const updateNodeMutation = useUpdateNode(wsId, id!);
   const createEdgeMutation = useCreateEdge(wsId, id!);
+  const deleteEdgeMutation = useDeleteEdge(wsId, id!);
   const updateWorkflowMutation = useUpdateWorkflow(wsId);
   const deleteWorkflowMutation = useDeleteWorkflow(wsId);
 
@@ -77,6 +79,10 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
       toast.error(t(($) => $.edge.toast_create_failed));
     }
   }, [createEdgeMutation, t]);
+
+  const handleEdgeDelete = useCallback((edgeId: string) => {
+    deleteEdgeMutation.mutate(edgeId);
+  }, [deleteEdgeMutation]);
 
   const handleAddNode = async () => {
     try {
@@ -267,6 +273,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
               edges={edges}
               onNodeMoved={handleNodeMoved}
               onEdgeCreate={handleEdgeCreate}
+              onEdgeDelete={handleEdgeDelete}
               onNodeDoubleClick={() => {
                 setMode("edit");
               }}
