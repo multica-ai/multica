@@ -599,6 +599,11 @@ export function SwimLaneView({
     if (swimlaneGrouping === "assignee") {
       return buildAssigneeLanes(issues, getActorName, swimlaneOrder, laneLabels);
     }
+    // Lane discovery uses `mergedIssues` so batch-fetched children (beyond
+    // the first page) can promote their parents to lane headers. Metadata
+    // lookup uses `laneSourceIssues` so headers resolve even for parents in
+    // hidden statuses. buildParentLanes only creates a lane when it can
+    // resolve the parent in the metadata map, so phantom lanes can't appear.
     return buildParentLanes(mergedIssues, laneSourceIssues, swimlaneOrder, laneLabels);
   }, [
     swimlaneGrouping,
@@ -993,12 +998,15 @@ export function SwimLaneView({
 
   // Grid template: one column per status, fixed width COLUMN_WIDTH, gap COLUMN_GAP.
   const trackWidth = sortedStatuses.length * COLUMN_WIDTH + Math.max(0, sortedStatuses.length - 1) * COLUMN_GAP;
-  const gridStyle = {
-    display: "grid",
-    gridTemplateColumns: `repeat(${sortedStatuses.length}, ${COLUMN_WIDTH}px)`,
-    columnGap: `${COLUMN_GAP}px`,
-    width: `${trackWidth}px`,
-  } as const;
+  const gridStyle = useMemo(
+    () => ({
+      display: "grid",
+      gridTemplateColumns: `repeat(${sortedStatuses.length}, ${COLUMN_WIDTH}px)`,
+      columnGap: `${COLUMN_GAP}px`,
+      width: `${trackWidth}px`,
+    }) as const,
+    [sortedStatuses.length, trackWidth],
+  );
 
   return (
     <DndContext
