@@ -232,7 +232,8 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		cancel()
 		return nil, fmt.Errorf("pi stdin pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[pi:stderr] ")
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[pi:stderr] "), agentStderrTailBytes)
+	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
@@ -370,7 +371,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			finalError = "execution cancelled"
 		} else if waitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("pi exited with error: %v", waitErr)
+			finalError = withAgentStderr(fmt.Sprintf("pi exited with error: %v", waitErr), "pi", stderrBuf.Tail())
 		}
 
 		b.cfg.Logger.Info("pi finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
