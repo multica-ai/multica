@@ -748,6 +748,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   // expanded/collapsed sets so collapsing then re-expanding preserves the
   // "show all" choice, and so the choice survives the block losing its
   // trailing position when a new comment lands after it.
+  const [showOlderActivityIds, setShowOlderActivityIds] = useState<Set<string>>(() => new Set());
   const toggleActivityBlock = useCallback((id: string, currentlyExpanded: boolean) => {
     if (currentlyExpanded) {
       setCollapsedActivityIds((prev) => {
@@ -774,6 +775,14 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
         return next;
       });
     }
+  }, []);
+  const showOlderActivities = useCallback((id: string) => {
+    setShowOlderActivityIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
   }, []);
   // Issue data from TQ — uses detail query, seeded from list cache if available.
   // Only seed when description is present; list API omits it, and ContentEditor
@@ -2352,6 +2361,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                     entries={group.entries}
                     expanded={expanded}
                     onToggle={() => toggleActivityBlock(activityId, expanded)}
+                    truncateOlder={activityId === lastActivityGroupId}
+                    showOlder={showOlderActivityIds.has(activityId)}
+                    onToggleShowOlder={() => showOlderActivities(activityId)}
                     getActorName={getActorName}
                     t={t}
                     timeAgo={timeAgo}
