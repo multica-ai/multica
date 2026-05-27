@@ -4,7 +4,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@multica/core/auth";
 import { useInboxList } from "@multica/core/inbox";
-import { Bot, Inbox, Server, Settings, Users } from "lucide-react-native";
+import { BookOpen, Bot, Inbox, Server, Settings, Users } from "lucide-react-native";
 import { Screen } from "../../components/ui/primitives";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
@@ -17,10 +17,11 @@ const readOnlyEntries = [
   { labelKey: "mine.agents", route: "Agents", icon: Bot },
   { labelKey: "mine.squads", route: "Squads", icon: Users },
   { labelKey: "mine.inbox", route: "Inbox", icon: Inbox },
+  { labelKey: "mine.wiki", route: "Wiki", icon: BookOpen },
   { labelKey: "mine.setting", route: "Setting", icon: Settings },
 ] as const satisfies ReadonlyArray<{
   labelKey: string;
-  route: keyof Pick<RootStackParamList, "Runtimes" | "Agents" | "Squads" | "Inbox" | "Setting">;
+  route: keyof Pick<RootStackParamList, "Runtimes" | "Agents" | "Squads" | "Inbox" | "Wiki" | "Setting">;
   icon: typeof Server;
 }>;
 
@@ -79,7 +80,12 @@ export function MineScreen() {
                       <View style={styles.unreadDot} />
                     ) : null}
                   </View>
-                  <Text numberOfLines={1} style={styles.entryLabel}>
+                  <Text
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.82}
+                    numberOfLines={1}
+                    style={styles.entryLabel}
+                  >
                     {t(entry.labelKey)}
                   </Text>
                 </Pressable>
@@ -188,5 +194,8 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 12,
     fontWeight: "500",
+    lineHeight: 16,
+    textAlign: "center",
+    width: "100%",
   },
 });

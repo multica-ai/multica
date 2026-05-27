@@ -41,6 +41,7 @@ const en = {
     agents: "Agents",
     squads: "Squads",
     inbox: "Inbox",
+    wiki: "Wiki",
     setting: "Setting",
   },
   settings: {
@@ -281,6 +282,15 @@ const en = {
     archive_all_confirm_title: "Archive all notifications?",
     archive_all_confirm_description: "All inbox notifications will be archived and removed from this list.",
     archive_all_confirm: "Archive all",
+  },
+  wiki: {
+    title: "Wiki",
+    unable_to_load: "Unable to load wiki",
+    empty_title: "No wiki pages yet",
+    empty_detail: "Wiki pages created on desktop or web will appear here.",
+    no_content: "No wiki content yet.",
+    updated_at: "Updated {{date}}",
+    untitled: "Untitled",
   },
   runtimes: {
     title: "Runtimes",
@@ -528,6 +538,7 @@ const zhHans = {
     agents: "智能体",
     squads: "小队",
     inbox: "收件箱",
+    wiki: "Wiki",
     setting: "设置",
   },
   settings: {
@@ -768,6 +779,15 @@ const zhHans = {
     archive_all_confirm_title: "归档全部通知？",
     archive_all_confirm_description: "所有收件箱通知都会被归档，并从当前列表中移除。",
     archive_all_confirm: "归档全部",
+  },
+  wiki: {
+    title: "Wiki",
+    unable_to_load: "无法加载 Wiki",
+    empty_title: "还没有 Wiki 页面",
+    empty_detail: "在桌面端或 Web 端创建的 Wiki 页面会显示在这里。",
+    no_content: "还没有 Wiki 内容。",
+    updated_at: "更新于 {{date}}",
+    untitled: "未命名",
   },
   runtimes: {
     title: "运行时",
