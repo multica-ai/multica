@@ -30,10 +30,10 @@ func TestBuildCursorArgs(t *testing.T) {
 		"chat",
 		"-p", "do something",
 		"--output-format", "stream-json",
-		"--yolo",
 		"--workspace", "/tmp/work",
 		"--model", "composer-1.5",
 	}
+	assertCursorArgsNoYolo(t, args)
 
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
@@ -61,17 +61,24 @@ func TestBuildCursorArgsWithResume(t *testing.T) {
 	if !hasResume {
 		t.Fatalf("expected --resume sess-123, got %v", args)
 	}
+	assertCursorArgsNoYolo(t, args)
 }
 
 func TestBuildCursorArgsMinimal(t *testing.T) {
 	t.Parallel()
 
 	args := buildCursorArgs("hello", ExecOptions{}, slog.Default())
-	expected := []string{"chat", "-p", "hello", "--output-format", "stream-json", "--yolo"}
+	expected := []string{"chat", "-p", "hello", "--output-format", "stream-json"}
 
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
 	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("args[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+	assertCursorArgsNoYolo(t, args)
 }
 
 func TestBuildCursorArgsIgnoresSystemPromptAndMaxTurns(t *testing.T) {
@@ -103,34 +110,32 @@ func TestBuildCursorArgsCustomArgs(t *testing.T) {
 
 	// --extra val should be present; --yolo and --output-format should be filtered out
 	hasExtra := false
-	hasBlockedYolo := false
 	hasBlockedFormat := false
 	for i, a := range args {
 		if a == "--extra" && i+1 < len(args) && args[i+1] == "val" {
 			hasExtra = true
 		}
 	}
-	// Count occurrences of --yolo (should be exactly 1 — the hardcoded one)
-	yoloCount := 0
 	for _, a := range args {
-		if a == "--yolo" {
-			yoloCount++
-		}
 		if a == "text" {
 			hasBlockedFormat = true
 		}
 	}
-	if yoloCount > 1 {
-		hasBlockedYolo = true
-	}
 	if !hasExtra {
 		t.Fatalf("expected --extra val in args, got %v", args)
 	}
-	if hasBlockedYolo {
-		t.Fatalf("--yolo from custom args should be filtered, got %v", args)
-	}
+	assertCursorArgsNoYolo(t, args)
 	if hasBlockedFormat {
 		t.Fatalf("--output-format from custom args should be filtered, got %v", args)
+	}
+}
+
+func assertCursorArgsNoYolo(t *testing.T, args []string) {
+	t.Helper()
+	for _, arg := range args {
+		if arg == "--yolo" {
+			t.Fatalf("cursor-agent CLI does not support --yolo; args must not include it: %v", args)
+		}
 	}
 }
 

@@ -391,20 +391,19 @@ func cursorErrorText(evt *cursorStreamEvent) string {
 var cursorBlockedArgs = map[string]blockedArgMode{
 	"-p":              blockedStandalone, // non-interactive print mode
 	"--output-format": blockedWithValue,  // stream-json protocol
-	"--yolo":          blockedStandalone, // auto-approval for autonomous operation
+	"--yolo":          blockedStandalone, // unsupported by cursor-agent; do not allow custom_args to add it
 }
 
 // buildCursorArgs assembles the argv for a one-shot cursor-agent invocation.
 //
 // Usage: cursor-agent chat -p <prompt> --output-format stream-json
 //
-//	--workspace <cwd> --yolo [--model <m>] [--resume <id>]
+//	--workspace <cwd> [--model <m>] [--resume <id>]
 func buildCursorArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
 		"chat",
 		"-p", prompt,
 		"--output-format", "stream-json",
-		"--yolo",
 	}
 	if opts.Cwd != "" {
 		args = append(args, "--workspace", opts.Cwd)
