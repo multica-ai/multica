@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   addHours,
   formatMutedUntilTime,
+  formatPlannedDateTime,
   fromDateTimeLocalValue,
   isMuted,
+  isReminderOverdue,
   nextBusinessDayNineAm,
   nextLocalEightAm,
   nextMondayNineAm,
@@ -63,6 +65,33 @@ describe("formatMutedUntilTime", () => {
     const got = formatMutedUntilTime(future, "en-US");
     expect(got).toBeTruthy();
     expect(got!).toMatch(/\d/);
+  });
+});
+
+describe("formatPlannedDateTime", () => {
+  it("returns null for malformed timestamps", () => {
+    expect(formatPlannedDateTime("not-a-date")).toBeNull();
+  });
+});
+
+describe("isReminderOverdue", () => {
+  const now = new Date("2026-05-27T10:00:00.000Z");
+
+  it("returns true when the planned time has passed", () => {
+    expect(isReminderOverdue("2026-05-27T09:59:00.000Z", now)).toBe(true);
+  });
+
+  it("returns true at the planned time", () => {
+    expect(isReminderOverdue("2026-05-27T10:00:00.000Z", now)).toBe(true);
+  });
+
+  it("returns false before the planned time", () => {
+    expect(isReminderOverdue("2026-05-27T10:01:00.000Z", now)).toBe(false);
+  });
+
+  it("returns false for missing or malformed timestamps", () => {
+    expect(isReminderOverdue(null, now)).toBe(false);
+    expect(isReminderOverdue("not-a-date", now)).toBe(false);
   });
 });
 

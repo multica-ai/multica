@@ -90,12 +90,25 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
   for (const group of groups.values()) {
     group.sort(
       (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        inboxItemSortTime(b) - inboxItemSortTime(a),
     );
     if (group[0]) merged.push(group[0]);
   }
   return merged.sort(
     (a, b) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      inboxItemSortTime(b) - inboxItemSortTime(a),
   );
+}
+
+// CEREBRO-PATCH(inbox-reminder-sort-time): reminders sort by planned activation time once they resurface.
+export function inboxItemSortTime(item: InboxItem): number {
+  const created = new Date(item.created_at).getTime();
+  const mutedUntil = item.muted_until
+    ? new Date(item.muted_until).getTime()
+    : NaN;
+  const parsed =
+    Number.isFinite(mutedUntil) && mutedUntil <= Date.now()
+      ? mutedUntil
+      : created;
+  return Number.isFinite(parsed) ? parsed : 0;
 }

@@ -53,8 +53,10 @@ var allChannels = []string{
 // out-of-the-box.
 var defaultChannelChoices = map[string]map[string]bool{
 	channelInbox: {
-		"issue_assigned":              true,
-		"mentioned":                   true,
+		"issue_assigned": true,
+		"mentioned":      true,
+		// CEREBRO-PATCH(inbox-reminder-push): reminder is a separate routing key for reminder-only push.
+		"reminder":                    true,
 		"task_failed":                 true,
 		"unassigned":                  true,
 		"reaction_added":              false,
@@ -71,6 +73,7 @@ var defaultChannelChoices = map[string]map[string]bool{
 	channelNotifications: {
 		"issue_assigned":              false,
 		"mentioned":                   false,
+		"reminder":                    false,
 		"task_failed":                 false,
 		"unassigned":                  false,
 		"reaction_added":              true,
@@ -87,6 +90,7 @@ var defaultChannelChoices = map[string]map[string]bool{
 	channelMobile: {
 		"issue_assigned":              true,
 		"mentioned":                   true,
+		"reminder":                    false,
 		"task_failed":                 false,
 		"unassigned":                  false,
 		"reaction_added":              false,
@@ -103,6 +107,7 @@ var defaultChannelChoices = map[string]map[string]bool{
 	channelDesktop: {
 		"issue_assigned":              true,
 		"mentioned":                   true,
+		"reminder":                    false,
 		"task_failed":                 true,
 		"unassigned":                  false,
 		"reaction_added":              false,

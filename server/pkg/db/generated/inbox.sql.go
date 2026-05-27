@@ -181,6 +181,68 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 	return i, err
 }
 
+const claimDueReminderInboxItems = `-- name: ClaimDueReminderInboxItems :many
+UPDATE inbox_item
+SET read = false,
+    details = COALESCE(details, '{}'::jsonb) || jsonb_build_object('due_notified_at', NOW(), 'due_pending', false)
+WHERE id IN (
+  SELECT id
+  FROM inbox_item
+  WHERE type = 'reminder'
+    AND route = 'inbox'
+    AND archived = false
+    AND muted_until IS NOT NULL
+    AND muted_until <= NOW()
+    AND details->>'due_pending' = 'true'
+    AND COALESCE(details->>'due_notified_at', '') = ''
+  ORDER BY muted_until ASC
+  LIMIT $1
+  FOR UPDATE SKIP LOCKED
+)
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+`
+
+// CEREBRO-PATCH(inbox-reminders-due): atomically claim reminders whose
+// muted_until has passed, force them unread, and stamp due_notified_at so
+// the live/push sweeper only rings once.
+func (q *Queries) ClaimDueReminderInboxItems(ctx context.Context, limit int32) ([]InboxItem, error) {
+	rows, err := q.db.Query(ctx, claimDueReminderInboxItems, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []InboxItem{}
+	for rows.Next() {
+		var i InboxItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RecipientType,
+			&i.RecipientID,
+			&i.Type,
+			&i.Severity,
+			&i.IssueID,
+			&i.Title,
+			&i.Body,
+			&i.Read,
+			&i.Archived,
+			&i.CreatedAt,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Details,
+			&i.Route,
+			&i.MutedUntil,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countUnreadInbox = `-- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3

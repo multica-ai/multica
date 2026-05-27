@@ -29,6 +29,7 @@ export type EmittedNotificationType = Extract<
   InboxItemType,
   | "issue_assigned"
   | "mentioned"
+  | "reminder"
   | "task_failed"
   | "unassigned"
   | "reaction_added"
@@ -52,6 +53,7 @@ export const SPLIT_TYPES: ReadonlySet<EmittedNotificationType> = new Set([
 export type RoutingKey =
   | "issue_assigned"
   | "mentioned"
+  | "reminder"
   | "task_failed"
   | "unassigned"
   | "reaction_added"
@@ -72,6 +74,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
   inbox: {
     issue_assigned: "on",
     mentioned: "on",
+    reminder: "on",
     task_failed: "on",
     unassigned: "on",
     reaction_added: "off",
@@ -86,6 +89,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
   notifications: {
     issue_assigned: "off",
     mentioned: "off",
+    reminder: "off",
     task_failed: "off",
     unassigned: "off",
     reaction_added: "on",
@@ -100,6 +104,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
   mobile: {
     issue_assigned: "on",
     mentioned: "on",
+    reminder: "off",
     task_failed: "off",
     unassigned: "off",
     reaction_added: "off",
@@ -114,6 +119,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
   desktop: {
     issue_assigned: "on",
     mentioned: "on",
+    reminder: "off",
     task_failed: "on",
     unassigned: "off",
     reaction_added: "off",
@@ -130,6 +136,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
   mail: {
     issue_assigned: "off",
     mentioned: "off",
+    reminder: "off",
     task_failed: "off",
     unassigned: "off",
     reaction_added: "off",

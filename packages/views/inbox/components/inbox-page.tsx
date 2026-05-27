@@ -13,6 +13,8 @@ import {
   inboxKeys,
   activeIssueTasksOptions,
   deduplicateInboxItems,
+  // CEREBRO-PATCH(inbox-reminder-sort-time): merged inbox rows use reminder activation time.
+  inboxItemSortTime,
   useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
 import {
@@ -803,7 +805,7 @@ export function InboxPage() {
       entries.push({
         kind: "notif",
         id: item.id,
-        time: new Date(item.created_at).getTime(),
+        time: inboxItemSortTime(item),
         item,
       });
     }

@@ -354,6 +354,10 @@ export function NotificationsTab() {
     }
   };
 
+  const handleReminderMobileToggle = async (next: boolean) => {
+    await handleChannelToggle("mobile", "reminder", next ? "on" : "off");
+  };
+
   return (
     <div className="space-y-8">
       <section className="space-y-3">
@@ -395,6 +399,11 @@ export function NotificationsTab() {
                   saving={savingNotifyAllMobile}
                   onChange={handleNotifyAllMobileToggle}
                 />
+                <ReminderMobilePushCard
+                  user={user}
+                  saving={savingChannelKey === "mobile:reminder"}
+                  onChange={handleReminderMobileToggle}
+                />
                 <PushNotificationsSection />
               </>
             ) : null
@@ -402,6 +411,47 @@ export function NotificationsTab() {
         />
       ))}
     </div>
+  );
+}
+
+interface ReminderMobilePushCardProps {
+  user: ReturnType<typeof useAuthStore.getState>["user"];
+  saving: boolean;
+  onChange: (next: boolean) => void | Promise<void>;
+}
+
+function ReminderMobilePushCard({
+  user,
+  saving,
+  onChange,
+}: ReminderMobilePushCardProps) {
+  const checked =
+    getChannelChoice(
+      user?.preferences as Record<string, unknown> | undefined,
+      "mobile",
+      "reminder",
+    ) === "on";
+  return (
+    <Card>
+      <CardContent className="px-4 py-3">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <Label className="text-sm font-medium">
+              Send mobile push for reminders
+            </Label>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Sends a push at the reminder time. Other inbox events keep their
+              own settings.
+            </p>
+          </div>
+          <Switch
+            checked={checked}
+            disabled={saving || !user}
+            onCheckedChange={(next) => void onChange(next)}
+          />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
