@@ -1929,6 +1929,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if runtime.OwnerID.Valid {
 		token, err := h.mintTaskToken(r.Context(), *task, resp.WorkspaceID, runtime.OwnerID)
 		if err != nil {
+			outcome = "error_token"
 			slog.Error("mint task token failed", "task_id", uuidToString(task.ID), "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to mint task token")
 			return
@@ -1952,44 +1953,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			"workspace_id", resp.WorkspaceID,
 			"error", err,
 		)
-	}
-
-	// Mint a task-scoped `mat_` token bound to (agent, task, workspace,
-	// owner). The daemon will inject this as MULTICA_TOKEN into the agent
-	// process instead of its own credential, so any API call the agent
-	// makes — even one that strips X-Agent-ID / X-Task-ID headers — is
-	// recognized server-side as actor=agent, closing the lateral-movement
-	// path on owner-only endpoints (e.g. `/api/agents/{id}/env`). MUL-2600.
-	//
-	// Skip silently when the runtime has no owning user (cloud / system
-	// runtimes installed before this PR) — the response carries no
-	// `auth_token`, and the daemon falls back to its existing credential.
-	// Token expires after the queue/runtime upper bound (24h) so it survives
-	// long-running tasks but cannot outlive a forgotten one.
-	if runtime.OwnerID.Valid {
-		tokenStr, terr := auth.GenerateAgentTaskToken()
-		if terr != nil {
-			outcome = "error_token"
-			slog.Error("task claim: failed to generate agent task token",
-				"task_id", uuidToString(task.ID), "error", terr)
-			writeError(w, http.StatusInternalServerError, "failed to mint task token")
-			return
-		}
-		if _, terr := h.Queries.CreateTaskToken(r.Context(), db.CreateTaskTokenParams{
-			TokenHash:   auth.HashToken(tokenStr),
-			TaskID:      task.ID,
-			AgentID:     task.AgentID,
-			WorkspaceID: parseUUID(resp.WorkspaceID),
-			UserID:      runtime.OwnerID,
-			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-		}); terr != nil {
-			outcome = "error_token"
-			slog.Error("task claim: failed to persist agent task token",
-				"task_id", uuidToString(task.ID), "error", terr)
-			writeError(w, http.StatusInternalServerError, "failed to persist task token")
-			return
-		}
-		resp.AuthToken = tokenStr
 	}
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)

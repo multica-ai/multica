@@ -282,7 +282,7 @@ function ProjectIssuesContent({
           sort={sort}
           projectId={projectId}
         />
-      ) : (
+      ) : viewMode === "list" ? (
         <ListView
           issues={issues}
           visibleStatuses={visibleStatuses}
@@ -296,7 +296,7 @@ function ProjectIssuesContent({
           projectId={projectId}
           onMoveIssue={handleMoveIssue}
         />
-      )}
+      ) : null}
       {viewMode === "gantt" && <GanttView issues={filteredGanttIssues} />}
       {viewMode === "swimlane" && (
         <SwimLaneView
