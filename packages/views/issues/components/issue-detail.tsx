@@ -726,7 +726,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [jumpScrollAction, setJumpScrollAction] = useState<"to-comment-box" | "to-top" | null>(null);
   const jumpScrollRafRef = useRef<number | null>(null);
   const jumpAutoDismissTimeoutRef = useRef<number | null>(null);
-  const lastJumpScrollTopRef = useRef(0);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -1085,11 +1084,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const { scrollTop, scrollHeight, clientHeight } = scrollContainerEl;
     const maxScrollTop = scrollHeight - clientHeight;
     const distanceFromBottom = maxScrollTop - scrollTop;
-    const lastScrollTop = lastJumpScrollTopRef.current;
-    const scrolledDown = scrollTop > lastScrollTop;
-    const scrolledUp = scrollTop < lastScrollTop;
-    lastJumpScrollTopRef.current = scrollTop;
-
     if (maxScrollTop <= 0) {
       clearJumpAutoDismissTimeout();
       setJumpScrollAction(null);
@@ -1102,20 +1096,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return;
     }
 
-    if (scrolledDown) {
+    if (distanceFromBottom > 300) {
       clearJumpAutoDismissTimeout();
-      setJumpScrollAction(null);
+      setJumpScrollAction("to-comment-box");
       return;
     }
 
-    if (scrolledUp && distanceFromBottom > 300) {
-      setJumpScrollAction("to-comment-box");
-      clearJumpAutoDismissTimeout();
-      jumpAutoDismissTimeoutRef.current = window.setTimeout(() => {
-        setJumpScrollAction(null);
-        jumpAutoDismissTimeoutRef.current = null;
-      }, 3000);
-    }
+    clearJumpAutoDismissTimeout();
+    setJumpScrollAction(null);
   }, [clearJumpAutoDismissTimeout, scrollContainerEl]);
 
   const scheduleJumpScrollStateUpdate = useCallback(() => {

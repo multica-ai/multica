@@ -1087,7 +1087,7 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
-  it("shows an issue-scoped jump pill based on scroll direction and position", async () => {
+  it("shows an issue-scoped jump pill whenever scrollable content is far from the comment box", async () => {
     renderIssueDetail();
 
     await waitFor(() => {
@@ -1098,15 +1098,11 @@ describe("IssueDetail (shared)", () => {
     const scrollTo = vi.fn();
     Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 2000 });
     Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 500 });
-    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 800 });
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 0 });
     Object.defineProperty(scrollContainer, "scrollTo", { configurable: true, value: scrollTo });
 
     fireEvent.scroll(scrollContainer);
     await flushAnimationFrame();
-    expect(screen.queryByRole("button", { name: "Jump to comment box" })).not.toBeInTheDocument();
-
-    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 400 });
-    fireEvent.scroll(scrollContainer);
 
     const jumpToCommentBox = await screen.findByRole("button", { name: "Jump to comment box" });
     expect(jumpToCommentBox).toHaveClass("absolute", "bottom-4");
@@ -1146,7 +1142,7 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByRole("button", { name: "Jump to top" })).not.toBeInTheDocument();
   });
 
-  it("dismisses the comment-box jump pill on downward scroll", async () => {
+  it("keeps the comment-box jump pill visible while scrolling down until the comment box is nearby", async () => {
     renderIssueDetail();
 
     await waitFor(() => {
@@ -1156,20 +1152,22 @@ describe("IssueDetail (shared)", () => {
     const scrollContainer = screen.getByTestId("issue-detail-scroll-container");
     Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 2000 });
     Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 500 });
-    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 800 });
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 0 });
     fireEvent.scroll(scrollContainer);
     await flushAnimationFrame();
 
-    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 400 });
-    fireEvent.scroll(scrollContainer);
     expect(await screen.findByRole("button", { name: "Jump to comment box" })).toBeInTheDocument();
 
     Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 500 });
     fireEvent.scroll(scrollContainer);
 
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Jump to comment box" })).not.toBeInTheDocument();
-    });
+    expect(await screen.findByRole("button", { name: "Jump to comment box" })).toBeInTheDocument();
+
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 1450 });
+    fireEvent.scroll(scrollContainer);
+
+    expect(await screen.findByRole("button", { name: "Jump to top" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Jump to comment box" })).not.toBeInTheDocument();
   });
 
   it("sends empty description when editor is cleared", async () => {
