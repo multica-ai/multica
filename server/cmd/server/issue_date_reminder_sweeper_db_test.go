@@ -91,9 +91,41 @@ func TestClaimArrivingDateReminders_BadTimezoneDoesNotAbortSweep(t *testing.T) {
 	if !sawGood {
 		t.Errorf("valid-timezone issue %s was not returned — the sweep dropped it", goodIssue)
 	}
-	// The bad-timezone user still gets a reminder, computed under the UTC
-	// fallback rather than failing the whole run.
+	// The bad-timezone user still gets a reminder, computed under the
+	// Europe/Copenhagen fallback rather than failing the whole run.
 	if !sawBad {
-		t.Errorf("bad-timezone issue %s was not returned — expected UTC fallback to still claim it", badIssue)
+		t.Errorf("bad-timezone issue %s was not returned — expected Copenhagen fallback to still claim it", badIssue)
+	}
+}
+
+// CEREBRO-PATCH(issue-date-reminders): regression guard for the Copenhagen default.
+// TestCerebroSafeTimezone_DefaultsToCopenhagen pins the FIR-2412 follow-up fix:
+// an unset or malformed user timezone must resolve to Europe/Copenhagen (the
+// fork's home offset, shared by all Scandinavian zones) so the day-of reminder
+// lands on the correct Danish calendar day, while a valid timezone passes
+// through unchanged.
+func TestCerebroSafeTimezone_DefaultsToCopenhagen(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name string
+		in   any // string or nil (NULL)
+		want string
+	}{
+		{"null", nil, "Europe/Copenhagen"},
+		{"empty", "", "Europe/Copenhagen"},
+		{"malformed", "Not/AZone", "Europe/Copenhagen"},
+		{"valid passthrough", "America/New_York", "America/New_York"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got string
+			if err := testPool.QueryRow(ctx,
+				`SELECT cerebro_safe_timezone($1)`, tc.in).Scan(&got); err != nil {
+				t.Fatalf("cerebro_safe_timezone(%v): %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("cerebro_safe_timezone(%v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
