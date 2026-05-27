@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
