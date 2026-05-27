@@ -35,10 +35,10 @@ export const useCaseText: Record<SupportedLocale, UseCaseText> = {
   ko: {
     indexTitle: "사용 사례",
     indexSubtitle:
-      "팀이 Multica로 사람과 agent를 함께 구성하는 방법을 확인해 보세요.",
+      "팀이 Multica로 사람과 에이전트를 함께 구성하는 방법을 확인해 보세요.",
     indexMetadataTitle: "사용 사례",
     indexMetadataDescription:
-      "팀이 Multica로 사람과 agent를 함께 일하게 만드는 방법을 확인해 보세요.",
+      "팀이 Multica로 사람과 에이전트를 함께 일하게 만드는 방법을 확인해 보세요.",
     cardReadMore: "읽기 →",
     tableOfContents: "이 페이지에서",
   },
