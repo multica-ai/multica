@@ -334,3 +334,172 @@ func TestSubIssueCreationSectionSkippedForNonIssueModes(t *testing.T) {
 		})
 	}
 }
+
+// FIR-2384 step 1: when the snapshot_prompt cost saving inlines the issue +
+// thread into the start prompt (IssueSnapshotInlined), the standing runtime
+// workflow brief must NOT also instruct the agent to run `multica issue get`
+// + `multica issue comment list`. Tine's QA on the first cut failed precisely
+// because buildMetaSkillContent still emitted those mandatory read steps, so
+// the agent re-fetched what was already inlined and the saving stayed dead.
+func TestSnapshotInlinedSuppressesRuntimeReadSteps(t *testing.T) {
+	t.Parallel()
+	const issueID = "11111111-2222-3333-4444-555555555555"
+	const triggerID = "33333333-4444-5555-6666-777777777777"
+
+	cases := []struct {
+		name string
+		ctx  TaskContextForEnv
+		// stepInstructions are the numbered workflow steps that must vanish
+		// when the snapshot is inlined (and must be present when it is not).
+		stepInstructions []string
+	}{
+		{
+			name: "comment-triggered",
+			ctx:  TaskContextForEnv{IssueID: issueID, TriggerCommentID: triggerID},
+			stepInstructions: []string{
+				"1. Run `multica issue get",
+				"3. Read the triggering thread first",
+			},
+		},
+		{
+			name: "assignment-triggered",
+			ctx:  TaskContextForEnv{IssueID: issueID},
+			stepInstructions: []string{
+				"1. Run `multica issue get",
+				"3. Run `multica issue comment list",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Saving off (default): the mandatory read steps must be present —
+			// behaviour is unchanged when the workspace has not enabled snapshot.
+			off := buildMetaSkillContent("claude", tc.ctx)
+			for _, want := range tc.stepInstructions {
+				if !strings.Contains(off, want) {
+					t.Errorf("[%s] snapshot OFF: brief must still contain read step %q", tc.name, want)
+				}
+			}
+
+			// Saving on: the same read steps must be gone, replaced by a note
+			// pointing at the already-inlined context.
+			onCtx := tc.ctx
+			onCtx.IssueSnapshotInlined = true
+			on := buildMetaSkillContent("claude", onCtx)
+			for _, gone := range tc.stepInstructions {
+				if strings.Contains(on, gone) {
+					t.Errorf("[%s] snapshot ON: brief must NOT instruct read step %q (agent would re-fetch what was inlined)", tc.name, gone)
+				}
+			}
+			if !strings.Contains(on, "they have been fetched for you") {
+				t.Errorf("[%s] snapshot ON: brief must point the agent at the inlined context", tc.name)
+			}
+		})
+	}
+}
+
+// The issue_context.md Quick Start must mirror the brief: no "run multica issue
+// get" nudge once the snapshot inlined the issue into the start prompt.
+func TestSnapshotInlinedSuppressesIssueContextQuickStart(t *testing.T) {
+	t.Parallel()
+	const issueID = "11111111-2222-3333-4444-555555555555"
+
+	off := renderIssueContext("claude", TaskContextForEnv{IssueID: issueID})
+	if !strings.Contains(off, "Run `multica issue get") {
+		t.Errorf("snapshot OFF: issue_context Quick Start must contain the fetch instruction")
+	}
+
+	on := renderIssueContext("claude", TaskContextForEnv{IssueID: issueID, IssueSnapshotInlined: true})
+	if strings.Contains(on, "Run `multica issue get") {
+		t.Errorf("snapshot ON: issue_context Quick Start must NOT instruct a re-fetch")
+	}
+	if !strings.Contains(on, "already inlined in your task prompt") {
+		t.Errorf("snapshot ON: issue_context Quick Start must point at the inlined context")
+	}
+}
+
+// CEREBRO-PATCH(runtime-config-bundled): FIR-2384 step 2 — when the bundled_read
+// cost saving is on (BundleContextHint), the standing runtime workflow brief
+// must steer the agent at the single `multica issue context` call instead of
+// the separate `multica issue get` + `multica issue comment list` reads. If the
+// brief still ordered the separate reads, the agent would never call the
+// endpoint whose per-task measurement the saving depends on — the same class of
+// bug Tine flagged for step 1's snapshot path.
+func TestBundleContextHintSteersRuntimeReadStepsToIssueContext(t *testing.T) {
+	t.Parallel()
+	const issueID = "11111111-2222-3333-4444-555555555555"
+	const triggerID = "33333333-4444-5555-6666-777777777777"
+
+	cases := []struct {
+		name string
+		ctx  TaskContextForEnv
+		gone []string // separate-read steps that must vanish when bundled_read is on
+	}{
+		{
+			name: "comment-triggered",
+			ctx:  TaskContextForEnv{IssueID: issueID, TriggerCommentID: triggerID},
+			gone: []string{"1. Run `multica issue get", "3. Read the triggering thread first"},
+		},
+		{
+			name: "assignment-triggered",
+			ctx:  TaskContextForEnv{IssueID: issueID},
+			gone: []string{"1. Run `multica issue get", "3. Run `multica issue comment list"},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Off (default): the separate reads must be present — unchanged behaviour.
+			off := buildMetaSkillContent("claude", tc.ctx)
+			for _, want := range tc.gone {
+				if !strings.Contains(off, want) {
+					t.Errorf("[%s] bundled OFF: brief must still contain read step %q", tc.name, want)
+				}
+			}
+
+			// On: the separate reads must be replaced by the single bundled call.
+			onCtx := tc.ctx
+			onCtx.BundleContextHint = true
+			on := buildMetaSkillContent("claude", onCtx)
+			for _, g := range tc.gone {
+				if strings.Contains(on, g) {
+					t.Errorf("[%s] bundled ON: brief must NOT instruct separate read %q (the agent must call `multica issue context`)", tc.name, g)
+				}
+			}
+			if !strings.Contains(on, "multica issue context "+issueID) {
+				t.Errorf("[%s] bundled ON: brief must steer the agent at `multica issue context %s`", tc.name, issueID)
+			}
+		})
+	}
+
+	// snapshot_prompt takes precedence: when both are set, the inlined snapshot
+	// wins and the brief must not mention the bundled `issue context` call.
+	bothCtx := TaskContextForEnv{IssueID: issueID, IssueSnapshotInlined: true, BundleContextHint: true}
+	both := buildMetaSkillContent("claude", bothCtx)
+	if strings.Contains(both, "multica issue context "+issueID) {
+		t.Errorf("snapshot precedence: brief must use the inlined snapshot, not the bundled call, when both are on")
+	}
+	if !strings.Contains(both, "they have been fetched for you") {
+		t.Errorf("snapshot precedence: brief must point at the inlined context when both are on")
+	}
+
+	// issue_context.md Quick Start mirrors the brief for bundled_read.
+	qsOff := renderIssueContext("claude", TaskContextForEnv{IssueID: issueID})
+	if !strings.Contains(qsOff, "Run `multica issue get") {
+		t.Errorf("bundled OFF: issue_context Quick Start must contain the fetch instruction")
+	}
+	qsOn := renderIssueContext("claude", TaskContextForEnv{IssueID: issueID, BundleContextHint: true})
+	if strings.Contains(qsOn, "Run `multica issue get") {
+		t.Errorf("bundled ON: issue_context Quick Start must NOT instruct a separate `multica issue get`")
+	}
+	if !strings.Contains(qsOn, "multica issue context "+issueID) {
+		t.Errorf("bundled ON: issue_context Quick Start must point at `multica issue context`")
+	}
+}
