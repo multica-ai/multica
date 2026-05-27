@@ -51,6 +51,18 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish never
 
+      - name: Verify Windows installer exposes CLI on PATH
+        if: matrix.target == 'win'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem apps/desktop/dist/win-x64 -Filter '*.exe' | Select-Object -First 1
+          if (-not $installer) {
+            throw "Windows x64 installer not found"
+          }
+          Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          cmd.exe /d /c "multica --help"
+
       - name: Upload Desktop artifacts (${{ matrix.target }})
         uses: actions/upload-artifact@v4
         with:

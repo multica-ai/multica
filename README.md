@@ -88,6 +88,8 @@ Use this if Homebrew is not available. The script installs the Multica CLI on ma
 irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
 ```
 
+The Windows Desktop EXE also ships the CLI at `%LOCALAPPDATA%\Programs\Multica\resources\bin\multica.exe`. The installer adds that `resources\bin` directory to your user `Path`, so new terminals and agent-spawned processes can run `multica` without an absolute path. Re-running the installer refreshes this entry and removes stale Multica `resources\bin` entries.
+
 Then configure, authenticate, and start the daemon in one command:
 
 ```bash
