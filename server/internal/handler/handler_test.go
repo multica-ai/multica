@@ -2648,6 +2648,199 @@ func TestBacklogToTodoTriggersAgent(t *testing.T) {
 	testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
 }
 
+func TestAgentCannotMarkDoneWithoutStructuredCompletionEvidence(t *testing.T) {
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("failed to find test agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, assignee_type, assignee_id, creator_type, creator_id, number, position)
+		VALUES ($1, 'done evidence missing test', 'in_progress', 'none', 'agent', $2, 'member', $3,
+			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1), 0)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to create issue: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at)
+		VALUES ($1, $2, $3, 'running', 0, now() - interval '1 second')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO comment (issue_id, author_type, author_id, content, type, created_at)
+		VALUES ($1, 'agent', $2, 'Implemented the change.', 'comment', now())
+	`, issueID, agentID); err != nil {
+		t.Fatalf("failed to create generic comment: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/issues/"+issueID, map[string]any{"status": "done"})
+	req = withURLParam(req, "id", issueID)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("UpdateIssue without structured evidence: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "structured completion evidence") {
+		t.Fatalf("expected completion evidence error, got %s", w.Body.String())
+	}
+
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status); err != nil {
+		t.Fatalf("failed to read issue status: %v", err)
+	}
+	if status != "in_progress" {
+		t.Fatalf("status changed without evidence: got %q", status)
+	}
+}
+
+func TestAgentCanMarkDoneAfterStructuredCompletionEvidence(t *testing.T) {
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("failed to find test agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, assignee_type, assignee_id, creator_type, creator_id, number, position)
+		VALUES ($1, 'done evidence present test', 'in_progress', 'none', 'agent', $2, 'member', $3,
+			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1), 0)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to create issue: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at)
+		VALUES ($1, $2, $3, 'running', 0, now() - interval '1 second')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO comment (issue_id, author_type, author_id, content, type, created_at)
+		VALUES ($1, 'agent', $2, $3, 'comment', now())
+	`, issueID, agentID, strings.Join([]string{
+		"Completion evidence:",
+		"Executor: Handler Test Agent",
+		"Repository: https://github.com/AndyMental/multica",
+		"Path: /workdir/multica",
+		"Branch: agent/dev/test",
+		"Changes: server/internal/handler/issue.go and handler tests",
+		"Validation: go test ./internal/handler -run TestAgentCanMarkDoneAfterStructuredCompletionEvidence",
+	}, "\n")); err != nil {
+		t.Fatalf("failed to create evidence comment: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/issues/"+issueID, map[string]any{"status": "done"})
+	req = withURLParam(req, "id", issueID)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue with evidence: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if updated.Status != "done" {
+		t.Fatalf("status = %q, want done", updated.Status)
+	}
+}
+
+func TestAgentBatchDoneWithoutStructuredCompletionEvidenceReturnsConflict(t *testing.T) {
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("failed to find test agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, assignee_type, assignee_id, creator_type, creator_id, number, position)
+		VALUES ($1, 'batch done evidence missing test', 'in_progress', 'none', 'agent', $2, 'member', $3,
+			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1), 0)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to create issue: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at)
+		VALUES ($1, $2, $3, 'running', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{issueID},
+		"updates":   map[string]any{"status": "done"},
+	})
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("BatchUpdateIssues without structured evidence: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "structured completion evidence") {
+		t.Fatalf("expected completion evidence error, got %s", w.Body.String())
+	}
+
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status); err != nil {
+		t.Fatalf("failed to read issue status: %v", err)
+	}
+	if status != "in_progress" {
+		t.Fatalf("status changed without evidence: got %q", status)
+	}
+}
+
 // TestBacklogToTodoByAgentTriggersDifferentAssignee verifies that the
 // documented sub-task chain works: when an agent (parent / Step 1) promotes
 // a backlog issue assigned to a different agent (child / Step 2), the

@@ -2376,6 +2376,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if req.Status != nil && prevIssue.Status != "done" && *req.Status == "done" {
+		if status, msg := h.validateAgentDoneEvidence(r, actorType, actorID, prevIssue.ID); status != 0 {
+			writeError(w, status, msg)
+			return
+		}
+	}
+
 	issue, err := h.Queries.UpdateIssue(r.Context(), params)
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
@@ -2403,9 +2411,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	prevDueDate := timestampToPtr(prevIssue.DueDate)
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
-
-	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
@@ -2550,6 +2555,100 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 	default:
 		return http.StatusBadRequest, "assignee_type must be 'member', 'agent', or 'squad'"
 	}
+}
+
+func (h *Handler) validateAgentDoneEvidence(r *http.Request, actorType, actorID string, issueID pgtype.UUID) (int, string) {
+	if actorType != "agent" {
+		return 0, ""
+	}
+	taskIDStr := r.Header.Get("X-Task-ID")
+	if taskIDStr == "" {
+		return http.StatusConflict, "agent cannot mark issue done without task evidence"
+	}
+	taskID, err := util.ParseUUID(taskIDStr)
+	if err != nil {
+		return http.StatusConflict, "agent cannot mark issue done without task evidence"
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), taskID)
+	if err != nil || uuidToString(task.AgentID) != actorID || !task.IssueID.Valid || task.IssueID != issueID {
+		return http.StatusConflict, "agent cannot mark issue done without task evidence"
+	}
+	since := task.StartedAt
+	if !since.Valid {
+		since = task.CreatedAt
+	}
+	hasEvidence, err := h.hasStructuredCompletionEvidenceSince(r.Context(), issueID, task.AgentID, since)
+	if err != nil {
+		slog.Warn("done evidence check failed", "task_id", taskIDStr, "issue_id", uuidToString(issueID), "error", err)
+		return http.StatusInternalServerError, "failed to verify completion evidence"
+	}
+	if !hasEvidence {
+		return http.StatusConflict, "agent must post structured completion evidence before marking issue done; include Executor, Repository, Path, Branch or PR, Changes, and Validation"
+	}
+	return 0, ""
+}
+
+func (h *Handler) hasStructuredCompletionEvidenceSince(ctx context.Context, issueID, agentID pgtype.UUID, since pgtype.Timestamptz) (bool, error) {
+	if h.DB == nil {
+		return false, nil
+	}
+	rows, err := h.DB.Query(ctx, `
+		SELECT content
+		FROM comment
+		WHERE issue_id = $1
+		  AND author_type = 'agent'
+		  AND author_id = $2
+		  AND created_at >= $3
+		ORDER BY created_at DESC
+	`, issueID, agentID, since)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var content string
+		if err := rows.Scan(&content); err != nil {
+			return false, err
+		}
+		if isStructuredCompletionEvidence(content) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+func isStructuredCompletionEvidence(content string) bool {
+	fields := map[string]bool{}
+	for _, line := range strings.Split(content, "\n") {
+		label, value, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(value) == "" {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(label))
+		switch key {
+		case "executor":
+			fields["executor"] = true
+		case "repository", "repo":
+			fields["repository"] = true
+		case "path", "repo/path", "workspace path":
+			fields["path"] = true
+		case "branch":
+			fields["branch_or_pr"] = true
+		case "pr", "pr url", "pull request":
+			fields["branch_or_pr"] = true
+		case "changes", "changed files", "summary":
+			fields["changes"] = true
+		case "validation", "checks", "tests":
+			fields["validation"] = true
+		}
+	}
+	return fields["executor"] &&
+		fields["repository"] &&
+		fields["path"] &&
+		fields["branch_or_pr"] &&
+		fields["changes"] &&
+		fields["validation"]
 }
 
 // shouldEnqueueAgentTask returns true when an issue creation or assignment
@@ -2756,6 +2855,28 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if req.Updates.Status != nil && *req.Updates.Status == "done" {
+		for _, issueID := range req.IssueIDs {
+			issueUUID, err := util.ParseUUID(issueID)
+			if err != nil {
+				continue
+			}
+			prevIssue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+				ID:          issueUUID,
+				WorkspaceID: wsUUID,
+			})
+			if err != nil {
+				continue
+			}
+			if prevIssue.Status != "done" {
+				if status, msg := h.validateAgentDoneEvidence(r, actorType, actorID, prevIssue.ID); status != 0 {
+					writeError(w, status, msg)
+					return
+				}
+			}
+		}
+	}
 	updated := 0
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
@@ -2905,7 +3026,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))

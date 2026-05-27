@@ -340,7 +340,10 @@
     "status_running": "Working",
     "status_completed": "Completed",
     "status_failed": "Failed",
-    "status_cancelled": "Cancelled"
+    "status_cancelled": "Cancelled",
+    "evidence_pr": "PR {{value}}",
+    "evidence_output": "Result {{value}}",
+    "evidence_workdir": "Path {{value}}"
   },
   "terminate_dialog": {
     "title": "Stop this task?",

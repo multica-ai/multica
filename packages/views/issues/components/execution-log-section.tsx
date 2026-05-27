@@ -361,6 +361,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
+  const evidence = useCompletionEvidenceText(task);
   const time = task.completed_at ? timeAgo(task.completed_at) : "—";
   const failureLabel =
     task.status === "failed" && task.failure_reason
@@ -391,7 +392,10 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
   return (
     <RowShell task={task}>
-      <TriggerText text={trigger} />
+      <div className="min-w-0 flex-1">
+        <TriggerText text={trigger} />
+        {evidence && <EvidenceText text={evidence} />}
+      </div>
       <span className="shrink-0 whitespace-nowrap text-xs">
         <span className={tone}>{failureLabel ?? label}</span>
         <span className="text-muted-foreground"> · {time}</span>
@@ -423,6 +427,51 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
       </RowActions>
     </RowShell>
   );
+}
+
+function useCompletionEvidenceText(task: AgentTask): string | null {
+  const { t } = useT("issues");
+  if (task.status !== "completed") return null;
+  const payload = taskResultPayload(task.result);
+  const parts: string[] = [];
+  if (payload?.pr_url) {
+    parts.push(t(($) => $.execution_log.evidence_pr, { value: compactUrl(payload.pr_url) }));
+  }
+  const outputLine = firstEvidenceLine(payload?.output);
+  if (outputLine) {
+    parts.push(t(($) => $.execution_log.evidence_output, { value: outputLine }));
+  }
+  if (task.work_dir) {
+    parts.push(t(($) => $.execution_log.evidence_workdir, { value: task.work_dir }));
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function taskResultPayload(result: unknown): { pr_url?: string; output?: string } | null {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return null;
+  const record = result as Record<string, unknown>;
+  return {
+    pr_url: typeof record.pr_url === "string" ? record.pr_url : undefined,
+    output: typeof record.output === "string" ? record.output : undefined,
+  };
+}
+
+function firstEvidenceLine(output?: string): string | null {
+  const line = output
+    ?.split(/\r?\n/)
+    .map((part) => part.trim())
+    .find(Boolean);
+  if (!line) return null;
+  return line.length > 120 ? `${line.slice(0, 117)}...` : line;
+}
+
+function compactUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.hostname}${url.pathname}`;
+  } catch {
+    return value;
+  }
 }
 
 // ─── Shared row chrome ─────────────────────────────────────────────────────
@@ -460,7 +509,18 @@ function RowShell({
 function TriggerText({ text }: { text: string }) {
   return (
     <span
-      className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground"
+      className="block min-w-0 flex-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground"
+      style={TRIGGER_MASK_STYLE}
+    >
+      {text}
+    </span>
+  );
+}
+
+function EvidenceText({ text }: { text: string }) {
+  return (
+    <span
+      className="mt-0.5 block min-w-0 overflow-hidden whitespace-nowrap text-[11px] leading-3 text-muted-foreground/80"
       style={TRIGGER_MASK_STYLE}
     >
       {text}
