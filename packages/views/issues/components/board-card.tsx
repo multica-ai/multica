@@ -12,6 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useModalStore } from "@multica/core/modals";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
@@ -345,6 +346,10 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
         <AppLink
           href={p.issueDetail(issue.id)}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
+          disablePush
+          onClick={() => {
+            useModalStore.getState().open("issue-detail", { issueId: issue.id });
+          }}
         >
           <BoardCardContent issue={issue} editable childProgress={childProgress} />
         </AppLink>

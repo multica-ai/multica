@@ -9,6 +9,7 @@ import { AppLink } from "../../navigation";
 import type { Issue } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
+import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
@@ -98,6 +99,10 @@ function ListRowContent({
         <AppLink
           href={p.issueDetail(issue.id)}
           className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
+          disablePush
+          onClick={() => {
+            useModalStore.getState().open("issue-detail", { issueId: issue.id });
+          }}
         >
           <span className="w-16 shrink-0 text-xs text-muted-foreground">
             {issue.identifier}
