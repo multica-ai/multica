@@ -21,6 +21,7 @@ interface DAGCanvasProps {
   nodeStatusColors?: Record<string, string>;
   nodeStatuses?: Record<string, { status: string; isRunning: boolean }>;
   initialScale?: number;
+  initialOffset?: { x: number; y: number };
 }
 
 interface NodeRect {
@@ -59,6 +60,7 @@ export function DAGCanvas({
   nodeStatusColors,
   nodeStatuses,
   initialScale,
+  initialOffset,
 }: DAGCanvasProps) {
   const selectedNodeId = useWorkflowEditorStore((s) => s.selectedNodeId);
   const mode = useWorkflowEditorStore((s) => s.mode);
@@ -74,7 +76,7 @@ export function DAGCanvas({
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [scale, setScale] = useState(initialScale ?? 1.5);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [offset, setOffset] = useState(initialOffset ?? { x: 0, y: 0 });
   const scaleRef = useRef(scale);
   const offsetRef = useRef(offset);
   scaleRef.current = scale;

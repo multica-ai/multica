@@ -220,14 +220,20 @@ export function WorkflowDagViewer({
         </div>
       )}
 
-      <div className={cn("h-[400px] overflow-hidden rounded-lg border bg-card", !runId && "opacity-60")}>
+      <div className={cn("h-[270px] overflow-hidden rounded-lg border bg-card", !runId && "opacity-60")}>
         <DAGCanvas
           nodes={nodes}
           edges={edges}
           nodeStatusColors={nodeStatusColors}
           nodeStatuses={nodeStatuses}
           onNodeClick={(id) => setSelectedNodeId(id === selectedNodeId ? null : id)}
-          initialScale={2}
+          initialScale={3}
+          initialOffset={(() => {
+            if (nodes.length === 0) return undefined;
+            const minX = Math.min(...nodes.map((n) => n.position_x));
+            const minY = Math.min(...nodes.map((n) => n.position_y));
+            return { x: 200 - minX, y: 150 - minY };
+          })()}
         />
       </div>
 
