@@ -345,7 +345,7 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 		return cli.PrintJSON(os.Stdout, agents)
 	}
 
-	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "ARCHIVED"}
+	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "INTERNAL", "ARCHIVED"}
 	rows := make([][]string, 0, len(agents))
 	for _, a := range agents {
 		archived := ""
@@ -357,6 +357,7 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 			strVal(a, "name"),
 			strVal(a, "status"),
 			strVal(a, "runtime_mode"),
+			strVal(a, "internal"),
 			archived,
 		})
 	}
@@ -383,13 +384,14 @@ func runAgentGet(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, agent)
 	}
 
-	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "VISIBILITY", "AVATAR_URL", "DESCRIPTION"}
+	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "VISIBILITY", "INTERNAL", "AVATAR_URL", "DESCRIPTION"}
 	rows := [][]string{{
 		strVal(agent, "id"),
 		strVal(agent, "name"),
 		strVal(agent, "status"),
 		strVal(agent, "runtime_mode"),
 		strVal(agent, "visibility"),
+		strVal(agent, "internal"),
 		strVal(agent, "avatar_url"),
 		strVal(agent, "description"),
 	}}
@@ -590,7 +592,8 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		body["max_concurrent_tasks"] = v
 	}
 	if cmd.Flags().Changed("internal") {
-		body["internal"] = true
+		v, _ := cmd.Flags().GetBool("internal")
+		body["internal"] = v
 	}
 	if cmd.Flags().Changed("no-internal") {
 		body["internal"] = false
