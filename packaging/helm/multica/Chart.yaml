@@ -1,0 +1,21 @@
+apiVersion: v2
+name: multica
+description: |
+  Multica — AI-native task management platform. This chart deploys the control
+  plane (Postgres+pgvector, backend, web, ingress) and optionally the
+  Kubernetes-native execution machinery (controller, repo-cache, per-task Jobs)
+  and bootstrap helpers. All three subsystems are gated by .Values.platform.*,
+  .Values.runtime.*, and .Values.bootstrap.*.
+type: application
+version: 0.1.0
+appVersion: "v0.2.4-mk1"
+keywords:
+  - multica
+  - ai-agents
+  - issue-tracker
+home: https://multica.ai
+sources:
+  - https://github.com/multica-ai/multica
+maintainers:
+  - name: Chris Snell
+icon: https://multica.ai/favicon.ico

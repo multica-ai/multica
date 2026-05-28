@@ -1,0 +1,19 @@
+{{- if .Values.platform.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: multica-uploads
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "backend" "ctx" .) | nindent 4 }}
+  annotations:
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.platform.backend.uploads.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.platform.backend.uploads.size }}
+{{- end }}

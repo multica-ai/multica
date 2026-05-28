@@ -1,0 +1,77 @@
+{{- if .Values.platform.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multica-backend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "backend" "ctx" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.platform.backend.replicaCount }}
+  strategy:
+    type: Recreate     # single-replica + migrations on startup → no parallel rollout
+  selector:
+    matchLabels:
+      {{- include "multica.componentSelector" (dict "name" "backend" "ctx" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "multica.componentLabels" (dict "name" "backend" "ctx" .) | nindent 8 }}
+      annotations:
+        # Bounce on ConfigMap changes
+        checksum/config: {{ include (print $.Template.BasePath "/platform/configmap.yaml") . | sha256sum }}
+    spec:
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecret }}
+      containers:
+        - name: backend
+          image: {{ include "multica.image" (dict "key" "backend" "ctx" .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: multica-backend-env
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.platform.postgres.secretName }}
+                  key: password
+            - name: DATABASE_URL
+              value: {{ include "multica.databaseUrl" . | quote }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.platform.backend.jwtSecretName }}
+                  key: jwt
+            {{- if .Values.platform.backend.resend.apiKeySecretName }}
+            - name: RESEND_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.platform.backend.resend.apiKeySecretName }}
+                  key: apiKey
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.platform.backend.resources | nindent 12 }}
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/data/uploads
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: multica-uploads
+{{- end }}

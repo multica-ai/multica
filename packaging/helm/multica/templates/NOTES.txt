@@ -1,0 +1,31 @@
+Multica deployed!
+
+Release:  {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+Hostname: {{ .Values.hostname }}
+
+{{- if .Values.platform.enabled }}
+
+Control plane:
+  Backend:  multica-backend.{{ .Release.Namespace }}.svc:8080
+  Web:      multica-web.{{ .Release.Namespace }}.svc:3000
+  Postgres: {{ if .Values.platform.postgres.enabled -}}
+    multica-postgres.{{ .Release.Namespace }}.svc:5432
+  {{- else -}}
+    (external)
+  {{- end }}
+
+Open https://{{ .Values.hostname }} once DNS and TLS resolve.
+
+First-user signup:
+  - With Resend configured: type your email in the UI; check inbox.
+  - Without Resend: read the code from the backend logs:
+      kubectl logs -n {{ .Release.Namespace }} deploy/multica-backend | grep -i 'verification code'
+{{- end }}
+
+{{- if not .Values.runtime.enabled }}
+
+Note: runtime subsystem is disabled in values.
+      Agent execution requires a workstation daemon for now.
+      Plans D/E will enable cluster-side runtime + bootstrap helpers.
+{{- end }}

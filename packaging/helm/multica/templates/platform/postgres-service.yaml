@@ -1,0 +1,17 @@
+{{- if and .Values.platform.enabled .Values.platform.postgres.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: multica-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "postgres" "ctx" .) | nindent 4 }}
+spec:
+  clusterIP: None
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+  selector:
+    {{- include "multica.componentSelector" (dict "name" "postgres" "ctx" .) | nindent 4 }}
+{{- end }}

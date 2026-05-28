@@ -1,0 +1,55 @@
+{{- if .Values.platform.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multica-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "web" "ctx" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.platform.web.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "multica.componentSelector" (dict "name" "web" "ctx" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "multica.componentLabels" (dict "name" "web" "ctx" .) | nindent 8 }}
+    spec:
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecret }}
+      containers:
+        - name: web
+          image: {{ include "multica.image" (dict "key" "web" "ctx" .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: PORT
+              value: "3000"
+          # Readiness probes the real page but with a generous timeout —
+          # SSR of "/" can take >1s, which must not pull the pod from rotation.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Liveness is a plain TCP check: only restart if the Node process is
+          # actually dead/hung, never for a slow render (which caused a restart
+          # loop + 503s under the previous httpGet "/" with a 1s timeout).
+          livenessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.platform.web.resources | nindent 12 }}
+{{- end }}

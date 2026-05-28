@@ -1,0 +1,19 @@
+{{- if .Values.platform.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multica-backend-env
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "backend" "ctx" .) | nindent 4 }}
+data:
+  APP_ENV: {{ .Values.platform.backend.appEnv | quote }}
+  PORT: "8080"
+  FRONTEND_ORIGIN: {{ printf "https://%s" .Values.hostname | quote }}
+  MULTICA_APP_URL: {{ printf "https://%s" .Values.hostname | quote }}
+  MULTICA_PUBLIC_URL: {{ default (printf "https://%s" .Values.hostname) .Values.platform.backend.publicUrl | quote }}
+  COOKIE_DOMAIN: {{ .Values.platform.backend.cookieDomain | quote }}
+  MULTICA_TRUSTED_PROXIES: {{ .Values.platform.backend.trustedProxies | quote }}
+  ALLOW_SIGNUP: {{ .Values.platform.backend.allowSignup | quote }}
+  RESEND_FROM_EMAIL: {{ .Values.platform.backend.resend.fromEmail | quote }}
+{{- end }}
