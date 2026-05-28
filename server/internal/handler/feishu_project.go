@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -239,6 +240,30 @@ func (h *Handler) SyncFeishuProjectIntegration(w http.ResponseWriter, r *http.Re
 			return
 		}
 	}
+	// Manual sync must take the same advisory lock as the scheduled worker.
+	// Without it, manual+scheduled can run concurrently against the same
+	// integration, which races on create-issue for new work items and
+	// double-inserts attachments. h.TxStarter is wired with the pgxpool.Pool
+	// at server startup; the type assertion documents that contract.
+	locker, ok := h.TxStarter.(*pgxpool.Pool)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "sync locker unavailable")
+		return
+	}
+	locked, unlock, err := service.TryAcquireFeishuProjectSyncLock(r.Context(), locker, cfg.ID)
+	if err != nil {
+		slog.Warn("Feishu Project sync lock acquire failed", "workspace_id", workspaceID, "integration_id", uuidToString(cfg.ID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to acquire sync lock")
+		return
+	}
+	if !locked {
+		// A scheduled run or another manual run holds the lock. Surface the
+		// latest run so the UI keeps polling progress instead of starting a
+		// duplicate.
+		latest, _ := h.Queries.GetLatestFeishuProjectSyncRun(r.Context(), cfg.ID)
+		writeJSON(w, http.StatusAccepted, FeishuProjectSyncResponse{Status: "running", Run: feishuProjectSyncRunToResponse(latest)})
+		return
+	}
 	run, err := h.Queries.CreateFeishuProjectSyncRun(r.Context(), db.CreateFeishuProjectSyncRunParams{
 		IntegrationID: cfg.ID,
 		WorkspaceID:   cfg.WorkspaceID,
@@ -246,10 +271,12 @@ func (h *Handler) SyncFeishuProjectIntegration(w http.ResponseWriter, r *http.Re
 		Trigger:       "manual",
 	})
 	if err != nil {
+		unlock()
 		writeError(w, http.StatusInternalServerError, "failed to start Feishu Project sync")
 		return
 	}
 	go func() {
+		defer unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 		defer cancel()
 		svc := &service.FeishuProjectSyncService{Queries: h.Queries, Tx: h.TxStarter, Client: service.NewFeishuProjectClient(), Storage: h.Storage, TaskService: h.TaskService}

@@ -36,8 +36,7 @@ func runFeishuProjectSyncOnce(ctx context.Context, queries *db.Queries, pool *pg
 	}
 	svc := &service.FeishuProjectSyncService{Queries: queries, Tx: pool, Client: service.NewFeishuProjectClient(), Storage: store, TaskService: taskSvc}
 	for _, cfg := range configs {
-		lockKey := "feishu-project-sync:" + service.UUIDString(cfg.ID)
-		locked, unlock, err := tryFeishuProjectSyncLock(ctx, pool, lockKey)
+		locked, unlock, err := service.TryAcquireFeishuProjectSyncLock(ctx, pool, cfg.ID)
 		if err != nil {
 			slog.Warn("Feishu Project sync lock failed", "integration_id", service.UUIDString(cfg.ID), "project_key", cfg.ProjectKey, "error", err)
 			continue
@@ -50,28 +49,4 @@ func runFeishuProjectSyncOnce(ctx context.Context, queries *db.Queries, pool *pg
 		}
 		unlock()
 	}
-}
-
-func tryFeishuProjectSyncLock(ctx context.Context, pool *pgxpool.Pool, key string) (bool, func(), error) {
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		return false, func() {}, err
-	}
-
-	var locked bool
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtextextended($1, 0))", key).Scan(&locked); err != nil {
-		conn.Release()
-		return false, func() {}, err
-	}
-	if !locked {
-		conn.Release()
-		return false, func() {}, nil
-	}
-
-	return true, func() {
-		if _, err := conn.Exec(context.Background(), "SELECT pg_advisory_unlock(hashtextextended($1, 0))", key); err != nil {
-			slog.Warn("Feishu Project sync unlock failed", "error", err)
-		}
-		conn.Release()
-	}, nil
 }
