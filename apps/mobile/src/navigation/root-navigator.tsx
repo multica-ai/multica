@@ -35,6 +35,7 @@ import { MineScreen } from "../screens/mine/mine-screen";
 import { SettingScreen } from "../screens/mine/setting-screen";
 import { SquadsScreen } from "../screens/mine/squads-screen";
 import { RuntimesScreen } from "../screens/runtimes/runtimes-screen";
+import { WikiDetailScreen, WikiScreen } from "../screens/wiki/wiki-screen";
 import { WorkspaceSetupScreen } from "../screens/workspace/workspace-setup-screen";
 import { colors, spacing } from "../theme/tokens";
 import { linking } from "./linking";
@@ -54,6 +55,8 @@ export type RootStackParamList = {
   Squads: undefined;
   Inbox: undefined;
   InboxDetail: { inboxItemId: string };
+  Wiki: undefined;
+  WikiDetail: { pageId: string };
   Setting: undefined;
 };
 
@@ -152,6 +155,8 @@ function AuthenticatedNavigator() {
             <Stack.Screen component={SquadsScreen} name="Squads" />
             <Stack.Screen component={InboxScreen} name="Inbox" />
             <Stack.Screen component={InboxDetailScreen} name="InboxDetail" />
+            <Stack.Screen component={WikiScreen} name="Wiki" />
+            <Stack.Screen component={WikiDetailScreen} name="WikiDetail" />
             <Stack.Screen component={SettingScreen} name="Setting" />
           </Stack.Navigator>
         </WorkspaceGate>

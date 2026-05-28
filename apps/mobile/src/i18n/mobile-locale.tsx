@@ -2,9 +2,10 @@ import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import i18next, { type i18n as I18n } from "i18next";
 import { I18nextProvider, initReactI18next } from "react-i18next";
-import { matchLocale, pickLocale, type SupportedLocale } from "@multica/core/i18n";
+import { matchLocale, type SupportedLocale } from "@multica/core/i18n";
 import { mobileStorage } from "../platform/storage";
 import { MOBILE_RESOURCES } from "./resources";
+import { resolveInitialMobileLocale } from "./mobile-locale-utils";
 
 const STORAGE_KEY = "multica-locale";
 
@@ -15,17 +16,8 @@ type MobileLocaleContextValue = {
 
 const MobileLocaleContext = createContext<MobileLocaleContextValue | null>(null);
 
-function getSystemPreferences() {
-  const locale = Intl.DateTimeFormat().resolvedOptions().locale;
-  return locale ? [locale] : [];
-}
-
 export function getInitialMobileLocale(): SupportedLocale {
-  return pickLocale({
-    getUserChoice: () => mobileStorage.getItem(STORAGE_KEY),
-    getSystemPreferences,
-    persist: (locale) => mobileStorage.setItem(STORAGE_KEY, locale),
-  });
+  return resolveInitialMobileLocale(mobileStorage.getItem(STORAGE_KEY));
 }
 
 export function persistMobileLocale(locale: SupportedLocale) {
