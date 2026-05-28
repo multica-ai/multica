@@ -122,6 +122,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
 		})
+	case "traecli":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverTraeCliModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -494,6 +498,47 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kiro-discovery-",
 	})
+}
+
+// discoverTraeCliModels runs `coco models` and parses the model names.
+// Unlike hermes/kimi/kiro, Coco has a dedicated `models` subcommand that
+// lists available models directly — no ACP session needed.
+func discoverTraeCliModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "coco"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return []Model{}, nil
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "models")
+	hideAgentWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return []Model{}, nil
+	}
+	return parseTraeCliModels(string(out)), nil
+}
+
+// parseTraeCliModels parses the output of `coco models`.
+// Each line is a model name (e.g. "DeepSeek-V4-Pro", "GPT-5.5").
+func parseTraeCliModels(output string) []Model {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	var models []Model
+	seen := map[string]bool{}
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if seen[line] {
+			continue
+		}
+		seen[line] = true
+		models = append(models, Model{ID: line, Label: line})
+	}
+	return models
 }
 
 // discoverCopilotModels spins up `copilot --acp` and reads the
