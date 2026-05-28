@@ -666,6 +666,14 @@ func (d *Daemon) deregisterRuntimes() {
 
 // resolveAuth loads the auth token from the CLI config for the active profile.
 func (d *Daemon) resolveAuth() error {
+	// Headless auth: honor MULTICA_TOKEN env (consistent with the CLI's
+	// resolveToken). Lets daemons run in containers with only an env var,
+	// no on-disk config file. Falls through to the config file when unset.
+	if envTok := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); envTok != "" {
+		d.client.SetToken(envTok)
+		d.logger.Info("authenticated via MULTICA_TOKEN env")
+		return nil
+	}
 	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
 	if err != nil {
 		return fmt.Errorf("load CLI config: %w", err)
