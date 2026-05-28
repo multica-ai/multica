@@ -38,6 +38,7 @@ function workspaceScoped(slug: string) {
     skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
     workflows: () => `${ws}/workflows`,
     workflowDetail: (id: string) => `${ws}/workflows/${encode(id)}`,
+    workflowRuns: (id: string) => `${ws}/workflows/${encode(id)}/runs`,
     workflowRunDetail: (workflowId: string, runId: string) => `${ws}/workflows/${encode(workflowId)}/runs/${encode(runId)}`,
     settings: () => `${ws}/settings`,
     attachmentPreview: (id: string) => `${ws}/attachments/${encode(id)}/preview`,

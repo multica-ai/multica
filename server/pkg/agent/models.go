@@ -96,6 +96,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		models := claudeStaticModels()
 		annotateClaudeThinking(ctx, models, executablePath)
 		return models, nil
+	case "csc":
+		models := claudeStaticModels()
+		annotateClaudeThinking(ctx, models, executablePath)
+		return models, nil
 	case "codex":
 		models := codexStaticModels()
 		annotateCodexThinking(ctx, models, executablePath)

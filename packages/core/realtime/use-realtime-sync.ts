@@ -20,6 +20,7 @@ import {
   agentRunCountsKeys,
   agentTasksKeys,
 } from "../agents/queries";
+import { workflowKeys } from "../workflows/queries";
 import { githubKeys } from "../github/queries";
 import {
   onIssueCreated,
@@ -564,6 +565,14 @@ export function useRealtimeSync(
       if (issue_id) qc.invalidateQueries({ queryKey: issueKeys.subscribers(issue_id) });
     });
 
+    // Workflow node run updates — keep DAG status fresh
+    const unsubNodeRunUpdated = ws.on("workflow:node_run_updated", (p) => {
+      const { run_id } = p as { run_id: string };
+      if (run_id) {
+        qc.invalidateQueries({ queryKey: workflowKeys.nodeRunsAll() });
+      }
+    });
+
     // --- Side-effect handlers (toast, navigation) ---
 
     // After the current workspace disappears (deleted or we were kicked out),
@@ -901,6 +910,7 @@ export function useRealtimeSync(
       unsubIssueReactionRemoved();
       unsubSubscriberAdded();
       unsubSubscriberRemoved();
+      unsubNodeRunUpdated();
       unsubWsUpdated();
       unsubWsDeleted();
       unsubMemberRemoved();

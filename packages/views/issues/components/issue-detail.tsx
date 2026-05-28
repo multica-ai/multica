@@ -1839,6 +1839,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 workflowId={issue.assignee_id}
                 runId={issue.workflow_run_id}
                 wsId={wsId}
+                parentIssueId={issue.id}
               />
             </div>
           )}

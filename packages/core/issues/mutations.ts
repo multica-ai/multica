@@ -259,6 +259,9 @@ export function useUpdateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      // Workflow assign may create sub-issues — refresh children cache.
+      qc.invalidateQueries({ queryKey: issueKeys.children(wsId, vars.id) });
+      qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
       // to resolve text-preview Eye gates, and unlike other mutations this

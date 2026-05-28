@@ -14,19 +14,26 @@ import (
 	"time"
 )
 
-// claudeBackend implements Backend by spawning the Claude Code CLI
-// with --output-format stream-json.
-type claudeBackend struct {
-	cfg Config
+// streamJSONBackend implements Backend by spawning a CLI that speaks the
+// Claude Code stream-json protocol. The name/defaultBin fields let the
+// same implementation serve compatible forks (e.g. csc) without duplication.
+type streamJSONBackend struct {
+	cfg        Config
+	name       string
+	defaultBin string
 }
 
-func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+// claudeBackend implements Backend by spawning the Claude Code CLI
+// with --output-format stream-json.
+type claudeBackend struct{ streamJSONBackend }
+
+func (b *streamJSONBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
-		execPath = "claude"
+		execPath = b.defaultBin
 	}
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("claude executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("%s executable not found at %q: %w", b.name, execPath, err)
 	}
 
 	timeout := opts.Timeout
@@ -71,12 +78,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("claude stdout pipe: %w", err)
+		return nil, fmt.Errorf("%s stdout pipe: %w", b.name, err)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("claude stdin pipe: %w", err)
+		return nil, fmt.Errorf("%s stdin pipe: %w", b.name, err)
 	}
 	closeStdin := func() {
 		if stdin != nil {
@@ -95,10 +102,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if err := cmd.Start(); err != nil {
 		closeStdin()
 		cancel()
-		return nil, fmt.Errorf("start claude: %w", err)
+		return nil, fmt.Errorf("start %s: %w", b.name, err)
 	}
 	if err := writeClaudeInput(stdin, prompt); err != nil {
-		// claude almost certainly died during startup (broken pipe). The
+		// %s almost certainly died during startup (broken pipe). The
 		// real reason is sitting in stderrBuf — surface it the same way the
 		// post-handshake error path does, otherwise the daemon log is the
 		// only place that knows whether it was a V8 abort, a missing native
@@ -107,11 +114,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		closeStdin()
 		cancel()
 		_ = cmd.Wait()
-		return nil, errors.New(withAgentStderr(fmt.Sprintf("write claude input: %v", err), "claude", stderrBuf.Tail()))
+		return nil, errors.New(withAgentStderr(fmt.Sprintf("write %s input: %v", b.name, err), b.name, stderrBuf.Tail()))
 	}
 	closeStdin()
 
-	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info(fmt.Sprintf("%s started", b.name), "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	// cmd.Start() succeeded — transfer temp file ownership to the goroutine.
 	mcpFileCleanup = nil
@@ -195,29 +202,29 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		if runCtx.Err() == context.DeadlineExceeded {
 			finalStatus = "timeout"
-			finalError = fmt.Sprintf("claude timed out after %s", timeout)
+			finalError = fmt.Sprintf("%s timed out after %s", b.name, timeout)
 		} else if runCtx.Err() == context.Canceled {
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
 		} else if exitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
+			finalError = fmt.Sprintf("%s exited with error: %v", b.name, exitErr)
 		}
 
 		// cmd.Wait() has returned — os/exec's stderr copy goroutine has
-		// observed every byte claude wrote to stderr before exiting, so
+		// observed every byte %s wrote to stderr before exiting, so
 		// stderrBuf.Tail() is safe to sample now. Attach the tail to any
 		// non-empty failure message; callers upstream surface this as the
 		// task's error field, which is the only place users see it.
 		if finalError != "" {
-			finalError = withAgentStderr(finalError, "claude", stderrBuf.Tail())
+			finalError = withAgentStderr(finalError, b.name, stderrBuf.Tail())
 		}
 
-		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info(fmt.Sprintf("%s finished", b.name), "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed")
 		if reportedSessionID != sessionID {
-			b.cfg.Logger.Info("claude resume did not land; clearing fresh session id for daemon fallback",
+			b.cfg.Logger.Info(fmt.Sprintf("%s resume did not land; clearing fresh session id for daemon fallback", b.name),
 				"requested_resume", opts.ResumeSessionID,
 				"emitted_session", sessionID,
 			)
@@ -236,7 +243,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage) {
+func (b *streamJSONBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage) {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		return
@@ -278,7 +285,7 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 	}
 }
 
-func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
+func (b *streamJSONBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		return
@@ -299,7 +306,7 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
 	}
 }
 
-func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }) {
+func (b *streamJSONBackend) handleControlRequest(msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }) {
 	// Auto-approve all tool uses in autonomous/daemon mode.
 	var req claudeControlRequestPayload
 	if err := json.Unmarshal(msg.Request, &req); err != nil {
@@ -328,12 +335,12 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 
 	data, err := json.Marshal(response)
 	if err != nil {
-		b.cfg.Logger.Warn("claude: failed to marshal control response", "error", err)
+		b.cfg.Logger.Warn(fmt.Sprintf("%s: failed to marshal control response", b.name), "error", err)
 		return
 	}
 	data = append(data, '\n')
 	if _, err := stdin.Write(data); err != nil {
-		b.cfg.Logger.Warn("claude: failed to write control response", "error", err)
+		b.cfg.Logger.Warn(fmt.Sprintf("%s: failed to write control response", b.name), "error", err)
 	}
 }
 

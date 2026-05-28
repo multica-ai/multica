@@ -129,6 +129,15 @@ web:
   affinity: {}
   volumes: []
   volumeMounts: []
+  # Subpath deployment: set NEXT_PUBLIC_API_URL so API requests go to
+  # /multica-backend/* and NEXT_PUBLIC_BASE_PATH for the web subpath.
+  # The proxy layer (e.g. Nginx) routes /multica-backend/* directly to
+  # the backend service; Next.js rewrite is not needed.
+  # extraEnv:
+  #   - name: NEXT_PUBLIC_BASE_PATH
+  #     value: "/multica-web"
+  #   - name: NEXT_PUBLIC_API_URL
+  #     value: "/multica-backend"
   extraEnv: []
 
   livenessProbe:
@@ -160,5 +169,24 @@ ingress:
   enabled: false
   className: ""
   annotations: {}
+  # Example: subpath deployment with separate routes for web and backend
+  # hosts:
+  #   - host: zgsmtest.cn
+  #     paths:
+  #       - path: /multica-web
+  #         pathType: Prefix
+  #         service: web
+  #       - path: /auth
+  #         pathType: Prefix
+  #         service: backend
+  #       - path: /api
+  #         pathType: Prefix
+  #         service: backend
+  #       - path: /ws
+  #         pathType: Prefix
+  #         service: backend
+  #       - path: /uploads
+  #         pathType: Prefix
+  #         service: backend
   hosts: []
   tls: []

@@ -386,6 +386,11 @@ func notifyDirect(
 		return
 	}
 
+		// workflow and other non-person types cannot receive notifications
+	if recipientType != "member" && recipientType != "agent" {
+		return
+	}
+
 	// Check notification preferences for member recipients.
 	if recipientType == "member" {
 		prefs := loadUserPrefs(ctx, queries, workspaceID, []string{recipientID})

@@ -38,6 +38,17 @@ func TestNewReturnsCopilotBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsCscBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("csc", Config{ExecutablePath: "/nonexistent/csc"})
+	if err != nil {
+		t.Fatalf("New(csc) error: %v", err)
+	}
+	if _, ok := b.(*cscBackend); !ok {
+		t.Fatalf("expected *cscBackend, got %T", b)
+	}
+}
+
 func TestNewRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 	_, err := New("gpt", Config{})
@@ -73,6 +84,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	supported := []string{
 		"claude", "codex", "copilot", "cursor", "gemini",
 		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
+		"csc",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {

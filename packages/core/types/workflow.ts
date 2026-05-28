@@ -76,10 +76,12 @@ export interface WorkflowNodeRun {
   worker_type: WorkerType;
   worker_id: string | null;
   worker_output: unknown;
+  worker_agent_task_id: string | null;
   critic_type: CriticType;
   critic_id: string | null;
   critic_output: unknown;
   critic_comment: string;
+  critic_agent_task_id: string | null;
   agent_task_id: string | null;
   started_at: string | null;
   completed_at: string | null;

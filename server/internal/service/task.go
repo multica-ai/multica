@@ -1820,6 +1820,16 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 			}
 		}
 	}
+	// Workflow tasks: resolve workspace from workflow_node_run → run → workflow.
+	if task.WorkflowNodeRunID.Valid {
+		if nodeRun, err := s.Queries.GetWorkflowNodeRun(ctx, task.WorkflowNodeRunID); err == nil {
+			if run, err := s.Queries.GetWorkflowRun(ctx, nodeRun.WorkflowRunID); err == nil {
+				if wf, err := s.Queries.GetWorkflow(ctx, run.WorkflowID); err == nil {
+					return util.UUIDToString(wf.WorkspaceID)
+				}
+			}
+		}
+	}
 	// Quick-create tasks have no issue / chat / autopilot link — workspace
 	// lives in the context JSONB. Returning "" here is what blocked
 	// requireDaemonTaskAccess (404 on /start, /progress, /complete, /fail

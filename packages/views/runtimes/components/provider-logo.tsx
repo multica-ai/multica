@@ -138,6 +138,19 @@ function GeminiLogo({ className }: { className: string }) {
   );
 }
 
+// Csc — placeholder mark using a simple geometric shape until official
+// brand assets are available.
+function CscLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#2563EB" />
+      <text x="12" y="17" textAnchor="middle" fill="white" fontSize="12" fontWeight="bold">
+        C
+      </text>
+    </svg>
+  );
+}
+
 // Kiro CLI — official icon sourced from kiro.dev/icon.svg.
 function KiroLogo({ className }: { className: string }) {
   const maskId = `kiro-logo-mask-${useId().replace(/:/g, "")}`;
@@ -207,6 +220,8 @@ export function ProviderLogo({
       return <KiroLogo className={className} />;
     case "gemini":
       return <GeminiLogo className={className} />;
+    case "csc":
+      return <CscLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

@@ -31,11 +31,18 @@ function hasLegacyToken(): boolean {
 // Derive WebSocket URL from the page origin so self-hosted / LAN deployments
 // work without explicit NEXT_PUBLIC_WS_URL.  The Next.js rewrite rule
 // (/ws → backend) handles proxying.
+// When NEXT_PUBLIC_API_URL is a relative path (e.g. /multica-backend), the
+// WS path is derived from it so both HTTP and WS requests share the same
+// subpath prefix.
 function deriveWsUrl(): string | undefined {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
   if (typeof window === "undefined") return undefined;
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}/ws`;
+  const apiPath = process.env.NEXT_PUBLIC_API_URL || "";
+  // If apiBaseUrl is a relative path like /multica-backend, WS goes to
+  // /multica-backend/ws; otherwise fall back to /ws.
+  const wsPath = apiPath && apiPath.startsWith("/") ? `${apiPath}/ws` : "/ws";
+  return `${proto}//${window.location.host}${wsPath}`;
 }
 
 // Build-time version preferred (CI sets NEXT_PUBLIC_APP_VERSION to a git tag

@@ -98,6 +98,20 @@ UPDATE workflow_node_run SET
 WHERE id = $1
 RETURNING *;
 
+-- name: LinkNodeRunWorkerTask :one
+UPDATE workflow_node_run SET
+    worker_agent_task_id = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: LinkNodeRunCriticTask :one
+UPDATE workflow_node_run SET
+    critic_agent_task_id = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: LinkNodeRunAgentTask :one
 UPDATE workflow_node_run SET
     agent_task_id = $2,
@@ -168,5 +182,5 @@ LIMIT $2 OFFSET $3;
 
 -- name: CreateWorkflowAgentTask :one
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, workflow_node_run_id, context)
-VALUES ($1, $2, NULL, 'queued', $3, sqlc.narg('workflow_node_run_id'), sqlc.narg('context'))
+VALUES ($1, $2, sqlc.narg('issue_id'), 'queued', $3, sqlc.narg('workflow_node_run_id'), sqlc.narg('context'))
 RETURNING *;

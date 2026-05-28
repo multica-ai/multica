@@ -6,7 +6,8 @@
       "name": "名称",
       "status": "状态",
       "nodes": "节点",
-      "last_run": "最近运行"
+      "last_run": "最近运行",
+      "runs": "运行历史"
     },
     "last_run_empty": "--",
     "empty": {

@@ -17,6 +17,7 @@ export const workflowKeys = {
   runs: (wsId: string, workflowId: string) => [...workflowKeys.detail(wsId, workflowId), "runs"] as const,
   run: (wsId: string, workflowId: string, runId: string) => [...workflowKeys.runs(wsId, workflowId), runId] as const,
   nodeRuns: (wsId: string, workflowId: string, runId: string) => [...workflowKeys.run(wsId, workflowId, runId), "node-runs"] as const,
+  nodeRunsAll: () => ["workflows", "node-runs"] as const,
   myTasks: (wsId: string) => [...workflowKeys.all(wsId), "my-tasks"] as const,
 };
 
@@ -77,6 +78,13 @@ export function workflowNodeRunsOptions(wsId: string, workflowId: string, runId:
   return queryOptions({
     queryKey: workflowKeys.nodeRuns(wsId, workflowId, runId),
     queryFn: () => api.listWorkflowNodeRuns(workflowId, runId),
+    refetchInterval: (query) => {
+      const runs = query.state.data;
+      if (!runs || runs.length === 0) return false;
+      const terminal = new Set(["completed", "critic_approved", "failed", "blocked", "skipped", "cancelled"]);
+      const allDone = runs.every((nr: { status: string }) => terminal.has(nr.status));
+      return allDone ? false : 5000;
+    },
   });
 }
 
@@ -194,6 +202,7 @@ export function useCancelWorkflowRun(wsId: string) {
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.run(wsId, vars.workflowId, vars.runId) });
       queryClient.invalidateQueries({ queryKey: workflowKeys.runs(wsId, vars.workflowId) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.nodeRuns(wsId, vars.workflowId, vars.runId) });
     },
   });
 }

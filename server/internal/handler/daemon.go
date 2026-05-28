@@ -1481,6 +1481,17 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Workflow task: resolve workspace from workflow_node_run -> run -> workflow
+	if task.WorkflowNodeRunID.Valid && resp.WorkspaceID == "" {
+		if nodeRun, err := h.Queries.GetWorkflowNodeRun(r.Context(), task.WorkflowNodeRunID); err == nil {
+			if run, err := h.Queries.GetWorkflowRun(r.Context(), nodeRun.WorkflowRunID); err == nil {
+				if wf, err := h.Queries.GetWorkflow(r.Context(), run.WorkflowID); err == nil {
+					resp.WorkspaceID = uuidToString(wf.WorkspaceID)
+				}
+			}
+		}
+	}
+
 	// Workspace isolation check: the daemon uses this response's workspace_id
 	// as the only authority for MULTICA_WORKSPACE_ID in the agent env. An
 	// empty value would make the CLI silently fall back to the user-global

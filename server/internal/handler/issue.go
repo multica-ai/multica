@@ -62,6 +62,8 @@ type IssueResponse struct {
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
 	Labels *[]LabelResponse `json:"labels,omitempty"`
+	OriginType *string `json:"origin_type,omitempty"`
+	OriginID   *string `json:"origin_id,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -89,6 +91,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		WorkflowID:    uuidToPtr(i.WorkflowID),
 		WorkflowRunID: uuidToPtr(i.WorkflowRunID),
 		Metadata:      parseIssueMetadata(i.Metadata),
+		OriginType:    textToPtr(i.OriginType),
+		OriginID:      uuidToPtr(i.OriginID),
 	}
 }
 
@@ -2020,6 +2024,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 								slog.Warn("failed to create sub-issue for node run", "node_run_id", uuidToString(nr.ID), "error", err)
 							}
 						}
+						// Dispatch after sub-issues exist so tasks can link issue_id.
+							h.WorkflowService.DispatchRootNodeRuns(ctx, run.ID)
 						_, err = h.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
 							ID:            issue.ID,
 							AssigneeType:  issue.AssigneeType,
@@ -2034,6 +2040,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 						if err != nil {
 							slog.Warn("failed to set workflow_run_id on parent issue", "issue_id", uuidToString(issue.ID), "error", err)
 						} else {
+							resp.WorkflowID = uuidToPtr(issue.AssigneeID)
 							resp.WorkflowRunID = uuidToPtr(run.ID)
 						}
 					}
@@ -2295,11 +2302,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if issue.AssigneeType.Valid && issue.AssigneeType.String == "workflow" && !issue.WorkflowRunID.Valid {
 			workflow, wfErr := h.Queries.GetWorkflow(ctx, issue.AssigneeID)
 			if wfErr != nil {
-				slog.Warn("failed to load workflow for issue assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr)
+				slog.Warn("failed to load workflow for issue assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr); resp.WorkflowID = uuidToPtr(issue.AssigneeID)
 			} else {
 				run, nodeRuns, wfErr := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, actorType, actorID)
 				if wfErr != nil {
-					slog.Warn("failed to start workflow run on assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr)
+					resp.WorkflowID = uuidToPtr(issue.AssigneeID); slog.Warn("failed to start workflow run on assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr)
 				} else {
 					for _, nr := range nodeRuns {
 						childNum, cerr := h.Queries.IncrementIssueCounter(ctx, prevIssue.WorkspaceID)
@@ -2312,6 +2319,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 							slog.Warn("failed to create sub-issue for node run", "node_run_id", uuidToString(nr.ID), "error", cerr)
 						}
 					}
+				h.WorkflowService.DispatchRootNodeRuns(ctx, run.ID)
 					_, cerr := h.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
 						ID:            issue.ID,
 						AssigneeType:  issue.AssigneeType,
@@ -2914,7 +2922,7 @@ func (h *Handler) createWorkflowSubIssue(
 		assigneeID = node.WorkerID
 	}
 
-	return qtx.CreateIssue(ctx, db.CreateIssueParams{
+	return qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 		WorkspaceID:   wsUUID,
 		Title:         subTitle,
 		Description:   parentIssue.Description,
@@ -2922,12 +2930,14 @@ func (h *Handler) createWorkflowSubIssue(
 		Priority:      parentIssue.Priority,
 		AssigneeType:  assigneeType,
 		AssigneeID:    assigneeID,
-		CreatorType:   "system",
+		CreatorType:   "member",
 		CreatorID:     parentIssue.CreatorID,
 		ParentIssueID: parentIssue.ID,
 		Position:      0,
 		Number:        issueNumber,
 		ProjectID:     parentIssue.ProjectID,
+		OriginType:    pgtype.Text{String: "workflow", Valid: true},
+		OriginID:      nodeRun.ID,
 	})
 }
 
