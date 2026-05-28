@@ -1,6 +1,6 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, Codex, Copilot, OpenCode, OpenClaw, Hermes,
-// Gemini, Pi, Cursor, Kimi, Kiro). It mirrors the happy-cli AgentBackend
+// Gemini, Pi, Cursor, Kimi, Kiro, Astraflow). It mirrors the happy-cli AgentBackend
 // pattern, translated to idiomatic Go.
 package agent
 
@@ -107,7 +107,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro".
+// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "astraflow", "astraflow-cn".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -136,8 +136,29 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &kimiBackend{cfg: cfg}, nil
 	case "kiro":
 		return &kiroBackend{cfg: cfg}, nil
+	case "astraflow":
+		// Astraflow is OpenAI-compatible; reuse opencodeBackend with the
+		// global endpoint injected via OPENAI_BASE_URL / OPENAI_API_KEY.
+		if cfg.Env == nil {
+			cfg.Env = map[string]string{}
+		}
+		cfg.Env["OPENAI_BASE_URL"] = "https://api-us-ca.umodelverse.ai/v1"
+		if key := cfg.Env["ASTRAFLOW_API_KEY"]; key != "" {
+			cfg.Env["OPENAI_API_KEY"] = key
+		}
+		return &opencodeBackend{cfg: cfg}, nil
+	case "astraflow-cn":
+		// Astraflow CN: China endpoint variant.
+		if cfg.Env == nil {
+			cfg.Env = map[string]string{}
+		}
+		cfg.Env["OPENAI_BASE_URL"] = "https://api.modelverse.cn/v1"
+		if key := cfg.Env["ASTRAFLOW_CN_API_KEY"]; key != "" {
+			cfg.Env["OPENAI_API_KEY"] = key
+		}
+		return &opencodeBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, astraflow, astraflow-cn)", agentType)
 	}
 }
 
@@ -158,12 +179,14 @@ var launchHeaders = map[string]string{
 	"copilot":  "copilot (json)",
 	"cursor":   "cursor-agent (stream-json)",
 	"gemini":   "gemini (stream-json)",
-	"hermes":   "hermes acp",
-	"openclaw": "openclaw agent (json)",
-	"opencode": "opencode run (json)",
-	"pi":       "pi (json mode)",
-	"kimi":     "kimi acp",
-	"kiro":     "kiro-cli acp",
+	"hermes":        "hermes acp",
+	"openclaw":      "openclaw agent (json)",
+	"opencode":      "opencode run (json)",
+	"pi":            "pi (json mode)",
+	"kimi":          "kimi acp",
+	"kiro":          "kiro-cli acp",
+	"astraflow":     "opencode run (json) [Astraflow global]",
+	"astraflow-cn":  "opencode run (json) [Astraflow CN]",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

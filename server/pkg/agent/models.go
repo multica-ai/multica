@@ -122,6 +122,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
 		})
+	case "astraflow", "astraflow-cn":
+		// Astraflow is OpenAI-compatible; delegate to the opencode model
+		// discovery path which enumerates whatever the configured endpoint
+		// supports via `opencode models`.
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverOpenCodeModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
