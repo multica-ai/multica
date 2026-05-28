@@ -12,18 +12,18 @@ import (
 // mockResolver implements Resolver for testing.
 type mockResolver struct {
 	prefix string
-	issues map[int32]db.Issue
+	issues map[int32]db.MulticaIssue
 }
 
-func (m *mockResolver) GetWorkspace(_ context.Context, _ pgtype.UUID) (db.Workspace, error) {
-	return db.Workspace{IssuePrefix: m.prefix}, nil
+func (m *mockResolver) GetWorkspace(_ context.Context, _ pgtype.UUID) (db.MulticaWorkspace, error) {
+	return db.MulticaWorkspace{IssuePrefix: m.prefix}, nil
 }
 
-func (m *mockResolver) GetIssueByNumber(_ context.Context, arg db.GetIssueByNumberParams) (db.Issue, error) {
+func (m *mockResolver) GetIssueByNumber(_ context.Context, arg db.GetIssueByNumberParams) (db.MulticaIssue, error) {
 	if issue, ok := m.issues[arg.Number]; ok {
 		return issue, nil
 	}
-	return db.Issue{}, fmt.Errorf("not found")
+	return db.MulticaIssue{}, fmt.Errorf("not found")
 }
 
 func makeUUID(id string) pgtype.UUID {
@@ -41,7 +41,7 @@ func TestExpandIssueIdentifiers(t *testing.T) {
 
 	resolver := &mockResolver{
 		prefix: "MUL",
-		issues: map[int32]db.Issue{
+		issues: map[int32]db.MulticaIssue{
 			117: {ID: issueID, Number: 117},
 		},
 	}

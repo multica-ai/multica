@@ -93,7 +93,7 @@ func setRuntimeStatus(t *testing.T, runtimeID, status string) {
 
 // loadRuntime is a thin wrapper around the sqlc query to keep the test bodies
 // short.
-func loadRuntime(t *testing.T, runtimeID string) db.AgentRuntime {
+func loadRuntime(t *testing.T, runtimeID string) db.MulticaAgentRuntime {
 	t.Helper()
 	uuid, err := pgUUID(runtimeID)
 	if err != nil {

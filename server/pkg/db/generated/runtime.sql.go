@@ -12,7 +12,7 @@ import (
 )
 
 const cancelAgentTasksByRuntimeOrAgent = `-- name: CancelAgentTasksByRuntimeOrAgent :many
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE (runtime_id = ANY($1::uuid[]) OR agent_id = ANY($2::uuid[]))
   AND status IN ('queued', 'dispatched', 'running')
@@ -25,28 +25,28 @@ type CancelAgentTasksByRuntimeOrAgentParams struct {
 }
 
 // Cancels every active task that either lives on one of the given runtimes
-// OR belongs to one of the given agents. Used by the member-revocation flow:
-// the runtime-side covers tasks queued against the leaving member's runtimes;
-// the agent-side covers tasks pinned to a different runtime that those agents
-// left behind from a prior UpdateAgent (agent.runtime_id can change, but
-// agent_task_queue.runtime_id does not get rewritten when it does, so a task
-// queued on runtime A by agent X — later moved to runtime B — survives the
+// OR belongs to one of the given agents. Used by the multica_member-revocation flow:
+// the runtime-side covers tasks queued against the leaving multica_member's runtimes;
+// the multica_agent-side covers tasks pinned to a different runtime that those agents
+// left behind from a prior UpdateAgent (multica_agent.runtime_id can change, but
+// multica_agent_task_queue.runtime_id does not get rewritten when it does, so a task
+// queued on runtime A by multica_agent X — later moved to runtime B — survives the
 // runtime-only revoke and could still be claimed because ClaimAgentTask does
-// not gate on agent.archived_at).
+// not gate on multica_agent.archived_at).
 //
 // We use 'cancelled' rather than 'failed' so the daemon's per-task status
-// poller (watchTaskCancellation) interrupts the running agent gracefully.
+// poller (watchTaskCancellation) interrupts the running multica_agent gracefully.
 // Returns the affected rows so the caller can broadcast task:cancelled and
-// reconcile per-agent status.
-func (q *Queries) CancelAgentTasksByRuntimeOrAgent(ctx context.Context, arg CancelAgentTasksByRuntimeOrAgentParams) ([]AgentTaskQueue, error) {
+// reconcile per-multica_agent status.
+func (q *Queries) CancelAgentTasksByRuntimeOrAgent(ctx context.Context, arg CancelAgentTasksByRuntimeOrAgentParams) ([]MulticaAgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, cancelAgentTasksByRuntimeOrAgent, arg.RuntimeIds, arg.AgentIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AgentTaskQueue{}
+	items := []MulticaAgentTaskQueue{}
 	for rows.Next() {
-		var i AgentTaskQueue
+		var i MulticaAgentTaskQueue
 		if err := rows.Scan(
 			&i.ID,
 			&i.AgentID,
@@ -86,7 +86,7 @@ func (q *Queries) CancelAgentTasksByRuntimeOrAgent(ctx context.Context, arg Canc
 }
 
 const countActiveAgentsByRuntime = `-- name: CountActiveAgentsByRuntime :one
-SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL
+SELECT count(*) FROM multica_agent WHERE runtime_id = $1 AND archived_at IS NULL
 `
 
 func (q *Queries) CountActiveAgentsByRuntime(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
@@ -97,7 +97,7 @@ func (q *Queries) CountActiveAgentsByRuntime(ctx context.Context, runtimeID pgty
 }
 
 const deleteAgentRuntime = `-- name: DeleteAgentRuntime :exec
-DELETE FROM agent_runtime WHERE id = $1
+DELETE FROM multica_agent_runtime WHERE id = $1
 `
 
 func (q *Queries) DeleteAgentRuntime(ctx context.Context, id pgtype.UUID) error {
@@ -106,7 +106,7 @@ func (q *Queries) DeleteAgentRuntime(ctx context.Context, id pgtype.UUID) error 
 }
 
 const deleteArchivedAgentsByRuntime = `-- name: DeleteArchivedAgentsByRuntime :exec
-DELETE FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+DELETE FROM multica_agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
 `
 
 func (q *Queries) DeleteArchivedAgentsByRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
@@ -115,10 +115,10 @@ func (q *Queries) DeleteArchivedAgentsByRuntime(ctx context.Context, runtimeID p
 }
 
 const deleteStaleOfflineRuntimes = `-- name: DeleteStaleOfflineRuntimes :many
-DELETE FROM agent_runtime
+DELETE FROM multica_agent_runtime
 WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => $1::double precision)
-  AND id NOT IN (SELECT DISTINCT runtime_id FROM agent)
+  AND id NOT IN (SELECT DISTINCT runtime_id FROM multica_agent)
 RETURNING id, workspace_id
 `
 
@@ -128,8 +128,8 @@ type DeleteStaleOfflineRuntimesRow struct {
 }
 
 // Deletes runtimes that have been offline for longer than the TTL and have
-// no agents bound (active or archived). The FK constraint on agent.runtime_id
-// is ON DELETE RESTRICT, so we must exclude all agent references.
+// no agents bound (active or archived). The FK constraint on multica_agent.runtime_id
+// is ON DELETE RESTRICT, so we must exclude all multica_agent references.
 func (q *Queries) DeleteStaleOfflineRuntimes(ctx context.Context, staleSeconds float64) ([]DeleteStaleOfflineRuntimesRow, error) {
 	rows, err := q.db.Query(ctx, deleteStaleOfflineRuntimes, staleSeconds)
 	if err != nil {
@@ -151,27 +151,27 @@ func (q *Queries) DeleteStaleOfflineRuntimes(ctx context.Context, staleSeconds f
 }
 
 const failTasksForOfflineRuntimes = `-- name: FailTasksForOfflineRuntimes :many
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',
     failure_reason = 'runtime_offline'
 WHERE status IN ('dispatched', 'running')
   AND runtime_id IN (
-    SELECT id FROM agent_runtime WHERE status = 'offline'
+    SELECT id FROM multica_agent_runtime WHERE status = 'offline'
   )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, workflow_node_run_id
 `
 
 // Marks dispatched/running tasks as failed when their runtime is offline.
 // This cleans up orphaned tasks after a daemon crash or network partition.
-func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQueue, error) {
+func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]MulticaAgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, failTasksForOfflineRuntimes)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AgentTaskQueue{}
+	items := []MulticaAgentTaskQueue{}
 	for rows.Next() {
-		var i AgentTaskQueue
+		var i MulticaAgentTaskQueue
 		if err := rows.Scan(
 			&i.ID,
 			&i.AgentID,
@@ -211,7 +211,7 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQ
 }
 
 const findLegacyRuntimesByDaemonID = `-- name: FindLegacyRuntimesByDaemonID :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM multica_agent_runtime
 WHERE workspace_id = $1
   AND provider = $2
   AND LOWER(daemon_id) = LOWER($3)
@@ -235,18 +235,18 @@ type FindLegacyRuntimesByDaemonIDParams struct {
 //
 // Returns many rather than one because case drift may have already minted
 // duplicate rows historically (e.g. `Foo.local` AND `foo.local` under the
-// same workspace+provider). A single-row lookup would consolidate only one
+// same multica_workspace+provider). A single-row lookup would consolidate only one
 // of them and leave the rest orphaned. Callers must merge every returned
 // row into the new UUID-keyed runtime.
-func (q *Queries) FindLegacyRuntimesByDaemonID(ctx context.Context, arg FindLegacyRuntimesByDaemonIDParams) ([]AgentRuntime, error) {
+func (q *Queries) FindLegacyRuntimesByDaemonID(ctx context.Context, arg FindLegacyRuntimesByDaemonIDParams) ([]MulticaAgentRuntime, error) {
 	rows, err := q.db.Query(ctx, findLegacyRuntimesByDaemonID, arg.WorkspaceID, arg.Provider, arg.DaemonID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AgentRuntime{}
+	items := []MulticaAgentRuntime{}
 	for rows.Next() {
-		var i AgentRuntime
+		var i MulticaAgentRuntime
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -275,7 +275,7 @@ func (q *Queries) FindLegacyRuntimesByDaemonID(ctx context.Context, arg FindLega
 }
 
 const forceOfflineRuntimesByIDs = `-- name: ForceOfflineRuntimesByIDs :many
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE id = ANY($1::uuid[]) AND status = 'online'
 RETURNING id, workspace_id, owner_id, daemon_id, provider
@@ -292,7 +292,7 @@ type ForceOfflineRuntimesByIDsRow struct {
 // Unconditionally flips a known set of runtime IDs to offline. Distinct from
 // MarkRuntimesOfflineByIDs (which keeps a stale-window predicate so the
 // sweeper cannot demote a runtime that just heartbeated): this variant is
-// used by intentional revocation paths — e.g. removing a workspace member —
+// used by intentional revocation paths — e.g. removing a multica_workspace multica_member —
 // where the caller has already decided the runtime should be offline
 // regardless of recent liveness.
 func (q *Queries) ForceOfflineRuntimesByIDs(ctx context.Context, runtimeIds []pgtype.UUID) ([]ForceOfflineRuntimesByIDsRow, error) {
@@ -322,13 +322,13 @@ func (q *Queries) ForceOfflineRuntimesByIDs(ctx context.Context, runtimeIds []pg
 }
 
 const getAgentRuntime = `-- name: GetAgentRuntime :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM multica_agent_runtime
 WHERE id = $1
 `
 
-func (q *Queries) GetAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRuntime, error) {
+func (q *Queries) GetAgentRuntime(ctx context.Context, id pgtype.UUID) (MulticaAgentRuntime, error) {
 	row := q.db.QueryRow(ctx, getAgentRuntime, id)
-	var i AgentRuntime
+	var i MulticaAgentRuntime
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -350,7 +350,7 @@ func (q *Queries) GetAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRun
 }
 
 const getAgentRuntimeForWorkspace = `-- name: GetAgentRuntimeForWorkspace :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM multica_agent_runtime
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -359,9 +359,9 @@ type GetAgentRuntimeForWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentRuntimeForWorkspaceParams) (AgentRuntime, error) {
+func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentRuntimeForWorkspaceParams) (MulticaAgentRuntime, error) {
 	row := q.db.QueryRow(ctx, getAgentRuntimeForWorkspace, arg.ID, arg.WorkspaceID)
-	var i AgentRuntime
+	var i MulticaAgentRuntime
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -383,20 +383,20 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 }
 
 const listAgentRuntimes = `-- name: ListAgentRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM multica_agent_runtime
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID) ([]AgentRuntime, error) {
+func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID) ([]MulticaAgentRuntime, error) {
 	rows, err := q.db.Query(ctx, listAgentRuntimes, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AgentRuntime{}
+	items := []MulticaAgentRuntime{}
 	for rows.Next() {
-		var i AgentRuntime
+		var i MulticaAgentRuntime
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -425,7 +425,7 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 }
 
 const listAgentRuntimesByOwner = `-- name: ListAgentRuntimesByOwner :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility FROM multica_agent_runtime
 WHERE workspace_id = $1 AND owner_id = $2
 ORDER BY created_at ASC
 `
@@ -435,15 +435,15 @@ type ListAgentRuntimesByOwnerParams struct {
 	OwnerID     pgtype.UUID `json:"owner_id"`
 }
 
-func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRuntimesByOwnerParams) ([]AgentRuntime, error) {
+func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRuntimesByOwnerParams) ([]MulticaAgentRuntime, error) {
 	rows, err := q.db.Query(ctx, listAgentRuntimesByOwner, arg.WorkspaceID, arg.OwnerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AgentRuntime{}
+	items := []MulticaAgentRuntime{}
 	for rows.Next() {
-		var i AgentRuntime
+		var i MulticaAgentRuntime
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -472,7 +472,7 @@ func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRun
 }
 
 const listArchivedAgentIDsByRuntime = `-- name: ListArchivedAgentIDsByRuntime :many
-SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+SELECT id FROM multica_agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
 `
 
 // Companion to DeleteArchivedAgentsByRuntime: enumerates the archived agents
@@ -499,7 +499,7 @@ func (q *Queries) ListArchivedAgentIDsByRuntime(ctx context.Context, runtimeID p
 }
 
 const markAgentRuntimeOnline = `-- name: MarkAgentRuntimeOnline :one
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility
@@ -508,9 +508,9 @@ RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, dev
 // Used on the offline→online transition (and on first heartbeat after
 // registration). Writes status, last_seen_at, and updated_at because the
 // status flip is a real state change and we want updated_at to reflect it.
-func (q *Queries) MarkAgentRuntimeOnline(ctx context.Context, id pgtype.UUID) (AgentRuntime, error) {
+func (q *Queries) MarkAgentRuntimeOnline(ctx context.Context, id pgtype.UUID) (MulticaAgentRuntime, error) {
 	row := q.db.QueryRow(ctx, markAgentRuntimeOnline, id)
-	var i AgentRuntime
+	var i MulticaAgentRuntime
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -532,7 +532,7 @@ func (q *Queries) MarkAgentRuntimeOnline(ctx context.Context, id pgtype.UUID) (A
 }
 
 const markRuntimesOfflineByIDs = `-- name: MarkRuntimesOfflineByIDs :many
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE status = 'online'
   AND id = ANY($1::uuid[])
@@ -591,18 +591,18 @@ func (q *Queries) MarkRuntimesOfflineByIDs(ctx context.Context, arg MarkRuntimes
 }
 
 const pauseAutopilotsByAgentAssignees = `-- name: PauseAutopilotsByAgentAssignees :exec
-UPDATE autopilot
+UPDATE multica_autopilot
 SET status = 'paused', updated_at = now()
 WHERE status = 'active'
   AND assignee_type = 'agent'
   AND assignee_id = ANY($1::uuid[])
 `
 
-// Pauses every active autopilot whose agent assignee is in the supplied list.
+// Pauses every active multica_autopilot whose multica_agent assignee is in the supplied list.
 // Called before hard-deleting archived agents on runtime teardown so the rows
-// do not become dangling (autopilot.assignee_id no longer has an agent FK
+// do not become dangling (multica_autopilot.assignee_id no longer has an multica_agent FK
 // since migration 096). Status='paused' makes the breakage visible in the UI
-// — operators can re-point the autopilot at a live agent or delete it —
+// — operators can re-point the multica_autopilot at a live multica_agent or delete it —
 // rather than silently piling skipped runs.
 func (q *Queries) PauseAutopilotsByAgentAssignees(ctx context.Context, assigneeIds []pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, pauseAutopilotsByAgentAssignees, assigneeIds)
@@ -610,7 +610,7 @@ func (q *Queries) PauseAutopilotsByAgentAssignees(ctx context.Context, assigneeI
 }
 
 const reassignAgentsToRuntime = `-- name: ReassignAgentsToRuntime :execrows
-UPDATE agent
+UPDATE multica_agent
 SET runtime_id = $1
 WHERE runtime_id = $2
 `
@@ -620,7 +620,7 @@ type ReassignAgentsToRuntimeParams struct {
 	OldRuntimeID pgtype.UUID `json:"old_runtime_id"`
 }
 
-// Re-points every agent referencing old_runtime_id at new_runtime_id.
+// Re-points every multica_agent referencing old_runtime_id at new_runtime_id.
 func (q *Queries) ReassignAgentsToRuntime(ctx context.Context, arg ReassignAgentsToRuntimeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reassignAgentsToRuntime, arg.NewRuntimeID, arg.OldRuntimeID)
 	if err != nil {
@@ -630,7 +630,7 @@ func (q *Queries) ReassignAgentsToRuntime(ctx context.Context, arg ReassignAgent
 }
 
 const reassignTasksToRuntime = `-- name: ReassignTasksToRuntime :execrows
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET runtime_id = $1
 WHERE runtime_id = $2
 `
@@ -641,7 +641,7 @@ type ReassignTasksToRuntimeParams struct {
 }
 
 // Re-points every queued/running/completed task referencing old_runtime_id.
-// Required before deleting the old runtime row because agent_task_queue has
+// Required before deleting the old runtime row because multica_agent_task_queue has
 // an ON DELETE CASCADE FK that would otherwise drop historical tasks.
 func (q *Queries) ReassignTasksToRuntime(ctx context.Context, arg ReassignTasksToRuntimeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reassignTasksToRuntime, arg.NewRuntimeID, arg.OldRuntimeID)
@@ -652,7 +652,7 @@ func (q *Queries) ReassignTasksToRuntime(ctx context.Context, arg ReassignTasksT
 }
 
 const recordRuntimeLegacyDaemonID = `-- name: RecordRuntimeLegacyDaemonID :exec
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET legacy_daemon_id = COALESCE(legacy_daemon_id, $2)
 WHERE id = $1
 `
@@ -672,7 +672,7 @@ func (q *Queries) RecordRuntimeLegacyDaemonID(ctx context.Context, arg RecordRun
 }
 
 const selectStaleOnlineRuntimes = `-- name: SelectStaleOnlineRuntimes :many
-SELECT id, workspace_id, owner_id, daemon_id, provider FROM agent_runtime
+SELECT id, workspace_id, owner_id, daemon_id, provider FROM multica_agent_runtime
 WHERE status = 'online'
   AND last_seen_at < now() - make_interval(secs => $1::double precision)
 `
@@ -716,7 +716,7 @@ func (q *Queries) SelectStaleOnlineRuntimes(ctx context.Context, staleSeconds fl
 }
 
 const setAgentRuntimeOffline = `-- name: SetAgentRuntimeOffline :exec
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE id = $1
 `
@@ -727,7 +727,7 @@ func (q *Queries) SetAgentRuntimeOffline(ctx context.Context, id pgtype.UUID) er
 }
 
 const touchAgentRuntimeLastSeen = `-- name: TouchAgentRuntimeLastSeen :execrows
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET last_seen_at = now()
 WHERE id = $1 AND status = 'online'
 `
@@ -753,7 +753,7 @@ func (q *Queries) TouchAgentRuntimeLastSeen(ctx context.Context, id pgtype.UUID)
 }
 
 const touchAgentRuntimesLastSeenBatch = `-- name: TouchAgentRuntimesLastSeenBatch :execrows
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET last_seen_at = now()
 WHERE id = ANY($1::uuid[]) AND status = 'online'
 `
@@ -776,7 +776,7 @@ func (q *Queries) TouchAgentRuntimesLastSeenBatch(ctx context.Context, ids []pgt
 }
 
 const updateAgentRuntimeVisibility = `-- name: UpdateAgentRuntimeVisibility :one
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET visibility = $1, updated_at = now()
 WHERE id = $2
 RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility
@@ -788,12 +788,12 @@ type UpdateAgentRuntimeVisibilityParams struct {
 }
 
 // Toggles a runtime between 'private' (only owner can bind agents) and
-// 'public' (any workspace member can). Default for new rows is 'private'
-// (see migration 083). Gated at the handler layer to owner / workspace
+// 'public' (any multica_workspace multica_member can). Default for new rows is 'private'
+// (see migration 083). Gated at the handler layer to owner / multica_workspace
 // admin only.
-func (q *Queries) UpdateAgentRuntimeVisibility(ctx context.Context, arg UpdateAgentRuntimeVisibilityParams) (AgentRuntime, error) {
+func (q *Queries) UpdateAgentRuntimeVisibility(ctx context.Context, arg UpdateAgentRuntimeVisibilityParams) (MulticaAgentRuntime, error) {
 	row := q.db.QueryRow(ctx, updateAgentRuntimeVisibility, arg.Visibility, arg.ID)
-	var i AgentRuntime
+	var i MulticaAgentRuntime
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -815,7 +815,7 @@ func (q *Queries) UpdateAgentRuntimeVisibility(ctx context.Context, arg UpdateAg
 }
 
 const upsertAgentRuntime = `-- name: UpsertAgentRuntime :one
-INSERT INTO agent_runtime (
+INSERT INTO multica_agent_runtime (
     workspace_id,
     daemon_id,
     name,
@@ -834,7 +834,7 @@ DO UPDATE SET
     status = EXCLUDED.status,
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
-    owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
+    owner_id = COALESCE(EXCLUDED.owner_id, multica_agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
 RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, (xmax = 0) AS inserted

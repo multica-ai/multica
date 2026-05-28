@@ -14,7 +14,7 @@ import (
 
 // listActivitiesForIssue is a test helper that fetches up to 100 activity_log
 // records for an issue. Uses the same query that backs the timeline endpoint.
-func listActivitiesForIssue(t *testing.T, queries *db.Queries, issueID string) []db.ActivityLog {
+func listActivitiesForIssue(t *testing.T, queries *db.Queries, issueID string) []db.MulticaActivityLog {
 	t.Helper()
 	activities, err := queries.ListActivitiesForIssue(context.Background(), db.ListActivitiesForIssueParams{
 		IssueID: util.MustParseUUID(issueID),

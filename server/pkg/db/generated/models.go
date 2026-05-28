@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type ActivityLog struct {
+type MulticaActivityLog struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	IssueID     pgtype.UUID        `json:"issue_id"`
@@ -21,7 +21,7 @@ type ActivityLog struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type Agent struct {
+type MulticaAgent struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
 	Name               string             `json:"name"`
@@ -46,7 +46,18 @@ type Agent struct {
 	ThinkingLevel      pgtype.Text        `json:"thinking_level"`
 }
 
-type AgentRuntime struct {
+type MulticaAgentAuditLog struct {
+	ID         pgtype.UUID        `json:"id"`
+	AgentID    pgtype.UUID        `json:"agent_id"`
+	Action     string             `json:"action"`
+	TargetType string             `json:"target_type"`
+	TargetID   string             `json:"target_id"`
+	StatusCode pgtype.Int4        `json:"status_code"`
+	ErrorMsg   pgtype.Text        `json:"error_msg"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type MulticaAgentRuntime struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
 	DaemonID       pgtype.Text        `json:"daemon_id"`
@@ -64,13 +75,13 @@ type AgentRuntime struct {
 	Visibility     string             `json:"visibility"`
 }
 
-type AgentSkill struct {
+type MulticaAgentSkill struct {
 	AgentID   pgtype.UUID        `json:"agent_id"`
 	SkillID   pgtype.UUID        `json:"skill_id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
-type AgentTaskQueue struct {
+type MulticaAgentTaskQueue struct {
 	ID                pgtype.UUID        `json:"id"`
 	AgentID           pgtype.UUID        `json:"agent_id"`
 	IssueID           pgtype.UUID        `json:"issue_id"`
@@ -99,7 +110,7 @@ type AgentTaskQueue struct {
 	WorkflowNodeRunID pgtype.UUID        `json:"workflow_node_run_id"`
 }
 
-type Attachment struct {
+type MulticaAttachment struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	IssueID       pgtype.UUID        `json:"issue_id"`
@@ -115,7 +126,7 @@ type Attachment struct {
 	ChatMessageID pgtype.UUID        `json:"chat_message_id"`
 }
 
-type Autopilot struct {
+type MulticaAutopilot struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
 	Title              string             `json:"title"`
@@ -133,7 +144,7 @@ type Autopilot struct {
 	ProjectID          pgtype.UUID        `json:"project_id"`
 }
 
-type AutopilotRun struct {
+type MulticaAutopilotRun struct {
 	ID             pgtype.UUID        `json:"id"`
 	AutopilotID    pgtype.UUID        `json:"autopilot_id"`
 	TriggerID      pgtype.UUID        `json:"trigger_id"`
@@ -150,7 +161,7 @@ type AutopilotRun struct {
 	SquadID        pgtype.UUID        `json:"squad_id"`
 }
 
-type AutopilotTrigger struct {
+type MulticaAutopilotTrigger struct {
 	ID             pgtype.UUID        `json:"id"`
 	AutopilotID    pgtype.UUID        `json:"autopilot_id"`
 	Kind           string             `json:"kind"`
@@ -167,7 +178,7 @@ type AutopilotTrigger struct {
 	SigningSecret  pgtype.Text        `json:"signing_secret"`
 }
 
-type ChatMessage struct {
+type MulticaChatMessage struct {
 	ID            pgtype.UUID        `json:"id"`
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
 	Role          string             `json:"role"`
@@ -178,7 +189,7 @@ type ChatMessage struct {
 	ElapsedMs     pgtype.Int8        `json:"elapsed_ms"`
 }
 
-type ChatSession struct {
+type MulticaChatSession struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	AgentID     pgtype.UUID        `json:"agent_id"`
@@ -193,7 +204,7 @@ type ChatSession struct {
 	RuntimeID   pgtype.UUID        `json:"runtime_id"`
 }
 
-type Comment struct {
+type MulticaComment struct {
 	ID             pgtype.UUID        `json:"id"`
 	IssueID        pgtype.UUID        `json:"issue_id"`
 	AuthorType     string             `json:"author_type"`
@@ -209,7 +220,7 @@ type Comment struct {
 	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
 }
 
-type CommentReaction struct {
+type MulticaCommentReaction struct {
 	ID          pgtype.UUID        `json:"id"`
 	CommentID   pgtype.UUID        `json:"comment_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -219,7 +230,7 @@ type CommentReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type ContactSalesInquiry struct {
+type MulticaContactSalesInquiry struct {
 	ID              pgtype.UUID        `json:"id"`
 	FirstName       string             `json:"first_name"`
 	LastName        string             `json:"last_name"`
@@ -236,7 +247,7 @@ type ContactSalesInquiry struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
-type DaemonConnection struct {
+type MulticaDaemonConnection struct {
 	ID              pgtype.UUID        `json:"id"`
 	AgentID         pgtype.UUID        `json:"agent_id"`
 	DaemonID        string             `json:"daemon_id"`
@@ -247,7 +258,7 @@ type DaemonConnection struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
-type DaemonToken struct {
+type MulticaDaemonToken struct {
 	ID          pgtype.UUID        `json:"id"`
 	TokenHash   string             `json:"token_hash"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -256,7 +267,7 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type Feedback struct {
+type MulticaFeedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -265,7 +276,7 @@ type Feedback struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type GithubInstallation struct {
+type MulticaGithubInstallation struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	InstallationID   int64              `json:"installation_id"`
@@ -277,7 +288,7 @@ type GithubInstallation struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
-type GithubPullRequest struct {
+type MulticaGithubPullRequest struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
 	InstallationID  int64              `json:"installation_id"`
@@ -303,7 +314,7 @@ type GithubPullRequest struct {
 	ChangedFiles    int32              `json:"changed_files"`
 }
 
-type GithubPullRequestCheckSuite struct {
+type MulticaGithubPullRequestCheckSuite struct {
 	PrID       pgtype.UUID        `json:"pr_id"`
 	SuiteID    int64              `json:"suite_id"`
 	HeadSha    string             `json:"head_sha"`
@@ -313,7 +324,7 @@ type GithubPullRequestCheckSuite struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
-type InboxItem struct {
+type MulticaInboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	RecipientType string             `json:"recipient_type"`
@@ -331,7 +342,7 @@ type InboxItem struct {
 	Details       []byte             `json:"details"`
 }
 
-type Issue struct {
+type MulticaIssue struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
 	Title              string             `json:"title"`
@@ -360,14 +371,14 @@ type Issue struct {
 	WorkflowRunID      pgtype.UUID        `json:"workflow_run_id"`
 }
 
-type IssueDependency struct {
+type MulticaIssueDependency struct {
 	ID               pgtype.UUID `json:"id"`
 	IssueID          pgtype.UUID `json:"issue_id"`
 	DependsOnIssueID pgtype.UUID `json:"depends_on_issue_id"`
 	Type             string      `json:"type"`
 }
 
-type IssueLabel struct {
+type MulticaIssueLabel struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Name        string             `json:"name"`
@@ -376,7 +387,7 @@ type IssueLabel struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
-type IssuePullRequest struct {
+type MulticaIssuePullRequest struct {
 	IssueID       pgtype.UUID        `json:"issue_id"`
 	PullRequestID pgtype.UUID        `json:"pull_request_id"`
 	LinkedByType  pgtype.Text        `json:"linked_by_type"`
@@ -384,7 +395,7 @@ type IssuePullRequest struct {
 	LinkedAt      pgtype.Timestamptz `json:"linked_at"`
 }
 
-type IssueReaction struct {
+type MulticaIssueReaction struct {
 	ID          pgtype.UUID        `json:"id"`
 	IssueID     pgtype.UUID        `json:"issue_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -394,7 +405,7 @@ type IssueReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type IssueSubscriber struct {
+type MulticaIssueSubscriber struct {
 	IssueID   pgtype.UUID        `json:"issue_id"`
 	UserType  string             `json:"user_type"`
 	UserID    pgtype.UUID        `json:"user_id"`
@@ -402,12 +413,12 @@ type IssueSubscriber struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
-type IssueToLabel struct {
+type MulticaIssueToLabel struct {
 	IssueID pgtype.UUID `json:"issue_id"`
 	LabelID pgtype.UUID `json:"label_id"`
 }
 
-type Member struct {
+type MulticaMember struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -415,7 +426,7 @@ type Member struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type NotificationPreference struct {
+type MulticaNotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -423,7 +434,7 @@ type NotificationPreference struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
-type PersonalAccessToken struct {
+type MulticaPersonalAccessToken struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
 	Name        string             `json:"name"`
@@ -435,7 +446,7 @@ type PersonalAccessToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type PinnedItem struct {
+type MulticaPinnedItem struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -445,7 +456,7 @@ type PinnedItem struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type Project struct {
+type MulticaProject struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Title       string             `json:"title"`
@@ -459,7 +470,7 @@ type Project struct {
 	Priority    string             `json:"priority"`
 }
 
-type ProjectResource struct {
+type MulticaProjectResource struct {
 	ID           pgtype.UUID        `json:"id"`
 	ProjectID    pgtype.UUID        `json:"project_id"`
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
@@ -471,7 +482,7 @@ type ProjectResource struct {
 	CreatedBy    pgtype.UUID        `json:"created_by"`
 }
 
-type Skill struct {
+type MulticaSkill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Name        string             `json:"name"`
@@ -483,7 +494,7 @@ type Skill struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
-type SkillFile struct {
+type MulticaSkillFile struct {
 	ID        pgtype.UUID        `json:"id"`
 	SkillID   pgtype.UUID        `json:"skill_id"`
 	Path      string             `json:"path"`
@@ -492,7 +503,7 @@ type SkillFile struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
-type Squad struct {
+type MulticaSquad struct {
 	ID           pgtype.UUID        `json:"id"`
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
 	Name         string             `json:"name"`
@@ -507,7 +518,7 @@ type Squad struct {
 	Instructions string             `json:"instructions"`
 }
 
-type SquadMember struct {
+type MulticaSquadMember struct {
 	ID         pgtype.UUID        `json:"id"`
 	SquadID    pgtype.UUID        `json:"squad_id"`
 	MemberType string             `json:"member_type"`
@@ -516,7 +527,7 @@ type SquadMember struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
-type TaskMessage struct {
+type MulticaTaskMessage struct {
 	ID        pgtype.UUID        `json:"id"`
 	TaskID    pgtype.UUID        `json:"task_id"`
 	Seq       int32              `json:"seq"`
@@ -528,7 +539,7 @@ type TaskMessage struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
-type TaskUsage struct {
+type MulticaTaskUsage struct {
 	ID               pgtype.UUID        `json:"id"`
 	TaskID           pgtype.UUID        `json:"task_id"`
 	Provider         string             `json:"provider"`
@@ -541,7 +552,7 @@ type TaskUsage struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
-type TaskUsageHourly struct {
+type MulticaTaskUsageHourly struct {
 	BucketHour       pgtype.Timestamptz `json:"bucket_hour"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	RuntimeID        pgtype.UUID        `json:"runtime_id"`
@@ -558,7 +569,7 @@ type TaskUsageHourly struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
-type TaskUsageHourlyDirty struct {
+type MulticaTaskUsageHourlyDirty struct {
 	BucketHour  pgtype.Timestamptz `json:"bucket_hour"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	RuntimeID   pgtype.UUID        `json:"runtime_id"`
@@ -569,7 +580,7 @@ type TaskUsageHourlyDirty struct {
 	EnqueuedAt  pgtype.Timestamptz `json:"enqueued_at"`
 }
 
-type TaskUsageHourlyRollupState struct {
+type MulticaTaskUsageHourlyRollupState struct {
 	ID                int16              `json:"id"`
 	WatermarkAt       pgtype.Timestamptz `json:"watermark_at"`
 	LastRunStartedAt  pgtype.Timestamptz `json:"last_run_started_at"`
@@ -578,7 +589,7 @@ type TaskUsageHourlyRollupState struct {
 	LastError         pgtype.Text        `json:"last_error"`
 }
 
-type User struct {
+type MulticaUser struct {
 	ID                      pgtype.UUID        `json:"id"`
 	Name                    string             `json:"name"`
 	Email                   string             `json:"email"`
@@ -597,7 +608,7 @@ type User struct {
 	SubjectID pgtype.Text `json:"subject_id"`
 }
 
-type VerificationCode struct {
+type MulticaVerificationCode struct {
 	ID        pgtype.UUID        `json:"id"`
 	Email     string             `json:"email"`
 	Code      string             `json:"code"`
@@ -607,7 +618,7 @@ type VerificationCode struct {
 	Attempts  int32              `json:"attempts"`
 }
 
-type WebhookDelivery struct {
+type MulticaWebhookDelivery struct {
 	ID                     pgtype.UUID        `json:"id"`
 	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
 	AutopilotID            pgtype.UUID        `json:"autopilot_id"`
@@ -632,7 +643,7 @@ type WebhookDelivery struct {
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
-type Workflow struct {
+type MulticaWorkflow struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	Title         string             `json:"title"`
@@ -645,7 +656,7 @@ type Workflow struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
-type WorkflowEdge struct {
+type MulticaWorkflowEdge struct {
 	ID           pgtype.UUID        `json:"id"`
 	WorkflowID   pgtype.UUID        `json:"workflow_id"`
 	SourceNodeID pgtype.UUID        `json:"source_node_id"`
@@ -654,7 +665,7 @@ type WorkflowEdge struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
-type WorkflowNode struct {
+type MulticaWorkflowNode struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkflowID         pgtype.UUID        `json:"workflow_id"`
 	Title              string             `json:"title"`
@@ -674,7 +685,7 @@ type WorkflowNode struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
-type WorkflowNodeRun struct {
+type MulticaWorkflowNodeRun struct {
 	ID                pgtype.UUID        `json:"id"`
 	WorkflowRunID     pgtype.UUID        `json:"workflow_run_id"`
 	WorkflowNodeID    pgtype.UUID        `json:"workflow_node_id"`
@@ -697,7 +708,7 @@ type WorkflowNodeRun struct {
 	CriticAgentTaskID pgtype.UUID        `json:"critic_agent_task_id"`
 }
 
-type WorkflowRun struct {
+type MulticaWorkflowRun struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkflowID      pgtype.UUID        `json:"workflow_id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
@@ -712,7 +723,7 @@ type WorkflowRun struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
-type Workspace struct {
+type MulticaWorkspace struct {
 	ID           pgtype.UUID        `json:"id"`
 	Name         string             `json:"name"`
 	Slug         string             `json:"slug"`
@@ -726,7 +737,7 @@ type Workspace struct {
 	IssueCounter int32              `json:"issue_counter"`
 }
 
-type WorkspaceInvitation struct {
+type MulticaWorkspaceInvitation struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	InviterID     pgtype.UUID        `json:"inviter_id"`

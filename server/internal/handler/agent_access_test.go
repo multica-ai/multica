@@ -22,7 +22,7 @@ func TestMemberAllowedForPrivateAgent_Pure(t *testing.T) {
 	ownerUserID := "11111111-1111-1111-1111-111111111111"
 	otherUserID := "22222222-2222-2222-2222-222222222222"
 
-	agent := db.Agent{
+	agent := db.MulticaAgent{
 		OwnerID: util.MustParseUUID(ownerUserID),
 	}
 

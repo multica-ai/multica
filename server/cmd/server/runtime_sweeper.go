@@ -283,7 +283,7 @@ func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *
 // in this package. New call sites should use TaskService.HandleFailedTasks
 // directly so the side effects (event broadcast, agent reconcile, issue
 // rollback, auto-retry) are guaranteed in one place.
-func broadcastFailedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus, tasks []db.AgentTaskQueue) {
+func broadcastFailedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus, tasks []db.MulticaAgentTaskQueue) {
 	if taskSvc != nil {
 		taskSvc.HandleFailedTasks(ctx, tasks)
 		return

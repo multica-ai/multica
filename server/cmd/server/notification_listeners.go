@@ -925,9 +925,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 	})
 }
 
-// inboxItemToResponse converts a db.InboxItem into a map suitable for
+// inboxItemToResponse converts a db.MulticaInboxItem into a map suitable for
 // JSON-serializable event payloads (mirrors handler.inboxToResponse fields).
-func inboxItemToResponse(item db.InboxItem) map[string]any {
+func inboxItemToResponse(item db.MulticaInboxItem) map[string]any {
 	return map[string]any{
 		"id":             util.UUIDToString(item.ID),
 		"workspace_id":   util.UUIDToString(item.WorkspaceID),

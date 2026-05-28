@@ -1070,7 +1070,7 @@ func TestListGitHubInstallations_RoleGating(t *testing.T) {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/github/installations", nil)
 		req = withURLParam(req, "id", testWorkspaceID)
-		req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, db.Member{Role: role}))
+		req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, db.MulticaMember{Role: role}))
 		w := httptest.NewRecorder()
 		testHandler.ListGitHubInstallations(w, req)
 		if w.Code != http.StatusOK {
@@ -1308,7 +1308,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 // the management handle via the list endpoint — which already gates the
 // numeric id by role.
 func TestGitHubInstallationBroadcastRedaction(t *testing.T) {
-	inst := db.GithubInstallation{
+	inst := db.MulticaGithubInstallation{
 		InstallationID: 123456789,
 		AccountLogin:   "broadcast-acct",
 		AccountType:    "User",

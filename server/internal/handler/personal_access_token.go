@@ -27,7 +27,7 @@ type CreatePATResponse struct {
 	Token string `json:"token"`
 }
 
-func patToResponse(pat db.PersonalAccessToken) PersonalAccessTokenResponse {
+func patToResponse(pat db.MulticaPersonalAccessToken) PersonalAccessTokenResponse {
 	return PersonalAccessTokenResponse{
 		ID:         uuidToString(pat.ID),
 		Name:       pat.Name,

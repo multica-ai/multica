@@ -21,11 +21,11 @@ func TestCanUseRuntimeForAgent_Pure(t *testing.T) {
 	ownerUserID := "11111111-1111-1111-1111-111111111111"
 	otherUserID := "22222222-2222-2222-2222-222222222222"
 
-	privateRT := db.AgentRuntime{
+	privateRT := db.MulticaAgentRuntime{
 		OwnerID:    util.MustParseUUID(ownerUserID),
 		Visibility: "private",
 	}
-	publicRT := db.AgentRuntime{
+	publicRT := db.MulticaAgentRuntime{
 		OwnerID:    util.MustParseUUID(ownerUserID),
 		Visibility: "public",
 	}
@@ -34,7 +34,7 @@ func TestCanUseRuntimeForAgent_Pure(t *testing.T) {
 		name   string
 		userID string
 		role   string
-		rt     db.AgentRuntime
+		rt     db.MulticaAgentRuntime
 		want   bool
 	}{
 		// workspace owner / admin override
@@ -51,7 +51,7 @@ func TestCanUseRuntimeForAgent_Pure(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			member := db.Member{
+			member := db.MulticaMember{
 				UserID: util.MustParseUUID(tc.userID),
 				Role:   tc.role,
 			}

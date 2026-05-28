@@ -3,7 +3,7 @@
 -- detects the row as dirty and re-aggregates its bucket.
 -- Without the conflict-side bump, a correction to historical token counts
 -- would never propagate to the rollup.
-INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at)
+INSERT INTO multica_task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, now())
 ON CONFLICT (task_id, provider, model)
 DO UPDATE SET
@@ -14,7 +14,7 @@ DO UPDATE SET
     updated_at = now();
 
 -- name: GetTaskUsage :many
-SELECT * FROM task_usage
+SELECT * FROM multica_task_usage
 WHERE task_id = $1
 ORDER BY model;
 
@@ -25,16 +25,16 @@ SELECT
     COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
     COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
-JOIN agent_task_queue atq ON atq.id = tu.task_id
+FROM multica_task_usage tu
+JOIN multica_agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1;
 
 -- name: ListDashboardUsageDaily :many
--- Daily per-(date, model) token aggregates for the workspace, served
--- from the UTC-bucketed `task_usage_hourly` table and
+-- Daily per-(date, model) token aggregates for the multica_workspace, served
+-- from the UTC-bucketed `multica_task_usage_hourly` table and
 -- sliced to calendar days under the caller-supplied @tz. Optionally
--- scoped to a single project via sqlc.narg('project_id'). Powers the
--- workspace dashboard's daily cost chart.
+-- scoped to a single multica_project via sqlc.narg('project_id'). Powers the
+-- multica_workspace dashboard's daily cost chart.
 -- The viewer's tz is applied here at query time, so a viewer in
 -- Asia/Shanghai gets their "today" cut at +08 and one in
 -- America/Los_Angeles gets theirs at -08 against the same UTC rows.
@@ -52,7 +52,7 @@ SELECT
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
     SUM(task_count)::int             AS task_count
-FROM task_usage_hourly
+FROM multica_task_usage_hourly
 WHERE workspace_id = $1
   AND bucket_hour >= sqlc.arg('since')::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
@@ -60,12 +60,12 @@ GROUP BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text), model
 ORDER BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text) DESC, model;
 
 -- name: ListDashboardUsageByAgent :many
--- Per-(agent, model) token aggregates from `task_usage_hourly`. No
+-- Per-(multica_agent, model) token aggregates from `multica_task_usage_hourly`. No
 -- date grouping in the result, so this query takes no `@tz` — the
 -- @since cutoff is a raw timestamptz the Go layer has already computed
 -- in the viewer's tz. Model dimension is preserved so the client can
 -- compute cost from its per-model pricing table; the client folds rows
--- by agent for the "by agent" list on the dashboard.
+-- by multica_agent for the "by multica_agent" list on the dashboard.
 --
 -- task_count is summed across hourly buckets — one task that spans
 -- multiple hours lands in multiple buckets, so this over-counts by
@@ -80,7 +80,7 @@ SELECT
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
     SUM(task_count)::int             AS task_count
-FROM task_usage_hourly
+FROM multica_task_usage_hourly
 WHERE workspace_id = $1
   AND bucket_hour >= @since::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
@@ -88,8 +88,8 @@ GROUP BY agent_id, model
 ORDER BY agent_id, model;
 
 -- name: ListDashboardRunTimeDaily :many
--- Daily per-date run time + task counts for the workspace, optionally
--- scoped to a single project. Powers the workspace dashboard's "Time"
+-- Daily per-date run time + task counts for the multica_workspace, optionally
+-- scoped to a single multica_project. Powers the multica_workspace dashboard's "Time"
 -- and "Tasks" metrics on the same toggle as Tokens / Cost. Bucketed by
 -- completed_at (terminal time) sliced into calendar days under the
 -- caller-supplied @tz — same Viewing-tz treatment as ListDashboardUsageDaily
@@ -108,9 +108,9 @@ SELECT
     )::bigint AS total_seconds,
     COUNT(*)::int AS task_count,
     COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
-FROM agent_task_queue atq
-JOIN agent a ON a.id = atq.agent_id
-LEFT JOIN issue i ON i.id = atq.issue_id
+FROM multica_agent_task_queue atq
+JOIN multica_agent a ON a.id = atq.agent_id
+LEFT JOIN multica_issue i ON i.id = atq.issue_id
 WHERE a.workspace_id = $1
   AND atq.status IN ('completed', 'failed')
   AND atq.started_at IS NOT NULL
@@ -121,14 +121,14 @@ GROUP BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text)
 ORDER BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) DESC;
 
 -- name: ListDashboardAgentRunTime :many
--- Per-agent total task run time and task count for the workspace, optionally
--- scoped to a single project. Counts only terminal runs (completed or failed)
+-- Per-multica_agent total task run time and task count for the multica_workspace, optionally
+-- scoped to a single multica_project. Counts only terminal runs (completed or failed)
 -- with both started_at and completed_at populated — queued/running tasks have
 -- no finite duration. Anchored on completed_at so the window matches the
 -- token cost window (which is anchored on tu.created_at, ~= completion time).
 --
 -- No date bucketing, so no @tz — but @since is the viewer's local
--- start-of-day-(N) so the "last N days" window lines up with the per-agent
+-- start-of-day-(N) so the "last N days" window lines up with the per-multica_agent
 -- cost card; passed straight through without re-truncation.
 SELECT
     atq.agent_id,
@@ -138,9 +138,9 @@ SELECT
     )::bigint AS total_seconds,
     COUNT(*)::int AS task_count,
     COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
-FROM agent_task_queue atq
-JOIN agent a ON a.id = atq.agent_id
-LEFT JOIN issue i ON i.id = atq.issue_id
+FROM multica_agent_task_queue atq
+JOIN multica_agent a ON a.id = atq.agent_id
+LEFT JOIN multica_issue i ON i.id = atq.issue_id
 WHERE a.workspace_id = $1
   AND atq.status IN ('completed', 'failed')
   AND atq.started_at IS NOT NULL

@@ -27,15 +27,15 @@ const (
 	otherMemberID   = "dddddddd-dddd-dddd-dddd-dddddddddddd"
 )
 
-func issueWithAgentAssignee() db.Issue {
-	return db.Issue{
+func issueWithAgentAssignee() db.MulticaIssue {
+	return db.MulticaIssue{
 		AssigneeType: testText("agent"),
 		AssigneeID:   testUUID(agentAssigneeID),
 	}
 }
 
-func issueNoAssignee() db.Issue {
-	return db.Issue{}
+func issueNoAssignee() db.MulticaIssue {
+	return db.MulticaIssue{}
 }
 
 // -------------------------------------------------------------------
@@ -128,16 +128,16 @@ func TestIsReplyToMemberThread(t *testing.T) {
 	h := &Handler{}
 	issue := issueWithAgentAssignee()
 
-	memberParent := &db.Comment{AuthorType: "member", AuthorID: testUUID(memberID), Content: "plain thread starter"}
-	agentParent := &db.Comment{AuthorType: "agent", AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
+	memberParent := &db.MulticaComment{AuthorType: "member", AuthorID: testUUID(memberID), Content: "plain thread starter"}
+	agentParent := &db.MulticaComment{AuthorType: "agent", AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
 	// Member-started thread root that @mentions the assignee agent.
-	memberParentMentioningAssignee := &db.Comment{
+	memberParentMentioningAssignee := &db.MulticaComment{
 		AuthorType: "member",
 		AuthorID:   testUUID(memberID),
 		Content:    fmt.Sprintf("[@Agent](mention://agent/%s) can you look at this?", agentAssigneeID),
 	}
 	// Member-started thread root that @mentions a non-assignee agent.
-	memberParentMentioningOther := &db.Comment{
+	memberParentMentioningOther := &db.MulticaComment{
 		AuthorType: "member",
 		AuthorID:   testUUID(memberID),
 		Content:    fmt.Sprintf("[@Other](mention://agent/%s) what do you think?", otherAgentID),
@@ -145,7 +145,7 @@ func TestIsReplyToMemberThread(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		parent  *db.Comment
+		parent  *db.MulticaComment
 		content string
 		want    bool
 	}{
@@ -220,13 +220,13 @@ func TestIsReplyToMemberThread(t *testing.T) {
 // -------------------------------------------------------------------
 
 func TestShouldInheritParentMentions(t *testing.T) {
-	memberParent := &db.Comment{AuthorType: "member", AuthorID: testUUID(memberID), Content: "thread starter"}
-	agentParent := &db.Comment{AuthorType: "agent", AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
+	memberParent := &db.MulticaComment{AuthorType: "member", AuthorID: testUUID(memberID), Content: "thread starter"}
+	agentParent := &db.MulticaComment{AuthorType: "agent", AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
 	someMention := []util.Mention{{Type: "agent", ID: otherAgentID}}
 
 	tests := []struct {
 		name            string
-		parent          *db.Comment
+		parent          *db.MulticaComment
 		replyMentions   []util.Mention
 		replyAuthorType string
 		want            bool
@@ -252,7 +252,7 @@ func TestShouldInheritParentMentions(t *testing.T) {
 // that @mentions GPT-Boy for review; later a member posts a plain follow-up
 // reply asking the assignee a question. GPT-Boy must NOT be re-triggered.
 func TestShouldInheritParentMentions_AgentReviewDelegationDoesNotLeak(t *testing.T) {
-	jPRCompletion := &db.Comment{
+	jPRCompletion := &db.MulticaComment{
 		AuthorType: "agent",
 		AuthorID:   testUUID(agentAssigneeID),
 		Content:    fmt.Sprintf("PR ready. [@GPT-Boy](mention://agent/%s) please review this.", otherAgentID),
@@ -270,9 +270,9 @@ func TestOnCommentTriggerDecision(t *testing.T) {
 	h := &Handler{}
 	issue := issueWithAgentAssignee()
 
-	memberParent := &db.Comment{AuthorType: "member", AuthorID: testUUID(memberID), Content: "plain thread starter"}
-	agentParent := &db.Comment{AuthorType: "agent", AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
-	memberParentMentioningAssignee := &db.Comment{
+	memberParent := &db.MulticaComment{AuthorType: "member", AuthorID: testUUID(memberID), Content: "plain thread starter"}
+	agentParent := &db.MulticaComment{AuthorType: "agent", AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
+	memberParentMentioningAssignee := &db.MulticaComment{
 		AuthorType: "member",
 		AuthorID:   testUUID(memberID),
 		Content:    fmt.Sprintf("[@Agent](mention://agent/%s) help me", agentAssigneeID),
@@ -280,14 +280,14 @@ func TestOnCommentTriggerDecision(t *testing.T) {
 
 	// Simulates the combined check from CreateComment:
 	//   !commentMentionsOthersButNotAssignee && !isReplyToMemberThread
-	shouldTrigger := func(parent *db.Comment, content string) bool {
+	shouldTrigger := func(parent *db.MulticaComment, content string) bool {
 		return !h.commentMentionsOthersButNotAssignee(content, issue) &&
 			!h.isReplyToMemberThread(context.Background(), parent, content, issue)
 	}
 
 	tests := []struct {
 		name    string
-		parent  *db.Comment
+		parent  *db.MulticaComment
 		content string
 		want    bool
 	}{

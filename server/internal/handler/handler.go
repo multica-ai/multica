@@ -132,7 +132,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	// Wire the workflow completion gateway: when an agent task linked to a
 	// workflow node run completes, the WorkflowService transitions the node
 	// run state machine.
-	taskSvc.OnTaskCompleted = func(ctx context.Context, task db.AgentTaskQueue) {
+	taskSvc.OnTaskCompleted = func(ctx context.Context, task db.MulticaAgentTaskQueue) {
 		_ = workflowSvc.HandleWorkflowTaskCompletion(ctx, task)
 	}
 
@@ -168,7 +168,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	// Wire workflow issue-sync callbacks so sub-issue status stays in sync
 	// with node-run state transitions, and the parent issue auto-completes
 	// when the workflow run finishes successfully.
-	workflowSvc.OnNodeStatusChanged = func(ctx context.Context, nodeRun db.WorkflowNodeRun) {
+	workflowSvc.OnNodeStatusChanged = func(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun) {
 		h.syncSubIssueForNodeRun(ctx, nodeRun)
 		// Publish WS event so frontend DAG refreshes immediately.
 		if run, err := h.Queries.GetWorkflowRun(ctx, nodeRun.WorkflowRunID); err == nil {
@@ -181,7 +181,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 			}
 		}
 	}
-	workflowSvc.OnRunTerminal = func(ctx context.Context, run db.WorkflowRun, status string) {
+	workflowSvc.OnRunTerminal = func(ctx context.Context, run db.MulticaWorkflowRun, status string) {
 		h.handleWorkflowRunTerminal(ctx, run, status)
 	}
 
@@ -379,7 +379,7 @@ func (h *Handler) resolveWorkspaceID(r *http.Request) string {
 }
 
 // ctxMember returns the workspace member from context (set by workspace middleware).
-func ctxMember(ctx context.Context) (db.Member, bool) {
+func ctxMember(ctx context.Context) (db.MulticaMember, bool) {
 	return middleware.MemberFromContext(ctx)
 }
 
@@ -398,7 +398,7 @@ func workspaceIDFromURL(r *http.Request, param string) string {
 
 // workspaceMember returns the member from middleware context, or falls back to a DB
 // lookup when the handler is called directly (e.g. in tests).
-func (h *Handler) workspaceMember(w http.ResponseWriter, r *http.Request, workspaceID string) (db.Member, bool) {
+func (h *Handler) workspaceMember(w http.ResponseWriter, r *http.Request, workspaceID string) (db.MulticaMember, bool) {
 	if m, ok := ctxMember(r.Context()); ok {
 		return m, true
 	}
@@ -414,7 +414,7 @@ func roleAllowed(role string, roles ...string) bool {
 	return false
 }
 
-func countOwners(members []db.Member) int {
+func countOwners(members []db.MulticaMember) int {
 	owners := 0
 	for _, member := range members {
 		if member.Role == "owner" {
@@ -424,14 +424,14 @@ func countOwners(members []db.Member) int {
 	return owners
 }
 
-func (h *Handler) getWorkspaceMember(ctx context.Context, userID, workspaceID string) (db.Member, error) {
+func (h *Handler) getWorkspaceMember(ctx context.Context, userID, workspaceID string) (db.MulticaMember, error) {
 	userUUID, err := util.ParseUUID(userID)
 	if err != nil {
-		return db.Member{}, err
+		return db.MulticaMember{}, err
 	}
 	wsUUID, err := util.ParseUUID(workspaceID)
 	if err != nil {
-		return db.Member{}, err
+		return db.MulticaMember{}, err
 	}
 	return h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 		UserID:      userUUID,
@@ -439,34 +439,34 @@ func (h *Handler) getWorkspaceMember(ctx context.Context, userID, workspaceID st
 	})
 }
 
-func (h *Handler) requireWorkspaceMember(w http.ResponseWriter, r *http.Request, workspaceID, notFoundMsg string) (db.Member, bool) {
+func (h *Handler) requireWorkspaceMember(w http.ResponseWriter, r *http.Request, workspaceID, notFoundMsg string) (db.MulticaMember, bool) {
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
-		return db.Member{}, false
+		return db.MulticaMember{}, false
 	}
 
 	userID, ok := requireUserID(w, r)
 	if !ok {
-		return db.Member{}, false
+		return db.MulticaMember{}, false
 	}
 
 	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, notFoundMsg)
-		return db.Member{}, false
+		return db.MulticaMember{}, false
 	}
 
 	return member, true
 }
 
-func (h *Handler) requireWorkspaceRole(w http.ResponseWriter, r *http.Request, workspaceID, notFoundMsg string, roles ...string) (db.Member, bool) {
+func (h *Handler) requireWorkspaceRole(w http.ResponseWriter, r *http.Request, workspaceID, notFoundMsg string, roles ...string) (db.MulticaMember, bool) {
 	member, ok := h.requireWorkspaceMember(w, r, workspaceID, notFoundMsg)
 	if !ok {
-		return db.Member{}, false
+		return db.MulticaMember{}, false
 	}
 	if !roleAllowed(member.Role, roles...) {
 		writeError(w, http.StatusForbidden, "insufficient permissions")
-		return db.Member{}, false
+		return db.MulticaMember{}, false
 	}
 	return member, true
 }
@@ -497,15 +497,15 @@ func (h *Handler) isWorkspaceEntity(ctx context.Context, userType, userID, works
 	}
 }
 
-func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issueID string) (db.Issue, bool) {
+func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issueID string) (db.MulticaIssue, bool) {
 	if _, ok := requireUserID(w, r); !ok {
-		return db.Issue{}, false
+		return db.MulticaIssue{}, false
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
-		return db.Issue{}, false
+		return db.MulticaIssue{}, false
 	}
 
 	// Try identifier format first (e.g., "JIA-42"). resolveIssueByIdentifier
@@ -520,12 +520,12 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 		// Not a valid UUID and didn't match identifier format → 404 (consistent
 		// with previous silent-zero behavior, which would also have produced 404).
 		writeError(w, http.StatusNotFound, "issue not found")
-		return db.Issue{}, false
+		return db.MulticaIssue{}, false
 	}
 	wsUUID, err := util.ParseUUID(workspaceID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid workspace_id")
-		return db.Issue{}, false
+		return db.MulticaIssue{}, false
 	}
 	issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 		ID:          issueUUID,
@@ -533,30 +533,30 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
-		return db.Issue{}, false
+		return db.MulticaIssue{}, false
 	}
 	return issue, true
 }
 
 // resolveIssueByIdentifier tries to look up an issue by "PREFIX-NUMBER" format.
-func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID string) (db.Issue, bool) {
+func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID string) (db.MulticaIssue, bool) {
 	parts := splitIdentifier(id)
 	if parts == nil {
-		return db.Issue{}, false
+		return db.MulticaIssue{}, false
 	}
 	if workspaceID == "" {
-		return db.Issue{}, false
+		return db.MulticaIssue{}, false
 	}
 	wsUUID, err := util.ParseUUID(workspaceID)
 	if err != nil {
-		return db.Issue{}, false
+		return db.MulticaIssue{}, false
 	}
 	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
 		WorkspaceID: wsUUID,
 		Number:      parts.number,
 	})
 	if err != nil {
-		return db.Issue{}, false
+		return db.MulticaIssue{}, false
 	}
 	return issue, true
 }
@@ -605,24 +605,24 @@ func (h *Handler) getIssuePrefix(ctx context.Context, workspaceID pgtype.UUID) s
 	return generateIssuePrefix(ws.Name)
 }
 
-func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agentID string) (db.Agent, bool) {
+func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agentID string) (db.MulticaAgent, bool) {
 	if _, ok := requireUserID(w, r); !ok {
-		return db.Agent{}, false
+		return db.MulticaAgent{}, false
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
-		return db.Agent{}, false
+		return db.MulticaAgent{}, false
 	}
 
 	agentUUID, ok := parseUUIDOrBadRequest(w, agentID, "agent id")
 	if !ok {
-		return db.Agent{}, false
+		return db.MulticaAgent{}, false
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
-		return db.Agent{}, false
+		return db.MulticaAgent{}, false
 	}
 
 	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
@@ -631,30 +631,30 @@ func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agent
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "agent not found")
-		return db.Agent{}, false
+		return db.MulticaAgent{}, false
 	}
 	return agent, true
 }
 
-func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, itemID string) (db.InboxItem, bool) {
+func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, itemID string) (db.MulticaInboxItem, bool) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
-		return db.InboxItem{}, false
+		return db.MulticaInboxItem{}, false
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
-		return db.InboxItem{}, false
+		return db.MulticaInboxItem{}, false
 	}
 
 	itemUUID, ok := parseUUIDOrBadRequest(w, itemID, "inbox item id")
 	if !ok {
-		return db.InboxItem{}, false
+		return db.MulticaInboxItem{}, false
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
-		return db.InboxItem{}, false
+		return db.MulticaInboxItem{}, false
 	}
 
 	item, err := h.Queries.GetInboxItemInWorkspace(r.Context(), db.GetInboxItemInWorkspaceParams{
@@ -663,12 +663,12 @@ func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, i
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "inbox item not found")
-		return db.InboxItem{}, false
+		return db.MulticaInboxItem{}, false
 	}
 
 	if item.RecipientType != "member" || uuidToString(item.RecipientID) != userID {
 		writeError(w, http.StatusNotFound, "inbox item not found")
-		return db.InboxItem{}, false
+		return db.MulticaInboxItem{}, false
 	}
 	return item, true
 }

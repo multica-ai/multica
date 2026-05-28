@@ -2,26 +2,26 @@
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
        w.issue_prefix, w.issue_counter
-FROM member m
-JOIN workspace w ON w.id = m.workspace_id
+FROM multica_member m
+JOIN multica_workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
 ORDER BY w.created_at ASC;
 
 -- name: GetWorkspace :one
-SELECT * FROM workspace
+SELECT * FROM multica_workspace
 WHERE id = $1;
 
 -- name: GetWorkspaceBySlug :one
-SELECT * FROM workspace
+SELECT * FROM multica_workspace
 WHERE slug = $1;
 
 -- name: CreateWorkspace :one
-INSERT INTO workspace (name, slug, description, context, issue_prefix)
+INSERT INTO multica_workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: UpdateWorkspace :one
-UPDATE workspace SET
+UPDATE multica_workspace SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
     context = COALESCE(sqlc.narg('context'), context),
@@ -33,9 +33,9 @@ WHERE id = $1
 RETURNING *;
 
 -- name: IncrementIssueCounter :one
-UPDATE workspace SET issue_counter = issue_counter + 1
+UPDATE multica_workspace SET issue_counter = issue_counter + 1
 WHERE id = $1
 RETURNING issue_counter;
 
 -- name: DeleteWorkspace :exec
-DELETE FROM workspace WHERE id = $1;
+DELETE FROM multica_workspace WHERE id = $1;

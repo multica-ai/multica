@@ -226,7 +226,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	// (see template authoring docs in agenttmpl/types.go). When it doesn't,
 	// the pre-flight misses and we fall back to the in-TX find-or-create
 	// below — slower (one wasted fetch) but still correct.
-	preReused := make(map[int]db.Skill, len(tmpl.Skills))
+	preReused := make(map[int]db.MulticaSkill, len(tmpl.Skills))
 	toFetchRefs := make([]agenttmpl.TemplateSkillRef, 0, len(tmpl.Skills))
 	toFetchOrigIdx := make([]int, 0, len(tmpl.Skills))
 	for i, ref := range tmpl.Skills {

@@ -3,20 +3,20 @@
 -- =====================
 
 -- name: ListGitHubInstallationsByWorkspace :many
-SELECT * FROM github_installation
+SELECT * FROM multica_github_installation
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
 -- name: GetGitHubInstallationByInstallationID :one
-SELECT * FROM github_installation
+SELECT * FROM multica_github_installation
 WHERE installation_id = $1;
 
 -- name: GetGitHubInstallationByID :one
-SELECT * FROM github_installation
+SELECT * FROM multica_github_installation
 WHERE id = $1;
 
 -- name: CreateGitHubInstallation :one
-INSERT INTO github_installation (
+INSERT INTO multica_github_installation (
     workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id
 ) VALUES (
     $1, $2, $3, $4, sqlc.narg('account_avatar_url'), sqlc.narg('connected_by_id')
@@ -31,10 +31,10 @@ ON CONFLICT (installation_id) DO UPDATE SET
 RETURNING *;
 
 -- name: DeleteGitHubInstallation :exec
-DELETE FROM github_installation WHERE id = $1 AND workspace_id = $2;
+DELETE FROM multica_github_installation WHERE id = $1 AND workspace_id = $2;
 
 -- name: DeleteGitHubInstallationByInstallationID :one
-DELETE FROM github_installation WHERE installation_id = $1
+DELETE FROM multica_github_installation WHERE installation_id = $1
 RETURNING id, workspace_id;
 
 -- =====================
@@ -51,7 +51,7 @@ RETURNING id, workspace_id;
 --      mergeability, and silently clobbering a known clean/dirty would lose
 --      information that GitHub only re-computes lazily.
 -- INSERT path always writes the incoming value (NULL acceptable for a new row).
-INSERT INTO github_pull_request (
+INSERT INTO multica_github_pull_request (
     workspace_id, installation_id, repo_owner, repo_name, pr_number,
     title, state, html_url, branch, author_login, author_avatar_url,
     merged_at, closed_at, pr_created_at, pr_updated_at,
@@ -79,7 +79,7 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     mergeable_state = CASE
         WHEN COALESCE(sqlc.narg('clear_mergeable_state')::boolean, FALSE) THEN NULL
         WHEN EXCLUDED.mergeable_state IS NOT NULL THEN EXCLUDED.mergeable_state
-        ELSE github_pull_request.mergeable_state
+        ELSE multica_github_pull_request.mergeable_state
     END,
     additions     = EXCLUDED.additions,
     deletions     = EXCLUDED.deletions,
@@ -88,29 +88,29 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
 RETURNING *;
 
 -- name: GetGitHubPullRequest :one
-SELECT * FROM github_pull_request
+SELECT * FROM multica_github_pull_request
 WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $4;
 
 -- name: ListPullRequestsByIssue :many
--- Returns the issue's linked PRs with the aggregated check-suite counts for
--- the PR's CURRENT head SHA. The `issue_prs` CTE narrows to this issue's PR
+-- Returns the multica_issue's linked PRs with the aggregated check-suite counts for
+-- the PR's CURRENT head SHA. The `issue_prs` CTE narrows to this multica_issue's PR
 -- ids first so the per-app aggregation only touches suite rows for those
 -- PRs — without that scoping the planner has to scan/aggregate every PR's
--- suites in the workspace before joining on issue. Per-app latest suite is
+-- suites in the multica_workspace before joining on multica_issue. Per-app latest suite is
 -- selected so a single app firing multiple suites on the same head doesn't
 -- get counted N times. Late-arriving suites for an OLD head are stored but
 -- excluded by the head_sha filter, so they can't override the new head's
 -- pending view.
 WITH issue_prs AS (
     SELECT pr.id, pr.head_sha
-    FROM github_pull_request pr
-    JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+    FROM multica_github_pull_request pr
+    JOIN multica_issue_pull_request ipr ON ipr.pull_request_id = pr.id
     WHERE ipr.issue_id = sqlc.arg('issue_id')
 ),
 per_app_latest AS (
     SELECT DISTINCT ON (cs.pr_id, cs.app_id)
         cs.pr_id, cs.app_id, cs.conclusion, cs.status
-    FROM github_pull_request_check_suite cs
+    FROM multica_github_pull_request_check_suite cs
     JOIN issue_prs ip ON ip.id = cs.pr_id
     WHERE cs.head_sha = ip.head_sha AND ip.head_sha <> ''
     ORDER BY cs.pr_id, cs.app_id, cs.updated_at DESC
@@ -141,28 +141,28 @@ SELECT
     COALESCE(c.passed, 0)::bigint  AS checks_passed,
     COALESCE(c.failed, 0)::bigint  AS checks_failed,
     COALESCE(c.pending, 0)::bigint AS checks_pending
-FROM github_pull_request pr
-JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+FROM multica_github_pull_request pr
+JOIN multica_issue_pull_request ipr ON ipr.pull_request_id = pr.id
 LEFT JOIN checks c ON c.pr_id = pr.id
 WHERE ipr.issue_id = sqlc.arg('issue_id')
 ORDER BY pr.pr_created_at DESC;
 
 -- name: ListIssueIDsForPullRequest :many
-SELECT issue_id FROM issue_pull_request
+SELECT issue_id FROM multica_issue_pull_request
 WHERE pull_request_id = $1;
 
 -- name: GetSiblingPullRequestStateCountsForIssue :one
--- Returns, for the PRs linked to an issue excluding one PR by id (the PR
+-- Returns, for the PRs linked to an multica_issue excluding one PR by id (the PR
 -- currently being processed by the webhook handler), how many are still in
 -- flight (open or draft) and how many have already merged. The webhook
 -- handler combines these with the current event's state to decide whether
--- to auto-advance the issue: the issue moves to done only when there is no
+-- to auto-advance the multica_issue: the multica_issue moves to done only when there is no
 -- in-flight sibling AND at least one linked PR (current or sibling) merged.
 SELECT
     COALESCE(SUM(CASE WHEN pr.state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
     COALESCE(SUM(CASE WHEN pr.state = 'merged' THEN 1 ELSE 0 END), 0)::bigint AS merged_count
-FROM github_pull_request pr
-JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+FROM multica_github_pull_request pr
+JOIN multica_issue_pull_request ipr ON ipr.pull_request_id = pr.id
 WHERE ipr.issue_id = $1
   AND pr.id <> $2;
 
@@ -177,7 +177,7 @@ WHERE ipr.issue_id = $1
 -- events targeting an old head still land here (their head_sha is stored
 -- on the row); the head_sha filter in ListPullRequestsByIssue keeps them
 -- out of the current aggregate.
-INSERT INTO github_pull_request_check_suite (
+INSERT INTO multica_github_pull_request_check_suite (
     pr_id, suite_id, head_sha, app_id, conclusion, status, updated_at
 ) VALUES (
     $1, $2, $3, $4, sqlc.narg('conclusion'), $5, $6
@@ -188,14 +188,14 @@ ON CONFLICT (pr_id, suite_id) DO UPDATE SET
     conclusion = EXCLUDED.conclusion,
     status     = EXCLUDED.status,
     updated_at = EXCLUDED.updated_at
-WHERE EXCLUDED.updated_at >= github_pull_request_check_suite.updated_at;
+WHERE EXCLUDED.updated_at >= multica_github_pull_request_check_suite.updated_at;
 
 -- =====================
 -- Issue ↔ Pull Request link
 -- =====================
 
 -- name: LinkIssueToPullRequest :exec
-INSERT INTO issue_pull_request (
+INSERT INTO multica_issue_pull_request (
     issue_id, pull_request_id, linked_by_type, linked_by_id
 ) VALUES (
     $1, $2, sqlc.narg('linked_by_type'), sqlc.narg('linked_by_id')
@@ -203,5 +203,5 @@ INSERT INTO issue_pull_request (
 ON CONFLICT (issue_id, pull_request_id) DO NOTHING;
 
 -- name: UnlinkIssueFromPullRequest :exec
-DELETE FROM issue_pull_request
+DELETE FROM multica_issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2;

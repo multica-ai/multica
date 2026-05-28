@@ -92,7 +92,7 @@ type GitHubConnectResponse struct {
 	Configured bool  `json:"configured"`
 }
 
-func githubInstallationToResponse(i db.GithubInstallation) GitHubInstallationResponse {
+func githubInstallationToResponse(i db.MulticaGithubInstallation) GitHubInstallationResponse {
 	instID := i.InstallationID
 	return GitHubInstallationResponse{
 		ID:               uuidToString(i.ID),
@@ -112,13 +112,13 @@ func githubInstallationToResponse(i db.GithubInstallation) GitHubInstallationRes
 // the list endpoint to recover the management handle. The frontend uses
 // these events only to invalidate the installations query, so it does not
 // read `installation_id` off the broadcast.
-func githubInstallationToBroadcast(i db.GithubInstallation) GitHubInstallationResponse {
+func githubInstallationToBroadcast(i db.MulticaGithubInstallation) GitHubInstallationResponse {
 	resp := githubInstallationToResponse(i)
 	resp.InstallationID = nil
 	return resp
 }
 
-func githubPullRequestToResponse(p db.GithubPullRequest) GitHubPullRequestResponse {
+func githubPullRequestToResponse(p db.MulticaGithubPullRequest) GitHubPullRequestResponse {
 	return GitHubPullRequestResponse{
 		ID:              uuidToString(p.ID),
 		WorkspaceID:     uuidToString(p.WorkspaceID),
@@ -1019,30 +1019,30 @@ func (h *Handler) workspaceAutoLinkPRsEnabled(ctx context.Context, workspaceID p
 }
 
 // the workspace's configured prefix and the number resolves to a real issue.
-func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool) {
+func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.MulticaIssue, bool) {
 	idx := strings.LastIndex(identifier, "-")
 	if idx < 0 {
-		return db.Issue{}, false
+		return db.MulticaIssue{}, false
 	}
 	gotPrefix, numStr := identifier[:idx], identifier[idx+1:]
 	if !strings.EqualFold(gotPrefix, prefix) {
-		return db.Issue{}, false
+		return db.MulticaIssue{}, false
 	}
 	n, err := strconv.Atoi(numStr)
 	if err != nil {
-		return db.Issue{}, false
+		return db.MulticaIssue{}, false
 	}
 	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
 		WorkspaceID: workspaceID,
 		Number:      int32(n),
 	})
 	if err != nil {
-		return db.Issue{}, false
+		return db.MulticaIssue{}, false
 	}
 	return issue, true
 }
 
-func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string) {
+func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.MulticaIssue, workspaceID string) {
 	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 		ID:          issue.ID,
 		Status:      "done",

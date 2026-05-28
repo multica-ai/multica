@@ -12,9 +12,9 @@ import (
 )
 
 const addReaction = `-- name: AddReaction :one
-INSERT INTO comment_reaction (comment_id, workspace_id, actor_type, actor_id, emoji)
+INSERT INTO multica_comment_reaction (comment_id, workspace_id, actor_type, actor_id, emoji)
 VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (comment_id, actor_type, actor_id, emoji) DO UPDATE SET created_at = comment_reaction.created_at
+ON CONFLICT (comment_id, actor_type, actor_id, emoji) DO UPDATE SET created_at = multica_comment_reaction.created_at
 RETURNING id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at
 `
 
@@ -26,7 +26,7 @@ type AddReactionParams struct {
 	Emoji       string      `json:"emoji"`
 }
 
-func (q *Queries) AddReaction(ctx context.Context, arg AddReactionParams) (CommentReaction, error) {
+func (q *Queries) AddReaction(ctx context.Context, arg AddReactionParams) (MulticaCommentReaction, error) {
 	row := q.db.QueryRow(ctx, addReaction,
 		arg.CommentID,
 		arg.WorkspaceID,
@@ -34,7 +34,7 @@ func (q *Queries) AddReaction(ctx context.Context, arg AddReactionParams) (Comme
 		arg.ActorID,
 		arg.Emoji,
 	)
-	var i CommentReaction
+	var i MulticaCommentReaction
 	err := row.Scan(
 		&i.ID,
 		&i.CommentID,
@@ -48,20 +48,20 @@ func (q *Queries) AddReaction(ctx context.Context, arg AddReactionParams) (Comme
 }
 
 const listReactionsByCommentIDs = `-- name: ListReactionsByCommentIDs :many
-SELECT id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at FROM comment_reaction
+SELECT id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at FROM multica_comment_reaction
 WHERE comment_id = ANY($1::uuid[])
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListReactionsByCommentIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]CommentReaction, error) {
+func (q *Queries) ListReactionsByCommentIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]MulticaCommentReaction, error) {
 	rows, err := q.db.Query(ctx, listReactionsByCommentIDs, dollar_1)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CommentReaction{}
+	items := []MulticaCommentReaction{}
 	for rows.Next() {
-		var i CommentReaction
+		var i MulticaCommentReaction
 		if err := rows.Scan(
 			&i.ID,
 			&i.CommentID,
@@ -82,7 +82,7 @@ func (q *Queries) ListReactionsByCommentIDs(ctx context.Context, dollar_1 []pgty
 }
 
 const removeReaction = `-- name: RemoveReaction :exec
-DELETE FROM comment_reaction
+DELETE FROM multica_comment_reaction
 WHERE comment_id = $1 AND actor_type = $2 AND actor_id = $3 AND emoji = $4
 `
 

@@ -69,32 +69,32 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 // that response to drop the stale runtime from its in-memory map and re-register,
 // so collapsing transient DB errors into the same 404 would force the daemon to
 // self-cleanup on a hiccup. Other DB errors become 500.
-func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (db.AgentRuntime, bool) {
+func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (db.MulticaAgentRuntime, bool) {
 	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
 	if !ok {
-		return db.AgentRuntime{}, false
+		return db.MulticaAgentRuntime{}, false
 	}
 	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "runtime not found")
-			return db.AgentRuntime{}, false
+			return db.MulticaAgentRuntime{}, false
 		}
 		slog.Warn("get agent runtime failed", "runtime_id", runtimeID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to load runtime")
-		return db.AgentRuntime{}, false
+		return db.MulticaAgentRuntime{}, false
 	}
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(rt.WorkspaceID)) {
-		return db.AgentRuntime{}, false
+		return db.MulticaAgentRuntime{}, false
 	}
 	return rt, true
 }
 
 // requireDaemonTaskAccess looks up a task and verifies the caller owns its workspace.
-func (h *Handler) requireDaemonTaskAccess(w http.ResponseWriter, r *http.Request, taskID string) (db.AgentTaskQueue, bool) {
+func (h *Handler) requireDaemonTaskAccess(w http.ResponseWriter, r *http.Request, taskID string) (db.MulticaAgentTaskQueue, bool) {
 	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
 	if !ok {
-		return db.AgentTaskQueue{}, false
+		return db.MulticaAgentTaskQueue{}, false
 	}
 	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 	if err != nil {
@@ -103,21 +103,21 @@ func (h *Handler) requireDaemonTaskAccess(w http.ResponseWriter, r *http.Request
 		// error must not be reported as a deletion.
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "task not found")
-			return db.AgentTaskQueue{}, false
+			return db.MulticaAgentTaskQueue{}, false
 		}
 		slog.Warn("get agent task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to load task")
-		return db.AgentTaskQueue{}, false
+		return db.MulticaAgentTaskQueue{}, false
 	}
 
 	wsID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
 	if wsID == "" {
 		writeError(w, http.StatusNotFound, "task not found")
-		return db.AgentTaskQueue{}, false
+		return db.MulticaAgentTaskQueue{}, false
 	}
 
 	if !h.requireDaemonWorkspaceAccess(w, r, wsID) {
-		return db.AgentTaskQueue{}, false
+		return db.MulticaAgentTaskQueue{}, false
 	}
 	return task, true
 }
@@ -343,7 +343,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		registered := db.AgentRuntime{
+		registered := db.MulticaAgentRuntime{
 			ID:             row.ID,
 			WorkspaceID:    row.WorkspaceID,
 			DaemonID:       row.DaemonID,
@@ -424,7 +424,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 // precisely when case-duplicate rows exist — which is the bug we're fixing.
 // We also dedupe across legacy ids so overlapping candidates (e.g. `foo` and
 // `foo.local` both resolving to the same stored row) don't double-process.
-func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntime, provider string, legacyIDs []string) {
+func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.MulticaAgentRuntime, provider string, legacyIDs []string) {
 	newID := uuidToString(registered.ID)
 	merged := make(map[string]struct{})
 
@@ -792,7 +792,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 // The actual DB write is delegated to h.HeartbeatScheduler so production can
 // coalesce many runtimes' bumps into one bulk UPDATE per tick. See
 // heartbeat_scheduler.go for the two implementations.
-func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error {
+func (h *Handler) recordHeartbeat(ctx context.Context, rt db.MulticaAgentRuntime) error {
 	now := time.Now()
 
 	// Decide whether the DB row needs a write *before* touching Redis, so a
@@ -836,7 +836,7 @@ type heartbeatMetrics struct {
 // the WebSocket daemon:heartbeat path: records liveness and pulls any pending
 // actions queued for the runtime. Auth and request decoding live in the
 // caller because they differ between transports.
-func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
+func (h *Handler) processHeartbeat(ctx context.Context, rt db.MulticaAgentRuntime, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
 	var m heartbeatMetrics
 	runtimeID := uuidToString(rt.ID)
 
@@ -1645,7 +1645,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 // the issue to reach terminal done. Retries / re-assignments / comment-
 // triggered follow-ups hit the WHERE first_executed_at IS NULL clause and
 // no-op, so the funnel counts unique issues, not tasks.
-func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.AgentTaskQueue) {
+func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.MulticaAgentTaskQueue) {
 	if task == nil {
 		return
 	}
@@ -1870,7 +1870,7 @@ func (h *Handler) ListTaskMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		messages []db.TaskMessage
+		messages []db.MulticaTaskMessage
 		err      error
 	)
 	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
@@ -2011,7 +2011,7 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 	}
 
 	var (
-		messages []db.TaskMessage
+		messages []db.MulticaTaskMessage
 		queryErr error
 	)
 	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {

@@ -43,10 +43,10 @@ func TestCommentMentionsAnyone(t *testing.T) {
 }
 
 // squadCommentTriggerFixture wires a squad assigned to a fresh issue and
-// returns the loaded db.Issue plus the leader agent UUID for use in
+// returns the loaded db.MulticaIssue plus the leader agent UUID for use in
 // shouldEnqueueSquadLeaderOnComment integration tests.
 type squadCommentTriggerFixture struct {
-	Issue    db.Issue
+	Issue    db.MulticaIssue
 	SquadID  string
 	LeaderID string
 	OtherID  string // second agent in workspace (with runtime), used as a non-leader @mention target

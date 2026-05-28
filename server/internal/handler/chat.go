@@ -174,14 +174,14 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *Handler) loadChatSessionForUser(w http.ResponseWriter, r *http.Request, userID, workspaceID, sessionID string) (db.ChatSession, bool) {
+func (h *Handler) loadChatSessionForUser(w http.ResponseWriter, r *http.Request, userID, workspaceID, sessionID string) (db.MulticaChatSession, bool) {
 	sessionUUID, ok := parseUUIDOrBadRequest(w, sessionID, "chat session id")
 	if !ok {
-		return db.ChatSession{}, false
+		return db.MulticaChatSession{}, false
 	}
 	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
-		return db.ChatSession{}, false
+		return db.MulticaChatSession{}, false
 	}
 	session, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
 		ID:          sessionUUID,
@@ -189,11 +189,11 @@ func (h *Handler) loadChatSessionForUser(w http.ResponseWriter, r *http.Request,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "chat session not found")
-		return db.ChatSession{}, false
+		return db.MulticaChatSession{}, false
 	}
 	if uuidToString(session.CreatorID) != userID {
 		writeError(w, http.StatusForbidden, "not your chat session")
-		return db.ChatSession{}, false
+		return db.MulticaChatSession{}, false
 	}
 	return session, true
 }
@@ -203,20 +203,20 @@ func (h *Handler) loadChatSessionForUser(w http.ResponseWriter, r *http.Request,
 // agent (role downgrade, ownership transfer, agent flipped to private)
 // cannot continue reading the chat transcript even though they remain the
 // session creator. Returns ok=false after writing the error response.
-func (h *Handler) gateChatSessionForUser(w http.ResponseWriter, r *http.Request, userID, workspaceID, sessionID string) (db.ChatSession, bool) {
+func (h *Handler) gateChatSessionForUser(w http.ResponseWriter, r *http.Request, userID, workspaceID, sessionID string) (db.MulticaChatSession, bool) {
 	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
-		return db.ChatSession{}, false
+		return db.MulticaChatSession{}, false
 	}
 	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "agent not found")
-		return db.ChatSession{}, false
+		return db.MulticaChatSession{}, false
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
-		return db.ChatSession{}, false
+		return db.MulticaChatSession{}, false
 	}
 	return session, true
 }
@@ -777,7 +777,7 @@ type ChatMessageResponse struct {
 	Attachments []AttachmentResponse `json:"attachments,omitempty"`
 }
 
-func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
+func chatSessionToResponse(s db.MulticaChatSession) ChatSessionResponse {
 	return ChatSessionResponse{
 		ID:          uuidToString(s.ID),
 		WorkspaceID: uuidToString(s.WorkspaceID),
@@ -790,7 +790,7 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 	}
 }
 
-func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) ChatMessageResponse {
+func chatMessageToResponse(m db.MulticaChatMessage, attachments []AttachmentResponse) ChatMessageResponse {
 	return ChatMessageResponse{
 		ID:            uuidToString(m.ID),
 		ChatSessionID: uuidToString(m.ChatSessionID),

@@ -28,8 +28,8 @@ func TestAutopilotErrorType(t *testing.T) {
 
 func TestBuildIssueDescription_NoTriggerPayload(t *testing.T) {
 	s := &AutopilotService{}
-	ap := db.Autopilot{Description: pgtype.Text{String: "do the thing", Valid: true}}
-	run := db.AutopilotRun{Source: "schedule"}
+	ap := db.MulticaAutopilot{Description: pgtype.Text{String: "do the thing", Valid: true}}
+	run := db.MulticaAutopilotRun{Source: "schedule"}
 
 	got := s.buildIssueDescription(ap, run)
 	if !strings.HasPrefix(got.String, "do the thing") {
@@ -45,9 +45,9 @@ func TestBuildIssueDescription_NoTriggerPayload(t *testing.T) {
 
 func TestBuildIssueDescription_WithWebhookPayload(t *testing.T) {
 	s := &AutopilotService{}
-	ap := db.Autopilot{Description: pgtype.Text{String: "watch PRs", Valid: true}}
+	ap := db.MulticaAutopilot{Description: pgtype.Text{String: "watch PRs", Valid: true}}
 	payload := []byte(`{"event":"github.pull_request.opened","eventPayload":{"number":7},"request":{"receivedAt":"2026-05-09T00:00:00Z","contentType":"application/json"}}`)
-	run := db.AutopilotRun{Source: "webhook", TriggerPayload: payload}
+	run := db.MulticaAutopilotRun{Source: "webhook", TriggerPayload: payload}
 
 	got := s.buildIssueDescription(ap, run)
 	if !strings.HasPrefix(got.String, "watch PRs") {
@@ -72,9 +72,9 @@ func TestBuildIssueDescription_WebhookSourceMissingEnvelope(t *testing.T) {
 	// trigger_payload, we should still emit a webhook block with sensible
 	// defaults rather than skipping the section entirely.
 	s := &AutopilotService{}
-	ap := db.Autopilot{Description: pgtype.Text{String: "thing", Valid: true}}
+	ap := db.MulticaAutopilot{Description: pgtype.Text{String: "thing", Valid: true}}
 	payload := []byte(`{"raw":"missing envelope"}`)
-	run := db.AutopilotRun{Source: "webhook", TriggerPayload: payload}
+	run := db.MulticaAutopilotRun{Source: "webhook", TriggerPayload: payload}
 
 	got := s.buildIssueDescription(ap, run)
 	if !strings.Contains(got.String, "Webhook event:") {
@@ -85,8 +85,8 @@ func TestBuildIssueDescription_WebhookSourceMissingEnvelope(t *testing.T) {
 func TestBuildIssueDescription_NonWebhookSourceWithPayloadIgnored(t *testing.T) {
 	// Manual / schedule with a payload should not get a webhook block.
 	s := &AutopilotService{}
-	ap := db.Autopilot{Description: pgtype.Text{String: "thing", Valid: true}}
-	run := db.AutopilotRun{Source: "manual", TriggerPayload: []byte(`{"event":"x.y"}`)}
+	ap := db.MulticaAutopilot{Description: pgtype.Text{String: "thing", Valid: true}}
+	run := db.MulticaAutopilotRun{Source: "manual", TriggerPayload: []byte(`{"event":"x.y"}`)}
 
 	got := s.buildIssueDescription(ap, run)
 	if strings.Contains(got.String, "Webhook event") {
@@ -105,27 +105,27 @@ func TestInterpolateTemplate(t *testing.T) {
 
 	cases := []struct {
 		name   string
-		ap     db.Autopilot
+		ap     db.MulticaAutopilot
 		expect string
 	}{
 		{
 			name:   "date placeholder substituted",
-			ap:     db.Autopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "probe — {{date}}", Valid: true}},
+			ap:     db.MulticaAutopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "probe — {{date}}", Valid: true}},
 			expect: "probe — " + today,
 		},
 		{
 			name:   "date placeholder with whitespace substituted",
-			ap:     db.Autopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "probe — {{ date }}", Valid: true}},
+			ap:     db.MulticaAutopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "probe — {{ date }}", Valid: true}},
 			expect: "probe — " + today,
 		},
 		{
 			name:   "empty template falls back to autopilot title",
-			ap:     db.Autopilot{Title: "fallback title", IssueTitleTemplate: pgtype.Text{Valid: false}},
+			ap:     db.MulticaAutopilot{Title: "fallback title", IssueTitleTemplate: pgtype.Text{Valid: false}},
 			expect: "fallback title",
 		},
 		{
 			name:   "template without placeholder is returned verbatim",
-			ap:     db.Autopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "static title", Valid: true}},
+			ap:     db.MulticaAutopilot{Title: "fallback", IssueTitleTemplate: pgtype.Text{String: "static title", Valid: true}},
 			expect: "static title",
 		},
 	}

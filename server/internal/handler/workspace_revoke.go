@@ -132,9 +132,9 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 // Publishing inside the transaction would let subscribers observe a state the
 // tx might still roll back (see TaskService.BroadcastCancelledTasks docstring).
 type revocationResult struct {
-	Runtimes           []db.AgentRuntime
-	ArchivedAgents     []db.Agent
-	CancelledTasks     []db.AgentTaskQueue
+	Runtimes           []db.MulticaAgentRuntime
+	ArchivedAgents     []db.MulticaAgent
+	CancelledTasks     []db.MulticaAgentTaskQueue
 	OfflineRuntimeIDs  []db.ForceOfflineRuntimesByIDsRow
 	RevokedTokenHashes []string
 }

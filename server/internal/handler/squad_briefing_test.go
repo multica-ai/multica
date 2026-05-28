@@ -32,8 +32,8 @@ func TestSquadOperatingProtocolWarnsAgainstDualTrigger(t *testing.T) {
 }
 
 // seedSquadForBriefing creates a squad with the seeded test agent as
-// leader. Returns the loaded db.Squad and a cleanup-registered ID.
-func seedSquadForBriefing(t *testing.T, leaderID string, name, instructions string) db.Squad {
+// leader. Returns the loaded db.MulticaSquad and a cleanup-registered ID.
+func seedSquadForBriefing(t *testing.T, leaderID string, name, instructions string) db.MulticaSquad {
 	t.Helper()
 	ctx := context.Background()
 

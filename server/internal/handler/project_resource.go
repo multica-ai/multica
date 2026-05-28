@@ -28,7 +28,7 @@ type ProjectResourceResponse struct {
 	CreatedBy    *string         `json:"created_by"`
 }
 
-func projectResourceToResponse(r db.ProjectResource) ProjectResourceResponse {
+func projectResourceToResponse(r db.MulticaProjectResource) ProjectResourceResponse {
 	ref := json.RawMessage(r.ResourceRef)
 	if len(ref) == 0 {
 		ref = json.RawMessage("{}")
@@ -140,21 +140,21 @@ func isValidGitRepoURL(s string) bool {
 
 // loadProjectForResource resolves the project, enforces workspace ownership,
 // and returns its DB row. Used by all project_resource handlers.
-func (h *Handler) loadProjectForResource(w http.ResponseWriter, r *http.Request, projectIDParam string) (db.Project, bool) {
+func (h *Handler) loadProjectForResource(w http.ResponseWriter, r *http.Request, projectIDParam string) (db.MulticaProject, bool) {
 	projectUUID, ok := parseUUIDOrBadRequest(w, projectIDParam, "project id")
 	if !ok {
-		return db.Project{}, false
+		return db.MulticaProject{}, false
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
 	if !ok {
-		return db.Project{}, false
+		return db.MulticaProject{}, false
 	}
 	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 		ID: projectUUID, WorkspaceID: wsUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
-		return db.Project{}, false
+		return db.MulticaProject{}, false
 	}
 	return project, true
 }
@@ -314,7 +314,7 @@ func parseUUIDLoose(s string) (pgtype.UUID, error) {
 
 // listProjectResourcesForProject is a small helper used by the daemon claim
 // handler to attach project resources to outgoing tasks.
-func (h *Handler) listProjectResourcesForProject(ctx context.Context, projectID pgtype.UUID) []db.ProjectResource {
+func (h *Handler) listProjectResourcesForProject(ctx context.Context, projectID pgtype.UUID) []db.MulticaProjectResource {
 	if !projectID.Valid {
 		return nil
 	}

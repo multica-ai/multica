@@ -28,7 +28,7 @@ func pickFixtureAgent(t *testing.T) pgtype.UUID {
 
 // seedAutopilot creates an autopilot owned by the given creator (member or
 // agent UUID + type) and registers cleanup. Status defaults to "active".
-func seedAutopilot(t *testing.T, queries *db.Queries, title, creatorType string, creatorID pgtype.UUID, agentID pgtype.UUID) db.Autopilot {
+func seedAutopilot(t *testing.T, queries *db.Queries, title, creatorType string, creatorID pgtype.UUID, agentID pgtype.UUID) db.MulticaAutopilot {
 	t.Helper()
 	ctx := context.Background()
 	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{

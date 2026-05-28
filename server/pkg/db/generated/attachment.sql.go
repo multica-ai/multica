@@ -12,7 +12,7 @@ import (
 )
 
 const createAttachment = `-- name: CreateAttachment :one
-INSERT INTO attachment (
+INSERT INTO multica_attachment (
   id, workspace_id, issue_id, comment_id, chat_session_id,
   uploader_type, uploader_id, filename, url, content_type, size_bytes
 )
@@ -37,7 +37,7 @@ type CreateAttachmentParams struct {
 	ChatSessionID pgtype.UUID `json:"chat_session_id"`
 }
 
-func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentParams) (Attachment, error) {
+func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentParams) (MulticaAttachment, error) {
 	row := q.db.QueryRow(ctx, createAttachment,
 		arg.ID,
 		arg.WorkspaceID,
@@ -51,7 +51,7 @@ func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentPara
 		arg.CommentID,
 		arg.ChatSessionID,
 	)
-	var i Attachment
+	var i MulticaAttachment
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -71,7 +71,7 @@ func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentPara
 }
 
 const deleteAttachment = `-- name: DeleteAttachment :exec
-DELETE FROM attachment WHERE id = $1 AND workspace_id = $2
+DELETE FROM multica_attachment WHERE id = $1 AND workspace_id = $2
 `
 
 type DeleteAttachmentParams struct {
@@ -85,7 +85,7 @@ func (q *Queries) DeleteAttachment(ctx context.Context, arg DeleteAttachmentPara
 }
 
 const getAttachment = `-- name: GetAttachment :one
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM multica_attachment
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -94,9 +94,9 @@ type GetAttachmentParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetAttachment(ctx context.Context, arg GetAttachmentParams) (Attachment, error) {
+func (q *Queries) GetAttachment(ctx context.Context, arg GetAttachmentParams) (MulticaAttachment, error) {
 	row := q.db.QueryRow(ctx, getAttachment, arg.ID, arg.WorkspaceID)
-	var i Attachment
+	var i MulticaAttachment
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -116,7 +116,7 @@ func (q *Queries) GetAttachment(ctx context.Context, arg GetAttachmentParams) (A
 }
 
 const linkAttachmentsToChatMessage = `-- name: LinkAttachmentsToChatMessage :exec
-UPDATE attachment
+UPDATE multica_attachment
 SET chat_message_id = $1
 WHERE chat_session_id = $2
   AND chat_message_id IS NULL
@@ -135,7 +135,7 @@ func (q *Queries) LinkAttachmentsToChatMessage(ctx context.Context, arg LinkAtta
 }
 
 const linkAttachmentsToComment = `-- name: LinkAttachmentsToComment :exec
-UPDATE attachment
+UPDATE multica_attachment
 SET comment_id = $1
 WHERE issue_id = $2
   AND comment_id IS NULL
@@ -154,7 +154,7 @@ func (q *Queries) LinkAttachmentsToComment(ctx context.Context, arg LinkAttachme
 }
 
 const linkAttachmentsToIssue = `-- name: LinkAttachmentsToIssue :exec
-UPDATE attachment
+UPDATE multica_attachment
 SET issue_id = $1
 WHERE workspace_id = $2
   AND issue_id IS NULL
@@ -173,7 +173,7 @@ func (q *Queries) LinkAttachmentsToIssue(ctx context.Context, arg LinkAttachment
 }
 
 const listAttachmentURLsByCommentID = `-- name: ListAttachmentURLsByCommentID :many
-SELECT url FROM attachment
+SELECT url FROM multica_attachment
 WHERE comment_id = $1
 `
 
@@ -198,9 +198,9 @@ func (q *Queries) ListAttachmentURLsByCommentID(ctx context.Context, commentID p
 }
 
 const listAttachmentURLsByIssueOrComments = `-- name: ListAttachmentURLsByIssueOrComments :many
-SELECT a.url FROM attachment a
+SELECT a.url FROM multica_attachment a
 WHERE a.issue_id = $1
-   OR a.comment_id IN (SELECT c.id FROM comment c WHERE c.issue_id = $1)
+   OR a.comment_id IN (SELECT c.id FROM multica_comment c WHERE c.issue_id = $1)
 `
 
 func (q *Queries) ListAttachmentURLsByIssueOrComments(ctx context.Context, issueID pgtype.UUID) ([]string, error) {
@@ -224,7 +224,7 @@ func (q *Queries) ListAttachmentURLsByIssueOrComments(ctx context.Context, issue
 }
 
 const listAttachmentsByChatMessage = `-- name: ListAttachmentsByChatMessage :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM multica_attachment
 WHERE chat_message_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC
 `
@@ -234,15 +234,15 @@ type ListAttachmentsByChatMessageParams struct {
 	WorkspaceID   pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) ListAttachmentsByChatMessage(ctx context.Context, arg ListAttachmentsByChatMessageParams) ([]Attachment, error) {
+func (q *Queries) ListAttachmentsByChatMessage(ctx context.Context, arg ListAttachmentsByChatMessageParams) ([]MulticaAttachment, error) {
 	rows, err := q.db.Query(ctx, listAttachmentsByChatMessage, arg.ChatMessageID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Attachment{}
+	items := []MulticaAttachment{}
 	for rows.Next() {
-		var i Attachment
+		var i MulticaAttachment
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -269,7 +269,7 @@ func (q *Queries) ListAttachmentsByChatMessage(ctx context.Context, arg ListAtta
 }
 
 const listAttachmentsByChatMessageIDs = `-- name: ListAttachmentsByChatMessageIDs :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM multica_attachment
 WHERE chat_message_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC
 `
@@ -279,15 +279,15 @@ type ListAttachmentsByChatMessageIDsParams struct {
 	WorkspaceID pgtype.UUID   `json:"workspace_id"`
 }
 
-func (q *Queries) ListAttachmentsByChatMessageIDs(ctx context.Context, arg ListAttachmentsByChatMessageIDsParams) ([]Attachment, error) {
+func (q *Queries) ListAttachmentsByChatMessageIDs(ctx context.Context, arg ListAttachmentsByChatMessageIDsParams) ([]MulticaAttachment, error) {
 	rows, err := q.db.Query(ctx, listAttachmentsByChatMessageIDs, arg.Column1, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Attachment{}
+	items := []MulticaAttachment{}
 	for rows.Next() {
-		var i Attachment
+		var i MulticaAttachment
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -314,7 +314,7 @@ func (q *Queries) ListAttachmentsByChatMessageIDs(ctx context.Context, arg ListA
 }
 
 const listAttachmentsByComment = `-- name: ListAttachmentsByComment :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM multica_attachment
 WHERE comment_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC
 `
@@ -324,15 +324,15 @@ type ListAttachmentsByCommentParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) ListAttachmentsByComment(ctx context.Context, arg ListAttachmentsByCommentParams) ([]Attachment, error) {
+func (q *Queries) ListAttachmentsByComment(ctx context.Context, arg ListAttachmentsByCommentParams) ([]MulticaAttachment, error) {
 	rows, err := q.db.Query(ctx, listAttachmentsByComment, arg.CommentID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Attachment{}
+	items := []MulticaAttachment{}
 	for rows.Next() {
-		var i Attachment
+		var i MulticaAttachment
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -359,7 +359,7 @@ func (q *Queries) ListAttachmentsByComment(ctx context.Context, arg ListAttachme
 }
 
 const listAttachmentsByCommentIDs = `-- name: ListAttachmentsByCommentIDs :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM multica_attachment
 WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC
 `
@@ -369,15 +369,15 @@ type ListAttachmentsByCommentIDsParams struct {
 	WorkspaceID pgtype.UUID   `json:"workspace_id"`
 }
 
-func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, arg ListAttachmentsByCommentIDsParams) ([]Attachment, error) {
+func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, arg ListAttachmentsByCommentIDsParams) ([]MulticaAttachment, error) {
 	rows, err := q.db.Query(ctx, listAttachmentsByCommentIDs, arg.Column1, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Attachment{}
+	items := []MulticaAttachment{}
 	for rows.Next() {
-		var i Attachment
+		var i MulticaAttachment
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -404,7 +404,7 @@ func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, arg ListAttac
 }
 
 const listAttachmentsByIssue = `-- name: ListAttachmentsByIssue :many
-SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM attachment
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM multica_attachment
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC
 `
@@ -414,15 +414,15 @@ type ListAttachmentsByIssueParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachmentsByIssueParams) ([]Attachment, error) {
+func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachmentsByIssueParams) ([]MulticaAttachment, error) {
 	rows, err := q.db.Query(ctx, listAttachmentsByIssue, arg.IssueID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Attachment{}
+	items := []MulticaAttachment{}
 	for rows.Next() {
-		var i Attachment
+		var i MulticaAttachment
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,

@@ -70,7 +70,7 @@ type UserResponse struct {
 // doesn't move the needle on prompt cost.
 const MaxProfileDescriptionLen = 2000
 
-func userToResponse(u db.User) UserResponse {
+func userToResponse(u db.MulticaUser) UserResponse {
 	// JSONB column is []byte with DEFAULT '{}', so it's never nil at the DB
 	// level. Defensive coalesce just in case a future ALTER makes the column
 	// nullable and some row comes back with no default applied.
@@ -146,7 +146,7 @@ func isSixDigitCode(code string) bool {
 	return true
 }
 
-func (h *Handler) issueJWT(user db.User) (string, error) {
+func (h *Handler) issueJWT(user db.MulticaUser) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":   uuidToString(user.ID),
 		"email": user.Email,
@@ -161,15 +161,15 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 // none exists. isNew reports whether this call created the user — the signup
 // event fires on that edge, covering both the verification-code and Google
 // OAuth entry points.
-func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.User, isNew bool, err error) {
+func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.MulticaUser, isNew bool, err error) {
 	user, err = h.Queries.GetUserByEmail(ctx, email)
 	isNew = isNotFound(err)
 	if err != nil && !isNew {
-		return db.User{}, false, err
+		return db.MulticaUser{}, false, err
 	}
 
 	if err := h.checkSignupAllowed(email, isNew); err != nil {
-		return db.User{}, false, err
+		return db.MulticaUser{}, false, err
 	}
 
 	if !isNew {
@@ -185,7 +185,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 		Email: email,
 	})
 	if err != nil {
-		return db.User{}, false, err
+		return db.MulticaUser{}, false, err
 	}
 	return created, true, nil
 }

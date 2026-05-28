@@ -72,7 +72,7 @@ func validateIssueMetadataValue(raw json.RawMessage) error {
 	}
 }
 
-// parseIssueMetadata decodes the JSONB bytes from db.Issue.Metadata into a
+// parseIssueMetadata decodes the JSONB bytes from db.MulticaIssue.Metadata into a
 // Go map suitable for response serialization. Empty or unparseable blobs
 // degrade to an empty map — the DB CHECK guarantees object shape, so this
 // path is only hit on rows somehow predating the migration.

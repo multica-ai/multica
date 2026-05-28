@@ -3,26 +3,26 @@
 -- =====================
 
 -- name: ListWorkflows :many
-SELECT * FROM workflow
+SELECT * FROM multica_workflow
 WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: GetWorkflow :one
-SELECT * FROM workflow
+SELECT * FROM multica_workflow
 WHERE id = $1;
 
 -- name: GetWorkflowInWorkspace :one
-SELECT * FROM workflow
+SELECT * FROM multica_workflow
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: CountWorkflowNodes :one
-SELECT count(*)::bigint FROM workflow_node
+SELECT count(*)::bigint FROM multica_workflow_node
 WHERE workflow_id = $1;
 
 -- name: CreateWorkflow :one
-INSERT INTO workflow (
+INSERT INTO multica_workflow (
     workspace_id, title, description, status, max_retries,
     created_by_type, created_by_id
 ) VALUES (
@@ -30,7 +30,7 @@ INSERT INTO workflow (
 ) RETURNING *;
 
 -- name: UpdateWorkflow :one
-UPDATE workflow SET
+UPDATE multica_workflow SET
     title = COALESCE(sqlc.narg('title'), title),
     description = COALESCE(sqlc.narg('description'), description),
     status = COALESCE(sqlc.narg('status'), status),
@@ -40,23 +40,23 @@ WHERE id = $1
 RETURNING *;
 
 -- name: DeleteWorkflow :exec
-DELETE FROM workflow WHERE id = $1;
+DELETE FROM multica_workflow WHERE id = $1;
 
 -- =====================
 -- Workflow Node CRUD
 -- =====================
 
 -- name: ListWorkflowNodes :many
-SELECT * FROM workflow_node
+SELECT * FROM multica_workflow_node
 WHERE workflow_id = $1
 ORDER BY sort_order ASC, created_at ASC;
 
 -- name: GetWorkflowNode :one
-SELECT * FROM workflow_node
+SELECT * FROM multica_workflow_node
 WHERE id = $1;
 
 -- name: CreateWorkflowNode :one
-INSERT INTO workflow_node (
+INSERT INTO multica_workflow_node (
     workflow_id, title, description, position_x, position_y,
     format_schema, worker_type, worker_id, worker_instructions,
     critic_type, critic_id, critic_instructions, critic_api_url,
@@ -69,7 +69,7 @@ INSERT INTO workflow_node (
 ) RETURNING *;
 
 -- name: UpdateWorkflowNode :one
-UPDATE workflow_node SET
+UPDATE multica_workflow_node SET
     title = COALESCE(sqlc.narg('title'), title),
     description = COALESCE(sqlc.narg('description'), description),
     position_x = COALESCE(sqlc.narg('position_x')::float, position_x),
@@ -88,44 +88,44 @@ WHERE id = $1
 RETURNING *;
 
 -- name: DeleteWorkflowNode :exec
-DELETE FROM workflow_node WHERE id = $1;
+DELETE FROM multica_workflow_node WHERE id = $1;
 
 -- name: DeleteWorkflowNodesByWorkflow :exec
-DELETE FROM workflow_node WHERE workflow_id = $1;
+DELETE FROM multica_workflow_node WHERE workflow_id = $1;
 
 -- =====================
 -- Workflow Edge CRUD
 -- =====================
 
 -- name: ListWorkflowEdges :many
-SELECT * FROM workflow_edge
+SELECT * FROM multica_workflow_edge
 WHERE workflow_id = $1
 ORDER BY created_at ASC;
 
 -- name: GetWorkflowEdge :one
-SELECT * FROM workflow_edge
+SELECT * FROM multica_workflow_edge
 WHERE id = $1;
 
 -- name: CreateWorkflowEdge :one
-INSERT INTO workflow_edge (
+INSERT INTO multica_workflow_edge (
     workflow_id, source_node_id, target_node_id, condition
 ) VALUES (
     $1, $2, $3, sqlc.narg('condition')
 ) RETURNING *;
 
 -- name: DeleteWorkflowEdge :exec
-DELETE FROM workflow_edge WHERE id = $1;
+DELETE FROM multica_workflow_edge WHERE id = $1;
 
 -- name: DeleteWorkflowEdgesByWorkflow :exec
-DELETE FROM workflow_edge WHERE workflow_id = $1;
+DELETE FROM multica_workflow_edge WHERE workflow_id = $1;
 
 -- name: ListWorkflowEdgesBySource :many
-SELECT * FROM workflow_edge
+SELECT * FROM multica_workflow_edge
 WHERE source_node_id = $1
 ORDER BY created_at ASC;
 
 -- name: ListWorkflowEdgesByTarget :many
-SELECT * FROM workflow_edge
+SELECT * FROM multica_workflow_edge
 WHERE target_node_id = $1
 ORDER BY created_at ASC;
 
@@ -134,23 +134,23 @@ ORDER BY created_at ASC;
 -- =====================
 
 -- name: ListWorkflowRuns :many
-SELECT * FROM workflow_run
+SELECT * FROM multica_workflow_run
 WHERE workflow_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: ListWorkflowRunsByWorkspace :many
-SELECT * FROM workflow_run
+SELECT * FROM multica_workflow_run
 WHERE workspace_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: GetWorkflowRun :one
-SELECT * FROM workflow_run
+SELECT * FROM multica_workflow_run
 WHERE id = $1;
 
 -- name: CreateWorkflowRun :one
-INSERT INTO workflow_run (
+INSERT INTO multica_workflow_run (
     workflow_id, workspace_id, workflow_title, status,
     triggered_by_type, triggered_by_id, input
 ) VALUES (
@@ -158,14 +158,14 @@ INSERT INTO workflow_run (
 ) RETURNING *;
 
 -- name: UpdateWorkflowRunStatus :one
-UPDATE workflow_run SET
+UPDATE multica_workflow_run SET
     status = $2,
     completed_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled') THEN now() ELSE completed_at END
 WHERE id = $1
 RETURNING *;
 
 -- name: CompleteWorkflowRun :one
-UPDATE workflow_run SET
+UPDATE multica_workflow_run SET
     status = 'completed',
     output = sqlc.narg('output'),
     completed_at = now()
@@ -173,14 +173,14 @@ WHERE id = $1
 RETURNING *;
 
 -- name: FailWorkflowRun :one
-UPDATE workflow_run SET
+UPDATE multica_workflow_run SET
     status = 'failed',
     completed_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: CancelWorkflowRun :one
-UPDATE workflow_run SET
+UPDATE multica_workflow_run SET
     status = 'cancelled',
     completed_at = now()
 WHERE id = $1

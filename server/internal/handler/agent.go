@@ -59,7 +59,7 @@ type AgentResponse struct {
 	ArchivedBy    *string             `json:"archived_by"`
 }
 
-func agentToResponse(a db.Agent) AgentResponse {
+func agentToResponse(a db.MulticaAgent) AgentResponse {
 	var rc any
 	if a.RuntimeConfig != nil {
 		json.Unmarshal(a.RuntimeConfig, &rc)
@@ -220,7 +220,7 @@ type TaskAgentData struct {
 	ThinkingLevel string                   `json:"thinking_level,omitempty"`
 }
 
-func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
+func taskToResponse(t db.MulticaAgentTaskQueue) AgentTaskResponse {
 	var result any
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
@@ -268,7 +268,7 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 // triggered task with both an issue_id and trigger_comment_id) / quick_create
 // (no linked source — the agent is creating the issue itself) / direct
 // (assignee-driven task on an existing issue).
-func computeTaskKind(t db.AgentTaskQueue) string {
+func computeTaskKind(t db.MulticaAgentTaskQueue) string {
 	if uuidToString(t.ChatSessionID) != "" {
 		return "chat"
 	}
@@ -292,7 +292,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := requestUserID(r)
 
-	var agents []db.Agent
+	var agents []db.MulticaAgent
 	var err error
 	if r.URL.Query().Get("include_archived") == "true" {
 		agents, err = h.Queries.ListAllAgents(r.Context(), parseUUID(workspaceID))
@@ -666,7 +666,7 @@ func workspaceAlwaysRedactEnv(settings []byte) bool {
 // canViewAgentEnv checks whether the requesting user is allowed to see the
 // agent's custom environment variables. Only the agent owner or workspace
 // owner/admin may view them; for everyone else the field is redacted.
-func canViewAgentEnv(agent db.Agent, userID string, memberRole string) bool {
+func canViewAgentEnv(agent db.MulticaAgent, userID string, memberRole string) bool {
 	if roleAllowed(memberRole, "owner", "admin") {
 		return true
 	}
@@ -698,7 +698,7 @@ func redactMcpConfig(resp *AgentResponse) {
 // canManageAgent checks whether the current user can update or archive an agent.
 // Only the agent owner or workspace owner/admin can manage any agent,
 // regardless of whether it is public or private.
-func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
+func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.MulticaAgent) bool {
 	wsID := uuidToString(agent.WorkspaceID)
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
 	if !ok {

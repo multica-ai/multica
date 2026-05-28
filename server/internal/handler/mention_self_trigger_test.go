@@ -24,13 +24,13 @@ type selfMentionFixture struct {
 	JID        string
 	RuntimeID  string
 	IssueAID   string // primary issue (used for same-issue scenarios)
-	IssueA     db.Issue
+	IssueA     db.MulticaIssue
 	IssueBID   string // a second issue (used for the cross-issue scenario)
-	IssueB     db.Issue
+	IssueB     db.MulticaIssue
 	CommentAID string // a comment on IssueA authored by J — used as the trigger
-	CommentA   db.Comment
+	CommentA   db.MulticaComment
 	CommentBID string // a comment on IssueB authored by J — used as the trigger
-	CommentB   db.Comment
+	CommentB   db.MulticaComment
 }
 
 func newSelfMentionFixture(t *testing.T) selfMentionFixture {

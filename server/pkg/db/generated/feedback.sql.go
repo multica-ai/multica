@@ -12,7 +12,7 @@ import (
 )
 
 const countRecentFeedbackByUser = `-- name: CountRecentFeedbackByUser :one
-SELECT count(*) FROM feedback
+SELECT count(*) FROM multica_feedback
 WHERE user_id = $1 AND created_at > now() - interval '1 hour'
 `
 
@@ -24,7 +24,7 @@ func (q *Queries) CountRecentFeedbackByUser(ctx context.Context, userID pgtype.U
 }
 
 const createFeedback = `-- name: CreateFeedback :one
-INSERT INTO feedback (user_id, workspace_id, message, metadata)
+INSERT INTO multica_feedback (user_id, workspace_id, message, metadata)
 VALUES ($1, $4, $2, $3)
 RETURNING id, user_id, workspace_id, message, metadata, created_at
 `
@@ -36,14 +36,14 @@ type CreateFeedbackParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) CreateFeedback(ctx context.Context, arg CreateFeedbackParams) (Feedback, error) {
+func (q *Queries) CreateFeedback(ctx context.Context, arg CreateFeedbackParams) (MulticaFeedback, error) {
 	row := q.db.QueryRow(ctx, createFeedback,
 		arg.UserID,
 		arg.Message,
 		arg.Metadata,
 		arg.WorkspaceID,
 	)
-	var i Feedback
+	var i MulticaFeedback
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
