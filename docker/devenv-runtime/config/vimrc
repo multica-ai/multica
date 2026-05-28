@@ -1,0 +1,82 @@
+let mapleader = "\<Space>"
+
+set nocompatible
+filetype plugin on
+syntax enable
+
+set t_Co=256
+set t_ut=
+set background=dark
+if has('termguicolors')
+  set termguicolors
+endif
+
+set history=50
+set backupcopy=yes
+set directory=/tmp/
+set backupdir=/tmp/
+
+set tabstop=2
+set softtabstop=2
+set shiftwidth=2
+set expandtab
+
+set encoding=utf-8
+set hlsearch
+set number
+set ruler
+set showcmd
+set autoindent
+set autowrite
+set laststatus=2
+set whichwrap=<,>,h,l
+set backspace=2
+set wildmenu
+set wildmode=list:longest
+set showmatch
+set matchtime=3
+set visualbell
+set noerrorbells
+set foldmethod=indent
+set lazyredraw
+set colorcolumn=120
+set list
+
+if &listchars ==# 'eol:$'
+  set listchars=tab:>\ ,trail:-,extends:>,precedes:<,nbsp:+
+endif
+
+highlight ExtraWhitespace ctermbg=darkred guibg=darkred
+match ExtraWhitespace /\s\+$\|\t/
+
+if executable('rg')
+  set grepprg=rg\ --vimgrep\ --smart-case
+  set grepformat=%f:%l:%c:%m
+endif
+
+noremap ; :
+tnoremap <C-c> <C-\><C-n>
+
+nmap <C-W>o :<CR>
+
+vnoremap * y/<C-R>"<CR>
+
+nnoremap <leader>a G$vgg^"+y
+vnoremap <leader>c "+y
+nnoremap <leader>p "+p
+nnoremap <leader>y :let @+ = expand('%')<CR>
+
+nnoremap <leader>s :%s/\s\+$//g<CR>
+
+nnoremap <leader>v :tabnew $MYVIMRC<CR>
+
+function! NumberToggle()
+  if(&relativenumber == 1)
+    set nornu
+    set number
+  else
+    set rnu
+  endif
+endfunction
+
+nnoremap <leader>rn :call NumberToggle()<cr>

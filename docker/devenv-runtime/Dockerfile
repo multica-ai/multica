@@ -2,46 +2,91 @@
 #
 # devenv-runtime — opencode server running on the shared agent-runtime base.
 #
-# Replaces the install-everything `opencode-dev` image in g2crowd/docker-layers
-# (out of scope for this POC to cut DevEnv production over — keep both for a
-# release; cut over once stable per PLA-267).
+# Base: agent-runtime-base (multica, claude, codex, opencode, hermes, pi, gh, acli)
+# Adds: kubectl, G2 devenv tooling (bun, mise, ruby, vim, uv, arb, oh-my-openagent)
 
 ARG BASE_IMAGE=ghcr.io/g2crowd/agent-runtime-base
 ARG BASE_TAG=latest
 
 FROM ${BASE_IMAGE}:${BASE_TAG}
 
-# kubectl — bump in lockstep with EKS control-plane minor.
 ARG KUBECTL_MINOR=v1.31
 
 USER root
 
+# ── kubectl + system packages for G2 devenv ──────────────────────────────────
 RUN curl -fsSL "https://pkgs.k8s.io/core:/stable:/${KUBECTL_MINOR}/deb/Release.key" \
       | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
  && chmod go+r /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
  && echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${KUBECTL_MINOR}/deb/ /" \
       > /etc/apt/sources.list.d/kubernetes.list \
  && apt-get update \
- && apt-get install -y --no-install-recommends kubectl yq \
+ && apt-get install -y --no-install-recommends \
+      kubectl yq \
+      vim nano tmux fzf unzip \
+      make build-essential pkg-config \
+      libpq-dev libssl-dev libyaml-dev libffi-dev libreadline-dev zlib1g-dev \
+      libcurl4-openssl-dev libsass-dev libxml2-dev libxslt1-dev \
+      imagemagick libmagickwand-dev \
+      python3 wget netcat-openbsd tree less dnsutils procps openssh-client \
  && rm -rf /var/lib/apt/lists/*
 
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
- && chmod +x /usr/local/bin/entrypoint.sh
+# ── Symlink /home/developer → /home/agent for k8s volume mount compat ────────
+RUN ln -sf /home/agent /home/developer
 
-COPY agentfarm-bootstrap.sh /usr/local/bin/agentfarm-bootstrap.sh
-RUN sed -i 's/\r$//' /usr/local/bin/agentfarm-bootstrap.sh \
- && chmod +x /usr/local/bin/agentfarm-bootstrap.sh
+# ── Scripts ──────────────────────────────────────────────────────────────────
+COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chmod=755 agentfarm-bootstrap.sh /usr/local/bin/agentfarm-bootstrap.sh
+COPY --chmod=755 git-sudo /usr/local/bin/git-sudo
+COPY --chmod=755 setup /usr/local/bin/setup
+COPY --chmod=755 restart /usr/local/bin/restart
 
 COPY agent-templates/ /etc/multica/agent-templates/
 RUN chmod -R a+r /etc/multica/agent-templates/
 
-USER agent
+# ── arb (GitHub/Jira → OpenCode dispatcher) ──────────────────────────────────
+RUN --mount=type=secret,id=github_token \
+    echo "@g2crowd:registry=https://npm.pkg.github.com" > /tmp/.npmrc \
+ && echo "//npm.pkg.github.com/:_authToken=$(cat /run/secrets/github_token 2>/dev/null || echo '')" >> /tmp/.npmrc \
+ && HOME=/tmp npm install -g @g2crowd/arb-cli@latest \
+ && rm -f /tmp/.npmrc
 
-# opencode serve binds 127.0.0.1 by default. We override with 0.0.0.0 in the
-# entrypoint so the Kubernetes Service can reach the pod. Default port 4096
-# matches the upstream `opencode serve` default; downstream Kustomize sets
-# OPENCODE_PORT if it needs a different port.
+USER agent
+ENV HOME=/home/agent
+
+# ── Install Bun ──────────────────────────────────────────────────────────────
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/home/agent/.bun/bin:${PATH}"
+
+# ── Install uv (Python package manager — needed for uvx MCP servers) ─────────
+RUN curl -fsSL https://astral.sh/uv/install.sh | sh
+ENV PATH="/home/agent/.local/bin:${PATH}"
+
+# ── Install mise + Ruby ──────────────────────────────────────────────────────
+RUN curl -fsSL https://mise.run | sh \
+ && echo 'eval "$($HOME/.local/bin/mise activate bash)"' >> ~/.bashrc
+ENV PATH="/home/agent/.local/bin:${PATH}"
+ENV MISE_TRUSTED_CONFIG_PATHS="/home/agent/workspaces:/home/developer/workspaces"
+
+RUN mise use --global ruby@3.3.10 && mise reshim
+ENV PATH="/home/agent/.local/share/mise/shims:${PATH}"
+
+# ── Bake in opencode config files ────────────────────────────────────────────
+RUN mkdir -p "${HOME}/.config/opencode"
+COPY --chown=agent:agent config/opencode.json "${HOME}/.config/opencode/opencode.json"
+COPY --chown=agent:agent config/oh-my-openagent.json "${HOME}/.config/opencode/oh-my-openagent.json"
+COPY --chown=agent:agent config/skills/ "${HOME}/.config/opencode/skills/"
+COPY --chown=agent:agent config/package.json "${HOME}/.config/opencode/package.json"
+COPY --chown=agent:agent config/tui.json "${HOME}/.config/opencode/tui.json"
+COPY --chown=agent:agent config/vimrc "${HOME}/.vimrc"
+COPY --chown=agent:agent config/AGENTS.md /opt/AGENTS.md
+
+# ── Install oh-my-openagent plugin ───────────────────────────────────────────
+RUN cd "${HOME}/.config/opencode" && bun install
+
+# ── Verify ───────────────────────────────────────────────────────────────────
+RUN opencode --version && bun --version && gh --version | head -1 && arb --help | head -1
+
 ENV OPENCODE_HOST=0.0.0.0 \
     OPENCODE_PORT=4096
 

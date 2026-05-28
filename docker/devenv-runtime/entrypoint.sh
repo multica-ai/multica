@@ -1,39 +1,28 @@
 #!/bin/bash
-# devenv-runtime entrypoint — starts the opencode HTTP server bound to
-# OPENCODE_HOST:OPENCODE_PORT so the per-developer Kubernetes Service can
-# reach it.
-#
-# Required env (set by the Deployment / Kustomize overlay): none.
-# Optional env:
-#   GH_TOKEN      — GitHub PAT. When set, `gh` is wired as git's credential
-#                   helper so `git clone` over HTTPS works for private repos.
-#   MULTICA_TOKEN — Multica personal access token (mul_...). When set, the
-#                   multica CLI is configured for the self-hosted server and
-#                   the daemon is started in the background so the devenv
-#                   joins the Multica workspace.
-#   MULTICA_SERVER_URL — Multica server URL (default https://agentfarm.g2.com).
-#   MULTICA_APP_URL    — Multica web app URL (default https://agentfarm.g2.com).
-#   OPENCODE_HOST — bind address (default 0.0.0.0; see Dockerfile ENV).
-#   OPENCODE_PORT — bind port    (default 4096;    see Dockerfile ENV).
-#   OPENCODE_EXTRA_ARGS — extra args appended verbatim, e.g.
-#                         `--cors https://devenv-jshuff.development.g2.com`.
-#
-# Agentfarm mode (all four required):
-#   MULTICA_PAT          — bot PAT for multica login (from SSM /devenv/development/MULTICA_PAT).
-#   MULTICA_WORKSPACE_ID — workspace UUID injected via configmap.
-#   LITELLM_API_KEY      — LiteLLM virtual key injected via secret.
-#   WORKSPACE_SLUG       — namespace injected via Downward API (fieldRef: metadata.namespace).
-#   When all four are set, agentfarm-bootstrap.sh runs first to register the daemon,
-#   flip the runtime public, and provision the bundled agents (Engineer + Reviewer
-#   by default; extras are opt-in installs from ai-enhancement-hub). The daemon
-#   runs in the background; opencode serve is always PID 1.
-#   Optional: GIT_USER_EMAIL + JIRA_PAT — when both set, bootstrap authenticates
-#   acli non-interactively. ATLASSIAN_SITE defaults to https://g2crowd.atlassian.net.
-
 set -euo pipefail
 
-# Wire `gh` as git's credential helper for github.com so plain `git clone`
-# uses GH_TOKEN; also rewrite SSH-style remotes to HTTPS to route through it.
+OPENCODE_PID=""
+WORKSPACES="${HOME}/workspaces"
+
+cleanup() {
+  if [ -n "${OPENCODE_PID}" ] && kill -0 "${OPENCODE_PID}" 2>/dev/null; then
+    kill "${OPENCODE_PID}" 2>/dev/null
+    wait "${OPENCODE_PID}" 2>/dev/null
+  fi
+  exit 0
+}
+
+restart_opencode() {
+  if [ -n "${OPENCODE_PID}" ] && kill -0 "${OPENCODE_PID}" 2>/dev/null; then
+    echo "[entrypoint] Restarting opencode..."
+    pkill -9 -f '.opencode serve' 2>/dev/null || true
+  fi
+}
+
+trap cleanup SIGTERM SIGINT
+trap restart_opencode SIGUSR1
+
+# ── GitHub credential helper ─────────────────────────────────────────────────
 if [ -n "${GH_TOKEN:-}" ]; then
   if gh auth setup-git --hostname github.com; then
     git config --global --unset-all url."https://github.com/".insteadOf 2>/dev/null || true
@@ -42,9 +31,100 @@ if [ -n "${GH_TOKEN:-}" ]; then
   fi
 fi
 
-# ── Agentfarm mode ───────────────────────────────────────────────
-# When the four agentfarm env vars are present, run the bootstrap
-# script to provision daemon + agents, then fall through to opencode.
+# ── Git identity ─────────────────────────────────────────────────────────────
+if [ -n "${GIT_USER_NAME:-}" ]; then git config --global user.name "$GIT_USER_NAME"; fi
+if [ -n "${GIT_USER_EMAIL:-}" ]; then git config --global user.email "$GIT_USER_EMAIL"; fi
+
+# ── SSH key ──────────────────────────────────────────────────────────────────
+generate_ssh_key() {
+  SSH_DIR="${HOME}/.ssh"
+  SSH_KEY="${SSH_DIR}/id_ed25519"
+  mkdir -p "${SSH_DIR}"
+  chmod 700 "${SSH_DIR}" 2>/dev/null || true
+  if [ ! -f "${SSH_KEY}" ]; then
+    ssh-keygen -t ed25519 -N "" -f "${SSH_KEY}" -C "${GIT_USER_EMAIL:-agent@devenv}" >/dev/null
+    echo "[entrypoint] Generated SSH key"
+  fi
+  chmod 600 "${SSH_KEY}" 2>/dev/null || true
+  chmod 644 "${SSH_KEY}.pub" 2>/dev/null || true
+}
+generate_ssh_key
+
+# ── LiteLLM auth ─────────────────────────────────────────────────────────────
+if [ -n "${LITELLM_API_KEY:-}" ]; then
+  AUTH_FILE="${HOME}/.local/share/opencode/auth.json"
+  mkdir -p "$(dirname "${AUTH_FILE}")"
+  printf '{"litellm":{"type":"api","key":"%s"}}' "${LITELLM_API_KEY}" > "${AUTH_FILE}"
+  echo "[entrypoint] Generated auth.json for litellm"
+fi
+
+# ── Source user env (persistent volume) ──────────────────────────────────────
+if [ -f "${WORKSPACES}/.opencode-env" ]; then
+  . "${WORKSPACES}/.opencode-env"
+  grep -q 'opencode-env' "${HOME}/.bashrc" 2>/dev/null || echo ". ${WORKSPACES}/.opencode-env" >> "${HOME}/.bashrc" 2>/dev/null || true
+  export BASH_ENV="${WORKSPACES}/.opencode-env"
+fi
+
+# ── Clone repo ───────────────────────────────────────────────────────────────
+clone_repo() {
+  REPO="${GITHUB_REPO:-}"
+  if [ -z "${REPO}" ]; then return; fi
+
+  CLONE_URL="https://github.com/${REPO}.git"
+  TARGET="${WORKSPACES}/$(echo "${REPO}" | sed 's|.*/||')"
+
+  if [ -d "${TARGET}/.git" ]; then
+    git config --global --add safe.directory "${TARGET}"
+    git -C "${TARGET}" pull --ff-only 2>/dev/null || true
+    return
+  fi
+
+  mkdir -p "${TARGET}"
+  git config --global --add safe.directory "${TARGET}"
+  git clone --depth 1 "${CLONE_URL}" "${TARGET}" 2>/dev/null || {
+    echo "[entrypoint] WARNING: Failed to clone ${REPO} (non-fatal)"
+  }
+}
+clone_repo
+
+# ── Clone ai-enhancement-hub ────────────────────────────────────────────────
+clone_ai_hub() {
+  DEST="${HOME}/.local/share/ai-enhancement-hub"
+  if [ -d "${DEST}/.git" ]; then
+    git -C "${DEST}" pull --ff-only 2>/dev/null || true
+    return
+  fi
+  git clone --depth 1 "https://github.com/g2crowd/ai-enhancement-hub.git" "${DEST}" 2>/dev/null || {
+    echo "[entrypoint] WARNING: Failed to clone ai-enhancement-hub (non-fatal)"
+  }
+}
+clone_ai_hub
+
+# ── Link ai-hub resources ───────────────────────────────────────────────────
+link_ai_hub() {
+  HUB="${HOME}/.local/share/ai-enhancement-hub/shared/opencode"
+  if [ ! -d "${HUB}" ]; then return; fi
+  for SUBDIR in agents commands skills; do
+    [ -d "${HUB}/${SUBDIR}" ] || continue
+    mkdir -p "${WORKSPACES}/.opencode/${SUBDIR}"
+    for FILE in "${HUB}/${SUBDIR}"/*.md; do
+      [ -f "${FILE}" ] || continue
+      BASENAME="${FILE##*/}"
+      [ "${BASENAME}" = "README.md" ] && continue
+      TARGET="${WORKSPACES}/.opencode/${SUBDIR}/${BASENAME}"
+      [ -e "${TARGET}" ] && continue
+      ln -s "${FILE}" "${TARGET}"
+    done
+  done
+}
+link_ai_hub
+
+# ── Seed AGENTS.md ───────────────────────────────────────────────────────────
+if [ ! -f "${WORKSPACES}/AGENTS.md" ] && [ -f /opt/AGENTS.md ]; then
+  cp /opt/AGENTS.md "${WORKSPACES}/AGENTS.md"
+fi
+
+# ── Agentfarm mode ───────────────────────────────────────────────────────────
 if [ -n "${MULTICA_PAT:-}" ] \
   && [ -n "${MULTICA_WORKSPACE_ID:-}" ] \
   && [ -n "${LITELLM_API_KEY:-}" ] \
@@ -52,40 +132,97 @@ if [ -n "${MULTICA_PAT:-}" ] \
   echo "devenv: agentfarm mode — running agentfarm-bootstrap.sh"
   /usr/local/bin/agentfarm-bootstrap.sh
 
-# ── Multica daemon (optional, personal devenv) ───────────────────
-# When MULTICA_TOKEN is set (but agentfarm mode is not), configure
-# the CLI and start the daemon in the background.
 elif [ -n "${MULTICA_TOKEN:-}" ]; then
   server_url="${MULTICA_SERVER_URL:-https://agentfarm.g2.com}"
   app_url="${MULTICA_APP_URL:-https://agentfarm.g2.com}"
-
-  # Write config directly — avoids the interactive prompts in
-  # `multica setup self-host` and `multica login`.
   config_dir="$HOME/.multica"
-  config_file="$config_dir/config.json"
   mkdir -p "$config_dir"
   umask 077
-  cat > "$config_file" <<JSON
+  cat > "$config_dir/config.json" <<JSON
 {
   "server_url": "${server_url}",
   "app_url": "${app_url}",
   "token": "${MULTICA_TOKEN}"
 }
 JSON
-
-  echo "devenv: multica configured for ${server_url}"
   multica auth status || true
-
-  # Start daemon in background — opencode serve is still PID 1 (via exec).
   multica daemon start &
   echo "devenv: multica daemon started (pid $!)"
 fi
 
+# ── Configure arb ────────────────────────────────────────────────────────────
+configure_arb() {
+  if [ -z "${ARB_TOKEN:-}" ]; then return; fi
+
+  ARB_STATE="${HOME}/.local/share/devenv/arb"
+  RUNTIME_CONFIG="${ARB_STATE}/arb.json"
+  mkdir -p "${ARB_STATE}"
+
+  if [ -f "${RUNTIME_CONFIG}" ]; then
+    echo "[entrypoint] arb config exists — preserving user edits"
+    return
+  fi
+
+  JIRA_EMAIL="${GIT_USER_EMAIL:-}"
+  cat > "${RUNTIME_CONFIG}" <<MONEOF
+{
+  "org": "g2crowd",
+  "reposDir": "${WORKSPACES}",
+  "arbServerUrl": "${ARB_URL:-https://arb.g2.com}",
+  "arbServerToken": "${ARB_TOKEN}",
+  "intervalMs": 60000,
+  "triggerPhrases": ["AI:"],
+  "opencodeUrl": "http://localhost:4096",
+  "jiraWorkingDir": "${WORKSPACES}",
+  "jira": {
+    "baseUrl": "https://g2crowd.atlassian.net",
+    "email": "${JIRA_EMAIL}"
+  }
+}
+MONEOF
+  echo "[entrypoint] Generated initial arb config"
+}
+configure_arb
+
+# ── Warm oh-my-openagent plugin cache ────────────────────────────────────────
+warm_plugin_cache() {
+  PKGS="${HOME}/.cache/opencode/packages"
+  mkdir -p "${PKGS}"
+  printf '{"dependencies":{"oh-my-openagent":"latest"}}' > "${PKGS}/package.json"
+  (cd "${PKGS}" && bun install) 2>/dev/null
+  echo "[entrypoint] Warmed plugin cache"
+}
+warm_plugin_cache
+
+echo "[entrypoint] Initialization complete"
+
+# ── Start arb ────────────────────────────────────────────────────────────────
+start_arb() {
+  if [ -z "${ARB_TOKEN:-}" ]; then return; fi
+  ARB_STATE="${HOME}/.local/share/devenv/arb"
+  RUNTIME_CONFIG="${ARB_STATE}/arb.json"
+  if [ ! -f "${RUNTIME_CONFIG}" ]; then return; fi
+
+  (
+    while ! nc -z localhost 4096 2>/dev/null; do sleep 1; done
+    echo "[arb] OpenCode is up — starting poller and client"
+    arb start --fresh --config "${RUNTIME_CONFIG}" >> "${ARB_STATE}/arb.log" 2>&1 &
+    arb client --config "${RUNTIME_CONFIG}" >> "${ARB_STATE}/arb-client.log" 2>&1 &
+  ) &
+  echo "[entrypoint] arb will start once OpenCode is listening"
+}
+start_arb
+
+# ── Start opencode with restart loop ─────────────────────────────────────────
 host="${OPENCODE_HOST:-0.0.0.0}"
 port="${OPENCODE_PORT:-4096}"
 
-# shellcheck disable=SC2086  # word-splitting on OPENCODE_EXTRA_ARGS is intentional
-exec opencode serve \
-  --hostname "$host" \
-  --port "$port" \
-  ${OPENCODE_EXTRA_ARGS:-}
+cd "${HOME}"
+while true; do
+  # shellcheck disable=SC2086
+  opencode serve --hostname "$host" --port "$port" ${OPENCODE_EXTRA_ARGS:-} &
+  OPENCODE_PID=$!
+  wait "${OPENCODE_PID}" || true
+  echo "[entrypoint] opencode exited — restarting in 2s..."
+  sleep 2
+done
