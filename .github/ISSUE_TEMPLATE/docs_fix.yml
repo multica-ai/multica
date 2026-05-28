@@ -1,0 +1,31 @@
+name: "Docs fix"
+description: Report a documentation problem, typo, or stale page.
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: textarea
+    id: page-url
+    attributes:
+      label: Page URL
+      description: Which documentation page needs attention?
+      placeholder: https://github.com/multica-ai/multica/blob/main/README.md
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's wrong?
+      description: Describe the typo, stale content, missing information, or confusing text.
+      placeholder: |
+        This page says...
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggested-fix
+    attributes:
+      label: Suggested fix
+      description: If you know the change that would help, describe it here.
+      placeholder: |
+        It should say...
