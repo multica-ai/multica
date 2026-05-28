@@ -11,15 +11,19 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/joho/godotenv"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/redis/go-redis/v9"
 )
@@ -281,6 +285,52 @@ func main() {
 		}
 	}
 
+	// Casdoor SSO: when CASDOOR_ENDPOINT is set, validate RS256 JWTs issued
+	// by Casdoor. Otherwise fall back to legacy HMAC JWT auth. Both modes
+	// support PAT tokens (the CasdoorAuth middleware passes "mul_" prefixed
+	// Bearer tokens through to the downstream Auth middleware).
+	casdoorEndpoint := os.Getenv("CASDOOR_ENDPOINT")
+	casdoorEnabled := casdoorEndpoint != ""
+	var jwksProvider *auth.JWKSProvider
+	if casdoorEnabled {
+		jwksProvider = auth.NewJWKSProvider(casdoorEndpoint)
+		jwksProvider.Preload()
+		slog.Info("Casdoor SSO enabled", "endpoint", casdoorEndpoint)
+	} else {
+		slog.Warn("Casdoor SSO not configured — using legacy HMAC JWT auth")
+	}
+
+	// subjectResolver maps a Casdoor subject_id (the "sub" claim) to a
+	// Multica user UUID. On first encounter the user is auto-provisioned
+	// with a placeholder name/email; the full profile arrives via the
+	// OAuth callback handler later.
+	subjectResolver := middleware.SubjectResolver(func(ctx context.Context, subjectID string) (string, error) {
+		user, err := queries.GetUserBySubjectID(ctx, pgtype.Text{String: subjectID, Valid: true})
+		if err != nil {
+			// Auto-provision: create a placeholder user and bind the subject.
+			user, err = queries.CreateUser(ctx, db.CreateUserParams{
+				Name:      "casdoor-" + subjectID,
+				Email:     subjectID + "@casdoor.local",
+				AvatarUrl: pgtype.Text{},
+			})
+			if err != nil {
+				return "", err
+			}
+			if setErr := queries.SetUserSubjectID(ctx, db.SetUserSubjectIDParams{
+				ID:        user.ID,
+				SubjectID: pgtype.Text{String: subjectID, Valid: true},
+			}); setErr != nil {
+				slog.Warn("failed to bind subject_id to auto-provisioned user",
+					"user_id", util.UUIDToString(user.ID),
+					"subject_id", subjectID,
+					"error", setErr,
+				)
+			}
+			slog.Info("casdoor: auto-provisioned user", "user_id", util.UUIDToString(user.ID), "subject_id", subjectID)
+		}
+		return util.UUIDToString(user.ID), nil
+	})
+
 	// Construct the BatchedHeartbeatScheduler before the router so it can
 	// be injected into the Handler. The Run goroutine starts below
 	// alongside the sweeper, and Stop is called explicitly during graceful
@@ -292,6 +342,9 @@ func main() {
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
 		HeartbeatScheduler: heartbeatScheduler,
+		JWKSProvider:       jwksProvider,
+		SubjectResolver:    subjectResolver,
+		CasdoorEnabled:     casdoorEnabled,
 	})
 
 	srv := &http.Server{

@@ -106,6 +106,12 @@ type RouterOptions struct {
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
 	// tests leave this nil and get the legacy synchronous behavior.
 	HeartbeatScheduler handler.HeartbeatScheduler
+	// Casdoor SSO: when JWKSProvider is non-nil, the CasdoorAuth middleware
+	// is stacked before the legacy Auth middleware on protected routes.
+	// SubjectResolver maps Casdoor subject_id to a Multica user UUID.
+	JWKSProvider    *auth.JWKSProvider
+	SubjectResolver middleware.SubjectResolver
+	CasdoorEnabled  bool
 }
 
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) chi.Router {
@@ -252,6 +258,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/logout", h.Logout)
 
+	// Casdoor SSO routes (only registered when Casdoor is enabled)
+	if opts.CasdoorEnabled {
+		r.Get("/auth/casdoor/login", h.CasdoorLogin)
+		r.Get("/auth/casdoor/callback", h.CasdoorCallback)
+	}
+
 	// Public API
 	r.Get("/api/config", h.GetConfig)
 	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
@@ -302,6 +314,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Protected API routes
 	r.Group(func(r chi.Router) {
+		if opts.JWKSProvider != nil {
+			r.Use(middleware.CasdoorAuth(opts.JWKSProvider, opts.SubjectResolver))
+		}
 		r.Use(middleware.Auth(queries, patCache))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
