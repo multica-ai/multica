@@ -45,7 +45,7 @@ var setupSelfHostCmd = &cobra.Command{
 	Short: "Configure the CLI for a self-hosted Multica server",
 	Long: `Configures the CLI to connect to a self-hosted Multica server.
 
-By default, connects to http://localhost:8080 (backend) and http://localhost:3000 (frontend).
+By default, connects to http://localhost:8081 (backend) and http://localhost:3000 (frontend).
 Use --server-url and --app-url to specify a custom server (e.g. an on-premise deployment).
 
 If you run this command from a different machine than the server, also pass
@@ -62,7 +62,7 @@ Examples:
 func init() {
 	setupSelfHostCmd.Flags().String("server-url", "", "Backend server URL (e.g. https://api.internal.co)")
 	setupSelfHostCmd.Flags().String("app-url", "", "Frontend app URL (e.g. https://app.internal.co)")
-	setupSelfHostCmd.Flags().Int("port", 8080, "Backend server port (used when --server-url is not set)")
+	setupSelfHostCmd.Flags().Int("port", 8081, "Backend server port (used when --server-url is not set)")
 	setupSelfHostCmd.Flags().Int("frontend-port", 3000, "Frontend port (used when --app-url is not set)")
 	setupSelfHostCmd.Flags().String(callbackHostFlag, "", "Host the OAuth callback URL points at (auto-detected when empty). Use this for reverse-proxy / FQDN setups.")
 
