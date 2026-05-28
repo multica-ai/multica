@@ -1,6 +1,6 @@
 ---
 title: Self-Host 快速上手
-description: 在自己的服务器或本机用 Docker 把 Multica 跑起来。约 10 分钟。
+description: 在自己的服务器或本机用 Docker 把 Multica 跑起来（也可以在 Kubernetes 上用 Helm）。约 10 分钟。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -17,6 +17,10 @@ import { Callout } from "fumadocs-ui/components/callout";
 - 至少一款 AI 编程工具装在**运行守护进程的机器上**（不一定是跑服务器的机器——可以是你开发用的笔记本）
 
 ## 1. 拉取项目 + 一键启动后端
+
+<Callout type="info">
+**已经有 Kubernetes 集群？** 不用走 Docker，直接用 Helm chart——跳到下面的 [Kubernetes 部署（替代方案）](#kubernetes-部署替代方案)，装完再回到 [第 4 步](#4-首次登录--创建工作区) 完成登录。
+</Callout>
 
 ```bash
 git clone https://github.com/multica-ai/multica.git
@@ -153,6 +157,53 @@ multica.example.com {
 ## 6. 创建智能体 + 分配第一个任务
 
 流程和 Cloud 一样——见 [Cloud 快速上手 → 5-6 步](/cloud-quickstart#5-创建智能体)。
+
+## Kubernetes 部署（替代方案）
+
+如果你已经在跑 Kubernetes 集群，仓库里也带了一个 Helm chart，路径 `deploy/helm/multica/`。它就是 k8s 版的 `make selfhost`——一样的 backend 镜像、frontend 镜像、`pgvector/pgvector:pg17` Postgres，封装成 Deployment / Service / Ingress，再加上一个由 `values.yaml` 渲染出来的 `ConfigMap`。这套 chart 是按照 k3s + Traefik + `local-path` 写的，集群里只要有 Ingress controller 和默认的 `ReadWriteOnce` StorageClass 就能跑，其他类型的集群稍微改一改也能用。
+
+这个 chart **不会模板化任何敏感值**。它通过 name 引用一个叫 `multica-secrets` 的 Secret，所以真实的 JWT / DB / Resend / Google 密钥永远不用进 git，也不用进 `values.yaml`。先用 kubectl 一次性把命名空间和 Secret 建好：
+
+```bash
+kubectl create namespace multica
+
+kubectl -n multica create secret generic multica-secrets \
+  --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
+  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+  --from-literal=RESEND_API_KEY="" \
+  --from-literal=GOOGLE_CLIENT_SECRET="" \
+  --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+  --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+```
+
+再装 chart：
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+helm install multica deploy/helm/multica -n multica
+```
+
+默认主机名是 `multica.dev.lan`（web）和 `api.multica.dev.lan`（backend）。把它们加进 `/etc/hosts`（或者本地 DNS），指向任意一个 Ingress 可达的节点 IP 就行。要换主机名，就把 `deploy/helm/multica/values.yaml` 复制一份，改掉 `ingress.frontend.host` / `ingress.backend.host`，再把 `backend.config.appUrl` / `frontendOrigin` / `localUploadBaseUrl` / `googleRedirectUri` 改成相应的地址，然后 `helm install ... -f my-values.yaml`。
+
+冷集群上 backend 可能会 `Running` 但 `Not Ready` 持续几分钟，等 Postgres 起来并跑完 migration——startupProbe 会兜住这一段，pod 不会被 liveness 重启。等它 `Ready` 之后：
+
+```bash
+curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
+# {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+然后浏览器打开 `http://multica.dev.lan`，回到上面的 [第 4 步——首次登录](#4-首次登录--创建工作区) 继续。命令行连到你的 Ingress 主机：
+
+```bash
+multica setup self-host \
+  --server-url http://api.multica.dev.lan \
+  --app-url http://multica.dev.lan
+```
+
+只想拉最新镜像、不动 chart：`kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend`。要锁到某个 Multica 版本，就在 values 文件里设 `images.backend.tag` / `images.frontend.tag`，再 `helm upgrade`。`helm -n multica uninstall multica` 只删工作负载，PVC 和 Secret 都保留；`kubectl delete namespace multica` 才会全清。
+
+完整参考——三种登录方式、为了绕过 web 镜像 build-time 写死的 `REMOTE_API_URL` 而加的 `backend` ExternalName 别名、资源限制、TLS——都在仓库的 [`SELF_HOSTING.md`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative)。
 
 ## 常见问题
 

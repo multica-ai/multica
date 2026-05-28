@@ -9,7 +9,7 @@ import {
 } from "react";
 import { LandingHeader } from "./landing-header";
 import { LandingFooter } from "./landing-footer";
-import { useLocale } from "../i18n";
+import { isZhLocale, useLocale } from "../i18n";
 import type { Locale } from "../i18n/types";
 
 const MONTHS_EN = [
@@ -40,14 +40,14 @@ function parseDate(dateStr: string): ParsedDate {
 
 function monthYearLabel(year: number, month: number, locale: Locale) {
   if (!year || !month) return "";
-  if (locale === "zh") return `${year}\u5e74${month}\u6708`;
+  if (isZhLocale(locale)) return `${year}\u5e74${month}\u6708`;
   return `${MONTHS_EN[month - 1]} ${year}`;
 }
 
 function fullDateLabel(dateStr: string, locale: Locale) {
   const { year, month, day } = parseDate(dateStr);
   if (!year || !month || !day) return dateStr;
-  if (locale === "zh") return `${year}\u5e74${month}\u6708${day}\u65e5`;
+  if (isZhLocale(locale)) return `${year}\u5e74${month}\u6708${day}\u65e5`;
   return `${MONTHS_EN[month - 1]} ${day}, ${year}`;
 }
 

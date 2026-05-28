@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import type { Agent, AgentRuntime, CreateAgentRequest, AgentDefaultsWithUser } from "@multica/core/types";
+import type { Agent, AgentRuntime, CopyAgentRequest, CreateAgentRequest, AgentDefaultsWithUser } from "@multica/core/types";
 import {
   type AgentAvailability,
   agentRunCounts30dOptions,
@@ -345,9 +345,32 @@ export function AgentsPage() {
     return agent;
   };
 
+  const handleCopyAgent = async (agentId: string, data: CopyAgentRequest): Promise<Agent> => {
+    const agent = await api.copyAgent(agentId, data);
+    qc.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (current = []) => {
+      const exists = current.some((a) => a.id === agent.id);
+      return exists
+        ? current.map((a) => (a.id === agent.id ? agent : a))
+        : [...current, agent];
+    });
+    setShowCreate(false);
+    setDuplicateTemplate(null);
+    navigation.push(paths.agentDetail(agent.id));
+    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    return agent;
+  };
+
   const handleDuplicate = useCallback((agent: Agent) => {
-    setDuplicateTemplate(agent);
-    setShowCreate(true);
+    void api
+      .getAgent(agent.id)
+      .then((detail) => {
+        setDuplicateTemplate(detail);
+        setShowCreate(true);
+      })
+      .catch(() => {
+        setDuplicateTemplate(agent);
+        setShowCreate(true);
+      });
   }, []);
 
   // Assemble per-row data once per render — agent + runtime + presence +
@@ -523,6 +546,7 @@ export function AgentsPage() {
             setDuplicateTemplate(null);
           }}
           onCreate={handleCreate}
+          onDuplicate={handleCopyAgent}
         />
       )}
 

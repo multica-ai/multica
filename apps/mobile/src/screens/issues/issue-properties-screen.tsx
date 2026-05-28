@@ -34,8 +34,8 @@ import {
 } from "@multica/core/issues/hooks";
 import { ALL_STATUSES, PRIORITY_ORDER } from "@multica/core/issues/config";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
-import { canAssignAgentToIssue, isAgentSelectable } from "@multica/core/permissions";
+import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
+import { canAssignAgentToIssue, isAgentSelectable, isSquadSelectable } from "@multica/core/permissions";
 import type {
   Agent,
   IssueAssigneeType,
@@ -45,6 +45,7 @@ import type {
   MemberWithUser,
   Project,
   SearchIssueResult,
+  Squad,
 } from "@multica/core/types";
 import { Button, EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
 import { ScreenTitleBar } from "../../components/ui/screen-title-bar";
@@ -64,7 +65,8 @@ type IssuePropertiesProps = NativeStackScreenProps<RootStackParamList, "IssuePro
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 type AssigneeOption =
   | { type: "member"; id: string; label: string; subtitle?: string }
-  | { type: "agent"; id: string; label: string; subtitle?: string };
+  | { type: "agent"; id: string; label: string; subtitle?: string }
+  | { type: "squad"; id: string; label: string; subtitle?: string };
 
 const SERVER_ISSUE_SEARCH_LIMIT = 20;
 const SERVER_SEARCH_DEBOUNCE_MS = 150;
@@ -113,11 +115,16 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
   const { data: childProgress } = useChildIssueProgress(workspace.id);
   const { data: members = [] } = useCoreQuery(memberListOptions(workspace.id));
   const { data: agents = [] } = useCoreQuery(agentListOptions(workspace.id));
+  const { data: squads = [] } = useCoreQuery(squadListOptions(workspace.id));
   const { data: projects = [] } = useProjectList(workspace.id);
-  const { data: allLabels = [] } = useCoreQuery(labelListOptions(workspace.id));
+  const labelListScope = useMemo(
+    () => ({ projectId: issue?.project_id ?? null }),
+    [issue?.project_id],
+  );
+  const { data: allLabels = [] } = useCoreQuery(labelListOptions(workspace.id, labelListScope));
   const { data: attachedLabels = [] } = useCoreQuery(issueLabelsOptions(workspace.id, issueId));
   const updateIssue = useUpdateIssue();
-  const attachLabel = useAttachLabel(issueId);
+  const attachLabel = useAttachLabel(issueId, labelListScope);
   const detachLabel = useDetachLabel(issueId);
   const [assigneePickerOpen, setAssigneePickerOpen] = useState(false);
   const [assigneeError, setAssigneeError] = useState<string | null>(null);
@@ -607,6 +614,7 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
         }}
         open={assigneePickerOpen}
         saving={updateIssue.isPending}
+        squads={squads}
         userId={userId ?? null}
       />
       <ProjectPickerSheet
@@ -802,6 +810,7 @@ function AssigneePickerSheet({
   onClose,
   open,
   saving,
+  squads,
   userId,
 }: {
   agents: Agent[];
@@ -815,6 +824,7 @@ function AssigneePickerSheet({
   onClose: () => void;
   open: boolean;
   saving: boolean;
+  squads: Squad[];
   userId: string | null;
 }) {
   const { t } = useTranslation();
@@ -862,7 +872,25 @@ function AssigneePickerSheet({
       })),
     [agents, currentMemberRole, normalizedQuery, t, userId],
   );
-  const hasResults = memberOptions.length > 0 || agentOptions.length > 0;
+  const squadOptions = useMemo<AssigneeOption[]>(
+    () => {
+      const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
+      return squads
+        .filter((squad) => isSquadSelectable(squad, agentsById, userId))
+        .filter((squad) => {
+          const haystack = squad.name.toLowerCase();
+          return !normalizedQuery || haystack.includes(normalizedQuery);
+        })
+        .map((squad) => ({
+          type: "squad" as const,
+          id: squad.id,
+          label: squad.name,
+          subtitle: t("issues.squad"),
+        }));
+    },
+    [agents, normalizedQuery, squads, t, userId],
+  );
+  const hasResults = memberOptions.length > 0 || agentOptions.length > 0 || squadOptions.length > 0;
 
   return (
     <Modal
@@ -927,6 +955,16 @@ function AssigneePickerSheet({
                 label={t("issues.agents")}
                 onChange={onChange}
                 options={agentOptions}
+              />
+            ) : null}
+            {squadOptions.length > 0 ? (
+              <AssigneeOptionSection
+                currentAssigneeId={currentAssigneeId}
+                currentAssigneeType={currentAssigneeType}
+                disabled={saving}
+                label={t("issues.squads")}
+                onChange={onChange}
+                options={squadOptions}
               />
             ) : null}
             {!hasResults ? (

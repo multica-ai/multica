@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/autosubscribe"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -49,6 +50,7 @@ type TaskContext struct {
 	SquadID          string `json:"squad_id,omitempty"`
 	SquadName        string `json:"squad_name,omitempty"`
 	LeaderTaskSource string `json:"leader_task_source,omitempty"`
+	RetryInstruction string `json:"retry_instruction,omitempty"`
 }
 
 const LeaderTaskSourceSquadMention = "squad_mention"
@@ -61,6 +63,24 @@ type TaskWakeupNotifier interface {
 // transmit (it ends up in every task list response). 200 is enough for a
 // recognisable preview of a one-paragraph comment.
 const triggerSummaryMaxLen = 200
+
+// TaskContextWithRetryInstruction merges a retry note into an existing task
+// context while preserving other task-scoped fields such as run mode or squad
+// routing metadata.
+func TaskContextWithRetryInstruction(taskContext []byte, retryInstruction string) ([]byte, error) {
+	retryInstruction = strings.TrimSpace(retryInstruction)
+	if retryInstruction == "" {
+		return taskContext, nil
+	}
+	var cfg TaskContext
+	if len(taskContext) > 0 {
+		if err := json.Unmarshal(taskContext, &cfg); err != nil {
+			return nil, fmt.Errorf("decode task context: %w", err)
+		}
+	}
+	cfg.RetryInstruction = retryInstruction
+	return json.Marshal(cfg)
+}
 
 // truncateForSummary returns s shortened to maxRunes, with a trailing
 // `…` when truncated. Operates on runes (not bytes) so multibyte characters
@@ -228,6 +248,16 @@ func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTas
 		s.taskAnalyticsContext(ctx, task),
 		taskDurationMS(task),
 	))
+	// Revoke any mat_ task tokens minted for this task. Cancellation is
+	// a terminal transition, so the running agent process no longer
+	// needs to call back; eagerly deleting the token closes the
+	// window where a compromised process could keep authenticating
+	// against the API until the 24h expiry. Failure is non-fatal — the
+	// expiry / FK cascade are the durable guards. MUL-2600.
+	if err := s.Queries.DeleteTaskTokensByTask(ctx, task.ID); err != nil {
+		slog.Warn("cancel task: failed to revoke task tokens",
+			"task_id", util.UUIDToString(task.ID), "error", err)
+	}
 }
 
 func (s *TaskService) captureTaskEvent(ctx context.Context, event analytics.Event) {
@@ -408,10 +438,16 @@ func taskErrorType(reason string) string {
 	switch reason {
 	case "runtime_offline", "runtime_recovery":
 		return "runtime"
-	case "timeout", "codex_semantic_inactivity":
+	case "timeout", "idle_watchdog":
 		return "timeout"
-	case "iteration_limit", "agent_fallback_message":
+	case "rate_limited":
+		return "rate_limited"
+	case "iteration_limit", "agent_fallback_message", "parse_error":
 		return "agent_output"
+	case "api_invalid_request", "upstream_failure":
+		return "upstream"
+	case "queued_expired":
+		return "queued_expired"
 	case "cancelled", "user_cancelled":
 		return "cancelled"
 	default:
@@ -1373,16 +1409,14 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
 var retryableReasons = map[string]bool{
-	"runtime_offline":           true,
-	"runtime_recovery":          true,
-	"timeout":                   true,
-	"codex_semantic_inactivity": true,
+	"runtime_offline":  true,
+	"runtime_recovery": true,
+	"timeout":          true,
+	"idle_watchdog":    true,
 }
 
 func resumeUnsafeFailureReason(reason string) bool {
 	switch reason {
-	// Keep in sync with GetLastTaskSession / GetLastChatTaskSession and
-	// CreateRetryTask's fresh-session CASE WHEN.
 	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity":
 		return true
 	default:
@@ -1480,7 +1514,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 // Tasks owned by other agents on the same issue (e.g. a parallel
 // @-mention agent) are left alone — rerun must not collateral-cancel
 // them.
-func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourceTaskID pgtype.UUID, triggerCommentID pgtype.UUID) (*db.AgentTaskQueue, error) {
+func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourceTaskID pgtype.UUID, triggerCommentID pgtype.UUID, retryInstruction string) (*db.AgentTaskQueue, error) {
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("load issue: %w", err)
@@ -1544,7 +1578,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader)
+	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader, retryInstruction)
 	if err != nil {
 		return nil, err
 	}
@@ -1566,12 +1600,16 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 // stays in sync; otherwise (squad member, prior assignee that has since been
 // reassigned, mention agent) we use the mention path with the same
 // force_fresh_session=true contract.
-func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, retryInstruction string) (db.AgentTaskQueue, error) {
+	taskContext, err := TaskContextWithRetryInstruction(nil, retryInstruction)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTask(ctx, issue, triggerCommentID, nil, true)
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, taskContext, true)
 	}
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, nil, isLeader, true)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, taskContext, isLeader, true)
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of
@@ -2245,31 +2283,33 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 	// is the semantic creator from a UX perspective — without this they
 	// only see the one-shot completion inbox and miss everything after.
 	// Best-effort: log on failure but don't block the inbox notification.
-	if err := s.Queries.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
-		IssueID:  issue.ID,
-		UserType: "member",
-		UserID:   requesterID,
-		Reason:   "creator",
-	}); err != nil {
-		slog.Warn("quick-create completion: subscribe requester failed",
-			"task_id", util.UUIDToString(task.ID),
-			"issue_id", util.UUIDToString(issue.ID),
-			"requester_id", qc.RequesterID,
-			"error", err,
-		)
-	} else {
-		s.Bus.Publish(events.Event{
-			Type:        protocol.EventSubscriberAdded,
-			WorkspaceID: qc.WorkspaceID,
-			ActorType:   "agent",
-			ActorID:     util.UUIDToString(task.AgentID),
-			Payload: map[string]any{
-				"issue_id":  util.UUIDToString(issue.ID),
-				"user_type": "member",
-				"user_id":   qc.RequesterID,
-				"reason":    "creator",
-			},
-		})
+	if autosubscribe.ShouldSubscribe(ctx, s.Queries, qc.WorkspaceID, "member", qc.RequesterID, autosubscribe.SourceQuickCreateRequester) {
+		if err := s.Queries.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
+			IssueID:  issue.ID,
+			UserType: "member",
+			UserID:   requesterID,
+			Reason:   "creator",
+		}); err != nil {
+			slog.Warn("quick-create completion: subscribe requester failed",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+				"requester_id", qc.RequesterID,
+				"error", err,
+			)
+		} else {
+			s.Bus.Publish(events.Event{
+				Type:        protocol.EventSubscriberAdded,
+				WorkspaceID: qc.WorkspaceID,
+				ActorType:   "agent",
+				ActorID:     util.UUIDToString(task.AgentID),
+				Payload: map[string]any{
+					"issue_id":  util.UUIDToString(issue.ID),
+					"user_type": "member",
+					"user_id":   qc.RequesterID,
+					"reason":    "creator",
+				},
+			})
+		}
 	}
 	prefix := s.getIssuePrefix(workspaceID)
 	identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)

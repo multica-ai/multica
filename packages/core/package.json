@@ -10,6 +10,7 @@
   },
   "exports": {
     ".": "./index.ts",
+    "./markdown": "./markdown/index.ts",
     "./types": "./types/index.ts",
     "./types/*": "./types/*.ts",
     "./api": "./api/index.ts",
@@ -30,6 +31,7 @@
     "./issues/queries": "./issues/queries.ts",
     "./issues/hooks": "./issues/hooks.ts",
     "./issues/mutations": "./issues/mutations.ts",
+    "./issues/timeline-sort": "./issues/timeline-sort.ts",
     "./issues/ws-updaters": "./issues/ws-updaters.ts",
     "./issues/config": "./issues/config/index.ts",
     "./issues/config/status": "./issues/config/status.ts",

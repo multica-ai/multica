@@ -77,6 +77,10 @@ function channelClass(channel: string): string {
   }
 }
 
+function isApprovalTraceChannel(channel: string): boolean {
+  return channel === "approval_request" || channel === "approval_response";
+}
+
 interface DisplayEvent {
   type?: string;
   title?: string;
@@ -90,6 +94,8 @@ interface TraceWorkItem {
   pairedEvent?: DisplayEvent;
   group?: TraceWorkItem[];
   groupKind?: "context";
+  approvalRequestLine?: TaskTraceLine;
+  approvalResponseLine?: TaskTraceLine;
 }
 
 function parseDisplayEvent(line: TaskTraceLine): DisplayEvent | null {
@@ -152,6 +158,30 @@ function summarizeJson(value: unknown): string {
   return `${keys.length} fields: ${keys.slice(0, 6).join(", ")}${keys.length > 6 ? "..." : ""}`;
 }
 
+function normalizedInputRecord(input: unknown): Record<string, unknown> | null {
+  if (input && typeof input === "object" && !Array.isArray(input)) {
+    return input as Record<string, unknown>;
+  }
+  if (typeof input !== "string") return null;
+  const parsed = unwrapJson(input);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>;
+  }
+  return null;
+}
+
+function nestedInputCandidates(input: unknown): Array<Record<string, unknown>> {
+  const record = normalizedInputRecord(input);
+  if (!record) return [];
+
+  const candidates = [record];
+  for (const key of ["args", "arguments", "input", "payload", "tool_input", "params"]) {
+    const nested = normalizedInputRecord(record[key]);
+    if (nested) candidates.push(nested);
+  }
+  return candidates;
+}
+
 function summarizeResultForCommand(command: string, parsed: unknown): string {
   if (Array.isArray(parsed)) {
     if (/\bmultica\s+issue\s+comment\s+list\b/.test(command)) return `Loaded ${parsed.length} comments`;
@@ -170,31 +200,35 @@ function summarizeResultForCommand(command: string, parsed: unknown): string {
 }
 
 function commandFromInput(input: unknown): string {
-  if (!input || typeof input !== "object") return "";
-  const record = input as Record<string, unknown>;
-  for (const key of ["command", "cmd", "script"]) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
+  const candidates = nestedInputCandidates(input);
+  for (const record of candidates) {
+    for (const key of ["command", "cmd", "script"]) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
   }
+  if (typeof input === "string") return input.trim();
   return "";
 }
 
 function descriptionFromInput(input: unknown): string {
-  if (!input || typeof input !== "object") return "";
-  const record = input as Record<string, unknown>;
-  for (const key of ["description", "summary", "purpose"]) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
+  const candidates = nestedInputCandidates(input);
+  for (const record of candidates) {
+    for (const key of ["description", "summary", "purpose"]) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
   }
   return "";
 }
 
 function inputText(input: unknown, keys: string[]): string {
-  if (!input || typeof input !== "object") return "";
-  const record = input as Record<string, unknown>;
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
+  const candidates = nestedInputCandidates(input);
+  for (const record of candidates) {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
   }
   return "";
 }
@@ -264,15 +298,43 @@ function actionKey(event: DisplayEvent): string {
 }
 
 function pairResultIndex(events: Array<DisplayEvent | null>, consumed: Set<number>, start: number, expectedType: string, callID: string): number | null {
-  for (let j = start + 1; j < Math.min(events.length, start + 10); j += 1) {
+  for (let j = start + 1; j < events.length; j += 1) {
     if (consumed.has(j)) continue;
     const candidate = events[j];
-    if (!candidate || candidate.type !== expectedType) continue;
-    const candidateCallID = eventCallId(candidate);
-    if (callID && candidateCallID && callID !== candidateCallID) continue;
-    return j;
+    if (!candidate) continue;
+    if (candidate.type === expectedType) {
+      const candidateCallID = eventCallId(candidate);
+      if (callID) {
+        if (candidateCallID === callID) return j;
+        continue;
+      }
+      return j;
+    }
+    if (!callID && (candidate.type === "tool_call" || candidate.type === "command_start")) {
+      return null;
+    }
   }
   return null;
+}
+
+function workItemAcceptsApproval(item: TraceWorkItem | undefined): boolean {
+  if (!item?.event) return false;
+  return item.event.type === "tool_call" || item.event.type === "command_start";
+}
+
+function appendApprovalLine(items: TraceWorkItem[], line: TaskTraceLine): boolean {
+  const previous = items[items.length - 1];
+  if (!workItemAcceptsApproval(previous)) return false;
+  if (!previous) return false;
+  if (line.channel === "approval_request") {
+    previous.approvalRequestLine = line;
+    return true;
+  }
+  if (line.channel === "approval_response") {
+    previous.approvalResponseLine = line;
+    return true;
+  }
+  return false;
 }
 
 function buildWorkItems(lines: TaskTraceLine[], showRaw: boolean): TraceWorkItem[] {
@@ -289,6 +351,9 @@ function buildWorkItems(lines: TaskTraceLine[], showRaw: boolean): TraceWorkItem
     if (consumed.has(i)) continue;
     const line = lines[i]!;
     const event = parsed[i];
+    if (isApprovalTraceChannel(line.channel) && appendApprovalLine(items, line)) {
+      continue;
+    }
     if (line.channel !== "display_event" || !event) {
       items.push({ line, event: event ?? null });
       continue;
@@ -340,6 +405,13 @@ function buildWorkItems(lines: TaskTraceLine[], showRaw: boolean): TraceWorkItem
   return groupReadSearchItems(items);
 }
 
+function commandLabel(command: string, fallbackInput?: unknown): string {
+  if (command) return `$ ${command}`;
+  const fallback = compactJson(normalizedInputRecord(fallbackInput) ?? fallbackInput);
+  if (fallback) return fallback;
+  return "Command";
+}
+
 function workItemToolKind(item: TraceWorkItem): "read" | "search" | "todo" | null {
   if (item.event?.type !== "tool_call") return null;
   const title = (item.event.title ?? "").toLowerCase();
@@ -376,7 +448,131 @@ function groupReadSearchItems(items: TraceWorkItem[]): TraceWorkItem[] {
   return grouped;
 }
 
-function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupKind }: TraceWorkItem) {
+function approvalTraceAppearance(channel: string, text: string): {
+  icon: ReactNode;
+  title: string;
+  containerClass: string;
+  titleClass: string;
+  textClass: string;
+} {
+  if (channel === "approval_request") {
+    return {
+      icon: <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />,
+      title: "Approval",
+      containerClass: "border-warning/30 bg-warning/10",
+      titleClass: "text-warning",
+      textClass: "text-foreground",
+    };
+  }
+
+  const normalized = text.toLowerCase();
+  if (/allow|approved=true|accept/.test(normalized)) {
+    return {
+      icon: <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />,
+      title: "Response",
+      containerClass: "border-success/30 bg-success/10",
+      titleClass: "text-success",
+      textClass: "text-foreground",
+    };
+  }
+  if (/deny|reject|approved=false|cancel/.test(normalized)) {
+    return {
+      icon: <X className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />,
+      title: "Response",
+      containerClass: "border-destructive/30 bg-destructive/10",
+      titleClass: "text-destructive",
+      textClass: "text-foreground",
+    };
+  }
+  return {
+    icon: <Radio className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" />,
+    title: "Response",
+    containerClass: "border-info/30 bg-info/10",
+    titleClass: "text-info",
+    textClass: "text-foreground",
+  };
+}
+
+function approvalTone(channel: string, text: string): "warning" | "success" | "error" | "info" {
+  if (channel === "approval_request") return "warning";
+  const normalized = text.toLowerCase();
+  if (/allow|approved=true|accept/.test(normalized)) return "success";
+  if (/deny|reject|approved=false|cancel/.test(normalized)) return "error";
+  return "info";
+}
+
+function ApprovalTraceLine({ line }: { line: TaskTraceLine }) {
+  const text = lineText(line);
+  const appearance = approvalTraceAppearance(line.channel, text);
+
+  return (
+    <div className={cn("rounded-md border px-3 py-2 text-[13px] leading-5", appearance.containerClass)}>
+      <div className="flex min-w-0 items-start gap-2">
+        {appearance.icon}
+        <div className="min-w-0 flex-1">
+          <div className={cn("text-xs font-semibold", appearance.titleClass)}>{appearance.title}</div>
+          <div className={cn("mt-1 whitespace-pre-wrap break-words", appearance.textClass)}>{text}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InlineApprovalStatus({
+  requestLine,
+  responseLine,
+}: {
+  requestLine?: TaskTraceLine;
+  responseLine?: TaskTraceLine;
+}) {
+  if (!requestLine && !responseLine) return null;
+
+  return (
+    <div className="mt-2 space-y-1">
+      {requestLine && (
+        <div className="flex items-start gap-2 px-0.5 py-0.5">
+          <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning/90" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-warning/90">Approval</div>
+            <div className="mt-0.5 whitespace-pre-wrap break-words text-[12px] text-foreground/85">{lineText(requestLine)}</div>
+          </div>
+        </div>
+      )}
+      {responseLine && (
+        <div className={cn(
+          "flex items-start gap-2 px-0.5 py-0.5",
+        )}>
+          {approvalTone(responseLine.channel, lineText(responseLine)) === "success" ? (
+            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success/90" />
+          ) : approvalTone(responseLine.channel, lineText(responseLine)) === "error" ? (
+            <X className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive/90" />
+          ) : (
+            <Radio className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info/90" />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className={cn(
+              "text-[11px] font-semibold uppercase tracking-[0.08em]",
+              approvalTone(responseLine.channel, lineText(responseLine)) === "success" && "text-success/90",
+              approvalTone(responseLine.channel, lineText(responseLine)) === "error" && "text-destructive/90",
+              approvalTone(responseLine.channel, lineText(responseLine)) === "info" && "text-info/90",
+            )}>Response</div>
+            <div className="mt-0.5 whitespace-pre-wrap break-words text-[12px] text-foreground/85">{lineText(responseLine)}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DisplayTraceLine({
+  line,
+  event: parsedEvent,
+  pairedEvent,
+  group,
+  groupKind,
+  approvalRequestLine,
+  approvalResponseLine,
+}: TraceWorkItem) {
   if (group && groupKind) {
     return <ContextActivityBlock items={group} />;
   }
@@ -416,7 +612,12 @@ function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupK
       );
     case "command_start":
       return (
-        <CommandBlock command={content} result={pairedEvent?.content} />
+        <CommandBlock
+          command={content}
+          result={pairedEvent?.content}
+          approvalRequestLine={approvalRequestLine}
+          approvalResponseLine={approvalResponseLine}
+        />
       );
     case "command_output":
       return (
@@ -443,7 +644,16 @@ function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupK
         );
       }
       if (title === "Bash" || command) {
-        return <CommandBlock command={command} description={description} result={pairedEvent?.content} />;
+        return (
+          <CommandBlock
+            command={command}
+            description={description}
+            result={pairedEvent?.content}
+            fallbackInput={input}
+            approvalRequestLine={approvalRequestLine}
+            approvalResponseLine={approvalResponseLine}
+          />
+        );
       }
       const kind = toolKind(title);
       if (kind === "read" || kind === "search") {
@@ -511,6 +721,12 @@ function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupK
           <div className="font-medium text-warning">{title}</div>
         </WorkLogBlock>
       );
+    case "approval_degraded":
+      return (
+        <WorkLogBlock title={title} tone="info" icon={<ShieldAlert className="h-3.5 w-3.5" />}>
+          <div className="text-info">{content || title}</div>
+        </WorkLogBlock>
+      );
     case "error":
       return (
         <WorkLogBlock title="Error" tone="error">
@@ -548,7 +764,7 @@ function WorkLogBlock({
   title: string;
   children: ReactNode;
   icon?: ReactNode;
-  tone?: "assistant" | "thinking" | "plan" | "command" | "result" | "read" | "file" | "warning" | "error";
+  tone?: "assistant" | "thinking" | "plan" | "command" | "result" | "read" | "file" | "warning" | "error" | "info";
   muted?: boolean;
 }) {
   return (
@@ -563,6 +779,7 @@ function WorkLogBlock({
       tone === "file" && "border-amber-200 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/25",
       tone === "warning" && "border-warning/40 bg-warning/15",
       tone === "error" && "border-destructive/40 bg-destructive/10",
+      tone === "info" && "border-info/40 bg-info/10",
       !tone && muted && "border-border/50 bg-muted/20",
       !tone && !muted && "border-border/70 bg-card/50",
     )}>
@@ -578,6 +795,7 @@ function WorkLogBlock({
           tone === "file" && "text-amber-700 dark:text-amber-300",
           tone === "warning" && "text-warning",
           tone === "error" && "text-destructive",
+          tone === "info" && "text-info",
           (!tone || muted) && "text-muted-foreground",
         )}>
           {icon}
@@ -589,17 +807,39 @@ function WorkLogBlock({
   );
 }
 
-function CommandBlock({ command, description, result }: { command: string; description?: string; result?: string }) {
+function CommandBlock({
+  command,
+  description,
+  result,
+  fallbackInput,
+  approvalRequestLine,
+  approvalResponseLine,
+}: {
+  command: string;
+  description?: string;
+  result?: string;
+  fallbackInput?: unknown;
+  approvalRequestLine?: TaskTraceLine;
+  approvalResponseLine?: TaskTraceLine;
+}) {
   return (
     <WorkLogBlock title={classifyCommand(command)} tone="command" icon={<Terminal className="h-3.5 w-3.5" />}>
       {description && <div className="mb-1 break-words text-muted-foreground">{description}</div>}
       <pre className="max-w-full whitespace-pre-wrap break-all rounded bg-blue-100/70 px-2 py-1.5 font-mono text-[12px] text-blue-950 dark:bg-blue-950/50 dark:text-blue-100">
-        {command ? `$ ${command}` : "Command"}
+        {commandLabel(command, fallbackInput)}
       </pre>
+      <InlineApprovalStatus requestLine={approvalRequestLine} responseLine={approvalResponseLine} />
       {result !== undefined && <CommandResult command={command} result={result} />}
     </WorkLogBlock>
   );
 }
+
+export const __taskTraceOutputTestUtils = {
+  buildWorkItems,
+  commandFromInput,
+  commandLabel,
+  isApprovalTraceChannel,
+};
 
 function CommandResult({ command, result }: { command: string; result: string }) {
   const parsed = unwrapJson(redactSecrets(result));
@@ -981,6 +1221,7 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [streamNonce, setStreamNonce] = useState(0);
+  const [streamGated, setStreamGated] = useState(false);
   const [interactions, setInteractions] = useState<TaskInteraction[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -1061,9 +1302,10 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
       });
       source.addEventListener("ready", (event) => {
         try {
-          const payload = JSON.parse((event as MessageEvent).data) as { run_id?: string };
+          const payload = JSON.parse((event as MessageEvent).data) as { run_id?: string; stream_display?: boolean };
           const nextRunId = payload.run_id ?? "";
           if (nextRunId) setRunId(nextRunId);
+          if (payload.stream_display === false) setStreamGated(true);
         } catch {
           // Ignore malformed ready events.
         }
@@ -1122,15 +1364,25 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
   }, [healthPort, streamNonce, task.id]);
 
   const visibleLines = useMemo(() => {
-    if (showRaw) return lines;
+    if (showRaw && streamGated) return lines;
+    const rawChannels = new Set(["raw_stdout", "provider_event"]);
+    if (showRaw) {
+      // StreamDisplay providers: show everything except raw provider channels
+      // (backend already filters these, but this is a belt-and-suspenders guard).
+      return lines.filter((line) => !rawChannels.has(line.channel));
+    }
     return lines.filter((line) => (
       line.channel === "display_event" ||
       line.channel === "approval_request" ||
       line.channel === "approval_response"
     ));
-  }, [lines, showRaw]);
+  }, [lines, showRaw, streamGated]);
 
   const workItems = useMemo(() => buildWorkItems(visibleLines, showRaw), [visibleLines, showRaw]);
+  const latestVisibleLineSeq = visibleLines[visibleLines.length - 1]?.seq ?? -1;
+  const latestInteractionStamp = interactions.length > 0
+    ? `${interactions[interactions.length - 1]?.id ?? ""}:${interactions[interactions.length - 1]?.status ?? ""}:${interactions[interactions.length - 1]?.responded_at ?? ""}:${interactions[interactions.length - 1]?.created_at ?? ""}`
+    : "";
 
   useEffect(() => {
     const scrollToBottom = () => {
@@ -1145,7 +1397,7 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
     // settled yet (e.g. CollapsibleContent animation, initial mount)
     const raf = requestAnimationFrame(scrollToBottom);
     return () => cancelAnimationFrame(raf);
-  }, [workItems.length, showRaw, open]);
+  }, [latestVisibleLineSeq, latestInteractionStamp, showRaw, open]);
 
   const planPhase = useMemo(() => latestPlanPhase(lines), [lines]);
   const planBadge = planPhase
@@ -1211,7 +1463,12 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
             fill ? "flex-1 min-h-0" : compact ? "max-h-[55vh]" : "max-h-72",
           )}
         >
-          {loading && lines.length === 0 ? (
+          {streamGated ? (
+            <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+              <Radio className="h-3 w-3" />
+              此 provider 不支持实时流输出，任务完成后将展示结果。
+            </div>
+          ) : loading && lines.length === 0 ? (
             <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
               Loading stream...
@@ -1226,6 +1483,8 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
                 workItems.map((item) => (
                   item.line.channel === "display_event" && !showRaw ? (
                     <DisplayTraceLine key={`${item.line.run_id}:${item.line.seq}`} {...item} />
+                  ) : isApprovalTraceChannel(item.line.channel) && !showRaw ? (
+                    <ApprovalTraceLine key={`${item.line.run_id}:${item.line.seq}`} line={item.line} />
                   ) : (
                     <div key={`${item.line.run_id}:${item.line.seq}`} className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] gap-2 text-xs leading-relaxed">
                       <span className="truncate text-muted-foreground">{lineLabel(item.line.channel)}</span>

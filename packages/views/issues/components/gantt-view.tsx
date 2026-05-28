@@ -365,7 +365,7 @@ function ScheduledRow({
       >
         {/* Sticky label cell */}
         <AppLink
-          href={p.issueDetail(issue.id)}
+          href={p.issueDetail(issue.identifier)}
           className="sticky left-0 z-[1] flex shrink-0 items-center gap-2 border-r bg-background px-3 text-sm min-w-0"
           style={{ width: LEFT_COL_WIDTH }}
         >
@@ -395,7 +395,7 @@ function ScheduledRow({
               <TooltipTrigger
                 render={
                   <AppLink
-                    href={p.issueDetail(issue.id)}
+                    href={p.issueDetail(issue.identifier)}
                     className={cn(
                       "absolute top-1/2 -translate-y-1/2 transition-opacity hover:opacity-90",
                       bar.isMarker

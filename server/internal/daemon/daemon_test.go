@@ -21,6 +21,7 @@ import (
 	daemonnotifier "github.com/multica-ai/multica/server/internal/daemon/notifier"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type stubNotifier struct {
@@ -217,6 +218,31 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 			t.Parallel()
 			if got := providerNeedsInlineSystemPrompt(tc.provider); got != tc.want {
 				t.Fatalf("providerNeedsInlineSystemPrompt(%q) = %v, want %v", tc.provider, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEffectiveTaskRunMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		provider  string
+		requested string
+		want      string
+	}{
+		{name: "claude keeps plan mode", provider: "claude", requested: "plan", want: "plan"},
+		{name: "codex downgrades plan mode", provider: "codex", requested: "plan", want: "normal"},
+		{name: "normal stays normal", provider: "codex", requested: "normal", want: "normal"},
+		{name: "unknown provider falls back to normal", provider: "unknown", requested: "plan", want: "normal"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := effectiveTaskRunMode(tc.provider, tc.requested); got != tc.want {
+				t.Fatalf("effectiveTaskRunMode(%q, %q) = %q, want %q", tc.provider, tc.requested, got, tc.want)
 			}
 		})
 	}
@@ -1995,28 +2021,22 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 		wantFailureReason string
 	}{
 		{
-			name:              "blocked with explicit reason preserves it",
+			name:              "blocked with explicit reason maps through taxonomy",
 			status:            "blocked",
 			failureReasonIn:   "iteration_limit",
-			wantFailureReason: "iteration_limit",
+			wantFailureReason: "parse_error",
 		},
 		{
-			name:              "blocked without reason defaults to agent_error",
+			name:              "blocked without reason defaults to unknown via taxonomy",
 			status:            "blocked",
 			failureReasonIn:   "",
-			wantFailureReason: "agent_error",
+			wantFailureReason: "unknown",
 		},
 		{
-			name:              "cancelled defaults to cancelled reason",
-			status:            "cancelled",
-			failureReasonIn:   "",
-			wantFailureReason: "cancelled",
-		},
-		{
-			name:              "unknown status fails closed",
+			name:              "unknown status fails closed as unknown",
 			status:            "weird_new_status",
 			failureReasonIn:   "",
-			wantFailureReason: "agent_error",
+			wantFailureReason: "unknown",
 		},
 	}
 
@@ -2050,6 +2070,33 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 				t.Errorf("session_id should be forwarded on failure paths so chat resume keeps working, got %v", rec.payload["session_id"])
 			}
 		})
+	}
+}
+
+func TestReportTaskResult_CancelledHitsCancelEndpoint(t *testing.T) {
+	t.Parallel()
+
+	rec := &reportTaskResultRecorder{}
+	srv := httptest.NewServer(rec.handler(t))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(context.Background(), "task-x", TaskResult{
+		Status:    "cancelled",
+		SessionID: "ses-x",
+		WorkDir:   "/tmp/x",
+	}, slog.Default())
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if rec.path != "/api/daemon/tasks/task-x/cancel" {
+		t.Fatalf("expected /cancel endpoint for status=cancelled, got %s", rec.path)
+	}
+	if rec.payload["session_id"] != "ses-x" {
+		t.Errorf("session_id should be forwarded, got %v", rec.payload["session_id"])
+	}
+	if rec.payload["work_dir"] != "/tmp/x" {
+		t.Errorf("work_dir should be forwarded, got %v", rec.payload["work_dir"])
 	}
 }
 
@@ -2249,5 +2296,33 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 	// given that the runner blocks on runCtx.Done().
 	if usageIdx < pollStatusIdx {
 		t.Fatalf("usage reported before poll-status (order: %v) — poll-status must come first", order)
+	}
+}
+
+func TestApprovalPolicyResolution(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		config string
+		want   string
+	}{
+		{"deny from runtime_config", `{"approval_policy":"deny"}`, "deny"},
+		{"prompt from runtime_config", `{"approval_policy":"prompt"}`, "prompt"},
+		{"auto from runtime_config", `{"approval_policy":"auto"}`, "auto"},
+		{"empty config defaults to auto", `{}`, "auto"},
+		{"nil config defaults to auto", "", "auto"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var rtCfg json.RawMessage
+			if tt.config != "" {
+				rtCfg = json.RawMessage(tt.config)
+			}
+			got := protocol.ResolveApprovalPolicy(rtCfg)
+			if got != tt.want {
+				t.Errorf("ResolveApprovalPolicy(%s) = %q, want %q", tt.config, got, tt.want)
+			}
+		})
 	}
 }

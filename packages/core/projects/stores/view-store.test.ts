@@ -52,7 +52,7 @@ describe("useProjectViewStore", () => {
     const raw = localStorage.getItem("multica_projects_view:acme");
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw as string);
-    expect(parsed.state).toEqual({ viewMode: "comfortable" });
+    expect(parsed.state).toEqual({ sortBy: "created_at", sortDirection: "desc", viewMode: "comfortable" });
   });
 
   it("rehydrates a different saved viewMode on workspace switch", async () => {

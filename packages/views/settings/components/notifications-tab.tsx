@@ -5,6 +5,8 @@ import { BellRing, Copy, Loader2, MessageCircle, Send, Trash2 } from "lucide-rea
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import type {
+  AutoSubscribePreferenceKey,
+  AutoSubscribePreferences,
   ExternalAccountBinding,
   NotificationChannel,
   NotificationChannelPreference,
@@ -110,6 +112,43 @@ const webhookTemplatePlaceholder = `{
 
 const openclawWeixinBindPrompt = "先执行 `curl -fsSL https://multica.wujieai.com/install.sh | sh -s -- --restart` 将 multica cli 更新到最新版并重启 daemon，然后用 multica notify bind-wechat 绑定微信通知";
 
+const autoSubscribeRows: Array<{
+  key: AutoSubscribePreferenceKey;
+  label: string;
+  description: string;
+}> = [
+  {
+    key: "issue_creator",
+    label: "我创建的 Issue",
+    description: "创建后加入关注者列表。",
+  },
+  {
+    key: "issue_assignee",
+    label: "分配给我的 Issue",
+    description: "成为分配人后加入关注者列表。",
+  },
+  {
+    key: "comment_author",
+    label: "我评论过的 Issue",
+    description: "评论后加入关注者列表。",
+  },
+  {
+    key: "issue_description_mention",
+    label: "正文/描述中 @我",
+    description: "关闭后仍会收到这次 @ 提醒，但不会因此接收后续普通动态。",
+  },
+  {
+    key: "comment_mention",
+    label: "评论中 @我",
+    description: "关闭后仍会收到这次 @ 提醒，但不会因此接收后续普通动态。",
+  },
+  {
+    key: "quick_create_requester",
+    label: "Agent 代我创建的 Issue",
+    description: "Quick Create 完成后加入关注者列表。",
+  },
+];
+
 function preferenceKey(pref: NotificationChannelPreference) {
   return `${pref.channel}:${pref.event_type}`;
 }
@@ -122,8 +161,12 @@ export function NotificationsTab() {
   const [bindings, setBindings] = useState<ExternalAccountBinding[]>([]);
   const [webhooks, setWebhooks] = useState<NotificationWebhook[]>([]);
   const [preferences, setPreferences] = useState<NotificationChannelPreference[]>([]);
+  const [autoSubscribePreferences, setAutoSubscribePreferences] =
+    useState<AutoSubscribePreferences | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [savingAutoSubscribeKey, setSavingAutoSubscribeKey] =
+    useState<AutoSubscribePreferenceKey | null>(null);
   const [busyWebhookId, setBusyWebhookId] = useState<string | null>(null);
   const [webhookName, setWebhookName] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
@@ -149,16 +192,18 @@ export function NotificationsTab() {
   const loadSettings = useCallback(async () => {
     setLoading(true);
     try {
-      const [bindingsResp, preferencesResp, webhooksResp, runtimesList] = await Promise.all([
+      const [bindingsResp, preferencesResp, webhooksResp, runtimesList, autoSubscribeResp] = await Promise.all([
         api.listNotificationBindings(),
         api.listNotificationPreferences(),
         api.listNotificationWebhooks(),
         api.listRuntimes({ owner: "me" }),
+        api.getAutoSubscribePreferences(),
       ]);
       setBindings(bindingsResp.bindings);
       setPreferences(preferencesResp.preferences);
       setWebhooks(webhooksResp.webhooks);
       setRuntimes(runtimesList);
+      setAutoSubscribePreferences(autoSubscribeResp.preferences);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to load notification settings");
     } finally {
@@ -392,6 +437,26 @@ export function NotificationsTab() {
       toast.error(err instanceof Error ? err.message : "Failed to update notification channel");
     } finally {
       setSavingKey(null);
+    }
+  };
+
+  const handleAutoSubscribeToggle = async (
+    key: AutoSubscribePreferenceKey,
+    enabled: boolean,
+  ) => {
+    if (!autoSubscribePreferences) return;
+    const previous = autoSubscribePreferences;
+    setSavingAutoSubscribeKey(key);
+    setAutoSubscribePreferences({ ...autoSubscribePreferences, [key]: enabled });
+
+    try {
+      const updated = await api.updateAutoSubscribePreferences({ [key]: enabled });
+      setAutoSubscribePreferences(updated.preferences);
+    } catch (err) {
+      setAutoSubscribePreferences(previous);
+      toast.error(err instanceof Error ? err.message : "Failed to update auto-subscribe settings");
+    } finally {
+      setSavingAutoSubscribeKey(null);
     }
   };
 
@@ -716,6 +781,14 @@ export function NotificationsTab() {
         </Card>
       </section>
 
+      {autoSubscribePreferences ? (
+        <AutoSubscribeSection
+          preferences={autoSubscribePreferences}
+          savingKey={savingAutoSubscribeKey}
+          onToggle={handleAutoSubscribeToggle}
+        />
+      ) : null}
+
       <section className="space-y-4">
         <h3 className="text-sm font-semibold">通知渠道</h3>
         <Card>
@@ -863,5 +936,50 @@ export function NotificationsTab() {
         </p>
       </section>
     </div>
+  );
+}
+
+function AutoSubscribeSection({
+  preferences,
+  savingKey,
+  onToggle,
+}: {
+  preferences: AutoSubscribePreferences;
+  savingKey: AutoSubscribePreferenceKey | null;
+  onToggle: (key: AutoSubscribePreferenceKey, enabled: boolean) => void;
+}) {
+  return (
+    <section className="space-y-4">
+      <h3 className="text-sm font-semibold">自动关注</h3>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">哪些场景会关注 Issue</CardTitle>
+          <CardDescription>
+            这些开关只决定是否把你加入 Issue 关注者列表，不会关闭 @ 提醒本身。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {autoSubscribeRows.map((row) => (
+            <div key={row.key} className="flex items-center justify-between gap-4 rounded-lg border p-4">
+              <div className="min-w-0 space-y-1">
+                <span className="text-sm font-medium">{row.label}</span>
+                <p className="text-xs text-muted-foreground">{row.description}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {savingKey === row.key ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                ) : null}
+                <Switch
+                  checked={preferences[row.key]}
+                  disabled={savingKey !== null}
+                  onCheckedChange={(checked) => onToggle(row.key, checked)}
+                  aria-label={`Toggle auto subscribe ${row.label}`}
+                />
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </section>
   );
 }

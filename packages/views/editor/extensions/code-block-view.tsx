@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
-import { Code as CodeIcon, Copy, Check, Eye } from "lucide-react";
+import { Code as CodeIcon, Copy, Check, Eye, Trash2 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { MermaidDiagram } from "../mermaid-diagram";
@@ -29,7 +29,7 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced;
 }
 
-function CodeBlockView({ node }: NodeViewProps) {
+function CodeBlockView({ node, deleteNode, editor }: NodeViewProps) {
   const { t } = useT("editor");
   const [copied, setCopied] = useState(false);
   // HTML blocks default to "preview"; the user can flip to "source" to
@@ -128,6 +128,16 @@ function CodeBlockView({ node }: NodeViewProps) {
             <Copy className="h-3.5 w-3.5" />
           )}
         </button>
+        {editor?.isEditable && (
+          <button
+            type="button"
+            onClick={() => deleteNode()}
+            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+            title={t(($) => $.code_block.delete)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
       {/* `<pre>` + NodeViewContent must remain mounted so the user can keep
           editing the code block contents. When the HTML preview is showing

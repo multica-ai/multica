@@ -24,21 +24,41 @@ const FILE_CARD_MARKDOWN_RE = new RegExp(
   `^!file\\[([^\\]]*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)`,
 );
 
-
 // ---------------------------------------------------------------------------
 // React NodeView — thin wrapper, all rendering lives in <Attachment>
 // ---------------------------------------------------------------------------
 
-export function FileCardView({ node }: NodeViewProps) {
+export function FileCardView({ node, editor, getPos }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
+  const isEditable = editor?.isEditable ?? false;
+
+  // Convert this compact card into an inline image preview node.
+  // Only available for image-type files that can render as <img>.
+  const handleExpandToPreview = () => {
+    if (!editor?.isEditable) return;
+    const pos = getPos();
+    if (pos == null) return;
+    const imageType = editor.schema.nodes.image;
+    if (!imageType) return;
+    const imageNode = imageType.create({ src: href, alt: filename });
+    const tr = editor.state.tr.replaceWith(pos, pos + node.nodeSize, imageNode);
+    editor.view.dispatch(tr);
+  };
 
   return (
-    <NodeViewWrapper as="div" className="file-card-node" data-type="fileCard">
+    <NodeViewWrapper
+      as="div"
+      className="file-card-node"
+      data-type="fileCard"
+    >
       <div contentEditable={false}>
         <Attachment
           attachment={{ kind: "url", url: href, filename, uploading }}
+          editable={isEditable}
+          displayAsCard
+          onExpandToPreview={handleExpandToPreview}
         />
       </div>
     </NodeViewWrapper>

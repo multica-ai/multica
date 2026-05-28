@@ -22,6 +22,67 @@ type claudeBackend struct {
 	cfg Config
 }
 
+type claudePendingToolUse struct {
+	tool  string
+	input map[string]any
+}
+
+type claudeToolUseState struct {
+	pending map[string]claudePendingToolUse
+}
+
+func newClaudeToolUseState() *claudeToolUseState {
+	return &claudeToolUseState{pending: make(map[string]claudePendingToolUse)}
+}
+
+func (s *claudeToolUseState) deferToolUse(callID, tool string, input map[string]any) {
+	if s == nil || callID == "" {
+		return
+	}
+	s.pending[callID] = claudePendingToolUse{tool: tool, input: input}
+}
+
+func (s *claudeToolUseState) discardToolUse(callID string) {
+	if s == nil || callID == "" {
+		return
+	}
+	delete(s.pending, callID)
+}
+
+func claudeCommandInput(input map[string]any) string {
+	if input == nil {
+		return ""
+	}
+	for _, key := range []string{"command", "cmd", "script"} {
+		value, _ := input[key].(string)
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func shouldDeferClaudeToolUse(tool string, input map[string]any) bool {
+	return tool == "Bash" && claudeCommandInput(input) == ""
+}
+
+func emitClaudeToolUse(ch chan<- Message, trace TraceCallback, tool, callID string, input map[string]any, metadata map[string]any) {
+	trySend(ch, Message{
+		Type:   MessageToolUse,
+		Tool:   tool,
+		CallID: callID,
+		Input:  input,
+	})
+	if trace != nil {
+		trace("normalized", "[tool_use: "+tool+"]", "")
+	}
+	traceMeta := map[string]any{"call_id": callID, "input": input}
+	for key, value := range metadata {
+		traceMeta[key] = value
+	}
+	emitDisplayEvent(trace, "tool_call", tool, "", traceMeta)
+}
+
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	if opts.ClaudeUseSDKBridge {
 		return b.executeWithGoSDK(ctx, prompt, opts)
@@ -150,6 +211,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var finalError string
 		permissionBlocked := false
 		usage := make(map[string]TokenUsage)
+		toolState := newClaudeToolUseState()
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
@@ -182,9 +244,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			switch msg.Type {
 			case "assistant":
-				b.handleAssistant(msg, msgCh, &output, usage, opts.TraceCallback)
+				b.handleAssistant(msg, msgCh, &output, usage, opts.TraceCallback, toolState, nil)
 			case "user":
-				if b.handleUser(msg, msgCh, opts.TraceCallback) {
+				if b.handleUser(msg, msgCh, opts.TraceCallback, toolState, nil) {
 					permissionBlocked = true
 					finalStatus = "blocked"
 					finalError = "Claude reported a permission request in tool output but did not emit a control_request event; stopping this run to avoid repeated permission retries."
@@ -295,7 +357,15 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage, trace TraceCallback) {
+func (b *claudeBackend) handleAssistant(
+	msg claudeSDKMessage,
+	ch chan<- Message,
+	output *strings.Builder,
+	usage map[string]TokenUsage,
+	trace TraceCallback,
+	toolState *claudeToolUseState,
+	traceMeta map[string]any,
+) {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		return
@@ -332,22 +402,23 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 			if block.Input != nil {
 				_ = json.Unmarshal(block.Input, &input)
 			}
-			trySend(ch, Message{
-				Type:   MessageToolUse,
-				Tool:   block.Name,
-				CallID: block.ID,
-				Input:  input,
-			})
-			if trace != nil {
-				trace("normalized", "[tool_use: "+block.Name+"]", "")
+			if shouldDeferClaudeToolUse(block.Name, input) {
+				toolState.deferToolUse(block.ID, block.Name, input)
+				continue
 			}
-			emitDisplayEvent(trace, "tool_call", block.Name, "", map[string]any{"call_id": block.ID, "input": input})
-
+			toolState.discardToolUse(block.ID)
+			emitClaudeToolUse(ch, trace, block.Name, block.ID, input, traceMeta)
 		}
 	}
 }
 
-func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message, trace TraceCallback) bool {
+func (b *claudeBackend) handleUser(
+	msg claudeSDKMessage,
+	ch chan<- Message,
+	trace TraceCallback,
+	toolState *claudeToolUseState,
+	traceMeta map[string]any,
+) bool {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		return false
@@ -371,7 +442,12 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message, trac
 			if trace != nil {
 				trace("normalized", "[tool_result: "+block.ToolUseID+"]", resultStr)
 			}
-			emitDisplayEvent(trace, "tool_result", "Tool result", resultStr, map[string]any{"call_id": block.ToolUseID})
+			toolState.discardToolUse(block.ToolUseID)
+			meta := map[string]any{"call_id": block.ToolUseID}
+			for key, value := range traceMeta {
+				meta[key] = value
+			}
+			emitDisplayEvent(trace, "tool_result", "Tool result", resultStr, meta)
 
 		}
 	}
@@ -401,7 +477,7 @@ func (b *claudeBackend) handleControlRequest(ctx context.Context, msg claudeSDKM
 	behavior := "allow"
 	if onApproval != nil {
 		if req.ToolName == "Bash" {
-			if command, _ := inputMap["command"].(string); isTrustedPlatformCommand(command) {
+			if command := trustedPlatformCommandFromInput(inputMap); isTrustedPlatformCommand(command) {
 				behavior = "allow"
 				goto respond
 			}

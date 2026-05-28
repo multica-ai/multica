@@ -179,7 +179,7 @@ export function ContextAnchorCard() {
 
   const href =
     candidate.type === "issue"
-      ? paths.issueDetail(candidate.id)
+      ? paths.issueDetail(candidate.label)
       : paths.projectDetail(candidate.id);
 
   const tooltipText =

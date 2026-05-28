@@ -1,7 +1,7 @@
 // Package agent provides a unified interface for executing prompts via
-// coding agents (Claude Code, Codex, Copilot, OpenCode, OpenClaw, Hermes,
-// Gemini, Pi, Cursor, Kimi, Kiro, DeepSeek). It mirrors the happy-cli
-// AgentBackend pattern, translated to idiomatic Go.
+// coding agents (Claude Code, Codex, CodeBuddy, Copilot, OpenCode, OpenClaw,
+// Hermes, Gemini, Pi, Cursor, Kimi, Kiro, DeepSeek). It mirrors the
+// happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
 
 import (
@@ -87,11 +87,12 @@ type ExecOptions struct {
 	MaxTurns                  int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
-	ResumeSessionID           string          // if non-empty, resume a previous agent session
-	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
-	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
-	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	ResumeSessionID           string           // if non-empty, resume a previous agent session
+	ExtraArgs                 []string         // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
+	CustomArgs                []string         // per-agent CLI arguments appended after ExtraArgs
+	McpConfig                 json.RawMessage  // if non-nil, MCP server config to pass via --mcp-config
 	OnApproval                ApprovalCallback // nil = auto-approve (default behaviour)
+	ApprovalPolicy            string           // "auto", "prompt", or "deny"; empty treated as "auto"
 	TraceCallback             TraceCallback    // nil = no trace recording (default)
 	ClaudePermissionMode      string           // optional controlled override: default, plan, acceptEdits
 	ClaudeUseSDKBridge        bool             // route Claude execution through the Agent SDK bridge
@@ -161,53 +162,13 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, DeepSeek-TUI)
+	ExecutablePath string            // path to CLI binary (claude, cbc, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, DeepSeek-TUI)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
-type PlanCapability struct {
-	PromptPlan          bool
-	NativePlan          string // "", "experimental", or "verified"
-	NativeApproval      bool
-	NativeUserInput     bool
-	StructuredStreaming bool
-}
-
-func Capabilities(agentType string) PlanCapability {
-	switch agentType {
-	case "claude":
-		return PlanCapability{
-			PromptPlan:          true,
-			NativePlan:          "experimental",
-			NativeApproval:      true,
-			StructuredStreaming: true,
-		}
-	case "codex":
-		return PlanCapability{
-			PromptPlan:          true,
-			NativeApproval:      true,
-			NativeUserInput:     true,
-			StructuredStreaming: true,
-		}
-	case "hermes", "kimi", "kiro":
-		return PlanCapability{
-			PromptPlan:          true,
-			NativeApproval:      true,
-			StructuredStreaming: true,
-		}
-	case "copilot", "cursor", "gemini", "opencode", "openclaw", "pi":
-		return PlanCapability{
-			PromptPlan:          true,
-			StructuredStreaming: true,
-		}
-	default:
-		return PlanCapability{}
-	}
-}
-
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -216,6 +177,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 	switch agentType {
 	case "claude":
 		return &claudeBackend{cfg: cfg}, nil
+	case "codebuddy":
+		return newCodebuddyBackend(cfg), nil
 	case "codex":
 		return &codexBackend{cfg: cfg}, nil
 	case "copilot":
@@ -239,8 +202,21 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "DeepSeek-TUI":
 		return &deepseekBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI)", agentType)
 	}
+}
+
+// SupportedBackends returns the set of agent types accepted by New.
+func SupportedBackends() []string {
+	return []string{
+		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw",
+		"hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI",
+	}
+}
+
+// RegisteredProviders returns the set of provider names with capability entries.
+func RegisteredProviders() []string {
+	return registeredProviders()
 }
 
 // DetectVersion runs the agent CLI with --version and returns the output.
@@ -255,8 +231,9 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
-	"claude":   "claude (stream-json)",
-	"codex":    "codex app-server",
+	"claude":    "claude (stream-json)",
+	"codebuddy": "codebuddy (stream-json)",
+	"codex":     "codex app-server",
 	"copilot":  "copilot (json)",
 	"cursor":   "cursor-agent (stream-json)",
 	"gemini":   "gemini (stream-json)",

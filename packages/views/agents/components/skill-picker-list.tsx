@@ -26,6 +26,7 @@ interface SkillPickerListProps {
 
   /** Loading state for the skills query. */
   loading?: boolean;
+  disabled?: boolean;
 
   /** Caller-supplied empty / no-match copy. Falls back to generic i18n
    *  strings when omitted — the dialog and the create-form pass their
@@ -54,6 +55,7 @@ export function SkillPickerList({
   onToggle,
   searchable = true,
   loading = false,
+  disabled = false,
   emptyMessage,
   noMatchMessage,
   className,
@@ -107,11 +109,19 @@ export function SkillPickerList({
               <button
                 key={skill.id}
                 type="button"
-                onClick={() => onToggle(skill)}
+                disabled={disabled}
+                onClick={() => {
+                  if (!disabled) onToggle(skill);
+                }}
                 aria-pressed={isSelected}
                 className={cn(
                   "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors",
-                  isSelected ? "bg-accent" : "hover:bg-accent/50",
+                  disabled
+                    ? "cursor-default"
+                    : isSelected
+                      ? "bg-accent"
+                      : "hover:bg-accent/50",
+                  disabled && isSelected && "bg-accent",
                 )}
               >
                 {/* Indicator only — the wrapping <button> handles clicks,

@@ -305,7 +305,7 @@ describe("CommentCard", () => {
     await userEvent.click(screen.getByText("Retry"));
 
     await waitFor(() => {
-      expect(mockRetryAgentComment).toHaveBeenCalledWith("agent-system-1");
+      expect(mockRetryAgentComment).toHaveBeenCalledWith("agent-system-1", undefined);
     });
     expect(mockToastSuccess).toHaveBeenCalledWith("Agent run queued");
   });
@@ -328,7 +328,7 @@ describe("CommentCard", () => {
     await userEvent.click(screen.getByText("Retry"));
 
     await waitFor(() => {
-      expect(mockRetryAgentComment).toHaveBeenCalledWith("agent-comment-1");
+      expect(mockRetryAgentComment).toHaveBeenCalledWith("agent-comment-1", undefined);
     });
   });
 

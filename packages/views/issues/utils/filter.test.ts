@@ -173,6 +173,7 @@ describe("filterIssues", () => {
     name,
     color,
     workspace_id: "ws-1",
+    project_id: null,
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
   });

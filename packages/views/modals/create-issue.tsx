@@ -35,7 +35,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multi
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
-import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, DueDatePicker } from "../issues/components";
+import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -60,8 +60,14 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { PillButton } from "../common/pill-button";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
+import {
+  LabelScopeSegment,
+  labelMatchesScope,
+  labelScopeProjectId,
+  type LabelCreateScope,
+} from "../issues/components/label-scope-segment";
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const INLINE_LABEL_COLORS = [
   "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6",
@@ -117,8 +123,20 @@ export function ManualCreatePanel({
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const modalTitle =
+    typeof data?.title === "string" ? data.title : undefined;
+  const modalDescription =
+    typeof data?.description === "string" ? data.description : undefined;
+  const shouldPersistTitleDraft = modalTitle === undefined;
+  const shouldPersistDescriptionDraft = modalDescription === undefined;
+  const initialTitle = modalTitle ?? draft.title;
+  const initialDescription = modalDescription ?? draft.description;
+  const blockIssueIdOnCreate =
+    typeof data?.block_issue_id_on_create === "string"
+      ? data.block_issue_id_on_create
+      : undefined;
 
-  const [title, setTitle] = useState(draft.title);
+  const [title, setTitle] = useState(initialTitle);
   const [formResetKey, setFormResetKey] = useState(0);
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
@@ -152,7 +170,7 @@ export function ManualCreatePanel({
   // overflow ⋯ menu. Clicking the menu item flips this open, which both
   // mounts the inline pill (the popover's anchor) AND opens the calendar.
   // When the popover closes without a value set, the pill unmounts again.
-  const [_startDatePickerOpen, setStartDatePickerOpen] = useState(false);
+  const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
   // Children live as full Issue objects — the picker always returns the whole
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
@@ -183,10 +201,13 @@ export function ManualCreatePanel({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
-  const { data: workspaceLabels = [] } = useQuery(labelListOptions(wsId));
+  const labelListScope = useMemo(() => ({ projectId: projectId ?? null }), [projectId]);
+  const { data: workspaceLabels = [] } = useQuery(labelListOptions(wsId, labelListScope));
   const createLabelMutation = useCreateLabel();
   const [labelIds, setLabelIds] = useState<string[]>([]);
   const [labelSearch, setLabelSearch] = useState("");
+  const [labelCreateScope, setLabelCreateScope] = useState<LabelCreateScope>(projectId ? "project" : "workspace");
+  const labelCreateScopeTouchedRef = useRef(false);
 
   // Inherit labels and project from parent issue when creating a sub-issue.
   const parentInheritedRef = useRef(false);
@@ -194,11 +215,15 @@ export function ManualCreatePanel({
     if (parentInheritedRef.current) return;
     if (!parentIssue) return;
     parentInheritedRef.current = true;
-    if (parentIssue.labels && parentIssue.labels.length > 0) {
-      setLabelIds(parentIssue.labels.map((l) => l.id));
-    }
     if (parentIssue.project_id && !initialProjectId) {
       setProjectId(parentIssue.project_id);
+    }
+    if (parentIssue.labels && parentIssue.labels.length > 0) {
+      setLabelIds(
+        parentIssue.labels
+          .filter((label) => !label.project_id || label.project_id === (parentIssue.project_id ?? null))
+          .map((l) => l.id),
+      );
     }
   }, [parentIssue, initialProjectId]);
 
@@ -220,7 +245,10 @@ export function ManualCreatePanel({
   }, [t, uploadWithToast]);
 
   // Sync field changes to draft store
-  const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
+  const updateTitle = (v: string) => {
+    setTitle(v);
+    if (shouldPersistTitleDraft) setDraft({ title: v });
+  };
   const updateStatus = (v: IssueStatus) => { setStatus(v); setDraft({ status: v }); };
   const updatePriority = (v: IssuePriority) => { setPriority(v); setDraft({ priority: v }); };
   const updateAssignee = (type?: IssueAssigneeType, id?: string) => {
@@ -240,14 +268,42 @@ export function ManualCreatePanel({
   const canCreateLabel = useMemo(() => {
     if (!labelSearchTrimmed || createLabelMutation.isPending) return false;
     const q = labelSearchTrimmed.toLowerCase();
-    return !workspaceLabels.some((label) => label.name.toLowerCase() === q);
-  }, [createLabelMutation.isPending, labelSearchTrimmed, workspaceLabels]);
+    return !workspaceLabels.some(
+      (label) =>
+        label.name.toLowerCase() === q &&
+        labelMatchesScope(label, labelCreateScope, projectId),
+    );
+  }, [createLabelMutation.isPending, labelCreateScope, labelSearchTrimmed, projectId, workspaceLabels]);
+
+  useEffect(() => {
+    const available = new Set(workspaceLabels.map((label) => label.id));
+    setLabelIds((prev) => {
+      if (prev.length === 0) return prev;
+      return prev.filter((id) => available.has(id));
+    });
+  }, [workspaceLabels]);
+
+  useEffect(() => {
+    if (!projectId && labelCreateScope === "project") {
+      setLabelCreateScope("workspace");
+      labelCreateScopeTouchedRef.current = false;
+      return;
+    }
+    if (projectId && !labelCreateScopeTouchedRef.current && labelCreateScope === "workspace") {
+      setLabelCreateScope("project");
+    }
+  }, [labelCreateScope, projectId]);
+
+  const updateLabelCreateScope = (scope: LabelCreateScope) => {
+    labelCreateScopeTouchedRef.current = true;
+    setLabelCreateScope(scope);
+  };
 
   const createInlineLabel = () => {
     if (!canCreateLabel) return;
     const name = labelSearchTrimmed;
     createLabelMutation.mutate(
-      { name, color: pickInlineLabelColor(name) },
+      { name, color: pickInlineLabelColor(name), project_id: labelScopeProjectId(labelCreateScope, projectId) },
       {
         onSuccess: (label) => {
           setLabelIds((prev) => (prev.includes(label.id) ? prev : [...prev, label.id]));
@@ -358,6 +414,22 @@ export function ManualCreatePanel({
         }
       }
 
+      if (blockIssueIdOnCreate) {
+        try {
+          await updateIssueMutation.mutateAsync({
+            id: blockIssueIdOnCreate,
+            status: "blocked",
+          });
+        } catch (err) {
+          console.error("[create-issue] source issue block failed", err);
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.create_issue.toast_block_source_failed),
+          );
+        }
+      }
+
       setLastMode("manual");
       clearDraft();
       const shouldShowBacklogHint =
@@ -429,7 +501,7 @@ export function ManualCreatePanel({
                   type="button"
                   className="ml-7 mt-2 text-sm text-primary hover:underline cursor-pointer"
                   onClick={() => {
-                    router.push(p.issueDetail(dup.issue.id));
+                    router.push(p.issueDetail(dup.issue.identifier));
                     toast.dismiss(toastId);
                   }}
                 >
@@ -560,7 +632,7 @@ export function ManualCreatePanel({
               <TitleEditor
                 key={formResetKey}
                 autoFocus
-                defaultValue={draft.title}
+                defaultValue={title}
                 placeholder={t(($) => $.create_issue.title_placeholder)}
                 className="text-lg font-semibold"
                 onChange={(v) => updateTitle(v)}
@@ -572,9 +644,11 @@ export function ManualCreatePanel({
             <div {...descDropZoneProps} className="relative flex flex-1 min-h-0 overflow-y-auto px-5">
               <ContentEditor
                 ref={descEditorRef}
-                defaultValue={draft.description}
+                defaultValue={initialDescription}
                 placeholder={t(($) => $.create_issue.description_placeholder)}
-                onUpdate={(md) => setDraft({ description: md })}
+                onUpdate={(md) => {
+                  if (shouldPersistDescriptionDraft) setDraft({ description: md });
+                }}
                 onUploadFile={handleUpload}
                 debounceMs={500}
               />
@@ -619,6 +693,25 @@ export function ManualCreatePanel({
                 align="start"
               />
 
+              {(startDate || startDatePickerOpen) && (
+                <StartDatePicker
+                  startDate={startDate}
+                  onUpdate={(u) => {
+                    setStartDate(u.start_date ?? null);
+                    setDraft({ startDate: u.start_date ?? null });
+                  }}
+                  open={startDatePickerOpen}
+                  onOpenChange={(open) => {
+                    setStartDatePickerOpen(open);
+                    if (!open && !startDate) {
+                      setStartDatePickerOpen(false);
+                    }
+                  }}
+                  triggerRender={<PillButton />}
+                  align="start"
+                />
+              )}
+
               {/* Project */}
               <ProjectPicker
                 projectId={projectId ?? null}
@@ -656,6 +749,24 @@ export function ManualCreatePanel({
                       className="h-8 w-full rounded-md border bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-ring"
                     />
                   </div>
+                  {projectId && (
+                    <>
+                      <div className="px-2 pb-1">
+                        <div className="mb-1 text-xs font-medium text-muted-foreground">
+                          {t(($) => $.create_issue.label_scope_label)}
+                        </div>
+                        <LabelScopeSegment
+                          value={labelCreateScope}
+                          onValueChange={updateLabelCreateScope}
+                          projectLabel={t(($) => $.create_issue.label_scope_project)}
+                          workspaceLabel={t(($) => $.create_issue.label_scope_workspace)}
+                          ariaLabel={t(($) => $.create_issue.label_scope_aria)}
+                          fullWidth
+                        />
+                      </div>
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
                   {canCreateLabel && (
                     <DropdownMenuItem onClick={createInlineLabel}>
                       <span className="truncate">

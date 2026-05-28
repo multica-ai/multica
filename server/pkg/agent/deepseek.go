@@ -39,7 +39,9 @@ var deepseekBlockedArgs = map[string]blockedArgMode{
 //   - {"type":"tool_lifecycle","response_id":"...","tool_name":"...","phase":"...","payload":{...}}
 //
 // These arrive DURING the thread/message call, before the JSON-RPC
-// response is sent.
+// response is sent. DeepSeek-TUI builds observed so far do not emit token
+// usage for every response; when a future build adds usage/token_usage fields
+// to either push events or JSON-RPC results, the parser below records them.
 type deepseekBackend struct {
 	cfg Config
 }
@@ -56,6 +58,9 @@ type deepseekClient struct {
 	mu      sync.Mutex
 	nextID  int
 	pending map[int]*pendingRPC
+
+	usageMu sync.Mutex
+	usage   TokenUsage
 
 	onMessage func(Message)
 }
@@ -173,6 +178,7 @@ func (c *deepseekClient) handleResponse(raw map[string]json.RawMessage) {
 		_ = json.Unmarshal(errData, &rpcErr)
 		pr.ch <- rpcResult{err: fmt.Errorf("%s: %s (code=%d)", pr.method, rpcErr.Message, rpcErr.Code)}
 	} else {
+		c.accumulateUsage(raw["result"])
 		pr.ch <- rpcResult{result: raw["result"]}
 	}
 }
@@ -235,7 +241,37 @@ func (c *deepseekClient) handlePushEvent(raw map[string]json.RawMessage) {
 				Output: output,
 			})
 		}
+	case "usage", "usage_update", "token_usage":
+		c.accumulateUsageFromRaw(raw)
 	}
+}
+
+func (c *deepseekClient) accumulateUsage(raw json.RawMessage) {
+	if u := tokenUsageFromRawMessage(raw); tokenUsageHasTokens(u) {
+		c.usageMu.Lock()
+		mergeTokenUsageMax(&c.usage, u)
+		c.usageMu.Unlock()
+	}
+}
+
+func (c *deepseekClient) accumulateUsageFromRaw(raw map[string]json.RawMessage) {
+	if len(raw) == 0 {
+		return
+	}
+	data := make(map[string]any, len(raw))
+	for k, v := range raw {
+		var value any
+		if err := json.Unmarshal(v, &value); err == nil {
+			data[k] = value
+		}
+	}
+	u := tokenUsageFromMap(data)
+	if !tokenUsageHasTokens(u) {
+		return
+	}
+	c.usageMu.Lock()
+	mergeTokenUsageMax(&c.usage, u)
+	c.usageMu.Unlock()
 }
 
 func (b *deepseekBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
@@ -419,12 +455,26 @@ func (b *deepseekBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			}
 		}
 
+		c.usageMu.Lock()
+		u := c.usage
+		c.usageMu.Unlock()
+
+		var usageMap map[string]TokenUsage
+		if tokenUsageHasTokens(u) {
+			model := opts.Model
+			if model == "" {
+				model = "unknown"
+			}
+			usageMap = map[string]TokenUsage{model: u}
+		}
+
 		resCh <- Result{
 			Status:     finalStatus,
 			Output:     finalOutput,
 			Error:      finalError,
 			DurationMs: duration.Milliseconds(),
 			SessionID:  threadID,
+			Usage:      usageMap,
 		}
 	}()
 

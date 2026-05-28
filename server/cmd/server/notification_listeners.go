@@ -964,11 +964,12 @@ func notifySubscribers(
 	severity string,
 	title string,
 	body string,
+	commentID string,
 	details []byte,
 ) {
 	notified := notifyIssueSubscribers(ctx, queries, bus,
 		issueID, issueID, issueStatus, workspaceID, e, exclude,
-		notifType, severity, title, body, details)
+		notifType, severity, title, body, commentID, details)
 
 	// Only a small allowlist of event types bubbles to parent subscribers.
 	if !parentBubbleNotifTypes[notifType] {
@@ -1000,7 +1001,7 @@ func notifySubscribers(
 	parentID := util.UUIDToString(issue.ParentIssueID)
 	notifyIssueSubscribers(ctx, queries, bus,
 		parentID, issueID, issueStatus, workspaceID, e, parentExclude,
-		notifType, severity, title, body, details)
+		notifType, severity, title, body, commentID, details)
 }
 
 // notifyIssueSubscribers sends inbox notifications to subscribers of
@@ -1022,6 +1023,7 @@ func notifyIssueSubscribers(
 	severity string,
 	title string,
 	body string,
+	commentID string,
 	details []byte,
 ) map[string]bool {
 	notified := map[string]bool{}
@@ -1085,8 +1087,8 @@ func notifyIssueSubscribers(
 		}
 
 		notified[subID] = true
-		notificationCtx := buildNotificationContext(ctx, queries, workspaceID, targetIssueID, "", "")
-		recordNotification(ctx, queries, e, subID, notifType, severity, targetIssueID, "", title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, "", details)
+		notificationCtx := buildNotificationContext(ctx, queries, workspaceID, targetIssueID, commentID, "")
+		recordNotification(ctx, queries, e, subID, notifType, severity, targetIssueID, commentID, title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, "", details)
 
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
@@ -1416,6 +1418,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				exclude, "assignee_changed", "info",
 				issue.Title, "",
+				"",
 				assigneeDetails)
 		}
 
@@ -1428,6 +1431,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "status_changed", "info",
 				issue.Title, "",
+				"",
 				statusDetails)
 
 			// When the issue progresses past the failure (in_review / done /
@@ -1448,6 +1452,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "priority_changed", "info",
 				issue.Title, "",
+				"",
 				priorityDetails)
 		}
 
@@ -1467,6 +1472,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "start_date_changed", "info",
 				issue.Title, "",
+				"",
 				startDateDetails)
 		}
 
@@ -1486,6 +1492,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "due_date_changed", "info",
 				issue.Title, "",
+				"",
 				dueDateDetails)
 		}
 
@@ -1571,6 +1578,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
 			nil, "new_comment", "info",
 			issueTitle, commentContent,
+			commentID,
 			commentDetails)
 
 		// Notify @mentions in comment content.
@@ -1876,6 +1884,23 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			recipientID = util.UUIDToString(issue.CreatorID)
 		}
 
+		// Find last agent comment for comment anchor link (needed by both
+		// notifySubscribers for dedup and the explicit IM delivery below).
+		lastAgentCommentID := ""
+		taskComments, commentErr := queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+			IssueID:     parseUUID(issueID),
+			WorkspaceID: parseUUID(e.WorkspaceID),
+			Limit:       100,
+		})
+		if commentErr == nil {
+			for i := len(taskComments) - 1; i >= 0; i-- {
+				if taskComments[i].AuthorType == "agent" {
+					lastAgentCommentID = util.UUIDToString(taskComments[i].ID)
+					break
+				}
+			}
+		}
+
 		notifySubscribers(ctx, queries, bus, issueID, issue.Status, e.WorkspaceID,
 			events.Event{
 				Type:        e.Type,
@@ -1885,25 +1910,13 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			},
 			exclude, "task_failed", "action_required",
 			issue.Title, failureSummary,
+			lastAgentCommentID,
 			emptyDetails)
 
-		// Deliver to openclaw_weixin and dingtalk for task_failed (same as task_completed)
+		// Deliver to openclaw_weixin and dingtalk for task_failed (same as task_completed).
+		// If the recipient is already a subscriber, recordOpenclawWeixinDelivery will
+		// dedup against the delivery created by notifySubscribers above (same comment_id).
 		if recipientID != "" && recipientID != agentID {
-			// Find last agent comment for comment anchor link
-			lastAgentCommentID := ""
-			taskComments, commentErr := queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
-				IssueID:     parseUUID(issueID),
-				WorkspaceID: parseUUID(e.WorkspaceID),
-				Limit:       100,
-			})
-			if commentErr == nil {
-				for i := len(taskComments) - 1; i >= 0; i-- {
-					if taskComments[i].AuthorType == "agent" {
-						lastAgentCommentID = util.UUIDToString(taskComments[i].ID)
-						break
-					}
-				}
-			}
 
 			nCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, lastAgentCommentID, "")
 			payloadSnapshot, _ := json.Marshal(map[string]any{

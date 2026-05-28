@@ -248,7 +248,9 @@
     "squad_leader_failed_reason": "evaluation failed: {{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} activity",
-    "activity_count_other": "{{count}} activities"
+    "activity_count_other": "{{count}} activities",
+    "show_more_activities_one": "Show {{count}} more activity",
+    "show_more_activities_other": "Show {{count}} more activities"
   },
   "comment": {
     "delete_title": "Delete comment",
@@ -391,6 +393,7 @@
     "copy_link": "Copy link",
     "copy_workdir_path": "Copy local workdir path",
     "more": "More",
+    "create_from_issue": "New issue from this",
     "create_sub_issue": "Create sub-issue",
     "set_parent_issue": "Set parent issue...",
     "add_sub_issue": "Add sub-issue...",
@@ -420,16 +423,24 @@
       "manage_action": "Manage labels…",
       "manage_dialog_title": "Manage labels",
       "create_action": "Create",
-      "create_failed": "Failed to create label"
+      "create_failed": "Failed to create label",
+      "scope_aria": "Label creation scope",
+      "scope_project": "Current project",
+      "scope_workspace": "Workspace"
     }
   },
   "labels_panel": {
     "intro": "Create and manage labels to categorize issues across your workspace.",
+    "project_intro": "Create and manage labels for this project or the whole workspace.",
+    "scope_aria": "Label scope",
+    "scope_project": "This project",
+    "scope_workspace": "Workspace",
     "new_placeholder": "New label name…",
     "new_aria": "New label name",
     "add_action": "Add",
     "loading": "Loading…",
-    "empty": "No labels yet.",
+    "empty_workspace": "No workspace labels yet.",
+    "empty_project": "No project labels yet.",
     "name_required": "Label name is required.",
     "color_label": "Color",
     "pick_color_aria": "Pick a color",
@@ -445,6 +456,17 @@
     "create_failed": "Failed to create label",
     "update_failed": "Failed to update label",
     "delete_failed": "Failed to delete label"
+  },
+  "retry_with_note": {
+    "action": "Retry with note",
+    "title": "Retry with note",
+    "description": "Add guidance for the next agent run.",
+    "label": "What should the agent pay attention to?",
+    "placeholder": "Describe what should change on this retry...",
+    "hint": "This note is added to the next task prompt.",
+    "too_long": "Keep the note under {{max}} characters.",
+    "cancel": "Cancel",
+    "submit": "Retry"
   },
   "backlog_hint": {
     "title": "Agent is paused in Backlog",

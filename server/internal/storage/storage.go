@@ -12,6 +12,10 @@ type Storage interface {
 	DeleteKeys(ctx context.Context, keys []string)
 	KeyFromURL(rawURL string) string
 	CdnDomain() string
+	// RemapURL rewrites a stored URL to use the CDN domain when configured.
+	// Historical attachment URLs (e.g. OBS direct links) are transparently
+	// remapped so clients always receive the CDN URL without a DB migration.
+	RemapURL(rawURL string) string
 	// GetReader streams an object back to the caller. Used by the attachment
 	// preview proxy (GET /api/attachments/{id}/content) to bypass CloudFront
 	// CORS and the inline/attachment Content-Disposition decision. Caller
@@ -36,6 +40,10 @@ type DirectUploadStorage interface {
 
 type PresignedGetStorage interface {
 	PresignedGetURL(ctx context.Context, key string, expires time.Duration) (string, error)
+}
+
+type PresignedInlineGetStorage interface {
+	PresignedInlineGetURL(ctx context.Context, key string, contentType string, filename string, expires time.Duration) (string, error)
 }
 
 type MultipartUploadPart struct {

@@ -5,19 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// copilotBackend implements Backend by spawning the GitHub Copilot CLI
-// with --output-format json and parsing its JSONL event stream.
-//
-// The v1 integration uses the -p (pipe) mode which is the stable
-// automation/CI channel. The prompt is passed as a CLI argument (not stdin).
-// Events arrive as newline-delimited JSON on stdout in the Copilot CLI's
-// own envelope format: { "type": "dotted.event.name", "data": {...}, ... }
+// copilotBackend implements Backend by spawning the GitHub Copilot CLI in
+// ACP mode and communicating via JSON-RPC 2.0 over stdin/stdout.
 type copilotBackend struct {
 	cfg Config
 }
@@ -45,7 +44,7 @@ func newCopilotEventState(seedModel string) *copilotEventState {
 // handleCopilotEvent processes a single parsed copilotEvent, updates state,
 // and returns zero or more Messages to emit. Extracted so tests can call the
 // exact same logic without duplicating the switch body.
-func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
+func handleCopilotEvent(evt copilotEvent, st *copilotEventState, trace TraceCallback) []Message {
 	var msgs []Message
 
 	switch evt.Type {
@@ -55,11 +54,6 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 			if ss.SelectedModel != "" {
 				st.activeModel = ss.SelectedModel
 			}
-			// Capture sessionId from session.start as well: the synthetic
-			// "result" event may never arrive (timeout, cancel, crash, or a
-			// session.error before result), and without this the daemon
-			// reports SessionID="" and the chat-session resume pointer can
-			// drift to a stale turn. result still wins when it does arrive.
 			if ss.SessionID != "" {
 				st.sessionID = ss.SessionID
 			}
@@ -68,10 +62,9 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 	case "assistant.message_delta":
 		var delta copilotMessageDelta
 		if err := json.Unmarshal(evt.Data, &delta); err == nil && delta.DeltaContent != "" {
-			// Write to output as defense-in-depth: if the process is killed
-			// before the final assistant.message arrives, we still have text.
 			st.output.WriteString(delta.DeltaContent)
 			msgs = append(msgs, Message{Type: MessageText, Content: delta.DeltaContent})
+			emitDisplayEvent(trace, "assistant_text", "Copilot", delta.DeltaContent, nil)
 		}
 
 	case "assistant.message":
@@ -79,11 +72,7 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 		if err := json.Unmarshal(evt.Data, &msg); err != nil {
 			return nil
 		}
-		// assistant.message carries the full turn content. Since deltas
-		// already wrote to output incrementally, we reset and write the
-		// authoritative content once to avoid double-counting.
 		if msg.Content != "" {
-			// Separator between turns.
 			trimmed := strings.TrimSuffix(st.output.String(), msg.Content)
 			st.output.Reset()
 			st.output.WriteString(trimmed)
@@ -94,6 +83,7 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 		}
 		if msg.ReasoningText != "" {
 			msgs = append(msgs, Message{Type: MessageThinking, Content: msg.ReasoningText})
+			emitDisplayEvent(trace, "thinking", "Thinking", msg.ReasoningText, nil)
 		}
 		if msg.OutputTokens > 0 {
 			u := st.usage[st.activeModel]
@@ -111,10 +101,10 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 				CallID: tr.ToolCallID,
 				Input:  input,
 			})
+			emitDisplayEvent(trace, "tool_call", tr.Name, "", map[string]any{"call_id": tr.ToolCallID, "input": input})
 		}
 
 	case "assistant.reasoning", "assistant.reasoning_delta":
-		// Streaming thinking content — may arrive as full or delta.
 		var r copilotReasoning
 		if err := json.Unmarshal(evt.Data, &r); err == nil {
 			text := r.Content
@@ -123,6 +113,7 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 			}
 			if text != "" {
 				msgs = append(msgs, Message{Type: MessageThinking, Content: text})
+				emitDisplayEvent(trace, "thinking", "Thinking", text, nil)
 			}
 		}
 
@@ -149,9 +140,11 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 			CallID: tc.ToolCallID,
 			Output: resultContent,
 		})
+		emitDisplayEvent(trace, "tool_result", "Tool result", resultContent, map[string]any{"call_id": tc.ToolCallID})
 
 	case "assistant.turn_start":
 		msgs = append(msgs, Message{Type: MessageStatus, Status: "running"})
+		emitDisplayEvent(trace, "status", "Copilot", "running", nil)
 
 	case "session.error":
 		var se copilotSessionError
@@ -170,6 +163,9 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 	case "result":
 		if evt.SessionID != "" {
 			st.sessionID = evt.SessionID
+		}
+		if evt.Usage != nil {
+			mergeCopilotResultUsage(evt.Usage, st)
 		}
 		if evt.ExitCode != 0 {
 			st.finalStatus = "failed"
@@ -207,7 +203,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	args := buildCopilotArgs(prompt, opts, b.cfg.Logger)
+	args := buildCopilotArgs(opts, b.cfg.Logger)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
@@ -223,8 +219,16 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		cancel()
 		return nil, fmt.Errorf("copilot stdout pipe: %w", err)
 	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("copilot stdin pipe: %w", err)
+	}
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[copilot:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
+	if opts.TraceCallback != nil {
+		cmd.Stderr = io.MultiWriter(stderrBuf, newTraceWriter("raw_stderr", opts.TraceCallback))
+	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -236,76 +240,904 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
+	var outputMu sync.Mutex
+	var output strings.Builder
+
+	promptDone := make(chan copilotPromptResult, 1)
+
+	c := &copilotACPClient{
+		cfg:           b.cfg,
+		stdin:         stdin,
+		pending:       make(map[int]*pendingRPC),
+		pendingTools:  make(map[string]*pendingToolCall),
+		onApproval:    opts.OnApproval,
+		traceCallback: opts.TraceCallback,
+		runCtx:        runCtx,
+		onMessage: func(msg Message) {
+			if msg.Type == MessageText {
+				outputMu.Lock()
+				output.WriteString(msg.Content)
+				outputMu.Unlock()
+			}
+			trySend(msgCh, msg)
+		},
+		onPromptDone: func(result copilotPromptResult) {
+			select {
+			case promptDone <- result:
+			default:
+			}
+		},
+	}
+
+	readerDone := make(chan struct{})
 	go func() {
-		defer cancel()
-		defer close(msgCh)
-		defer close(resCh)
-
-		startTime := time.Now()
-		seedModel := opts.Model
-		if seedModel == "" {
-			seedModel = "copilot"
-		}
-		st := newCopilotEventState(seedModel)
-
-		go func() {
-			<-runCtx.Done()
-			_ = stdout.Close()
-		}()
-
+		defer close(readerDone)
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
-
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
 				continue
 			}
-
-			var evt copilotEvent
-			if err := json.Unmarshal([]byte(line), &evt); err != nil {
-				slog.Warn("copilot event parse failed", "err", err, "line", line)
-				continue
-			}
-
-			for _, m := range handleCopilotEvent(evt, st) {
-				trySend(msgCh, m)
-			}
+			c.handleLine(line)
 		}
 		if err := scanner.Err(); err != nil {
 			slog.Warn("copilot stdout scanner error", "err", err)
 		}
+		c.closeAllPending(fmt.Errorf("copilot process exited"))
+	}()
 
-		exitErr := cmd.Wait()
+	go func() {
+		defer cancel()
+		defer close(msgCh)
+		defer close(resCh)
+		defer func() {
+			c.flushText()
+			c.flushThinking()
+			stdin.Close()
+			_ = cmd.Wait()
+		}()
+
+		startTime := time.Now()
+		finalStatus := "completed"
+		var finalError string
+		var sessionID string
+
+		_, err := c.request(runCtx, "initialize", map[string]any{
+			"protocolVersion": 1,
+			"clientInfo": map[string]any{
+				"name":    "multica-agent-sdk",
+				"version": "0.2.0",
+			},
+			"clientCapabilities": map[string]any{},
+		})
+		if err != nil {
+			finalStatus = "failed"
+			finalError = withAgentStderr(fmt.Sprintf("copilot initialize failed: %v", err), "copilot", stderrBuf.Tail())
+			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			return
+		}
+		c.notify("notifications/initialized")
+
+		cwd := opts.Cwd
+		if cwd == "" {
+			cwd = "."
+		}
+		sessionParams := buildCopilotSessionParams(cwd, opts)
+		var sessionResult json.RawMessage
+		if opts.ResumeSessionID != "" {
+			sessionResult, err = c.request(runCtx, "session/resume", map[string]any{
+				"cwd":       cwd,
+				"sessionId": opts.ResumeSessionID,
+			})
+			if err != nil {
+				finalStatus = "failed"
+				finalError = withAgentStderr(fmt.Sprintf("copilot session/resume failed: %v", err), "copilot", stderrBuf.Tail())
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
+			sessionID, _ = resolveResumedSessionID(opts.ResumeSessionID, sessionResult)
+		} else {
+			sessionResult, err = c.request(runCtx, "session/new", sessionParams)
+			if err != nil {
+				finalStatus = "failed"
+				finalError = withAgentStderr(fmt.Sprintf("copilot session/new failed: %v", err), "copilot", stderrBuf.Tail())
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
+			sessionID = extractACPSessionID(sessionResult)
+			if sessionID == "" {
+				finalStatus = "failed"
+				finalError = "copilot session/new returned no session ID"
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
+		}
+		c.sessionID = sessionID
+
+		_, err = c.request(runCtx, "session/prompt", map[string]any{
+			"sessionId": sessionID,
+			"prompt": []map[string]any{
+				{"type": "text", "text": prompt},
+			},
+		})
+		if err != nil {
+			switch runCtx.Err() {
+			case context.DeadlineExceeded:
+				finalStatus = "timeout"
+				finalError = fmt.Sprintf("copilot timed out after %s", timeout)
+			case context.Canceled:
+				finalStatus = "aborted"
+				finalError = "execution cancelled"
+			default:
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("copilot session/prompt failed: %v", err)
+			}
+		} else {
+			select {
+			case pr := <-promptDone:
+				if pr.stopReason == "cancelled" || pr.stopReason == "canceled" {
+					finalStatus = "aborted"
+					finalError = "copilot cancelled the prompt"
+				}
+				c.addUsage(pr.usage)
+			default:
+			}
+		}
+
+		c.flushText()
+		c.flushThinking()
+		stdin.Close()
+		cancel()
+		<-readerDone
+
+		if finalError != "" {
+			finalError = withAgentStderr(finalError, "copilot", stderrBuf.Tail())
+		}
+
 		duration := time.Since(startTime)
+		b.cfg.Logger.Info("copilot finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		if runCtx.Err() == context.DeadlineExceeded {
-			st.finalStatus = "timeout"
-			st.finalError = fmt.Sprintf("copilot timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
-			st.finalStatus = "aborted"
-			st.finalError = "execution cancelled"
-		} else if exitErr != nil && st.finalStatus == "completed" {
-			st.finalStatus = "failed"
-			st.finalError = fmt.Sprintf("copilot exited with error: %v", exitErr)
-		}
-		if st.finalError != "" {
-			st.finalError = withAgentStderr(st.finalError, "copilot", stderrBuf.Tail())
-		}
+		emitDisplayEvent(opts.TraceCallback, "status", "Copilot", finalStatus, map[string]any{"error": finalError})
 
-		b.cfg.Logger.Info("copilot finished", "pid", cmd.Process.Pid, "status", st.finalStatus, "duration", duration.Round(time.Millisecond).String())
+		outputMu.Lock()
+		finalOutput := output.String()
+		outputMu.Unlock()
+
+		c.usageMu.Lock()
+		u := c.usage
+		c.usageMu.Unlock()
+		var usageMap map[string]TokenUsage
+		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 {
+			model := opts.Model
+			if model == "" {
+				model = "copilot"
+			}
+			usageMap = map[string]TokenUsage{model: u}
+		}
 
 		resCh <- Result{
-			Status:     st.finalStatus,
-			Output:     st.output.String(),
-			Error:      st.finalError,
+			Status:     finalStatus,
+			Output:     finalOutput,
+			Error:      finalError,
 			DurationMs: duration.Milliseconds(),
-			SessionID:  st.sessionID,
-			Usage:      st.usage,
+			SessionID:  sessionID,
+			Usage:      usageMap,
 		}
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// ── Copilot ACP JSON-RPC client ──
+
+type copilotPromptResult struct {
+	stopReason string
+	usage      TokenUsage
+}
+
+type copilotACPClient struct {
+	cfg           Config
+	stdin         interface{ Write([]byte) (int, error) }
+	writeMu       sync.Mutex
+	mu            sync.Mutex
+	nextID        int
+	pending       map[int]*pendingRPC
+	sessionID     string
+	onMessage     func(Message)
+	onPromptDone  func(copilotPromptResult)
+	onApproval    ApprovalCallback
+	traceCallback TraceCallback
+	runCtx        context.Context
+
+	toolMu       sync.Mutex
+	pendingTools map[string]*pendingToolCall
+
+	usageMu sync.Mutex
+	usage   TokenUsage
+
+	textMu     sync.Mutex
+	textBuffer strings.Builder
+
+	thinkMu     sync.Mutex
+	thinkBuffer strings.Builder
+}
+
+func (c *copilotACPClient) writeLine(data []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	_, err := c.stdin.Write(data)
+	return err
+}
+
+func (c *copilotACPClient) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	c.mu.Lock()
+	id := c.nextID
+	c.nextID++
+	pr := &pendingRPC{ch: make(chan rpcResult, 1), method: method}
+	c.pending[id] = pr
+	c.mu.Unlock()
+
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  method,
+		"params":  params,
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+		return nil, err
+	}
+	data = append(data, '\n')
+	if err := c.writeLine(data); err != nil {
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+		return nil, fmt.Errorf("write %s: %w", method, err)
+	}
+
+	select {
+	case res := <-pr.ch:
+		return res.result, res.err
+	case <-ctx.Done():
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+		return nil, ctx.Err()
+	}
+}
+
+func (c *copilotACPClient) notify(method string) {
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  method,
+	}
+	data, _ := json.Marshal(msg)
+	data = append(data, '\n')
+	_ = c.writeLine(data)
+}
+
+func (c *copilotACPClient) closeAllPending(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id, pr := range c.pending {
+		pr.ch <- rpcResult{err: err}
+		delete(c.pending, id)
+	}
+}
+
+func (c *copilotACPClient) handleLine(line string) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
+		return
+	}
+
+	if _, hasID := raw["id"]; hasID {
+		if _, hasResult := raw["result"]; hasResult {
+			c.handleResponse(raw)
+			return
+		}
+		if _, hasError := raw["error"]; hasError {
+			c.handleResponse(raw)
+			return
+		}
+		if _, hasMethod := raw["method"]; hasMethod {
+			c.flushText()
+			c.flushThinking()
+			c.handleAgentRequest(raw)
+			return
+		}
+	}
+
+	if _, hasMethod := raw["method"]; hasMethod {
+		c.handleNotification(raw)
+	}
+}
+
+func (c *copilotACPClient) handleResponse(raw map[string]json.RawMessage) {
+	var id int
+	if err := json.Unmarshal(raw["id"], &id); err != nil {
+		var fid float64
+		if err := json.Unmarshal(raw["id"], &fid); err != nil {
+			return
+		}
+		id = int(fid)
+	}
+
+	c.mu.Lock()
+	pr, ok := c.pending[id]
+	if ok {
+		delete(c.pending, id)
+	}
+	c.mu.Unlock()
+
+	if !ok {
+		return
+	}
+
+	if errData, hasErr := raw["error"]; hasErr {
+		var rpcErr struct {
+			Code    int             `json:"code"`
+			Message string          `json:"message"`
+			Data    json.RawMessage `json:"data"`
+		}
+		_ = json.Unmarshal(errData, &rpcErr)
+		if len(rpcErr.Data) > 0 && string(rpcErr.Data) != "null" {
+			pr.ch <- rpcResult{err: fmt.Errorf("%s: %s (code=%d, data=%s)", pr.method, rpcErr.Message, rpcErr.Code, string(rpcErr.Data))}
+		} else {
+			pr.ch <- rpcResult{err: fmt.Errorf("%s: %s (code=%d)", pr.method, rpcErr.Message, rpcErr.Code)}
+		}
+		return
+	}
+
+	if pr.method == "session/prompt" {
+		c.extractPromptResult(raw["result"])
+	}
+	pr.ch <- rpcResult{result: raw["result"]}
+}
+
+func (c *copilotACPClient) handleAgentRequest(raw map[string]json.RawMessage) {
+	rawID, ok := raw["id"]
+	if !ok {
+		return
+	}
+	var method string
+	_ = json.Unmarshal(raw["method"], &method)
+
+	switch method {
+	case "session/request_permission":
+		optionID := c.choosePermissionOption(raw["params"])
+		c.respondRaw(rawID, map[string]any{
+			"outcome": map[string]any{
+				"outcome":  "selected",
+				"optionId": optionID,
+			},
+		})
+	default:
+		c.respondErrorRaw(rawID, -32601, "method not found: "+method)
+	}
+}
+
+func (c *copilotACPClient) respond(id int, result any) {
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result":  result,
+	}
+	data, _ := json.Marshal(msg)
+	data = append(data, '\n')
+	if err := c.writeLine(data); err != nil {
+		c.cfg.Logger.Warn("write copilot response", "error", err)
+	}
+}
+
+func (c *copilotACPClient) respondRaw(rawID json.RawMessage, result any) {
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      json.RawMessage(rawID),
+		"result":  result,
+	}
+	data, _ := json.Marshal(msg)
+	data = append(data, '\n')
+	if err := c.writeLine(data); err != nil {
+		c.cfg.Logger.Warn("write copilot response", "error", err)
+	}
+}
+
+func (c *copilotACPClient) respondError(id int, code int, message string) {
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error": map[string]any{
+			"code":    code,
+			"message": message,
+		},
+	}
+	data, _ := json.Marshal(msg)
+	data = append(data, '\n')
+	if err := c.writeLine(data); err != nil {
+		c.cfg.Logger.Warn("write copilot error response", "error", err)
+	}
+}
+
+func (c *copilotACPClient) respondErrorRaw(rawID json.RawMessage, code int, message string) {
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      json.RawMessage(rawID),
+		"error": map[string]any{
+			"code":    code,
+			"message": message,
+		},
+	}
+	data, _ := json.Marshal(msg)
+	data = append(data, '\n')
+	if err := c.writeLine(data); err != nil {
+		c.cfg.Logger.Warn("write copilot error response", "error", err)
+	}
+}
+
+type copilotPermissionOption struct {
+	OptionID string `json:"optionId"`
+	Name     string `json:"name"`
+	Label    string `json:"label"`
+	Kind     string `json:"kind"`
+}
+
+type copilotPermissionParams struct {
+	Options  []copilotPermissionOption `json:"options"`
+	ToolCall struct {
+		ToolCallID string         `json:"toolCallId"`
+		Title      string         `json:"title"`
+		Kind       string         `json:"kind"`
+		RawInput   map[string]any `json:"rawInput"`
+		Input      map[string]any `json:"input"`
+		Parameters map[string]any `json:"parameters"`
+	} `json:"toolCall"`
+}
+
+func (c *copilotACPClient) choosePermissionOption(raw json.RawMessage) string {
+	params := parseCopilotPermissionParams(raw)
+	deny := findCopilotPermissionOption(params.Options, true)
+	allow := findCopilotPermissionOption(params.Options, false)
+	if deny == "" {
+		deny = "deny"
+	}
+	if allow == "" {
+		allow = deny
+	}
+
+	// Auto-approve trusted Multica platform commands (e.g. "multica ...")
+	// without routing through the approval callback.
+	input := params.ToolCall.RawInput
+	if input == nil {
+		input = params.ToolCall.Input
+	}
+	if input == nil {
+		input = params.ToolCall.Parameters
+	}
+	if input != nil {
+		if command := trustedPlatformCommandFromInput(input); isTrustedPlatformCommand(command) {
+			return allow
+		}
+	}
+
+	if c.onApproval == nil {
+		return allow
+	}
+
+	req := buildCopilotApprovalRequest(params, deny)
+	chosen, approved, err := c.onApproval(c.runCtx, req)
+	chosen, _ = SplitApprovalChoice(chosen)
+	if err != nil || !approved {
+		return deny
+	}
+	chosen = strings.TrimSpace(chosen)
+	if chosen == "" {
+		return deny
+	}
+	for _, opt := range params.Options {
+		if chosen == opt.OptionID {
+			return chosen
+		}
+	}
+	return deny
+}
+
+func parseCopilotPermissionParams(raw json.RawMessage) copilotPermissionParams {
+	var params copilotPermissionParams
+	_ = json.Unmarshal(raw, &params)
+	return params
+}
+
+func buildCopilotApprovalRequest(params copilotPermissionParams, defaultOption string) ApprovalRequest {
+	title := params.ToolCall.Title
+	if title == "" {
+		title = "Copilot permission request"
+	}
+	detail := ""
+	input := params.ToolCall.RawInput
+	if input == nil {
+		input = params.ToolCall.Input
+	}
+	if input == nil {
+		input = params.ToolCall.Parameters
+	}
+	if input != nil {
+		if b, err := json.Marshal(input); err == nil {
+			detail = string(b)
+		}
+	}
+	options := make([]protocol.InteractionOption, 0, len(params.Options))
+	for _, opt := range params.Options {
+		id := strings.TrimSpace(opt.OptionID)
+		if id == "" {
+			continue
+		}
+		label := strings.TrimSpace(opt.Name)
+		if label == "" {
+			label = strings.TrimSpace(opt.Label)
+		}
+		if label == "" {
+			label = id
+		}
+		options = append(options, protocol.InteractionOption{ID: id, Label: label})
+	}
+	if len(options) == 0 {
+		options = []protocol.InteractionOption{
+			{ID: "allow_once", Label: "Allow once"},
+			{ID: defaultOption, Label: "Deny"},
+		}
+	}
+	return ApprovalRequest{
+		Type:          "permission_request",
+		Title:         title,
+		Detail:        detail,
+		Options:       options,
+		DefaultOption: defaultOption,
+	}
+}
+
+func findCopilotPermissionOption(options []copilotPermissionOption, deny bool) string {
+	for _, opt := range options {
+		id := strings.ToLower(opt.OptionID)
+		kind := strings.ToLower(opt.Kind)
+		if deny {
+			if strings.Contains(id, "deny") || strings.Contains(id, "reject") || strings.Contains(kind, "deny") || strings.Contains(kind, "reject") {
+				return opt.OptionID
+			}
+			continue
+		}
+		if strings.Contains(id, "session") || strings.Contains(kind, "always") || strings.Contains(kind, "session") {
+			return opt.OptionID
+		}
+	}
+	if deny {
+		return ""
+	}
+	for _, opt := range options {
+		id := strings.ToLower(opt.OptionID)
+		kind := strings.ToLower(opt.Kind)
+		if !strings.Contains(id, "deny") && !strings.Contains(id, "reject") && !strings.Contains(kind, "deny") && !strings.Contains(kind, "reject") {
+			return opt.OptionID
+		}
+	}
+	return ""
+}
+
+func (c *copilotACPClient) handleNotification(raw map[string]json.RawMessage) {
+	var method string
+	_ = json.Unmarshal(raw["method"], &method)
+	if method != "session/update" && method != "session/notification" {
+		return
+	}
+
+	var params struct {
+		SessionID string          `json:"sessionId"`
+		Update    json.RawMessage `json:"update"`
+	}
+	if p, ok := raw["params"]; ok {
+		_ = json.Unmarshal(p, &params)
+	}
+	if len(params.Update) == 0 {
+		return
+	}
+
+	updateType, updateData := normalizeACPUpdate(params.Update)
+	if updateType != "agent_message_chunk" {
+		c.flushText()
+	}
+	if updateType != "agent_thought_chunk" {
+		c.flushThinking()
+	}
+
+	switch updateType {
+	case "agent_message_chunk":
+		c.handleAgentMessage(updateData)
+	case "agent_thought_chunk":
+		c.handleAgentThought(updateData)
+	case "tool_call":
+		c.handleToolCallStart(updateData)
+	case "tool_call_update":
+		c.handleToolCallUpdate(updateData)
+	case "usage_update":
+		c.handleUsageUpdate(updateData)
+	case "turn_end":
+		c.extractPromptResult(updateData)
+	}
+}
+
+func (c *copilotACPClient) handleAgentMessage(data json.RawMessage) {
+	var msg struct {
+		Content struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(data, &msg); err != nil || msg.Content.Text == "" {
+		return
+	}
+	c.appendText(msg.Content.Text)
+}
+
+func (c *copilotACPClient) appendText(text string) {
+	c.textMu.Lock()
+	c.textBuffer.WriteString(text)
+	c.textMu.Unlock()
+}
+
+func (c *copilotACPClient) flushText() {
+	c.textMu.Lock()
+	text := c.textBuffer.String()
+	c.textBuffer.Reset()
+	c.textMu.Unlock()
+
+	if text == "" {
+		return
+	}
+	if c.onMessage != nil {
+		c.onMessage(Message{Type: MessageText, Content: text})
+	}
+	emitDisplayEvent(c.traceCallback, "assistant_text", "Copilot", text, nil)
+}
+
+func (c *copilotACPClient) handleAgentThought(data json.RawMessage) {
+	var msg struct {
+		Content struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(data, &msg); err != nil || msg.Content.Text == "" {
+		return
+	}
+	c.appendThinking(msg.Content.Text)
+}
+
+func (c *copilotACPClient) appendThinking(text string) {
+	c.thinkMu.Lock()
+	c.thinkBuffer.WriteString(text)
+	c.thinkMu.Unlock()
+}
+
+func (c *copilotACPClient) flushThinking() {
+	c.thinkMu.Lock()
+	text := c.thinkBuffer.String()
+	c.thinkBuffer.Reset()
+	c.thinkMu.Unlock()
+
+	if text == "" {
+		return
+	}
+	if c.onMessage != nil {
+		c.onMessage(Message{Type: MessageThinking, Content: text})
+	}
+	emitDisplayEvent(c.traceCallback, "thinking", "Thinking", text, nil)
+}
+
+func (c *copilotACPClient) handleToolCallStart(data json.RawMessage) {
+	var msg struct {
+		ToolCallID string            `json:"toolCallId"`
+		Name       string            `json:"name"`
+		Title      string            `json:"title"`
+		Kind       string            `json:"kind"`
+		RawInput   map[string]any    `json:"rawInput"`
+		Input      map[string]any    `json:"input"`
+		Parameters map[string]any    `json:"parameters"`
+		Content    []json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return
+	}
+	toolName := copilotToolName(msg.Name, msg.Title, msg.Kind)
+	input := msg.RawInput
+	if input == nil {
+		input = msg.Input
+	}
+	if input == nil {
+		input = msg.Parameters
+	}
+	if input == nil {
+		input = parseToolArgsJSON(extractACPToolCallText(msg.Content))
+	}
+	c.trackTool(msg.ToolCallID, &pendingToolCall{toolName: toolName, input: input, emitted: true})
+	if c.onMessage != nil {
+		c.onMessage(Message{Type: MessageToolUse, Tool: toolName, CallID: msg.ToolCallID, Input: input})
+	}
+	emitDisplayEvent(c.traceCallback, "tool_call", toolName, "", map[string]any{"call_id": msg.ToolCallID, "input": input})
+}
+
+func (c *copilotACPClient) handleToolCallUpdate(data json.RawMessage) {
+	var msg struct {
+		ToolCallID string            `json:"toolCallId"`
+		Status     string            `json:"status"`
+		Name       string            `json:"name"`
+		Title      string            `json:"title"`
+		Kind       string            `json:"kind"`
+		RawInput   map[string]any    `json:"rawInput"`
+		Input      map[string]any    `json:"input"`
+		Parameters map[string]any    `json:"parameters"`
+		RawOutput  json.RawMessage   `json:"rawOutput"`
+		Output     string            `json:"output"`
+		Content    []json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return
+	}
+	if msg.Status != "completed" && msg.Status != "failed" {
+		return
+	}
+	pending := c.takePendingTool(msg.ToolCallID)
+	input := msg.RawInput
+	if input == nil {
+		input = msg.Input
+	}
+	if input == nil {
+		input = msg.Parameters
+	}
+	if pending == nil || !pending.emitted {
+		toolName := copilotToolName(msg.Name, msg.Title, msg.Kind)
+		if pending != nil {
+			toolName = pending.toolName
+			if pending.input != nil {
+				input = pending.input
+			}
+		}
+		if c.onMessage != nil {
+			c.onMessage(Message{Type: MessageToolUse, Tool: toolName, CallID: msg.ToolCallID, Input: input})
+		}
+		emitDisplayEvent(c.traceCallback, "tool_call", toolName, "", map[string]any{"call_id": msg.ToolCallID, "input": input})
+	}
+	output := extractCopilotRawOutput(msg.RawOutput)
+	if output == "" {
+		output = msg.Output
+	}
+	if output == "" {
+		output = extractACPToolCallText(msg.Content)
+	}
+	if c.onMessage != nil {
+		c.onMessage(Message{Type: MessageToolResult, CallID: msg.ToolCallID, Output: output})
+	}
+	emitDisplayEvent(c.traceCallback, "tool_result", "Tool result", output, map[string]any{"call_id": msg.ToolCallID})
+}
+
+func (c *copilotACPClient) trackTool(callID string, p *pendingToolCall) {
+	c.toolMu.Lock()
+	defer c.toolMu.Unlock()
+	if c.pendingTools == nil {
+		c.pendingTools = make(map[string]*pendingToolCall)
+	}
+	c.pendingTools[callID] = p
+}
+
+func (c *copilotACPClient) takePendingTool(callID string) *pendingToolCall {
+	c.toolMu.Lock()
+	defer c.toolMu.Unlock()
+	if c.pendingTools == nil {
+		return nil
+	}
+	p := c.pendingTools[callID]
+	delete(c.pendingTools, callID)
+	return p
+}
+
+func (c *copilotACPClient) handleUsageUpdate(data json.RawMessage) {
+	var msg struct {
+		Usage struct {
+			InputTokens      int64 `json:"inputTokens"`
+			OutputTokens     int64 `json:"outputTokens"`
+			CachedReadTokens int64 `json:"cachedReadTokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return
+	}
+	c.addUsage(TokenUsage{
+		InputTokens:     msg.Usage.InputTokens,
+		OutputTokens:    msg.Usage.OutputTokens,
+		CacheReadTokens: msg.Usage.CachedReadTokens,
+	})
+}
+
+func (c *copilotACPClient) extractPromptResult(data json.RawMessage) {
+	var resp struct {
+		StopReason string `json:"stopReason"`
+		Usage      *struct {
+			InputTokens      int64 `json:"inputTokens"`
+			OutputTokens     int64 `json:"outputTokens"`
+			CachedReadTokens int64 `json:"cachedReadTokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return
+	}
+	result := copilotPromptResult{stopReason: resp.StopReason}
+	if resp.Usage != nil {
+		result.usage = TokenUsage{
+			InputTokens:     resp.Usage.InputTokens,
+			OutputTokens:    resp.Usage.OutputTokens,
+			CacheReadTokens: resp.Usage.CachedReadTokens,
+		}
+	}
+	if c.onPromptDone != nil {
+		c.onPromptDone(result)
+	}
+}
+
+func (c *copilotACPClient) addUsage(u TokenUsage) {
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if u.InputTokens > c.usage.InputTokens {
+		c.usage.InputTokens = u.InputTokens
+	}
+	if u.OutputTokens > c.usage.OutputTokens {
+		c.usage.OutputTokens = u.OutputTokens
+	}
+	if u.CacheReadTokens > c.usage.CacheReadTokens {
+		c.usage.CacheReadTokens = u.CacheReadTokens
+	}
+}
+
+// extractCopilotRawOutput handles rawOutput which can be either a plain string
+// or an object like {"content": "...", "detailedContent": "..."}.
+func extractCopilotRawOutput(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	// Try string first.
+	var s string
+	if json.Unmarshal(raw, &s) == nil && s != "" {
+		return s
+	}
+	// Try object with content field.
+	var obj struct {
+		Content string `json:"content"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &obj) == nil {
+		if obj.Content != "" {
+			return obj.Content
+		}
+		if obj.Message != "" {
+			return obj.Message
+		}
+	}
+	return ""
+}
+
+func copilotToolName(name, title, kind string) string {
+	if name != "" {
+		return name
+	}
+	if t := hermesToolNameFromTitle(title, kind); t != "" {
+		return t
+	}
+	if kind != "" {
+		return kind
+	}
+	return "tool"
 }
 
 // ── Copilot CLI JSONL event types ──
@@ -405,10 +1237,80 @@ type copilotSessionWarning struct {
 
 // copilotResultUsage is the usage on the final "result" line.
 type copilotResultUsage struct {
+	raw                json.RawMessage
 	PremiumRequests    float64             `json:"premiumRequests"`
 	TotalAPIDurationMs int64               `json:"totalApiDurationMs"`
 	SessionDurationMs  int64               `json:"sessionDurationMs"`
 	CodeChanges        *copilotCodeChanges `json:"codeChanges,omitempty"`
+}
+
+func (u *copilotResultUsage) UnmarshalJSON(data []byte) error {
+	type alias copilotResultUsage
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*u = copilotResultUsage(a)
+	u.raw = append(u.raw[:0], data...)
+	return nil
+}
+
+func mergeCopilotResultUsage(resultUsage *copilotResultUsage, st *copilotEventState) {
+	if resultUsage == nil {
+		return
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(resultUsage.raw, &raw); err != nil {
+		return
+	}
+
+	modelUsage := copilotModelUsage(raw)
+	if len(modelUsage) > 0 {
+		for model, snapshot := range modelUsage {
+			if !tokenUsageHasTokens(snapshot) {
+				continue
+			}
+			st.usage[model] = mergeTokenUsageSnapshot(st.usage[model], snapshot)
+		}
+		return
+	}
+
+	// As of Copilot CLI v1.0.x, result.usage only contains premium request
+	// counters and durations; no prompt/input token fields are emitted. This
+	// parser is intentionally tolerant so newer CLIs that add token fields start
+	// reporting input tokens without changing the daemon again.
+	snapshot := tokenUsageFromMap(raw)
+	if !tokenUsageHasTokens(snapshot) {
+		return
+	}
+	model := st.activeModel
+	if model == "" {
+		model = "copilot"
+	}
+	st.usage[model] = mergeTokenUsageSnapshot(st.usage[model], snapshot)
+}
+
+func copilotModelUsage(raw map[string]any) map[string]TokenUsage {
+	for _, key := range []string{"modelUsage", "model_usage", "models"} {
+		container, ok := tokenUsageNestedMap(raw, key)
+		if !ok {
+			continue
+		}
+		result := make(map[string]TokenUsage, len(container))
+		for model, value := range container {
+			usageMap, ok := tokenUsageAsMap(value)
+			if !ok {
+				continue
+			}
+			if u := tokenUsageFromMap(usageMap); tokenUsageHasTokens(u) {
+				result[model] = u
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
+	}
+	return nil
 }
 
 type copilotCodeChanges struct {
@@ -430,27 +1332,28 @@ var copilotBlockedArgs = map[string]blockedArgMode{
 	"--allow-all-urls":  blockedStandalone,
 	"--yolo":            blockedStandalone,
 	"--no-ask-user":     blockedStandalone,
-	"--resume":          blockedWithValue,  // managed via ExecOptions.ResumeSessionID
-	"--acp":             blockedStandalone, // prevent switching to ACP mode
+	"--resume":          blockedWithValue,  // managed via session/resume
+	"--acp":             blockedStandalone, // daemon owns the ACP transport
 }
 
-// buildCopilotArgs assembles the argv for a one-shot copilot invocation.
-//
-//	copilot -p "<prompt>" --output-format json --allow-all --no-ask-user
-//	        [--resume <session-id>] [--model <model>]
-func buildCopilotArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{
-		"-p", prompt,
-		"--output-format", "json",
-		"--allow-all", // tools + paths + URLs — full headless mode
-		"--no-ask-user",
-	}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
-	}
-	if opts.ResumeSessionID != "" {
-		args = append(args, "--resume", opts.ResumeSessionID)
-	}
+func buildCopilotArgs(opts ExecOptions, logger *slog.Logger) []string {
+	args := []string{"--acp"}
 	args = append(args, filterCustomArgs(opts.CustomArgs, copilotBlockedArgs, logger)...)
 	return args
+}
+
+func buildCopilotSessionParams(cwd string, opts ExecOptions) map[string]any {
+	params := map[string]any{
+		"cwd":        cwd,
+		"mcpServers": []any{},
+	}
+	if opts.Model != "" {
+		params["model"] = opts.Model
+	}
+	if opts.OnApproval == nil {
+		params["config"] = []map[string]any{
+			{"name": "allow_all", "value": "on"},
+		}
+	}
+	return params
 }

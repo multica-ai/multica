@@ -25,8 +25,9 @@
 
 import {
   Download,
+  Eye,
   Link as LinkIcon,
-  Maximize2,
+  Minimize2,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -39,6 +40,7 @@ import { useDownloadAttachment } from "./use-download-attachment";
 import { AttachmentCard } from "./attachment-card";
 import { HtmlAttachmentPreview } from "./html-attachment-preview";
 import { getPreviewKind, type PreviewKind } from "./utils/preview";
+import "./styles/attachment.css";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -79,6 +81,12 @@ export interface AttachmentProps {
   selected?: boolean;
   /** Editor hint — wired to Tiptap deleteNode(). */
   onDelete?: () => void;
+  /** Editor hint — collapse image preview to compact card. */
+  onCollapseToCard?: () => void;
+  /** Editor hint — expand compact card to inline preview (image types). */
+  onExpandToPreview?: () => void;
+  /** Force card rendering regardless of detected kind (used by fileCard nodes). */
+  displayAsCard?: boolean;
   className?: string;
 }
 
@@ -125,6 +133,9 @@ export function Attachment({
   editable,
   selected,
   onDelete,
+  onCollapseToCard,
+  onExpandToPreview,
+  displayAsCard,
   className,
 }: AttachmentProps) {
   const { resolveAttachment, openByUrl } = useAttachmentDownloadResolver();
@@ -162,6 +173,28 @@ export function Attachment({
     if (state.url) openByUrl(state.url);
   };
 
+  // Force card rendering for image-kind when explicitly requested (fileCard
+  // NodeView). This ensures !file[photo.png](url) stays as a compact card
+  // rather than expanding to an inline image. Show "expand to preview" so
+  // the user can switch to inline image view.
+  if (displayAsCard && kind === "image") {
+    return (
+      <>
+        <AttachmentCard
+          filename={state.filename}
+          contentType={state.contentType}
+          attachmentId={state.attachmentId}
+          href={state.url || undefined}
+          uploading={state.uploading}
+          onPreview={openPreview}
+          onDownload={handleDownload}
+          onExpandToPreview={editable ? onExpandToPreview : undefined}
+        />
+        {preview.modal}
+      </>
+    );
+  }
+
   if (kind === "image") {
     return (
       <>
@@ -174,6 +207,7 @@ export function Attachment({
           onView={openPreview}
           onDownload={handleDownload}
           onDelete={onDelete}
+          onCollapseToCard={onCollapseToCard}
           className={className}
         />
         {preview.modal}
@@ -216,11 +250,10 @@ export function Attachment({
 // ---------------------------------------------------------------------------
 //
 // DOM and styling are intentionally a direct port of the original
-// extensions/image-view.tsx <figure> structure. All visual styles live in
-// content-editor.css under `.image-figure / .image-content / .image-toolbar`
-// — the unification step de-scoped those rules from `.rich-text-editor` so
-// standalone surfaces (chat messages, AttachmentList) get identical visuals
-// without each component carrying its own Tailwind tax.
+// extensions/image-view.tsx <figure> structure. Shared visual styles live in
+// styles/attachment.css under `.image-figure / .image-content / .image-toolbar`
+// so standalone surfaces (chat messages, AttachmentList) get identical visuals
+// without depending on the editor stylesheet being imported elsewhere.
 
 interface ImageAttachmentViewProps {
   src: string;
@@ -231,6 +264,7 @@ interface ImageAttachmentViewProps {
   onView: () => void;
   onDownload: () => void;
   onDelete?: () => void;
+  onCollapseToCard?: () => void;
   className?: string;
 }
 
@@ -243,6 +277,7 @@ function ImageAttachmentView({
   onView,
   onDownload,
   onDelete,
+  onCollapseToCard,
   className,
 }: ImageAttachmentViewProps) {
   const { t } = useT("editor");
@@ -292,7 +327,7 @@ function ImageAttachmentView({
             onClick={(e) => e.stopPropagation()}
           >
             <button type="button" onClick={onView} title={t(($) => $.image.view)}>
-              <Maximize2 className="size-3.5" />
+              <Eye className="size-3.5" />
             </button>
             <button type="button" onClick={onDownload} title={t(($) => $.image.download)}>
               <Download className="size-3.5" />
@@ -300,6 +335,11 @@ function ImageAttachmentView({
             <button type="button" onClick={handleCopyLink} title={t(($) => $.image.copy_link)}>
               <LinkIcon className="size-3.5" />
             </button>
+            {editable && onCollapseToCard && (
+              <button type="button" onClick={onCollapseToCard} title={t(($) => $.image.collapse_to_card)}>
+                <Minimize2 className="size-3.5" />
+              </button>
+            )}
             {editable && onDelete && (
               <button type="button" onClick={onDelete} title={t(($) => $.image.delete)}>
                 <Trash2 className="size-3.5" />

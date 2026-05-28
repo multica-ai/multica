@@ -67,6 +67,10 @@ func (s *LocalStorage) CdnDomain() string {
 	return u.Hostname()
 }
 
+func (s *LocalStorage) RemapURL(rawURL string) string {
+	return rawURL
+}
+
 func (s *LocalStorage) KeyFromURL(rawURL string) string {
 	if s.baseURL != "" && strings.HasPrefix(rawURL, s.baseURL) {
 		rawURL = strings.TrimPrefix(rawURL, s.baseURL)

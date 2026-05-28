@@ -72,7 +72,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
 		"claude", "codex", "copilot", "cursor", "gemini",
-		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
+		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "DeepSeek-TUI",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {
@@ -88,25 +88,96 @@ func TestLaunchHeaderReturnsEmptyForUnknownType(t *testing.T) {
 	}
 }
 
-func TestCapabilities(t *testing.T) {
+func TestCapabilityRegistryCoversSupportedBackends(t *testing.T) {
 	t.Parallel()
 
-	claude := Capabilities("claude")
-	if !claude.PromptPlan || claude.NativePlan != "experimental" || !claude.NativeApproval || !claude.StructuredStreaming {
-		t.Fatalf("unexpected claude capabilities: %+v", claude)
+	supported := []string{
+		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes",
+		"gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI",
+	}
+	for _, provider := range supported {
+		if _, ok := CapabilityFor(provider); !ok {
+			t.Fatalf("CapabilityFor(%q) missing registry entry", provider)
+		}
+	}
+}
+
+func TestCapabilityValues(t *testing.T) {
+	t.Parallel()
+
+	claude, ok := CapabilityFor("claude")
+	if !ok {
+		t.Fatal("missing claude capability")
+	}
+	if !claude.StreamDisplay || !claude.ToolCallStream || !claude.Approval || !claude.ResumeSession || !claude.PlanMode || !claude.StructuredOutput {
+		t.Fatalf("unexpected claude capability: %+v", claude)
 	}
 
-	codex := Capabilities("codex")
-	if !codex.PromptPlan || codex.NativePlan != "" || !codex.NativeApproval || !codex.NativeUserInput {
-		t.Fatalf("unexpected codex capabilities: %+v", codex)
+	codex, ok := CapabilityFor("codex")
+	if !ok {
+		t.Fatal("missing codex capability")
+	}
+	if !codex.StreamDisplay || !codex.ToolCallStream || !codex.Approval || !codex.ResumeSession || codex.PlanMode || !codex.StructuredOutput {
+		t.Fatalf("unexpected codex capability: %+v", codex)
 	}
 
-	gemini := Capabilities("gemini")
-	if !gemini.PromptPlan || gemini.NativePlan != "" || gemini.NativeApproval {
-		t.Fatalf("unexpected gemini capabilities: %+v", gemini)
+	if got := CapabilityOrDefault("unknown"); got != (Capability{}) {
+		t.Fatalf("unknown capability = %+v", got)
+	}
+}
+
+func TestStreamDisplayGating(t *testing.T) {
+	t.Parallel()
+
+	cap := CapabilityOrDefault("unregistered_provider")
+	if cap.StreamDisplay {
+		t.Fatal("unknown provider must default to StreamDisplay=false")
 	}
 
-	if got := Capabilities("unknown"); got != (PlanCapability{}) {
-		t.Fatalf("unknown capabilities = %+v", got)
+	streamProviders := map[string]bool{
+		"claude":   true,
+		"codex":    true,
+		"copilot":  true,
+		"opencode": true,
+	}
+
+	for _, name := range RegisteredProviders() {
+		cap, ok := CapabilityFor(name)
+		if !ok {
+			t.Fatalf("missing %s", name)
+		}
+		if cap.StreamDisplay != streamProviders[name] {
+			t.Fatalf("%s StreamDisplay=%v, want %v", name, cap.StreamDisplay, streamProviders[name])
+		}
+		if cap.ToolCallStream != streamProviders[name] {
+			t.Fatalf("%s ToolCallStream=%v, want %v", name, cap.ToolCallStream, streamProviders[name])
+		}
+	}
+}
+
+func TestCapabilityRegistryNoDriftFromSupportedBackends(t *testing.T) {
+	t.Parallel()
+
+	backends := SupportedBackends()
+	providers := RegisteredProviders()
+
+	backendSet := make(map[string]bool, len(backends))
+	for _, b := range backends {
+		backendSet[b] = true
+	}
+	providerSet := make(map[string]bool, len(providers))
+	for _, p := range providers {
+		providerSet[p] = true
+	}
+
+	for _, b := range backends {
+		if !providerSet[b] {
+			t.Errorf("supported backend %q missing from capability registry", b)
+		}
+	}
+	for _, p := range providers {
+		if !backendSet[p] {
+			t.Errorf("capability registry entry %q not in supported backends", p)
+		}
 	}
 }

@@ -4,7 +4,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@multica/core/auth";
 import { useInboxList } from "@multica/core/inbox";
-import { Bot, Inbox, Server, Settings } from "lucide-react-native";
+import { Bot, Inbox, Server, Settings, Users } from "lucide-react-native";
 import { Screen } from "../../components/ui/primitives";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
@@ -15,11 +15,12 @@ type MineNavigation = NativeStackNavigationProp<RootStackParamList>;
 const readOnlyEntries = [
   { labelKey: "mine.runtimes", route: "Runtimes", icon: Server },
   { labelKey: "mine.agents", route: "Agents", icon: Bot },
+  { labelKey: "mine.squads", route: "Squads", icon: Users },
   { labelKey: "mine.inbox", route: "Inbox", icon: Inbox },
   { labelKey: "mine.setting", route: "Setting", icon: Settings },
 ] as const satisfies ReadonlyArray<{
   labelKey: string;
-  route: keyof Pick<RootStackParamList, "Runtimes" | "Agents" | "Inbox" | "Setting">;
+  route: keyof Pick<RootStackParamList, "Runtimes" | "Agents" | "Squads" | "Inbox" | "Setting">;
   icon: typeof Server;
 }>;
 
@@ -60,7 +61,7 @@ export function MineScreen() {
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>{t("mine.more")}</Text>
           <View style={styles.entryRow}>
-            {readOnlyEntries.slice(0, 4).map((entry) => {
+            {readOnlyEntries.map((entry) => {
               const Icon = entry.icon;
               return (
                 <Pressable
@@ -147,6 +148,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   entryRow: {
+    flexWrap: "wrap",
     flexDirection: "row",
     gap: spacing.sm,
   },
@@ -154,7 +156,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: colors.muted,
     borderRadius: radii.md,
-    flex: 1,
+    flexBasis: "30%",
+    flexGrow: 1,
     gap: spacing.xs,
     minWidth: 0,
     paddingHorizontal: spacing.xs,

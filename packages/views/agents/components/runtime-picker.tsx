@@ -22,6 +22,7 @@ export function RuntimePicker({
   currentUserId,
   selectedRuntimeId,
   onSelect,
+  disabled = false,
 }: {
   runtimes: RuntimeDevice[];
   runtimesLoading?: boolean;
@@ -29,6 +30,7 @@ export function RuntimePicker({
   currentUserId: string | null;
   selectedRuntimeId: string;
   onSelect: (id: string) => void;
+  disabled?: boolean;
 }) {
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
@@ -85,6 +87,7 @@ export function RuntimePicker({
           <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
             <button
               type="button"
+              disabled={disabled}
               onClick={() => handleFilterChange("mine")}
               className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
                 filter === "mine"
@@ -96,6 +99,7 @@ export function RuntimePicker({
             </button>
             <button
               type="button"
+              disabled={disabled}
               onClick={() => handleFilterChange("all")}
               className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
                 filter === "all"
@@ -110,7 +114,7 @@ export function RuntimePicker({
       </div>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
-          disabled={runtimes.length === 0 && !runtimesLoading}
+          disabled={disabled || (runtimes.length === 0 && !runtimesLoading)}
           className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
         >
           {runtimesLoading ? (

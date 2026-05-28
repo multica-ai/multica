@@ -310,6 +310,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/progress", h.ReportTaskProgress)
 		r.Post("/tasks/{taskId}/complete", h.CompleteTask)
 		r.Post("/tasks/{taskId}/fail", h.FailTask)
+		r.Post("/tasks/{taskId}/cancel", h.CancelTaskFromDaemon)
 		r.Post("/tasks/{taskId}/usage", h.ReportTaskUsage)
 		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
@@ -631,6 +632,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/skills", h.SetAgentSkills)
 					r.Get("/allowed-principals", h.ListAgentAllowedPrincipals)
 					r.Put("/allowed-principals", h.UpdateAgentAllowedPrincipals)
+					// Dedicated env-management endpoint. Owner/admin only;
+					// agent actors are denied. Every reveal / write is
+					// audited to activity_log. See MUL-2600 and
+					// internal/handler/agent_env.go.
+					r.Get("/env", h.GetAgentEnv)
+					r.Put("/env", h.UpdateAgentEnv)
 				})
 			})
 
@@ -763,6 +770,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.GetNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
 			})
+
+			r.Get("/api/auto-subscribe-preferences", h.GetMyAutoSubscribePreferences)
+			r.Patch("/api/auto-subscribe-preferences", h.UpdateMyAutoSubscribePreferences)
 		})
 	})
 

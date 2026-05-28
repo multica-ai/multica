@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Loader2, Search, Square, X } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronRight, Loader2, MessageSquarePlus, RotateCw, Search, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
@@ -20,6 +20,7 @@ import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
 import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
+import { RetryWithNoteDialog } from "./retry-with-note-dialog";
 
 // ─── Agent group coloring ──────────────────────────────────────────────────
 // 8-color palette; each unique agent_id gets a stable color based on
@@ -266,6 +267,7 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
                     <PastRow
                       key={task.id}
                       task={task}
+                      issueId={issueId}
                       runIndex={taskIndexMap.get(task.id)}
                       colorClass={agentColorMap?.get(task.agent_id)}
                       onHighlightComment={onHighlightComment}
@@ -481,18 +483,22 @@ function ActiveRow({
 
 function PastRow({
   task,
+  issueId,
   runIndex,
   colorClass,
   onHighlightComment,
 }: {
   task: AgentTask;
+  issueId: string;
   runIndex?: number;
   colorClass?: string;
   onHighlightComment?: (commentId: string) => void;
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
-  const [_retrying, _setRetrying] = useState(false);
+  const qc = useQueryClient();
+  const [retrying, setRetrying] = useState(false);
+  const [retryWithNoteOpen, setRetryWithNoteOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
@@ -510,6 +516,21 @@ function PastRow({
     task.trigger_comment_id && onHighlightComment
       ? () => onHighlightComment(task.trigger_comment_id!)
       : undefined;
+  const canRetry = task.kind !== "local_cli" && !!task.agent_id;
+
+  const retryTask = async (retryInstruction?: string) => {
+    if (retrying || !canRetry) return;
+    setRetrying(true);
+    try {
+      await api.rerunIssue(issueId, task.id, retryInstruction);
+      await qc.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
+      throw e;
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   return (
     <RowShell task={task} runIndex={runIndex} colorClass={colorClass}>
@@ -519,8 +540,54 @@ function PastRow({
         <span className="text-muted-foreground"> · {time}</span>
       </span>
       <RowActions>
+        {canRetry && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={() => void retryTask()}
+                  disabled={retrying}
+                  aria-label={t(($) => $.execution_log.retry_task_aria)}
+                />
+              }
+              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {retrying ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RotateCw className="h-3.5 w-3.5" />
+              )}
+            </TooltipTrigger>
+            <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
+          </Tooltip>
+        )}
+        {canRetry && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={() => setRetryWithNoteOpen(true)}
+                  disabled={retrying}
+                  aria-label={t(($) => $.retry_with_note.action)}
+                />
+              }
+              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <MessageSquarePlus className="h-3.5 w-3.5" />
+            </TooltipTrigger>
+            <TooltipContent>{t(($) => $.retry_with_note.action)}</TooltipContent>
+          </Tooltip>
+        )}
         <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
       </RowActions>
+      <RetryWithNoteDialog
+        open={retryWithNoteOpen}
+        pending={retrying}
+        onOpenChange={setRetryWithNoteOpen}
+        onSubmit={(note) => retryTask(note)}
+      />
     </RowShell>
   );
 }

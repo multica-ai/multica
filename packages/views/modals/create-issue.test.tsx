@@ -21,6 +21,7 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
+const mockUpdateIssue = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
@@ -90,12 +91,12 @@ vi.mock("@multica/core/projects/queries", () => ({
 }));
 
 vi.mock("@multica/core/labels", () => ({
-  labelListOptions: (wsId: string) => ({
-    queryKey: ["labels", wsId],
+  labelListOptions: (wsId: string, scope?: { projectId?: string | null }) => ({
+    queryKey: ["labels", wsId, "list", scope?.projectId ? "project" : "workspace", scope?.projectId ?? null],
     queryFn: () =>
       Promise.resolve([
-        { id: "label-1", name: "bug", color: "#ef4444" },
-        { id: "label-2", name: "feature", color: "#22c55e" },
+        { id: "label-1", workspace_id: wsId, project_id: null, name: "bug", color: "#ef4444" },
+        { id: "label-2", workspace_id: wsId, project_id: null, name: "feature", color: "#22c55e" },
       ]),
   }),
   useCreateLabel: () => ({ mutate: mockCreateLabel, isPending: false }),
@@ -116,7 +117,7 @@ vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
 
 vi.mock("@multica/core/issues/mutations", () => ({
   useCreateIssue: () => ({ mutateAsync: mockCreateIssue }),
-  useUpdateIssue: () => ({ mutate: vi.fn() }),
+  useUpdateIssue: () => ({ mutate: vi.fn(), mutateAsync: mockUpdateIssue }),
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
@@ -278,6 +279,41 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenuSeparator: () => null,
 }));
 
+vi.mock("../issues/components/label-scope-segment", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../issues/components/label-scope-segment")>();
+  return {
+    ...actual,
+    LabelScopeSegment: ({
+      value,
+      onValueChange,
+      projectLabel,
+      workspaceLabel,
+    }: {
+      value: "project" | "workspace";
+      onValueChange: (value: "project" | "workspace") => void;
+      projectLabel: string;
+      workspaceLabel: string;
+    }) => (
+      <div>
+        <button
+          type="button"
+          aria-pressed={value === "project"}
+          onClick={() => onValueChange("project")}
+        >
+          {projectLabel}
+        </button>
+        <button
+          type="button"
+          aria-pressed={value === "workspace"}
+          onClick={() => onValueChange("workspace")}
+        >
+          {workspaceLabel}
+        </button>
+      </div>
+    ),
+  };
+});
+
 vi.mock("./issue-picker-modal", () => ({
   IssuePickerModal: () => null,
 }));
@@ -376,8 +412,17 @@ describe("CreateIssueModal", () => {
       mockQuickCreateStore.keepOpen = v;
     });
     mockCreateLabel.mockImplementation(
-      (_data: { name: string; color: string }, opts?: { onSuccess?: (label: { id: string }) => void }) => {
-        opts?.onSuccess?.({ id: "label-new" });
+      (
+        data: { name: string; color: string; project_id?: string | null },
+        opts?: { onSuccess?: (label: { id: string; workspace_id: string; project_id: string | null; name: string; color: string }) => void },
+      ) => {
+        opts?.onSuccess?.({
+          id: "label-new",
+          workspace_id: "ws-test",
+          project_id: data.project_id ?? null,
+          name: data.name,
+          color: data.color,
+        });
       },
     );
     // Reset the shared draft mock so per-test assignee seeding (squad / agent)
@@ -390,6 +435,7 @@ describe("CreateIssueModal", () => {
       title: "Ship create issue regression coverage",
       status: "todo",
     });
+    mockUpdateIssue.mockResolvedValue({});
     mockUploadWithToast.mockResolvedValue(null);
     mockUploadState.uploading = false;
   });
@@ -439,6 +485,116 @@ describe("CreateIssueModal", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/TES-123");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
+  });
+
+  it("prefills title and description from modal data without writing them to the draft", () => {
+    renderModal(
+      <CreateIssueModal
+        onClose={vi.fn()}
+        data={{
+          title: "Original issue title",
+          description: "Original issue body",
+          project_id: "proj-1",
+          parent_issue_id: "issue-parent",
+        }}
+      />,
+    );
+
+    expect(screen.getByPlaceholderText("Issue title")).toHaveValue("Original issue title");
+    expect(screen.getByPlaceholderText("Add description...")).toHaveValue("Original issue body");
+    expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project-id", "proj-1");
+    expect(mockSetDraft).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Original issue title",
+      }),
+    );
+    expect(mockSetDraft).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Original issue body",
+      }),
+    );
+  });
+
+  it("creates from modal data as a child issue and blocks the source issue after create", async () => {
+    const user = userEvent.setup();
+
+    renderModal(
+      <CreateIssueModal
+        onClose={vi.fn()}
+        data={{
+          title: "Original issue title",
+          description: "Original issue body",
+          project_id: "proj-1",
+          parent_issue_id: "issue-parent",
+          block_issue_id_on_create: "issue-parent",
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Original issue title",
+          description: "Original issue body",
+          project_id: "proj-1",
+          parent_issue_id: "issue-parent",
+        }),
+      );
+    });
+    expect(mockUpdateIssue).toHaveBeenCalledWith({
+      id: "issue-parent",
+      status: "blocked",
+    });
+  });
+
+  it("does not block the source issue when create fails", async () => {
+    const user = userEvent.setup();
+    mockCreateIssue.mockRejectedValue(new Error("create failed"));
+
+    renderModal(
+      <CreateIssueModal
+        onClose={vi.fn()}
+        data={{
+          title: "Original issue title",
+          project_id: "proj-1",
+          parent_issue_id: "issue-parent",
+          block_issue_id_on_create: "issue-parent",
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("create failed"));
+    expect(mockUpdateIssue).not.toHaveBeenCalled();
+  });
+
+  it("shows a warning when blocking the source issue fails after create succeeds", async () => {
+    const user = userEvent.setup();
+    mockUpdateIssue.mockRejectedValue(new Error("block failed"));
+
+    renderModal(
+      <CreateIssueModal
+        onClose={vi.fn()}
+        data={{
+          title: "Original issue title",
+          project_id: "proj-1",
+          parent_issue_id: "issue-parent",
+          block_issue_id_on_create: "issue-parent",
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalled());
+    expect(mockUpdateIssue).toHaveBeenCalledWith({
+      id: "issue-parent",
+      status: "blocked",
+    });
+    expect(mockToastError).toHaveBeenCalledWith("block failed");
   });
 
   it("keeps manual mode open and clears content when create another is enabled", async () => {
@@ -556,6 +712,31 @@ describe("CreateIssueModal", () => {
     }));
   });
 
+  it("submits uploaded UUIDv7 attachment ids when creating an issue", async () => {
+    const user = userEvent.setup();
+    const attachmentId = "019e5d0e-6f02-7335-8e7f-8276f3f410df";
+    mockUploadWithToast.mockResolvedValue({
+      id: attachmentId,
+      url: "https://cdn.example.test/uploaded.txt",
+      download_url: "https://cdn.example.test/uploaded.txt",
+      filename: "uploaded.txt",
+      link: "https://cdn.example.test/uploaded.txt",
+    });
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Editor upload file" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Submit UUIDv7 attachment");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
+        attachment_ids: [attachmentId],
+      }));
+    });
+    expect(mockToastError).not.toHaveBeenCalledWith("Attachment upload failed. Try again.");
+  });
+
   it("shows an upload error when the manual create attachment upload fails", async () => {
     const user = userEvent.setup();
     mockUploadWithToast.mockRejectedValue(new Error("upload failed"));
@@ -645,6 +826,28 @@ describe("CreateIssueModal", () => {
           title: "Issue with new label",
           label_ids: ["label-new"],
         }),
+      );
+    });
+  });
+
+  it("supports creating a workspace label from the project create flow", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Issue with workspace label");
+    await user.click(screen.getByLabelText("Select labels"));
+    await user.click(screen.getByRole("button", { name: "Workspace" }));
+    await user.type(screen.getByPlaceholderText("Search or type a new label"), "global-risk");
+    await user.click(screen.getByRole("button", { name: /Create label "global-risk"/i }));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "global-risk", project_id: null }),
+        expect.any(Object),
+      );
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ label_ids: ["label-new"] }),
       );
     });
   });

@@ -5,9 +5,14 @@ export function createZhDict(allowSignup: boolean): LandingDict {
   return {
   header: {
     github: "GitHub",
-    login: "\u767b\u5f55",
+    cta: "\u5f00\u59cb\u4f7f\u7528",
     dashboard: "\u8fdb\u5165\u5de5\u4f5c\u53f0",
+    docs: "\u6587\u6863",
     changelog: "\u66f4\u65b0\u65e5\u5fd7",
+    useCases: "\u6848\u4f8b",
+    navigation: "\u4e3b\u5bfc\u822a",
+    openMenu: "\u6253\u5f00\u5bfc\u822a\u83dc\u5355",
+    closeMenu: "\u5173\u95ed\u5bfc\u822a\u83dc\u5355",
   },
 
   hero: {
@@ -228,6 +233,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "\u529f\u80fd\u7279\u6027", href: "#features" },
           { label: "\u5982\u4f55\u5de5\u4f5c", href: "#how-it-works" },
+          { label: "\u6848\u4f8b", href: "/usecases" },
           { label: "更新日志", href: "/changelog" },
           { label: "下载", href: "/download" },
         ],
@@ -286,6 +292,32 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.3.7",
+        date: "2026-05-25",
+        title: "iOS 客户端、Helm 自托管与更顺畅的协作体验",
+        changes: [],
+        features: [
+          "Multica iOS 客户端发布官方首个可用版本，覆盖登录、工作区、收件箱、Issue、项目、聊天、评论、表情回应、在线状态和实时更新；目前暂未上架 App Store，需要用户自行打包安装",
+          "自托管团队现在可以通过 Helm 将 Multica 部署到 Kubernetes，Docker 安装也有更清晰的端口和 URL 配置",
+          "项目资源选择器新增仓库搜索，工作区仓库设置也可以保存描述，帮助智能体理解每个代码库",
+          "运行时用量现在可以更准确识别 DeepSeek、Kimi K2.6、Zhipu GLM 和长上下文 Claude Opus 的费用",
+          "官网新增使用场景页面能力，并让文档、更新日志和开始使用入口更清晰",
+        ],
+        improvements: [
+          "小队头像和看板卡片会显示更完整的悬浮信息、成员状态和实时工作状态",
+          "桌面端在长 Issue 和聊天中切换标签页时，会更好地保留滚动位置，并避免重复的历史记录",
+          "代码和富文本内容更容易阅读，命令文本会按原样显示，编辑器样式也拆分得更清晰",
+          "工作区仓库描述会进入智能体的任务上下文，让分配的工作带上更有用的项目背景",
+          "文档和 README 补充了移动端支持、自动化、授权说明和自托管选项",
+        ],
+        fixes: [
+          "实时评论和动态连续到达时，Issue 时间线仍会按正确时间顺序显示",
+          "Codex 运行不再继承本机隐藏记忆，Pi 运行也能收到更明确的输入结束信号",
+          "本地运行时的删除入口会避开会自动恢复的项目，服务端依赖也更新到修复安全问题的版本",
+          "标题字段会在外部更新后安全刷新，Markdown 代码也不再使用会影响命令参数阅读的连字",
+        ],
+      },
       {
         version: "0.3.6",
         date: "2026-05-22",

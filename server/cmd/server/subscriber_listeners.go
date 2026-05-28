@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/multica-ai/multica/server/internal/autosubscribe"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -28,18 +29,18 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		// Subscribe the creator
-		addSubscriber(bus, queries, e.WorkspaceID, issue.ID, issue.CreatorType, issue.CreatorID, "creator")
+		maybeAddAutoSubscriber(bus, queries, e.WorkspaceID, issue.ID, issue.CreatorType, issue.CreatorID, "creator", autosubscribe.SourceIssueCreator)
 
 		// Subscribe the assignee if exists and different from creator
 		if issue.AssigneeType != nil && issue.AssigneeID != nil &&
 			!(*issue.AssigneeType == issue.CreatorType && *issue.AssigneeID == issue.CreatorID) {
-			addSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
+			maybeAddAutoSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee", autosubscribe.SourceIssueAssignee)
 		}
 
 		// Subscribe @mentioned users in description
 		if issue.Description != nil && *issue.Description != "" {
 			for _, m := range parseMentions(*issue.Description) {
-				addSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
+				maybeAddAutoSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned", autosubscribe.SourceIssueDescriptionMention)
 			}
 		}
 	})
@@ -58,7 +59,7 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 		// Subscribe new assignee if assignee changed
 		if assigneeChanged, _ := payload["assignee_changed"].(bool); assigneeChanged {
 			if issue.AssigneeType != nil && issue.AssigneeID != nil {
-				addSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
+				maybeAddAutoSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee", autosubscribe.SourceIssueAssignee)
 			}
 		}
 
@@ -74,7 +75,7 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 				}
 				for _, m := range newMentions {
 					if !prevMentioned[m.Type+":"+m.ID] {
-						addSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
+						maybeAddAutoSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned", autosubscribe.SourceIssueDescriptionMention)
 					}
 				}
 			}
@@ -89,15 +90,17 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		// Comments created via handler use CommentResponse; agent comments from task.go use map[string]any
-		var issueID, authorType, authorID string
+		var issueID, authorType, authorID, content string
 		if comment, ok := payload["comment"].(handler.CommentResponse); ok {
 			issueID = comment.IssueID
 			authorType = comment.AuthorType
 			authorID = comment.AuthorID
+			content = comment.Content
 		} else if commentMap, ok := payload["comment"].(map[string]any); ok {
 			issueID, _ = commentMap["issue_id"].(string)
 			authorType, _ = commentMap["author_type"].(string)
 			authorID, _ = commentMap["author_id"].(string)
+			content, _ = commentMap["content"].(string)
 		} else {
 			return
 		}
@@ -115,7 +118,14 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 
-		addSubscriber(bus, queries, e.WorkspaceID, issueID, authorType, authorID, "commenter")
+		maybeAddAutoSubscriber(bus, queries, e.WorkspaceID, issueID, authorType, authorID, "commenter", autosubscribe.SourceCommentAuthor)
+
+		for _, m := range parseMentions(content) {
+			if m.Type != "member" {
+				continue
+			}
+			maybeAddAutoSubscriber(bus, queries, e.WorkspaceID, issueID, "member", m.ID, "mentioned", autosubscribe.SourceCommentMention)
+		}
 	})
 }
 
@@ -142,6 +152,13 @@ func extractIssueFields(v any) (handler.IssueResponse, bool) {
 		return handler.IssueResponse{}, false
 	}
 	return issue, true
+}
+
+func maybeAddAutoSubscriber(bus *events.Bus, queries *db.Queries, workspaceID, issueID, userType, userID, reason string, source autosubscribe.Source) {
+	if !autosubscribe.ShouldSubscribe(context.Background(), queries, workspaceID, userType, userID, source) {
+		return
+	}
+	addSubscriber(bus, queries, workspaceID, issueID, userType, userID, reason)
 }
 
 // addSubscriber adds a user as an issue subscriber and publishes a

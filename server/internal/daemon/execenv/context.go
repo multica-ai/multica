@@ -125,6 +125,10 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 	case "claude":
 		// Claude Code natively discovers skills from .claude/skills/ in the workdir.
 		skillsDir = filepath.Join(workDir, ".claude", "skills")
+	case "codebuddy":
+		// CodeBuddy mirrors Claude Code's project-level skill discovery
+		// from .codebuddy/skills/ in the workdir.
+		skillsDir = filepath.Join(workDir, ".codebuddy", "skills")
 	case "copilot":
 		// GitHub Copilot CLI natively discovers project-level skills from
 		// .github/skills/<name>/SKILL.md (takes precedence over user-level

@@ -18,6 +18,7 @@ interface AvatarPickerProps {
    *  up vertically with the Name + Description stack in the create-agent
    *  form so the two read as a single visual row. */
   size?: number;
+  disabled?: boolean;
 }
 
 /**
@@ -32,7 +33,7 @@ interface AvatarPickerProps {
  *                 overlay for "click to change". A small × in the corner
  *                 clears the choice.
  */
-export function AvatarPicker({ value, onChange, size = 56 }: AvatarPickerProps) {
+export function AvatarPicker({ value, onChange, size = 56, disabled = false }: AvatarPickerProps) {
   const { t } = useT("agents");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { upload, uploading } = useFileUpload(api);
@@ -67,14 +68,17 @@ export function AvatarPicker({ value, onChange, size = 56 }: AvatarPickerProps) 
     <div className="relative shrink-0" style={dimensionStyle}>
       <button
         type="button"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={uploading}
+        onClick={() => {
+          if (!disabled) fileInputRef.current?.click();
+        }}
+        disabled={disabled || uploading}
         className={cn(
           "group relative h-full w-full overflow-hidden rounded-lg outline-none transition-colors",
           "focus-visible:ring-2 focus-visible:ring-ring",
           hasValue
             ? "border"
             : "border border-dashed bg-muted/40 hover:bg-muted",
+          disabled && "cursor-default",
         )}
         aria-label={
           hasValue
@@ -102,7 +106,7 @@ export function AvatarPicker({ value, onChange, size = 56 }: AvatarPickerProps) 
 
         {/* Hover overlay only when there's already an image — otherwise the
             placeholder icon already invites the click. */}
-        {hasValue && (
+        {hasValue && !disabled && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
             {uploading ? (
               <Loader2 className="h-4 w-4 animate-spin text-white" />
@@ -116,7 +120,7 @@ export function AvatarPicker({ value, onChange, size = 56 }: AvatarPickerProps) 
       {/* Tiny X to clear, only shown when there's a value. Positioned just
           outside the avatar's top-right corner so it doesn't cover the
           image. */}
-      {hasValue && !uploading && (
+      {hasValue && !disabled && !uploading && (
         <button
           type="button"
           onClick={(e) => {

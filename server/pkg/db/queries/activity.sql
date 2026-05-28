@@ -32,9 +32,9 @@ SELECT EXISTS (
 SELECT 1 FROM activity_log
 WHERE issue_id = $1
   AND action = 'referenced_by'
-  AND details->>'source_issue_id' = $2
-  AND details->>'source_type' = $3
-  AND details->>'source_id' = $4
+  AND details->>'source_issue_id' = sqlc.arg(source_issue_id)::text
+  AND details->>'source_type' = sqlc.arg(source_type)::text
+  AND details->>'source_id' = sqlc.arg(source_id)::text
 LIMIT 1;
 
 -- name: CountAssigneeChangesByActor :many

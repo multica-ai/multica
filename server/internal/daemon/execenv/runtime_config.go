@@ -87,8 +87,9 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // InjectRuntimeConfig writes the meta skill content into the runtime-specific
 // config file so the agent discovers its environment through its native mechanism.
 //
-// For Claude:   writes {workDir}/CLAUDE.md  (skills discovered natively from .claude/skills/)
-// For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
+// For Claude:    writes {workDir}/CLAUDE.md  (skills discovered natively from .claude/skills/)
+// For CodeBuddy: writes {workDir}/CODEBUDDY.md  (cbc reads CODEBUDDY.md the same way Claude reads CLAUDE.md; skills under .codebuddy/skills/)
+// For Codex:     writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
 // For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .opencode/skills/)
 // For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from {workDir}/skills/ via per-task openclaw-config.json that pins agents.defaults.workspace)
@@ -104,6 +105,8 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 	switch provider {
 	case "claude":
 		return content, os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
+	case "codebuddy":
+		return content, os.WriteFile(filepath.Join(workDir, "CODEBUDDY.md"), []byte(content), 0o644)
 	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI":
 		return content, os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
 	case "gemini":
@@ -273,7 +276,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("The following code repositories are available in this workspace.\n")
 		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory. Add `--ref <branch-or-sha>` when you need an exact branch, tag, or commit.\n\n")
 		for _, repo := range ctx.Repos {
-			fmt.Fprintf(&b, "- %s\n", repo.URL)
+			if repo.Description != "" {
+				fmt.Fprintf(&b, "- %s — %s\n", repo.URL, repo.Description)
+			} else {
+				fmt.Fprintf(&b, "- %s\n", repo.URL)
+			}
 		}
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed, and can pass `--ref` for review/QA on a non-default branch or commit.\n\n")
 	}
@@ -420,8 +427,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Skills\n\n")
 		switch provider {
-		case "claude":
-			// Claude discovers skills natively from .claude/skills/ — just list names.
+		case "claude", "codebuddy":
+			// Claude and CodeBuddy discover skills natively from
+			// .claude/skills/ resp. .codebuddy/skills/ — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
 		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI":
 			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, Kiro, and DeepSeek

@@ -19,6 +19,7 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 10)
 	var output strings.Builder
+	toolState := newClaudeToolUseState()
 
 	msg := claudeSDKMessage{
 		Type: "assistant",
@@ -30,7 +31,7 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), nil)
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), nil, toolState, nil)
 
 	if output.String() != "Hello world" {
 		t.Fatalf("expected output 'Hello world', got %q", output.String())
@@ -51,6 +52,7 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 10)
 	var output strings.Builder
+	toolState := newClaudeToolUseState()
 
 	msg := claudeSDKMessage{
 		Type: "assistant",
@@ -67,7 +69,7 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 		}),
 	}
 
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), nil)
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), nil, toolState, nil)
 
 	if output.String() != "" {
 		t.Fatalf("tool_use should not add to output, got %q", output.String())
@@ -85,11 +87,94 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 	}
 }
 
+func TestClaudeHandleAssistantBashToolUseWithCommand(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+	var output strings.Builder
+	toolState := newClaudeToolUseState()
+
+	msg := claudeSDKMessage{
+		Type: "assistant",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role: "assistant",
+			Content: []claudeContentBlock{
+				{
+					Type:  "tool_use",
+					ID:    "call-bash-1",
+					Name:  "Bash",
+					Input: mustMarshal(t, map[string]any{"command": "pwd"}),
+				},
+			},
+		}),
+	}
+
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), nil, toolState, nil)
+
+	select {
+	case m := <-ch:
+		if m.Type != MessageToolUse || m.Tool != "Bash" || m.CallID != "call-bash-1" {
+			t.Fatalf("unexpected message: %+v", m)
+		}
+		if m.Input["command"] != "pwd" {
+			t.Fatalf("expected command pwd, got %v", m.Input["command"])
+		}
+	default:
+		t.Fatal("expected bash tool_use on channel")
+	}
+}
+
+func TestClaudeHandleAssistantDefersEmptyBashToolUse(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+	var output strings.Builder
+	toolState := newClaudeToolUseState()
+	var displayEvents []string
+	trace := func(channel, content, rawPayload string) {
+		if channel == traceChannelDisplayEvent {
+			displayEvents = append(displayEvents, content)
+		}
+	}
+
+	msg := claudeSDKMessage{
+		Type: "assistant",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role: "assistant",
+			Content: []claudeContentBlock{
+				{
+					Type:  "tool_use",
+					ID:    "call-bash-empty",
+					Name:  "Bash",
+					Input: mustMarshal(t, map[string]any{}),
+				},
+			},
+		}),
+	}
+
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), trace, toolState, nil)
+
+	select {
+	case m := <-ch:
+		t.Fatalf("expected deferred empty bash tool_use, got %+v", m)
+	default:
+	}
+	if len(displayEvents) != 0 {
+		t.Fatalf("expected no display events for deferred empty bash tool_use, got %v", displayEvents)
+	}
+	if _, ok := toolState.pending["call-bash-empty"]; !ok {
+		t.Fatal("expected empty bash tool_use to be buffered")
+	}
+}
+
 func TestClaudeHandleUserToolResult(t *testing.T) {
 	t.Parallel()
 
 	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 10)
+	toolState := newClaudeToolUseState()
 
 	msg := claudeSDKMessage{
 		Type: "user",
@@ -105,7 +190,7 @@ func TestClaudeHandleUserToolResult(t *testing.T) {
 		}),
 	}
 
-	b.handleUser(msg, ch, nil)
+	b.handleUser(msg, ch, nil, toolState, nil)
 
 	select {
 	case m := <-ch:
@@ -114,6 +199,43 @@ func TestClaudeHandleUserToolResult(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected message on channel")
+	}
+}
+
+func TestClaudeHandleUserToolResultClearsDeferredBashToolUse(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+	toolState := newClaudeToolUseState()
+	toolState.deferToolUse("call-bash-empty", "Bash", map[string]any{})
+
+	msg := claudeSDKMessage{
+		Type: "user",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role: "user",
+			Content: []claudeContentBlock{
+				{
+					Type:      "tool_result",
+					ToolUseID: "call-bash-empty",
+					Content:   mustMarshal(t, "done"),
+				},
+			},
+		}),
+	}
+
+	b.handleUser(msg, ch, nil, toolState, nil)
+
+	select {
+	case m := <-ch:
+		if m.Type != MessageToolResult || m.CallID != "call-bash-empty" || m.Output != "\"done\"" {
+			t.Fatalf("unexpected message: %+v", m)
+		}
+	default:
+		t.Fatal("expected tool result on channel")
+	}
+	if _, ok := toolState.pending["call-bash-empty"]; ok {
+		t.Fatal("expected deferred empty bash tool_use to be cleared after result")
 	}
 }
 
@@ -137,7 +259,7 @@ func TestClaudeHandleUserDetectsPermissionNotGrantedText(t *testing.T) {
 		}),
 	}
 
-	if !b.handleUser(msg, ch, nil) {
+	if !b.handleUser(msg, ch, nil, newClaudeToolUseState(), nil) {
 		t.Fatal("expected permission-not-granted text to be detected")
 	}
 }
@@ -263,7 +385,7 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	}
 
 	// Should not panic
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), nil)
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), nil, newClaudeToolUseState(), nil)
 
 	if output.String() != "" {
 		t.Fatalf("expected empty output for invalid JSON, got %q", output.String())

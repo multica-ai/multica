@@ -49,7 +49,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/u
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, AttachmentCard, AttachmentDownloadProvider } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, AttachmentCard, AttachmentDownloadProvider, useAttachmentPreview, useDownloadAttachment } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -115,6 +115,8 @@ import { cn } from "@multica/ui/lib/utils";
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+
+type PreviewWithPort = LocalPreview & { healthPort: number };
 
 function SubscriberPopoverContent({
   members,
@@ -344,86 +346,140 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
+function mergeAttachments(
+  primary?: Attachment[],
+  pending?: Attachment[],
+): Attachment[] | undefined {
+  const all = [...(primary ?? []), ...(pending ?? [])];
+  if (!all.length) return primary;
+  const seen = new Set<string>();
+  return all.filter((attachment) => {
+    if (seen.has(attachment.id)) return false;
+    seen.add(attachment.id);
+    return true;
+  });
+}
+
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
 const EMPTY_REPLIES: TimelineEntry[] = [];
 
 // ---------------------------------------------------------------------------
-// Issue-level attachment list — URL-only filtering, no sibling dedupe.
-// Unlike the comment-card AttachmentList, this only hides attachments whose
-// exact URL appears in the description markdown. Same-name / same-size
-// siblings are NOT collapsed — each attachment is an independent record.
+// Issue-level attachment list. These are explicit issue attachments, so keep
+// every record visible even when the description also references the same URL.
+// This preserves the dedicated attachment area below the issue description.
 // ---------------------------------------------------------------------------
 
 function IssueAttachmentList({
   attachments,
-  content,
+  pendingAttachments,
   className,
   onDelete,
   onAppendToDesc,
 }: {
   attachments?: Attachment[];
-  content?: string;
+  pendingAttachments?: Attachment[];
   className?: string;
   onDelete?: (id: string) => void;
   onAppendToDesc?: (a: Attachment) => void;
 }) {
-  if (!attachments?.length) return null;
-  const standalone = content
-    ? attachments.filter((a) => !content.includes(a.url))
-    : attachments;
-  if (!standalone.length) return null;
+  const visible = mergeAttachments(attachments, pendingAttachments);
+  if (!visible?.length) return null;
+  const persistedIds = new Set((attachments ?? []).map((attachment) => attachment.id));
 
   return (
-    <AttachmentDownloadProvider attachments={attachments}>
+    <AttachmentDownloadProvider attachments={visible}>
       <div className={cn("flex flex-col gap-1", className)}>
-        {standalone.map((a) => (
-          <div key={a.id} className="flex items-center gap-1 group">
-            <div className="flex-1 min-w-0">
-              <AttachmentCard
-                filename={a.filename}
-                contentType={a.content_type ?? undefined}
-                attachmentId={a.id}
-                href={a.url}
-                onPreview={() => { window.open(a.url, "_blank"); }}
-                onDownload={() => { window.open(a.url, "_blank"); }}
-              />
-            </div>
-            {(onDelete || onAppendToDesc) && (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <button
-                      type="button"
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-opacity"
-                    >
-                      <MoreHorizontal className="h-3.5 w-3.5" />
-                    </button>
-                  }
-                />
-                <DropdownMenuContent align="end">
-                  {onAppendToDesc && (
-                    <DropdownMenuItem onClick={() => onAppendToDesc(a)}>
-                      引用到描述末尾
-                    </DropdownMenuItem>
-                  )}
-                  {onDelete && onAppendToDesc && <DropdownMenuSeparator />}
-                  {onDelete && (
-                    <DropdownMenuItem
-                      className="text-destructive focus:text-destructive"
-                      onClick={() => onDelete(a.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5 mr-2" />
-                      删除
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
+        {visible.map((a) => (
+          <IssueAttachmentRow
+            key={a.id}
+            attachment={a}
+            pending={!persistedIds.has(a.id)}
+            onDelete={onDelete}
+            onAppendToDesc={onAppendToDesc}
+          />
         ))}
       </div>
     </AttachmentDownloadProvider>
+  );
+}
+
+function IssueAttachmentRow({
+  attachment,
+  pending: _pending,
+  onDelete,
+  onAppendToDesc,
+}: {
+  attachment: Attachment;
+  pending: boolean;
+  onDelete?: (id: string) => void;
+  onAppendToDesc?: (a: Attachment) => void;
+}) {
+  const preview = useAttachmentPreview();
+  const download = useDownloadAttachment();
+  const handlePreview = () => {
+    preview.tryOpen({ kind: "full", attachment });
+  };
+  const handleDownload = () => {
+    void download(attachment.id);
+  };
+
+  return (
+    <div className="flex items-center gap-1 group" onMouseDown={(e) => {
+      // Prevent clicks in the attachment row from shifting focus to the
+      // editor above. Without this, after the dropdown closes the browser
+      // refocuses the editor and ProseMirror may process a stale delete
+      // event that removes the last line of content instead of the
+      // attachment card.
+      if ((e.target as HTMLElement).closest('[role="menu"]') || (e.target as HTMLElement).closest('button')) {
+        e.preventDefault();
+      }
+    }}>
+      <div className="flex-1 min-w-0">
+        <AttachmentCard
+          filename={attachment.filename}
+          contentType={attachment.content_type ?? undefined}
+          attachmentId={attachment.id}
+          href={attachment.url}
+          className="my-0"
+          onPreview={handlePreview}
+          onDownload={handleDownload}
+        />
+      </div>
+      {preview.modal}
+      {(onDelete || onAppendToDesc) && (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-opacity"
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </button>
+            }
+          />
+          <DropdownMenuContent align="end">
+            {onAppendToDesc && (
+              <DropdownMenuItem onClick={() => onAppendToDesc(attachment)}>
+                引用到描述末尾
+              </DropdownMenuItem>
+            )}
+            {onDelete && onAppendToDesc && <DropdownMenuSeparator />}
+            {onDelete && (
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => onDelete(attachment.id)}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-2" />
+                删除
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
   );
 }
 
@@ -591,6 +647,11 @@ function inferThreadRootId(selection: Selection): string | null {
   if (focusRoot && !anchorRoot) return focusRoot;
   return null;
 }
+// When the trailing block is expanded, we still truncate its body to the most
+// recent N entries — a single block of 50 status flips drowns the comment area
+// as badly as N blocks of 1 would. Older entries fold behind a "Show N more
+// activities" line that expands in place.
+const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
 
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
@@ -601,6 +662,9 @@ function ActivityBlock({
   entries,
   expanded,
   onToggle,
+  truncateOlder,
+  showOlder,
+  onToggleShowOlder,
   getActorName,
   t,
   timeAgo,
@@ -608,6 +672,12 @@ function ActivityBlock({
   entries: TimelineEntry[];
   expanded: boolean;
   onToggle: () => void;
+  // Trailing block only: when true, the body shows only the most recent
+  // LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT entries with the older ones folded
+  // behind a "Show N more activities" inline toggle.
+  truncateOlder: boolean;
+  showOlder: boolean;
+  onToggleShowOlder: () => void;
   getActorName: (type: string, id: string) => string;
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
@@ -628,17 +698,42 @@ function ActivityBlock({
       </div>
     );
   }
+  const hiddenOlderCount =
+    truncateOlder && !showOlder && entries.length > LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
+      ? entries.length - LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
+      : 0;
+  const visibleEntries =
+    hiddenOlderCount > 0 ? entries.slice(-LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT) : entries;
+  // Hide the "v N activities" collapse header while we're in the truncated
+  // default state. The "Show N more" link is the only control users need
+  // when they're glancing at recent activity — stacking two chevron rows
+  // looked like nested folds and added visual noise without value. Once the
+  // user explicitly reveals older entries, the header reappears so they can
+  // fold the whole block back to a single count line.
+  const showHeader = hiddenOlderCount === 0;
   return (
     <div className="pb-3 px-4 flex flex-col gap-3">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ChevronDown className="h-3 w-3 shrink-0" />
-        <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
-      </button>
-      {entries.map((entry) => {
+      {showHeader && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronDown className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
+        </button>
+      )}
+      {hiddenOlderCount > 0 && (
+        <button
+          type="button"
+          onClick={onToggleShowOlder}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.show_more_activities, { count: hiddenOlderCount })}</span>
+        </button>
+      )}
+      {visibleEntries.map((entry) => {
         const details = (entry.details ?? {}) as Record<string, string>;
         const isStatusChange = entry.action === "status_changed";
         const isPriorityChange = entry.action === "priority_changed";
@@ -776,7 +871,7 @@ function SubIssueRow({ child }: { child: Issue }) {
         }
       />
       <AppLink
-        href={paths.issueDetail(child.id)}
+        href={paths.issueDetail(child.identifier)}
         className="flex min-w-0 flex-1 items-center gap-2.5"
       >
         <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
@@ -978,6 +1073,12 @@ export function IssueDetail({
   // versa). Not persisted, matches the resolved-thread behaviour above.
   const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
   const [collapsedActivityIds, setCollapsedActivityIds] = useState<Set<string>>(() => new Set());
+  // Block IDs where the user has explicitly chosen to also reveal the older
+  // (pre-last-8) entries within the trailing block. Kept independent of the
+  // expanded/collapsed sets so collapsing then re-expanding preserves the
+  // "show all" choice, and so the choice survives the block losing its
+  // trailing position when a new comment lands after it.
+  const [showOlderActivityIds, setShowOlderActivityIds] = useState<Set<string>>(() => new Set());
   const toggleActivityBlock = useCallback((id: string, currentlyExpanded: boolean) => {
     if (currentlyExpanded) {
       setCollapsedActivityIds((prev) => {
@@ -1004,6 +1105,14 @@ export function IssueDetail({
         return next;
       });
     }
+  }, []);
+  const showOlderActivities = useCallback((id: string) => {
+    setShowOlderActivityIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
   }, []);
   const didHighlightRef = useRef<string | null>(null);
 
@@ -1105,20 +1214,87 @@ export function IssueDetail({
     }
     return Array.from(ports);
   }, [localRuntimes]);
-  const { data: localPreviews = [], refetch: refetchLocalPreviews } = useQuery({
+  const [localPreviewsByPort, setLocalPreviewsByPort] = useState<Record<number, PreviewWithPort[]>>({});
+  const { refetch: refetchLocalPreviews } = useQuery({
     queryKey: ["local-previews", wsId, resolvedId, localPreviewPorts.join(",")],
-    queryFn: async (): Promise<Array<LocalPreview & { healthPort: number }>> => {
+    queryFn: async (): Promise<PreviewWithPort[]> => {
       const results = await Promise.allSettled(
         localPreviewPorts.map(async (healthPort) => {
           const response = await api.listLocalPreviews(healthPort, { workspace_id: wsId, issue_id: resolvedId });
           return response.previews.map((preview) => ({ ...preview, healthPort }));
         }),
       );
+      const nextByPort: Record<number, PreviewWithPort[]> = {};
+      for (const result of results) {
+        if (result.status !== "fulfilled") continue;
+        for (const preview of result.value) {
+          nextByPort[preview.healthPort] = [...(nextByPort[preview.healthPort] ?? []), preview];
+        }
+      }
+      setLocalPreviewsByPort(nextByPort);
       return results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
     },
     enabled: !!resolvedId && localPreviewPorts.length > 0,
-    refetchInterval: 15_000,
   });
+  useEffect(() => {
+    if (!resolvedId || localPreviewPorts.length === 0) {
+      setLocalPreviewsByPort({});
+      return;
+    }
+
+    const portSet = new Set(localPreviewPorts);
+    setLocalPreviewsByPort((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([port]) => portSet.has(Number(port))),
+      ) as Record<number, PreviewWithPort[]>;
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+
+    const sources = localPreviewPorts.map((healthPort) => {
+      const source = new EventSource(api.getLocalPreviewStreamUrl(healthPort, { workspace_id: wsId, issue_id: resolvedId }));
+      let fallbackTimer: number | undefined;
+      const handleSnapshot = (event: Event) => {
+        try {
+          const payload = JSON.parse((event as MessageEvent).data) as { previews?: LocalPreview[] };
+          const previews = Array.isArray(payload.previews) ? payload.previews : [];
+          setLocalPreviewsByPort((prev) => ({
+            ...prev,
+            [healthPort]: previews.map((preview) => ({ ...preview, healthPort })),
+          }));
+        } catch {
+          // Ignore malformed local daemon events; the initial fetch remains as fallback.
+        }
+      };
+      const handleError = () => {
+        source.close();
+        void refetchLocalPreviews();
+        if (!fallbackTimer) {
+          fallbackTimer = window.setInterval(() => {
+            void refetchLocalPreviews();
+          }, 15_000);
+        }
+      };
+
+      source.addEventListener("ready", handleSnapshot);
+      source.addEventListener("snapshot", handleSnapshot);
+      source.addEventListener("error", handleError);
+      return { source, fallbackTimer: () => fallbackTimer };
+    });
+
+    return () => {
+      for (const { source, fallbackTimer } of sources) {
+        source.close();
+        const timer = fallbackTimer();
+        if (timer) {
+          window.clearInterval(timer);
+        }
+      }
+    };
+  }, [localPreviewPorts, refetchLocalPreviews, resolvedId, wsId]);
+  const localPreviews = useMemo(
+    () => Object.values(localPreviewsByPort).flat(),
+    [localPreviewsByPort],
+  );
   const issueLocalPreviews = useMemo(() => (
     localPreviews.filter((preview) => (
       preview.workspace_id === wsId &&
@@ -1127,11 +1303,11 @@ export function IssueDetail({
       preview.status !== "stopped"
     ))
   ), [localPreviews, resolvedId, wsId]);
-  const handleStopLocalPreview = useCallback(async (preview: LocalPreview & { healthPort: number }) => {
+  const handleStopLocalPreview = useCallback(async (preview: PreviewWithPort) => {
     await api.stopLocalPreview(preview.healthPort, preview.id);
     await refetchLocalPreviews();
   }, [refetchLocalPreviews]);
-  const handleShowLocalPreviewLogs = useCallback(async (preview: LocalPreview & { healthPort: number }) => {
+  const handleShowLocalPreviewLogs = useCallback(async (preview: PreviewWithPort) => {
     const logs = await api.getLocalPreviewLogs(preview.healthPort, preview.id);
     setPreviewLogs({
       title: logs.log_path,
@@ -1316,8 +1492,9 @@ export function IssueDetail({
   const queryClient = useQueryClient();
 
   // Attachments uploaded against this issue. Drives the description
-  // editor's click-time fresh-sign download.
-  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(id));
+  // editor's click-time fresh-sign download. Must use `resolvedId` so the
+  // cache key matches what `useUpdateIssue.onSettled` invalidates (UUID).
+  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(resolvedId));
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
@@ -1427,32 +1604,40 @@ export function IssueDetail({
     router.replace(query ? `${canonicalPath}?${query}` : canonicalPath);
   }, [issue, issueId, paths, router]);
 
+  // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
+  // Called before the `if (!issue)` early return so hook order stays stable.
+  const actions = useIssueActions(issue);
+  const handleUpdateField = actions.updateField;
+
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => descEditorRef.current?.uploadFiles(files),
   });
-  // Pending uploads in the description editor. We don't pass `issueId` on
-  // upload (to avoid orphaning attachments when the user deletes the file
-  // from the markdown), so they start unattached and we re-bind them via
-  // `attachment_ids` on the next description save. Drives editor previews
-  // so text/code attachments show an Eye before the bind round-trips.
+  // Pending uploads in the description editor. We bind them immediately after
+  // upload so IssueAttachmentList can show the compact attachment index while
+  // the description keeps rendering attachments inline at their markdown
+  // positions.
   const [descPendingAttachments, setDescPendingAttachments] = useState<Attachment[]>([]);
+  useEffect(() => {
+    setDescPendingAttachments([]);
+  }, [resolvedId]);
   const descEditorAttachments = descPendingAttachments.length > 0
     ? [...(issueAttachments ?? []), ...descPendingAttachments]
     : issueAttachments;
   const handleDescriptionUpload = useCallback(
     async (file: File) => {
-      const result = await uploadWithToast(file);
-      if (result) setDescPendingAttachments((prev) => [...prev, result]);
+      // Pass issueId in upload context so the attachment record is created
+      // with issue_id pre-set in the DB. This ensures the attachment survives
+      // page refresh even if the separate link call races or the user removes
+      // the node from the body before the debounced save fires.
+      const result = await uploadWithToast(file, { issueId: resolvedId });
+      if (result) {
+        setDescPendingAttachments((prev) => [...prev, result]);
+      }
       return result;
     },
-    [uploadWithToast],
+    [resolvedId, uploadWithToast],
   );
-
-  // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
-  // Called before the `if (!issue)` early return so hook order stays stable.
-  const actions = useIssueActions(issue);
-  const handleUpdateField = actions.updateField;
 
   const insertQuoteToNewComment = useCallback((markdown: string) => {
     closeQuoteMenu();
@@ -1803,6 +1988,7 @@ export function IssueDetail({
             <PropRow label={t(($) => $.detail.prop_labels)}>
               <LabelPicker
                 issueId={issue.id}
+                projectId={issue.project_id}
                 align="start"
                 defaultOpen={autoOpenProp === "labels"}
               />
@@ -1956,7 +2142,7 @@ export function IssueDetail({
           </button>
           {parentIssueOpen && <div className="pl-2">
             <AppLink
-              href={paths.issueDetail(parentIssue.id)}
+              href={paths.issueDetail(parentIssue.identifier)}
               className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
             >
               <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
@@ -2130,11 +2316,16 @@ export function IssueDetail({
       : collapsedActivityIds.has(item.id)
         ? false
         : item.id === lastActivityGroupId;
+    const truncateOlder = item.id === lastActivityGroupId;
+    const showOlder = showOlderActivityIds.has(item.id);
     return (
       <ActivityBlock
         entries={item.entries}
         expanded={expanded}
         onToggle={() => toggleActivityBlock(item.id, expanded)}
+        truncateOlder={truncateOlder}
+        showOlder={showOlder}
+        onToggleShowOlder={() => showOlderActivities(item.id)}
         getActorName={getActorName}
         t={t}
         timeAgo={timeAgo}
@@ -2199,7 +2390,7 @@ export function IssueDetail({
             {parentIssue && (
               <>
                 <AppLink
-                  href={paths.issueDetail(parentIssue.id)}
+                  href={paths.issueDetail(parentIssue.identifier)}
                   className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
                 >
                   {parentIssue.identifier}
@@ -2307,6 +2498,7 @@ export function IssueDetail({
         <div className="flex flex-1 min-h-0">
         <div
           ref={setScrollContainerEl}
+          data-tab-scroll-root
           className="relative flex-1 overflow-y-auto"
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
@@ -2323,7 +2515,7 @@ export function IssueDetail({
 
           {parentIssue && (
             <AppLink
-              href={paths.issueDetail(parentIssue.id)}
+              href={paths.issueDetail(parentIssue.identifier)}
               className="mt-2 inline-flex max-w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group/parent"
             >
               <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
@@ -2353,13 +2545,11 @@ export function IssueDetail({
               defaultValue={issue.description || ""}
               placeholder={t(($) => $.detail.desc_placeholder)}
               onUpdate={(md) => {
-                // Bind any pending uploads still referenced in the markdown
-                // so they appear in `issueAttachments` after refresh and the
-                // editor's text/code preview keeps working past reload.
-                const ids = descPendingAttachments
-                  .filter((a) => md.includes(a.url))
-                  .map((a) => a.id);
-                handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
+                // Attachments are linked to the issue at upload time (via
+                // issueId context), so we only save the description text here.
+                // Removing an attachment node from the body does NOT unlink or
+                // delete the attachment — only the attachment area delete does.
+                handleUpdateField({ description: md });
               }}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
@@ -2391,10 +2581,13 @@ export function IssueDetail({
 
           <IssueAttachmentList
             attachments={issueAttachments}
-            content={issue.description ?? ""}
+            pendingAttachments={descPendingAttachments}
             className="mt-3"
             onDelete={async (attachmentId) => {
               await api.deleteAttachment(attachmentId);
+              setDescPendingAttachments((prev) =>
+                prev.filter((attachment) => attachment.id !== attachmentId),
+              );
               queryClient.invalidateQueries({ queryKey: issueAttachmentsOptions(id).queryKey });
             }}
             onAppendToDesc={(a) => {

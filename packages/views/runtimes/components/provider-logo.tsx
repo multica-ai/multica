@@ -19,6 +19,24 @@ function CodexLogo({ className }: { className: string }) {
   );
 }
 
+// CodeBuddy (Tencent) — wordmark-free brand glyph: a stylised "C" with a
+// bracket motif evoking code blocks. Vector authored in-house to avoid any
+// trademark issue; uses Tencent CodeBuddy's primary brand blue (#1A6CFF).
+function CodeBuddyLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className={className}>
+      <rect x="1" y="1" width="14" height="14" rx="3" fill="#1A6CFF" />
+      <path
+        d="M6.2 5.2 4 8l2.2 2.8M9.8 5.2 12 8l-2.2 2.8"
+        stroke="#FFFFFF"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 // OpenCode — official pixel-art "O" mark from anomalyco/opencode brand assets
 function OpenCodeLogo({ className }: { className: string }) {
   return (
@@ -187,6 +205,8 @@ export function ProviderLogo({
   switch (provider) {
     case "claude":
       return <ClaudeLogo className={className} />;
+    case "codebuddy":
+      return <CodeBuddyLogo className={className} />;
     case "codex":
       return <CodexLogo className={className} />;
     case "opencode":

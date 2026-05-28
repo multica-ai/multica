@@ -171,6 +171,8 @@
     "allowed_users_count": "{{count}} 个用户",
     "allowed_users_empty": "没有其他用户",
     "allowed_users_loading": "加载中",
+    "allowed_users_search_placeholder": "搜索用户",
+    "allowed_users_no_results": "无匹配用户",
     "save": "保存",
     "cancel": "取消"
   },
@@ -290,7 +292,7 @@
       "save_failed_toast": "保存 Instructions 失败"
     },
     "env": {
-      "intro_readonly": "在智能体进程启动时注入。值已隐藏 —— 只有智能体所有者或工作区管理员可以查看和编辑。",
+      "intro_readonly": "在智能体进程启动时注入。只有工作区所有者 / 管理员可以查看或编辑值；每次解锁和编辑都会写入工作区审计日志。",
       "empty_readonly": "尚未配置环境变量。",
       "intro_prefix": "在智能体进程启动时注入（例如 ",
       "intro_separator": "、",
@@ -302,7 +304,14 @@
       "remove_aria": "移除变量",
       "duplicate_keys_toast": "环境变量 key 重复",
       "saved_toast": "已保存环境变量",
-      "save_failed_toast": "保存环境变量失败"
+      "save_failed_toast": "保存环境变量失败",
+      "not_revealed_title_other": "已配置 {{count}} 个变量",
+      "not_revealed_empty": "尚未配置环境变量。",
+      "not_revealed_hint": "在解锁前所有值保持隐藏。每次解锁与编辑都会写入工作区审计日志。",
+      "reveal_action": "解锁并编辑",
+      "revealing": "正在解锁…",
+      "reveal_failed_toast": "加载环境变量值失败",
+      "empty_editable": "尚未配置环境变量。新增一条即可在智能体启动时注入。"
     },
     "custom_args": {
       "intro": "在智能体命令启动时追加的额外 CLI 参数。多 token 的参数可以共用一行 —— 在传给 CLI 前会按空白拆分。",

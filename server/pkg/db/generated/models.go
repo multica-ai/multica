@@ -147,6 +147,19 @@ type AttachmentUploadSession struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type AutoSubscribePreference struct {
+	WorkspaceID             pgtype.UUID        `json:"workspace_id"`
+	UserID                  pgtype.UUID        `json:"user_id"`
+	IssueCreator            bool               `json:"issue_creator"`
+	IssueAssignee           bool               `json:"issue_assignee"`
+	CommentAuthor           bool               `json:"comment_author"`
+	IssueDescriptionMention bool               `json:"issue_description_mention"`
+	CommentMention          bool               `json:"comment_mention"`
+	QuickCreateRequester    bool               `json:"quick_create_requester"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Autopilot struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
@@ -448,6 +461,7 @@ type IssueLabel struct {
 	Color       string             `json:"color"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
 }
 
 type IssuePullRequest struct {
@@ -729,6 +743,17 @@ type TaskMessage struct {
 	Input     []byte             `json:"input"`
 	Output    pgtype.Text        `json:"output"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type TaskToken struct {
+	ID          pgtype.UUID        `json:"id"`
+	TokenHash   string             `json:"token_hash"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type TaskUsage struct {

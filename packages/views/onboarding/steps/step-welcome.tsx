@@ -275,6 +275,7 @@ function WelcomeIllustration() {
 
 type ProviderName =
   | "claude"
+  | "codebuddy"
   | "codex"
   | "opencode"
   | "openclaw"
@@ -283,8 +284,7 @@ type ProviderName =
   | "kiro"
   | "pi"
   | "copilot"
-  | "cursor"
-  | "kiro";
+  | "cursor";
 
 type ActivityActor =
   | { kind: "user"; name: string; initial: string }

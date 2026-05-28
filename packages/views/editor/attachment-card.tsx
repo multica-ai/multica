@@ -9,7 +9,7 @@
  * that decision out of this file so this stays a single-purpose row UI.
  */
 
-import { Download, Eye, FileText, Loader2 } from "lucide-react";
+import { Download, Eye, FileText, Loader2, Maximize2 } from "lucide-react";
 import { useT } from "../i18n";
 import { getPreviewKind } from "./utils/preview";
 
@@ -18,8 +18,10 @@ interface AttachmentCardChromeProps {
   uploading?: boolean;
   canPreview: boolean;
   canDownload: boolean;
+  canExpand?: boolean;
   onPreview: () => void;
   onDownload: () => void;
+  onExpand?: () => void;
 }
 
 function AttachmentCardChrome({
@@ -27,8 +29,10 @@ function AttachmentCardChrome({
   uploading,
   canPreview,
   canDownload,
+  canExpand,
   onPreview,
   onDownload,
+  onExpand,
 }: AttachmentCardChromeProps) {
   const { t } = useT("editor");
   return (
@@ -48,6 +52,21 @@ function AttachmentCardChrome({
             : filename}
         </p>
       </div>
+      {!uploading && canExpand && onExpand && (
+        <button
+          type="button"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          title={t(($) => $.attachment.expand_to_preview)}
+          aria-label={t(($) => $.attachment.expand_to_preview)}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onExpand();
+          }}
+        >
+          <Maximize2 className="size-3.5" />
+        </button>
+      )}
       {!uploading && canPreview && (
         <button
           type="button"
@@ -97,10 +116,14 @@ export interface AttachmentCardProps {
   href?: string;
   /** True while a synchronous upload is in flight (file-card NodeView only). */
   uploading?: boolean;
+  /** Compact row class override for surfaces that need local spacing control. */
+  className?: string;
   /** Pressed when the Eye button is clicked. */
   onPreview: () => void;
   /** Pressed when the Download button is clicked. */
   onDownload: () => void;
+  /** Expand to inline preview (image types in editor). */
+  onExpandToPreview?: () => void;
 }
 
 export function AttachmentCard({
@@ -109,8 +132,10 @@ export function AttachmentCard({
   attachmentId,
   href,
   uploading,
+  className,
   onPreview,
   onDownload,
+  onExpandToPreview,
 }: AttachmentCardProps) {
   const kind = filename ? getPreviewKind(contentType, filename) : null;
   // Media kinds (pdf/video/audio) are previewable from a URL alone — the
@@ -124,14 +149,16 @@ export function AttachmentCard({
     !!href && kind !== null && (!!attachmentId || isUrlPreviewableKind);
 
   return (
-    <div className="my-1">
+    <div className={className ?? "my-1"}>
       <AttachmentCardChrome
         filename={filename}
         uploading={uploading}
         canPreview={canPreview}
         canDownload={!!href}
+        canExpand={!!onExpandToPreview}
         onPreview={onPreview}
         onDownload={onDownload}
+        onExpand={onExpandToPreview}
       />
     </div>
   );

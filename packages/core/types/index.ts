@@ -28,6 +28,8 @@ export type {
   CreateAgentFromTemplateFailure,
   UpdateAgentRequest,
   UpdateAgentAllowedPrincipalsRequest,
+  AgentEnvResponse,
+  UpdateAgentEnvRequest,
   Skill,
   SkillSummary,
   AgentSkillSummary,
@@ -107,6 +109,10 @@ export type {
   CompleteGoogleBindingResponse,
   BindOpenclawWeixinRequest,
   BindOpenclawWeixinResponse,
+  AutoSubscribePreferenceKey,
+  AutoSubscribePreferences,
+  AutoSubscribePreferenceResponse,
+  UpdateAutoSubscribePreferenceRequest,
 } from "./notification";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
@@ -188,6 +194,7 @@ export type {
   Squad,
   SquadMember,
   SquadMemberType,
+  SquadMemberPreview,
   SquadActivityLog,
   SquadActivityOutcome,
   CreateSquadRequest,

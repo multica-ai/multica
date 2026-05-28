@@ -20,6 +20,8 @@ import type {
   UpdateAgentRequest,
   AgentAllowedPrincipal,
   UpdateAgentAllowedPrincipalsRequest,
+  AgentEnvResponse,
+  UpdateAgentEnvRequest,
   AgentTask,
   LocalPreview,
   LocalPreviewLogs,
@@ -99,11 +101,13 @@ import type {
   ListNotificationPreferencesResponse,
   NotificationChannelPreference,
   NotificationWebhook,
+  AutoSubscribePreferenceResponse,
   ListNotificationWebhooksResponse,
   CreateNotificationWebhookRequest,
   UpdateNotificationWebhookRequest,
   TestNotificationWebhookResponse,
   UpdateNotificationPreferenceRequest,
+  UpdateAutoSubscribePreferenceRequest,
   StartDingTalkBindingRequest,
   StartDingTalkBindingResponse,
   CompleteDingTalkBindingResponse,
@@ -168,6 +172,7 @@ import {
   CloudRuntimeNodeListSchema,
   CloudRuntimeNodeSchema,
   CreateAgentFromTemplateResponseSchema,
+  AutoSubscribePreferenceResponseSchema,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
   DashboardLocalRunTimeByRunnerListSchema,
@@ -181,23 +186,33 @@ import {
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_ATTACHMENT,
+  EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
+  EMPTY_ISSUE_LABELS_RESPONSE,
+  EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_SQUAD,
+  EMPTY_SQUAD_LIST,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   GroupedIssuesResponseSchema,
+  IssueLabelsResponseSchema,
+  LabelSchema,
   ListIssuesResponseSchema,
+  ListLabelsResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  SquadSchema,
+  SquadListSchema,
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
@@ -665,6 +680,31 @@ export class ApiClient {
     });
   }
 
+  async getAutoSubscribePreferences(): Promise<AutoSubscribePreferenceResponse> {
+    const raw = await this.fetch<unknown>("/api/auto-subscribe-preferences");
+    return parseWithFallback(
+      raw,
+      AutoSubscribePreferenceResponseSchema,
+      EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE,
+      { endpoint: "GET /api/auto-subscribe-preferences" },
+    );
+  }
+
+  async updateAutoSubscribePreferences(
+    preferences: UpdateAutoSubscribePreferenceRequest["preferences"],
+  ): Promise<AutoSubscribePreferenceResponse> {
+    const raw = await this.fetch<unknown>("/api/auto-subscribe-preferences", {
+      method: "PATCH",
+      body: JSON.stringify({ preferences }),
+    });
+    return parseWithFallback(
+      raw,
+      AutoSubscribePreferenceResponseSchema,
+      EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE,
+      { endpoint: "PATCH /api/auto-subscribe-preferences" },
+    );
+  }
+
   // Issues
   async listIssues(params?: ListIssuesParams): Promise<ListIssuesResponse> {
     const search = new URLSearchParams();
@@ -905,8 +945,11 @@ export class ApiClient {
   }
 
   /** Re-queue the agent for this reply (issue threads only). */
-  async retryAgentComment(commentId: string): Promise<void> {
-    await this.fetch(`/api/comments/${commentId}/retry-agent`, { method: "POST" });
+  async retryAgentComment(commentId: string, retryInstruction?: string): Promise<void> {
+    await this.fetch(`/api/comments/${commentId}/retry-agent`, {
+      method: "POST",
+      body: retryInstruction ? JSON.stringify({ retry_instruction: retryInstruction }) : undefined,
+    });
   }
 
   async resolveComment(commentId: string): Promise<Comment> {
@@ -1076,6 +1119,31 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/archive`, { method: "POST" });
   }
 
+  /**
+   * Returns the plaintext `custom_env` map for an agent. Owner/admin
+   * only; calls from agent-actor sessions get a 403. Every successful
+   * call writes an `agent_env_revealed` activity_log row server-side.
+   * MUL-2600.
+   */
+  async getAgentEnv(id: string): Promise<AgentEnvResponse> {
+    return this.fetch(`/api/agents/${id}/env`);
+  }
+
+  /**
+   * Replaces an agent's `custom_env` wholesale. Values equal to
+   * `"****"` are preserved server-side (the **** guard) so a partial
+   * UI edit doesn't overwrite real secrets with the masked
+   * placeholder. Owner/admin only; agent actors get a 403. Every
+   * successful call writes an `agent_env_updated` activity_log row.
+   * MUL-2600.
+   */
+  async updateAgentEnv(id: string, data: UpdateAgentEnvRequest): Promise<AgentEnvResponse> {
+    return this.fetch(`/api/agents/${id}/env`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
   async restoreAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/restore`, { method: "POST" });
   }
@@ -1088,10 +1156,11 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
   }
 
-  async listRuntimes(params?: { workspace_id?: string; owner?: "me" }): Promise<AgentRuntime[]> {
+  async listRuntimes(params?: { workspace_id?: string; owner?: "me"; owner_id?: string }): Promise<AgentRuntime[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.owner) search.set("owner", params.owner);
+    if (params?.owner_id) search.set("owner_id", params.owner_id);
     return this.fetch(`/api/runtimes?${search}`);
   }
 
@@ -1237,6 +1306,17 @@ export class ApiClient {
       throw new ApiError(await this.parseErrorMessage(res, "Failed to load local preview logs"), res.status, res.statusText);
     }
     return res.json() as Promise<LocalPreviewLogs>;
+  }
+
+  getLocalPreviewStreamUrl(
+    healthPort: number,
+    params?: { workspace_id?: string; issue_id?: string },
+  ): string {
+    const search = new URLSearchParams();
+    if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
+    if (params?.issue_id) search.set("issue_id", params.issue_id);
+    const suffix = search.toString() ? `?${search}` : "";
+    return `http://127.0.0.1:${healthPort}/preview/stream${suffix}`;
   }
 
   getLocalTaskTraceStreamUrl(
@@ -1600,10 +1680,13 @@ export class ApiClient {
     });
   }
 
-  async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
+  async rerunIssue(issueId: string, taskId?: string, retryInstruction?: string): Promise<AgentTask> {
+    const body: { task_id?: string; retry_instruction?: string } = {};
+    if (taskId) body.task_id = taskId;
+    if (retryInstruction) body.retry_instruction = retryInstruction;
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
-      body: JSON.stringify(taskId ? { task_id: taskId } : {}),
+      body: JSON.stringify(body),
     });
   }
 
@@ -2223,25 +2306,64 @@ export class ApiClient {
   }
 
   // Labels
-  async listLabels(): Promise<ListLabelsResponse> {
-    return this.fetch(`/api/labels`);
+  async listLabels(params?: { project_id?: string | null }): Promise<ListLabelsResponse> {
+    const search = new URLSearchParams();
+    if (params?.project_id) search.set("project_id", params.project_id);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(`/api/labels${qs ? `?${qs}` : ""}`);
+    return parseWithFallback(raw, ListLabelsResponseSchema, EMPTY_LIST_LABELS_RESPONSE, {
+      endpoint: "GET /api/labels",
+    });
   }
 
   async getLabel(id: string): Promise<Label> {
-    return this.fetch(`/api/labels/${id}`);
+    const raw = await this.fetch<unknown>(`/api/labels/${id}`);
+    return parseWithFallback(raw, LabelSchema, {
+      id,
+      workspace_id: "",
+      project_id: null,
+      name: "",
+      color: "#64748b",
+      created_at: "",
+      updated_at: "",
+    }, {
+      endpoint: "GET /api/labels/:id",
+    });
   }
 
   async createLabel(data: CreateLabelRequest): Promise<Label> {
-    return this.fetch(`/api/labels`, {
+    const raw = await this.fetch<unknown>(`/api/labels`, {
       method: "POST",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, LabelSchema, {
+      id: "",
+      workspace_id: "",
+      project_id: data.project_id ?? null,
+      name: data.name,
+      color: data.color,
+      created_at: "",
+      updated_at: "",
+    }, {
+      endpoint: "POST /api/labels",
     });
   }
 
   async updateLabel(id: string, data: UpdateLabelRequest): Promise<Label> {
-    return this.fetch(`/api/labels/${id}`, {
+    const raw = await this.fetch<unknown>(`/api/labels/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, LabelSchema, {
+      id,
+      workspace_id: "",
+      project_id: null,
+      name: data.name ?? "",
+      color: data.color ?? "#64748b",
+      created_at: "",
+      updated_at: "",
+    }, {
+      endpoint: "PUT /api/labels/:id",
     });
   }
 
@@ -2250,19 +2372,28 @@ export class ApiClient {
   }
 
   async listLabelsForIssue(issueId: string): Promise<IssueLabelsResponse> {
-    return this.fetch(`/api/issues/${issueId}/labels`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/labels`);
+    return parseWithFallback(raw, IssueLabelsResponseSchema, EMPTY_ISSUE_LABELS_RESPONSE, {
+      endpoint: "GET /api/issues/:id/labels",
+    });
   }
 
   async attachLabel(issueId: string, labelId: string): Promise<IssueLabelsResponse> {
-    return this.fetch(`/api/issues/${issueId}/labels`, {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/labels`, {
       method: "POST",
       body: JSON.stringify({ label_id: labelId }),
+    });
+    return parseWithFallback(raw, IssueLabelsResponseSchema, EMPTY_ISSUE_LABELS_RESPONSE, {
+      endpoint: "POST /api/issues/:id/labels",
     });
   }
 
   async detachLabel(issueId: string, labelId: string): Promise<IssueLabelsResponse> {
-    return this.fetch(`/api/issues/${issueId}/labels/${labelId}`, {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/labels/${labelId}`, {
       method: "DELETE",
+    });
+    return parseWithFallback(raw, IssueLabelsResponseSchema, EMPTY_ISSUE_LABELS_RESPONSE, {
+      endpoint: "DELETE /api/issues/:id/labels/:labelId",
     });
   }
 
@@ -2291,19 +2422,31 @@ export class ApiClient {
 
   // Squads
   async listSquads(): Promise<Squad[]> {
-    return this.fetch(`/api/squads`);
+    const raw = await this.fetch<unknown>(`/api/squads`);
+    return parseWithFallback(raw, SquadListSchema, EMPTY_SQUAD_LIST, {
+      endpoint: "GET /api/squads",
+    }) as Squad[];
   }
 
   async getSquad(id: string): Promise<Squad> {
-    return this.fetch(`/api/squads/${id}`);
+    const raw = await this.fetch<unknown>(`/api/squads/${id}`);
+    return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
+      endpoint: "GET /api/squads/:id",
+    }) as Squad;
   }
 
   async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string }): Promise<Squad> {
-    return this.fetch("/api/squads", { method: "POST", body: JSON.stringify(data) });
+    const raw = await this.fetch<unknown>("/api/squads", { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
+      endpoint: "POST /api/squads",
+    }) as Squad;
   }
 
   async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string }): Promise<Squad> {
-    return this.fetch(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
+    const raw = await this.fetch<unknown>(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
+    return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
+      endpoint: "PUT /api/squads/:id",
+    }) as Squad;
   }
 
   async deleteSquad(id: string): Promise<void> {

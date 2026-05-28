@@ -9,6 +9,12 @@ const text = (seq: number, content: string): ChatTimelineItem => ({
   content,
 });
 
+const final = (seq: number, content: string): ChatTimelineItem => ({
+  seq,
+  type: "final",
+  content,
+});
+
 const thinking = (seq: number, content = "..."): ChatTimelineItem => ({
   seq,
   type: "thinking",
@@ -70,6 +76,14 @@ describe("splitTimeline", () => {
     expect(out.final).toEqual([f1, f2]);
   });
 
+  it("treats trailing final events as answer text", () => {
+    const u = tool(1);
+    const f = final(2, "final answer");
+    const out = splitTimeline([u, f]);
+    expect(out.middle).toEqual([u]);
+    expect(out.final).toEqual([f]);
+  });
+
   it("collects leading text into preface", () => {
     const p = text(1, "preface");
     const u = tool(2);
@@ -84,6 +98,16 @@ describe("splitTimeline", () => {
 describe("extractCopyText", () => {
   it("falls back to message.content when timeline is empty (legacy)", () => {
     expect(extractCopyText(message("legacy body"), [])).toBe("legacy body");
+  });
+
+  it("prefers the persisted assistant message over transcript fragments", () => {
+    expect(
+      extractCopyText(message("full saved answer"), [
+        thinking(1),
+        tool(2),
+        text(3, "告知"),
+      ]),
+    ).toBe("full saved answer");
   });
 
   it("returns concatenated text segments for an all-text timeline", () => {

@@ -19,7 +19,11 @@ import { useMobileLogout } from "../auth/use-mobile-logout";
 import { Button, EmptyState, LoadingState, Screen } from "../components/ui/primitives";
 import { LoginScreen } from "../screens/auth/login-screen";
 import { CreateIssueScreen } from "../screens/issues/create-issue-screen";
-import { IssueDetailScreen } from "../screens/issues/issue-detail-screen";
+import {
+  IssueDetailScreen,
+  IssueTaskRunsScreen,
+  IssueTimelineScreen,
+} from "../screens/issues/issue-detail-screen";
 import { IssuePropertiesScreen } from "../screens/issues/issue-properties-screen";
 import { IssueTaskTranscriptScreen } from "../screens/issues/issue-task-transcript-screen";
 import { IssuesScreen } from "../screens/issues/issues-screen";
@@ -29,6 +33,7 @@ import { InboxScreen } from "../screens/mine/inbox-screen";
 import { AgentsScreen } from "../screens/mine/agents-screen";
 import { MineScreen } from "../screens/mine/mine-screen";
 import { SettingScreen } from "../screens/mine/setting-screen";
+import { SquadsScreen } from "../screens/mine/squads-screen";
 import { RuntimesScreen } from "../screens/runtimes/runtimes-screen";
 import { WorkspaceSetupScreen } from "../screens/workspace/workspace-setup-screen";
 import { colors, spacing } from "../theme/tokens";
@@ -39,11 +44,14 @@ export type RootStackParamList = {
   Main: undefined;
   IssueDetail: { issueId: string };
   IssueProperties: { issueId: string };
+  IssueTimeline: { issueId: string };
+  IssueTaskRuns: { issueId: string };
   IssueTaskTranscript: { issueId: string; taskId: string };
   CreateIssue: { parentIssueId?: string; parentIssueIdentifier?: string } | undefined;
   Search: undefined;
   Runtimes: undefined;
   Agents: undefined;
+  Squads: undefined;
   Inbox: undefined;
   InboxDetail: { inboxItemId: string };
   Setting: undefined;
@@ -134,11 +142,14 @@ function AuthenticatedNavigator() {
             <Stack.Screen component={MainTabs} name="Main" />
             <Stack.Screen component={IssueDetailScreen} name="IssueDetail" />
             <Stack.Screen component={IssuePropertiesScreen} name="IssueProperties" />
+            <Stack.Screen component={IssueTimelineScreen} name="IssueTimeline" />
+            <Stack.Screen component={IssueTaskRunsScreen} name="IssueTaskRuns" />
             <Stack.Screen component={IssueTaskTranscriptScreen} name="IssueTaskTranscript" />
             <Stack.Screen component={CreateIssueScreen} name="CreateIssue" />
             <Stack.Screen component={SearchScreen} name="Search" />
             <Stack.Screen component={RuntimesScreen} name="Runtimes" />
             <Stack.Screen component={AgentsScreen} name="Agents" />
+            <Stack.Screen component={SquadsScreen} name="Squads" />
             <Stack.Screen component={InboxScreen} name="Inbox" />
             <Stack.Screen component={InboxDetailScreen} name="InboxDetail" />
             <Stack.Screen component={SettingScreen} name="Setting" />

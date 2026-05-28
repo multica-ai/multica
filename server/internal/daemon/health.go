@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/daemon/trace"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // HealthResponse is returned by the daemon's local health endpoint.
@@ -59,10 +60,11 @@ type repoCheckoutRequest struct {
 }
 
 type traceResponse struct {
-	TaskID string            `json:"task_id"`
-	RunID  string            `json:"run_id"`
-	Runs   []string          `json:"runs,omitempty"`
-	Lines  []trace.TraceLine `json:"lines"`
+	TaskID        string            `json:"task_id"`
+	RunID         string            `json:"run_id"`
+	Runs          []string          `json:"runs,omitempty"`
+	Lines         []trace.TraceLine `json:"lines"`
+	StreamDisplay *bool             `json:"stream_display,omitempty"`
 }
 
 // healthHandler returns the /health HTTP handler. Extracted from serveHealth
@@ -266,19 +268,7 @@ func (d *Daemon) previewListHandler() http.HandlerFunc {
 		}
 		workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
 		issueID := strings.TrimSpace(r.URL.Query().Get("issue_id"))
-		if workspaceID != "" || issueID != "" {
-			filtered := previews[:0]
-			for _, preview := range previews {
-				if workspaceID != "" && preview.WorkspaceID != workspaceID {
-					continue
-				}
-				if issueID != "" && preview.IssueID != issueID {
-					continue
-				}
-				filtered = append(filtered, preview)
-			}
-			previews = filtered
-		}
+		previews = filterPreviews(previews, workspaceID, issueID)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"previews": previews})
 	}
@@ -426,6 +416,16 @@ var defaultTraceOrigins = []string{
 	"http://localhost:5174",
 }
 
+const (
+	defaultPreviewStreamInterval = time.Second
+	minPreviewStreamInterval     = 500 * time.Millisecond
+	maxPreviewStreamInterval     = 10 * time.Second
+)
+
+type previewStreamResponse struct {
+	Previews []Preview `json:"previews"`
+}
+
 func (d *Daemon) applyLocalDaemonCORS(w http.ResponseWriter, r *http.Request) {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" || !d.isAllowedTraceOrigin(origin) {
@@ -435,6 +435,9 @@ func (d *Daemon) applyLocalDaemonCORS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Vary", "Origin")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	if r.Header.Get("Access-Control-Request-Private-Network") == "true" {
+		w.Header().Set("Access-Control-Allow-Private-Network", "true")
+	}
 }
 
 func (d *Daemon) applyTraceCORS(w http.ResponseWriter, r *http.Request) {
@@ -523,6 +526,141 @@ func normalizeOrigin(raw string) string {
 	return parsed.Scheme + "://" + parsed.Host
 }
 
+func filterPreviews(previews []Preview, workspaceID, issueID string) []Preview {
+	if workspaceID == "" && issueID == "" {
+		return previews
+	}
+	filtered := previews[:0]
+	for _, preview := range previews {
+		if workspaceID != "" && preview.WorkspaceID != workspaceID {
+			continue
+		}
+		if issueID != "" && preview.IssueID != issueID {
+			continue
+		}
+		filtered = append(filtered, preview)
+	}
+	return filtered
+}
+
+func parsePreviewStreamInterval(raw string) (time.Duration, error) {
+	if strings.TrimSpace(raw) == "" {
+		return defaultPreviewStreamInterval, nil
+	}
+	intervalMS, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, fmt.Errorf("invalid interval_ms")
+	}
+	interval := time.Duration(intervalMS) * time.Millisecond
+	if interval < minPreviewStreamInterval {
+		return minPreviewStreamInterval, nil
+	}
+	if interval > maxPreviewStreamInterval {
+		return maxPreviewStreamInterval, nil
+	}
+	return interval, nil
+}
+
+func previewSnapshotFingerprint(previews []Preview) string {
+	stable := append([]Preview(nil), previews...)
+	for i := range stable {
+		stable[i].LastHealthAt = time.Time{}
+	}
+	data, err := json.Marshal(stable)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func (d *Daemon) previewStreamHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		d.applyLocalDaemonCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if d.previews == nil {
+			http.Error(w, "preview manager not initialized", http.StatusServiceUnavailable)
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		interval, err := parsePreviewStreamInterval(r.URL.Query().Get("interval_ms"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+		issueID := strings.TrimSpace(r.URL.Query().Get("issue_id"))
+		sendEvent := func(event string, payload any) bool {
+			data, err := json.Marshal(payload)
+			if err != nil {
+				return true
+			}
+			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+				return false
+			}
+			flusher.Flush()
+			return true
+		}
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		initialized := false
+		lastFingerprint := ""
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			default:
+			}
+
+			previews, err := d.previews.List(r.Context())
+			if err != nil {
+				_ = sendEvent("error", map[string]string{"error": err.Error()})
+				return
+			}
+			previews = filterPreviews(previews, workspaceID, issueID)
+			fingerprint := previewSnapshotFingerprint(previews)
+			payload := previewStreamResponse{Previews: previews}
+
+			if !initialized {
+				if !sendEvent("ready", payload) {
+					return
+				}
+				initialized = true
+				lastFingerprint = fingerprint
+			} else if fingerprint != lastFingerprint {
+				if !sendEvent("snapshot", payload) {
+					return
+				}
+				lastFingerprint = fingerprint
+			}
+
+			select {
+			case <-r.Context().Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}
+}
+
 func (d *Daemon) streamTrace(w http.ResponseWriter, r *http.Request, taskID string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -568,12 +706,17 @@ func (d *Daemon) streamTrace(w http.ResponseWriter, r *http.Request, taskID stri
 	}
 
 	sendReady := func(runs []string) bool {
-		return sendEvent("ready", traceResponse{
+		resp := traceResponse{
 			TaskID: taskID,
 			RunID:  runID,
 			Runs:   runs,
 			Lines:  []trace.TraceLine{},
-		})
+		}
+		if prov, ok := d.taskProviders.Load(taskID); ok {
+			cap := agent.CapabilityOrDefault(prov.(string))
+			resp.StreamDisplay = &cap.StreamDisplay
+		}
+		return sendEvent("ready", resp)
 	}
 
 	sendLines := func(lines []trace.TraceLine) bool {
@@ -647,6 +790,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux.HandleFunc("/traces/tasks/", d.traceHandler())
 	mux.HandleFunc("/preview/start", d.previewStartHandler())
 	mux.HandleFunc("/preview/list", d.previewListHandler())
+	mux.HandleFunc("/preview/stream", d.previewStreamHandler())
 	mux.HandleFunc("/preview/status", d.previewStatusHandler())
 	mux.HandleFunc("/preview/stop", d.previewStopHandler())
 	mux.HandleFunc("/preview/restart", d.previewRestartHandler())

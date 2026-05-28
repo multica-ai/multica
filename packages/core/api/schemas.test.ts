@@ -2,18 +2,22 @@ import { describe, expect, it } from "vitest";
 import {
   AgentRunDashboardSchema,
   AgentRunDashboardRunDetailSchema,
+  AutoSubscribePreferenceResponseSchema,
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   DuplicateIssueErrorBodySchema,
   EMPTY_AGENT_RUN_DASHBOARD,
   EMPTY_AGENT_RUN_DETAIL,
+  EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE,
   EMPTY_USER,
   ListIssuesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  SquadListSchema,
+  SquadSchema,
   UserSchema,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
@@ -165,6 +169,87 @@ describe("UserSchema timezone drift", () => {
       { endpoint: "GET /api/me" },
     );
     expect(parsed).toBe(EMPTY_USER);
+  });
+});
+
+describe("AutoSubscribePreferenceResponseSchema drift", () => {
+  it("defaults missing preference keys to the product defaults", () => {
+    const parsed = AutoSubscribePreferenceResponseSchema.parse({
+      workspace_id: "workspace-1",
+      preferences: {
+        issue_description_mention: true,
+      },
+    });
+
+    expect(parsed.preferences).toMatchObject({
+      issue_creator: true,
+      issue_assignee: true,
+      comment_author: true,
+      issue_description_mention: true,
+      comment_mention: false,
+      quick_create_requester: true,
+    });
+  });
+
+  it("falls back when a preference value has the wrong type", () => {
+    const parsed = parseWithFallback(
+      {
+        workspace_id: "workspace-1",
+        preferences: {
+          issue_creator: "yes",
+        },
+      },
+      AutoSubscribePreferenceResponseSchema,
+      EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE,
+      { endpoint: "GET /api/auto-subscribe-preferences" },
+    );
+
+    expect(parsed).toBe(EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE);
+  });
+});
+
+describe("SquadListSchema member preview drift", () => {
+  const baseSquad = {
+    id: "squad-1",
+    workspace_id: "ws-1",
+    name: "Frontend Squad",
+    description: "",
+    instructions: "",
+    avatar_url: null,
+    leader_id: "agent-1",
+    creator_id: "user-1",
+    created_at: "2026-05-01T00:00:00Z",
+    updated_at: "2026-05-01T00:00:00Z",
+    archived_at: null,
+    archived_by: null,
+  };
+
+  it("defaults preview fields when an older backend omits them", () => {
+    const parsed = SquadListSchema.parse([baseSquad]);
+    expect(parsed[0]?.member_count).toBe(0);
+    expect(parsed[0]?.member_preview).toEqual([]);
+  });
+
+  it("defaults preview fields on a single squad response", () => {
+    const parsed = SquadSchema.parse(baseSquad);
+    expect(parsed.member_count).toBe(0);
+    expect(parsed.member_preview).toEqual([]);
+  });
+
+  it("preserves lightweight member preview rows", () => {
+    const parsed = SquadListSchema.parse([
+      {
+        ...baseSquad,
+        member_count: 2,
+        member_preview: [
+          { member_type: "agent", member_id: "agent-1", role: "leader" },
+          { member_type: "member", member_id: "user-2", role: "member" },
+        ],
+      },
+    ]);
+    expect(parsed[0]?.member_count).toBe(2);
+    expect(parsed[0]?.member_preview).toHaveLength(2);
+    expect(parsed[0]?.member_preview?.[0]?.role).toBe("leader");
   });
 });
 

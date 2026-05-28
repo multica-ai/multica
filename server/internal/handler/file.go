@@ -159,14 +159,15 @@ type directUploadClaims struct {
 }
 
 func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
+	remappedURL := h.Storage.RemapURL(a.Url)
 	resp := AttachmentResponse{
 		ID:           uuidToString(a.ID),
 		WorkspaceID:  uuidToString(a.WorkspaceID),
 		UploaderType: a.UploaderType,
 		UploaderID:   uuidToString(a.UploaderID),
 		Filename:     a.Filename,
-		URL:          a.Url,
-		DownloadURL:  a.Url,
+		URL:          remappedURL,
+		DownloadURL:  remappedURL,
 		ContentType:  a.ContentType,
 		SizeBytes:    a.SizeBytes,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
@@ -1286,7 +1287,7 @@ func (h *Handler) GetAttachmentPreviewURL(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	signed := h.signedDownloadURL(att.Url)
+	signed := h.signedPreviewURL(att)
 	expires := time.Now().Add(30 * time.Minute).Unix()
 	writeJSON(w, http.StatusOK, previewURLResponse{URL: signed, ExpiresAt: expires})
 }
@@ -1295,7 +1296,12 @@ func (h *Handler) GetAttachmentPreviewURL(w http.ResponseWriter, r *http.Request
 // Falls back to returning the raw URL when no signing is configured.
 func (h *Handler) signedDownloadURL(rawURL string) string {
 	if h.CFSigner != nil {
-		return h.CFSigner.SignedURL(rawURL, time.Now().Add(30*time.Minute))
+		cdnURL := h.Storage.RemapURL(rawURL)
+		return h.CFSigner.SignedURL(cdnURL, time.Now().Add(30*time.Minute))
+	}
+	// CDN domain set without CloudFront signer → public-read CDN; just remap.
+	if h.Storage.CdnDomain() != "" {
+		return h.Storage.RemapURL(rawURL)
 	}
 	if ps, ok := h.Storage.(storage.PresignedGetStorage); ok {
 		key := h.Storage.KeyFromURL(rawURL)
@@ -1306,6 +1312,32 @@ func (h *Handler) signedDownloadURL(rawURL string) string {
 		}
 	}
 	return rawURL
+}
+
+func (h *Handler) signedPreviewURL(att db.Attachment) string {
+	if h.CFSigner != nil {
+		cdnURL := h.Storage.RemapURL(att.Url)
+		return h.CFSigner.SignedURL(cdnURL, time.Now().Add(30*time.Minute))
+	}
+	// CDN domain set without CloudFront signer → public-read CDN; just remap.
+	if h.Storage.CdnDomain() != "" {
+		return h.Storage.RemapURL(att.Url)
+	}
+	key := h.Storage.KeyFromURL(att.Url)
+	if key == "" {
+		return att.Url
+	}
+	if ps, ok := h.Storage.(storage.PresignedInlineGetStorage); ok {
+		if signed, err := ps.PresignedInlineGetURL(context.Background(), key, att.ContentType, att.Filename, 30*time.Minute); err == nil {
+			return signed
+		}
+	}
+	if ps, ok := h.Storage.(storage.PresignedGetStorage); ok {
+		if signed, err := ps.PresignedGetURL(context.Background(), key, 30*time.Minute); err == nil {
+			return signed
+		}
+	}
+	return att.Url
 }
 
 // ---------------------------------------------------------------------------

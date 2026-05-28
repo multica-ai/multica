@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -11,7 +11,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Agent, CreateAgentRequest, UpdateAgentRequest } from "@multica/core/types";
+import type {
+  Agent,
+  AgentAllowedPrincipal,
+  CopyAgentRequest,
+  UpdateAgentAllowedPrincipalsRequest,
+  UpdateAgentRequest,
+} from "@multica/core/types";
 import {
   agentAllowedPrincipalKeys,
   agentAllowedPrincipalsOptions,
@@ -105,26 +111,25 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const { canEdit } = useAgentPermissions(agent, wsId);
   const canManageAllowedPrincipals =
     !!agent?.owner_id && agent.owner_id === currentUser?.id;
-  const { data: allowedPrincipals = [], isLoading: allowedPrincipalsLoading } =
+  const {
+    data: allowedPrincipals = [],
+    isLoading: allowedPrincipalsLoading,
+    isFetching: allowedPrincipalsFetching,
+  } =
     useQuery({
       ...agentAllowedPrincipalsOptions(wsId, agentId),
       enabled: !!agent && agent.visibility === "private" && canManageAllowedPrincipals,
     });
+  const allowedPrincipalUserIds = useMemo(
+    () => allowedPrincipals.map((p) => p.user_id),
+    [allowedPrincipals],
+  );
 
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [showDuplicate, setShowDuplicate] = useState(false);
 
-  const handleDuplicate = async (data: CreateAgentRequest) => {
-    const created = await api.createAgent(data);
-    if (agent?.skills.length) {
-      try {
-        await api.setAgentSkills(created.id, {
-          skill_ids: agent.skills.map((s) => s.id),
-        });
-      } catch {
-        // Skills copy is best-effort
-      }
-    }
+  const handleDuplicate = async (sourceAgentId: string, data: CopyAgentRequest) => {
+    const created = await api.copyAgent(sourceAgentId, data);
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     qc.setQueryData(agentDetailKeys.detail(wsId, created.id), created);
     setShowDuplicate(false);
@@ -180,10 +185,16 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     }
   };
 
-  const handleUpdateAllowedPrincipals = async (userIds: string[]) => {
+  const handleUpdateAllowedPrincipals = async (
+    data: UpdateAgentAllowedPrincipalsRequest,
+  ) => {
     if (!canManageAllowedPrincipals || !agent) return;
     try {
-      await api.updateAgentAllowedPrincipals(agent.id, { user_ids: userIds });
+      const updated = await api.updateAgentAllowedPrincipals(agent.id, data);
+      qc.setQueryData<AgentAllowedPrincipal[]>(
+        agentAllowedPrincipalKeys.detail(wsId, agent.id),
+        updated,
+      );
       await Promise.all([
         qc.invalidateQueries({
           queryKey: agentAllowedPrincipalKeys.detail(wsId, agent.id),
@@ -351,8 +362,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           currentUserId={currentUser?.id ?? null}
           canEdit={canEdit.allowed}
           canManageAllowedPrincipals={canManageAllowedPrincipals}
-          allowedPrincipalUserIds={allowedPrincipals.map((p) => p.user_id)}
-          allowedPrincipalsLoading={allowedPrincipalsLoading}
+          allowedPrincipalUserIds={allowedPrincipalUserIds}
+          allowedPrincipalsLoading={allowedPrincipalsLoading || allowedPrincipalsFetching}
           onUpdate={handleUpdate}
           onUpdateAllowedPrincipals={handleUpdateAllowedPrincipals}
         />
@@ -416,7 +427,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           currentUserId={currentUser?.id ?? null}
           template={agent}
           onClose={() => setShowDuplicate(false)}
-          onCreate={handleDuplicate}
+          onCreate={async () => undefined}
+          onDuplicate={handleDuplicate}
         />
       )}
     </div>

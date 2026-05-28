@@ -250,7 +250,7 @@ func simulateCopilotEventLoopWithModel(t *testing.T, lines []string, seedModel s
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}
-		msgs = append(msgs, handleCopilotEvent(evt, st)...)
+		msgs = append(msgs, handleCopilotEvent(evt, st, nil)...)
 	}
 	return msgs, st.sessionID, st.finalStatus, st.usage
 }
@@ -447,7 +447,7 @@ func TestCopilotEventLoopSessionErrorSurvivesNonZeroResult(t *testing.T) {
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			t.Fatal(err)
 		}
-		handleCopilotEvent(evt, st)
+		handleCopilotEvent(evt, st, nil)
 	}
 
 	if st.finalStatus != "failed" {
@@ -565,6 +565,39 @@ func TestCopilotEventLoopSeedModelFromOpts(t *testing.T) {
 	}
 }
 
+func TestCopilotEventLoopMergesFlatResultUsageSnapshot(t *testing.T) {
+	t.Parallel()
+	lines := []string{
+		fixtureSessionStart,
+		fixtureAssistantMessage, // outputTokens=5 from assistant.message.
+		`{"type":"result","sessionId":"final-id","exitCode":0,"usage":{"input_tokens":123,"output_tokens":7,"cached_input_tokens":11,"cache_creation_input_tokens":13,"premiumRequests":1}}`,
+	}
+
+	_, sessionID, _, usage := simulateCopilotEventLoop(t, lines)
+
+	if sessionID != "final-id" {
+		t.Fatalf("expected result session id to win, got %q", sessionID)
+	}
+	u := usage["claude-sonnet-4"]
+	if u.InputTokens != 123 || u.OutputTokens != 7 || u.CacheReadTokens != 11 || u.CacheWriteTokens != 13 {
+		t.Fatalf("usage = %+v, want input=123 output=7 cache_read=11 cache_write=13", u)
+	}
+}
+
+func TestCopilotEventLoopMergesModelResultUsage(t *testing.T) {
+	t.Parallel()
+	lines := []string{
+		`{"type":"result","sessionId":"final-id","exitCode":0,"usage":{"modelUsage":{"claude-opus-4.6":{"inputTokens":200,"outputTokens":80,"cacheReadTokens":30}}}}`,
+	}
+
+	_, _, _, usage := simulateCopilotEventLoop(t, lines)
+
+	u := usage["claude-opus-4.6"]
+	if u.InputTokens != 200 || u.OutputTokens != 80 || u.CacheReadTokens != 30 {
+		t.Fatalf("usage = %+v, want input=200 output=80 cache_read=30", u)
+	}
+}
+
 func TestCopilotEventLoopReasoning(t *testing.T) {
 	t.Parallel()
 	lines := []string{
@@ -646,7 +679,7 @@ func TestCopilotEventLoopDeltaFallbackOutput(t *testing.T) {
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			t.Fatal(err)
 		}
-		handleCopilotEvent(evt, st)
+		handleCopilotEvent(evt, st, nil)
 	}
 
 	if st.output.String() != "hello world" {
@@ -662,7 +695,6 @@ func TestCopilotExecuteSurfacesStderrOnNonZeroResult(t *testing.T) {
 
 	fakePath := filepath.Join(t.TempDir(), "copilot")
 	script := "#!/bin/sh\n" +
-		"printf '%s\\n' '{\"type\":\"result\",\"sessionId\":\"sess-fail\",\"exitCode\":1}'\n" +
 		"echo \"error: authentication failed: refresh token expired\" >&2\n" +
 		"exit 1\n"
 	writeTestExecutable(t, fakePath, []byte(script))
@@ -691,8 +723,8 @@ func TestCopilotExecuteSurfacesStderrOnNonZeroResult(t *testing.T) {
 		if result.Status != "failed" {
 			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
 		}
-		if !strings.Contains(result.Error, "copilot exited with code 1") {
-			t.Fatalf("expected error to mention exit code, got %q", result.Error)
+		if !strings.Contains(result.Error, "copilot initialize failed") {
+			t.Fatalf("expected initialize failure, got %q", result.Error)
 		}
 		if !strings.Contains(result.Error, "refresh token expired") {
 			t.Fatalf("expected error to include stderr hint, got %q", result.Error)
@@ -710,13 +742,8 @@ func TestCopilotExecuteSurfacesStderrOnNonZeroResult(t *testing.T) {
 func TestBuildCopilotArgsBaseline(t *testing.T) {
 	t.Parallel()
 
-	args := buildCopilotArgs("write a haiku", ExecOptions{}, slog.Default())
-	expected := []string{
-		"-p", "write a haiku",
-		"--output-format", "json",
-		"--allow-all",
-		"--no-ask-user",
-	}
+	args := buildCopilotArgs(ExecOptions{}, slog.Default())
+	expected := []string{"--acp"}
 
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
@@ -728,50 +755,36 @@ func TestBuildCopilotArgsBaseline(t *testing.T) {
 	}
 }
 
-func TestBuildCopilotArgsWithModel(t *testing.T) {
+func TestBuildCopilotSessionParamsWithModel(t *testing.T) {
 	t.Parallel()
 
-	args := buildCopilotArgs("hi", ExecOptions{Model: "gpt-4o"}, slog.Default())
+	params := buildCopilotSessionParams("/tmp/project", ExecOptions{Model: "gpt-4o"})
 
-	var foundModel bool
-	for i, a := range args {
-		if a == "--model" {
-			if i+1 >= len(args) || args[i+1] != "gpt-4o" {
-				t.Fatalf("expected --model followed by gpt-4o, got %v", args)
-			}
-			foundModel = true
-			break
-		}
+	if params["cwd"] != "/tmp/project" {
+		t.Fatalf("expected cwd param, got %#v", params["cwd"])
 	}
-	if !foundModel {
-		t.Fatalf("expected --model flag when Model is set, got args=%v", args)
+	if params["model"] != "gpt-4o" {
+		t.Fatalf("expected model param gpt-4o, got %#v", params["model"])
 	}
 }
 
-func TestBuildCopilotArgsWithResume(t *testing.T) {
+func TestBuildCopilotArgsOmitsPromptAndResumeFlags(t *testing.T) {
 	t.Parallel()
 
-	args := buildCopilotArgs("hi", ExecOptions{ResumeSessionID: "sess-42"}, slog.Default())
+	args := buildCopilotArgs(ExecOptions{ResumeSessionID: "sess-42"}, slog.Default())
 
-	var foundResume bool
-	for i, a := range args {
-		if a == "--resume" {
-			if i+1 >= len(args) || args[i+1] != "sess-42" {
-				t.Fatalf("expected --resume followed by session id, got %v", args)
-			}
-			foundResume = true
-			break
+	for _, a := range args {
+		switch a {
+		case "-p", "--output-format", "--resume", "sess-42":
+			t.Fatalf("ACP transport should not use pipe/json/resume argv, got %v", args)
 		}
-	}
-	if !foundResume {
-		t.Fatalf("expected --resume flag when ResumeSessionID is set, got args=%v", args)
 	}
 }
 
 func TestBuildCopilotArgsOmitsOptionalWhenEmpty(t *testing.T) {
 	t.Parallel()
 
-	args := buildCopilotArgs("hi", ExecOptions{}, slog.Default())
+	args := buildCopilotArgs(ExecOptions{}, slog.Default())
 	for _, a := range args {
 		if a == "--model" {
 			t.Fatalf("expected no --model flag when Model is empty, got args=%v", args)
@@ -785,7 +798,7 @@ func TestBuildCopilotArgsOmitsOptionalWhenEmpty(t *testing.T) {
 func TestBuildCopilotArgsPassesThroughCustomArgs(t *testing.T) {
 	t.Parallel()
 
-	args := buildCopilotArgs("hi", ExecOptions{
+	args := buildCopilotArgs(ExecOptions{
 		CustomArgs: []string{"--max-turns", "50"},
 	}, slog.Default())
 
@@ -797,7 +810,7 @@ func TestBuildCopilotArgsPassesThroughCustomArgs(t *testing.T) {
 func TestBuildCopilotArgsFiltersBlockedCustomArgs(t *testing.T) {
 	t.Parallel()
 
-	args := buildCopilotArgs("hi", ExecOptions{
+	args := buildCopilotArgs(ExecOptions{
 		CustomArgs: []string{"--output-format", "text", "--max-turns", "50"},
 	}, slog.Default())
 
@@ -820,7 +833,7 @@ func TestBuildCopilotArgsFiltersBlockedCustomArgs(t *testing.T) {
 func TestBuildCopilotArgsBlocksResumeAndACP(t *testing.T) {
 	t.Parallel()
 
-	args := buildCopilotArgs("hi", ExecOptions{
+	args := buildCopilotArgs(ExecOptions{
 		CustomArgs: []string{"--resume", "bad-session", "--acp", "--yolo"},
 	}, slog.Default())
 
@@ -828,11 +841,363 @@ func TestBuildCopilotArgsBlocksResumeAndACP(t *testing.T) {
 		if a == "bad-session" {
 			t.Fatalf("blocked --resume value should have been filtered: %v", args)
 		}
-		if a == "--acp" {
-			t.Fatalf("blocked --acp should have been filtered: %v", args)
-		}
 		if a == "--yolo" {
 			t.Fatalf("blocked --yolo should have been filtered: %v", args)
 		}
+	}
+	if len(args) != 1 || args[0] != "--acp" {
+		t.Fatalf("expected only daemon-owned --acp arg, got %v", args)
+	}
+}
+
+// ── Approval mode tests ──
+
+func TestBuildCopilotArgsAutoModeUsesAllowAll(t *testing.T) {
+	t.Parallel()
+	params := buildCopilotSessionParams(".", ExecOptions{})
+
+	config, ok := params["config"].([]map[string]any)
+	if !ok || len(config) != 1 {
+		t.Fatalf("expected allow_all config in auto mode, got %#v", params["config"])
+	}
+	if config[0]["name"] != "allow_all" || config[0]["value"] != "on" {
+		t.Fatalf("unexpected auto config: %#v", config)
+	}
+}
+
+func TestBuildCopilotSessionParamsPromptModeDoesNotAllowAll(t *testing.T) {
+	t.Parallel()
+	callback := func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "allow", true, nil
+	}
+	params := buildCopilotSessionParams(".", ExecOptions{OnApproval: callback})
+
+	if _, ok := params["config"]; ok {
+		t.Fatalf("prompt mode must not set allow_all config, got %#v", params["config"])
+	}
+}
+
+func TestBuildCopilotArgsNoLegacyApprovalFlags(t *testing.T) {
+	t.Parallel()
+	callback := func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "allow", true, nil
+	}
+	args := buildCopilotArgs(ExecOptions{OnApproval: callback}, slog.Default())
+
+	for _, a := range args {
+		switch a {
+		case "--allow-all", "--allow-all-tools", "--allow-all-paths", "--allow-all-urls", "--no-ask-user":
+			t.Fatalf("ACP mode must not use legacy approval argv, got %v", args)
+		}
+	}
+}
+
+func TestBuildCopilotSessionParamsPromptModeWithModel(t *testing.T) {
+	t.Parallel()
+	callback := func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "allow", true, nil
+	}
+	params := buildCopilotSessionParams(".", ExecOptions{
+		OnApproval: callback,
+		Model:      "gpt-4o",
+	})
+
+	if params["model"] != "gpt-4o" {
+		t.Fatalf("expected model gpt-4o, got %#v", params["model"])
+	}
+	if _, ok := params["config"]; ok {
+		t.Fatalf("prompt mode must not set allow_all config, got %#v", params["config"])
+	}
+}
+
+// ── ACP client tests ──
+
+func TestCopilotACPClientPermissionRequestUsesApprovalCallback(t *testing.T) {
+	t.Parallel()
+
+	w := &bufferWriter{}
+	var gotReq ApprovalRequest
+	c := &copilotACPClient{
+		cfg:     Config{Logger: slog.Default()},
+		stdin:   w,
+		pending: make(map[int]*pendingRPC),
+		runCtx:  context.Background(),
+		onApproval: func(_ context.Context, req ApprovalRequest) (string, bool, error) {
+			gotReq = req
+			return "allow_once", true, nil
+		},
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":42,"method":"session/request_permission","params":{"sessionId":"ses_1","options":[{"optionId":"allow_once","name":"Allow once","kind":"allow_once"},{"optionId":"allow_session","name":"Allow for session","kind":"allow_always"},{"optionId":"deny","name":"Deny","kind":"reject_once"}],"toolCall":{"toolCallId":"tc_1","title":"Run requested echo command","kind":"execute","rawInput":{"command":"echo hello","commands":["echo hello"]}}}}`)
+
+	if gotReq.Type != "permission_request" {
+		t.Fatalf("expected permission_request, got %+v", gotReq)
+	}
+	if gotReq.Title != "Run requested echo command" {
+		t.Fatalf("unexpected title: %q", gotReq.Title)
+	}
+	if !strings.Contains(gotReq.Detail, "echo hello") {
+		t.Fatalf("expected detail to include rawInput, got %q", gotReq.Detail)
+	}
+	if gotReq.DefaultOption != "deny" {
+		t.Fatalf("expected deny default, got %q", gotReq.DefaultOption)
+	}
+
+	var resp struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      int    `json:"id"`
+		Result  struct {
+			Outcome struct {
+				Outcome  string `json:"outcome"`
+				OptionID string `json:"optionId"`
+			} `json:"outcome"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(w.String())), &resp); err != nil {
+		t.Fatalf("reply is not valid JSON: %q err=%v", w.String(), err)
+	}
+	if resp.ID != 42 {
+		t.Fatalf("expected id 42, got %d", resp.ID)
+	}
+	if resp.Result.Outcome.Outcome != "selected" {
+		t.Fatalf("expected outcome 'selected', got %q", resp.Result.Outcome.Outcome)
+	}
+	if resp.Result.Outcome.OptionID != "allow_once" {
+		t.Fatalf("expected allow_once response, got %q", resp.Result.Outcome.OptionID)
+	}
+}
+
+func TestCopilotACPClientPermissionRequestDeniesOnCallbackRejection(t *testing.T) {
+	t.Parallel()
+
+	w := &bufferWriter{}
+	c := &copilotACPClient{
+		cfg:     Config{Logger: slog.Default()},
+		stdin:   w,
+		pending: make(map[int]*pendingRPC),
+		runCtx:  context.Background(),
+		onApproval: func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+			return "allow_once", false, nil
+		},
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"options":[{"optionId":"allow_once","kind":"allow_once"},{"optionId":"deny","kind":"reject_once"}],"toolCall":{"title":"Shell"}}}`)
+
+	var resp struct {
+		Result struct {
+			Outcome struct {
+				Outcome  string `json:"outcome"`
+				OptionID string `json:"optionId"`
+			} `json:"outcome"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(w.String())), &resp); err != nil {
+		t.Fatalf("reply is not valid JSON: %q err=%v", w.String(), err)
+	}
+	if resp.Result.Outcome.OptionID != "deny" {
+		t.Fatalf("expected deny response, got %q", resp.Result.Outcome.OptionID)
+	}
+}
+
+func TestCopilotACPClientTextChunksDebounceUntilFlush(t *testing.T) {
+	t.Parallel()
+
+	var got []Message
+	var assistantTextEvents int
+	c := &copilotACPClient{
+		pending: make(map[int]*pendingRPC),
+		onMessage: func(msg Message) {
+			got = append(got, msg)
+		},
+		traceCallback: func(channel, content, rawPayload string) {
+			if channel == "display_event" {
+				var evt struct {
+					Type string `json:"type"`
+				}
+				if json.Unmarshal([]byte(content), &evt) == nil && evt.Type == "assistant_text" {
+					assistantTextEvents++
+				}
+			}
+		},
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello "}}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"world"}}}}`)
+	if len(got) != 0 {
+		t.Fatalf("expected debounce to hold chunks before explicit flush, got %+v", got)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","title":"terminal: pwd","kind":"execute","status":"pending","rawInput":{"command":"pwd"}}}}`)
+	if len(got) < 2 {
+		t.Fatalf("expected flushed text and tool use, got %+v", got)
+	}
+	if got[0].Type != MessageText || got[0].Content != "hello world" {
+		t.Fatalf("expected aggregated text first, got %+v", got[0])
+	}
+	if got[1].Type != MessageToolUse {
+		t.Fatalf("expected tool use after flush, got %+v", got[1])
+	}
+	if assistantTextEvents != 1 {
+		t.Fatalf("expected one assistant_text display event, got %d", assistantTextEvents)
+	}
+}
+
+func TestCopilotACPClientToolLifecycle(t *testing.T) {
+	t.Parallel()
+
+	var got []Message
+	c := &copilotACPClient{
+		pending:      make(map[int]*pendingRPC),
+		pendingTools: make(map[string]*pendingToolCall),
+		onMessage: func(msg Message) {
+			got = append(got, msg)
+		},
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","title":"terminal: ls -la","kind":"execute","status":"pending","rawInput":{"command":"ls -la"}}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed","kind":"execute","rawOutput":"file.go\n"}}}`)
+
+	if len(got) != 2 {
+		t.Fatalf("expected two messages, got %+v", got)
+	}
+	if got[0].Type != MessageToolUse || got[0].Tool != "terminal" {
+		t.Fatalf("unexpected tool use: %+v", got[0])
+	}
+	if got[1].Type != MessageToolResult || got[1].Output != "file.go\n" {
+		t.Fatalf("unexpected tool result: %+v", got[1])
+	}
+}
+
+// ── Capability registry tests ──
+
+func TestCopilotCapabilityRegistration(t *testing.T) {
+	t.Parallel()
+	cap, ok := CapabilityFor("copilot")
+	if !ok {
+		t.Fatal("expected copilot to be registered in capability registry")
+	}
+	if !cap.StreamDisplay {
+		t.Fatal("expected StreamDisplay=true for copilot")
+	}
+	if !cap.ToolCallStream {
+		t.Fatal("expected ToolCallStream=true for copilot")
+	}
+	if !cap.ResumeSession {
+		t.Fatal("expected ResumeSession=true for copilot")
+	}
+	if !cap.StructuredOutput {
+		t.Fatal("expected StructuredOutput=true for copilot")
+	}
+	if !cap.Approval {
+		t.Fatal("expected Approval=true for copilot so daemon injects unified approval callbacks")
+	}
+	if cap.PlanMode {
+		t.Fatal("expected PlanMode=false for copilot")
+	}
+}
+
+func TestCapabilityOrDefaultUnknownProvider(t *testing.T) {
+	t.Parallel()
+	cap := CapabilityOrDefault("unknown-provider")
+	if cap != (Capability{}) {
+		t.Fatalf("expected zero-value Capability for unknown provider, got %+v", cap)
+	}
+}
+
+func TestCopilotHandleLineNoRawProviderTraces(t *testing.T) {
+	t.Parallel()
+
+	var traceChannels []string
+	c := &copilotACPClient{
+		cfg:     Config{Logger: slog.Default()},
+		pending: make(map[int]*pendingRPC),
+		traceCallback: func(channel, _, _ string) {
+			traceChannels = append(traceChannels, channel)
+		},
+	}
+
+	// Use ACP JSON-RPC notification messages (the format handleLine expects).
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"}}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","title":"terminal: pwd","kind":"execute","status":"pending","rawInput":{"command":"pwd"}}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed","kind":"execute","rawOutput":"file.go"}}}}`)
+
+	for _, tc := range traceChannels {
+		if tc == "raw_stdout" || tc == "provider_event" {
+			t.Errorf("standardized provider must not emit %q trace to user-visible stream", tc)
+		}
+	}
+
+	hasDisplay := false
+	for _, tc := range traceChannels {
+		if tc == "display_event" {
+			hasDisplay = true
+			break
+		}
+	}
+	if !hasDisplay {
+		t.Fatal("expected display_event traces to be emitted")
+	}
+}
+
+func TestCopilotACPClientAutoApprovesTrustedPlatformCommands(t *testing.T) {
+	t.Parallel()
+
+	w := &bufferWriter{}
+	approved := false
+	c := &copilotACPClient{
+		cfg:     Config{Logger: slog.Default()},
+		stdin:   w,
+		pending: make(map[int]*pendingRPC),
+		runCtx:  context.Background(),
+		onApproval: func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+			approved = true
+			return "allow_once", true, nil
+		},
+	}
+
+	// "multica preview start" is a trusted platform command — must be
+	// auto-approved without calling the approval callback.
+	c.handleLine(`{"jsonrpc":"2.0","id":10,"method":"session/request_permission","params":{"sessionId":"ses_1","options":[{"optionId":"allow_once","name":"Allow once","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}],"toolCall":{"toolCallId":"tc_trusted","title":"Run multica command","kind":"execute","rawInput":{"command":"multica preview start"}}}}`)
+
+	if approved {
+		t.Fatal("trusted platform command should be auto-approved without calling onApproval callback")
+	}
+
+	var resp struct {
+		Result struct {
+			Outcome struct {
+				OptionID string `json:"optionId"`
+			} `json:"outcome"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(w.String())), &resp); err != nil {
+		t.Fatalf("reply is not valid JSON: %q err=%v", w.String(), err)
+	}
+	if resp.Result.Outcome.OptionID != "allow_once" {
+		t.Fatalf("expected auto-approve of trusted command, got optionId %q", resp.Result.Outcome.OptionID)
+	}
+}
+
+func TestCopilotACPClientRoutesUntrustedCommandsToApproval(t *testing.T) {
+	t.Parallel()
+
+	w := &bufferWriter{}
+	var gotReq ApprovalRequest
+	c := &copilotACPClient{
+		cfg:     Config{Logger: slog.Default()},
+		stdin:   w,
+		pending: make(map[int]*pendingRPC),
+		runCtx:  context.Background(),
+		onApproval: func(_ context.Context, req ApprovalRequest) (string, bool, error) {
+			gotReq = req
+			return "deny", false, nil
+		},
+	}
+
+	// "rm -rf /tmp" is NOT a trusted platform command — must go through approval.
+	c.handleLine(`{"jsonrpc":"2.0","id":11,"method":"session/request_permission","params":{"sessionId":"ses_1","options":[{"optionId":"allow_once","name":"Allow once","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}],"toolCall":{"toolCallId":"tc_untrusted","title":"Shell","kind":"execute","rawInput":{"command":"rm -rf /tmp"}}}}`)
+
+	if gotReq.Type != "permission_request" {
+		t.Fatal("untrusted command should have been routed through onApproval callback")
 	}
 }

@@ -38,6 +38,7 @@ import type {
   ListIssuesCache,
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
+import { sortTimelineEntriesAsc } from "./timeline-sort";
 
 // ---------------------------------------------------------------------------
 // Shared mutation variable types — used by both mutation hooks and
@@ -579,7 +580,7 @@ export function useCreateComment(issueId: string) {
       qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
         if (!old) return [entry];
         if (old.some((e) => e.id === entry.id)) return old;
-        return [...old, entry];
+        return sortTimelineEntriesAsc([...old, entry]);
       });
       qc.invalidateQueries({ queryKey: workspaceKeys.mentionFrequency(wsId) });
     },

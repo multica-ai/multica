@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Clipboard,
-  Image,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -10,7 +9,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  SectionList,
   StyleSheet,
   Text,
   TextInput,
@@ -23,17 +21,18 @@ import {
   type TextInputSelectionChangeEventData,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { LinearGradient } from "expo-linear-gradient";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MoreHorizontal } from "lucide-react-native";
+import Svg, { Path } from "react-native-svg";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import {
   useCreateComment,
   useDeleteComment,
-  useToggleCommentReaction,
-  useToggleIssueReaction,
   useUpdateComment,
   useUpdateIssue,
 } from "@multica/core/issues/mutations";
@@ -41,7 +40,6 @@ import {
   useIssueAttachments,
   useIssueDetail,
   useIssueList,
-  useIssueReactions,
   useIssueSubscribers,
   useIssueTaskRuns,
   useIssueTimelineEntries,
@@ -60,9 +58,7 @@ import type {
   AgentTask,
   Attachment,
   IssuePriority,
-  IssueReaction,
   IssueStatus,
-  Reaction,
   TaskMessagePayload,
   TimelineEntry,
 } from "@multica/core/types";
@@ -73,6 +69,7 @@ import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { uploadMobileAsset, type MobileUploadAsset } from "../../platform/upload";
 import { colors, radii, spacing } from "../../theme/tokens";
+import { ImagePreviewModal } from "./image-preview-modal";
 import {
   createDraftCommentAttachment,
   type DraftCommentAttachment,
@@ -85,41 +82,39 @@ import {
 } from "../../i18n/format";
 
 type Props = NativeStackScreenProps<RootStackParamList, "IssueDetail">;
-type ReactionLike = Pick<Reaction | IssueReaction, "actor_id" | "actor_type" | "emoji">;
+type TimelineProps = NativeStackScreenProps<RootStackParamList, "IssueTimeline">;
+type TaskRunsProps = NativeStackScreenProps<RootStackParamList, "IssueTaskRuns">;
 type DocumentPickerModule = typeof import("expo-document-picker");
 declare const require: (moduleName: string) => unknown;
-type DetailListItem = {
-  key: string;
-  node: React.ReactElement;
-} | CommentListRow;
-type DetailSection = {
-  key: string;
-  title?: string;
-  count?: number;
-  collapsed?: boolean;
-  onToggle?: () => void;
-  data: DetailListItem[];
-};
+const emptyTimeline: TimelineEntry[] = [];
+type DetailListItem = CommentListRow | { key: string; kind: "error"; message: string };
 type CommentThread = {
   root: TimelineEntry;
   replies: TimelineEntry[];
 };
 type CommentListRow =
-  | { key: string; kind: "root"; entry: TimelineEntry; rootId: string }
-  | { key: string; kind: "reply"; entry: TimelineEntry; rootId: string; isLastReply: boolean }
+  | { key: string; kind: "root"; entry: TimelineEntry; rootId: string; expanded: boolean }
+  | { key: string; kind: "reply"; entry: TimelineEntry; rootId: string; expanded: boolean; isLastReply: boolean }
   | { key: string; kind: "footer"; rootId: string };
 type AttachmentPreviewState = {
   attachment: Attachment;
+  imageAttachments?: Attachment[];
+  imageIndex?: number;
   textContent?: string;
   error?: string;
   loading?: boolean;
 };
 type Translate = (key: string, options?: Record<string, unknown>) => string;
-const DEFAULT_REACTIONS = ["👍", "👀", "🎉", "❤️"];
 const MAX_MENTION_SUGGESTIONS = 20;
 const SERVER_ISSUE_SEARCH_LIMIT = 20;
 const SERVER_SEARCH_DEBOUNCE_MS = 150;
 const TEXT_PREVIEW_MAX_BYTES = 1_000_000;
+const COLLAPSED_COMMENT_HEIGHT = 160;
+const COMMENT_PREVIEW_MAX_CHARS = 700;
+const COMMENT_COLLAPSE_MIN_CHARS = 420;
+const COMMENT_COLLAPSE_MIN_LINES = 8;
+const COMMENT_CARD_FADE_COLORS = ["rgba(255, 255, 255, 0)", "rgba(255, 255, 255, 0.86)", colors.card] as const;
+const COMMENT_REPLY_FADE_COLORS = ["rgba(241, 241, 240, 0)", "rgba(241, 241, 240, 0.88)", colors.muted] as const;
 
 function useKeyboardHeight(enabled: boolean) {
   const { height: windowHeight } = useWindowDimensions();
@@ -164,7 +159,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     [allIssues],
   );
   const { data: attachments = [], refetch: refetchAttachments } = useIssueAttachments(workspace.id, issueId);
-  const { data: issueReactions = [] } = useIssueReactions(workspace.id, issueId);
   const {
     isSubscribed,
     isToggling: togglingSubscription,
@@ -178,14 +172,13 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   } = useLiveIssueTasks(workspace.id, issueId);
   const { data: taskRuns = [] } = useIssueTaskRuns(workspace.id, issueId);
   const { data: timelineData } = useIssueTimelineEntries(workspace.id, issueId);
-  const timeline = Array.isArray(timelineData) ? timelineData : [];
+  const timeline = Array.isArray(timelineData) ? timelineData : emptyTimeline;
   const createComment = useCreateComment(issueId);
   const updateComment = useUpdateComment(issueId);
   const deleteComment = useDeleteComment(issueId);
   const updateIssue = useUpdateIssue();
-  const toggleIssueReaction = useToggleIssueReaction(issueId);
-  const toggleCommentReaction = useToggleCommentReaction(issueId);
   const titleInputRef = useRef<TextInput | null>(null);
+  const listRef = useRef<FlashListRef<DetailListItem> | null>(null);
   const [comment, setComment] = useState("");
   const [commentAttachments, setCommentAttachments] = useState<DraftCommentAttachment[]>([]);
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
@@ -201,8 +194,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const [commentError, setCommentError] = useState<string | null>(null);
   const [issueMenuOpen, setIssueMenuOpen] = useState(false);
   const [commentSheetOpen, setCommentSheetOpen] = useState(false);
-  const [commentsCollapsed, setCommentsCollapsed] = useState(false);
-  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const [liveTaskError, setLiveTaskError] = useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreviewState | null>(null);
   const previewAbortRef = useRef<AbortController | null>(null);
@@ -217,7 +208,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     setDescriptionSheetOpen(false);
     setDescriptionDraft(issue?.description ?? "");
     setIssueEditError(null);
-  }, [issue?.id]);
+  }, [issue?.description, issue?.id, issue?.title]);
 
   useEffect(() => {
     if (!editingTitle) return;
@@ -234,16 +225,18 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     [timeline],
   );
   const commentThreads = useMemo(() => buildCommentThreads(comments), [comments]);
-  const commentRows = useMemo(() => buildCommentRows(commentThreads), [commentThreads]);
+  const baseCommentRows = useMemo(() => buildCommentRows(commentThreads), [commentThreads]);
+  const [commentRows, setCommentRows] = useState<CommentListRow[]>([]);
   const activities = useMemo(
     () => timeline
       .filter((entry: TimelineEntry) => entry.type === "activity")
       .sort((a: TimelineEntry, b: TimelineEntry) => a.created_at.localeCompare(b.created_at)),
     [timeline],
   );
-  const renderSectionHeader = useCallback(({ section }: { section: DetailSection }) => (
-    section.title ? <StickySectionHeader section={section} /> : null
-  ), []);
+
+  useEffect(() => {
+    setCommentRows((currentRows) => mergeCommentRows(currentRows, baseCommentRows));
+  }, [baseCommentRows]);
 
   const openCommentComposer = useCallback(() => {
     setReplyTargetId(null);
@@ -411,20 +404,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     }
   }, [uploadAttachment]);
 
-  const handleIssueReaction = useCallback((emoji: string) => {
-    if (!userId) return;
-    const existing = issueReactions.find((reaction) => isOwnReaction(reaction, emoji, userId));
-    toggleIssueReaction.mutate({ emoji, existing });
-  }, [issueReactions, toggleIssueReaction, userId]);
-
-  const handleCommentReaction = useCallback((entry: TimelineEntry, emoji: string) => {
-    if (!userId) return;
-    const existing = (entry.reactions ?? []).find((reaction) =>
-      isOwnReaction(reaction, emoji, userId),
-    );
-    toggleCommentReaction.mutate({ commentId: entry.id, emoji, existing });
-  }, [toggleCommentReaction, userId]);
-
   const startCommentEdit = useCallback((commentId: string, content: string) => {
     setEditingCommentId(commentId);
     setEditingContent(content);
@@ -438,6 +417,27 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       setCommentError(formatClipboardError(err, t));
     }
   }, [t]);
+
+  const cancelCommentEdit = useCallback(() => {
+    setEditingCommentId(null);
+    setEditingContent("");
+  }, []);
+
+  const deleteCommentById = useCallback((commentId: string) => {
+    void removeComment(commentId);
+  }, [removeComment]);
+
+  const saveCommentEditById = useCallback((commentId: string) => {
+    void saveCommentEdit(commentId);
+  }, [saveCommentEdit]);
+
+  const copyCommentByContent = useCallback((content: string) => {
+    void copyCommentContent(content);
+  }, [copyCommentContent]);
+
+  const openIssueMention = useCallback((targetIssueId: string) => {
+    navigation.push("IssueDetail", { issueId: targetIssueId });
+  }, [navigation]);
 
   const startTitleEdit = useCallback(() => {
     if (!issue || updateIssue.isPending) return;
@@ -512,12 +512,14 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     setAttachmentPreview(null);
   }, []);
 
-  const openAttachmentPreview = useCallback(async (attachment: Attachment) => {
+  const openAttachmentPreview = useCallback(async (attachment: Attachment, attachmentGroup: Attachment[] = [attachment]) => {
     previewAbortRef.current?.abort();
     previewAbortRef.current = null;
 
     if (isImageAttachment(attachment)) {
-      setAttachmentPreview({ attachment });
+      const imageAttachments = attachmentGroup.filter(isImageAttachment);
+      const imageIndex = Math.max(0, imageAttachments.findIndex((item) => item.id === attachment.id));
+      setAttachmentPreview({ attachment, imageAttachments, imageIndex });
       return;
     }
 
@@ -560,68 +562,85 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     }
   }, [t]);
 
+  const expandCommentRow = useCallback((commentId: string) => {
+    setCommentRows((rows) => rows.map((row) => {
+      if (row.kind === "footer" || row.entry.id !== commentId || row.expanded) return row;
+      return { ...row, expanded: true };
+    }));
+  }, []);
+
   const renderListItem = useCallback(({ item }: { item: DetailListItem }) => {
-    if ("node" in item) return item.node;
+    if (item.kind === "error") {
+      return (
+        <View style={styles.commentRowThreadStart}>
+          <Text style={styles.errorText}>{item.message}</Text>
+        </View>
+      );
+    }
 
     if (item.kind === "footer") {
       return (
-        <ThreadReplyFooter
-          onReply={() => openReplyComposer(item.rootId)}
-        />
+        <View style={styles.commentRowThreadContinuation}>
+          <ThreadReplyFooter
+            onReply={() => openReplyComposer(item.rootId)}
+          />
+        </View>
       );
     }
 
     const isEditingEntry = editingCommentId === item.entry.id;
     return (
-      <TimelineItem
-        entry={item.entry}
-        editingCommentId={isEditingEntry ? editingCommentId : null}
-        editingContent={isEditingEntry ? editingContent : ""}
-        onToggleReaction={handleCommentReaction}
-        onOpenAttachment={openAttachmentPreview}
-        onCancelEdit={() => {
-          setEditingCommentId(null);
-          setEditingContent("");
-        }}
-        onChangeEdit={setEditingContent}
-        onDelete={(commentId) => void removeComment(commentId)}
-        onReply={item.kind === "root" ? openReplyComposer : undefined}
-        onSaveEdit={(commentId) => void saveCommentEdit(commentId)}
-        onStartEdit={startCommentEdit}
-        onCopyComment={(content) => void copyCommentContent(content)}
-        onIssueMentionPress={(targetIssueId) => {
-          navigation.push("IssueDetail", { issueId: targetIssueId });
-        }}
-        resolveActorName={getActorName}
-        userId={userId}
-        mentionTargets={mentionTargets}
-        issueMentionTargets={issueMentionTargets}
-        variant={item.kind === "root" ? "threadRoot" : "reply"}
-        isLastReply={item.kind === "reply" ? item.isLastReply : false}
-      />
+      <View style={item.kind === "root" ? styles.commentRowThreadStart : styles.commentRowThreadContinuation}>
+        <TimelineItem
+          entry={item.entry}
+          editingCommentId={isEditingEntry ? editingCommentId : null}
+          editingContent={isEditingEntry ? editingContent : ""}
+          onOpenAttachment={openAttachmentPreview}
+          onCancelEdit={cancelCommentEdit}
+          onChangeEdit={setEditingContent}
+          onDelete={deleteCommentById}
+          onReply={item.kind === "root" ? openReplyComposer : undefined}
+          onSaveEdit={saveCommentEditById}
+          onStartEdit={startCommentEdit}
+          onCopyComment={copyCommentByContent}
+          onIssueMentionPress={openIssueMention}
+          resolveActorName={getActorName}
+          userId={userId}
+          mentionTargets={mentionTargets}
+          issueMentionTargets={issueMentionTargets}
+          expanded={item.expanded}
+          onExpandComment={expandCommentRow}
+          variant={item.kind === "root" ? "threadRoot" : "reply"}
+          isLastReply={item.kind === "reply" ? item.isLastReply : false}
+        />
+      </View>
     );
   }, [
     editingCommentId,
     editingContent,
+    expandCommentRow,
     getActorName,
-    handleCommentReaction,
     mentionTargets,
     issueMentionTargets,
-    navigation,
     openAttachmentPreview,
     openReplyComposer,
-    copyCommentContent,
-    removeComment,
-    saveCommentEdit,
+    cancelCommentEdit,
+    copyCommentByContent,
+    deleteCommentById,
+    openIssueMention,
+    saveCommentEditById,
     startCommentEdit,
     userId,
   ]);
 
-  const overviewItems = useMemo<DetailListItem[]>(() => {
-    if (!issue) return [];
-    return [{
-      key: "issue-summary",
-      node: (
+  const scrollToLatestComment = useCallback(() => {
+    listRef.current?.scrollToEnd({ animated: true });
+  }, []);
+
+  const listHeader = useMemo(() => {
+    if (!issue) return null;
+    return (
+      <View style={styles.listHeader}>
         <View style={styles.section}>
           {editingTitle ? (
             <TextInput
@@ -678,11 +697,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
             )}
           </Pressable>
           <View style={styles.issueEngagementRow}>
-            <ReactionRow
-              onToggle={handleIssueReaction}
-              reactions={issueReactions}
-              userId={userId}
-            />
             <Pressable
               accessibilityRole="button"
               disabled={!userId || subscribersLoading || togglingSubscription}
@@ -701,20 +715,30 @@ export function IssueDetailScreen({ navigation, route }: Props) {
                 {isSubscribed ? t("issues.subscribed") : t("issues.subscribe")}
               </Text>
             </Pressable>
+            <IssueShortcutButton
+              count={activities.length}
+              label={t("issues.timeline")}
+              onPress={() => navigation.navigate("IssueTimeline", { issueId })}
+            />
+            <IssueShortcutButton
+              count={taskRuns.length}
+              label={t("issues.agent_transcript")}
+              onPress={() => navigation.navigate("IssueTaskRuns", { issueId })}
+            />
           </View>
         </View>
-      ),
-    },
-    {
-      key: "attachments",
-      node: (
+
         <View style={[styles.section, styles.sectionSeparated]}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{t("issues.attachments")}</Text>
+          <View style={[styles.sectionHeader, styles.sectionHeaderSurface]}>
+            <View style={styles.sectionTitleGroup}>
+              <View style={styles.sectionTitleAccent} />
+              <Text style={styles.sectionTitle}>{t("issues.attachments")}</Text>
+            </View>
             <View style={styles.inlineActions}>
               <Button
                 disabled={uploading}
                 onPress={() => void pickImage("issue")}
+                style={styles.sectionHeaderActionButton}
                 variant="secondary"
               >
                 {t("issues.image")}
@@ -722,6 +746,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
               <Button
                 disabled={uploading}
                 onPress={() => void pickDocument("issue")}
+                style={styles.sectionHeaderActionButton}
                 variant="secondary"
               >
                 {t("issues.file")}
@@ -729,27 +754,52 @@ export function IssueDetailScreen({ navigation, route }: Props) {
             </View>
           </View>
           {uploadError ? <Text style={styles.errorText}>{uploadError}</Text> : null}
-          <AttachmentList attachments={attachments} onOpen={openAttachmentPreview} />
+          <View style={styles.attachmentSectionPanel}>
+            <AttachmentList attachments={attachments} onOpen={openAttachmentPreview} />
+          </View>
         </View>
-      ),
-    }];
+
+        <View style={styles.sectionSeparated}>
+          <View style={[styles.commentListHeader, styles.sectionHeaderSurface]}>
+            <View style={styles.stickySectionTitleGroup}>
+              <View style={styles.sectionTitleAccent} />
+              <Text style={styles.sectionTitle}>{t("issues.comments")}</Text>
+              <Text style={styles.stickySectionCount}>{comments.length}</Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={scrollToLatestComment}
+              style={({ pressed }) => [
+                styles.jumpToLatestButton,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={styles.metadataToggle}>{t("issues.jump_to_latest_comment")}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    );
   }, [
+    activities.length,
     attachments,
-    handleIssueReaction,
+    comments.length,
     editingTitle,
     issue,
     issueEditError,
-    issueReactions,
     isSubscribed,
+    issueId,
     navigation,
     openAttachmentPreview,
     openDescriptionEditor,
     pickDocument,
     pickImage,
     saveTitleEdit,
+    scrollToLatestComment,
     startTitleEdit,
     subscribersLoading,
     t,
+    taskRuns.length,
     titleDraft,
     toggleSubscribe,
     togglingSubscription,
@@ -760,50 +810,14 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   ]);
 
   const commentItems = useMemo<DetailListItem[]>(() => {
-    if (commentsCollapsed) return [];
     const items: DetailListItem[] = commentError
-      ? [{ key: "comments-error", node: <Text style={styles.errorText}>{commentError}</Text> }]
+      ? [{ key: "comments-error", kind: "error", message: commentError }]
       : [];
     if (comments.length === 0) return items;
     items.push(...commentRows);
     return items;
-  }, [commentError, commentRows, comments.length, commentsCollapsed]);
+  }, [commentError, commentRows, comments.length]);
 
-  const timelineItems = useMemo<DetailListItem[]>(() => (
-    timelineCollapsed
-      ? []
-      : activities.map((entry: TimelineEntry) => ({
-          key: entry.id,
-          node: (
-            <TimelineItem
-              entry={entry}
-              resolveActorName={getActorName}
-            />
-          ),
-        }))
-  ), [activities, getActorName, timelineCollapsed]);
-
-  const transcriptItems = useMemo<DetailListItem[]>(() => (
-    taskRuns.length === 0
-      ? []
-      : taskRuns.map((task, taskIndex) => ({
-        key: `task-${task.id}`,
-        node: (
-          <TaskRunHeader
-            onPress={() => navigation.push("IssueTaskTranscript", { issueId, taskId: task.id })}
-            showTitle={taskIndex === 0}
-            task={task}
-          />
-        ),
-      }))
-  ), [issueId, navigation, taskRuns]);
-
-  const toggleCommentsCollapsed = useCallback(() => {
-    setCommentsCollapsed((collapsed) => !collapsed);
-  }, []);
-  const toggleTimelineCollapsed = useCallback(() => {
-    setTimelineCollapsed((collapsed) => !collapsed);
-  }, []);
   const openIssueProperties = useCallback(() => {
     setIssueMenuOpen(false);
     navigation.navigate("IssueProperties", { issueId });
@@ -816,53 +830,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       parentIssueIdentifier: issue.identifier,
     });
   }, [issue, navigation]);
-
-  const sections = useMemo<DetailSection[]>(() => {
-    const nextSections: DetailSection[] = [
-      { key: "overview", data: overviewItems },
-    ];
-
-    if (comments.length > 0 || commentError) {
-      nextSections.push({
-        key: "comments",
-        title: t("issues.comments"),
-        count: comments.length,
-        collapsed: commentsCollapsed,
-        onToggle: toggleCommentsCollapsed,
-        data: commentItems,
-      });
-    }
-
-    if (activities.length > 0) {
-      nextSections.push({
-        key: "timeline",
-        title: t("issues.timeline"),
-        count: activities.length,
-        collapsed: timelineCollapsed,
-        onToggle: toggleTimelineCollapsed,
-        data: timelineItems,
-      });
-    }
-
-    if (transcriptItems.length > 0) {
-      nextSections.push({ key: "transcript", data: transcriptItems });
-    }
-
-    return nextSections;
-  }, [
-    activities.length,
-    commentError,
-    commentItems,
-    comments.length,
-    commentsCollapsed,
-    overviewItems,
-    timelineCollapsed,
-    timelineItems,
-    toggleCommentsCollapsed,
-    toggleTimelineCollapsed,
-    transcriptItems,
-    t,
-  ]);
 
   if (isLoading) return <LoadingState />;
   if (isError || !issue) return <EmptyState title={t("issues.unable_to_load")} />;
@@ -902,22 +869,22 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         keyboardVerticalOffset={0}
         style={styles.keyboardAvoidingContent}
       >
-        <SectionList
+        <FlashList
           automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
           contentContainerStyle={[
-            styles.content,
+            styles.issueDetailContent,
             editingCommentId && styles.contentEditingComment,
           ]}
+          data={commentItems}
+          drawDistance={1200}
+          getItemType={getDetailListItemType}
           keyboardShouldPersistTaps="handled"
           keyExtractor={(item) => item.key}
-          maxToRenderPerBatch={8}
+          ListEmptyComponent={<Text style={styles.emptyText}>{t("issues.no_comments")}</Text>}
+          ListHeaderComponent={listHeader}
+          ref={listRef}
           removeClippedSubviews={Platform.OS === "android"}
           renderItem={renderListItem}
-          renderSectionHeader={renderSectionHeader}
-          sections={sections}
-          updateCellsBatchingPeriod={50}
-          windowSize={7}
-          stickySectionHeadersEnabled
         />
 
         {!editingCommentId ? (
@@ -980,6 +947,70 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   );
 }
 
+export function IssueTimelineScreen({ navigation, route }: TimelineProps) {
+  const { t } = useTranslation();
+  const { issueId } = route.params;
+  const { workspace } = useMobileWorkspace();
+  const { getActorName } = useActorName();
+  const { data: timelineData, isError, isLoading } = useIssueTimelineEntries(workspace.id, issueId);
+  const activities = useMemo(
+    () => (Array.isArray(timelineData) ? timelineData : emptyTimeline)
+      .filter((entry: TimelineEntry) => entry.type === "activity")
+      .sort((a: TimelineEntry, b: TimelineEntry) => a.created_at.localeCompare(b.created_at)),
+    [timelineData],
+  );
+
+  if (isLoading) return <LoadingState />;
+  if (isError) return <EmptyState title={t("issues.unable_to_load_timeline")} />;
+
+  return (
+    <Screen padded={false} safeArea={false}>
+      <ScreenTitleBar onBack={() => navigation.goBack()} title={t("issues.issue_timeline")} />
+      <FlashList
+        contentContainerStyle={styles.content}
+        data={activities}
+        ItemSeparatorComponent={ListItemSeparator}
+        keyExtractor={(item) => item.id}
+        ListEmptyComponent={<Text style={styles.emptyText}>{t("issues.no_timeline_events")}</Text>}
+        renderItem={({ item }) => (
+          <TimelineItem
+            entry={item}
+            resolveActorName={getActorName}
+          />
+        )}
+      />
+    </Screen>
+  );
+}
+
+export function IssueTaskRunsScreen({ navigation, route }: TaskRunsProps) {
+  const { t } = useTranslation();
+  const { issueId } = route.params;
+  const { workspace } = useMobileWorkspace();
+  const { data: taskRuns = [], isError, isLoading } = useIssueTaskRuns(workspace.id, issueId);
+
+  if (isLoading) return <LoadingState />;
+  if (isError) return <EmptyState title={t("transcript.unable_to_load")} />;
+
+  return (
+    <Screen padded={false} safeArea={false}>
+      <ScreenTitleBar onBack={() => navigation.goBack()} title={t("issues.issue_agent_runs")} />
+      <FlashList
+        contentContainerStyle={styles.content}
+        data={taskRuns}
+        ItemSeparatorComponent={ListItemSeparator}
+        keyExtractor={(item) => item.id}
+        ListEmptyComponent={<Text style={styles.emptyText}>{t("issues.no_agent_runs")}</Text>}
+        renderItem={({ item }) => (
+          <TaskRunHeader
+            onPress={() => navigation.push("IssueTaskTranscript", { issueId, taskId: item.id })}
+            task={item}
+          />
+        )}
+      />
+    </Screen>
+  );
+}
 
 function IssueActionsMenu({
   onClose,
@@ -1011,6 +1042,34 @@ function IssueActionsMenu({
       </View>
     </Modal>
   );
+}
+
+function IssueShortcutButton({
+  count,
+  label,
+  onPress,
+}: {
+  count: number;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.issueShortcutButton,
+        pressed && styles.buttonPressed,
+      ]}
+    >
+      <Text style={styles.issueShortcutLabel}>{label}</Text>
+      <Text style={styles.issueShortcutCount}>{count}</Text>
+    </Pressable>
+  );
+}
+
+function ListItemSeparator() {
+  return <View style={styles.listItemSeparator} />;
 }
 
 function CommentSheet({
@@ -1194,30 +1253,6 @@ function DescriptionEditSheet({
         </View>
       </View>
     </Modal>
-  );
-}
-
-function StickySectionHeader({ section }: { section: DetailSection }) {
-  const { t } = useTranslation();
-  if (!section.title || !section.onToggle) return null;
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={section.onToggle}
-      style={({ pressed }) => [
-        styles.stickySectionHeader,
-        pressed && styles.buttonPressed,
-      ]}
-    >
-      <View style={styles.stickySectionTitleGroup}>
-        <Text style={styles.sectionTitle}>{section.title}</Text>
-        {typeof section.count === "number" ? (
-          <Text style={styles.stickySectionCount}>{section.count}</Text>
-        ) : null}
-      </View>
-      <Text style={styles.metadataToggle}>{section.collapsed ? t("issues.show") : t("issues.hide")}</Text>
-    </Pressable>
   );
 }
 
@@ -1448,7 +1483,13 @@ function MentionSuggestionGroup({
               >
                 {target.type === "issue"
                   ? target.description ?? t("issues.issue")
-                  : target.type === "agent" ? t("issues.agent") : target.type === "all" ? t("issues.all_members") : t("issues.member")}
+                  : target.type === "agent"
+                    ? t("issues.agent")
+                    : target.type === "squad"
+                      ? t("issues.squad")
+                      : target.type === "all"
+                        ? t("issues.all_members")
+                        : t("issues.member")}
               </Text>
             </View>
           </Pressable>
@@ -1539,12 +1580,14 @@ function buildCommentRows(threads: CommentThread[]): CommentListRow[] {
       key: `${thread.root.id}:root`,
       kind: "root" as const,
       entry: thread.root,
+      expanded: false,
       rootId: thread.root.id,
     },
     ...thread.replies.map((reply, index) => ({
       key: `${reply.id}:reply`,
       kind: "reply" as const,
       entry: reply,
+      expanded: false,
       rootId: thread.root.id,
       isLastReply: index === thread.replies.length - 1,
     })),
@@ -1554,6 +1597,83 @@ function buildCommentRows(threads: CommentThread[]): CommentListRow[] {
       rootId: thread.root.id,
     },
   ]);
+}
+
+function mergeCommentRows(currentRows: CommentListRow[], nextRows: CommentListRow[]): CommentListRow[] {
+  if (currentRows.length === 0) return nextRows;
+
+  const currentByCommentId = new Map<string, Extract<CommentListRow, { entry: TimelineEntry }>>();
+  for (const row of currentRows) {
+    if (row.kind !== "footer") currentByCommentId.set(row.entry.id, row);
+  }
+
+  return nextRows.map((row) => {
+    if (row.kind === "footer") return row;
+    const current = currentByCommentId.get(row.entry.id);
+    if (!current?.expanded) return row;
+    return { ...row, expanded: true };
+  });
+}
+
+function getDetailListItemType(item: DetailListItem) {
+  switch (item.kind) {
+    case "root":
+      return "comment-root";
+    case "reply":
+      return "comment-reply";
+    case "footer":
+      return "comment-footer";
+    case "error":
+      return "comment-error";
+  }
+}
+
+function shouldCollapseComment(content: string) {
+  if (content.length > COMMENT_COLLAPSE_MIN_CHARS) return true;
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  if (lines.length > COMMENT_COLLAPSE_MIN_LINES) return true;
+  const denseMarkdownLines = lines.filter((line) => {
+    const trimmed = line.trim();
+    return (
+      trimmed.startsWith("```") ||
+      trimmed.startsWith(">") ||
+      /^#{1,6}\s+/.test(trimmed) ||
+      /^[-*]\s+/.test(trimmed) ||
+      /^\d+[.)]\s+/.test(trimmed)
+    );
+  });
+  return denseMarkdownLines.length > 5;
+}
+
+function createCommentPreview(content: string) {
+  const normalized = content.replace(/\r\n/g, "\n").trimEnd();
+  const lines = normalized.split("\n");
+  const previewLines: string[] = [];
+  let charCount = 0;
+  let openCodeFence = false;
+
+  for (const line of lines) {
+    const nextCount = charCount + line.length + (previewLines.length > 0 ? 1 : 0);
+    if (previewLines.length >= COMMENT_COLLAPSE_MIN_LINES || nextCount > COMMENT_PREVIEW_MAX_CHARS) {
+      break;
+    }
+    previewLines.push(line);
+    charCount = nextCount;
+    if (line.trim().startsWith("```")) {
+      openCodeFence = !openCodeFence;
+    }
+  }
+
+  let preview = previewLines.join("\n").trimEnd();
+  if (!preview) return normalized.slice(0, COMMENT_PREVIEW_MAX_CHARS).trimEnd();
+
+  if (openCodeFence) {
+    preview = `${preview}\n\`\`\``;
+  }
+  if (preview.length < normalized.length) {
+    preview = `${preview}\n...`;
+  }
+  return preview;
 }
 
 
@@ -1584,17 +1704,18 @@ const TimelineItem = memo(function TimelineItem({
   editingCommentId,
   editingContent,
   entry,
+  expanded = false,
   isLastReply,
   onCancelEdit,
   onChangeEdit,
   onCopyComment,
   onDelete,
+  onExpandComment,
   onOpenAttachment,
   onIssueMentionPress,
   onReply,
   onSaveEdit,
   onStartEdit,
-  onToggleReaction,
   resolveActorName,
   userId,
   issueMentionTargets,
@@ -1604,16 +1725,17 @@ const TimelineItem = memo(function TimelineItem({
   editingCommentId?: string | null;
   editingContent?: string;
   entry: TimelineEntry;
+  expanded?: boolean;
   onCancelEdit?: () => void;
   onChangeEdit?: (content: string) => void;
   onCopyComment?: (content: string) => void;
   onDelete?: (commentId: string) => void;
-  onOpenAttachment?: (attachment: Attachment) => void;
+  onExpandComment?: (commentId: string) => void;
+  onOpenAttachment?: (attachment: Attachment, attachmentGroup: Attachment[]) => void;
   onIssueMentionPress?: (issueId: string) => void;
   onReply?: (commentId: string) => void;
   onSaveEdit?: (commentId: string) => void;
   onStartEdit?: (commentId: string, content: string) => void;
-  onToggleReaction?: (entry: TimelineEntry, emoji: string) => void;
   resolveActorName: (type: string, id: string) => string;
   userId?: string;
   issueMentionTargets?: WorkspaceMentionTarget[];
@@ -1625,7 +1747,7 @@ const TimelineItem = memo(function TimelineItem({
   const actor = resolveActorName(entry.actor_type, entry.actor_id);
   const isOwnComment = entry.type === "comment" && entry.actor_type === "member" && entry.actor_id === userId;
   const isEditing = editingCommentId === entry.id;
-  const [openMenu, setOpenMenu] = useState<"reactions" | "actions" | null>(null);
+  const [openMenu, setOpenMenu] = useState<"actions" | null>(null);
   const [actionsMenuAnchor, setActionsMenuAnchor] = useState<{ x: number; y: number } | null>(null);
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const body = entry.type === "comment"
@@ -1633,21 +1755,14 @@ const TimelineItem = memo(function TimelineItem({
     : formatActivity(entry, resolveActorName, t);
   const isComment = entry.type === "comment";
   const hasCommentActions = isComment;
-  const reactionSummary = useMemo(() => {
-    const counts = new Map<string, number>();
-    const own = new Set<string>();
-    for (const reaction of entry.reactions ?? []) {
-      counts.set(reaction.emoji, (counts.get(reaction.emoji) ?? 0) + 1);
-      if (userId && isOwnReaction(reaction, reaction.emoji, userId)) {
-        own.add(reaction.emoji);
-      }
-    }
-    return {
-      counts,
-      options: Array.from(new Set([...DEFAULT_REACTIONS, ...counts.keys()])),
-      own,
-    };
-  }, [entry.reactions, userId]);
+  const commentContent = entry.content ?? "";
+  const fadeColors = variant === "reply" ? COMMENT_REPLY_FADE_COLORS : COMMENT_CARD_FADE_COLORS;
+  const canCollapse = isComment && !isEditing && shouldCollapseComment(commentContent);
+  const isCommentCollapsed = canCollapse && !expanded;
+  const renderedCommentContent = useMemo(
+    () => isCommentCollapsed ? createCommentPreview(commentContent) : commentContent,
+    [commentContent, isCommentCollapsed],
+  );
 
   function openActionsMenuAtPress(event: GestureResponderEvent) {
     if (!isComment || isEditing || !hasCommentActions) return;
@@ -1737,55 +1852,23 @@ const TimelineItem = memo(function TimelineItem({
         </View>
         {isComment ? (
           <View style={styles.commentHeaderActions}>
-            <View style={styles.commentHeaderButtonRow}>
-              <HeaderIconButton
-                disabled={!userId}
-                label={t("issues.react")}
-                onPress={() => {
-                  setActionsMenuAnchor(null);
-                  setOpenMenu((menu) => menu === "reactions" ? null : "reactions");
-                }}
-              >
-                ☺
-              </HeaderIconButton>
-              <HeaderIconButton
-                label={t("issues.issue_actions")}
-                disabled={!hasCommentActions}
-                onPress={(event) => {
-                  if (openMenu === "actions") {
-                    closeActionsMenu();
-                    return;
-                  }
-                  setActionsMenuAnchor({
-                    x: event.nativeEvent.pageX,
-                    y: event.nativeEvent.pageY,
-                  });
-                  setOpenMenu("actions");
-                }}
-              >
-                ⋯
-              </HeaderIconButton>
-            </View>
-            {openMenu === "reactions" ? (
-              <View style={styles.commentDropdown}>
-                {reactionSummary.options.map((emoji) => {
-                  const count = reactionSummary.counts.get(emoji) ?? 0;
-                  const active = reactionSummary.own.has(emoji);
-                  return (
-                    <DropdownItem
-                      active={active}
-                      key={emoji}
-                      label={`${emoji}${count > 0 ? ` ${count}` : ""}`}
-                      onPress={() => {
-                        onToggleReaction?.(entry, emoji);
-                        setOpenMenu(null);
-                        setActionsMenuAnchor(null);
-                      }}
-                    />
-                  );
-                })}
-              </View>
-            ) : null}
+            <HeaderIconButton
+              label={t("issues.issue_actions")}
+              disabled={!hasCommentActions}
+              onPress={(event) => {
+                if (openMenu === "actions") {
+                  closeActionsMenu();
+                  return;
+                }
+                setActionsMenuAnchor({
+                  x: event.nativeEvent.pageX,
+                  y: event.nativeEvent.pageY,
+                });
+                setOpenMenu("actions");
+              }}
+            >
+              ⋯
+            </HeaderIconButton>
           </View>
         ) : null}
       </View>
@@ -1812,10 +1895,31 @@ const TimelineItem = memo(function TimelineItem({
           </View>
         </View>
       ) : entry.type === "comment" ? (
-        <MarkdownText
-          content={entry.content ?? ""}
-          onIssueMentionPress={onIssueMentionPress}
-        />
+        <View style={[styles.commentBodyWrap, isCommentCollapsed && styles.commentBodyCollapsed]}>
+          <MarkdownText
+            content={renderedCommentContent}
+            onIssueMentionPress={onIssueMentionPress}
+          />
+          {isCommentCollapsed ? (
+            <LinearGradient
+              colors={fadeColors}
+              pointerEvents="box-none"
+              style={styles.commentFadeOverlay}
+            >
+              <Pressable
+                accessibilityLabel={t("issues.expand_comment")}
+                accessibilityRole="button"
+                onPress={() => onExpandComment?.(entry.id)}
+                style={({ pressed }) => [
+                  styles.expandCommentButton,
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <ExpandCommentIcon />
+              </Pressable>
+            </LinearGradient>
+          ) : null}
+        </View>
       ) : (
         <Text style={styles.timelineBody}>{body}</Text>
       )}
@@ -1881,6 +1985,28 @@ function HeaderIconButton({
   );
 }
 
+function ExpandCommentIcon() {
+  return (
+    <Svg fill="none" height={22} viewBox="0 0 24 24" width={22}>
+      <Path
+        d="M7 10.5L12 15.5L17 10.5"
+        stroke={colors.foreground}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2.4}
+      />
+      <Path
+        d="M7 5.5L12 10.5L17 5.5"
+        stroke={colors.foreground}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeOpacity={0.72}
+        strokeWidth={2.4}
+      />
+    </Svg>
+  );
+}
+
 function DropdownItem({
   active,
   destructive,
@@ -1910,7 +2036,7 @@ function AttachmentList({
 }: {
   attachments: Attachment[];
   compact?: boolean;
-  onOpen: (attachment: Attachment) => void;
+  onOpen: (attachment: Attachment, attachmentGroup: Attachment[]) => void;
   onRemove?: (attachmentId: string) => void;
   removingAttachmentId?: string | null;
 }) {
@@ -1925,7 +2051,7 @@ function AttachmentList({
       {attachments.map((attachment) => (
         <Pressable
           key={attachment.id}
-          onPress={() => onOpen(attachment)}
+          onPress={() => onOpen(attachment, attachments)}
           style={({ pressed }) => [
             styles.attachmentRow,
             pressed && styles.buttonPressed,
@@ -1934,7 +2060,7 @@ function AttachmentList({
           <View style={styles.attachmentContent}>
             <Text style={styles.attachmentName}>{attachment.filename}</Text>
             <Text style={styles.attachmentMeta}>
-              {formatBytes(attachment.size_bytes)} / {attachment.content_type || t("issues.file")} / {attachmentPreviewLabel(attachment, t)}
+              {attachmentMetaLabel(attachment, t)}
             </Text>
           </View>
           {onRemove ? (
@@ -2014,73 +2140,85 @@ function AttachmentPreviewModal({
   const url = attachment ? attachment.download_url || attachment.url : "";
   const canPreviewImage = Boolean(attachment && isImageAttachment(attachment));
   const canPreviewText = Boolean(attachment && isTextPreviewAttachment(attachment));
+  const imageAttachments = useMemo(() => (
+    preview?.imageAttachments?.length ? preview.imageAttachments : attachment && canPreviewImage ? [attachment] : []
+  ), [attachment, canPreviewImage, preview?.imageAttachments]);
+
+  if (canPreviewImage) {
+    return (
+      <ImagePreviewModal
+        imageAttachments={imageAttachments}
+        initialIndex={preview?.imageIndex ?? 0}
+        onClose={onClose}
+        open={open}
+      />
+    );
+  }
 
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={open}>
-      <View style={styles.previewModal}>
-        <View style={styles.previewHeader}>
-          <View style={styles.previewTitleGroup}>
-            <Text numberOfLines={1} style={styles.previewTitle}>
-              {attachment?.filename ?? t("issues.attachment")}
-            </Text>
-            {attachment ? (
-              <Text style={styles.previewMeta}>
-                {formatBytes(attachment.size_bytes)} / {attachment.content_type || t("issues.file")}
+      <View style={styles.previewModalRoot}>
+        <View style={styles.previewModal}>
+          <View style={styles.previewHeader}>
+            <View style={styles.previewTitleGroup}>
+              <Text numberOfLines={1} style={styles.previewTitle}>
+                {attachment?.filename ?? t("issues.attachment")}
               </Text>
+              {attachment ? (
+                <Text style={styles.previewMeta}>
+                  {formatBytes(attachment.size_bytes)} / {attachment.content_type || t("issues.file")}
+                </Text>
+              ) : null}
+            </View>
+            {attachment ? (
+              <View style={styles.previewActions}>
+                <Button onPress={() => void Linking.openURL(url)} variant="secondary">
+                  {t("common.open")}
+                </Button>
+                <Button onPress={onClose} variant="ghost">
+                  {t("common.close")}
+                </Button>
+              </View>
             ) : null}
           </View>
-          {attachment ? (
-            <View style={styles.previewActions}>
-              <Button onPress={() => void Linking.openURL(url)} variant="secondary">
-                {t("common.open")}
-              </Button>
-              <Button onPress={onClose} variant="ghost">
-                {t("common.close")}
-              </Button>
-            </View>
-          ) : null}
-        </View>
 
-        <View style={styles.previewBody}>
-          {attachment && canPreviewImage ? (
-            <Image resizeMode="contain" source={{ uri: url }} style={styles.previewImage} />
-          ) : null}
+          <View style={styles.previewBody}>
+            {attachment && canPreviewText ? (
+              preview?.loading ? (
+                <View style={styles.previewCentered}>
+                  <ActivityIndicator />
+                  <Text style={styles.attachmentMeta}>{t("issues.loading_preview")}</Text>
+                </View>
+              ) : (
+                <ScrollView contentContainerStyle={styles.previewTextContent}>
+                  <Text selectable style={styles.previewText}>
+                    {preview?.error ?? preview?.textContent ?? t("issues.no_preview_available")}
+                  </Text>
+                </ScrollView>
+              )
+            ) : null}
 
-          {attachment && canPreviewText ? (
-            preview?.loading ? (
+            {attachment && !canPreviewText ? (
               <View style={styles.previewCentered}>
-                <ActivityIndicator />
-                <Text style={styles.attachmentMeta}>{t("issues.loading_preview")}</Text>
-              </View>
-            ) : (
-              <ScrollView contentContainerStyle={styles.previewTextContent}>
-                <Text selectable style={styles.previewText}>
-                  {preview?.error ?? preview?.textContent ?? t("issues.no_preview_available")}
+                <Text style={styles.previewUnsupportedTitle}>{t("issues.preview_unavailable")}</Text>
+                <Text style={styles.previewUnsupportedBody}>
+                  {t("issues.preview_unsupported_body")}
                 </Text>
-              </ScrollView>
-            )
-          ) : null}
+                <Button onPress={() => void Linking.openURL(url)} variant="secondary">
+                  {t("issues.open_externally")}
+                </Button>
+              </View>
+            ) : null}
 
-          {attachment && !canPreviewImage && !canPreviewText ? (
-            <View style={styles.previewCentered}>
-              <Text style={styles.previewUnsupportedTitle}>{t("issues.preview_unavailable")}</Text>
-              <Text style={styles.previewUnsupportedBody}>
-                {t("issues.preview_unsupported_body")}
-              </Text>
-              <Button onPress={() => void Linking.openURL(url)} variant="secondary">
-                {t("issues.open_externally")}
-              </Button>
-            </View>
-          ) : null}
-
-          {attachment && preview?.error && !canPreviewText ? (
-            <View style={styles.previewCentered}>
-              <Text style={styles.errorText}>{preview.error}</Text>
-              <Button onPress={() => void Linking.openURL(url)} variant="secondary">
-                {t("issues.open_externally")}
-              </Button>
-            </View>
-          ) : null}
+            {attachment && preview?.error && !canPreviewText ? (
+              <View style={styles.previewCentered}>
+                <Text style={styles.errorText}>{preview.error}</Text>
+                <Button onPress={() => void Linking.openURL(url)} variant="secondary">
+                  {t("issues.open_externally")}
+                </Button>
+              </View>
+            ) : null}
+          </View>
         </View>
       </View>
     </Modal>
@@ -2210,11 +2348,9 @@ function LiveElapsed({ task }: { task: AgentTask }) {
 
 const TaskRunHeader = memo(function TaskRunHeader({
   onPress,
-  showTitle,
   task,
 }: {
   onPress: () => void;
-  showTitle: boolean;
   task: AgentTask;
 }) {
   const { t } = useTranslation();
@@ -2224,7 +2360,6 @@ const TaskRunHeader = memo(function TaskRunHeader({
       onPress={onPress}
       style={({ pressed }) => [styles.taskCard, pressed && styles.buttonPressed]}
     >
-      {showTitle ? <Text style={styles.sectionTitle}>{t("issues.agent_transcript")}</Text> : null}
       <View style={styles.timelineHeader}>
         <Text style={styles.timelineActor}>{t("issues.run_title", { id: task.id.slice(0, 8) })}</Text>
         <Text style={styles.timelineDate}>{formatAgentTaskStatus(t, task.status)}</Text>
@@ -2233,67 +2368,6 @@ const TaskRunHeader = memo(function TaskRunHeader({
     </Pressable>
   );
 });
-
-const ReactionRow = memo(function ReactionRow({
-  compact,
-  onToggle,
-  reactions,
-  userId,
-}: {
-  compact?: boolean;
-  onToggle: (emoji: string) => void;
-  reactions: ReactionLike[];
-  userId?: string;
-}) {
-  const reactionSummary = useMemo(() => {
-    const counts = new Map<string, number>();
-    const own = new Set<string>();
-    for (const reaction of reactions) {
-      counts.set(reaction.emoji, (counts.get(reaction.emoji) ?? 0) + 1);
-      if (userId && isOwnReaction(reaction, reaction.emoji, userId)) {
-        own.add(reaction.emoji);
-      }
-    }
-    return {
-      counts,
-      emojis: Array.from(new Set([...DEFAULT_REACTIONS, ...counts.keys()])),
-      own,
-    };
-  }, [reactions, userId]);
-
-  return (
-    <View style={styles.reactionRow}>
-      {reactionSummary.emojis.map((emoji) => {
-        const count = reactionSummary.counts.get(emoji) ?? 0;
-        const active = reactionSummary.own.has(emoji);
-        return (
-          <Pressable
-            disabled={!userId}
-            key={emoji}
-            onPress={() => onToggle(emoji)}
-            style={[
-              styles.reactionChip,
-              compact && styles.reactionChipCompact,
-              active && styles.reactionChipActive,
-            ]}
-          >
-            <Text style={[
-              styles.reactionText,
-              compact && styles.reactionTextCompact,
-              active && styles.reactionTextActive,
-            ]}>
-              {emoji}{count > 0 ? ` ${count}` : ""}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-});
-
-function isOwnReaction(reaction: ReactionLike, emoji: string, userId: string) {
-  return reaction.emoji === emoji && reaction.actor_type === "member" && reaction.actor_id === userId;
-}
 
 function formatDate(date: string | null | undefined) {
   if (!date) return "-";
@@ -2345,6 +2419,12 @@ function attachmentPreviewLabel(attachment: Attachment, t: Translate) {
   if (isImageAttachment(attachment)) return t("issues.tap_to_view");
   if (isTextPreviewAttachment(attachment)) return t("issues.tap_to_preview");
   return t("issues.tap_to_open");
+}
+
+function attachmentMetaLabel(attachment: Attachment, t: Translate) {
+  const fileInfo = `${formatBytes(attachment.size_bytes)} / ${attachment.content_type || t("issues.file")}`;
+  if (isImageAttachment(attachment)) return fileInfo;
+  return `${fileInfo} / ${attachmentPreviewLabel(attachment, t)}`;
 }
 
 function formatDocumentPickerError(err: unknown, t: Translate) {
@@ -2414,7 +2494,13 @@ function formatActivity(
 
 const styles = StyleSheet.create({
   content: {
-    gap: spacing.xl,
+    padding: spacing.lg,
+    paddingBottom: 96,
+  },
+  listItemSeparator: {
+    height: spacing.md,
+  },
+  issueDetailContent: {
     padding: spacing.lg,
     paddingBottom: 96,
   },
@@ -2428,19 +2514,47 @@ const styles = StyleSheet.create({
   keyboardAvoidingContent: {
     flex: 1,
   },
+  listHeader: {
+    gap: spacing.xl,
+  },
   section: {
     gap: spacing.sm,
   },
   sectionSeparated: {
     borderTopColor: colors.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: spacing.lg,
+    borderTopWidth: 1,
+    paddingTop: spacing.xl,
   },
   sectionHeader: {
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.md,
     justifyContent: "space-between",
+  },
+  sectionHeaderSurface: {
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    minHeight: 58,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  sectionHeaderActionButton: {
+    minHeight: 32,
+    paddingHorizontal: spacing.sm,
+  },
+  sectionTitleGroup: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 32,
+  },
+  sectionTitleAccent: {
+    backgroundColor: colors.foreground,
+    borderRadius: 2,
+    height: 18,
+    width: 3,
   },
   stickySectionHeader: {
     alignItems: "center",
@@ -2462,9 +2576,31 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   stickySectionCount: {
-    color: colors.mutedForeground,
+    backgroundColor: colors.muted,
+    borderRadius: 10,
+    color: colors.foreground,
     fontSize: 12,
-    fontWeight: "500",
+    fontWeight: "600",
+    minWidth: 22,
+    overflow: "hidden",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    textAlign: "center",
+  },
+  commentListHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+  },
+  jumpToLatestButton: {
+    alignItems: "center",
+    backgroundColor: colors.muted,
+    borderRadius: radii.sm,
+    justifyContent: "center",
+    minHeight: 32,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
   inlineActions: {
     alignItems: "center",
@@ -2534,6 +2670,7 @@ const styles = StyleSheet.create({
   issueEngagementRow: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: spacing.sm,
   },
   subscribeButton: {
@@ -2543,7 +2680,6 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     borderWidth: StyleSheet.hairlineWidth,
     justifyContent: "center",
-    marginLeft: "auto",
     minHeight: 36,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -2562,6 +2698,28 @@ const styles = StyleSheet.create({
   },
   subscribeButtonTextActive: {
     color: colors.primaryForeground,
+  },
+  issueShortcutButton: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 36,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  issueShortcutLabel: {
+    color: colors.foreground,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  issueShortcutCount: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontWeight: "600",
   },
   errorText: {
     color: colors.destructive,
@@ -2840,8 +2998,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: colors.foreground,
-    fontSize: 16,
-    fontWeight: "500",
+    fontSize: 17,
+    fontWeight: "700",
   },
   childRow: {
     backgroundColor: colors.card,
@@ -2864,6 +3022,12 @@ const styles = StyleSheet.create({
   relationList: {
     gap: spacing.sm,
   },
+  commentRowThreadStart: {
+    marginTop: spacing.md,
+  },
+  commentRowThreadContinuation: {
+    marginTop: 0,
+  },
   timelineItem: {
     backgroundColor: colors.card,
     borderColor: colors.border,
@@ -2883,7 +3047,6 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     borderWidth: StyleSheet.hairlineWidth,
     borderTopWidth: StyleSheet.hairlineWidth,
-    marginTop: -spacing.lg,
     padding: spacing.md,
   },
   threadReplyButton: {
@@ -2912,7 +3075,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 0,
-    marginTop: -spacing.lg,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
@@ -2956,11 +3118,6 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     position: "relative",
     zIndex: 10,
-  },
-  commentHeaderButtonRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.xs,
   },
   headerIconButton: {
     alignItems: "center",
@@ -3028,6 +3185,39 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 14,
     lineHeight: 20,
+  },
+  commentBodyWrap: {
+    position: "relative",
+  },
+  commentBodyCollapsed: {
+    height: COLLAPSED_COMMENT_HEIGHT,
+    overflow: "hidden",
+  },
+  commentFadeOverlay: {
+    alignItems: "center",
+    bottom: 0,
+    justifyContent: "flex-end",
+    left: 0,
+    minHeight: 96,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.xs,
+    position: "absolute",
+    right: 0,
+  },
+  expandCommentButton: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 36,
+    justifyContent: "center",
+    shadowColor: "#000000",
+    shadowOffset: { height: 2, width: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    width: 36,
+    elevation: 4,
   },
   editBox: {
     backgroundColor: colors.muted,
@@ -3104,6 +3294,13 @@ const styles = StyleSheet.create({
   attachmentList: {
     gap: spacing.sm,
   },
+  attachmentSectionPanel: {
+    backgroundColor: colors.muted,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: spacing.sm,
+  },
   attachmentRow: {
     alignItems: "center",
     backgroundColor: colors.card,
@@ -3113,7 +3310,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing.md,
     justifyContent: "space-between",
+    minHeight: 64,
     padding: spacing.md,
+    shadowColor: "#000000",
+    shadowOffset: { height: 1, width: 0 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
   },
   attachmentContent: {
     flex: 1,
@@ -3122,8 +3325,8 @@ const styles = StyleSheet.create({
   },
   attachmentName: {
     color: colors.foreground,
-    fontSize: 14,
-    fontWeight: "500",
+    fontSize: 15,
+    fontWeight: "600",
   },
   attachmentMeta: {
     color: colors.mutedForeground,
@@ -3139,6 +3342,9 @@ const styles = StyleSheet.create({
     color: colors.destructive,
     fontSize: 12,
     fontWeight: "500",
+  },
+  previewModalRoot: {
+    flex: 1,
   },
   previewModal: {
     backgroundColor: colors.background,
@@ -3175,11 +3381,6 @@ const styles = StyleSheet.create({
   },
   previewBody: {
     flex: 1,
-  },
-  previewImage: {
-    flex: 1,
-    height: "100%",
-    width: "100%",
   },
   previewCentered: {
     alignItems: "center",
@@ -3270,38 +3471,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     gap: spacing.sm,
     padding: spacing.md,
-  },
-  reactionRow: {
-    alignItems: "center",
-    flex: 1,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  reactionChip: {
-    backgroundColor: colors.muted,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  reactionChipCompact: {
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.xs,
-    paddingVertical: spacing.xs,
-  },
-  reactionChipActive: {
-    backgroundColor: colors.primary,
-  },
-  reactionText: {
-    color: colors.foreground,
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  reactionTextCompact: {
-    fontSize: 12,
-  },
-  reactionTextActive: {
-    color: colors.primaryForeground,
   },
   floatingButton: {
     alignItems: "center",

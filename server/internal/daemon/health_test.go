@@ -327,6 +327,251 @@ func TestTraceHandlerStreamSendsInitialLines(t *testing.T) {
 	}
 }
 
+func TestTraceHandlerStreamReadyReportsStreamDisplayCapability(t *testing.T) {
+	t.Parallel()
+
+	store := newTraceStoreForTest(t)
+	defer store.Close()
+	d := &Daemon{traceStore: store, logger: slog.Default()}
+	d.taskProviders.Store("task-stream-gemini", "gemini")
+	d.taskProviders.Store("task-stream-codex", "codex")
+
+	srv := httptest.NewServer(d.traceHandler())
+	defer srv.Close()
+
+	for _, tt := range []struct {
+		name string
+		task string
+		want bool
+	}{
+		{name: "unsupported provider", task: "task-stream-gemini", want: false},
+		{name: "stream provider", task: "task-stream-codex", want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			reqCtx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, srv.URL+"/"+tt.task+"/stream?tail=0", nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("stream request: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
+			}
+
+			_, data := readSSEEventForTest(t, bufio.NewReader(resp.Body), "ready")
+			var payload traceResponse
+			if err := json.Unmarshal([]byte(data), &payload); err != nil {
+				t.Fatalf("decode ready payload: %v", err)
+			}
+			if payload.StreamDisplay == nil {
+				t.Fatal("expected stream_display in ready payload")
+			}
+			if *payload.StreamDisplay != tt.want {
+				t.Fatalf("stream_display=%v, want %v", *payload.StreamDisplay, tt.want)
+			}
+		})
+	}
+}
+
+func TestPreviewStreamHandlerRejectsNonGet(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{previews: NewPreviewManager(t.TempDir(), "daemon-test", slog.Default()), logger: slog.Default()}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/preview/stream", nil)
+	d.previewStreamHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+}
+
+func TestPreviewStreamHandlerSendsFilteredReady(t *testing.T) {
+	t.Parallel()
+
+	manager := NewPreviewManager(t.TempDir(), "daemon-test", slog.Default())
+	now := time.Now()
+	if err := manager.saveLocked(Preview{
+		ID:          "preview-1",
+		Key:         "preview-1",
+		WorkspaceID: "ws-1",
+		IssueID:     "issue-1",
+		Visibility:  PreviewVisibilityPrivate,
+		CWD:         t.TempDir(),
+		Command:     []string{"npm", "run", "dev"},
+		PID:         os.Getpid(),
+		LogPath:     filepath.Join(t.TempDir(), "preview-1.log"),
+		Status:      PreviewStatusRunning,
+		StartedAt:   now,
+	}); err != nil {
+		t.Fatalf("save matching preview: %v", err)
+	}
+	if err := manager.saveLocked(Preview{
+		ID:          "preview-2",
+		Key:         "preview-2",
+		WorkspaceID: "ws-2",
+		IssueID:     "issue-2",
+		Visibility:  PreviewVisibilityPrivate,
+		CWD:         t.TempDir(),
+		Command:     []string{"npm", "run", "dev"},
+		PID:         os.Getpid(),
+		LogPath:     filepath.Join(t.TempDir(), "preview-2.log"),
+		Status:      PreviewStatusRunning,
+		StartedAt:   now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("save non-matching preview: %v", err)
+	}
+
+	d := &Daemon{previews: manager, logger: slog.Default()}
+	srv := httptest.NewServer(d.previewStreamHandler())
+	defer srv.Close()
+
+	reqCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, srv.URL+"?workspace_id=ws-1&issue_id=issue-1", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
+	}
+	event, data := readSSEEventForTest(t, bufio.NewReader(resp.Body), "ready")
+	cancel()
+	if event != "ready" {
+		t.Fatalf("expected ready event, got %q", event)
+	}
+
+	var payload previewStreamResponse
+	if err := json.Unmarshal([]byte(data), &payload); err != nil {
+		t.Fatalf("decode ready payload: %v", err)
+	}
+	if len(payload.Previews) != 1 || payload.Previews[0].ID != "preview-1" {
+		t.Fatalf("unexpected previews: %+v", payload.Previews)
+	}
+}
+
+func TestPreviewStreamHandlerSendsSnapshotOnChange(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	manager := NewPreviewManager(dir, "daemon-test", slog.Default())
+	d := &Daemon{previews: manager, logger: slog.Default()}
+	srv := httptest.NewServer(d.previewStreamHandler())
+	defer srv.Close()
+
+	reqCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, srv.URL+"?workspace_id=ws-1&issue_id=issue-1&interval_ms=500", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	if event, _ := readSSEEventForTest(t, reader, "ready"); event != "ready" {
+		t.Fatalf("expected ready event, got %q", event)
+	}
+
+	if err := manager.saveLocked(Preview{
+		ID:          "preview-new",
+		Key:         "preview-new",
+		WorkspaceID: "ws-1",
+		IssueID:     "issue-1",
+		Visibility:  PreviewVisibilityPrivate,
+		CWD:         t.TempDir(),
+		Command:     []string{"npm", "run", "dev"},
+		PID:         os.Getpid(),
+		LogPath:     filepath.Join(dir, "preview-new.log"),
+		Status:      PreviewStatusRunning,
+		StartedAt:   time.Now(),
+	}); err != nil {
+		t.Fatalf("save preview: %v", err)
+	}
+
+	event, data := readSSEEventForTest(t, reader, "snapshot")
+	cancel()
+	if event != "snapshot" {
+		t.Fatalf("expected snapshot event, got %q", event)
+	}
+	var payload previewStreamResponse
+	if err := json.Unmarshal([]byte(data), &payload); err != nil {
+		t.Fatalf("decode snapshot payload: %v", err)
+	}
+	if len(payload.Previews) != 1 || payload.Previews[0].ID != "preview-new" {
+		t.Fatalf("unexpected previews: %+v", payload.Previews)
+	}
+}
+
+func TestLocalDaemonCORSAllowsPrivateNetworkPreflight(t *testing.T) {
+	t.Setenv("FRONTEND_ORIGIN", "https://app.example.com")
+
+	d := &Daemon{previews: NewPreviewManager(t.TempDir(), "daemon-test", slog.Default()), logger: slog.Default()}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodOptions, "/preview/list", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	req.Header.Set("Access-Control-Request-Private-Network", "true")
+	d.previewListHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Private-Network"); got != "true" {
+		t.Fatalf("expected private network CORS header, got %q", got)
+	}
+}
+
+func readSSEEventForTest(t *testing.T, reader *bufio.Reader, target string) (string, string) {
+	t.Helper()
+
+	deadline := time.After(3 * time.Second)
+	event := ""
+	data := ""
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s event", target)
+		default:
+		}
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read stream: %v", err)
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			if event == target {
+				return event, data
+			}
+			event = ""
+			data = ""
+			continue
+		}
+		if strings.HasPrefix(line, "event: ") {
+			event = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+		if strings.HasPrefix(line, "data: ") {
+			data = strings.TrimPrefix(line, "data: ")
+		}
+	}
+}
+
 func TestHealthHandlerRespondsWhileTaskRepoLookupWaits(t *testing.T) {
 	const workspaceID = "ws-health"
 	const repoURL = "https://github.com/org/repo.git"

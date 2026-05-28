@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -32,6 +33,7 @@ func BuildPromptWithRunMode(task Task, runMode string) string {
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	writeLanguageInstruction(&b)
 	writeRunModeInstruction(&b, runMode)
+	writeRetryInstruction(&b, task)
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). On long-running issues use `--recent 20 --output json` to read the 20 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
@@ -132,6 +134,7 @@ func buildCommentPrompt(task Task, runMode string) string {
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	writeLanguageInstruction(&b)
 	writeRunModeInstruction(&b, runMode)
+	writeRetryInstruction(&b, task)
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	if task.TriggerCommentContent != "" {
 		authorLabel := "A user"
@@ -163,6 +166,7 @@ func buildChatPrompt(task Task) string {
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
 	writeLanguageInstruction(&b)
+	writeRetryInstruction(&b, task)
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
 	// List attachments by id + filename so the agent can fetch them via
 	// the CLI. We deliberately do NOT inline the URL: chat attachments
@@ -182,6 +186,27 @@ func buildChatPrompt(task Task) string {
 		b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it.\n")
 	}
 	return b.String()
+}
+
+func writeRetryInstruction(b *strings.Builder, task Task) {
+	type retryContext struct {
+		RetryInstruction string `json:"retry_instruction,omitempty"`
+	}
+	var cfg retryContext
+	if len(task.Context) == 0 || json.Unmarshal(task.Context, &cfg) != nil {
+		return
+	}
+	retryInstruction := strings.TrimSpace(cfg.RetryInstruction)
+	if retryInstruction == "" {
+		return
+	}
+	b.WriteString("## Retry Instruction\n\n")
+	b.WriteString("This task was manually retried with additional user guidance. Treat this guidance as the highest-priority correction for this retry, while still respecting the issue/comment context and system instructions.\n\n")
+	b.WriteString("User guidance:\n")
+	for _, line := range strings.Split(retryInstruction, "\n") {
+		fmt.Fprintf(b, "> %s\n", line)
+	}
+	b.WriteString("\n")
 }
 
 // buildAutopilotPrompt constructs a prompt for run_only autopilot tasks.

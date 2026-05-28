@@ -119,6 +119,56 @@ func (s *S3Storage) CdnDomain() string {
 	return s.cdnDomain
 }
 
+// RemapURL rewrites a stored attachment URL to use the CDN domain. If the URL
+// already uses the CDN domain or no CDN is configured, it is returned unchanged.
+// This enables historical OBS-direct URLs to be served via CDN without a DB migration.
+func (s *S3Storage) RemapURL(rawURL string) string {
+	if s.cdnDomain == "" {
+		return rawURL
+	}
+	cdnPrefix := "https://" + s.cdnDomain + "/"
+	if strings.HasPrefix(rawURL, cdnPrefix) {
+		return rawURL
+	}
+	if !s.isKnownStorageURL(rawURL) {
+		return rawURL
+	}
+	key := s.KeyFromURL(rawURL)
+	if key == "" {
+		return rawURL
+	}
+	return cdnPrefix + key
+}
+
+// isKnownStorageURL returns true when rawURL starts with a prefix that this
+// storage instance can authoritatively extract a key from (endpoint-based or
+// AWS bucket-based hosts). Used by RemapURL to avoid remapping unrelated URLs.
+func (s *S3Storage) isKnownStorageURL(rawURL string) bool {
+	if s.endpointURL != "" {
+		pathPrefix := strings.TrimRight(s.endpointURL, "/") + "/" + s.bucket + "/"
+		if strings.HasPrefix(rawURL, pathPrefix) {
+			return true
+		}
+		if prefix, ok := virtualHostedEndpointPrefix(s.endpointURL, s.bucket); ok {
+			if strings.HasPrefix(rawURL, prefix) {
+				return true
+			}
+		}
+	}
+	if s.region != "" {
+		if strings.HasPrefix(rawURL, "https://"+s.bucket+".s3."+s.region+".amazonaws.com/") {
+			return true
+		}
+		if strings.HasPrefix(rawURL, "https://s3."+s.region+".amazonaws.com/"+s.bucket+"/") {
+			return true
+		}
+	}
+	if strings.HasPrefix(rawURL, "https://"+s.bucket+"/") {
+		return true
+	}
+	return false
+}
+
 func normalizeS3KeyPrefix(prefix string) string {
 	prefix = strings.TrimSpace(prefix)
 	prefix = strings.Trim(prefix, "/")
@@ -438,6 +488,25 @@ func (s *S3Storage) PresignedGetURL(ctx context.Context, key string, expires tim
 	})
 	if err != nil {
 		return "", fmt.Errorf("s3 presign GetObject: %w", err)
+	}
+	return out.URL, nil
+}
+
+func (s *S3Storage) PresignedInlineGetURL(ctx context.Context, key string, contentType string, filename string, expires time.Duration) (string, error) {
+	presigner := s3.NewPresignClient(s.client)
+	input := &s3.GetObjectInput{
+		Bucket:                     aws.String(s.bucket),
+		Key:                        aws.String(key),
+		ResponseContentDisposition: aws.String(contentDisposition("inline", filename)),
+	}
+	if strings.TrimSpace(contentType) != "" {
+		input.ResponseContentType = aws.String(contentType)
+	}
+	out, err := presigner.PresignGetObject(ctx, input, func(o *s3.PresignOptions) {
+		o.Expires = expires
+	})
+	if err != nil {
+		return "", fmt.Errorf("s3 presign inline GetObject: %w", err)
 	}
 	return out.URL, nil
 }

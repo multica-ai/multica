@@ -3,11 +3,15 @@ import type {
   Agent,
   AgentTemplate,
   AgentTemplateSummary,
+  AutoSubscribePreferenceResponse,
   Attachment,
   CreateAgentFromTemplateResponse,
   GroupedIssuesResponse,
+  IssueLabelsResponse,
   ListIssuesResponse,
+  ListLabelsResponse,
   ListWebhookDeliveriesResponse,
+  Squad,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -143,7 +147,7 @@ export const CommentsListSchema = z.array(CommentSchema);
 // to {} so consumers never need to nil-guard `issue.metadata`.
 const IssueMetadataSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({});
 
-const IssueSchema = z.object({
+export const IssueSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
   number: z.number(),
@@ -167,6 +171,34 @@ const IssueSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
 }).passthrough();
+
+export const LabelSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  project_id: z.string().nullable().default(null),
+  name: z.string(),
+  color: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).passthrough();
+
+export const ListLabelsResponseSchema = z.object({
+  labels: z.array(LabelSchema).default([]),
+  total: z.number().default(0),
+}).passthrough();
+
+export const EMPTY_LIST_LABELS_RESPONSE: ListLabelsResponse = {
+  labels: [],
+  total: 0,
+};
+
+export const IssueLabelsResponseSchema = z.object({
+  labels: z.array(LabelSchema).default([]),
+}).passthrough();
+
+export const EMPTY_ISSUE_LABELS_RESPONSE: IssueLabelsResponse = {
+  labels: [],
+};
 
 export const ListIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
@@ -203,6 +235,39 @@ const SubscriberSchema = z.object({
 }).passthrough();
 
 export const SubscribersListSchema = z.array(SubscriberSchema);
+
+const AutoSubscribePreferencesSchema = z.object({
+  issue_creator: z.boolean().default(true),
+  issue_assignee: z.boolean().default(true),
+  comment_author: z.boolean().default(true),
+  issue_description_mention: z.boolean().default(false),
+  comment_mention: z.boolean().default(false),
+  quick_create_requester: z.boolean().default(true),
+}).passthrough();
+
+export const AutoSubscribePreferenceResponseSchema = z.object({
+  workspace_id: z.string().default(""),
+  preferences: AutoSubscribePreferencesSchema.default({
+    issue_creator: true,
+    issue_assignee: true,
+    comment_author: true,
+    issue_description_mention: false,
+    comment_mention: false,
+    quick_create_requester: true,
+  }),
+}).passthrough();
+
+export const EMPTY_AUTO_SUBSCRIBE_PREFERENCE_RESPONSE: AutoSubscribePreferenceResponse = {
+  workspace_id: "",
+  preferences: {
+    issue_creator: true,
+    issue_assignee: true,
+    comment_author: true,
+    issue_description_mention: false,
+    comment_mention: false,
+    quick_create_requester: true,
+  },
+};
 
 export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
@@ -627,6 +692,51 @@ export const EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE: CreateAgentFromTemplateR
   agent: { id: "" } as Agent,
   imported_skill_ids: [],
   reused_skill_ids: [],
+};
+
+// Squad list responses carry lightweight membership previews used by hover
+// cards. The preview fields are additive API fields, so older backends default
+// cleanly to no preview instead of breaking newer frontends.
+const SquadMemberPreviewSchema = z.object({
+  member_type: z.string(),
+  member_id: z.string(),
+  role: z.string().default(""),
+}).loose();
+
+export const SquadSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  instructions: z.string().default(""),
+  avatar_url: z.string().nullable().optional().transform((v) => v ?? null),
+  leader_id: z.string(),
+  creator_id: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  archived_at: z.string().nullable().optional().transform((v) => v ?? null),
+  archived_by: z.string().nullable().optional().transform((v) => v ?? null),
+  member_count: z.number().default(0),
+  member_preview: z.array(SquadMemberPreviewSchema).default([]),
+}).loose();
+
+export const SquadListSchema = z.array(SquadSchema);
+export const EMPTY_SQUAD_LIST: Squad[] = [];
+export const EMPTY_SQUAD: Squad = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  description: "",
+  instructions: "",
+  avatar_url: null,
+  leader_id: "",
+  creator_id: "",
+  created_at: "",
+  updated_at: "",
+  archived_at: null,
+  archived_by: null,
+  member_count: 0,
+  member_preview: [],
 };
 
 // Squad member status — backs the Squad detail page's Members tab. status

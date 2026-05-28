@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useAuthStore } from "@multica/core/auth";
-import { useLocale } from "../i18n";
+import { isZhLocale, useLocale } from "../i18n";
 import { GitHubMark, githubUrl, heroButtonClassName } from "./shared";
 
 export function HowItWorksSection() {
@@ -45,7 +45,7 @@ export function HowItWorksSection() {
             {user ? t.header.dashboard : t.howItWorks.cta}
           </Link>
           <Link
-            href={locale === "zh" ? "/docs/zh" : "/docs"}
+            href={isZhLocale(locale) ? "/docs/zh" : "/docs"}
             className={heroButtonClassName("ghost")}
           >
             {t.howItWorks.ctaDocs}

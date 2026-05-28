@@ -322,8 +322,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 				// Merge usage from the PromptResponse.
 				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
+				mergeTokenUsageMax(&c.usage, pr.usage)
 				c.usageMu.Unlock()
 			default:
 			}
@@ -366,7 +365,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		c.usageMu.Unlock()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 {
+		if tokenUsageHasTokens(u) {
 			model := opts.Model
 			if model == "" {
 				model = "unknown"
@@ -638,14 +637,8 @@ func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 
 func (c *hermesClient) extractPromptResult(data json.RawMessage) {
 	var resp struct {
-		StopReason string `json:"stopReason"`
-		Usage      *struct {
-			InputTokens      int64 `json:"inputTokens"`
-			OutputTokens     int64 `json:"outputTokens"`
-			TotalTokens      int64 `json:"totalTokens"`
-			ThoughtTokens    int64 `json:"thoughtTokens"`
-			CachedReadTokens int64 `json:"cachedReadTokens"`
-		} `json:"usage"`
+		StopReason string          `json:"stopReason"`
+		Usage      json.RawMessage `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return
@@ -654,12 +647,8 @@ func (c *hermesClient) extractPromptResult(data json.RawMessage) {
 	pr := hermesPromptResult{
 		stopReason: resp.StopReason,
 	}
-	if resp.Usage != nil {
-		pr.usage = TokenUsage{
-			InputTokens:     resp.Usage.InputTokens,
-			OutputTokens:    resp.Usage.OutputTokens,
-			CacheReadTokens: resp.Usage.CachedReadTokens,
-		}
+	if len(resp.Usage) > 0 && string(resp.Usage) != "null" {
+		pr.usage = tokenUsageFromRawMessage(resp.Usage)
 	}
 
 	if c.onPromptDone != nil {
@@ -1095,28 +1084,19 @@ func extractACPToolCallText(blocks []json.RawMessage) string {
 
 func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
 	var msg struct {
-		Usage struct {
-			InputTokens      int64 `json:"inputTokens"`
-			OutputTokens     int64 `json:"outputTokens"`
-			TotalTokens      int64 `json:"totalTokens"`
-			CachedReadTokens int64 `json:"cachedReadTokens"`
-		} `json:"usage"`
+		Usage json.RawMessage `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
+		return
+	}
+	u := tokenUsageFromRawMessage(msg.Usage)
+	if !tokenUsageHasTokens(u) {
 		return
 	}
 
 	c.usageMu.Lock()
 	// Usage updates from ACP are cumulative snapshots, so take the latest.
-	if msg.Usage.InputTokens > c.usage.InputTokens {
-		c.usage.InputTokens = msg.Usage.InputTokens
-	}
-	if msg.Usage.OutputTokens > c.usage.OutputTokens {
-		c.usage.OutputTokens = msg.Usage.OutputTokens
-	}
-	if msg.Usage.CachedReadTokens > c.usage.CacheReadTokens {
-		c.usage.CacheReadTokens = msg.Usage.CachedReadTokens
-	}
+	mergeTokenUsageMax(&c.usage, u)
 	c.usageMu.Unlock()
 }
 

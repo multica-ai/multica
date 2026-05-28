@@ -101,7 +101,7 @@ func TestOpencodeHandleToolUseEventCompleted(t *testing.T) {
 		},
 	}
 
-	b.handleToolUseEvent(event, ch)
+	b.handleToolUseEvent(context.Background(), event, ch, ExecOptions{})
 
 	// Should emit both a tool-use and a tool-result message.
 	if len(ch) != 2 {
@@ -155,7 +155,7 @@ func TestOpencodeHandleToolUseEventPending(t *testing.T) {
 		},
 	}
 
-	b.handleToolUseEvent(event, ch)
+	b.handleToolUseEvent(context.Background(), event, ch, ExecOptions{})
 
 	if len(ch) != 1 {
 		t.Fatalf("expected 1 message for pending tool, got %d", len(ch))
@@ -189,7 +189,7 @@ func TestOpencodeHandleToolUseEventStructuredOutput(t *testing.T) {
 		},
 	}
 
-	b.handleToolUseEvent(event, ch)
+	b.handleToolUseEvent(context.Background(), event, ch, ExecOptions{})
 
 	// tool-use + tool-result
 	if len(ch) != 2 {
@@ -220,7 +220,7 @@ func TestOpencodeHandleToolUseEventNilState(t *testing.T) {
 		},
 	}
 
-	b.handleToolUseEvent(event, ch)
+	b.handleToolUseEvent(context.Background(), event, ch, ExecOptions{})
 
 	if len(ch) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(ch))
@@ -509,7 +509,7 @@ func TestOpencodeProcessEventsHappyPath(t *testing.T) {
 		`{"type":"step_finish","timestamp":1004,"sessionID":"ses_happy","part":{"type":"step-finish"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch, ExecOptions{})
 
 	// Verify result.
 	if result.status != "completed" {
@@ -568,7 +568,7 @@ func TestOpencodeProcessEventsErrorCausesFailedStatus(t *testing.T) {
 		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_err","part":{"type":"step-finish"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch, ExecOptions{})
 
 	if result.status != "failed" {
 		t.Errorf("status: got %q, want %q", result.status, "failed")
@@ -604,13 +604,41 @@ func TestOpencodeProcessEventsSessionIDExtracted(t *testing.T) {
 		`{"type":"text","timestamp":1001,"sessionID":"ses_updated","part":{"type":"text","text":"hi"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch, ExecOptions{})
 
 	if result.sessionID != "ses_updated" {
 		t.Errorf("sessionID: got %q, want %q (should use last seen)", result.sessionID, "ses_updated")
 	}
 
 	close(ch)
+}
+
+func TestOpencodeProcessEventsStepFinishUsageKeepsReasoningInsideOutput(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	lines := strings.Join([]string{
+		`{"type":"step_finish","timestamp":1775116676180,"sessionID":"ses_usage","part":{"id":"prt_789","reason":"stop","snapshot":"abc123","messageID":"msg_456","sessionID":"ses_usage","type":"step-finish","tokens":{"total":14674,"input":14585,"output":89,"reasoning":82,"cache":{"write":11,"read":7}},"cost":0}}`,
+		`{"type":"step_finish","sessionID":"ses_usage","part":{"tokens":{"input":50,"output":10,"reasoning":3,"cache":{"read":2,"write":4}}}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+	close(ch)
+
+	if result.usage.InputTokens != 14635 {
+		t.Fatalf("input = %d, want 14635", result.usage.InputTokens)
+	}
+	if result.usage.OutputTokens != 99 {
+		t.Fatalf("output = %d, want 99", result.usage.OutputTokens)
+	}
+	if result.usage.CacheReadTokens != 9 {
+		t.Fatalf("cache read = %d, want 9", result.usage.CacheReadTokens)
+	}
+	if result.usage.CacheWriteTokens != 15 {
+		t.Fatalf("cache write = %d, want 15", result.usage.CacheWriteTokens)
+	}
 }
 
 func TestOpencodeProcessEventsScannerError(t *testing.T) {
@@ -621,9 +649,9 @@ func TestOpencodeProcessEventsScannerError(t *testing.T) {
 
 	// Use an ioErrReader that returns valid data then an I/O error, which
 	// triggers scanner.Err() and should set status to "failed".
-	result := b.processEvents(&ioErrReader{
+	result := b.processEvents(context.Background(), &ioErrReader{
 		data: `{"type":"text","sessionID":"ses_scan","part":{"text":"before error"}}` + "\n",
-	}, ch)
+	}, ch, ExecOptions{})
 
 	if result.status != "failed" {
 		t.Errorf("status: got %q, want %q", result.status, "failed")
@@ -669,7 +697,7 @@ func TestOpencodeProcessEventsEmptyLines(t *testing.T) {
 		"",
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch, ExecOptions{})
 
 	if result.status != "completed" {
 		t.Errorf("status: got %q, want %q", result.status, "completed")
@@ -703,7 +731,7 @@ func TestOpencodeProcessEventsErrorDoesNotRevertToCompleted(t *testing.T) {
 		`{"type":"text","sessionID":"ses_x","part":{"text":"recovered?"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch, ExecOptions{})
 
 	if result.status != "failed" {
 		t.Errorf("status: got %q, want %q (error should stick)", result.status, "failed")
@@ -713,6 +741,129 @@ func TestOpencodeProcessEventsErrorDoesNotRevertToCompleted(t *testing.T) {
 	}
 
 	close(ch)
+}
+
+func TestOpencodeDisplayEventOrdering(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	type displayEvt struct {
+		evType  string
+		title   string
+		content string
+	}
+	var displayEvents []displayEvt
+
+	trace := func(channel, content, _ string) {
+		if channel != "display_event" {
+			return
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(content), &payload); err != nil {
+			return
+		}
+		displayEvents = append(displayEvents, displayEvt{
+			evType:  payload["type"].(string),
+			title:   payload["title"].(string),
+			content: fmt.Sprintf("%v", payload["content"]),
+		})
+	}
+
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_disp","part":{"type":"step-start"}}`,
+		`{"type":"text","timestamp":1001,"sessionID":"ses_disp","part":{"type":"text","text":"Hello world"}}`,
+		`{"type":"tool_use","timestamp":1002,"sessionID":"ses_disp","part":{"tool":"bash","callID":"call_1","state":{"status":"completed","input":{"command":"ls"},"output":"a.go\n"}}}`,
+		`{"type":"text","timestamp":1003,"sessionID":"ses_disp","part":{"type":"text","text":" done"}}`,
+		`{"type":"step_finish","timestamp":1004,"sessionID":"ses_disp","part":{"type":"step-finish"}}`,
+	}, "\n")
+
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch, ExecOptions{TraceCallback: trace})
+	close(ch)
+
+	if result.status != "completed" {
+		t.Fatalf("status: got %q, want completed", result.status)
+	}
+
+	// Verify display events: status, assistant_text, command_start, command_output, assistant_text, final status
+	expectedTypes := []string{"status", "assistant_text", "command_start", "command_output", "assistant_text", "status"}
+	if len(displayEvents) != len(expectedTypes) {
+		t.Fatalf("expected %d display events, got %d: %+v", len(expectedTypes), len(displayEvents), displayEvents)
+	}
+	for i, want := range expectedTypes {
+		if displayEvents[i].evType != want {
+			t.Errorf("display event[%d]: got type %q, want %q", i, displayEvents[i].evType, want)
+		}
+	}
+
+	// Verify content of specific events
+	if displayEvents[1].content != "Hello world" {
+		t.Errorf("assistant_text content: got %q, want %q", displayEvents[1].content, "Hello world")
+	}
+	if displayEvents[2].content != "ls" {
+		t.Errorf("command_start content: got %q, want %q", displayEvents[2].content, "ls")
+	}
+	if displayEvents[3].content != "a.go\n" {
+		t.Errorf("command_output content: got %q, want %q", displayEvents[3].content, "a.go\n")
+	}
+}
+
+func TestProcessEventsEmitsFileChangeDisplayEventsForEditTools(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	type displayEvt struct {
+		evType  string
+		title   string
+		content string
+	}
+	var displayEvents []displayEvt
+
+	trace := func(channel, content, _ string) {
+		if channel != "display_event" {
+			return
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(content), &payload); err != nil {
+			return
+		}
+		displayEvents = append(displayEvents, displayEvt{
+			evType:  payload["type"].(string),
+			title:   payload["title"].(string),
+			content: fmt.Sprintf("%v", payload["content"]),
+		})
+	}
+
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_edit","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","timestamp":1001,"sessionID":"ses_edit","part":{"tool":"edit","callID":"call_edit","state":{"status":"completed","input":{"file_path":"server/pkg/agent/opencode.go"},"output":"ok"}}}`,
+		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_edit","part":{"type":"step-finish"}}`,
+	}, "\n")
+
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch, ExecOptions{TraceCallback: trace})
+	close(ch)
+
+	if result.status != "completed" {
+		t.Fatalf("status: got %q, want completed", result.status)
+	}
+
+	expected := []displayEvt{
+		{evType: "status", title: "OpenCode", content: "running"},
+		{evType: "file_change", title: "File change", content: "started"},
+		{evType: "file_change", title: "File change", content: "completed"},
+		{evType: "status", title: "OpenCode", content: "completed"},
+	}
+	if len(displayEvents) != len(expected) {
+		t.Fatalf("expected %d display events, got %d: %+v", len(expected), len(displayEvents), displayEvents)
+	}
+	for i, want := range expected {
+		if displayEvents[i] != want {
+			t.Fatalf("display event[%d]: got %+v, want %+v", i, displayEvents[i], want)
+		}
+	}
 }
 
 // ── Windows native-binary resolution tests ──
@@ -1123,4 +1274,77 @@ func equalStringSlice(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestOpencodeBuildRunArgs_ApprovalPolicy(t *testing.T) {
+	t.Parallel()
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+
+	tests := []struct {
+		name          string
+		policy        string
+		wantSkipPerms bool
+	}{
+		{"empty defaults to auto (skip permissions)", "", true},
+		{"auto skips permissions", "auto", true},
+		{"prompt skips permissions (degraded)", "prompt", true},
+		{"deny does NOT skip permissions", "deny", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			args := b.buildRunArgs("hello", ExecOptions{ApprovalPolicy: tt.policy})
+			hasSkip := false
+			for _, a := range args {
+				if a == "--dangerously-skip-permissions" {
+					hasSkip = true
+					break
+				}
+			}
+			if hasSkip != tt.wantSkipPerms {
+				t.Errorf("ApprovalPolicy=%q: --dangerously-skip-permissions present=%v, want %v\nargs: %v",
+					tt.policy, hasSkip, tt.wantSkipPerms, args)
+			}
+		})
+	}
+}
+
+func TestOpencodeProcessEventsNoRawProviderTraces(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	var traceChannels []string
+	trace := func(channel, _, _ string) {
+		traceChannels = append(traceChannels, channel)
+	}
+
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_raw","part":{"type":"step-start"}}`,
+		`{"type":"text","timestamp":1001,"sessionID":"ses_raw","part":{"type":"text","text":"hello"}}`,
+		`{"type":"tool_use","timestamp":1002,"sessionID":"ses_raw","part":{"tool":"bash","callID":"call_1","state":{"status":"completed","input":{"command":"ls"},"output":"file.go\n"}}}`,
+		`{"type":"step_finish","timestamp":1003,"sessionID":"ses_raw","part":{"type":"step-finish"}}`,
+	}, "\n")
+
+	b.processEvents(context.Background(), strings.NewReader(lines), ch, ExecOptions{TraceCallback: trace})
+	close(ch)
+
+	for _, tc := range traceChannels {
+		if tc == "raw_stdout" || tc == "provider_event" {
+			t.Errorf("standardized provider must not emit %q trace to user-visible stream", tc)
+		}
+	}
+
+	hasDisplay := false
+	for _, tc := range traceChannels {
+		if tc == "display_event" {
+			hasDisplay = true
+			break
+		}
+	}
+	if !hasDisplay {
+		t.Fatal("expected display_event traces to be emitted")
+	}
 }

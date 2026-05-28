@@ -247,7 +247,9 @@
     "squad_leader_failed_reason": "评估失败：{{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} 条动态",
-    "activity_count_other": "{{count}} 条动态"
+    "activity_count_other": "{{count}} 条动态",
+    "show_more_activities_one": "展开更早 {{count}} 条动态",
+    "show_more_activities_other": "展开更早 {{count}} 条动态"
   },
   "comment": {
     "delete_title": "删除评论",
@@ -381,6 +383,7 @@
     "copy_link": "复制链接",
     "copy_workdir_path": "复制本地 workdir 路径",
     "more": "更多",
+    "create_from_issue": "基于此 issue 新建",
     "create_sub_issue": "创建子 issue",
     "set_parent_issue": "设置父 issue...",
     "add_sub_issue": "添加子 issue...",
@@ -410,16 +413,24 @@
       "manage_action": "管理标签...",
       "manage_dialog_title": "管理标签",
       "create_action": "创建",
-      "create_failed": "创建标签失败"
+      "create_failed": "创建标签失败",
+      "scope_aria": "标签创建范围",
+      "scope_project": "当前项目",
+      "scope_workspace": "工作区"
     }
   },
   "labels_panel": {
     "intro": "创建和管理标签，用于在工作区内分类 issue。",
+    "project_intro": "为当前项目或整个工作区创建和管理标签。",
+    "scope_aria": "标签范围",
+    "scope_project": "当前项目",
+    "scope_workspace": "工作区",
     "new_placeholder": "新标签名称...",
     "new_aria": "新标签名称",
     "add_action": "添加",
     "loading": "加载中...",
-    "empty": "还没有标签。",
+    "empty_workspace": "还没有工作区标签。",
+    "empty_project": "还没有项目标签。",
     "name_required": "标签名称必填。",
     "color_label": "颜色",
     "pick_color_aria": "选择颜色",
@@ -435,6 +446,17 @@
     "create_failed": "创建标签失败",
     "update_failed": "更新标签失败",
     "delete_failed": "删除标签失败"
+  },
+  "retry_with_note": {
+    "action": "带说明重试",
+    "title": "带说明重试",
+    "description": "为下一次 agent 运行补充纠偏说明。",
+    "label": "这次希望 agent 注意什么？",
+    "placeholder": "说明这次重试需要改变或重点关注的内容...",
+    "hint": "这段说明会注入下一次 task prompt。",
+    "too_long": "说明不能超过 {{max}} 个字符。",
+    "cancel": "取消",
+    "submit": "重试"
   },
   "backlog_hint": {
     "title": "智能体在 backlog 状态下暂停",

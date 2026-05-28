@@ -9,9 +9,14 @@ import type { TaskFailureReason } from "@multica/core/types";
 // is purely a detail-page concern now.
 export const failureReasonLabel: Record<TaskFailureReason, string> = {
   agent_error: "Agent execution error",
+  cancelled: "Cancelled",
   timeout: "Task timed out",
-  codex_semantic_inactivity: "Codex semantic inactivity timeout",
+  rate_limited: "Rate limited",
+  parse_error: "Agent output error",
+  upstream_failure: "Upstream API failure",
   runtime_offline: "Daemon offline",
   runtime_recovery: "Daemon restarted",
+  queued_expired: "Queue expired",
+  unknown: "Unknown error",
   manual: "Cancelled by user",
 };

@@ -71,7 +71,7 @@ export function CreateIssueScreen({ navigation, route }: Props) {
 
   const assigneeOptions = useMemo(
     () => mentionTargets.filter((target): target is typeof target & { type: IssueAssigneeType } =>
-      target.type === "member" || target.type === "agent",
+      target.type === "member" || target.type === "agent" || target.type === "squad",
     ),
     [mentionTargets],
   );
@@ -362,8 +362,9 @@ function AssigneePickerModal({
 
   const filteredMembers = options.filter((item) => item.type === "member" && fuzzyMatch(item.label, query));
   const filteredAgents = options.filter((item) => item.type === "agent" && fuzzyMatch(item.label, query));
+  const filteredSquads = options.filter((item) => item.type === "squad" && fuzzyMatch(item.label, query));
   const showUnassigned = !query.trim() || fuzzyMatch(t("issues.unassigned"), query) || fuzzyMatch(t("issues.no_assignee"), query);
-  const hasResults = showUnassigned || filteredMembers.length > 0 || filteredAgents.length > 0;
+  const hasResults = showUnassigned || filteredMembers.length > 0 || filteredAgents.length > 0 || filteredSquads.length > 0;
 
   function select(value: { type: IssueAssigneeType; id: string } | null) {
     onChange(value);
@@ -407,6 +408,18 @@ function AssigneePickerModal({
               label={item.label}
               onPress={() => select({ type: "agent", id: item.id })}
               selected={assignee?.type === "agent" && assignee.id === item.id}
+            />
+          ))}
+        </PickerSection>
+      ) : null}
+      {filteredSquads.length > 0 ? (
+        <PickerSection label={t("issues.squads")}>
+          {filteredSquads.map((item) => (
+            <PickerRow
+              key={`squad-${item.id}`}
+              label={item.label}
+              onPress={() => select({ type: "squad", id: item.id })}
+              selected={assignee?.type === "squad" && assignee.id === item.id}
             />
           ))}
         </PickerSection>
