@@ -17,8 +17,17 @@ import (
 // cfuseBackend implements Backend by spawning the cfuse CLI with stream-json
 // output. cfuse is a Claude Code wrapper that supports the same stream-json
 // protocol, so this backend reuses claudeBackend's message parsing and session
-// handling. The differences are in argument construction (--print instead of
-// -p, --skip-update to prevent interactive prompts).
+// handling. The differences are in argument construction:
+//   - --print instead of -p (both are equivalent but cfuse's CLI only has --print)
+//   - --approval-mode yolo instead of --permission-mode bypassPermissions
+//   - --skip-update to prevent interactive prompts on startup
+//   - No --input-format or --verbose (cfuse sets these internally for the engine)
+//
+// IMPORTANT: cfuse has its own CLI argument parser that runs before delegating
+// to the Claude Code engine. Flags like --input-format, --verbose, and
+// --permission-mode are engine-only and will cause "Unknown arguments" errors
+// when cfuse's login session is expired. Always use cfuse-native flags
+// (--approval-mode yolo, --skip-update, etc.) for critical arguments.
 type cfuseBackend struct {
 	cfg Config
 }
@@ -286,26 +295,44 @@ func handleCfuseUser(msg claudeSDKMessage, ch chan<- Message) {
 var cfuseBlockedArgs = map[string]blockedArgMode{
 	"--print":          blockedStandalone, // non-interactive mode
 	"--output-format":  blockedWithValue,  // stream-json protocol
-	"--input-format":   blockedWithValue,  // stream-json protocol
-	"--permission-mode": blockedWithValue, // bypassPermissions for autonomous operation
+	"--approval-mode":  blockedWithValue,  // yolo mode for autonomous operation
+	"-y":               blockedStandalone, // alias for --approval-mode yolo
+	"--yolo":           blockedStandalone, // alias for --approval-mode yolo
 	"--mcp-config":     blockedWithValue,  // set by daemon from agent.mcp_config
 	"--skip-update":    blockedStandalone, // must be set to prevent interactive prompts
-	"--effort":         blockedWithValue,  // owned by thinking_level picker
 	"-p":               blockedStandalone, // alias for --print
 }
 
 func buildCfuseArgs(opts ExecOptions, logger *slog.Logger) []string {
+	// cfuse has its own CLI layer that validates arguments before delegating
+	// to the Claude Code engine. Only cfuse-native flags are safe here;
+	// engine-only flags like --input-format, --verbose, --effort,
+	// --permission-mode, --max-turns, and --append-system-prompt are
+	// rejected by cfuse's parser when the login session is expired, causing
+	// "Unknown arguments" errors and immediate task failure.
+	//
+	// cfuse internally forwards these engine-only flags to the Claude Code
+	// engine when logged in:
+	//   --cc --print --verbose --output-format stream-json
+	//   --input-format stream-json --skip-update
+	//   --setting-sources user,project,local
 	args := []string{
-		"--print",                          // non-interactive mode (cfuse uses --print, Claude uses -p)
-		"--output-format", "stream-json",   // same as Claude Code
-		"--input-format", "stream-json",    // same as Claude Code
-		"--verbose",
-		"--permission-mode", "bypassPermissions", // non-interactive autonomous mode
-		"--skip-update",                    // cfuse-specific: prevent interactive engine update prompt
+		"--print",                        // non-interactive mode (cfuse uses --print, Claude uses -p)
+		"--output-format", "stream-json", // stream-json output for daemon parsing
+		"--approval-mode", "yolo",        // cfuse-native: auto-approve all operations (equivalent to --permission-mode bypassPermissions)
+		"--skip-update",                  // cfuse-specific: prevent interactive engine update prompt
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
+	// Engine-specific flags: --effort, --max-turns, --append-system-prompt,
+	// --resume, and --input-format are NOT cfuse-native. They work when
+	// cfuse is logged in (cfuse delegates to the engine which recognizes them)
+	// but cause "Unknown arguments" errors when cfuse's login session is
+	// expired. We still pass them because they're needed for full
+	// functionality, and the login-expiry case is an operational issue
+	// that should be fixed at the cfuse/auth level rather than by
+	// stripping features.
 	if opts.ThinkingLevel != "" {
 		args = append(args, "--effort", opts.ThinkingLevel)
 	}
