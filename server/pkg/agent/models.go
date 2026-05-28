@@ -91,7 +91,10 @@ const modelCacheTTL = 60 * time.Second
 // executablePath lets the caller point at a non-default binary; pass
 // "" to use the provider's default name on PATH.
 func ListModels(ctx context.Context, providerType, executablePath string) ([]Model, error) {
-	switch providerType {
+	// Variant providers (codebuddy, claude-internal, codex-internal,
+	// gemini-internal) share the upstream model catalog verbatim, so
+	// route them through the family's discovery path.
+	switch ProtocolFamily(providerType) {
 	case "claude":
 		models := claudeStaticModels()
 		annotateClaudeThinking(ctx, models, executablePath)

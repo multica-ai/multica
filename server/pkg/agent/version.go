@@ -10,10 +10,24 @@ import (
 
 // MinVersions defines the minimum required CLI version for each agent type.
 // Versions below these will be rejected during daemon registration.
+//
+// Variant providers (codebuddy, *-internal) intentionally pin a 0.0.0 floor
+// rather than inheriting the protocol family's threshold via ProtocolFamily.
+// Internal forks ship under independent version sequences (e.g. claude-internal
+// 1.1.8 corresponds to a Claude Code feature set well past upstream 2.0.0;
+// codex-internal 0.0.9 carries the modern app-server protocol despite the
+// tiny number) and pinning them to upstream's gate would silently reject
+// every internal CLI on every supported machine. We still go through
+// CheckMinVersion for the parsing-side guarantees, just with no real floor.
 var MinVersions = map[string]string{
 	"claude":  "2.0.0",
 	"codex":   "0.100.0", // app-server --listen stdio:// added in 0.100.0
 	"copilot": "1.0.0",   // --output-format json envelope stable from 1.0.x
+	// Variant providers — see comment above.
+	"codebuddy":       "0.0.0",
+	"claude-internal": "0.0.0",
+	"codex-internal":  "0.0.0",
+	"gemini-internal": "0.0.0",
 }
 
 // MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against
@@ -105,8 +119,20 @@ func (v semver) lessThan(other semver) bool {
 
 // CheckMinVersion validates that detectedVersion meets the minimum for agentType.
 // Returns nil if the version is acceptable or no minimum is defined.
+//
+// Variant providers (codebuddy, claude-internal, codex-internal,
+// gemini-internal) inherit the base protocol family's minimum version
+// requirement via ProtocolFamily, so they don't need to be enumerated
+// in MinVersions explicitly — adding a new variant doesn't require
+// touching this gate.
 func CheckMinVersion(agentType, detectedVersion string) error {
 	minRaw, ok := MinVersions[agentType]
+	if !ok {
+		// Fall back to the protocol family's minimum (e.g. "claude-internal"
+		// → "claude"). Returns ok=false for genuine unknowns, which keeps
+		// the existing "no minimum defined → accept anything" behaviour.
+		minRaw, ok = MinVersions[ProtocolFamily(agentType)]
+	}
 	if !ok {
 		return nil
 	}

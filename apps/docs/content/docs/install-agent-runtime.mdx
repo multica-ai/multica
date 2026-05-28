@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 11 supported tools so the daemon can detect them.
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 15 supported tools so the daemon can detect them.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 11 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 15 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -31,13 +31,13 @@ multica daemon restart
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
 
-## The 11 supported tools
+## The 15 supported tools
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 11.
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 15.
 
 ### Claude Code (Anthropic)
 
-The most complete integration. Session resumption works, MCP works, and it's the **only one of the 11 that actually consumes the `mcp_config` field** on agents (see the [matrix](/providers#mcp-configuration-only-claude-code-actually-reads-it)).
+The most complete integration. Session resumption works, MCP works, and it's the **only one of the 15 that actually consumes the `mcp_config` field** on agents (see the [matrix](/providers#mcp-configuration-only-claude-code-actually-reads-it)).
 
 | | |
 |---|---|
@@ -146,6 +146,28 @@ Minimalist. **Session resumption is unusual** — the resume id is the path to a
 | Daemon looks for | `pi` |
 | Install | See Inflection's CLI docs at [pi.ai](https://pi.ai/). |
 | Authentication | Per the vendor's docs. |
+
+### CodeBuddy (Tencent)
+
+A Tencent-published fork of Claude Code. Speaks the same wire protocol as Claude (stream-json over stdio), so MCP and session resumption behave identically — the daemon dispatches it to the same backend implementation. Independent versioning (`codebuddy --version` is on a 2.x line that doesn't track upstream Claude Code), so the minimum-version gate is relaxed for this entry.
+
+| | |
+|---|---|
+| Daemon looks for | `codebuddy` |
+| Install | npm package `codebuddy` (`npm install -g codebuddy`). See [docs.cloud.tencent.com/document/product/1779](https://cloud.tencent.com/document/product/1779) for the latest official guide. |
+| Authentication | `codebuddy` will walk you through Tencent CodeBuddy login on first run. |
+
+### Internal-only forks (enterprise distributions)
+
+Three additional CLIs are recognised so on-prem / corporate environments can register them as runtimes alongside their public counterparts. They share each parent's wire protocol and backend implementation verbatim, but ship under independent version sequences and are not available on the public npm registry. The daemon registers them as separate runtimes (their own row in the Runtimes panel) so the same machine can host both an upstream tool and its internal fork side-by-side.
+
+| Provider key | Family | Daemon looks for | How it's distributed |
+|---|---|---|---|
+| `claude-internal` | Claude Code | `claude-internal` | Internal package channel — protocol-compatible with Claude Code |
+| `codex-internal` | Codex | `codex-internal` | Internal package channel — protocol-compatible with Codex |
+| `gemini-internal` | Gemini | `gemini-internal` | Internal package channel — protocol-compatible with Gemini CLI |
+
+If you don't have access to the internal channels, the daemon simply skips these entries during the `PATH` scan — no error, no log noise. Override the binary path per provider with `MULTICA_CLAUDE_INTERNAL_PATH`, `MULTICA_CODEX_INTERNAL_PATH`, or `MULTICA_GEMINI_INTERNAL_PATH` when the binary lives outside the daemon's resolved `PATH`.
 
 ## After installing
 

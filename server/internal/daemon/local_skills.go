@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 const (
@@ -57,7 +59,11 @@ func localSkillRootForProvider(provider string) (string, bool, error) {
 		return "", false, fmt.Errorf("resolve user home: %w", err)
 	}
 
-	switch provider {
+	// Variant providers (codebuddy, claude-internal, codex-internal,
+	// gemini-internal) share the upstream's user-level skills directory
+	// — they read the exact same SKILL.md format from the same
+	// well-known location.
+	switch agent.ProtocolFamily(provider) {
 	case "claude":
 		return filepath.Join(home, ".claude", "skills"), true, nil
 	case "codex":

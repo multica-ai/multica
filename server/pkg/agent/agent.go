@@ -113,10 +113,12 @@ func New(agentType string, cfg Config) (Backend, error) {
 		cfg.Logger = slog.Default()
 	}
 
+	// Variant providers (codebuddy, *-internal) reuse the base backend of
+	// their protocol family — see ProtocolFamily for the mapping.
 	switch agentType {
-	case "claude":
+	case "claude", "codebuddy", "claude-internal":
 		return &claudeBackend{cfg: cfg}, nil
-	case "codex":
+	case "codex", "codex-internal":
 		return &codexBackend{cfg: cfg}, nil
 	case "copilot":
 		return &copilotBackend{cfg: cfg}, nil
@@ -126,7 +128,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &openclawBackend{cfg: cfg}, nil
 	case "hermes":
 		return &hermesBackend{cfg: cfg}, nil
-	case "gemini":
+	case "gemini", "gemini-internal":
 		return &geminiBackend{cfg: cfg}, nil
 	case "pi":
 		return &piBackend{cfg: cfg}, nil
@@ -137,7 +139,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "kiro":
 		return &kiroBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, codebuddy, claude-internal, codex-internal, gemini-internal)", agentType)
 	}
 }
 
@@ -164,6 +166,13 @@ var launchHeaders = map[string]string{
 	"pi":       "pi (json mode)",
 	"kimi":     "kimi acp",
 	"kiro":     "kiro-cli acp",
+	// Variant providers — same wire protocol as their family parent, but
+	// different binary name shows in the UI preview so the user can tell
+	// which CLI is actually being launched.
+	"codebuddy":       "codebuddy (stream-json)",
+	"claude-internal": "claude-internal (stream-json)",
+	"codex-internal":  "codex-internal app-server",
+	"gemini-internal": "gemini-internal (stream-json)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

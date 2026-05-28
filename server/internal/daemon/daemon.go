@@ -728,7 +728,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		}
 		d.setAgentVersion(name, version)
 		d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
-		displayName := strings.ToUpper(name[:1]) + name[1:]
+		displayName := providerDisplayName(name)
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
@@ -2423,7 +2423,7 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 }
 
 func providerNeedsInlineSystemPrompt(provider string) bool {
-	switch provider {
+	switch agent.ProtocolFamily(provider) {
 	case "openclaw", "kiro", "kimi":
 		return true
 	default:
@@ -2512,7 +2512,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var env *execenv.Environment
 	codexVersion := d.agentVersion("codex")
 	openclawBin := ""
-	if provider == "openclaw" {
+	// behaviorProvider is the protocol family identity (e.g.
+	// "claude-internal" → "claude") used for every per-provider behaviour
+	// branch downstream: execenv config-file selection (CLAUDE.md vs
+	// AGENTS.md vs GEMINI.md), CODEX_HOME setup, openclaw config
+	// preparation, the comment reply template, the prompt builder. The
+	// raw `provider` is kept for cfg.Agents map lookups, agent.New
+	// dispatch, and runtime registration so the variant remains visible
+	// as its own row in the UI.
+	behaviorProvider := agent.ProtocolFamily(provider)
+	if behaviorProvider == "openclaw" {
 		openclawBin = entry.Path
 	}
 	// Resolve any local_directory assignment again here so runTask can plumb
@@ -2526,7 +2535,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.PriorWorkDir != "" && localAssignment == nil {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkDir:      task.PriorWorkDir,
-			Provider:     provider,
+			Provider:     behaviorProvider,
 			CodexVersion: codexVersion,
 			OpenclawBin:  openclawBin,
 			Task:         taskCtx,
@@ -2539,7 +2548,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			WorkspaceID:    task.WorkspaceID,
 			TaskID:         task.ID,
 			AgentName:      agentName,
-			Provider:       provider,
+			Provider:       behaviorProvider,
 			CodexVersion:   codexVersion,
 			OpenclawBin:    openclawBin,
 			Task:           taskCtx,
@@ -2560,7 +2569,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, behaviorProvider, taskCtx)
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
@@ -2568,7 +2577,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// the same (agent, issue) pair. The work_dir path is stored in DB on
 	// task completion and passed back via PriorWorkDir on the next claim.
 
-	prompt := BuildPrompt(task, provider)
+	prompt := BuildPrompt(task, behaviorProvider)
 
 	// Pass the daemon's auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -3488,7 +3497,7 @@ func isBlockedEnvKey(key string) bool {
 
 func defaultArgsForProvider(cfg Config, provider string) []string {
 	var args []string
-	switch provider {
+	switch agent.ProtocolFamily(provider) {
 	case "claude":
 		args = cfg.ClaudeArgs
 	case "codex":
@@ -3497,4 +3506,27 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 		return nil
 	}
 	return append([]string(nil), args...)
+}
+
+// providerDisplayName renders the human-readable runtime label used in
+// the UI's runtime cards. Variants get an explicit "(Internal)" suffix
+// so users can tell the original and the internal fork apart at a
+// glance; CodeBuddy keeps its branded casing instead of the default
+// title-case fallback ("Codebuddy"). Unknown providers fall back to
+// simple first-letter capitalisation, matching the legacy behaviour.
+func providerDisplayName(provider string) string {
+	switch provider {
+	case "codebuddy":
+		return "CodeBuddy"
+	case "claude-internal":
+		return "Claude (Internal)"
+	case "codex-internal":
+		return "Codex (Internal)"
+	case "gemini-internal":
+		return "Gemini (Internal)"
+	}
+	if provider == "" {
+		return ""
+	}
+	return strings.ToUpper(provider[:1]) + provider[1:]
 }

@@ -461,6 +461,11 @@ func IsKnownThinkingValue(providerType, value string) bool {
 	}
 	enum, ok := providerThinkingEnums[providerType]
 	if !ok {
+		// Variant providers (codebuddy, claude-internal, codex-internal,
+		// gemini-internal) inherit their family's enum.
+		enum, ok = providerThinkingEnums[ProtocolFamily(providerType)]
+	}
+	if !ok {
 		return false
 	}
 	return enum[value]

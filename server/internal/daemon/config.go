@@ -213,8 +213,27 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
+	// Variant providers (CodeBuddy + the *-internal CLIs) reuse the same wire
+	// protocol as their family parents (Claude / Codex / Gemini) and therefore
+	// the same backend implementation, but they ship under distinct binary
+	// names so users can install both originals and variants side-by-side.
+	// Probing each one independently lets a single machine register all four
+	// as their own runtime row in the UI rather than collapsing them into
+	// whichever happens to win the family slot.
+	if e, ok := probe("MULTICA_CODEBUDDY_PATH", "codebuddy", "MULTICA_CODEBUDDY_MODEL"); ok {
+		agents["codebuddy"] = e
+	}
+	if e, ok := probe("MULTICA_CLAUDE_INTERNAL_PATH", "claude-internal", "MULTICA_CLAUDE_INTERNAL_MODEL"); ok {
+		agents["claude-internal"] = e
+	}
+	if e, ok := probe("MULTICA_CODEX_INTERNAL_PATH", "codex-internal", "MULTICA_CODEX_INTERNAL_MODEL"); ok {
+		agents["codex-internal"] = e
+	}
+	if e, ok := probe("MULTICA_GEMINI_INTERNAL_PATH", "gemini-internal", "MULTICA_GEMINI_INTERNAL_MODEL"); ok {
+		agents["gemini-internal"] = e
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, codebuddy, claude-internal, codex-internal, or gemini-internal and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -550,6 +569,8 @@ func shellArgsFromEnv(name string) ([]string, error) {
 var defaultAgentCommandNames = []string{
 	"claude", "codex", "opencode", "openclaw", "hermes",
 	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
+	// Variant CLIs — see the probe block in LoadConfig.
+	"codebuddy", "claude-internal", "codex-internal", "gemini-internal",
 }
 
 var codexDesktopAppBundlePaths = func() []string {

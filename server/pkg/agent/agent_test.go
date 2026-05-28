@@ -73,6 +73,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	supported := []string{
 		"claude", "codex", "copilot", "cursor", "gemini",
 		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
+		"codebuddy", "claude-internal", "codex-internal", "gemini-internal",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {

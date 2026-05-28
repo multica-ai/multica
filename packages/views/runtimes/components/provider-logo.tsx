@@ -177,6 +177,104 @@ function KiroLogo({ className }: { className: string }) {
   );
 }
 
+// CodeBuddy (Tencent) — official mark, blue-purple gradient circle
+// with white speech-bubble glyphs. Provided by the user; defs IDs are
+// scoped per-instance via useId so multiple logos on the same page
+// don't collide on the linearGradient/radialGradient references.
+function CodeBuddyLogo({ className }: { className: string }) {
+  const rawId = useId().replace(/:/g, "");
+  const mask0 = `cb-mask0-${rawId}`;
+  const mask1 = `cb-mask1-${rawId}`;
+  const linear0 = `cb-linear0-${rawId}`;
+  const radial1 = `cb-radial1-${rawId}`;
+  const linear2 = `cb-linear2-${rawId}`;
+
+  return (
+    <svg viewBox="0 0 828 828" fill="none" className={className}>
+      <mask
+        id={mask0}
+        style={{ maskType: "luminance" }}
+        maskUnits="userSpaceOnUse"
+        x="0"
+        y="0"
+        width="828"
+        height="828"
+      >
+        <path
+          d="M828 414C828 185.354 642.646 0 414 0C185.354 0 0 185.354 0 414C0 642.646 185.354 828 414 828C642.646 828 828 642.646 828 414Z"
+          fill="white"
+        />
+      </mask>
+      <g mask={`url(#${mask0})`}>
+        <path d="M7107 0H0V7107H7107V0Z" fill="white" />
+        <path d="M7107 0H0V7107H7107V0Z" fill="white" />
+        <mask
+          id={mask1}
+          style={{ maskType: "luminance" }}
+          maskUnits="userSpaceOnUse"
+          x="0"
+          y="0"
+          width="828"
+          height="828"
+        >
+          <path d="M828 0H0V828H828V0Z" fill="white" />
+        </mask>
+        <g mask={`url(#${mask1})`}>
+          <path d="M828 0H0V828H828V0Z" fill={`url(#${linear0})`} />
+          <path d="M828 0H0V828H828V0Z" fill={`url(#${radial1})`} />
+          <path
+            d="M580.457 52.5005C588.039 45.7001 588.493 45.4376 594.055 45.1038C603.063 44.4455 611.314 48.7684 625.36 61.5566C658.173 91.3735 703.862 152.675 732.27 205.025L743.243 225.341L758.747 233.048C773.714 240.611 798.264 256.118 808.516 264.433C813.154 268.267 813.801 268.346 818.629 266.47C840.388 257.996 871.551 269.228 899.051 295.604C923.802 319.324 947.502 359.853 956.583 393.68C957.909 399.123 959.664 410.828 960.31 419.544C962.38 450.148 952.564 474.593 933.667 485.657C929.802 487.886 929.543 488.489 929.657 498.119C930.522 543.954 918.175 589.703 893.351 634.319C865.333 684.416 815.451 736.236 747.931 785.06C711.676 811.44 625.896 861.419 587.113 878.966C494.205 920.794 419.726 936.845 355.03 928.912C316.441 924.239 272.763 909.175 246.919 891.693C240.115 886.987 239.039 886.696 233.841 888.184C206.174 896.132 169.94 879.799 139.158 845.627C126.881 831.97 107.065 798.438 100.64 780.492C85.7807 738.492 88.7353 700.594 108.529 677.96C113.643 672.13 113.805 671.885 112.688 662.081C110.843 646.034 110.005 622.288 110.848 606.961L111.517 592.644L90.021 554.627C56.736 495.401 35.5955 445.67 27.4394 407.674C23.1335 386.84 23.4017 377.6 28.6903 370.76C31.909 366.63 42.4633 362.353 55.1898 360.004C87.2265 354.379 157.099 359.468 234.833 373.193L242.908 374.589L260.65 358.893C290.107 332.801 309.675 318.171 345.753 295.676C383.354 272.15 425.79 252.799 473.578 237.474L488.912 232.558L497.337 210.43C527.515 130.767 558.421 72.0374 580.457 52.5005ZM327.681 460.714C293.574 480.405 276.521 490.251 263.99 501.285C213.247 545.968 194.283 616.744 215.886 680.812C221.221 696.634 231.066 713.688 250.758 747.793C270.45 781.9 280.295 798.954 291.329 811.48C336.012 862.228 406.788 881.189 470.856 859.592C486.677 854.255 503.731 844.406 537.838 824.717L734.038 711.44C768.144 691.749 785.197 681.903 797.728 670.869C848.474 626.185 867.435 555.41 845.83 491.342C840.501 475.52 830.652 458.467 810.963 424.36C791.269 390.254 781.423 373.201 770.389 360.67C725.706 309.927 654.93 290.962 590.862 312.566C575.041 317.9 557.987 327.746 523.88 347.438L327.681 460.714Z"
+            fill={`url(#${linear2})`}
+          />
+          <path
+            d="M433.091 592.614C422.39 574.079 398.689 567.728 380.154 578.43C361.619 589.131 355.269 612.831 365.97 631.366L407.703 703.65C418.404 722.185 442.105 728.535 460.64 717.834C479.175 707.133 485.525 683.433 474.824 664.898L433.091 592.614Z"
+            fill="white"
+          />
+          <path
+            d="M642.198 471.887C631.497 453.352 607.797 447.001 589.262 457.702C570.727 468.403 564.376 492.104 575.077 510.639L616.81 582.923C627.512 601.458 651.212 607.808 669.747 597.107C688.282 586.406 694.633 562.705 683.931 544.17L642.198 471.887Z"
+            fill="white"
+          />
+        </g>
+      </g>
+      <defs>
+        <linearGradient
+          id={linear0}
+          x1="414"
+          y1="0"
+          x2="414"
+          y2="828"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="#6C4DFF" />
+          <stop offset="1" stopColor="#583ED3" />
+        </linearGradient>
+        <radialGradient
+          id={radial1}
+          cx="0"
+          cy="0"
+          r="1"
+          gradientUnits="userSpaceOnUse"
+          gradientTransform="translate(654.387 828) rotate(167.005) scale(356.352 367.336)"
+        >
+          <stop stopColor="#32E6B9" />
+          <stop offset="1" stopColor="#32E6B9" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient
+          id={linear2}
+          x1="311.174"
+          y1="206.207"
+          x2="672.925"
+          y2="832.779"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="white" stopOpacity="0.8" />
+          <stop offset="0.437689" stopColor="white" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -185,9 +283,20 @@ export function ProviderLogo({
   className?: string;
 }) {
   switch (provider) {
+    // claude-internal shares the upstream Anthropic mark — same wire
+    // protocol, same brand family. A future iteration can layer a
+    // small "Internal" badge to disambiguate the two without
+    // splintering the icon set.
     case "claude":
+    case "claude-internal":
       return <ClaudeLogo className={className} />;
+    // CodeBuddy is a Tencent-branded fork of Claude Code; it ships
+    // its own official mark (blue/purple gradient circle), so it
+    // gets a dedicated logo rather than reusing Claude's.
+    case "codebuddy":
+      return <CodeBuddyLogo className={className} />;
     case "codex":
+    case "codex-internal":
       return <CodexLogo className={className} />;
     case "opencode":
       return <OpenCodeLogo className={className} />;
@@ -206,6 +315,7 @@ export function ProviderLogo({
     case "kiro":
       return <KiroLogo className={className} />;
     case "gemini":
+    case "gemini-internal":
       return <GeminiLogo className={className} />;
     default:
       return <Monitor className={className} />;
