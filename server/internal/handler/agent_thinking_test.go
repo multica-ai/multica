@@ -24,7 +24,7 @@ func TestCreateAgent_ThinkingLevel_ValidationConsistency(t *testing.T) {
 
 	t.Cleanup(func() {
 		testPool.Exec(ctx,
-			`DELETE FROM agent WHERE workspace_id = $1 AND name LIKE 'thinking-test-%'`,
+			`DELETE FROM multica_agent WHERE workspace_id = $1 AND name LIKE 'thinking-test-%'`,
 			testWorkspaceID,
 		)
 	})
@@ -117,7 +117,7 @@ func TestUpdateAgent_ThinkingLevel_TriState(t *testing.T) {
 	agentID := createAgentOnRuntime(t, "thinking-update-test", claudeRuntimeID, "high")
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
+		testPool.Exec(ctx, `DELETE FROM multica_agent WHERE id = $1`, agentID)
 	})
 
 	// 1. Omitted field — name-only update must NOT touch thinking_level.
@@ -211,7 +211,7 @@ func TestUpdateAgent_RuntimeSwitch_PreservesValidValueRejectsInvalid(t *testing.
 	codexRuntimeID := createCodexProviderRuntime(t)
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent WHERE workspace_id = $1 AND name LIKE 'runtime-switch-%'`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_agent WHERE workspace_id = $1 AND name LIKE 'runtime-switch-%'`, testWorkspaceID)
 	})
 
 	t.Run("existing value still valid for new runtime is kept", func(t *testing.T) {
@@ -302,7 +302,7 @@ func createCodexProviderRuntime(t *testing.T) string {
 	t.Helper()
 	var runtimeID string
 	err := testPool.QueryRow(context.Background(), `
-		INSERT INTO agent_runtime (
+		INSERT INTO multica_agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status,
 			device_info, metadata, last_seen_at, owner_id
 		)
@@ -313,7 +313,7 @@ func createCodexProviderRuntime(t *testing.T) string {
 		t.Fatalf("create codex runtime: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, runtimeID)
 	})
 	return runtimeID
 }
@@ -326,7 +326,7 @@ func createClaudeProviderRuntime(t *testing.T) string {
 	t.Helper()
 	var runtimeID string
 	err := testPool.QueryRow(context.Background(), `
-		INSERT INTO agent_runtime (
+		INSERT INTO multica_agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status,
 			device_info, metadata, last_seen_at, owner_id
 		)
@@ -337,7 +337,7 @@ func createClaudeProviderRuntime(t *testing.T) string {
 		t.Fatalf("create claude runtime: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, runtimeID)
 	})
 	return runtimeID
 }
@@ -354,7 +354,7 @@ func createAgentOnRuntime(t *testing.T, name, runtimeID, level string) string {
 		levelArg = level
 	}
 	err := testPool.QueryRow(context.Background(), `
-		INSERT INTO agent (
+		INSERT INTO multica_agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks, owner_id,
 			instructions, custom_env, custom_args, thinking_level
@@ -366,7 +366,7 @@ func createAgentOnRuntime(t *testing.T, name, runtimeID, level string) string {
 		t.Fatalf("create agent on runtime %s: %v", runtimeID, err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent WHERE id = $1`, agentID)
 	})
 	return agentID
 }

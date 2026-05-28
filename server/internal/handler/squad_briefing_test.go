@@ -39,14 +39,14 @@ func seedSquadForBriefing(t *testing.T, leaderID string, name, instructions stri
 
 	var squadID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id, instructions)
+		INSERT INTO multica_squad (workspace_id, name, description, leader_id, creator_id, instructions)
 		VALUES ($1, $2, '', $3, $4, $5)
 		RETURNING id
 	`, testWorkspaceID, name, leaderID, testUserID, instructions).Scan(&squadID); err != nil {
 		t.Fatalf("create squad: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM squad WHERE id = $1`, squadID)
+		testPool.Exec(ctx, `DELETE FROM multica_squad WHERE id = $1`, squadID)
 	})
 
 	uuid := util.MustParseUUID(squadID)
@@ -88,7 +88,7 @@ func addHumanMember(t *testing.T, squadID pgtype.UUID, userID, role string) {
 func seededLeaderAgent(t *testing.T) (id, name string) {
 	t.Helper()
 	if err := testPool.QueryRow(context.Background(), `
-		SELECT id, name FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+		SELECT id, name FROM multica_agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
 	`, testWorkspaceID).Scan(&id, &name); err != nil {
 		t.Fatalf("load seeded agent: %v", err)
 	}
@@ -101,7 +101,7 @@ func seededHumanMember(t *testing.T) (memberID, userID, userName string) {
 	t.Helper()
 	if err := testPool.QueryRow(context.Background(), `
 		SELECT m.id, u.id, u.name
-		FROM member m JOIN "user" u ON u.id = m.user_id
+		FROM multica_member m JOIN multica_user u ON u.id = m.user_id
 		WHERE m.workspace_id = $1 ORDER BY m.created_at ASC LIMIT 1
 	`, testWorkspaceID).Scan(&memberID, &userID, &userName); err != nil {
 		t.Fatalf("load seeded member: %v", err)
@@ -173,7 +173,7 @@ func TestBuildSquadLeaderBriefing_SkipsArchivedAgent(t *testing.T) {
 	archived := createHandlerTestAgent(t, "Retired Bot", []byte("[]"))
 	addAgentMember(t, squad.ID, archived, "")
 	if _, err := testPool.Exec(ctx,
-		`UPDATE agent SET archived_at = now(), archived_by = $1 WHERE id = $2`,
+		`UPDATE multica_agent SET archived_at = now(), archived_by = $1 WHERE id = $2`,
 		testUserID, archived,
 	); err != nil {
 		t.Fatalf("archive agent: %v", err)
@@ -254,7 +254,7 @@ func queueSquadIssueTaskFor(t *testing.T, squadID, agentID, runtimeID string, is
 t.Helper()
 ctx := context.Background()
 if err := testPool.QueryRow(ctx, `
-INSERT INTO issue (
+INSERT INTO multica_issue (
 workspace_id, title, status, priority, creator_id, creator_type,
 assignee_type, assignee_id, number, position
 ) VALUES ($1, 'Squad briefing claim test', 'todo', 'medium', $2, 'member',
@@ -263,16 +263,16 @@ RETURNING id
 `, testWorkspaceID, testUserID, squadID, issueNumber).Scan(&issueID); err != nil {
 t.Fatalf("create squad-assigned issue: %v", err)
 }
-t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 if err := testPool.QueryRow(ctx, `
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
 VALUES ($1, $2, $3, 'queued', 0)
 RETURNING id
 `, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
 t.Fatalf("queue task: %v", err)
 }
-t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 return
 }
 
@@ -287,7 +287,7 @@ ctx := context.Background()
 
 var leaderID, runtimeID string
 if err := testPool.QueryRow(ctx,
-`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+`SELECT id, runtime_id FROM multica_agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
 testWorkspaceID,
 ).Scan(&leaderID, &runtimeID); err != nil {
 t.Fatalf("get leader agent: %v", err)
@@ -325,7 +325,7 @@ ctx := context.Background()
 
 var leaderID string
 if err := testPool.QueryRow(ctx,
-`SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+`SELECT id FROM multica_agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
 testWorkspaceID,
 ).Scan(&leaderID); err != nil {
 t.Fatalf("get leader agent: %v", err)
@@ -339,7 +339,7 @@ helperID := createHandlerTestAgent(t, "Non Leader Helper", []byte("[]"))
 addAgentMember(t, squad.ID, helperID, "")
 var helperRuntime string
 if err := testPool.QueryRow(ctx,
-`SELECT runtime_id FROM agent WHERE id = $1`, helperID,
+`SELECT runtime_id FROM multica_agent WHERE id = $1`, helperID,
 ).Scan(&helperRuntime); err != nil {
 t.Fatalf("get helper runtime: %v", err)
 }

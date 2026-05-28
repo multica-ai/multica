@@ -66,7 +66,7 @@ func TestSendChatMessage_LinksAttachments(t *testing.T) {
 	}
 	attachmentID := uploadResp.ID
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, attachmentID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_attachment WHERE id = $1`, attachmentID)
 	})
 
 	// 2. Send a chat message that references the attachment.
@@ -94,7 +94,7 @@ func TestSendChatMessage_LinksAttachments(t *testing.T) {
 	var dbMessageID *string
 	if err := testPool.QueryRow(
 		context.Background(),
-		`SELECT chat_message_id::text FROM attachment WHERE id = $1`,
+		`SELECT chat_message_id::text FROM multica_attachment WHERE id = $1`,
 		attachmentID,
 	).Scan(&dbMessageID); err != nil {
 		t.Fatalf("query attachment: %v", err)
@@ -135,7 +135,7 @@ func TestUpdateChatSession_RenamesTitle(t *testing.T) {
 	var dbTitle string
 	if err := testPool.QueryRow(
 		context.Background(),
-		`SELECT title FROM chat_session WHERE id = $1`,
+		`SELECT title FROM multica_chat_session WHERE id = $1`,
 		sessionID,
 	).Scan(&dbTitle); err != nil {
 		t.Fatalf("query chat_session: %v", err)
@@ -185,7 +185,7 @@ func TestSendChatMessage_InvalidAttachmentIDs(t *testing.T) {
 	var count int
 	if err := testPool.QueryRow(
 		context.Background(),
-		`SELECT count(*) FROM chat_message WHERE chat_session_id = $1`,
+		`SELECT count(*) FROM multica_chat_message WHERE chat_session_id = $1`,
 		sessionID,
 	).Scan(&count); err != nil {
 		t.Fatalf("count chat_message: %v", err)

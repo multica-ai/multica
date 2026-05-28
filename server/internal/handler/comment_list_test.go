@@ -72,14 +72,14 @@ func newCommentListFixture(t *testing.T) commentListFixture {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		INSERT INTO multica_issue (workspace_id, creator_type, creator_id, title)
 		VALUES ($1, 'member', $2, $3)
 		RETURNING id
 	`, testWorkspaceID, testUserID, "comment list fixture").Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	base := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
@@ -88,7 +88,7 @@ func newCommentListFixture(t *testing.T) commentListFixture {
 		t.Helper()
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at)
+			INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at)
 			VALUES ($1, $2, 'member', $3, $4, 'comment', $5, $6)
 			RETURNING id
 		`, issueID, testWorkspaceID, testUserID, body, parent, base.Add(offset)).Scan(&id); err != nil {
@@ -278,20 +278,20 @@ func TestListComments_RecentRanksStaleThreadAheadIfRecentlyReplied(t *testing.T)
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		INSERT INTO multica_issue (workspace_id, creator_type, creator_id, title)
 		VALUES ($1, 'member', $2, $3) RETURNING id
 	`, testWorkspaceID, testUserID, "stale-but-fresh fixture").Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	base := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
 	insert := func(parent *string, offset time.Duration, body string) string {
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at)
+			INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at)
 			VALUES ($1, $2, 'member', $3, $4, 'comment', $5, $6) RETURNING id
 		`, issueID, testWorkspaceID, testUserID, body, parent, base.Add(offset)).Scan(&id); err != nil {
 			t.Fatalf("insert: %v", err)
@@ -405,20 +405,20 @@ func TestListComments_ThreadCursorStableUnderSameLastActivity(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		INSERT INTO multica_issue (workspace_id, creator_type, creator_id, title)
 		VALUES ($1, 'member', $2, $3) RETURNING id
 	`, testWorkspaceID, testUserID, "thread tie-break fixture").Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	ts := time.Now().UTC().Add(-30 * time.Minute).Truncate(time.Millisecond)
 	insertRoot := func(body string) string {
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+			INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
 			VALUES ($1, $2, 'member', $3, $4, 'comment', $5) RETURNING id
 		`, issueID, testWorkspaceID, testUserID, body, ts).Scan(&id); err != nil {
 			t.Fatalf("insert: %v", err)

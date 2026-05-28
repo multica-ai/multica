@@ -306,7 +306,7 @@ func TestAttachLabelCrossWorkspaceLabel(t *testing.T) {
 	otherWorkspaceID := createOtherTestWorkspace(t)
 	var otherLabelID string
 	err := testPool.QueryRow(context.Background(), `
-		INSERT INTO issue_label (workspace_id, name, color)
+		INSERT INTO multica_issue_label (workspace_id, name, color)
 		VALUES ($1, 'foreign-label', '#000000')
 		RETURNING id
 	`, otherWorkspaceID).Scan(&otherLabelID)
@@ -419,7 +419,7 @@ func createOtherTestWorkspace(t *testing.T) string {
 	ctx := context.Background()
 	var wsID string
 	err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
+		INSERT INTO multica_workspace (name, slug, description, issue_prefix)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id
 	`, "Other Handler Tests", handlerTestWorkspaceSlug+"-other", "temp second workspace", "OTH").Scan(&wsID)
@@ -427,12 +427,12 @@ func createOtherTestWorkspace(t *testing.T) string {
 		t.Fatalf("create other workspace: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
+		INSERT INTO multica_member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
 	`, wsID, testUserID); err != nil {
 		t.Fatalf("add member to other workspace: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_workspace WHERE id = $1`, wsID)
 	})
 	return wsID
 }

@@ -747,8 +747,8 @@ func TestAgentAvatarUpdateFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for update failure, got nil")
 	}
-	if !strings.Contains(err.Error(), "update agent avatar") {
-		t.Fatalf("expected 'update agent avatar' error, got: %v", err)
+	if !strings.Contains(err.Error(), "update multica_agent avatar") {
+		t.Fatalf("expected 'update multica_agent avatar' error, got: %v", err)
 	}
 }
 

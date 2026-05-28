@@ -24,7 +24,7 @@ func createWebhookTestAgent(t *testing.T, name string) string {
 	t.Helper()
 	var agentID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO agent (
+		INSERT INTO multica_agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks, owner_id,
 			instructions, custom_env, custom_args, mcp_config
@@ -35,7 +35,7 @@ func createWebhookTestAgent(t *testing.T, name string) string {
 		t.Fatalf("create agent: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent WHERE id = $1`, agentID)
 	})
 	return agentID
 }
@@ -44,7 +44,7 @@ func createWebhookTestAutopilot(t *testing.T, agentID, status, mode string) stri
 	t.Helper()
 	var apID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO autopilot (
+		INSERT INTO multica_autopilot (
 			workspace_id, title, assignee_id, status, execution_mode,
 			created_by_type, created_by_id
 		) VALUES ($1, $2, $3, $4, $5, 'member', $6)
@@ -53,7 +53,7 @@ func createWebhookTestAutopilot(t *testing.T, agentID, status, mode string) stri
 		t.Fatalf("create autopilot: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, apID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_autopilot WHERE id = $1`, apID)
 	})
 	return apID
 }
@@ -412,7 +412,7 @@ func TestWebhookHandler_ArchivedAutopilotReturnsIgnored(t *testing.T) {
 	trig := createWebhookTriggerViaHandler(t, apID)
 
 	if _, err := testPool.Exec(context.Background(),
-		`UPDATE autopilot SET status = 'archived' WHERE id = $1`, apID); err != nil {
+		`UPDATE multica_autopilot SET status = 'archived' WHERE id = $1`, apID); err != nil {
 		t.Fatalf("archive autopilot: %v", err)
 	}
 

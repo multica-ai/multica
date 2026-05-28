@@ -59,7 +59,7 @@ func newSquadCommentTriggerFixture(t *testing.T) squadCommentTriggerFixture {
 	// Reuse the seeded "Handler Test Agent" as the leader — it has a runtime.
 	var leaderID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+		SELECT id FROM multica_agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
 	`, testWorkspaceID).Scan(&leaderID); err != nil {
 		t.Fatalf("load leader agent: %v", err)
 	}
@@ -70,26 +70,26 @@ func newSquadCommentTriggerFixture(t *testing.T) squadCommentTriggerFixture {
 
 	var squadID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		INSERT INTO multica_squad (workspace_id, name, description, leader_id, creator_id)
 		VALUES ($1, $2, '', $3, $4)
 		RETURNING id
 	`, testWorkspaceID, "Squad Comment Trigger", leaderID, testUserID).Scan(&squadID); err != nil {
 		t.Fatalf("create squad: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_squad WHERE id = $1`, squadID)
 	})
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id)
+		INSERT INTO multica_issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id)
 		VALUES ($1, 'member', $2, $3, 'squad', $4)
 		RETURNING id
 	`, testWorkspaceID, testUserID, "squad comment trigger", squadID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
@@ -217,22 +217,22 @@ func TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole(t *testing.T)
 	issueID := uuidToString(fx.Issue.ID)
 
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
 	})
 
 	clearTasks := func() {
-		if _, err := testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID); err != nil {
+		if _, err := testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID); err != nil {
 			t.Fatalf("clear tasks: %v", err)
 		}
 	}
 	insertTask := func(isLeader bool, status string) {
 		t.Helper()
 		var runtimeID string
-		if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
+		if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM multica_agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
 			t.Fatalf("load runtime: %v", err)
 		}
 		if _, err := testPool.Exec(ctx, `
-			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task)
+			INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task)
 			VALUES ($1, $2, $3, $4, $5)
 		`, fx.LeaderID, runtimeID, issueID, status, isLeader); err != nil {
 			t.Fatalf("insert task: %v", err)
@@ -294,14 +294,14 @@ func TestCreateComment_SquadLeaderSkipOnlyInspectsCurrentMention(t *testing.T) {
 	issueID := uuidToString(fx.Issue.ID)
 
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_comment WHERE issue_id = $1`, issueID)
 	})
 
 	countQueued := func(agentID string) int {
 		var n int
 		if err := testPool.QueryRow(ctx,
-			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+			`SELECT count(*) FROM multica_agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
 			issueID, agentID,
 		).Scan(&n); err != nil {
 			t.Fatalf("count tasks for %s: %v", agentID, err)
@@ -369,8 +369,8 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	issueID := uuidToString(fx.Issue.ID)
 
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_comment WHERE issue_id = $1`, issueID)
 	})
 
 	// Seed a worker task for the leader agent on this issue so the guard
@@ -379,12 +379,12 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	// completed) so we can hand its ID back through X-Task-ID for the
 	// resolveActor agent-identity check.
 	var runtimeID string
-	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM multica_agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
 		t.Fatalf("load runtime: %v", err)
 	}
 	var workerTaskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task)
 		VALUES ($1, $2, $3, 'running', FALSE)
 		RETURNING id
 	`, fx.LeaderID, runtimeID, issueID).Scan(&workerTaskID); err != nil {
@@ -409,7 +409,7 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	// leader role can react to its own worker output.
 	var leaderTasks int
 	if err := testPool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_task_queue
+		SELECT count(*) FROM multica_agent_task_queue
 		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE
 	`, issueID, fx.LeaderID).Scan(&leaderTasks); err != nil {
 		t.Fatalf("count leader tasks: %v", err)
@@ -434,11 +434,11 @@ func TestCreateRetryTask_InheritsIsLeaderTask(t *testing.T) {
 	issueID := uuidToString(fx.Issue.ID)
 
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
 	})
 
 	var runtimeID string
-	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM multica_agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
 		t.Fatalf("load runtime: %v", err)
 	}
 
@@ -453,14 +453,14 @@ func TestCreateRetryTask_InheritsIsLeaderTask(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var parentID string
 			if err := testPool.QueryRow(ctx, `
-				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, attempt, max_attempts, is_leader_task)
+				INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, attempt, max_attempts, is_leader_task)
 				VALUES ($1, $2, $3, 'failed', 1, 3, $4)
 				RETURNING id
 			`, fx.LeaderID, runtimeID, issueID, tc.isLeader).Scan(&parentID); err != nil {
 				t.Fatalf("seed parent task: %v", err)
 			}
 			t.Cleanup(func() {
-				testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1 OR parent_task_id = $1`, parentID)
+				testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1 OR parent_task_id = $1`, parentID)
 			})
 
 			child, err := testHandler.Queries.CreateRetryTask(ctx, util.MustParseUUID(parentID))
@@ -492,29 +492,29 @@ func TestCreateComment_SquadMentionPrivateLeaderBlocksPlainMember(t *testing.T) 
 	// Create a squad with the private agent as leader.
 	var squadID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		INSERT INTO multica_squad (workspace_id, name, description, leader_id, creator_id)
 		VALUES ($1, 'Private Leader Squad', '', $2, $3)
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID).Scan(&squadID); err != nil {
 		t.Fatalf("create squad: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_squad WHERE id = $1`, squadID)
 	})
 
 	// Create an issue.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		INSERT INTO multica_issue (workspace_id, creator_type, creator_id, title)
 		VALUES ($1, 'member', $2, 'private leader squad mention test')
 		RETURNING id
 	`, testWorkspaceID, memberID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	// Plain member posts a comment mentioning the squad.
@@ -531,7 +531,7 @@ func TestCreateComment_SquadMentionPrivateLeaderBlocksPlainMember(t *testing.T) 
 	// The private leader must NOT have a queued task — plain member lacks access.
 	var count int
 	if err := testPool.QueryRow(ctx,
-		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+		`SELECT count(*) FROM multica_agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
 		issueID, agentID,
 	).Scan(&count); err != nil {
 		t.Fatalf("count tasks: %v", err)
@@ -553,42 +553,42 @@ func TestCreateComment_SquadMentionTriggersLeader(t *testing.T) {
 	// Create a squad with a leader agent.
 	var leaderID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+		SELECT id FROM multica_agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
 	`, testWorkspaceID).Scan(&leaderID); err != nil {
 		t.Fatalf("load leader agent: %v", err)
 	}
 
 	var squadID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		INSERT INTO multica_squad (workspace_id, name, description, leader_id, creator_id)
 		VALUES ($1, $2, '', $3, $4)
 		RETURNING id
 	`, testWorkspaceID, "Mention Trigger Squad", leaderID, testUserID).Scan(&squadID); err != nil {
 		t.Fatalf("create squad: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_squad WHERE id = $1`, squadID)
 	})
 
 	// Create an issue NOT assigned to the squad (assigned to nobody).
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		INSERT INTO multica_issue (workspace_id, creator_type, creator_id, title)
 		VALUES ($1, 'member', $2, 'squad mention trigger test')
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	countQueued := func(agentID string) int {
 		var n int
 		if err := testPool.QueryRow(ctx,
-			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+			`SELECT count(*) FROM multica_agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
 			issueID, agentID,
 		).Scan(&n); err != nil {
 			t.Fatalf("count tasks for %s: %v", agentID, err)

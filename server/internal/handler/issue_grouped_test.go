@@ -16,18 +16,18 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 	suffix := time.Now().UnixNano()
 	var assigneeID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO "user" (name, email)
+		INSERT INTO multica_user (name, email)
 		VALUES ($1, $2)
 		RETURNING id
 	`, "Grouped Issues Test User", fmt.Sprintf("grouped-%d@multica.ai", suffix)).Scan(&assigneeID); err != nil {
 		t.Fatalf("create assignee user: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, assigneeID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_user WHERE id = $1`, assigneeID)
 	})
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO member (workspace_id, user_id, role)
+		INSERT INTO multica_member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'member')
 	`, testWorkspaceID, assigneeID); err != nil {
 		t.Fatalf("create assignee member: %v", err)
@@ -35,7 +35,7 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 
 	var agentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (
+		INSERT INTO multica_agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks, owner_id
 		)
@@ -45,17 +45,17 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_agent WHERE id = $1`, agentID)
 	})
 
 	createIssue := func(title, assigneeType, assigneeID string, position float64) string {
 		t.Helper()
 		var number int32
 		if err := testPool.QueryRow(ctx, `
-			UPDATE workspace
+			UPDATE multica_workspace
 			SET issue_counter = GREATEST(
 				issue_counter,
-				(SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)
+				(SELECT COALESCE(MAX(number), 0) FROM multica_issue WHERE workspace_id = $1)
 			) + 1
 			WHERE id = $1
 			RETURNING issue_counter
@@ -65,7 +65,7 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (
+			INSERT INTO multica_issue (
 				workspace_id, title, description, status, priority,
 				assignee_type, assignee_id, creator_type, creator_id,
 				position, number
@@ -76,7 +76,7 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 			t.Fatalf("create issue %q: %v", title, err)
 		}
 		t.Cleanup(func() {
-			_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id)
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, id)
 		})
 		return id
 	}

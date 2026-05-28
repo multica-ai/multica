@@ -227,7 +227,7 @@ func TestSubscriberAPI(t *testing.T) {
 		// Look up the agent created by the handler test fixture.
 		var agentID string
 		err := testPool.QueryRow(ctx,
-			`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+			`SELECT id FROM multica_agent WHERE workspace_id = $1 AND name = $2`,
 			testWorkspaceID, "Handler Test Agent",
 		).Scan(&agentID)
 		if err != nil {

@@ -57,7 +57,7 @@ func TestCreateCloudRuntimeNodeForwardsValidatedPAT(t *testing.T) {
 		t.Fatalf("create PAT: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE token_hash = $1`, auth.HashToken(rawPAT))
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_personal_access_token WHERE token_hash = $1`, auth.HashToken(rawPAT))
 	})
 
 	proxy := &fakeCloudRuntimeProxy{
@@ -141,7 +141,7 @@ func TestCreateCloudRuntimeNodeRejectsExpiredPAT(t *testing.T) {
 		t.Fatalf("create PAT: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE token_hash = $1`, auth.HashToken(rawPAT))
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_personal_access_token WHERE token_hash = $1`, auth.HashToken(rawPAT))
 	})
 
 	proxy := &fakeCloudRuntimeProxy{
@@ -198,7 +198,7 @@ func TestCreateCloudRuntimeNodeAutoGeneratesPAT(t *testing.T) {
 		t.Fatalf("expected auto-generated PAT with mul_ prefix, got %q", proxy.req.UserPAT)
 	}
 	// Clean up the auto-generated PAT.
-	_, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE token_hash = $1`, auth.HashToken(proxy.req.UserPAT))
+	_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_personal_access_token WHERE token_hash = $1`, auth.HashToken(proxy.req.UserPAT))
 }
 
 func TestCloudRuntimeDisabledReturnsUnavailable(t *testing.T) {

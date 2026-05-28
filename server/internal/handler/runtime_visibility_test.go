@@ -75,7 +75,7 @@ func runtimeVisibilityFixture(t *testing.T) (runtimeID, runtimeOwnerID, plainMem
 	ctx := context.Background()
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO "user" (name, email)
+		INSERT INTO multica_user (name, email)
 		VALUES ('Runtime Owner', 'runtime-owner@multica.test')
 		RETURNING id
 	`).Scan(&runtimeOwnerID); err != nil {
@@ -83,18 +83,18 @@ func runtimeVisibilityFixture(t *testing.T) (runtimeID, runtimeOwnerID, plainMem
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM "user" WHERE email = 'runtime-owner@multica.test'`)
+			`DELETE FROM multica_user WHERE email = 'runtime-owner@multica.test'`)
 	})
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO member (workspace_id, user_id, role)
+		INSERT INTO multica_member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'member')
 	`, testWorkspaceID, runtimeOwnerID); err != nil {
 		t.Fatalf("add runtime owner as member: %v", err)
 	}
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO "user" (name, email)
+		INSERT INTO multica_user (name, email)
 		VALUES ('Plain Runtime Member', 'plain-runtime-member@multica.test')
 		RETURNING id
 	`).Scan(&plainMemberID); err != nil {
@@ -102,18 +102,18 @@ func runtimeVisibilityFixture(t *testing.T) (runtimeID, runtimeOwnerID, plainMem
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM "user" WHERE email = 'plain-runtime-member@multica.test'`)
+			`DELETE FROM multica_user WHERE email = 'plain-runtime-member@multica.test'`)
 	})
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO member (workspace_id, user_id, role)
+		INSERT INTO multica_member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'member')
 	`, testWorkspaceID, plainMemberID); err != nil {
 		t.Fatalf("add plain member: %v", err)
 	}
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
+		INSERT INTO multica_agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status,
 			device_info, metadata, owner_id, visibility, last_seen_at
 		)
@@ -124,7 +124,7 @@ func runtimeVisibilityFixture(t *testing.T) (runtimeID, runtimeOwnerID, plainMem
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+			`DELETE FROM multica_agent_runtime WHERE id = $1`, runtimeID)
 	})
 
 	return runtimeID, runtimeOwnerID, plainMemberID
@@ -143,7 +143,7 @@ func TestCreateAgent_RejectsPrivateRuntimeForNonOwner(t *testing.T) {
 
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM agent WHERE workspace_id = $1 AND name LIKE 'runtime-visibility-test-%'`,
+			`DELETE FROM multica_agent WHERE workspace_id = $1 AND name LIKE 'runtime-visibility-test-%'`,
 			testWorkspaceID)
 	})
 
@@ -191,14 +191,14 @@ func TestCreateAgent_AllowsPublicRuntimeForPlainMember(t *testing.T) {
 	runtimeID, _, plainMemberID := runtimeVisibilityFixture(t)
 	ctx := context.Background()
 	if _, err := testPool.Exec(ctx,
-		`UPDATE agent_runtime SET visibility = 'public' WHERE id = $1`, runtimeID,
+		`UPDATE multica_agent_runtime SET visibility = 'public' WHERE id = $1`, runtimeID,
 	); err != nil {
 		t.Fatalf("flip runtime to public: %v", err)
 	}
 
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM agent WHERE workspace_id = $1 AND name = 'runtime-visibility-test-public-runtime'`,
+			`DELETE FROM multica_agent WHERE workspace_id = $1 AND name = 'runtime-visibility-test-public-runtime'`,
 			testWorkspaceID)
 	})
 
@@ -232,7 +232,7 @@ func TestUpdateAgent_RejectsRebindToPrivateRuntime(t *testing.T) {
 	// an agent on, then we try to move the agent onto the private runtime.
 	var publicRuntimeID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
+		INSERT INTO multica_agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status,
 			device_info, metadata, owner_id, visibility, last_seen_at
 		)
@@ -242,12 +242,12 @@ func TestUpdateAgent_RejectsRebindToPrivateRuntime(t *testing.T) {
 		t.Fatalf("create public runtime: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, publicRuntimeID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, publicRuntimeID)
 	})
 
 	var agentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (
+		INSERT INTO multica_agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks, owner_id,
 			instructions, custom_env, custom_args
@@ -259,7 +259,7 @@ func TestUpdateAgent_RejectsRebindToPrivateRuntime(t *testing.T) {
 		t.Fatalf("create agent on public runtime: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent WHERE id = $1`, agentID)
 	})
 
 	body := map[string]any{

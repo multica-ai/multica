@@ -180,11 +180,11 @@ func TestWebhook_MergedPR_AdvancesLinkedIssueToDone(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&created)
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, created.ID)
 	})
 
 	// Wire up an installation row for the webhook to attribute to.
@@ -291,10 +291,10 @@ func TestWebhook_MergedPR_PreservesCancelled(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&created)
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, created.ID)
 	})
 
 	const installationID int64 = 11223344
@@ -358,7 +358,7 @@ func TestWebhook_UninstallReturnsWorkspaceForBroadcast(t *testing.T) {
 		t.Fatalf("CreateGitHubInstallation: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_installation WHERE workspace_id = $1`, testWorkspaceID)
 	})
 
 	deleted, err := testHandler.Queries.DeleteGitHubInstallationByInstallationID(ctx, installationID)
@@ -400,11 +400,11 @@ func TestWebhook_MergedPR_WaitsForOpenSibling(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&created)
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, created.ID)
 	})
 
 	const installationID int64 = 55667788
@@ -576,11 +576,11 @@ func TestWebhook_ClosedSiblingAfterMerge(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&created)
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, created.ID)
 	})
 
 	const installationID int64 = 66778899
@@ -644,11 +644,11 @@ func TestWebhook_AllClosedWithoutMerge(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&created)
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, created.ID)
 	})
 
 	const installationID int64 = 77889900
@@ -841,12 +841,12 @@ func setupPRTestIssue(t *testing.T, ctx context.Context, secret string) (IssueRe
 
 	installationID := int64(33445566) + int64(time.Now().UnixNano()%1000000)
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM github_pull_request_check_suite WHERE pr_id IN (SELECT id FROM github_pull_request WHERE workspace_id = $1)`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_pull_request_check_suite WHERE pr_id IN (SELECT id FROM multica_github_pull_request WHERE workspace_id = $1)`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_installation WHERE installation_id = $1`, installationID)
+		testPool.Exec(ctx, `DELETE FROM multica_activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, created.ID)
 	})
 	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
 		WorkspaceID:    parseUUID(testWorkspaceID),
@@ -1063,7 +1063,7 @@ func TestListGitHubInstallations_RoleGating(t *testing.T) {
 		t.Fatalf("CreateGitHubInstallation: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_installation WHERE workspace_id = $1`, testWorkspaceID)
 	})
 
 	call := func(t *testing.T, role string) map[string]any {
@@ -1161,11 +1161,11 @@ func TestGitHubRoutes_RoleGating(t *testing.T) {
 	ctx := context.Background()
 
 	const slug = "github-routes-role-gating"
-	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	_, _ = testPool.Exec(ctx, `DELETE FROM multica_workspace WHERE slug = $1`, slug)
 
 	var wsID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO workspace (name, slug, description, issue_prefix)
+INSERT INTO multica_workspace (name, slug, description, issue_prefix)
 VALUES ($1, $2, $3, $4)
 RETURNING id
 `, "GitHub Routes Role Gating", slug, "github routes role gating", "GRG").Scan(&wsID); err != nil {
@@ -1180,7 +1180,7 @@ RETURNING id
 		var id string
 		email := fmt.Sprintf("github-routes-%s-%s@multica.ai", slug, label)
 		if err := testPool.QueryRow(ctx, `
-INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+INSERT INTO multica_user (name, email) VALUES ($1, $2) RETURNING id
 `, "GHR "+label, email).Scan(&id); err != nil {
 			t.Fatalf("create user %s: %v", label, err)
 		}
@@ -1197,7 +1197,7 @@ INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
 		{memberUserID, "member"},
 	} {
 		if _, err := testPool.Exec(ctx, `
-INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
+INSERT INTO multica_member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 `, wsID, m.userID, m.role); err != nil {
 			t.Fatalf("insert member (%s): %v", m.role, err)
 		}
@@ -1215,9 +1215,9 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 	}
 
 	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_workspace WHERE id = $1`, wsID)
 		for _, uid := range []string{adminUserID, memberUserID, outsiderUserID} {
-			_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, uid)
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_user WHERE id = $1`, uid)
 		}
 	})
 
@@ -1292,7 +1292,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 			t.Errorf("admin DELETE installation: want 204, got %d", code)
 		}
 		var remaining int
-		if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM github_installation WHERE id = $1`, uuidToString(createdInst.ID)).Scan(&remaining); err != nil {
+		if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM multica_github_installation WHERE id = $1`, uuidToString(createdInst.ID)).Scan(&remaining); err != nil {
 			t.Fatalf("verify deletion: %v", err)
 		}
 		if remaining != 0 {
@@ -1382,13 +1382,13 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&child)
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id IN ($1, $2)`, child.ID, parent.ID)
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id IN ($1, $2)`, child.ID, parent.ID)
-		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id IN ($1, $2)`, child.ID, parent.ID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, child.ID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, parent.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue_pull_request WHERE issue_id IN ($1, $2)`, child.ID, parent.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM multica_activity_log WHERE issue_id IN ($1, $2)`, child.ID, parent.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_comment WHERE issue_id IN ($1, $2)`, child.ID, parent.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, child.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, parent.ID)
 	})
 
 	const installationID int64 = 88990011
@@ -1449,7 +1449,7 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 	// Parent must have received exactly one platform-generated system comment.
 	var sysCount int
 	if err := testPool.QueryRow(ctx,
-		`SELECT count(*) FROM comment WHERE issue_id = $1 AND author_type = 'system'`,
+		`SELECT count(*) FROM multica_comment WHERE issue_id = $1 AND author_type = 'system'`,
 		parent.ID,
 	).Scan(&sysCount); err != nil {
 		t.Fatalf("count system comments on parent: %v", err)
@@ -1460,7 +1460,7 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 
 	var content string
 	if err := testPool.QueryRow(ctx,
-		`SELECT content FROM comment WHERE issue_id = $1 AND author_type = 'system' LIMIT 1`,
+		`SELECT content FROM multica_comment WHERE issue_id = $1 AND author_type = 'system' LIMIT 1`,
 		parent.ID,
 	).Scan(&content); err != nil {
 		t.Fatalf("read system comment: %v", err)
