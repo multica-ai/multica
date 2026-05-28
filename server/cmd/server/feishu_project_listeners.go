@@ -34,9 +34,22 @@ func syncFeishuProjectStatus(queries *db.Queries, workspaceID, issueID, status s
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
+	// Event payload IDs are not request-validated; a malformed string would
+	// panic via MustParseUUID and crash the process (this goroutine runs
+	// outside middleware.Recoverer). Use ParseUUID and bail on bad input.
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		slog.Warn("Feishu Project status sync skipped: invalid workspace_id", "workspace_id", workspaceID, "error", err)
+		return
+	}
+	issueUUID, err := util.ParseUUID(issueID)
+	if err != nil {
+		slog.Warn("Feishu Project status sync skipped: invalid issue_id", "issue_id", issueID, "error", err)
+		return
+	}
 	binding, err := queries.GetFeishuProjectIssueBindingByIssue(ctx, db.GetFeishuProjectIssueBindingByIssueParams{
-		WorkspaceID: util.MustParseUUID(workspaceID),
-		IssueID:     util.MustParseUUID(issueID),
+		WorkspaceID: wsUUID,
+		IssueID:     issueUUID,
 	})
 	if err != nil {
 		return

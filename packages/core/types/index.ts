@@ -89,9 +89,17 @@ export type {
   GitHubConnectResponse,
 } from "./github";
 export type {
+  FeishuProjectBusinessLineNode,
+  FeishuProjectBusinessLinesResponse,
+  FeishuProjectFieldMeta,
+  FeishuProjectFieldsResponse,
   FeishuProjectIntegration,
+  FeishuProjectRoute,
+  FeishuProjectRouteInput,
+  FeishuProjectRoutesResponse,
   FeishuProjectStatusOption,
   FeishuProjectStatusOptionsResponse,
+  ReplaceFeishuProjectRoutesRequest,
   UpdateFeishuProjectIntegrationRequest,
   FeishuProjectSyncResponse,
   FeishuProjectSyncRequest,

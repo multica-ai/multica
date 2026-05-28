@@ -718,3 +718,339 @@ func TestFeishuProjectDownloadAttachmentSkipsGoapiFallback(t *testing.T) {
 		t.Fatalf("downloadCalls = %d, want 1 (no retry for 404)", got)
 	}
 }
+
+func TestFeishuProjectRateLimitResetDelayHonorsHeader(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		header string
+		want   time.Duration
+	}{
+		{"empty header → no delay", "", 0},
+		{"valid 3s header", "3", 3 * time.Second},
+		{"capped at 60s", "120", feishuProjectRateLimitMaxSleep},
+		{"negative ignored", "-5", 0},
+		{"non-numeric ignored", "soon", 0},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			h := http.Header{}
+			if tt.header != "" {
+				h.Set("x-ogw-ratelimit-reset", tt.header)
+			}
+			if got := feishuProjectRateLimitResetDelay(h); got != tt.want {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFeishuProjectRetryableAPIErrorRecognizesRateLimit(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		payload     map[string]any
+		retryable   bool
+		rateLimited bool
+		quota       bool
+	}{
+		{
+			name:        "99991400 frequency limit",
+			payload:     map[string]any{"err_code": 99991400, "err_msg": "request trigger frequency limit"},
+			retryable:   true,
+			rateLimited: true,
+		},
+		{
+			name:        "string-form 99991400",
+			payload:     map[string]any{"err_code": "99991400", "err_msg": "request trigger frequency limit"},
+			retryable:   true,
+			rateLimited: true,
+		},
+		{
+			name:      "99991403 quota exhausted",
+			payload:   map[string]any{"err_code": 99991403, "err_msg": "monthly quota exceeded"},
+			retryable: false,
+			quota:     true,
+		},
+		{
+			name:      "50007 gateway timeout (still transient, not rate limit)",
+			payload:   map[string]any{"err_code": 50007, "err_msg": "gateway timeout"},
+			retryable: true,
+		},
+		{
+			name:    "non-retryable business error",
+			payload: map[string]any{"err_code": 1234, "err_msg": "validation failed"},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := feishuProjectRetryableAPIError(tc.payload); got != tc.retryable {
+				t.Errorf("retryable: got %v, want %v", got, tc.retryable)
+			}
+			if got := feishuProjectIsRateLimited(tc.payload); got != tc.rateLimited {
+				t.Errorf("rateLimited: got %v, want %v", got, tc.rateLimited)
+			}
+			if got := feishuProjectIsQuotaExhausted(tc.payload); got != tc.quota {
+				t.Errorf("quota: got %v, want %v", got, tc.quota)
+			}
+		})
+	}
+}
+
+// On HTTP 429 the openAPI loop should sleep for the duration named in the
+// gateway reset header rather than the default linear 1s backoff, then retry.
+func TestFeishuProjectOpenAPIHonorsRateLimitResetOn429(t *testing.T) {
+	t.Parallel()
+	var apiCalls atomic.Int32
+	var firstAt, secondAt time.Time
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/probe":
+			n := apiCalls.Add(1)
+			if n == 1 {
+				firstAt = time.Now()
+				w.Header().Set("x-ogw-ratelimit-reset", "1")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"err_code":99991400,"err_msg":"request trigger frequency limit"}`))
+				return
+			}
+			secondAt = time.Now()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{}}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := client.openAPI(ctx, db.FeishuProjectIntegration{
+		ProjectKey: "project-key", PluginID: "id", PluginSecret: "secret",
+	}, http.MethodPost, "/open_api/project-key/probe", map[string]any{}); err != nil {
+		t.Fatalf("openAPI: %v", err)
+	}
+	if got := apiCalls.Load(); got != 2 {
+		t.Fatalf("apiCalls = %d, want 2 (one 429 then retry)", got)
+	}
+	gap := secondAt.Sub(firstAt)
+	if gap < 900*time.Millisecond {
+		t.Fatalf("retry gap = %v, want ≥ ~1s from x-ogw-ratelimit-reset", gap)
+	}
+}
+
+// err_code 99991403 must propagate ErrFeishuProjectQuotaExhausted on the very
+// first response — no retries, since the monthly bucket only refills on the 1st.
+func TestFeishuProjectOpenAPIQuotaExhaustedShortCircuits(t *testing.T) {
+	t.Parallel()
+	var apiCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/probe":
+			apiCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":99991403,"err_msg":"monthly quota exceeded"}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	_, err := client.openAPI(context.Background(), db.FeishuProjectIntegration{
+		ProjectKey: "project-key", PluginID: "id", PluginSecret: "secret",
+	}, http.MethodPost, "/open_api/project-key/probe", map[string]any{})
+	if err == nil {
+		t.Fatal("expected error on quota-exhausted response")
+	}
+	if !errors.Is(err, ErrFeishuProjectQuotaExhausted) {
+		t.Fatalf("want errors.Is(err, ErrFeishuProjectQuotaExhausted), got %v", err)
+	}
+	if got := apiCalls.Load(); got != 1 {
+		t.Fatalf("apiCalls = %d, want 1 (must not retry quota exhaustion)", got)
+	}
+}
+
+// The attachment-download path must mirror the openAPI quota-exhausted behavior:
+// surface ErrFeishuProjectQuotaExhausted immediately without burning retries.
+func TestFeishuProjectDownloadAttachmentQuotaExhaustedShortCircuits(t *testing.T) {
+	t.Parallel()
+	var downloadCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/work_item/issue/123/file/download":
+			downloadCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":99991403,"err_msg":"monthly quota exceeded"}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	_, _, _, err := client.DownloadAttachment(
+		context.Background(),
+		db.FeishuProjectIntegration{ProjectKey: "project-key", PluginID: "id", PluginSecret: "secret"},
+		FeishuProjectWorkItem{ID: "123", Type: "issue"},
+		FeishuProjectAttachment{ID: "uuid-1", Name: "shot.png"},
+	)
+	if err == nil {
+		t.Fatal("expected error on quota-exhausted attachment response")
+	}
+	if !errors.Is(err, ErrFeishuProjectQuotaExhausted) {
+		t.Fatalf("want errors.Is(err, ErrFeishuProjectQuotaExhausted), got %v", err)
+	}
+	if got := downloadCalls.Load(); got != 1 {
+		t.Fatalf("downloadCalls = %d, want 1 (must not retry quota exhaustion)", got)
+	}
+}
+
+func TestFeishuProjectSinceUnixMilliForTrigger(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	withWatermark := db.FeishuProjectIntegration{
+		LastSeenUpdatedAtMs: pgtype.Int8{
+			Int64: time.Date(2026, 5, 28, 11, 55, 0, 0, time.UTC).UnixMilli(),
+			Valid: true,
+		},
+	}
+	noWatermarkButSynced := db.FeishuProjectIntegration{
+		LastSyncedAt: pgtype.Timestamptz{
+			Time:  time.Date(2026, 5, 28, 11, 50, 0, 0, time.UTC),
+			Valid: true,
+		},
+	}
+	bareIntegration := db.FeishuProjectIntegration{}
+
+	tests := []struct {
+		name    string
+		cfg     db.FeishuProjectIntegration
+		trigger string
+		// Predicate over the resulting unix-millis; lets tests assert
+		// "in the right ballpark" without pinning exact wall-clock math.
+		check func(t *testing.T, got int64)
+	}{
+		{
+			name:    "manual picks 30d lookback regardless of watermark",
+			cfg:     withWatermark,
+			trigger: "manual",
+			check: func(t *testing.T, got int64) {
+				want := now.Add(-feishuProjectManualLookback).UnixMilli()
+				if got != want {
+					t.Fatalf("got %d want %d (manual 30d)", got, want)
+				}
+			},
+		},
+		{
+			name:    "reconcile picks 6h30m lookback regardless of watermark",
+			cfg:     withWatermark,
+			trigger: "reconcile",
+			check: func(t *testing.T, got int64) {
+				want := now.Add(-feishuProjectReconcileLookback - feishuProjectReconcileLookbackSafety).UnixMilli()
+				if got != want {
+					t.Fatalf("got %d want %d (reconcile 6h30m)", got, want)
+				}
+			},
+		},
+		{
+			name:    "scheduled uses watermark - 10min when set",
+			cfg:     withWatermark,
+			trigger: "scheduled",
+			check: func(t *testing.T, got int64) {
+				want := withWatermark.LastSeenUpdatedAtMs.Int64 - feishuProjectIncrementalReplay.Milliseconds()
+				if got != want {
+					t.Fatalf("got %d want %d (watermark - replay)", got, want)
+				}
+			},
+		},
+		{
+			name:    "scheduled falls back to LastSyncedAt - 10min when watermark unset",
+			cfg:     noWatermarkButSynced,
+			trigger: "scheduled",
+			check: func(t *testing.T, got int64) {
+				want := noWatermarkButSynced.LastSyncedAt.Time.Add(-feishuProjectIncrementalReplay).UnixMilli()
+				if got != want {
+					t.Fatalf("got %d want %d (legacy fallback)", got, want)
+				}
+			},
+		},
+		{
+			name:    "scheduled falls back to 24h initial lookback when neither set",
+			cfg:     bareIntegration,
+			trigger: "scheduled",
+			check: func(t *testing.T, got int64) {
+				want := now.Add(-feishuProjectInitialLookback).UnixMilli()
+				if got != want {
+					t.Fatalf("got %d want %d (initial 24h)", got, want)
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			tc.check(t, feishuProjectSinceUnixMilliForTrigger(tc.cfg, tc.trigger, now))
+		})
+	}
+}
+
+// /work_item/filter must receive opts.SinceUnixMilli verbatim when set,
+// so callers (Sync) can pick the lookback policy in one place.
+func TestFeishuProjectQueryWorkItemsHonorsExplicitSinceFromOpts(t *testing.T) {
+	t.Parallel()
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/work_item/filter":
+			if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":0,"data":[],"pagination":{"page_num":1,"page_size":100,"total":0}}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	const explicit int64 = 1748000000000
+	err := client.QueryWorkItemPagesWithOptions(
+		context.Background(),
+		db.FeishuProjectIntegration{
+			ProjectKey:    "project-key",
+			PluginID:      "id",
+			PluginSecret:  "secret",
+			StatusMapping: []byte(`{"OPEN":"todo"}`),
+		},
+		"issue",
+		false,
+		FeishuProjectSyncOptions{SinceUnixMilli: explicit},
+		func(FeishuProjectWorkItemPage) error { return nil },
+	)
+	if err != nil {
+		t.Fatalf("QueryWorkItemPagesWithOptions: %v", err)
+	}
+	updatedAt, _ := captured["updated_at"].(map[string]any)
+	got, _ := updatedAt["start"].(float64)
+	if int64(got) != explicit {
+		t.Fatalf("updated_at.start = %v, want %d", got, explicit)
+	}
+}

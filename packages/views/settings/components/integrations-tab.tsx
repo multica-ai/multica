@@ -21,10 +21,13 @@ import {
   feishuProjectIntegrationOptions,
   feishuProjectIssueStatusesOptions,
   feishuProjectKeys,
+  feishuProjectRoutesOptions,
   feishuProjectSyncOptions,
 } from "@multica/core/feishu-project/queries";
 import { api } from "@multica/core/api";
+import type { FeishuProjectRouteInput } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { FeishuProjectRoutingSection, type RouteRow } from "./feishu-project-routing-section";
 
 const MULTICA_STATUS_OPTIONS = [
   "backlog",
@@ -60,6 +63,13 @@ export function IntegrationsTab() {
   const [syncWorkItemId, setSyncWorkItemId] = useState("");
   const [statusMapping, setStatusMapping] = useState<Record<string, string>>({});
   const [reverseStatusMapping, setReverseStatusMapping] = useState<Record<string, string>>({});
+  // Business-line field config — local while the user is editing, persisted on Save.
+  const [businessLineFieldKey, setBusinessLineFieldKey] = useState("");
+  const [businessLineFieldName, setBusinessLineFieldName] = useState("");
+  // Routes draft state lifted from FeishuProjectRoutingSection so the single Save button
+  // can commit both integration fields and the route table in one click.
+  const [routeRows, setRouteRows] = useState<RouteRow[]>([]);
+  const [routesExpanded, setRoutesExpanded] = useState<Record<string, boolean>>({});
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManage = currentMember?.role === "owner" || currentMember?.role === "admin";
@@ -68,13 +78,16 @@ export function IntegrationsTab() {
     ...feishuProjectIntegrationOptions(wsId),
     enabled: !!wsId && canManage,
   });
-  const {
-    data: issueStatusesData,
-    isFetching: loadingIssueStatuses,
-    refetch: refetchIssueStatuses,
-  } = useQuery({
+  const { data: issueStatusesData } = useQuery({
     ...feishuProjectIssueStatusesOptions(wsId, canManage && !!projectKey.trim() && !!pluginId.trim()),
   });
+  // Subscribe to the route table so the Save handler can diff/replace it. Section
+  // component reads the same query but only for the initial seed — edits flow through
+  // routeRows state owned here.
+  const { data: routesData } = useQuery({
+    ...feishuProjectRoutesOptions(wsId, canManage && !!feishuProject?.id),
+  });
+  const savedRoutes = routesData?.routes ?? [];
   const { data: feishuSync } = useQuery({
     ...feishuProjectSyncOptions(wsId, canManage && !!feishuProject?.id),
     refetchInterval: (query) => (query.state.data?.status === "running" ? 2000 : false),
@@ -100,7 +113,34 @@ export function IntegrationsTab() {
     setAssignOpenItemsToOwnerAgent(feishuProject.assign_open_items_to_owner_agent);
     setStatusMapping(feishuProject.status_mapping);
     setReverseStatusMapping(feishuProject.reverse_status_mapping);
+    setBusinessLineFieldKey(feishuProject.business_line_field_key);
+    setBusinessLineFieldName(feishuProject.business_line_field_name);
   }, [feishuProject]);
+
+  // Seed route draft from the server's saved table whenever it (re)loads. Auto-expand
+  // parents that already have a routed child so the user sees their current state
+  // without expanding manually.
+  useEffect(() => {
+    setRouteRows(
+      savedRoutes.map((r) => ({
+        businessLineId: r.business_line_id,
+        businessLineName: r.business_line_name,
+        parentBusinessLineId: r.parent_business_line_id ?? "",
+        parentBusinessLineName: r.parent_business_line_name ?? "",
+        projectId: r.project_id,
+        fallbackAgentId: r.fallback_agent_id ?? "",
+      })),
+    );
+    const auto: Record<string, boolean> = {};
+    for (const r of savedRoutes) {
+      const parentId = r.parent_business_line_id ?? "";
+      if (parentId) auto[parentId] = true;
+    }
+    setRoutesExpanded(auto);
+    // savedRoutes identity changes on every render; key by the server's underlying data
+    // shape via JSON to avoid resetting the user's in-flight edits on cache touches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(savedRoutes)]);
 
   useEffect(() => {
     if (syncRun?.status === "running" && !activeSyncRunId) {
@@ -148,6 +188,20 @@ export function IntegrationsTab() {
   }, [issueStatuses.length, issueStatusKeys]);
 
   async function handleSaveFeishuProject() {
+    // Validate route rows upfront so a user clicking Save with a half-configured route
+    // gets a precise row-level error instead of a generic backend 400 toast.
+    const bizLineKey = businessLineFieldKey.trim();
+    if (bizLineKey) {
+      const missing = routeRows.find((r) => !r.projectId);
+      if (missing) {
+        toast.error(
+          t(($) => $.integrations.feishu_project_routes_missing_project, {
+            name: missing.businessLineName || missing.businessLineId,
+          }),
+        );
+        return;
+      }
+    }
     setSavingFeishu(true);
     try {
       await api.updateFeishuProjectIntegration(wsId, {
@@ -162,9 +216,28 @@ export function IntegrationsTab() {
         status_mapping: compactMapping(statusMapping),
         reverse_status_mapping: compactMapping(reverseStatusMapping),
         assign_open_items_to_owner_agent: assignOpenItemsToOwnerAgent,
+        business_line_field_key: bizLineKey,
+        business_line_field_name: businessLineFieldName.trim(),
       });
-      await queryClient.invalidateQueries({ queryKey: feishuProjectKeys.integration(wsId) });
-      await queryClient.invalidateQueries({ queryKey: feishuProjectKeys.issueStatuses(wsId) });
+      // Routes are scoped to a business-line field. Always sync them: if the field was
+      // cleared, send [] so the backend deletes stale routes that would otherwise sit
+      // orphaned and never match anything.
+      const routePayload: FeishuProjectRouteInput[] = bizLineKey
+        ? routeRows.map((r) => ({
+            project_id: r.projectId,
+            business_line_id: r.businessLineId,
+            business_line_name: r.businessLineName,
+            parent_business_line_id: r.parentBusinessLineId || undefined,
+            parent_business_line_name: r.parentBusinessLineName || undefined,
+            fallback_agent_id: r.fallbackAgentId || null,
+          }))
+        : [];
+      await api.replaceFeishuProjectRoutes(wsId, { routes: routePayload });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: feishuProjectKeys.integration(wsId) }),
+        queryClient.invalidateQueries({ queryKey: feishuProjectKeys.issueStatuses(wsId) }),
+        queryClient.invalidateQueries({ queryKey: feishuProjectKeys.routes(wsId) }),
+      ]);
       toast.success(t(($) => $.integrations.feishu_project_saved));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.integrations.feishu_project_save_failed));
@@ -193,24 +266,6 @@ export function IntegrationsTab() {
     }
   }
 
-  async function handleRefreshIssueStatuses() {
-    try {
-      const result = await refetchIssueStatuses();
-      if (result.error) {
-        toast.error(result.error instanceof Error ? result.error.message : t(($) => $.integrations.feishu_project_statuses_refresh_failed));
-        return;
-      }
-      const count = result.data?.statuses.length ?? 0;
-      if (count === 0) {
-        toast.error(t(($) => $.integrations.feishu_project_statuses_refresh_empty));
-        return;
-      }
-      toast.success(t(($) => $.integrations.feishu_project_statuses_refreshed, { count }));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.integrations.feishu_project_statuses_refresh_failed));
-    }
-  }
-
   return (
     <div className="space-y-4">
       <section className="space-y-4">
@@ -225,6 +280,7 @@ export function IntegrationsTab() {
                   {t(($) => $.integrations.feishu_project_description)}
                 </p>
               </div>
+              {canManage && <Switch checked={feishuEnabled} onCheckedChange={setFeishuEnabled} />}
             </div>
 
             {canManage ? (
@@ -263,20 +319,6 @@ export function IntegrationsTab() {
                       <Input value={actorUserKey} onChange={(e) => setActorUserKey(e.target.value)} />
                     </label>
                   </div>
-                  <div className="flex items-center justify-between gap-4 rounded-md border border-border/70 px-3 py-3">
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium">
-                        {t(($) => $.integrations.feishu_project_assign_owner_agent)}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {t(($) => $.integrations.feishu_project_assign_owner_agent_hint)}
-                      </p>
-                    </div>
-                    <Switch
-                      checked={assignOpenItemsToOwnerAgent}
-                      onCheckedChange={setAssignOpenItemsToOwnerAgent}
-                    />
-                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -284,20 +326,6 @@ export function IntegrationsTab() {
                     <p className="text-xs font-medium text-muted-foreground">
                       {t(($) => $.integrations.feishu_project_mapping_section)}
                     </p>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={handleRefreshIssueStatuses}
-                      disabled={!projectKey.trim() || !pluginId.trim() || loadingIssueStatuses}
-                    >
-                      {loadingIssueStatuses ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-3.5 w-3.5" />
-                      )}
-                      {t(($) => $.integrations.feishu_project_refresh_statuses)}
-                    </Button>
                   </div>
 
                   {issueStatuses.length === 0 ? (
@@ -341,21 +369,12 @@ export function IntegrationsTab() {
                       </div>
 
                       <div className="space-y-2">
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="space-y-1">
-                            <p className="text-xs font-medium">
-                              {t(($) => $.integrations.feishu_project_reverse_mapping)}
-                            </p>
-                            <p className="text-[11px] text-muted-foreground">
-                              {t(($) => $.integrations.feishu_project_status_writeback_hint)}
-                            </p>
-                          </div>
-                          <Switch
-                            checked={feishuEnabled}
-                            onCheckedChange={setFeishuEnabled}
-                            aria-label={t(($) => $.integrations.feishu_project_status_writeback)}
-                          />
-                        </div>
+                        <p className="text-xs font-medium">
+                          {t(($) => $.integrations.feishu_project_reverse_mapping)}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {t(($) => $.integrations.feishu_project_reverse_mapping_disable_hint)}
+                        </p>
                         <div className="overflow-hidden rounded-md border border-border/70">
                           {MULTICA_STATUS_OPTIONS.map((status) => {
                             const current = reverseStatusMapping[status];
@@ -392,6 +411,45 @@ export function IntegrationsTab() {
                       </div>
                     </div>
                   )}
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3 border-b border-border/70 pb-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {t(($) => $.integrations.feishu_project_routing_section)}
+                    </p>
+                  </div>
+                  <FeishuProjectRoutingSection
+                    workspaceId={wsId}
+                    integration={feishuProject ?? null}
+                    fieldKey={businessLineFieldKey}
+                    onFieldChanged={(key, name) => {
+                      setBusinessLineFieldKey(key);
+                      setBusinessLineFieldName(name);
+                    }}
+                    rows={routeRows}
+                    setRows={setRouteRows}
+                    expanded={routesExpanded}
+                    setExpanded={setRoutesExpanded}
+                  />
+                  {/* Assignment policy lives with routing: routing decides the
+                      project, this toggle decides who picks up the new issue.
+                      The per-route fallback agent (above) covers the case
+                      where this lookup misses. */}
+                  <div className="flex items-center justify-between gap-4 rounded-md border border-border/70 px-3 py-3">
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium">
+                        {t(($) => $.integrations.feishu_project_assign_owner_agent)}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {t(($) => $.integrations.feishu_project_assign_owner_agent_hint)}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={assignOpenItemsToOwnerAgent}
+                      onCheckedChange={setAssignOpenItemsToOwnerAgent}
+                    />
+                  </div>
                 </div>
 
                 <div className="flex flex-col gap-4 border-t border-border/70 pt-4 lg:flex-row lg:items-end lg:justify-between">

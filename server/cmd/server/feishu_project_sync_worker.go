@@ -35,9 +35,9 @@ func runFeishuProjectSyncOnce(ctx context.Context, queries *db.Queries, pool *pg
 		return
 	}
 	svc := &service.FeishuProjectSyncService{Queries: queries, Tx: pool, Client: service.NewFeishuProjectClient(), Storage: store, TaskService: taskSvc}
+	now := time.Now()
 	for _, cfg := range configs {
-		lockKey := "feishu-project-sync:" + service.UUIDString(cfg.ID)
-		locked, unlock, err := tryFeishuProjectSyncLock(ctx, pool, lockKey)
+		locked, unlock, err := service.TryAcquireFeishuProjectSyncLock(ctx, pool, cfg.ID)
 		if err != nil {
 			slog.Warn("Feishu Project sync lock failed", "integration_id", service.UUIDString(cfg.ID), "project_key", cfg.ProjectKey, "error", err)
 			continue
@@ -45,33 +45,22 @@ func runFeishuProjectSyncOnce(ctx context.Context, queries *db.Queries, pool *pg
 		if !locked {
 			continue
 		}
-		if _, err := svc.Sync(ctx, cfg, "scheduled"); err != nil {
-			slog.Warn("Feishu Project scheduled sync failed", "integration_id", service.UUIDString(cfg.ID), "project_key", cfg.ProjectKey, "error", err)
+		trigger := feishuProjectSyncTriggerFor(cfg, now)
+		if _, err := svc.Sync(ctx, cfg, trigger); err != nil {
+			slog.Warn("Feishu Project sync failed", "integration_id", service.UUIDString(cfg.ID), "project_key", cfg.ProjectKey, "trigger", trigger, "error", err)
 		}
 		unlock()
 	}
 }
 
-func tryFeishuProjectSyncLock(ctx context.Context, pool *pgxpool.Pool, key string) (bool, func(), error) {
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		return false, func() {}, err
+// feishuProjectSyncTriggerFor decides whether this tick should run the
+// cheap incremental path or the periodic 6h reconcile. A NULL
+// last_reconciled_at counts as "never reconciled" and forces an immediate
+// reconcile on first tick after the migration lands, so every integration
+// builds a fresh watermark within one tick of deploy.
+func feishuProjectSyncTriggerFor(cfg db.FeishuProjectIntegration, now time.Time) string {
+	if !cfg.LastReconciledAt.Valid || now.Sub(cfg.LastReconciledAt.Time) >= service.FeishuProjectReconcileInterval() {
+		return "reconcile"
 	}
-
-	var locked bool
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock(hashtextextended($1, 0))", key).Scan(&locked); err != nil {
-		conn.Release()
-		return false, func() {}, err
-	}
-	if !locked {
-		conn.Release()
-		return false, func() {}, nil
-	}
-
-	return true, func() {
-		if _, err := conn.Exec(context.Background(), "SELECT pg_advisory_unlock(hashtextextended($1, 0))", key); err != nil {
-			slog.Warn("Feishu Project sync unlock failed", "error", err)
-		}
-		conn.Release()
-	}, nil
+	return "scheduled"
 }

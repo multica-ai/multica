@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,11 +36,28 @@ const (
 	feishuProjectManualLookback    = 30 * 24 * time.Hour
 	feishuProjectIncrementalReplay = 10 * time.Minute
 	feishuProjectSyncMaxPages      = 1000
-	feishuProjectAttachmentMaxSize     = 5 << 20
-	feishuProjectSyncWorkers           = 20
+
+	// How often a successful reconcile should run, and how far back its
+	// `updated_at` filter looks. Reconcile is the L3 defence that catches
+	// updates the incremental L1 missed (long worker stalls, clock skew,
+	// out-of-order events). The +30min safety margin overshoots the
+	// 6h interval so we always overlap the previous reconcile window.
+	feishuProjectReconcileInterval       = 6 * time.Hour
+	feishuProjectReconcileLookback       = 6 * time.Hour
+	feishuProjectReconcileLookbackSafety = 30 * time.Minute
+	feishuProjectAttachmentMaxSize = 5 << 20
+	// Feishu Project caps every (token, single interface) pair at 15 QPS
+	// (project.feishu.cn/b/helpcenter/1p8d7djs/4bsmoql6). The advisory lock keeps
+	// only one replica syncing a given integration, so worker fan-out is the only
+	// thing that can blow past 15 concurrent calls to the same endpoint. 10 leaves
+	// headroom for the bursty start of each page without crossing the cap.
+	feishuProjectSyncWorkers           = 10
 	feishuProjectSlowItemLogAfter      = 500 * time.Millisecond
 	feishuProjectAPIRetryAttempts      = 4
 	feishuProjectDownloadRetryAttempts = 3
+	// Cap on any per-attempt sleep we'll honor from Feishu's rate-limit reset
+	// header, so a misbehaving gateway response can't stall the worker for hours.
+	feishuProjectRateLimitMaxSleep = 60 * time.Second
 )
 
 // Initial backoff for attachment-download retries. Subsequent attempts use exponential backoff.
@@ -47,6 +65,17 @@ const (
 var feishuProjectDownloadRetryInitialDelay = 300 * time.Millisecond
 
 var ErrFeishuProjectSyncScopeRequired = errors.New("Feishu Project sync requires a bounded sync scope before searching work items")
+
+// FeishuProjectReconcileInterval is the cadence at which a successful
+// reconcile run is expected. Exposed for the cmd-level worker scheduler
+// to keep the constant in one place.
+func FeishuProjectReconcileInterval() time.Duration { return feishuProjectReconcileInterval }
+
+// ErrFeishuProjectQuotaExhausted is returned when the tenant has consumed its
+// monthly Feishu Open Platform quota (err_code 99991403, enforced since
+// 2024-12-03). Retries within the same calendar month are futile; the worker
+// should surface this rather than burn retry budget on calls that cannot succeed.
+var ErrFeishuProjectQuotaExhausted = errors.New("Feishu Project API monthly quota exhausted")
 
 type FeishuProjectTxStarter interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
@@ -74,6 +103,12 @@ type FeishuProjectSyncSummary struct {
 
 type FeishuProjectSyncOptions struct {
 	WorkItemID string
+
+	// SinceUnixMilli, if > 0, overrides the `updated_at >=` lookback start
+	// passed to Feishu's /work_item/filter call. Sync entry computes this
+	// from the trigger + cfg watermark and threads it through so the policy
+	// lives in one place. Zero means use the legacy per-cfg/fullSync default.
+	SinceUnixMilli int64
 }
 
 type FeishuProjectWorkItemPage struct {
@@ -93,15 +128,42 @@ type FeishuProjectClient struct {
 }
 
 type FeishuProjectWorkItem struct {
-	ID          string
-	Type        string
-	Title       string
-	Description string
-	Status      string
-	OwnerEmail  string
-	UpdatedAt   time.Time
-	URL         string
-	Attachments []FeishuProjectAttachment
+	ID                 string
+	Type               string
+	Title              string
+	Description        string
+	Status             string
+	OwnerEmail         string
+	UpdatedAt          time.Time
+	URL                string
+	Attachments        []FeishuProjectAttachment
+	BusinessLineTokens []FeishuBusinessLineToken
+}
+
+// FeishuBusinessLineToken represents one biz-line value attached to a work item,
+// extracted from the field designated by FeishuProjectIntegration.BusinessLineFieldKey.
+// Either ID or Name may be empty depending on what Meego returned.
+type FeishuBusinessLineToken struct {
+	ID         string
+	Name       string
+	ParentID   string
+	ParentName string
+}
+
+// FeishuProjectFieldOption is one selectable option (used for biz-line nodes).
+type FeishuProjectFieldOption struct {
+	ID         string                     `json:"id"`
+	Name       string                     `json:"name"`
+	ParentID   string                     `json:"parent_id,omitempty"`
+	ParentName string                     `json:"parent_name,omitempty"`
+	Children   []FeishuProjectFieldOption `json:"children,omitempty"`
+}
+
+// FeishuProjectFieldMeta is one field on a work-item type.
+type FeishuProjectFieldMeta struct {
+	Key  string `json:"key"`
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 type FeishuProjectAttachment struct {
@@ -174,8 +236,18 @@ func (s *FeishuProjectSyncService) SyncWithRunAndOptions(ctx context.Context, cf
 	summary := FeishuProjectSyncSummary{}
 	var summaryMu sync.Mutex
 	var syncErr error
-	fullSync := trigger == "manual"
-	skipExisting := fullSync && strings.TrimSpace(opts.WorkItemID) == ""
+	// Manual triggers do a 30-day bootstrap; reconcile triggers do a 6h30m
+	// reconcile pass. Both share the larger-lookback + light-update-existing
+	// path so a no-cost attachment refetch isn't triggered for items whose
+	// external_id is already bound.
+	fullSync := trigger == "manual" || trigger == "reconcile"
+	lightUpdateExisting := fullSync && strings.TrimSpace(opts.WorkItemID) == ""
+	if opts.SinceUnixMilli == 0 {
+		opts.SinceUnixMilli = feishuProjectSinceUnixMilliForTrigger(cfg, trigger, time.Now())
+	}
+	// Tracks max(item.updated_at) across all goroutines so the watermark is
+	// pinned to Feishu's clock, not ours.
+	var maxObservedUpdatedAtMs atomic.Int64
 	totalCount := 0
 	for _, typ := range enabledFeishuProjectTypes(cfg) {
 		err := s.Client.QueryWorkItemPagesWithOptions(ctx, cfg, typ, fullSync, opts, func(page FeishuProjectWorkItemPage) error {
@@ -200,7 +272,16 @@ func (s *FeishuProjectSyncService) SyncWithRunAndOptions(ctx context.Context, cf
 						if ctx.Err() != nil {
 							continue
 						}
-						result, attachErrs, err := s.syncWorkItem(ctx, cfg, item, skipExisting)
+						result, attachErrs, err := s.syncWorkItem(ctx, cfg, item, lightUpdateExisting)
+						if err == nil && !item.UpdatedAt.IsZero() {
+							ms := item.UpdatedAt.UnixMilli()
+							for {
+								cur := maxObservedUpdatedAtMs.Load()
+								if ms <= cur || maxObservedUpdatedAtMs.CompareAndSwap(cur, ms) {
+									break
+								}
+							}
+						}
 						summaryMu.Lock()
 						if err != nil {
 							summary.Errors++
@@ -258,18 +339,34 @@ func (s *FeishuProjectSyncService) SyncWithRunAndOptions(ctx context.Context, cf
 			combined = combined + "; " + attachmentHint
 		}
 		errText = pgtype.Text{String: combined, Valid: true}
-		_ = s.Queries.MarkFeishuProjectIntegrationError(finishCtx, db.MarkFeishuProjectIntegrationErrorParams{
+		if err := s.Queries.MarkFeishuProjectIntegrationError(finishCtx, db.MarkFeishuProjectIntegrationErrorParams{
 			ID:        cfg.ID,
 			LastError: pgtype.Text{String: combined, Valid: true},
-		})
+		}); err != nil {
+			slog.Warn("Feishu Project mark-error failed", "integration_id", UUIDString(cfg.ID), "error", err)
+		}
 	} else {
-		_ = s.Queries.MarkFeishuProjectIntegrationSynced(finishCtx, cfg.ID)
+		// If this write fails silently, last_synced_at never advances and the
+		// next incremental sync replays the full lookback window.
+		if err := s.Queries.MarkFeishuProjectIntegrationSynced(finishCtx, db.MarkFeishuProjectIntegrationSyncedParams{
+			ID:                  cfg.ID,
+			ObservedUpdatedAtMs: maxObservedUpdatedAtMs.Load(),
+		}); err != nil {
+			slog.Warn("Feishu Project mark-synced failed; last_synced_at not advanced", "integration_id", UUIDString(cfg.ID), "error", err)
+		}
+		if trigger == "reconcile" {
+			if err := s.Queries.MarkFeishuProjectIntegrationReconciled(finishCtx, cfg.ID); err != nil {
+				slog.Warn("Feishu Project mark-reconciled failed; will re-attempt next tick", "integration_id", UUIDString(cfg.ID), "error", err)
+			}
+		}
 		if attachmentHint != "" {
 			errText = pgtype.Text{String: attachmentHint, Valid: true}
-			_ = s.Queries.MarkFeishuProjectIntegrationError(finishCtx, db.MarkFeishuProjectIntegrationErrorParams{
+			if err := s.Queries.MarkFeishuProjectIntegrationError(finishCtx, db.MarkFeishuProjectIntegrationErrorParams{
 				ID:        cfg.ID,
 				LastError: pgtype.Text{String: attachmentHint, Valid: true},
-			})
+			}); err != nil {
+				slog.Warn("Feishu Project mark-error (attachment hint) failed", "integration_id", UUIDString(cfg.ID), "error", err)
+			}
 		}
 	}
 	if run.ID.Valid {
@@ -312,7 +409,7 @@ func enabledFeishuProjectTypes(cfg db.FeishuProjectIntegration) []string {
 	return out
 }
 
-func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, skipExisting bool) (result string, attachErrs int, retErr error) {
+func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, lightUpdateExisting bool) (result string, attachErrs int, retErr error) {
 	started := time.Now()
 	timing := &feishuProjectSyncTiming{}
 	defer func() {
@@ -350,6 +447,19 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 	if item.ID == "" || item.Title == "" {
 		return "skipped", 0, nil
 	}
+	matchedRoute, routed, routeErr := s.routeWorkItemProject(ctx, cfg, item)
+	if routeErr != nil {
+		return "skipped", 0, routeErr
+	}
+	if !routed {
+		return "skipped", 0, nil
+	}
+	var projectID pgtype.UUID
+	var fallbackAgentID pgtype.UUID
+	if matchedRoute != nil {
+		projectID = matchedRoute.ProjectID
+		fallbackAgentID = matchedRoute.FallbackAgentID
+	}
 	mappedStatus := mapFeishuStatus(cfg.StatusMapping, item.Type, item.Status)
 	status := mappedStatus
 	if status == "" {
@@ -364,9 +474,6 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 	})
 	timing.bindingLookup += time.Since(phaseStarted)
 	if err == nil {
-		if skipExisting {
-			return "skipped", 0, nil
-		}
 		phaseStarted = time.Now()
 		issue, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: binding.IssueID, WorkspaceID: cfg.WorkspaceID})
 		timing.issueLookup += time.Since(phaseStarted)
@@ -374,8 +481,57 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			return "skipped", 0, nil
 		}
 		phaseStarted = time.Now()
-		assigneeType, assigneeID := s.resolveAssignee(ctx, cfg, item, mappedStatus, issue.AssigneeType, issue.AssigneeID)
+		assigneeType, assigneeID := s.resolveAssignee(ctx, cfg, item, mappedStatus, issue.AssigneeType, issue.AssigneeID, fallbackAgentID)
 		timing.ownerLookup += time.Since(phaseStarted)
+		nextProjectID := issue.ProjectID
+		if projectID.Valid {
+			nextProjectID = projectID
+		}
+
+		if lightUpdateExisting {
+			// Light-update path for manual full-sync: refresh status / assignee /
+			// project only. Skip syncExternalAttachments (~200-500ms per item with
+			// any attachment) and preserve the existing title + description so the
+			// already-synced attachment markdown block doesn't get clobbered. Per
+			// item this collapses to ~25-30ms, so a 1k-item manual sync runs in ~30s
+			// instead of multiple minutes. New attachments added in Meego after the
+			// first sync are still picked up by the next scheduled (incremental)
+			// sync, which keeps its full path.
+			if issue.Status == status &&
+				sameNullableText(issue.AssigneeType, assigneeType) &&
+				sameNullableUUID(issue.AssigneeID, assigneeID) &&
+				issue.ProjectID == nextProjectID {
+				s.reconcileSyncedIssueTasks(ctx, issue, issue)
+				return "skipped", 0, nil
+			}
+			phaseStarted = time.Now()
+			updatedIssue, err := s.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
+				ID: issue.ID,
+				// Pass invalid pgtype.Text for title/description → COALESCE in
+				// queries/issue.sql keeps the current values, so the embedded
+				// attachment markdown survives.
+				Title:         pgtype.Text{},
+				Description:   pgtype.Text{},
+				Status:        pgtype.Text{String: status, Valid: true},
+				Priority:      pgtype.Text{String: issue.Priority, Valid: true},
+				AssigneeType:  assigneeType,
+				AssigneeID:    assigneeID,
+				DueDate:       issue.DueDate,
+				ParentIssueID: issue.ParentIssueID,
+				ProjectID:     nextProjectID,
+			})
+			timing.issueUpdate += time.Since(phaseStarted)
+			if err != nil {
+				return "skipped", 0, err
+			}
+			phaseStarted = time.Now()
+			_, _ = s.Queries.UpsertFeishuProjectIssueBinding(ctx, bindingParams(cfg, issue.ID, item))
+			timing.bindingUpsert += time.Since(phaseStarted)
+			s.reconcileSyncedIssueTasks(ctx, issue, updatedIssue)
+			return "updated", 0, nil
+		}
+
+		// Full update path — scheduled (incremental) sync. Includes attachment refetch.
 		phaseStarted = time.Now()
 		attachmentMarkdown, attachErr := s.syncExternalAttachments(ctx, cfg, issue.ID, item, timing)
 		timing.attachments += time.Since(phaseStarted)
@@ -385,7 +541,8 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		nextDesc := externalDescription(item, attachmentMarkdown)
 		nextTitle := externalTitle(item)
 		if issue.Title == nextTitle && issue.Description.String == nextDesc && issue.Status == status &&
-			sameNullableText(issue.AssigneeType, assigneeType) && sameNullableUUID(issue.AssigneeID, assigneeID) {
+			sameNullableText(issue.AssigneeType, assigneeType) && sameNullableUUID(issue.AssigneeID, assigneeID) &&
+			issue.ProjectID == nextProjectID {
 			s.reconcileSyncedIssueTasks(ctx, issue, issue)
 			return "skipped", 0, nil
 		}
@@ -400,7 +557,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			AssigneeID:    assigneeID,
 			DueDate:       issue.DueDate,
 			ParentIssueID: issue.ParentIssueID,
-			ProjectID:     issue.ProjectID,
+			ProjectID:     nextProjectID,
 		})
 		timing.issueUpdate += time.Since(phaseStarted)
 		if err != nil {
@@ -417,7 +574,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		return "skipped", 0, fmt.Errorf("feishu project integration has no creator")
 	}
 	phaseStarted = time.Now()
-	assigneeType, assigneeID := s.resolveAssignee(ctx, cfg, item, mappedStatus, pgtype.Text{}, pgtype.UUID{})
+	assigneeType, assigneeID := s.resolveAssignee(ctx, cfg, item, mappedStatus, pgtype.Text{}, pgtype.UUID{}, fallbackAgentID)
 	timing.ownerLookup += time.Since(phaseStarted)
 	phaseStarted = time.Now()
 	tx, err := s.Tx.Begin(ctx)
@@ -442,6 +599,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		CreatorID:    cfg.CreatedByID,
 		Position:     0,
 		Number:       number,
+		ProjectID:    projectID,
 	})
 	if err != nil {
 		return "skipped", 0, err
@@ -522,14 +680,136 @@ func (s *FeishuProjectSyncService) enqueueSyncedIssueIfNeeded(ctx context.Contex
 	}
 }
 
-func (s *FeishuProjectSyncService) resolveAssignee(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, localStatus string, currentType pgtype.Text, currentID pgtype.UUID) (pgtype.Text, pgtype.UUID) {
-	if cfg.AssignOpenItemsToOwnerAgent {
-		if !isFeishuProjectOwnerAgentAssignableStatus(item.Status, localStatus) {
-			return currentType, currentID
-		}
-		return s.resolveOwnerAgent(ctx, cfg.WorkspaceID, item.OwnerEmail)
+// resolveAssignee picks the issue assignee for a synced work item. The chain is:
+//
+//  1. Owner's agent — only if cfg.AssignOpenItemsToOwnerAgent is on AND the local status
+//     is in an "assignable" state (currently "todo"). For non-assignable states (e.g.
+//     in_progress, done) we preserve currentType/currentID so we don't fight with a
+//     manual reassignment that happened in Multica.
+//  2. Owner as workspace member — the normal case when the Meego owner exists in
+//     Multica as a workspace member.
+//  3. Route's fallback agent — last resort when the owner can't be resolved at all
+//     (left Meego / never joined Multica / typo'd email). Per-route so different
+//     business lines can have different triage handlers.
+//  4. Empty — nothing matched.
+//
+// The fallback is intentionally below member resolution: 兜底 means "use when nothing
+// else fits", so if the human owner is in the workspace they should still own the item
+// (otherwise the fallback would silently steal items that have a valid owner).
+func (s *FeishuProjectSyncService) resolveAssignee(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, localStatus string, currentType pgtype.Text, currentID pgtype.UUID, fallbackAgentID pgtype.UUID) (pgtype.Text, pgtype.UUID) {
+	if cfg.AssignOpenItemsToOwnerAgent && !isFeishuProjectOwnerAgentAssignableStatus(item.Status, localStatus) {
+		return currentType, currentID
 	}
-	return s.resolveOwnerMember(ctx, cfg.WorkspaceID, item.OwnerEmail)
+	if cfg.AssignOpenItemsToOwnerAgent {
+		if t, id := s.resolveOwnerAgent(ctx, cfg.WorkspaceID, item.OwnerEmail); id.Valid {
+			return t, id
+		}
+	}
+	if t, id := s.resolveOwnerMember(ctx, cfg.WorkspaceID, item.OwnerEmail); id.Valid {
+		return t, id
+	}
+	if fallbackAgentID.Valid {
+		return pgtype.Text{String: "agent", Valid: true}, fallbackAgentID
+	}
+	return pgtype.Text{}, pgtype.UUID{}
+}
+
+// routeWorkItemProject decides which Multica project (inside the integration's workspace) a
+// Meego work item belongs to, based on the configured business-line field and the routes
+// stored in feishu_project_business_line_route.
+//
+// Returns:
+//   - matched: pointer to the matched route row (nil when routing is disabled). Callers
+//     read both ProjectID and FallbackAgentID off it.
+//   - routed=true: the item should be synced (either no routing rules apply, or a route matched)
+//   - routed=false, err=nil: routing is configured but no rule matched → item is intentionally
+//     skipped (operators see this as "no route configured for this biz line")
+//   - err != nil: transient lookup failure; caller should bubble up
+//
+// When the integration has BusinessLineFieldKey == "" (legacy / 1:1 setup), routing is
+// disabled and every item is synced into the workspace without a project — matching the
+// pre-routing behavior so this change is backward-compatible. In that case matched=nil.
+func (s *FeishuProjectSyncService) routeWorkItemProject(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem) (*db.FeishuProjectBusinessLineRoute, bool, error) {
+	if strings.TrimSpace(cfg.BusinessLineFieldKey) == "" {
+		return nil, true, nil
+	}
+	routes, err := s.Queries.ListFeishuProjectBusinessLineRoutes(ctx, cfg.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("list biz-line routes: %w", err)
+	}
+	if len(routes) == 0 {
+		slog.Warn("Feishu Project sync skipped: routing enabled but no routes configured",
+			"integration_id", UUIDString(cfg.ID),
+			"project_key", cfg.ProjectKey,
+			"work_item_id", item.ID,
+		)
+		return nil, false, nil
+	}
+	matched := matchBusinessLineRoute(routes, item.BusinessLineTokens)
+	if matched == nil {
+		slog.Warn("Feishu Project sync skipped: work item business-line value has no matching route",
+			"integration_id", UUIDString(cfg.ID),
+			"project_key", cfg.ProjectKey,
+			"work_item_id", item.ID,
+			"work_item_tokens", formatBusinessLineTokens(item.BusinessLineTokens),
+		)
+		return nil, false, nil
+	}
+	return matched, true, nil
+}
+
+// matchBusinessLineRoute applies the precedence rules from the design:
+//  1. exact leaf-id match (route.business_line_id == any item leaf id)
+//  2. exact leaf-name match
+//  3. parent-id match (route.business_line_id == any item parent id) — covers parent-level routes
+//  4. parent-name match
+//
+// First-wins by route order. Multiple ties at the same precedence layer log a warning at
+// call sites; here we return deterministically the first.
+func matchBusinessLineRoute(routes []db.FeishuProjectBusinessLineRoute, tokens []FeishuBusinessLineToken) *db.FeishuProjectBusinessLineRoute {
+	if len(routes) == 0 || len(tokens) == 0 {
+		return nil
+	}
+	leafIDs := map[string]bool{}
+	leafNames := map[string]bool{}
+	parentIDs := map[string]bool{}
+	parentNames := map[string]bool{}
+	for _, tok := range tokens {
+		if id := strings.TrimSpace(tok.ID); id != "" {
+			leafIDs[id] = true
+		}
+		if name := strings.TrimSpace(tok.Name); name != "" {
+			leafNames[name] = true
+		}
+		if pid := strings.TrimSpace(tok.ParentID); pid != "" {
+			parentIDs[pid] = true
+		}
+		if pname := strings.TrimSpace(tok.ParentName); pname != "" {
+			parentNames[pname] = true
+		}
+	}
+	matchers := []func(db.FeishuProjectBusinessLineRoute) bool{
+		func(r db.FeishuProjectBusinessLineRoute) bool { return leafIDs[strings.TrimSpace(r.BusinessLineID)] },
+		func(r db.FeishuProjectBusinessLineRoute) bool { return leafNames[strings.TrimSpace(r.BusinessLineName)] },
+		func(r db.FeishuProjectBusinessLineRoute) bool { return parentIDs[strings.TrimSpace(r.BusinessLineID)] },
+		func(r db.FeishuProjectBusinessLineRoute) bool { return parentNames[strings.TrimSpace(r.BusinessLineName)] },
+	}
+	for _, m := range matchers {
+		for i := range routes {
+			if m(routes[i]) {
+				return &routes[i]
+			}
+		}
+	}
+	return nil
+}
+
+func formatBusinessLineTokens(tokens []FeishuBusinessLineToken) string {
+	parts := make([]string, 0, len(tokens))
+	for _, t := range tokens {
+		parts = append(parts, fmt.Sprintf("%s/%s(%s/%s)", t.ID, t.Name, t.ParentID, t.ParentName))
+	}
+	return strings.Join(parts, ",")
 }
 
 func (s *FeishuProjectSyncService) resolveOwnerMember(ctx context.Context, workspaceID pgtype.UUID, email string) (pgtype.Text, pgtype.UUID) {
@@ -731,8 +1011,26 @@ func (s *FeishuProjectSyncService) syncExternalAttachments(ctx context.Context, 
 		IssueID:     issueID,
 		WorkspaceID: cfg.WorkspaceID,
 	})
+	bindings, _ := s.Queries.ListFeishuProjectAttachmentBindingsByIssue(ctx, db.ListFeishuProjectAttachmentBindingsByIssueParams{
+		IntegrationID: cfg.ID,
+		IssueID:       issueID,
+	})
 	if timing != nil {
 		timing.attachmentList += time.Since(phaseStarted)
+	}
+	attachmentsByID := make(map[pgtype.UUID]db.Attachment, len(existing))
+	for _, att := range existing {
+		attachmentsByID[att.ID] = att
+	}
+	// Bindings are the primary dedup key (Feishu attachment ID → local
+	// attachment). Filename is kept as a fallback for legacy rows synced
+	// before bindings existed, or for the rare case where Feishu returns
+	// no attachment ID.
+	boundByExternalID := make(map[string]db.Attachment, len(bindings))
+	for _, b := range bindings {
+		if att, ok := attachmentsByID[b.AttachmentID]; ok {
+			boundByExternalID[b.ExternalAttachmentID] = att
+		}
 	}
 	byName := make(map[string]db.Attachment, len(existing))
 	for _, att := range existing {
@@ -745,7 +1043,18 @@ func (s *FeishuProjectSyncService) syncExternalAttachments(ctx context.Context, 
 		if ext.Name == "" {
 			continue
 		}
-		if att, ok := byName[ext.Name]; ok {
+		externalID := strings.TrimSpace(ext.ID)
+		if externalID != "" {
+			if att, ok := boundByExternalID[externalID]; ok {
+				if timing != nil {
+					timing.attachmentsExisting++
+				}
+				lines = append(lines, attachmentMarkdown(att.Filename, feishuProjectAttachmentContentURL(att), att.ContentType))
+				continue
+			}
+		} else if att, ok := byName[ext.Name]; ok {
+			// No external ID — fall back to filename match. Lossy, but only
+			// hit when Feishu omits the attachment ID.
 			if timing != nil {
 				timing.attachmentsExisting++
 			}
@@ -840,6 +1149,30 @@ func (s *FeishuProjectSyncService) syncExternalAttachments(ctx context.Context, 
 		}
 		if timing != nil {
 			timing.attachmentsUploaded++
+		}
+		// Record the external ID → local attachment binding so future syncs
+		// dedup on the Feishu attachment ID instead of filename. Failure
+		// here is logged and ignored: the attachment is already uploaded
+		// and visible to the user; we'll just re-download on the next sync.
+		if externalID != "" {
+			if _, err := s.Queries.CreateFeishuProjectAttachmentBinding(ctx, db.CreateFeishuProjectAttachmentBindingParams{
+				WorkspaceID:          cfg.WorkspaceID,
+				IntegrationID:        cfg.ID,
+				IssueID:              issueID,
+				AttachmentID:         att.ID,
+				ExternalAttachmentID: externalID,
+				ExternalFilename:     ext.Name,
+			}); err != nil {
+				slog.Warn("Feishu Project attachment binding create failed",
+					"workspace_id", UUIDString(cfg.WorkspaceID),
+					"integration_id", UUIDString(cfg.ID),
+					"issue_id", UUIDString(issueID),
+					"external_attachment_id", externalID,
+					"error", err,
+				)
+			} else {
+				boundByExternalID[externalID] = att
+			}
 		}
 		byName[att.Filename] = att
 		lines = append(lines, attachmentMarkdown(att.Filename, feishuProjectAttachmentContentURL(att), att.ContentType))
@@ -974,12 +1307,44 @@ func feishuProjectManualSyncSinceUnixMilli(now time.Time) int64 {
 	return now.Add(-feishuProjectManualLookback).UnixMilli()
 }
 
+// feishuProjectSyncSince computes the legacy local-clock-based incremental
+// lookback. Kept as a fallback for integrations that haven't yet stored a
+// Feishu-side watermark (last_seen_updated_at_ms), and for tests that drive
+// QueryWorkItemPages directly without a Sync entry.
 func feishuProjectSyncSince(cfg db.FeishuProjectIntegration, now time.Time) time.Time {
 	since := now.Add(-feishuProjectInitialLookback)
 	if cfg.LastSyncedAt.Valid {
 		since = cfg.LastSyncedAt.Time.Add(-feishuProjectIncrementalReplay)
 	}
 	return since
+}
+
+// feishuProjectSinceUnixMilliForTrigger picks the `updated_at >=` lookback
+// for a sync run based on its trigger. The result is the single point of
+// policy for "how far back do we ask Feishu for changes".
+//
+//   - "manual"    → 30d (full bootstrap on user request)
+//   - "reconcile" → 6h30m (6h cadence + 30m safety overshoot)
+//   - default     → incremental: last_seen_updated_at_ms - 10m overlap,
+//     falling back to legacy local-clock lookback when the watermark
+//     hasn't been stored yet (first run after deploy of this change).
+//
+// Using Feishu's own updated_at value for the incremental watermark removes
+// the local-clock dependency in the previous design: a Multica server clock
+// that runs ahead of (or behind) Feishu's gateway no longer eats into the
+// 10-minute overlap window.
+func feishuProjectSinceUnixMilliForTrigger(cfg db.FeishuProjectIntegration, trigger string, now time.Time) int64 {
+	switch trigger {
+	case "manual":
+		return feishuProjectManualSyncSinceUnixMilli(now)
+	case "reconcile":
+		return now.Add(-feishuProjectReconcileLookback - feishuProjectReconcileLookbackSafety).UnixMilli()
+	default:
+		if cfg.LastSeenUpdatedAtMs.Valid && cfg.LastSeenUpdatedAtMs.Int64 > 0 {
+			return cfg.LastSeenUpdatedAtMs.Int64 - feishuProjectIncrementalReplay.Milliseconds()
+		}
+		return feishuProjectSyncSinceUnixMilli(cfg, now)
+	}
 }
 
 func buildFeishuProjectSyncMQL(projectKey, workItemType string, statuses []string, sinceDate, extraFilter string, offset, limit int) string {
@@ -1059,9 +1424,16 @@ func (c *FeishuProjectClient) QueryWorkItemPagesWithOptions(ctx context.Context,
 			req["work_item_ids"] = []string{strings.TrimSpace(opts.WorkItemID)}
 		}
 		now := time.Now()
-		updatedAtStart := feishuProjectSyncSinceUnixMilli(cfg, now)
-		if fullSync {
-			updatedAtStart = feishuProjectManualSyncSinceUnixMilli(now)
+		// Sync entry computes the precise lookback per trigger and threads it
+		// through opts.SinceUnixMilli. Direct callers (tests, future ad-hoc
+		// uses) without that context fall back to the legacy fullSync-aware
+		// default.
+		updatedAtStart := opts.SinceUnixMilli
+		if updatedAtStart == 0 {
+			updatedAtStart = feishuProjectSyncSinceUnixMilli(cfg, now)
+			if fullSync {
+				updatedAtStart = feishuProjectManualSyncSinceUnixMilli(now)
+			}
 		}
 		req["updated_at"] = map[string]any{
 			"start": updatedAtStart,
@@ -1070,7 +1442,7 @@ func (c *FeishuProjectClient) QueryWorkItemPagesWithOptions(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		items := parseFeishuProjectSearch(payload, workItemType, cfg.ProjectKey)
+		items := parseFeishuProjectSearch(payload, workItemType, cfg.ProjectKey, strings.TrimSpace(cfg.BusinessLineFieldKey))
 		total, hasTotal := feishuProjectOpenAPITotal(payload)
 		if !hasTotal {
 			total = 0
@@ -1184,6 +1556,109 @@ func (c *FeishuProjectClient) IssueStatusOptions(ctx context.Context, cfg db.Fei
 	return statuses, nil
 }
 
+// ListWorkItemFields returns the field definitions of a work-item type so the user
+// can pick which one is the "business line" field. Backed by
+// GET /open_api/{project_key}/work_item/{type}/meta — the same endpoint we already use
+// for status options, just parsed for the full field list.
+func (c *FeishuProjectClient) ListWorkItemFields(ctx context.Context, cfg db.FeishuProjectIntegration, workItemType string) ([]FeishuProjectFieldMeta, error) {
+	if workItemType == "" {
+		workItemType = "issue"
+	}
+	payload, err := c.openAPI(ctx, cfg, http.MethodGet, fmt.Sprintf("/open_api/%s/work_item/%s/meta", cfg.ProjectKey, workItemType), nil)
+	if err != nil {
+		return nil, err
+	}
+	return parseFeishuProjectFieldMetas(payload), nil
+}
+
+// ListFieldOptions returns the option tree of a specific work-item field. Used by the
+// routing UI to populate the business-line tree based on the operator's field choice.
+//
+// Two cases Meego presents:
+//  1. Custom select fields (`_select` / `_multi_select` / ...) carry their option list
+//     inline in the meta payload — we extract from there.
+//  2. Built-in business-line fields (`_biz_line` type) DON'T carry inline options;
+//     their valid values come from the space-wide /open_api/{key}/business/all tree.
+//     For this case we fall back to that endpoint so the UI doesn't end up empty when
+//     the operator picks the "obvious" 业务线 field.
+//
+// Returns nil only if the field isn't found at all OR has no options under either path.
+// Caller (handler/UI) treats nil as "this field has no selectable values".
+func (c *FeishuProjectClient) ListFieldOptions(ctx context.Context, cfg db.FeishuProjectIntegration, workItemType, fieldKey string) ([]FeishuProjectFieldOption, error) {
+	if workItemType == "" {
+		workItemType = "issue"
+	}
+	if strings.TrimSpace(fieldKey) == "" {
+		return nil, fmt.Errorf("field_key is required")
+	}
+	payload, err := c.openAPI(ctx, cfg, http.MethodGet, fmt.Sprintf("/open_api/%s/work_item/%s/meta", cfg.ProjectKey, workItemType), nil)
+	if err != nil {
+		return nil, err
+	}
+	field := findFeishuProjectFieldByKey(payload, fieldKey)
+	if field != nil {
+		if tree := extractFeishuProjectFieldOptionTree(field); len(tree) > 0 {
+			return tree, nil
+		}
+	}
+	// Fallback: maybe this is a _biz_line field whose options live in the space tree.
+	// We don't gate on field type because Meego's type keys aren't stable across
+	// space versions; just try the second source and accept whatever comes back.
+	bizPayload, err := c.openAPI(ctx, cfg, http.MethodGet, fmt.Sprintf("/open_api/%s/business/all", cfg.ProjectKey), nil)
+	if err != nil {
+		// Don't mask the original "field has no inline options" with a permission
+		// error from /business/all — return nil and let the caller surface the
+		// empty-state message that points at both possible causes.
+		slog.Info("Feishu Project /business/all fallback failed",
+			"project_key", cfg.ProjectKey, "field_key", fieldKey, "error", err)
+		return nil, nil
+	}
+	return parseFeishuProjectBusinessLineTree(bizPayload), nil
+}
+
+// findFeishuProjectFieldByKey walks a meta payload looking for a field entry whose
+// field_key (or field_alias) matches. Meego's meta document nests fields under
+// "fields"/"field_list"/tab containers, so we recurse.
+func findFeishuProjectFieldByKey(payload map[string]any, fieldKey string) map[string]any {
+	var found map[string]any
+	var walk func(any)
+	walk = func(v any) {
+		if found != nil {
+			return
+		}
+		switch x := v.(type) {
+		case map[string]any:
+			k := strings.TrimSpace(firstNonEmpty(fmt.Sprint(x["field_key"]), fmt.Sprint(x["field_alias"])))
+			if k == fieldKey {
+				found = x
+				return
+			}
+			for _, child := range x {
+				walk(child)
+			}
+		case []any:
+			for _, child := range x {
+				walk(child)
+			}
+		}
+	}
+	walk(payload)
+	return found
+}
+
+// extractFeishuProjectFieldOptionTree pulls the option tree out of a single field node.
+// Meego stores it under any of `option` / `options` / sometimes nested inside
+// `field_value`. We try those and feed the result to the existing biz-line tree parser
+// which already knows how to handle nested children with id/option_id/key shapes.
+func extractFeishuProjectFieldOptionTree(field map[string]any) []FeishuProjectFieldOption {
+	for _, k := range []string{"option", "options"} {
+		if v, ok := field[k]; ok {
+			return parseFeishuProjectBusinessLineTree(map[string]any{"data": v})
+		}
+	}
+	return nil
+}
+
 func (c *FeishuProjectClient) TransitionStatus(ctx context.Context, cfg db.FeishuProjectIntegration, workItemID, workItemType, targetStatus string) error {
 	if targetStatus == "" {
 		return nil
@@ -1231,7 +1706,7 @@ func (c *FeishuProjectClient) openAPI(ctx context.Context, cfg db.FeishuProjectI
 		resp, err := c.httpClient().Do(req)
 		if err != nil {
 			lastErr = err
-			if attempt < feishuProjectAPIRetryAttempts && feishuProjectRetryDelay(ctx, attempt) {
+			if attempt < feishuProjectAPIRetryAttempts && feishuProjectSleep(ctx, feishuProjectRetryDelay(attempt)) {
 				continue
 			}
 			return nil, err
@@ -1240,45 +1715,78 @@ func (c *FeishuProjectClient) openAPI(ctx context.Context, cfg db.FeishuProjectI
 		_ = resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			lastErr = fmt.Errorf("Feishu Project API %s %s http %d: %s", method, path, resp.StatusCode, string(raw))
-			if attempt < feishuProjectAPIRetryAttempts && feishuProjectRetryableHTTPStatus(resp.StatusCode) && feishuProjectRetryDelay(ctx, attempt) {
-				slog.Warn("Feishu Project API retrying",
-					"method", method,
-					"path", path,
-					"status", resp.StatusCode,
-					"attempt", attempt,
-					"max_attempts", feishuProjectAPIRetryAttempts,
-					"body", string(raw),
-				)
-				continue
+			if !feishuProjectRetryableHTTPStatus(resp.StatusCode) || attempt >= feishuProjectAPIRetryAttempts {
+				return nil, lastErr
 			}
-			return nil, lastErr
+			delay := feishuProjectRetryDelay(attempt)
+			if resp.StatusCode == http.StatusTooManyRequests {
+				if d := feishuProjectRateLimitResetDelay(resp.Header); d > 0 {
+					delay = d
+				} else {
+					delay = feishuProjectRateLimitFallbackDelay(attempt)
+				}
+			}
+			slog.Warn("Feishu Project API retrying",
+				"method", method,
+				"path", path,
+				"status", resp.StatusCode,
+				"attempt", attempt,
+				"max_attempts", feishuProjectAPIRetryAttempts,
+				"delay", delay,
+				"body", string(raw),
+			)
+			if !feishuProjectSleep(ctx, delay) {
+				return nil, lastErr
+			}
+			continue
 		}
 		var out map[string]any
 		if err := json.Unmarshal(raw, &out); err != nil {
 			return nil, err
 		}
 		if msg := feishuProjectAPIError(out); msg != "" {
-			lastErr = fmt.Errorf("Feishu Project API %s %s failed: %s", method, path, msg)
-			if attempt < feishuProjectAPIRetryAttempts && feishuProjectRetryableAPIError(out) && feishuProjectRetryDelay(ctx, attempt) {
-				slog.Warn("Feishu Project API retrying",
-					"method", method,
-					"path", path,
-					"attempt", attempt,
-					"max_attempts", feishuProjectAPIRetryAttempts,
-					"error", msg,
-				)
-				continue
+			// Monthly tenant quota — refilled only on the 1st of next month, so
+			// no amount of retrying within this run will succeed.
+			if feishuProjectIsQuotaExhausted(out) {
+				return nil, fmt.Errorf("Feishu Project API %s %s: %s: %w", method, path, msg, ErrFeishuProjectQuotaExhausted)
 			}
-			return nil, lastErr
+			lastErr = fmt.Errorf("Feishu Project API %s %s failed: %s", method, path, msg)
+			if !feishuProjectRetryableAPIError(out) || attempt >= feishuProjectAPIRetryAttempts {
+				return nil, lastErr
+			}
+			delay := feishuProjectRetryDelay(attempt)
+			if feishuProjectIsRateLimited(out) {
+				if d := feishuProjectRateLimitResetDelay(resp.Header); d > 0 {
+					delay = d
+				} else {
+					delay = feishuProjectRateLimitFallbackDelay(attempt)
+				}
+			}
+			slog.Warn("Feishu Project API retrying",
+				"method", method,
+				"path", path,
+				"attempt", attempt,
+				"max_attempts", feishuProjectAPIRetryAttempts,
+				"delay", delay,
+				"error", msg,
+			)
+			if !feishuProjectSleep(ctx, delay) {
+				return nil, lastErr
+			}
+			continue
 		}
 		return out, nil
 	}
 	return nil, lastErr
 }
 
-func feishuProjectRetryDelay(ctx context.Context, attempt int) bool {
-	delay := time.Duration(attempt) * time.Second
-	timer := time.NewTimer(delay)
+// feishuProjectSleep blocks for d, returning false if the context is cancelled
+// before the timer fires. Non-positive d returns true immediately.
+func feishuProjectSleep(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -1286,6 +1794,47 @@ func feishuProjectRetryDelay(ctx context.Context, attempt int) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+// feishuProjectRetryDelay returns the linear-backoff duration we use for
+// transient errors that are *not* rate-limit-related (network blips, 5xx,
+// upstream gateway timeouts). Rate-limited responses use a separate, larger
+// delay computed from the gateway reset header.
+func feishuProjectRetryDelay(attempt int) time.Duration {
+	return time.Duration(attempt) * time.Second
+}
+
+// feishuProjectRateLimitResetDelay reads Feishu's gateway reset header. The
+// gateway emits the number of whole seconds until the per-token-per-interface
+// bucket recovers; capped at feishuProjectRateLimitMaxSleep so a malformed
+// response can't stall a worker indefinitely.
+func feishuProjectRateLimitResetDelay(h http.Header) time.Duration {
+	raw := strings.TrimSpace(h.Get("x-ogw-ratelimit-reset"))
+	if raw == "" {
+		return 0
+	}
+	secs, err := strconv.Atoi(raw)
+	if err != nil || secs <= 0 {
+		return 0
+	}
+	d := time.Duration(secs) * time.Second
+	if d > feishuProjectRateLimitMaxSleep {
+		d = feishuProjectRateLimitMaxSleep
+	}
+	return d
+}
+
+// feishuProjectRateLimitFallbackDelay is the exponential backoff used when the
+// gateway returns 429 / err_code 99991400 but no reset header — 2s, 4s, 8s, 16s.
+func feishuProjectRateLimitFallbackDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	d := time.Duration(1<<attempt) * time.Second
+	if d > feishuProjectRateLimitMaxSleep {
+		d = feishuProjectRateLimitMaxSleep
+	}
+	return d
 }
 
 func feishuProjectRetryableHTTPStatus(status int) bool {
@@ -1297,14 +1846,42 @@ func feishuProjectRetryableHTTPStatus(status int) bool {
 	}
 }
 
-func feishuProjectRetryableAPIError(payload map[string]any) bool {
+// feishuProjectErrCode pulls err_code from the response envelope, falling back
+// to nested err.code (used by a few legacy Feishu Project endpoints).
+func feishuProjectErrCode(payload map[string]any) int {
 	code, _ := feishuProjectInt(payload["err_code"])
 	if code == 0 {
 		if errMap, _ := payload["err"].(map[string]any); errMap != nil {
 			code, _ = feishuProjectInt(errMap["code"])
 		}
 	}
-	if code == 50007 {
+	return code
+}
+
+// feishuProjectIsRateLimited reports whether the response body indicates the
+// per-token-per-interface QPS limit was hit. err_code 99991400 with msg
+// "request trigger frequency limit" is the documented signal.
+func feishuProjectIsRateLimited(payload map[string]any) bool {
+	if feishuProjectErrCode(payload) == 99991400 {
+		return true
+	}
+	msg := strings.ToLower(strings.TrimSpace(fmt.Sprint(payload["err_msg"]) + " " + fmt.Sprint(payload["msg"])))
+	return strings.Contains(msg, "frequency limit") || strings.Contains(msg, "too many requests")
+}
+
+// feishuProjectIsQuotaExhausted reports whether the tenant's monthly Feishu
+// Open Platform quota has been consumed (err_code 99991403, enforced since
+// 2024-12-03). The bucket only refills on the 1st of the next natural month,
+// so retrying within the same run is futile.
+func feishuProjectIsQuotaExhausted(payload map[string]any) bool {
+	return feishuProjectErrCode(payload) == 99991403
+}
+
+func feishuProjectRetryableAPIError(payload map[string]any) bool {
+	if feishuProjectIsRateLimited(payload) {
+		return true
+	}
+	if feishuProjectErrCode(payload) == 50007 {
 		return true
 	}
 	msg := strings.ToLower(strings.TrimSpace(fmt.Sprint(payload["err_msg"]) + " " + fmt.Sprint(payload["msg"])))
@@ -1390,13 +1967,26 @@ func (c *FeishuProjectClient) DownloadAttachment(ctx context.Context, cfg db.Fei
 		payload := map[string]any{"uuid": att.ID}
 		var lastErr error
 		for attempt := 1; attempt <= feishuProjectDownloadRetryAttempts; attempt++ {
-			raw, filename, contentType, retryable, reqErr := c.downloadAttachmentRequest(ctx, cfg, item, token, payload)
+			outcome, reqErr := c.downloadAttachmentRequest(ctx, cfg, item, token, payload)
 			if reqErr == nil {
-				return raw, firstNonEmpty(filename, att.Name), firstNonEmpty(contentType, att.ContentType), nil
+				return outcome.raw, firstNonEmpty(outcome.filename, att.Name), firstNonEmpty(outcome.contentType, att.ContentType), nil
 			}
 			lastErr = reqErr
-			if !retryable || attempt == feishuProjectDownloadRetryAttempts {
+			// Quota exhaustion will not heal until the next natural month;
+			// caller should bail out instead of burning retry budget.
+			if errors.Is(reqErr, ErrFeishuProjectQuotaExhausted) {
+				return nil, "", "", reqErr
+			}
+			if !outcome.retryable || attempt == feishuProjectDownloadRetryAttempts {
 				break
+			}
+			delay := feishuProjectDownloadRetryInitialDelay * time.Duration(1<<(attempt-1))
+			if outcome.rateLimited {
+				if outcome.retryAfter > 0 {
+					delay = outcome.retryAfter
+				} else {
+					delay = feishuProjectRateLimitFallbackDelay(attempt)
+				}
 			}
 			slog.Warn("Feishu Project attachment download retrying",
 				"workspace_id", UUIDString(cfg.WorkspaceID),
@@ -1406,9 +1996,11 @@ func (c *FeishuProjectClient) DownloadAttachment(ctx context.Context, cfg db.Fei
 				"attachment_id", att.ID,
 				"attempt", attempt,
 				"max_attempts", feishuProjectDownloadRetryAttempts,
+				"delay", delay,
+				"rate_limited", outcome.rateLimited,
 				"error", reqErr,
 			)
-			if !feishuProjectDownloadBackoff(ctx, attempt) {
+			if !feishuProjectSleep(ctx, delay) {
 				return nil, "", "", ctx.Err()
 			}
 		}
@@ -1446,11 +2038,23 @@ func (c *FeishuProjectClient) DownloadAttachment(ctx context.Context, cfg db.Fei
 	return raw, firstNonEmpty(filenameFromContentDisposition(resp.Header.Get("Content-Disposition")), att.Name), firstNonEmpty(resp.Header.Get("Content-Type"), att.ContentType), nil
 }
 
-func (c *FeishuProjectClient) downloadAttachmentRequest(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, token string, body any) (raw []byte, filename, contentType string, retryable bool, err error) {
+// feishuProjectDownloadOutcome carries both the response body and the retry
+// hints derived from the response (status, body err_code, rate-limit headers).
+// Embedded inline rather than returned as a 7-tuple to keep call sites readable.
+type feishuProjectDownloadOutcome struct {
+	raw         []byte
+	filename    string
+	contentType string
+	retryable   bool
+	rateLimited bool
+	retryAfter  time.Duration
+}
+
+func (c *FeishuProjectClient) downloadAttachmentRequest(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, token string, body any) (feishuProjectDownloadOutcome, error) {
 	rawBody, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+fmt.Sprintf("/open_api/%s/work_item/%s/%s/file/download", cfg.ProjectKey, item.Type, item.ID), bytes.NewReader(rawBody))
 	if err != nil {
-		return nil, "", "", false, err
+		return feishuProjectDownloadOutcome{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-PLUGIN-TOKEN", token)
@@ -1460,36 +2064,43 @@ func (c *FeishuProjectClient) downloadAttachmentRequest(ctx context.Context, cfg
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
 		// Network-level failures (timeouts, resets) are almost always transient.
-		return nil, "", "", true, err
+		return feishuProjectDownloadOutcome{retryable: true}, err
 	}
 	defer resp.Body.Close()
-	raw, _ = io.ReadAll(io.LimitReader(resp.Body, feishuProjectAttachmentMaxSize+1))
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, feishuProjectAttachmentMaxSize+1))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, "", "", feishuProjectAttachmentRetryableHTTPStatus(resp.StatusCode),
-			fmt.Errorf("Feishu Project attachment download http %d: %s", resp.StatusCode, string(raw))
+		outcome := feishuProjectDownloadOutcome{
+			retryable: feishuProjectAttachmentRetryableHTTPStatus(resp.StatusCode),
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			outcome.rateLimited = true
+			outcome.retryAfter = feishuProjectRateLimitResetDelay(resp.Header)
+		}
+		return outcome, fmt.Errorf("Feishu Project attachment download http %d: %s", resp.StatusCode, string(raw))
 	}
 	if strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
 		var payload map[string]any
 		if err := json.Unmarshal(raw, &payload); err == nil {
 			if msg := feishuProjectAPIError(payload); msg != "" {
-				return nil, "", "", feishuProjectAttachmentRetryableAPIError(payload),
-					fmt.Errorf("Feishu Project attachment download failed: %s", msg)
+				if feishuProjectIsQuotaExhausted(payload) {
+					return feishuProjectDownloadOutcome{}, fmt.Errorf("Feishu Project attachment download: %s: %w", msg, ErrFeishuProjectQuotaExhausted)
+				}
+				outcome := feishuProjectDownloadOutcome{
+					retryable: feishuProjectAttachmentRetryableAPIError(payload),
+				}
+				if feishuProjectIsRateLimited(payload) {
+					outcome.rateLimited = true
+					outcome.retryAfter = feishuProjectRateLimitResetDelay(resp.Header)
+				}
+				return outcome, fmt.Errorf("Feishu Project attachment download failed: %s", msg)
 			}
 		}
 	}
-	return raw, filenameFromContentDisposition(resp.Header.Get("Content-Disposition")), resp.Header.Get("Content-Type"), false, nil
-}
-
-func feishuProjectDownloadBackoff(ctx context.Context, attempt int) bool {
-	delay := feishuProjectDownloadRetryInitialDelay * time.Duration(1<<(attempt-1))
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
+	return feishuProjectDownloadOutcome{
+		raw:         raw,
+		filename:    filenameFromContentDisposition(resp.Header.Get("Content-Disposition")),
+		contentType: resp.Header.Get("Content-Type"),
+	}, nil
 }
 
 func feishuProjectAttachmentRetryableHTTPStatus(status int) bool {
@@ -1505,20 +2116,14 @@ func feishuProjectAttachmentRetryableHTTPStatus(status int) bool {
 // transient on the attachment download endpoint:
 //   - 30019: internal error observed mid-sync, succeeds on retry within hundreds of ms.
 //   - 50007: upstream gateway timeout.
+//   - 99991400: per-token-per-interface QPS limit hit; retry after gateway reset.
 //
 // Anything else (including 4xx-mapped business errors) is permanent.
 func feishuProjectAttachmentRetryableAPIError(payload map[string]any) bool {
-	code := 0
-	if raw, ok := payload["err_code"]; ok {
-		code, _ = strconv.Atoi(strings.TrimSpace(fmt.Sprint(raw)))
+	if feishuProjectIsRateLimited(payload) {
+		return true
 	}
-	if code == 0 {
-		if errMap, _ := payload["err"].(map[string]any); errMap != nil {
-			if raw, ok := errMap["code"]; ok {
-				code, _ = strconv.Atoi(strings.TrimSpace(fmt.Sprint(raw)))
-			}
-		}
-	}
+	code := feishuProjectErrCode(payload)
 	if code == 30019 || code == 50007 {
 		return true
 	}
@@ -1687,7 +2292,7 @@ func feishuProjectInt(value any) (int, bool) {
 	}
 }
 
-func parseFeishuProjectSearch(payload map[string]any, typ, projectKey string) []FeishuProjectWorkItem {
+func parseFeishuProjectSearch(payload map[string]any, typ, projectKey, businessLineFieldKey string) []FeishuProjectWorkItem {
 	var out []FeishuProjectWorkItem
 	rows, _ := payload["data"].([]any)
 	for _, rowAny := range rows {
@@ -1706,8 +2311,13 @@ func parseFeishuProjectSearch(payload map[string]any, typ, projectKey string) []
 		if ts := feishuProjectTime(row["updated_at"]); !ts.IsZero() {
 			record["updated_at"] = ts.Format(time.RFC3339Nano)
 		}
+		var businessLineTokens []FeishuBusinessLineToken
 		fields, _ := row["fields"].([]any)
 		var attachments []FeishuProjectAttachment
+		// Index each field by both its field_key and its Chinese display name. Two spaces
+		// can give the same logical field different names (经办人 vs 处理人 vs 负责人)
+		// — sometimes even custom field_keys like `field_xxx` — so downstream lookups
+		// (notably owner-email extraction) need to try by display name too.
 		for _, fieldAny := range fields {
 			field, _ := fieldAny.(map[string]any)
 			key := firstNonEmpty(fmt.Sprint(field["field_key"]), fmt.Sprint(field["field_alias"]))
@@ -1715,8 +2325,15 @@ func parseFeishuProjectSearch(payload map[string]any, typ, projectKey string) []
 				continue
 			}
 			attachments = append(attachments, feishuProjectOpenAPIFieldAttachments(field)...)
-			if value := feishuProjectOpenAPIFieldValue(field); value != "" {
+			value := feishuProjectOpenAPIFieldValue(field)
+			if value != "" {
 				record[key] = value
+				if displayName := feishuFieldDisplayName(field); displayName != "" {
+					record[displayName] = value
+				}
+			}
+			if businessLineFieldKey != "" && key == businessLineFieldKey {
+				businessLineTokens = extractBusinessLineTokens(field["field_value"])
 			}
 		}
 		multiTexts, _ := row["multi_texts"].([]any)
@@ -1727,8 +2344,15 @@ func parseFeishuProjectSearch(payload map[string]any, typ, projectKey string) []
 				continue
 			}
 			attachments = append(attachments, feishuProjectOpenAPIFieldAttachments(field)...)
-			if value := feishuProjectOpenAPIFieldValue(field); value != "" {
+			value := feishuProjectOpenAPIFieldValue(field)
+			if value != "" {
 				record[key] = value
+				if displayName := feishuFieldDisplayName(field); displayName != "" {
+					record[displayName] = value
+				}
+			}
+			if businessLineFieldKey != "" && len(businessLineTokens) == 0 && key == businessLineFieldKey {
+				businessLineTokens = extractBusinessLineTokens(field["field_value"])
 			}
 		}
 		description, descriptionAttachments := normalizeFeishuProjectDescription(record["description"])
@@ -1736,15 +2360,16 @@ func parseFeishuProjectSearch(payload map[string]any, typ, projectKey string) []
 		updatedAt, _ := time.Parse(time.RFC3339Nano, record["updated_at"])
 		ownerEmail := feishuProjectOwnerEmail(record, feishuProjectUserEmails(row))
 		out = append(out, FeishuProjectWorkItem{
-			ID:          id,
-			Type:        typ,
-			Title:       firstNonEmpty(record["name"], record["title"]),
-			Description: description,
-			Status:      firstNonEmpty(record["work_item_status"], record["sub_stage"], record["status"]),
-			OwnerEmail:  ownerEmail,
-			UpdatedAt:   updatedAt,
-			URL:         fmt.Sprintf("https://project.feishu.cn/%s/%s/detail/%s", projectKey, typ, id),
-			Attachments: dedupeFeishuProjectAttachments(attachments),
+			ID:                 id,
+			Type:               typ,
+			Title:              firstNonEmpty(record["name"], record["title"]),
+			Description:        description,
+			Status:             firstNonEmpty(record["work_item_status"], record["sub_stage"], record["status"]),
+			OwnerEmail:         ownerEmail,
+			UpdatedAt:          updatedAt,
+			URL:                fmt.Sprintf("https://project.feishu.cn/%s/%s/detail/%s", projectKey, typ, id),
+			Attachments:        dedupeFeishuProjectAttachments(attachments),
+			BusinessLineTokens: businessLineTokens,
 		})
 	}
 	return out
@@ -1773,8 +2398,103 @@ func feishuProjectUserEmails(row map[string]any) map[string]string {
 	return out
 }
 
+// extractBusinessLineTokens pulls leaf + parent ID/Name pairs out of a Meego biz-line field
+// value. The Meego API surfaces the value as either:
+//   - a single object {option_id, option_name, parent_option_id, parent_option_name, ...},
+//   - an array of such objects (multi-select), or
+//   - a primitive id string (rare; we degrade gracefully to a token with just ID set).
+//
+// We accept any of the common key spellings (id/option_id/key, name/option_name/label) so
+// the routing logic doesn't care which Meego shape arrived.
+func extractBusinessLineTokens(value any) []FeishuBusinessLineToken {
+	if value == nil {
+		return nil
+	}
+	var out []FeishuBusinessLineToken
+	pick := func(m map[string]any, keys ...string) string {
+		for _, k := range keys {
+			if v, ok := m[k]; ok && v != nil {
+				s := strings.TrimSpace(fmt.Sprint(v))
+				if s != "" && s != "<nil>" {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+	visit := func(m map[string]any) {
+		tok := FeishuBusinessLineToken{
+			ID:         pick(m, "option_id", "id", "key", "value"),
+			Name:       pick(m, "option_name", "name", "label", "text"),
+			ParentID:   pick(m, "parent_option_id", "parent_id", "parent_key"),
+			ParentName: pick(m, "parent_option_name", "parent_name", "parent_label"),
+		}
+		if tok.ID == "" && tok.Name == "" {
+			return
+		}
+		out = append(out, tok)
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		visit(v)
+	case []any:
+		for _, itemAny := range v {
+			switch item := itemAny.(type) {
+			case map[string]any:
+				visit(item)
+			case string:
+				s := strings.TrimSpace(item)
+				if s != "" {
+					out = append(out, FeishuBusinessLineToken{ID: s})
+				}
+			}
+		}
+	case string:
+		s := strings.TrimSpace(v)
+		if s != "" {
+			out = append(out, FeishuBusinessLineToken{ID: s})
+		}
+	}
+	return out
+}
+
+// feishuFieldDisplayName extracts the Chinese display name from a field entry in the
+// Meego /work_item/filter response (and the meta response — same key shape). Both
+// `name` (filter response) and `field_name` (meta response) are accepted so the same
+// helper works for either source. Returns "" when no usable name is present, so callers
+// can early-out without falling into the fmt.Sprint(nil) → "<nil>" trap.
+func feishuFieldDisplayName(field map[string]any) string {
+	for _, k := range []string{"name", "field_name"} {
+		if v, ok := field[k]; ok && v != nil {
+			s := strings.TrimSpace(fmt.Sprint(v))
+			if s != "" && s != "<nil>" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// feishuProjectOwnerEmail picks the email of the work-item's assignee/owner. It tries:
+//  1. Stable Meego field_keys (`current_status_operator`, `owner`, `operator`) — the
+//     common case.
+//  2. Custom fields indexed by their Chinese display name — different spaces name the
+//     assignee field differently (经办人 / 处理人 / 负责人 / etc.) and may use a
+//     custom field_key like `field_xxx` so a plain field_key match misses them.
+//
+// At each step the raw value is checked for an embedded email pattern first; if none is
+// found and Meego returned a user_details lookup, we treat the value as a user_key list
+// and resolve against that map.
 func feishuProjectOwnerEmail(record map[string]string, userEmails map[string]string) string {
-	for _, raw := range []string{record["current_status_operator"], record["owner"], record["operator"]} {
+	candidates := []string{
+		// Stable field_keys
+		record["current_status_operator"], record["owner"], record["operator"],
+		// Chinese display names (fall back when the field is custom and we matched it
+		// in parseFeishuProjectSearch via field["name"]). Order is intentional: the
+		// more-specific "current" variants first so they win when both exist.
+		record["当前处理人"], record["当前经办人"], record["处理人"], record["经办人"], record["负责人"],
+	}
+	for _, raw := range candidates {
 		if email := extractEmail(raw); email != "" {
 			return email
 		}
@@ -1785,6 +2505,103 @@ func feishuProjectOwnerEmail(record map[string]string, userEmails map[string]str
 		}
 	}
 	return ""
+}
+
+// parseFeishuProjectFieldMetas walks the /work_item/{type}/meta response and surfaces
+// every (field_key, field_name, field_type) triple. Reused by ListWorkItemFields so the
+// settings UI can show a dropdown of fields to designate as the business-line field.
+//
+// The meta document is loosely typed in Meego — fields can appear under "fields", under
+// nested "tab"/"field_list" containers, or as top-level entries. We walk recursively and
+// dedupe by field_key.
+func parseFeishuProjectFieldMetas(payload map[string]any) []FeishuProjectFieldMeta {
+	seen := map[string]bool{}
+	var out []FeishuProjectFieldMeta
+	var walk func(any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case map[string]any:
+			if key := strings.TrimSpace(firstNonEmpty(fmt.Sprint(x["field_key"]), fmt.Sprint(x["field_alias"]))); key != "" && key != "<nil>" && !seen[key] {
+				typeStr := firstNonEmpty(fmt.Sprint(x["field_type_key"]), fmt.Sprint(x["field_type"]))
+				if _, isOption := x["option"]; !isOption {
+					_, isOption = x["options"]
+					_ = isOption
+				}
+				out = append(out, FeishuProjectFieldMeta{
+					Key:  key,
+					Name: firstNonEmpty(fmt.Sprint(x["name"]), fmt.Sprint(x["field_name"]), key),
+					Type: typeStr,
+				})
+				seen[key] = true
+			}
+			for _, child := range x {
+				walk(child)
+			}
+		case []any:
+			for _, child := range x {
+				walk(child)
+			}
+		}
+	}
+	walk(payload)
+	return out
+}
+
+// parseFeishuProjectBusinessLineTree converts the /business/all response into a 2-level
+// FeishuProjectFieldOption tree. The Meego response shape varies — top-level "data" can be
+// either an array of nodes or an object containing "list"/"items" — so we walk and pick out
+// nodes that look like {id, name, children?}.
+func parseFeishuProjectBusinessLineTree(payload map[string]any) []FeishuProjectFieldOption {
+	pickStr := func(m map[string]any, keys ...string) string {
+		for _, k := range keys {
+			if v, ok := m[k]; ok && v != nil {
+				s := strings.TrimSpace(fmt.Sprint(v))
+				if s != "" && s != "<nil>" {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+	var toNodes func(any, string, string) []FeishuProjectFieldOption
+	toNodes = func(v any, parentID, parentName string) []FeishuProjectFieldOption {
+		var nodes []FeishuProjectFieldOption
+		switch x := v.(type) {
+		case []any:
+			for _, child := range x {
+				nodes = append(nodes, toNodes(child, parentID, parentName)...)
+			}
+		case map[string]any:
+			id := pickStr(x, "id", "business_id", "option_id", "key")
+			name := pickStr(x, "name", "business_name", "option_name", "label")
+			if id != "" || name != "" {
+				node := FeishuProjectFieldOption{
+					ID:         id,
+					Name:       name,
+					ParentID:   parentID,
+					ParentName: parentName,
+				}
+				if children, ok := x["children"]; ok {
+					node.Children = toNodes(children, id, name)
+				} else if subItems, ok := x["sub_items"]; ok {
+					node.Children = toNodes(subItems, id, name)
+				}
+				nodes = append(nodes, node)
+				return nodes
+			}
+			// container — recurse looking for a list inside
+			for _, key := range []string{"data", "list", "items", "businesses", "business_list"} {
+				if inner, ok := x[key]; ok {
+					nodes = append(nodes, toNodes(inner, parentID, parentName)...)
+				}
+			}
+		}
+		return nodes
+	}
+	if data, ok := payload["data"]; ok {
+		return toNodes(data, "", "")
+	}
+	return toNodes(payload, "", "")
 }
 
 func parseFeishuProjectStatusOptions(payload map[string]any) []FeishuProjectStatusOption {

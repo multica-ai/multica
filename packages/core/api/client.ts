@@ -96,8 +96,12 @@ import type {
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
+  FeishuProjectBusinessLinesResponse,
+  FeishuProjectFieldsResponse,
   FeishuProjectIntegration,
+  FeishuProjectRoutesResponse,
   FeishuProjectStatusOptionsResponse,
+  ReplaceFeishuProjectRoutesRequest,
   UpdateFeishuProjectIntegrationRequest,
   FeishuProjectSyncRequest,
   FeishuProjectSyncResponse,
@@ -133,7 +137,10 @@ import {
   EMPTY_ATTACHMENT,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
+  EMPTY_FEISHU_PROJECT_BUSINESS_LINES_RESPONSE,
+  EMPTY_FEISHU_PROJECT_FIELDS_RESPONSE,
   EMPTY_FEISHU_PROJECT_INTEGRATION,
+  EMPTY_FEISHU_PROJECT_ROUTES_RESPONSE,
   EMPTY_FEISHU_PROJECT_STATUS_OPTIONS_RESPONSE,
   EMPTY_FEISHU_PROJECT_SYNC_RESPONSE,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
@@ -144,7 +151,10 @@ import {
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_USER,
   EMPTY_WEBHOOK_DELIVERY,
+  FeishuProjectBusinessLinesResponseSchema,
+  FeishuProjectFieldsResponseSchema,
   FeishuProjectIntegrationSchema,
+  FeishuProjectRoutesResponseSchema,
   FeishuProjectStatusOptionsResponseSchema,
   FeishuProjectSyncResponseSchema,
   GroupedIssuesResponseSchema,
@@ -1839,6 +1849,52 @@ export class ApiClient {
     const raw = await this.fetch(`/api/workspaces/${workspaceId}/feishu-project/issue-statuses`);
     return parseWithFallback(raw, FeishuProjectStatusOptionsResponseSchema, EMPTY_FEISHU_PROJECT_STATUS_OPTIONS_RESPONSE, {
       endpoint: "GET /api/workspaces/:id/feishu-project/issue-statuses",
+    });
+  }
+
+  async listFeishuProjectWorkItemFields(
+    workspaceId: string,
+    workItemType = "issue",
+  ): Promise<FeishuProjectFieldsResponse> {
+    const raw = await this.fetch(
+      `/api/workspaces/${workspaceId}/feishu-project/fields?work_item_type=${encodeURIComponent(workItemType)}`,
+    );
+    return parseWithFallback(raw, FeishuProjectFieldsResponseSchema, EMPTY_FEISHU_PROJECT_FIELDS_RESPONSE, {
+      endpoint: "GET /api/workspaces/:id/feishu-project/fields",
+    });
+  }
+
+  async listFeishuProjectBusinessLines(
+    workspaceId: string,
+    fieldKey: string,
+    workItemType = "issue",
+  ): Promise<FeishuProjectBusinessLinesResponse> {
+    const params = new URLSearchParams({ field_key: fieldKey, work_item_type: workItemType });
+    const raw = await this.fetch(
+      `/api/workspaces/${workspaceId}/feishu-project/business-lines?${params.toString()}`,
+    );
+    return parseWithFallback(raw, FeishuProjectBusinessLinesResponseSchema, EMPTY_FEISHU_PROJECT_BUSINESS_LINES_RESPONSE, {
+      endpoint: "GET /api/workspaces/:id/feishu-project/business-lines",
+    });
+  }
+
+  async listFeishuProjectRoutes(workspaceId: string): Promise<FeishuProjectRoutesResponse> {
+    const raw = await this.fetch(`/api/workspaces/${workspaceId}/feishu-project/routes`);
+    return parseWithFallback(raw, FeishuProjectRoutesResponseSchema, EMPTY_FEISHU_PROJECT_ROUTES_RESPONSE, {
+      endpoint: "GET /api/workspaces/:id/feishu-project/routes",
+    });
+  }
+
+  async replaceFeishuProjectRoutes(
+    workspaceId: string,
+    data: ReplaceFeishuProjectRoutesRequest,
+  ): Promise<FeishuProjectRoutesResponse> {
+    const raw = await this.fetch(`/api/workspaces/${workspaceId}/feishu-project/routes`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, FeishuProjectRoutesResponseSchema, EMPTY_FEISHU_PROJECT_ROUTES_RESPONSE, {
+      endpoint: "PUT /api/workspaces/:id/feishu-project/routes",
     });
   }
 }

@@ -5,7 +5,11 @@ import type {
   AgentTemplateSummary,
   Attachment,
   CreateAgentFromTemplateResponse,
+  FeishuProjectBusinessLineNode,
+  FeishuProjectBusinessLinesResponse,
+  FeishuProjectFieldsResponse,
   FeishuProjectIntegration,
+  FeishuProjectRoutesResponse,
   FeishuProjectStatusOptionsResponse,
   FeishuProjectSyncResponse,
   GroupedIssuesResponse,
@@ -226,6 +230,8 @@ export const FeishuProjectIntegrationSchema = z.object({
   status_mapping: z.record(z.string(), z.string()).default({}),
   reverse_status_mapping: z.record(z.string(), z.string()).default({}),
   assign_open_items_to_owner_agent: z.boolean().default(false),
+  business_line_field_key: z.string().default(""),
+  business_line_field_name: z.string().default(""),
   last_synced_at: z.string().nullable().default(null),
   last_error: z.string().nullable().default(null),
   created_at: z.string().optional(),
@@ -245,6 +251,8 @@ export const EMPTY_FEISHU_PROJECT_INTEGRATION: FeishuProjectIntegration = {
   status_mapping: {},
   reverse_status_mapping: {},
   assign_open_items_to_owner_agent: false,
+  business_line_field_key: "",
+  business_line_field_name: "",
   last_synced_at: null,
   last_error: null,
 };
@@ -303,6 +311,59 @@ export const FeishuProjectStatusOptionsResponseSchema = z.object({
 
 export const EMPTY_FEISHU_PROJECT_STATUS_OPTIONS_RESPONSE: FeishuProjectStatusOptionsResponse = {
   statuses: [],
+};
+
+export const FeishuProjectFieldsResponseSchema = z.object({
+  fields: z.array(z.object({
+    key: z.string().default(""),
+    name: z.string().default(""),
+    type: z.string().default(""),
+  }).loose()).default([]),
+}).loose();
+
+export const EMPTY_FEISHU_PROJECT_FIELDS_RESPONSE: FeishuProjectFieldsResponse = {
+  fields: [],
+};
+
+// Recursive zod schema — the 2-level biz-line tree returned by /open_api/{key}/business/all
+// is at most 2 deep but the schema is recursive so future deeper trees still parse without
+// us shipping a new build.
+const FeishuProjectBusinessLineNodeSchema: z.ZodType<FeishuProjectBusinessLineNode> = z.lazy(() =>
+  z.object({
+    id: z.string().default(""),
+    name: z.string().default(""),
+    parent_id: z.string().optional(),
+    parent_name: z.string().optional(),
+    children: z.array(FeishuProjectBusinessLineNodeSchema).optional(),
+  }).loose(),
+);
+
+export const FeishuProjectBusinessLinesResponseSchema = z.object({
+  business_lines: z.array(FeishuProjectBusinessLineNodeSchema).default([]),
+}).loose();
+
+export const EMPTY_FEISHU_PROJECT_BUSINESS_LINES_RESPONSE: FeishuProjectBusinessLinesResponse = {
+  business_lines: [],
+};
+
+const FeishuProjectRouteSchema = z.object({
+  id: z.string().default(""),
+  project_id: z.string().default(""),
+  business_line_id: z.string().default(""),
+  business_line_name: z.string().default(""),
+  parent_business_line_id: z.string().optional(),
+  parent_business_line_name: z.string().optional(),
+  fallback_agent_id: z.string().nullable().optional(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+}).loose();
+
+export const FeishuProjectRoutesResponseSchema = z.object({
+  routes: z.array(FeishuProjectRouteSchema).default([]),
+}).loose();
+
+export const EMPTY_FEISHU_PROJECT_ROUTES_RESPONSE: FeishuProjectRoutesResponse = {
+  routes: [],
 };
 
 export const CloudRuntimeNodeSchema = z.object({
