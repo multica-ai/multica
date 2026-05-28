@@ -1012,39 +1012,73 @@ function AdvancedTab({
   onUpdate: (agentId: string, data: UpdateAgentRequest) => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const [envText, setEnvText] = useState(envMapToText(agent.custom_env ?? {}));
+  const [envText, setEnvText] = useState("");
+  const [initialEnvText, setInitialEnvText] = useState("");
+  const [envLoaded, setEnvLoaded] = useState(false);
   const [argsText, setArgsText] = useState((agent.custom_args ?? []).join("\n"));
   const [saving, setSaving] = useState(false);
+  const [revealingEnv, setRevealingEnv] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const envReadOnly = readOnly || agent.custom_env_redacted;
+  const envReadOnly = readOnly || !envLoaded;
+  const envDirty = envLoaded && envText !== initialEnvText;
+  const argsDirty = argsText !== (agent.custom_args ?? []).join("\n");
   const dirty =
-    envText !== envMapToText(agent.custom_env ?? {}) ||
-    argsText !== (agent.custom_args ?? []).join("\n");
+    envDirty ||
+    argsDirty;
 
   useEffect(() => {
-    setEnvText(envMapToText(agent.custom_env ?? {}));
+    setEnvText("");
+    setInitialEnvText("");
+    setEnvLoaded(false);
     setArgsText((agent.custom_args ?? []).join("\n"));
     setError(null);
   }, [agent]);
 
-  async function save() {
-    let customEnv: Record<string, string>;
+  async function revealEnv() {
+    if (readOnly || revealingEnv) return;
+    setRevealingEnv(true);
+    setError(null);
     try {
-      customEnv = parseEnvText(envText);
-    } catch {
-      setError(t("agents.invalid_environment"));
-      return;
+      const response = await api.getAgentEnv(agent.id);
+      const text = envMapToText(response.custom_env ?? {});
+      setEnvText(text);
+      setInitialEnvText(text);
+      setEnvLoaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("agents.unable_to_load_environment"));
+    } finally {
+      setRevealingEnv(false);
+    }
+  }
+
+  async function save() {
+    let customEnv: Record<string, string> | null = null;
+    if (envDirty) {
+      try {
+        customEnv = parseEnvText(envText);
+      } catch {
+        setError(t("agents.invalid_environment"));
+        return;
+      }
     }
     setSaving(true);
     setError(null);
     try {
-      await onUpdate(agent.id, {
-        custom_env: envReadOnly ? undefined : customEnv,
-        custom_args: argsText
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean),
-      });
+      if (customEnv) {
+        const response = await api.updateAgentEnv(agent.id, { custom_env: customEnv });
+        const text = envMapToText(response.custom_env ?? {});
+        setEnvText(text);
+        setInitialEnvText(text);
+        setEnvLoaded(true);
+      }
+      if (argsDirty) {
+        await onUpdate(agent.id, {
+          custom_args: argsText
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean),
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t("agents.unable_to_save_advanced"));
     } finally {
@@ -1073,8 +1107,13 @@ function AdvancedTab({
         placeholderTextColor={colors.mutedForeground}
         style={[styles.textArea, envReadOnly && styles.inputReadOnly]}
         textAlignVertical="top"
-        value={agent.custom_env_redacted ? t("agents.hidden_values") : envText}
+        value={envLoaded ? envText : t("agents.hidden_values", { count: agent.custom_env_key_count ?? 0 })}
       />
+      {!readOnly && !envLoaded ? (
+        <Button disabled={revealingEnv} onPress={() => void revealEnv()}>
+          {revealingEnv ? t("agents.loading_environment") : t("agents.reveal_environment")}
+        </Button>
+      ) : null}
       <Text style={styles.optionLabel}>{t("agents.custom_args")}</Text>
       <TextInput
         autoCapitalize="none"
