@@ -177,7 +177,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		// the same agent the issue listener will end up enqueueing.
 		CreatorType:   "agent",
 		CreatorID:     leader.ID,
-		ParentIssueID: pgtype.UUID{},
+		ParentIssueID: ap.ParentIssueID,
 		Position:      0,
 		StartDate:     pgtype.Timestamptz{},
 		DueDate:       pgtype.Timestamptz{},
