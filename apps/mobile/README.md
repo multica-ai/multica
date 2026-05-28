@@ -101,6 +101,57 @@ pnpm --filter @multica/mobile build:ios
 
 发布前仍然需要确认 `app.json` 中的 `version` 和 `runtimeVersion` 是否符合当前 release 预期。当前项目使用 bare workflow，`runtimeVersion` 需要手动维护为固定字符串；当 native runtime 发生不兼容变化时，应随新包一起递增。
 
+### Android 本地正式构建
+
+需要在本机产出正式 APK 或 AAB 时，使用 EAS local build。它在本机执行 Gradle 构建，但仍会连接 Expo project，并使用 Expo 平台上配置的 remote credentials；不要把 Android credentials 改成本地文件，除非明确要脱离 Expo 凭证管理。
+
+先确认登录状态：
+
+```bash
+pnpm --filter @multica/mobile exec eas whoami
+```
+
+未登录时先登录：
+
+```bash
+pnpm --filter @multica/mobile exec eas login
+```
+
+构建前建议确认依赖和 Expo 配置：
+
+```bash
+pnpm install
+pnpm --filter @multica/mobile list react-native-reanimated react-native-worklets --depth 0
+pnpm --filter @multica/mobile exec expo config --type public
+```
+
+构建正式 APK：
+
+```bash
+pnpm --filter @multica/mobile exec eas build \
+  --platform android \
+  --profile production-apk \
+  --local \
+  --output ./multica-production.apk
+```
+
+构建应用商店使用的 AAB：
+
+```bash
+pnpm --filter @multica/mobile exec eas build \
+  --platform android \
+  --profile production \
+  --local \
+  --output ./multica-production.aab
+```
+
+本地构建注意事项：
+
+- `production` 和 `production-apk` 会自动递增 Android `versionCode`；构建后检查 `apps/mobile/app.json` 的 diff，确认版本号变化符合 release 预期。
+- EAS local build 不会自动注入 Expo Secret 环境变量；如果某次构建依赖 Secret，需要在本机 shell 中手动 export。
+- 如果设置过 `EAS_LOCAL_BUILD_WORKINGDIR`，失败后重试建议换一个空目录或取消该环境变量，避免复用上次失败构建的 Gradle/CMake 缓存。
+- `.easignore` 会保留已提交的 `apps/mobile/android/gradlew` 和原生源码，但排除 `android/build`、`.cxx`、`.gradle` 等生成缓存；不要把这些缓存作为修复手段提交。
+
 ## 发布
 
 ### iOS

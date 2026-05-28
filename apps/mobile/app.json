@@ -24,7 +24,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.wujieai.multica",
-      "buildNumber": "4",
+      "buildNumber": "5",
       "supportsTablet": false,
       "icon": "./assets/icon-ios.png",
       "infoPlist": {
