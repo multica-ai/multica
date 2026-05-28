@@ -1,95 +1,117 @@
 import { describe, expect, it } from "vitest";
-import { tokenizeInline } from "./markdown-tokenize";
+import {
+  getIssueMentionId,
+  parseFileCardLine,
+  parseMobileFileCardHtml,
+  preprocessMobileMarkdown,
+  resolveMobileFileCardUrl,
+} from "./markdown-utils";
 
-describe("mobile markdown tokenizer", () => {
-  it("parses all mention target types", () => {
-    expect(tokenizeInline("[@All members](mention://all/all)")).toEqual([
-      {
-        type: "mention",
-        content: "@All members",
-        mentionType: "all",
-        mentionId: "all",
-      },
-    ]);
-    expect(tokenizeInline("[@Alice](mention://member/user-1)")).toEqual([
-      {
-        type: "mention",
-        content: "@Alice",
-        mentionType: "member",
-        mentionId: "user-1",
-      },
-    ]);
-    expect(tokenizeInline("[@Builder](mention://agent/agent-1)")).toEqual([
-      {
-        type: "mention",
-        content: "@Builder",
-        mentionType: "agent",
-        mentionId: "agent-1",
-      },
-    ]);
-    expect(tokenizeInline("[@Frontend](mention://squad/squad-1)")).toEqual([
-      {
-        type: "mention",
-        content: "@Frontend",
-        mentionType: "squad",
-        mentionId: "squad-1",
-      },
-    ]);
-    expect(tokenizeInline("[MUL-123](mention://issue/issue-1)")).toEqual([
-      {
-        type: "mention",
-        content: "MUL-123",
-        mentionType: "issue",
-        mentionId: "issue-1",
-      },
-    ]);
+describe("mobile markdown preprocessing", () => {
+  it("recognizes upload file cards", () => {
+    expect(parseFileCardLine("!file[report.pdf](/uploads/report.pdf)")).toEqual({
+      filename: "report.pdf",
+      href: "/uploads/report.pdf",
+    });
   });
 
-  it("keeps surrounding text around issue mentions", () => {
-    expect(tokenizeInline("See [MUL-123](mention://issue/issue-1) now")).toEqual([
-      { type: "text", content: "See " },
-      {
-        type: "mention",
-        content: "MUL-123",
-        mentionType: "issue",
-        mentionId: "issue-1",
-      },
-      { type: "text", content: " now" },
-    ]);
+  it("recognizes absolute http file cards", () => {
+    expect(parseFileCardLine("!file[report.pdf](https://cdn.example.com/report.pdf)")).toEqual({
+      filename: "report.pdf",
+      href: "https://cdn.example.com/report.pdf",
+    });
   });
 
-  it("parses markdown http links", () => {
-    expect(tokenizeInline("Open [docs](https://example.com/path?a=1)")).toEqual([
-      { type: "text", content: "Open " },
-      {
-        type: "link",
-        content: "docs",
-        href: "https://example.com/path?a=1",
-      },
-    ]);
+  it.each([
+    "javascript:alert(1)",
+    "data:text/html,xss",
+    "//evil.com/x",
+    "/api/x",
+  ])("does not create a clickable file card for %s", (href) => {
+    expect(parseFileCardLine(`!file[evil.txt](${href})`)).toBeNull();
+    expect(preprocessMobileMarkdown(`!file[evil.txt](${href})`)).toBe(`!file[evil.txt](${href})`);
+    expect(preprocessMobileMarkdown(`before !file[evil.txt](${href}) after`)).toBe(
+      `before !file[evil.txt](${href}) after`,
+    );
   });
 
-  it("linkifies bare http and https URLs", () => {
-    expect(tokenizeInline("See https://example.com/a?b=1 and http://foo.test.")).toEqual([
-      { type: "text", content: "See " },
-      {
-        type: "link",
-        content: "https://example.com/a?b=1",
-        href: "https://example.com/a?b=1",
-      },
-      { type: "text", content: " and " },
-      {
-        type: "link",
-        content: "http://foo.test",
-        href: "http://foo.test",
-      },
-      { type: "text", content: "." },
-    ]);
+  it("preprocesses inline file syntax into an internal markdown link", () => {
+    const result = preprocessMobileMarkdown("Mac: 执行!file[Multica.dmg](/uploads/Multica.dmg) 后继续");
+
+    expect(result).toBe('Mac: 执行[Multica.dmg](/uploads/Multica.dmg "multica-file") 后继续');
+    expect(result).not.toContain("!file");
   });
 
-  it("handles long pasted URLs without recursive regex matching", () => {
+  it("preprocesses absolute inline file links", () => {
+    expect(
+      preprocessMobileMarkdown(
+        "before !file[report.pdf](https://cdn.example.com/report.pdf) after",
+      ),
+    ).toBe('before [report.pdf](https://cdn.example.com/report.pdf "multica-file") after');
+  });
+
+  it("preprocesses file-card syntax into mobile file-card html", () => {
+    const html = preprocessMobileMarkdown("before\n!file[report.pdf](/uploads/report.pdf)\nafter");
+
+    expect(html).toBe(
+      'before\n<div data-type="fileCard" data-href="/uploads/report.pdf" data-filename="report.pdf"></div>\nafter',
+    );
+    expect(parseMobileFileCardHtml(html.split("\n")[1] ?? "")).toEqual({
+      filename: "report.pdf",
+      href: "/uploads/report.pdf",
+    });
+  });
+
+  it("resolves relative upload file cards against the mobile API base URL", () => {
+    expect(resolveMobileFileCardUrl("/uploads/report.pdf", "https://api.example.com/")).toBe(
+      "https://api.example.com/uploads/report.pdf",
+    );
+    expect(resolveMobileFileCardUrl("https://cdn.example.com/report.pdf", "https://api.example.com")).toBe(
+      "https://cdn.example.com/report.pdf",
+    );
+    expect(resolveMobileFileCardUrl("/api/report.pdf", "https://api.example.com")).toBeNull();
+  });
+
+  it("extracts issue mention ids for renderer navigation", () => {
+    expect(getIssueMentionId("mention://issue/issue-1")).toBe("issue-1");
+    expect(getIssueMentionId("mention://member/user-1")).toBeNull();
+  });
+
+  it("leaves file syntax inside fenced and inline code unchanged", () => {
+    const fenced = "```\n!file[report.pdf](/uploads/report.pdf)\n```";
+    const inline = "before `!file[report.pdf](/uploads/report.pdf)` after";
+
+    expect(preprocessMobileMarkdown(fenced)).toBe(fenced);
+    expect(preprocessMobileMarkdown(inline)).toBe(inline);
+  });
+
+  it("separates standalone markdown images from adjacent text lines", () => {
+    expect(preprocessMobileMarkdown("before\n![screenshot](/uploads/screenshot.png)\nafter")).toBe(
+      "before\n\n![screenshot](/uploads/screenshot.png)\n\nafter",
+    );
+  });
+
+  it("does not add extra spacing around already separated markdown images", () => {
+    const content = "before\n\n![screenshot](/uploads/screenshot.png)\n\nafter";
+
+    expect(preprocessMobileMarkdown(content)).toBe(content);
+  });
+
+  it("leaves inline markdown images unchanged", () => {
+    const content = "before ![screenshot](/uploads/screenshot.png) after";
+
+    expect(preprocessMobileMarkdown(content)).toBe(content);
+  });
+
+  it("leaves markdown image syntax inside fenced code unchanged", () => {
+    const content = "```\n![screenshot](/uploads/screenshot.png)\n```";
+
+    expect(preprocessMobileMarkdown(content)).toBe(content);
+  });
+
+  it("handles long pasted URLs without recursive parsing", () => {
     const url = `https://example.com/${"a".repeat(5000)}?q=${"b".repeat(5000)}`;
 
-    expect(tokenizeInline(url)).toEqual([{ type: "link", content: url, href: url }]);
+    expect(preprocessMobileMarkdown(url)).toBe(url);
   });
 });

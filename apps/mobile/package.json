@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-google-signin/google-signin": "^16.1.2",
     "@react-navigation/bottom-tabs": "catalog:",
@@ -46,6 +47,7 @@
     "react-native": "0.83.6",
     "react-native-gesture-handler": "~2.30.0",
     "react-native-get-random-values": "^1.11.0",
+    "react-native-marked": "^8.1.0",
     "react-native-reanimated": "^4.3.1",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",

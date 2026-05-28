@@ -32,7 +32,12 @@ export function ScreenTitleBar({
           <ChevronLeft color={colors.foreground} size={22} />
         </Pressable>
         <View pointerEvents="none" style={styles.titleBarTitleWrap}>
-          <Text numberOfLines={1} style={styles.titleBarTitle}>
+          <Text
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            numberOfLines={1}
+            style={styles.titleBarTitle}
+          >
             {title}
           </Text>
         </View>
@@ -77,8 +82,10 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 16,
     fontWeight: "600",
+    lineHeight: 21,
     maxWidth: "100%",
     textAlign: "center",
+    width: "100%",
   },
   titleBarSideSpacer: {
     alignItems: "flex-end",

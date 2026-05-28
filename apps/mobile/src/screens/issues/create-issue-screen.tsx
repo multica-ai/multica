@@ -332,7 +332,12 @@ function PickerTrigger({
         pressed && styles.optionChipPressed,
       ]}
     >
-      <Text numberOfLines={1} style={[styles.pickerTriggerText, muted && styles.pickerTriggerPlaceholder]}>
+      <Text
+        adjustsFontSizeToFit
+        minimumFontScale={0.82}
+        numberOfLines={1}
+        style={[styles.pickerTriggerText, muted && styles.pickerTriggerPlaceholder]}
+      >
         {label}
       </Text>
       <Text style={styles.pickerTriggerMeta}>{t("issues.select")}</Text>
@@ -580,7 +585,12 @@ function PickerRow({
         pressed && styles.optionChipPressed,
       ]}
     >
-      <Text numberOfLines={1} style={[styles.pickerRowLabel, muted && styles.pickerRowMuted]}>
+      <Text
+        adjustsFontSizeToFit
+        minimumFontScale={0.82}
+        numberOfLines={1}
+        style={[styles.pickerRowLabel, muted && styles.pickerRowMuted]}
+      >
         {label}
       </Text>
       {selected ? <Text style={styles.pickerRowCheck}>✓</Text> : null}
@@ -797,6 +807,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontWeight: "500",
+    lineHeight: 20,
   },
   pickerTriggerPlaceholder: {
     color: colors.mutedForeground,
@@ -873,6 +884,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontWeight: "500",
+    lineHeight: 20,
   },
   pickerRowMuted: {
     color: colors.mutedForeground,

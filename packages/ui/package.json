@@ -12,6 +12,7 @@
     "./components/ui/*": "./components/ui/*.tsx",
     "./components/common/*": "./components/common/*.tsx",
     "./markdown": "./markdown/index.ts",
+    "./markdown/file-cards": "./markdown/file-cards.ts",
     "./markdown/*": "./markdown/*.tsx",
     "./markdown/linkify": "./markdown/linkify.ts",
     "./markdown/mentions": "./markdown/mentions.ts",

@@ -335,6 +335,8 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                 ]}
               >
                 <Text
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
                   numberOfLines={1}
                   style={[
                     styles.propertySelectText,
@@ -343,7 +345,12 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                 >
                   {assigneeLabel}
                 </Text>
-                <Text style={styles.propertySelectMeta}>
+                <Text
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                  numberOfLines={1}
+                  style={styles.propertySelectMeta}
+                >
                   {updateIssue.isPending ? t("issues.saving") : t("issues.select")}
                 </Text>
               </Pressable>
@@ -363,6 +370,8 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                 ]}
               >
                 <Text
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
                   numberOfLines={1}
                   style={[
                     styles.propertySelectText,
@@ -371,7 +380,12 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                 >
                   {projectLabel}
                 </Text>
-                <Text style={styles.propertySelectMeta}>
+                <Text
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                  numberOfLines={1}
+                  style={styles.propertySelectMeta}
+                >
                   {updateIssue.isPending ? t("issues.saving") : t("issues.select")}
                 </Text>
               </Pressable>
@@ -396,6 +410,8 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                 ]}
               >
                 <Text
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
                   numberOfLines={1}
                   style={[
                     styles.dueDateTriggerText,
@@ -404,7 +420,12 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                 >
                   {issue.start_date ? formatDateLabel(issue.start_date) : t("issues.no_start_date")}
                 </Text>
-                <Text style={styles.dueDateTriggerMeta}>
+                <Text
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                  numberOfLines={1}
+                  style={styles.dueDateTriggerMeta}
+                >
                   {updateIssue.isPending ? t("issues.saving") : t("issues.select")}
                 </Text>
               </Pressable>
@@ -425,6 +446,8 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                 ]}
               >
                 <Text
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
                   numberOfLines={1}
                   style={[
                     styles.dueDateTriggerText,
@@ -433,7 +456,12 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                 >
                   {issue.due_date ? formatDateLabel(issue.due_date) : t("issues.no_due_date")}
                 </Text>
-                <Text style={styles.dueDateTriggerMeta}>
+                <Text
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                  numberOfLines={1}
+                  style={styles.dueDateTriggerMeta}
+                >
                   {updateIssue.isPending ? t("issues.saving") : t("issues.select")}
                 </Text>
               </Pressable>
@@ -460,11 +488,21 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                     ))}
                   </View>
                 ) : (
-                  <Text style={[styles.propertySelectText, styles.propertySelectPlaceholder]}>
+                  <Text
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.82}
+                    numberOfLines={1}
+                    style={[styles.propertySelectText, styles.propertySelectPlaceholder]}
+                  >
                     {t("issues.no_labels")}
                   </Text>
                 )}
-                <Text style={styles.propertySelectMeta}>
+                <Text
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                  numberOfLines={1}
+                  style={styles.propertySelectMeta}
+                >
                   {labelSaving ? t("issues.saving") : t("issues.select")}
                 </Text>
               </Pressable>
@@ -1460,7 +1498,12 @@ function Chip({
       onPress={onPress}
       style={[styles.chip, active && styles.chipActive]}
     >
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+      <Text
+        numberOfLines={1}
+        style={[styles.chipText, active && styles.chipTextActive]}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -1644,8 +1687,10 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   chip: {
+    alignSelf: "flex-start",
     backgroundColor: colors.muted,
     borderRadius: radii.md,
+    maxWidth: "100%",
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
@@ -1656,6 +1701,7 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 12,
     fontWeight: "500",
+    lineHeight: 16,
   },
   chipTextActive: {
     color: colors.primaryForeground,
@@ -1678,6 +1724,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     fontWeight: "500",
+    lineHeight: 18,
   },
   propertySelectPlaceholder: {
     color: colors.mutedForeground,
@@ -1686,6 +1733,7 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 12,
     fontWeight: "500",
+    lineHeight: 16,
   },
   dueDateTrigger: {
     alignItems: "center",
@@ -1705,6 +1753,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     fontWeight: "500",
+    lineHeight: 18,
   },
   dueDatePlaceholder: {
     color: colors.mutedForeground,
@@ -1713,6 +1762,7 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 12,
     fontWeight: "500",
+    lineHeight: 16,
   },
   labelTrigger: {
     alignItems: "center",
@@ -1737,6 +1787,7 @@ const styles = StyleSheet.create({
   },
   issueLabelChip: {
     alignItems: "center",
+    alignSelf: "flex-start",
     backgroundColor: colors.muted,
     borderColor: colors.border,
     borderRadius: radii.md,
@@ -1757,6 +1808,8 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     fontSize: 12,
     fontWeight: "500",
+    lineHeight: 16,
+    minWidth: 0,
   },
   disabledAction: {
     opacity: 0.6,

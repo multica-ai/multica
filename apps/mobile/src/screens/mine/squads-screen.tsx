@@ -1086,7 +1086,12 @@ function SegmentedControl<T extends string>({
               pressed && styles.pressed,
             ]}
           >
-            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+            <Text
+              adjustsFontSizeToFit
+              minimumFontScale={0.82}
+              numberOfLines={1}
+              style={[styles.segmentText, active && styles.segmentTextActive]}
+            >
               {option.label}
             </Text>
           </Pressable>
@@ -1130,8 +1135,24 @@ function PickerTrigger({
       style={({ pressed }) => [styles.pickerTrigger, pressed && styles.pressed]}
     >
       <View style={styles.pickerTriggerText}>
-        <Text numberOfLines={1} style={styles.pickerTriggerLabel}>{label}</Text>
-        {meta ? <Text numberOfLines={1} style={styles.pickerTriggerMeta}>{meta}</Text> : null}
+        <Text
+          adjustsFontSizeToFit
+          minimumFontScale={0.82}
+          numberOfLines={1}
+          style={styles.pickerTriggerLabel}
+        >
+          {label}
+        </Text>
+        {meta ? (
+          <Text
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            numberOfLines={1}
+            style={styles.pickerTriggerMeta}
+          >
+            {meta}
+          </Text>
+        ) : null}
       </View>
       <Text style={styles.pickerTriggerAction}>›</Text>
     </Pressable>
@@ -1160,8 +1181,24 @@ function PickerRow({
       ]}
     >
       <View style={styles.pickerRowText}>
-        <Text numberOfLines={1} style={styles.pickerRowLabel}>{label}</Text>
-        {meta ? <Text numberOfLines={1} style={styles.pickerRowMeta}>{meta}</Text> : null}
+        <Text
+          adjustsFontSizeToFit
+          minimumFontScale={0.82}
+          numberOfLines={1}
+          style={styles.pickerRowLabel}
+        >
+          {label}
+        </Text>
+        {meta ? (
+          <Text
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            numberOfLines={1}
+            style={styles.pickerRowMeta}
+          >
+            {meta}
+          </Text>
+        ) : null}
       </View>
       {selected ? <CheckCircle2 color={colors.success} size={18} /> : null}
     </Pressable>
@@ -1486,10 +1523,12 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 14,
     fontWeight: "600",
+    lineHeight: 18,
   },
   pickerRowMeta: {
     color: colors.mutedForeground,
     fontSize: 12,
+    lineHeight: 16,
   },
   pickerRowSelected: {
     borderColor: colors.primary,
@@ -1517,10 +1556,12 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 14,
     fontWeight: "600",
+    lineHeight: 18,
   },
   pickerTriggerMeta: {
     color: colors.mutedForeground,
     fontSize: 12,
+    lineHeight: 16,
   },
   pickerTriggerText: {
     flex: 1,
@@ -1581,6 +1622,9 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 13,
     fontWeight: "600",
+    lineHeight: 17,
+    textAlign: "center",
+    width: "100%",
   },
   segmentTextActive: {
     color: colors.foreground,

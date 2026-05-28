@@ -250,7 +250,10 @@ export function IssuesScreen() {
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={[styles.statusText, item === status && styles.statusTextActive]}>
+              <Text
+                numberOfLines={1}
+                style={[styles.statusText, item === status && styles.statusTextActive]}
+              >
                 {formatIssueStatus(t, item)}
               </Text>
             </Pressable>
@@ -735,7 +738,14 @@ function FilterOption({
           {swatchColor ? (
             <View style={[styles.labelSwatch, { backgroundColor: swatchColor }]} />
           ) : null}
-          <Text numberOfLines={1} style={styles.filterOptionLabel}>{label}</Text>
+          <Text
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            numberOfLines={1}
+            style={styles.filterOptionLabel}
+          >
+            {label}
+          </Text>
         </View>
         {meta ? <Text style={styles.filterOptionMeta}>{meta}</Text> : null}
       </View>
@@ -800,6 +810,7 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 12,
     fontWeight: "500",
+    lineHeight: 16,
   },
   statusTextActive: {
     color: colors.primaryForeground,
@@ -1042,6 +1053,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontWeight: "500",
+    lineHeight: 20,
   },
   filterOptionLabelRow: {
     alignItems: "center",
