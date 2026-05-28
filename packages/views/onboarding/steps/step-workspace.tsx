@@ -24,7 +24,9 @@ import { cn } from "@multica/ui/lib/utils";
 import { useCreateWorkspace } from "@multica/core/workspace/mutations";
 import type { Workspace } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
+import { useConfigStore } from "@multica/core/config";
 import { DragStrip } from "@multica/views/platform";
+import { useLogout } from "../../auth";
 import { StepHeader } from "../components/step-header";
 import { RadioMark } from "../components/option-card";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
@@ -78,6 +80,8 @@ export function StepWorkspace({
   const { t } = useT("onboarding");
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
+  const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
+  const logout = useLogout();
 
   const reusing = existing ?? null;
   // Resume path only: user picks which card. `null` = neither yet, so
@@ -289,17 +293,23 @@ export function StepWorkspace({
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
               {reusing
                 ? t(($) => $.step_workspace.eyebrow_resume)
-                : t(($) => $.step_workspace.eyebrow_first)}
+                : workspaceCreationDisabled
+                  ? t(($) => $.step_workspace.creation_disabled_eyebrow)
+                  : t(($) => $.step_workspace.eyebrow_first)}
             </div>
             <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
               {reusing
                 ? t(($) => $.step_workspace.headline_resume, { name: reusing.name })
-                : t(($) => $.step_workspace.headline_first)}
+                : workspaceCreationDisabled
+                  ? t(($) => $.step_workspace.creation_disabled_headline)
+                  : t(($) => $.step_workspace.headline_first)}
             </h1>
             <p className="mt-4 text-[15.5px] leading-[1.55] text-foreground/80">
               {reusing
                 ? t(($) => $.step_workspace.lede_resume)
-                : t(($) => $.step_workspace.lede_first)}
+                : workspaceCreationDisabled
+                  ? t(($) => $.step_workspace.creation_disabled_lede)
+                  : t(($) => $.step_workspace.lede_first)}
             </p>
 
             <div className="mt-10">
@@ -310,30 +320,40 @@ export function StepWorkspace({
                     selected={mode === "existing"}
                     onSelect={pickExisting}
                   />
-                  <CreateNewWorkspaceCard
-                    selected={mode === "create"}
-                    onSelect={pickCreate}
-                  >
-                    {createFields}
-                  </CreateNewWorkspaceCard>
+                  {/* Hide the create-new card entirely when the self-host
+                      gate (DISABLE_WORKSPACE_CREATION) is on (#3433) — the
+                      backend would 403 the POST and the user would be stuck
+                      with a useless form. */}
+                  {!workspaceCreationDisabled && (
+                    <CreateNewWorkspaceCard
+                      selected={mode === "create"}
+                      onSelect={pickCreate}
+                    >
+                      {createFields}
+                    </CreateNewWorkspaceCard>
+                  )}
                 </div>
+              ) : workspaceCreationDisabled ? (
+                <CreationDisabledNotice onLogout={logout} />
               ) : (
                 createFields
               )}
             </div>
 
-            <div className="mt-8 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
-              <span
-                aria-live="polite"
-                className="mr-auto text-xs text-muted-foreground"
-              >
-                {hint}
-              </span>
-              <Button size="lg" disabled={continueDisabled} onClick={onContinue}>
-                {continueLabel}
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
+            {!(workspaceCreationDisabled && !reusing) && (
+              <div className="mt-8 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+                <span
+                  aria-live="polite"
+                  className="mr-auto text-xs text-muted-foreground"
+                >
+                  {hint}
+                </span>
+                <Button size="lg" disabled={continueDisabled} onClick={onContinue}>
+                  {continueLabel}
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </div>
         </main>
       </div>
@@ -354,6 +374,24 @@ export function StepWorkspace({
           )}
         </div>
       </aside>
+    </div>
+  );
+}
+
+/**
+ * Onboarding-step notice rendered when the operator has set
+ * DISABLE_WORKSPACE_CREATION=true (#3433) AND the user has no existing
+ * workspace yet. The headline / lede above this block already carry the
+ * messaging; this component only provides the logout escape so a user who
+ * landed here without an invitation is not trapped.
+ */
+function CreationDisabledNotice({ onLogout }: { onLogout: () => void }) {
+  const { t } = useT("onboarding");
+  return (
+    <div className="flex flex-col gap-3">
+      <Button variant="outline" size="lg" onClick={onLogout}>
+        {t(($) => $.step_workspace.creation_disabled_logout)}
+      </Button>
     </div>
   );
 }

@@ -72,6 +72,10 @@ backend:
     allowSignup: true
     allowedEmails: ""
     allowedEmailDomains: ""
+    # Self-host gate (#3433): set true to make POST /api/workspaces 403 for
+    # every caller. Bootstrap the workspace with this false, then flip to
+    # true so users can only join via invitation.
+    disableWorkspaceCreation: false
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
     s3Bucket: ""

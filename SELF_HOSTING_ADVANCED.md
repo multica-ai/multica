@@ -67,8 +67,20 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 | `ALLOW_SIGNUP` | Set to `false` to disable new user signups on a private instance |
 | `ALLOWED_EMAIL_DOMAINS` | Optional comma-separated allowlist of email domains |
 | `ALLOWED_EMAILS` | Optional comma-separated allowlist of exact email addresses |
+| `DISABLE_WORKSPACE_CREATION` | Set to `true` to make `POST /api/workspaces` return 403 for every caller — users can only join workspaces they were invited to |
 
-Changes take effect after restarting the backend / compose stack. The web UI reads `ALLOW_SIGNUP` from `/api/config` at runtime, so no web rebuild is needed.
+Changes take effect after restarting the backend / compose stack. The web UI reads `ALLOW_SIGNUP` and `DISABLE_WORKSPACE_CREATION` from `/api/config` at runtime, so no web rebuild is needed.
+
+#### Locking down workspace creation
+
+`ALLOW_SIGNUP=false` blocks new accounts from being created, but it does **not** block an already-signed-in user from creating another workspace via `POST /api/workspaces`. On a self-hosted instance where every issue/repo/agent must be visible to the platform admin, set `DISABLE_WORKSPACE_CREATION=true` to close that gap. The recommended bootstrap sequence is:
+
+1. Start the instance with `DISABLE_WORKSPACE_CREATION=false` (the default).
+2. Sign in as the admin and create the shared workspace.
+3. Set `DISABLE_WORKSPACE_CREATION=true` and restart the backend. Optionally set `ALLOW_SIGNUP=false` at the same time if you also want to block new account creation.
+4. Going forward, additional users join via invitation only — the "Create workspace" affordance is hidden in the UI and any direct API call returns 403.
+
+> Note: setting `ALLOW_SIGNUP=false` blocks **all** new account creation, including users who already have a pending invitation. If you need invited users to be able to sign up but not create their own workspaces, keep `ALLOW_SIGNUP=true` (optionally combined with `ALLOWED_EMAIL_DOMAINS` / `ALLOWED_EMAILS`) and only flip `DISABLE_WORKSPACE_CREATION=true`.
 
 ### File Storage (Optional)
 
