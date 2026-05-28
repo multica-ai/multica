@@ -166,6 +166,7 @@ func init() {
 	agentCreateCmd.Flags().String("custom-env-file", "", "Read the --custom-env JSON object from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
 	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks")
+	agentCreateCmd.Flags().Bool("internal", false, "Mark as internal (background worker hidden from default assignee picker)")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent update
@@ -182,6 +183,8 @@ func init() {
 	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks")
+	agentUpdateCmd.Flags().Bool("internal", false, "Mark as internal (background worker hidden from default assignee picker)")
+	agentUpdateCmd.Flags().Bool("no-internal", false, "Clear internal flag (make agent visible in default assignee picker)")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent archive
@@ -460,6 +463,10 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
 		body["max_concurrent_tasks"] = v
 	}
+	if cmd.Flags().Changed("internal") {
+		v, _ := cmd.Flags().GetBool("internal")
+		body["internal"] = v
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -582,9 +589,15 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
 		body["max_concurrent_tasks"] = v
 	}
+	if cmd.Flags().Changed("internal") {
+		body["internal"] = true
+	}
+	if cmd.Flags().Changed("no-internal") {
+		body["internal"] = false
+	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --visibility, --status, --max-concurrent-tasks, --internal, or --no-internal (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

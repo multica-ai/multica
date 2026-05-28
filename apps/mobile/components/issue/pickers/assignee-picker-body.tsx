@@ -84,7 +84,7 @@ export function AssigneePickerBody({ value, query, onChange }: Props) {
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((m) => ({ kind: "member" as const, member: m }));
     const agentRows: Row[] = [...agents]
-      .filter((a) => matchName(a.name))
+      .filter((a) => (q || !a.internal) && matchName(a.name))
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((a) => ({ kind: "agent" as const, agent: a }));
     const squadRows: Row[] = [...squads]

@@ -206,6 +206,13 @@ export interface Agent {
   thinking_level?: string;
   owner_id: string | null;
   skills: AgentSkillSummary[];
+  /**
+   * When true this agent is a background worker not intended for direct human
+   * assignment. Internal agents are hidden from the default assignee picker
+   * and only appear when the user actively searches. Older backends omit this
+   * field; treat `undefined` as `false`. See SLE-53.
+   */
+  internal?: boolean;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
@@ -242,6 +249,9 @@ export interface CreateAgentRequest {
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
+  /** When true, mark this agent as a background worker hidden from the default
+   *  assignee picker. See `Agent.internal`. */
+  internal?: boolean;
 }
 
 /** Agent template summary — fields needed by the picker grid. Does NOT
