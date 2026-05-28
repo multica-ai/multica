@@ -396,7 +396,6 @@ const JUMP_SCROLL_MIN_RANGE = 300;
 const JUMP_NEAR_EDGE_THRESHOLD = 120;
 const JUMP_PROGRAMMATIC_SCROLL_TIMEOUT_MS = 3000;
 type JumpScrollAction = "to-comment-box" | "to-top";
-type JumpScrollVisibility = JumpScrollAction | "both" | null;
 
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
@@ -728,7 +727,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
-  const [jumpScrollAction, setJumpScrollAction] = useState<JumpScrollVisibility>(null);
+  const [jumpScrollAction, setJumpScrollAction] = useState<JumpScrollAction | null>(null);
   const pendingJumpScrollActionRef = useRef<JumpScrollAction | null>(null);
   const jumpScrollRafRef = useRef<number | null>(null);
   const jumpProgrammaticScrollRef = useRef(false);
@@ -1131,18 +1130,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const canJumpToTop = scrollTop > JUMP_NEAR_EDGE_THRESHOLD;
     const canJumpToCommentBox = distanceFromBottom > JUMP_NEAR_EDGE_THRESHOLD;
 
-    if (canJumpToTop && canJumpToCommentBox) {
-      setJumpScrollAction("both");
+    if (canJumpToCommentBox) {
+      setJumpScrollAction("to-comment-box");
       return;
     }
 
     if (canJumpToTop) {
       setJumpScrollAction("to-top");
-      return;
-    }
-
-    if (canJumpToCommentBox) {
-      setJumpScrollAction("to-comment-box");
       return;
     }
 
@@ -2202,7 +2196,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>
         </div>
         </div>
-        {(jumpScrollAction === "to-top" || jumpScrollAction === "both") && (
+        {jumpScrollAction === "to-top" && (
           <IssueJumpFab
             direction="up"
             position="top"
@@ -2211,7 +2205,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             ariaLabel={t(($) => $.detail.jump_to_top)}
           />
         )}
-        {(jumpScrollAction === "to-comment-box" || jumpScrollAction === "both") && (
+        {jumpScrollAction === "to-comment-box" && (
           <IssueJumpFab
             direction="down"
             position="bottom"

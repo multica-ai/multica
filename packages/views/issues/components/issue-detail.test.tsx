@@ -1172,7 +1172,7 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByRole("button", { name: "Jump to top" })).not.toBeInTheDocument();
   });
 
-  it("shows both top and comment-box jump pills from the middle of a long thread", async () => {
+  it("shows only one jump pill from the middle of a long thread", async () => {
     renderIssueDetail();
 
     await waitFor(() => {
@@ -1187,12 +1187,10 @@ describe("IssueDetail (shared)", () => {
     fireEvent.scroll(scrollContainer);
     await flushAnimationFrame();
 
-    const jumpToTop = await screen.findByRole("button", { name: "Jump to top" });
     const jumpToCommentBox = await screen.findByRole("button", { name: "Jump to comment box" });
-    expect(jumpToTop).toHaveTextContent("Top");
     expect(jumpToCommentBox).toHaveTextContent("Comment");
-    expect(jumpToTop).toHaveClass("top-8", "sm:top-4");
     expect(jumpToCommentBox).toHaveClass("bottom-2");
+    expect(screen.queryByRole("button", { name: "Jump to top" })).not.toBeInTheDocument();
   });
 
   it("keeps the comment-box jump pill visible while scrolling down until the comment box is nearby", async () => {
