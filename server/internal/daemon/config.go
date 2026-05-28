@@ -61,7 +61,7 @@ type Config struct {
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, reasonix
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
@@ -213,8 +213,11 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
+	if e, ok := probeReasonix("MULTICA_REASONIX_PATH", "npx", "MULTICA_REASONIX_MODEL", getShellResolved); ok {
+		agents["reasonix"] = e
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or node/npm for reasonix and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -426,6 +429,39 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}, nil
 }
 
+func probeReasonix(envVar, defaultCmd, modelEnv string, getShellResolved func() map[string]string) (AgentEntry, bool) {
+	cmd := strings.TrimSpace(envOrDefault(envVar, defaultCmd))
+	if cmd == "" {
+		cmd = defaultCmd
+	}
+	parts, err := shellwords.Parse(cmd)
+	if err != nil || len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		return AgentEntry{}, false
+	}
+	execName := parts[0]
+	if _, err := exec.LookPath(execName); err == nil {
+		return AgentEntry{
+			Path:  cmd,
+			Model: strings.TrimSpace(os.Getenv(modelEnv)),
+		}, true
+	}
+	if strings.ContainsAny(execName, "/\\") {
+		return AgentEntry{}, false
+	}
+	if path, ok := getShellResolved()[execName]; ok {
+		if len(parts) == 1 {
+			cmd = path
+		} else {
+			cmd = path + " " + strings.Join(parts[1:], " ")
+		}
+		return AgentEntry{
+			Path:  cmd,
+			Model: strings.TrimSpace(os.Getenv(modelEnv)),
+		}, true
+	}
+	return AgentEntry{}, false
+}
+
 // officialCloudHost is the hostname of Multica's hosted cloud. It's the only
 // origin we treat as "official" for the auto-update default — staging,
 // preview, and any future *.multica.ai subdomains are deliberately excluded
@@ -549,7 +585,7 @@ func shellArgsFromEnv(name string) ([]string, error) {
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
 	"claude", "codex", "opencode", "openclaw", "hermes",
-	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
+	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "reasonix", "npx",
 }
 
 var codexDesktopAppBundlePaths = func() []string {

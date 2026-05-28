@@ -47,6 +47,7 @@ type runtimeLocalSkillBundle struct {
 //   - Cursor: official forum guidance referencing the built-in /create-skill flow
 //     (https://forum.cursor.com/t/cursor-doesnt-know-new-skills-arens-saved/158507)
 //   - Kiro: project and user-level .kiro/skills directories discovered by Kiro CLI
+//   - Reasonix: project and user-level .reasonix/skills directories discovered by Reasonix
 //
 // Longer-term this mapping would be better colocated with the provider
 // definitions under server/pkg/agent so adding a new runtime can't silently
@@ -78,6 +79,8 @@ func localSkillRootForProvider(provider string) (string, bool, error) {
 		return filepath.Join(home, ".cursor", "skills"), true, nil
 	case "kiro":
 		return filepath.Join(home, ".kiro", "skills"), true, nil
+	case "reasonix":
+		return filepath.Join(home, ".reasonix", "skills"), true, nil
 	default:
 		return "", false, nil
 	}

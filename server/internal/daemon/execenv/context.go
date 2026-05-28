@@ -163,6 +163,10 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
 		skillsDir = filepath.Join(workDir, ".kiro", "skills")
+	case "reasonix":
+		// Reasonix auto-discovers project-level skills from .reasonix/skills/
+		// in the workdir.
+		skillsDir = filepath.Join(workDir, ".reasonix", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		skillsDir = filepath.Join(workDir, ".agent_context", "skills")

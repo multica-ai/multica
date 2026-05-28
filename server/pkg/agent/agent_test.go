@@ -38,6 +38,17 @@ func TestNewReturnsCopilotBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsReasonixBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("reasonix", Config{ExecutablePath: "/nonexistent/npx"})
+	if err != nil {
+		t.Fatalf("New(reasonix) error: %v", err)
+	}
+	if _, ok := b.(*reasonixBackend); !ok {
+		t.Fatalf("expected *reasonixBackend, got %T", b)
+	}
+}
+
 func TestNewRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 	_, err := New("gpt", Config{})
@@ -72,7 +83,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
 		"claude", "codex", "copilot", "cursor", "gemini",
-		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
+		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "reasonix",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {

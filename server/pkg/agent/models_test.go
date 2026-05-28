@@ -233,6 +233,21 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	}
 }
 
+func TestListModelsReasonixWithoutBinary(t *testing.T) {
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "reasonix")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "reasonix", "/nonexistent/npx")
+	if err != nil {
+		t.Fatalf("ListModels(reasonix) error: %v", err)
+	}
+	if got == nil {
+		t.Error("expected non-nil slice even when binary is missing")
+	}
+}
+
 func TestListModelsUnknownProvider(t *testing.T) {
 	ctx := context.Background()
 	_, err := ListModels(ctx, "nonexistent", "")
