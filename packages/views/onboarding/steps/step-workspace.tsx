@@ -81,14 +81,24 @@ export function StepWorkspace({
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
+  // Single source of truth for "can the user reach the create path on this
+  // instance?" — drives the resume-mode picker, the eyebrow/headline/lede
+  // copy, the side panel, and the footer CTA so the disabled state can't
+  // leak a clickable create affordance even if /api/config arrives late
+  // (#3433 review feedback).
+  const workspaceCreationAllowed = !workspaceCreationDisabled;
   const logout = useLogout();
 
   const reusing = existing ?? null;
   // Resume path only: user picks which card. `null` = neither yet, so
   // the footer CTA stays disabled. Clicking either card toggles — a
   // second click on the same card deselects it. No-existing path
-  // ignores this state entirely.
-  const [mode, setMode] = useState<"existing" | "create" | null>(null);
+  // ignores this state entirely. When workspace creation is disabled
+  // and a workspace already exists, default to "existing" so the user
+  // can press the CTA immediately — the only valid action.
+  const [mode, setMode] = useState<"existing" | "create" | null>(() =>
+    !workspaceCreationAllowed && existing ? "existing" : null,
+  );
   const pickExisting = () =>
     setMode((m) => (m === "existing" ? null : "existing"));
   const pickCreate = () =>
@@ -156,9 +166,13 @@ export function StepWorkspace({
   // Compute the footer CTA from whichever path the user is on. `null`
   // is only reachable in the resume path; `existing` is only valid
   // when we actually have a `reusing` workspace; everything else
-  // (including the no-existing path) funnels through `create`.
+  // (including the no-existing path) funnels through `create` — except
+  // when this instance has DISABLE_WORKSPACE_CREATION=true, in which
+  // case the create path is unreachable and a no-reusing user falls
+  // through to the disabled notice (rendered separately below).
   const isCreating = createWorkspace.isPending;
-  const creatingActive = !reusing || mode === "create";
+  const creatingActive =
+    workspaceCreationAllowed && (!reusing || mode === "create");
   const existingActive = Boolean(reusing) && mode === "existing";
 
   let hint: string;
@@ -292,24 +306,30 @@ export function StepWorkspace({
           <div className="mx-auto w-full max-w-[620px] px-6 py-10 sm:px-10 md:px-14 lg:px-0 lg:py-14">
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
               {reusing
-                ? t(($) => $.step_workspace.eyebrow_resume)
-                : workspaceCreationDisabled
-                  ? t(($) => $.step_workspace.creation_disabled_eyebrow)
-                  : t(($) => $.step_workspace.eyebrow_first)}
+                ? workspaceCreationAllowed
+                  ? t(($) => $.step_workspace.eyebrow_resume)
+                  : t(($) => $.step_workspace.creation_disabled_eyebrow_resume)
+                : workspaceCreationAllowed
+                  ? t(($) => $.step_workspace.eyebrow_first)
+                  : t(($) => $.step_workspace.creation_disabled_eyebrow)}
             </div>
             <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
               {reusing
-                ? t(($) => $.step_workspace.headline_resume, { name: reusing.name })
-                : workspaceCreationDisabled
-                  ? t(($) => $.step_workspace.creation_disabled_headline)
-                  : t(($) => $.step_workspace.headline_first)}
+                ? workspaceCreationAllowed
+                  ? t(($) => $.step_workspace.headline_resume, { name: reusing.name })
+                  : t(($) => $.step_workspace.creation_disabled_headline_resume, { name: reusing.name })
+                : workspaceCreationAllowed
+                  ? t(($) => $.step_workspace.headline_first)
+                  : t(($) => $.step_workspace.creation_disabled_headline)}
             </h1>
             <p className="mt-4 text-[15.5px] leading-[1.55] text-foreground/80">
               {reusing
-                ? t(($) => $.step_workspace.lede_resume)
-                : workspaceCreationDisabled
-                  ? t(($) => $.step_workspace.creation_disabled_lede)
-                  : t(($) => $.step_workspace.lede_first)}
+                ? workspaceCreationAllowed
+                  ? t(($) => $.step_workspace.lede_resume)
+                  : t(($) => $.step_workspace.creation_disabled_lede_resume)
+                : workspaceCreationAllowed
+                  ? t(($) => $.step_workspace.lede_first)
+                  : t(($) => $.step_workspace.creation_disabled_lede)}
             </p>
 
             <div className="mt-10">
