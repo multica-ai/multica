@@ -30,6 +30,7 @@ function initCore(
   onLogout?: () => void,
   cookieAuth?: boolean,
   identity?: ClientIdentity,
+  casdoorMode?: boolean,
 ) {
   if (initialized) return;
 
@@ -44,7 +45,7 @@ function initCore(
   setSchemaLogger(createLogger("api-schema"));
 
   // In token mode, hydrate token from storage.
-  if (!cookieAuth) {
+  if (!cookieAuth && !casdoorMode) {
     const token = storage.getItem("multica_token");
     if (token) api.setToken(token);
   }
@@ -53,7 +54,7 @@ function initCore(
   // client reads the slug from that singleton for the X-Workspace-Slug
   // header. No boot-time hydration from storage is required.
 
-  authStore = createAuthStore({ api, storage, onLogin, onLogout, cookieAuth });
+  authStore = createAuthStore({ api, storage, onLogin, onLogout, cookieAuth, casdoorMode });
   registerAuthStore(authStore);
 
   chatStore = createChatStore({ storage });
@@ -68,6 +69,7 @@ export function CoreProvider({
   wsUrl = "ws://localhost:8080/ws",
   storage = defaultStorage,
   cookieAuth,
+  casdoorMode,
   onLogin,
   onLogout,
   identity,
@@ -78,7 +80,7 @@ export function CoreProvider({
   // Initialize singletons on first render only. Dependencies are read-once:
   // apiBaseUrl, storage, and callbacks are set at app boot and never change at runtime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth, identity), []);
+  useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth, identity, casdoorMode), []);
 
   // I18nProvider wraps everything else: server and client must use the same
   // (locale, resources) to avoid hydration mismatch. Language switching goes
@@ -90,6 +92,7 @@ export function CoreProvider({
         onLogout={onLogout}
         storage={storage}
         cookieAuth={cookieAuth}
+        casdoorMode={casdoorMode}
         identity={identity}
       >
         <WSProvider

@@ -27,6 +27,7 @@ export function AuthInitializer({
   onLogout,
   storage = defaultStorage,
   cookieAuth,
+  casdoorMode,
   identity,
 }: {
   children: ReactNode;
@@ -34,6 +35,7 @@ export function AuthInitializer({
   onLogout?: () => void;
   storage?: StorageAdapter;
   cookieAuth?: boolean;
+  casdoorMode?: boolean;
   identity?: ClientIdentity;
 }) {
   const qc = useQueryClient();
@@ -78,6 +80,22 @@ export function AuthInitializer({
       resetAnalytics();
       useAuthStore.setState({ user: null, isLoading: false });
     };
+
+    if (casdoorMode) {
+      // Casdoor SSO mode: session lives in the zgsmAdminToken cookie set by
+      // the Casdoor OAuth callback. credentials: "include" sends it
+      // automatically. No localStorage token needed.
+      Promise.all([api.getMe(), api.listWorkspaces()])
+        .then(([user, wsList]) => {
+          onAuthSuccess(user);
+          qc.setQueryData(workspaceKeys.list(), wsList);
+        })
+        .catch((err) => {
+          logger.error("casdoor auth init failed", err);
+          onAuthFailure();
+        });
+      return;
+    }
 
     if (cookieAuth) {
       // Cookie mode: the HttpOnly cookie is sent automatically by the browser.

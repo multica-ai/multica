@@ -11,6 +11,9 @@ export interface AuthStoreOptions {
   onLogout?: () => void;
   /** When true, rely on HttpOnly cookies instead of localStorage for auth tokens. */
   cookieAuth?: boolean;
+  /** When true, session is managed by Casdoor SSO (zgsmAdminToken cookie).
+   *  Implies cookie-based auth — no localStorage token needed. */
+  casdoorMode?: boolean;
 }
 
 export interface AuthState {
@@ -28,13 +31,25 @@ export interface AuthState {
 }
 
 export function createAuthStore(options: AuthStoreOptions) {
-  const { api, storage, onLogin, onLogout, cookieAuth } = options;
+  const { api, storage, onLogin, onLogout, cookieAuth, casdoorMode } = options;
 
   return create<AuthState>((set) => ({
     user: null,
     isLoading: true,
 
     initialize: async () => {
+      if (casdoorMode) {
+        // Casdoor mode: session lives in the zgsmAdminToken cookie, sent
+        // automatically via credentials: "include". No localStorage token.
+        try {
+          const user = await api.getMe();
+          set({ user, isLoading: false });
+        } catch {
+          set({ user: null, isLoading: false });
+        }
+        return;
+      }
+
       if (cookieAuth) {
         // In cookie mode, the HttpOnly cookie is sent automatically.
         // Try to fetch the current user — if the cookie exists the server will accept it.
@@ -114,7 +129,13 @@ export function createAuthStore(options: AuthStoreOptions) {
     },
 
     logout: () => {
-      if (cookieAuth) {
+      if (casdoorMode) {
+        // Clear Casdoor session via the backend proxy endpoint.
+        fetch("/auth/casdoor/logout", {
+          method: "POST",
+          credentials: "include",
+        }).catch(() => {});
+      } else if (cookieAuth) {
         // Clear server-side HttpOnly cookie.
         api.logout().catch(() => {});
       }
