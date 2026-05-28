@@ -210,6 +210,8 @@ func TestAgentUpdateNoFieldsErrorPointsAtEnvCommand(t *testing.T) {
 	cmd.Flags().String("runtime-config", "", "")
 	cmd.Flags().String("model", "", "")
 	cmd.Flags().String("custom-args", "", "")
+	cmd.Flags().String("mcp-config", "", "")
+	cmd.Flags().String("mcp-config-file", "", "")
 	cmd.Flags().String("visibility", "", "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().Int32("max-concurrent-tasks", 0, "")
@@ -223,6 +225,9 @@ func TestAgentUpdateNoFieldsErrorPointsAtEnvCommand(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "multica agent env set") {
 		t.Fatalf("no-fields error must direct users to `multica agent env set`; got: %q", msg)
+	}
+	if !strings.Contains(msg, "--mcp-config") {
+		t.Fatalf("no-fields error must mention --mcp-config; got: %q", msg)
 	}
 }
 
@@ -851,6 +856,186 @@ func TestAgentAvatarSizeBoundary(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "file too large") {
 			t.Fatalf("expected 'file too large' error, got: %v", err)
+		}
+	})
+}
+
+// freshAgentMcpCmd returns a standalone cobra.Command with the two
+// --mcp-config* flags registered, so resolveMcpConfig-shaped tests can
+// mutate flag state without leaking across subtests.
+func freshAgentMcpCmd() *cobra.Command {
+	c := &cobra.Command{Use: "test"}
+	c.Flags().String("mcp-config", "", "")
+	c.Flags().String("mcp-config-file", "", "")
+	return c
+}
+
+// TestParseMcpConfigErrorSanitization guards against future changes that
+// re-introduce %w wrapping of json error messages. Those errors can surface
+// short fragments of the input, which for a config that may carry secret
+// material (env blocks in MCP server definitions) must not appear in
+// user-visible output.
+func TestParseMcpConfigErrorSanitization(t *testing.T) {
+	secretish := `{"mcpServers":{"loom":{"command":"node","env":{"SECRET_TOKEN":verySensitiveValue}}}}`
+	_, err := parseMcpConfig(secretish)
+	if err == nil {
+		t.Fatal("expected parse error for invalid JSON")
+	}
+	msg := err.Error()
+	for _, leak := range []string{"SECRET_TOKEN", "verySensitiveValue", "loom", "mcpServers"} {
+		if strings.Contains(msg, leak) {
+			t.Fatalf("parseMcpConfig error leaked input fragment %q: %q", leak, msg)
+		}
+	}
+}
+
+// TestAgentCreateAndUpdateExposeMcpConfigFlags ensures both commands expose the
+// --mcp-config and --mcp-config-file flags so agents and users can set MCP
+// server config without requiring direct database access.
+func TestAgentCreateAndUpdateExposeMcpConfigFlags(t *testing.T) {
+	for _, flag := range []string{"mcp-config", "mcp-config-file"} {
+		if agentCreateCmd.Flag(flag) == nil {
+			t.Fatalf("agent create must expose --%s", flag)
+		}
+		if agentUpdateCmd.Flag(flag) == nil {
+			t.Fatalf("agent update must expose --%s", flag)
+		}
+	}
+}
+
+// TestResolveMcpConfig exercises the input-channel resolver: inline flag,
+// file, mutual exclusion, empty path, non-existent file, and the "not
+// supplied" path.
+func TestResolveMcpConfig(t *testing.T) {
+	t.Run("not supplied", func(t *testing.T) {
+		cmd := freshAgentMcpCmd()
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || ok || got != nil {
+			t.Fatalf("unset flags: got=%v ok=%v err=%v", got, ok, err)
+		}
+	})
+
+	t.Run("inline flag: valid JSON object", func(t *testing.T) {
+		cmd := freshAgentMcpCmd()
+		raw := `{"mcpServers":{"loom":{"command":"node","args":["/path/to/index.js"],"type":"stdio"}}}`
+		if err := cmd.Flags().Set("mcp-config", raw); err != nil {
+			t.Fatal(err)
+		}
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || !ok {
+			t.Fatalf("inline: ok=%v err=%v", ok, err)
+		}
+		if string(got) != raw {
+			t.Fatalf("inline: got %s, want %s", got, raw)
+		}
+	})
+
+	t.Run("inline flag: clear with empty object", func(t *testing.T) {
+		cmd := freshAgentMcpCmd()
+		if err := cmd.Flags().Set("mcp-config", "{}"); err != nil {
+			t.Fatal(err)
+		}
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || !ok {
+			t.Fatalf("inline {}: ok=%v err=%v", ok, err)
+		}
+		if string(got) != "{}" {
+			t.Fatalf("inline {}: got %s, want {}", got)
+		}
+	})
+
+	t.Run("file: valid JSON", func(t *testing.T) {
+		dir := t.TempDir()
+		raw := `{"mcpServers":{"loom":{"command":"node","args":["/path/to/index.js"],"type":"stdio"}}}`
+		path := filepath.Join(dir, "mcp.json")
+		if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshAgentMcpCmd()
+		if err := cmd.Flags().Set("mcp-config-file", path); err != nil {
+			t.Fatal(err)
+		}
+		got, ok, err := resolveMcpConfig(cmd)
+		if err != nil || !ok {
+			t.Fatalf("file: ok=%v err=%v", ok, err)
+		}
+		if string(got) != raw {
+			t.Fatalf("file: got %s, want %s", got, raw)
+		}
+	})
+
+	t.Run("mutually exclusive: inline + file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "mcp.json")
+		if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshAgentMcpCmd()
+		_ = cmd.Flags().Set("mcp-config", "{}")
+		_ = cmd.Flags().Set("mcp-config-file", path)
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("expected mutual-exclusion error, got %v", err)
+		}
+	})
+
+	t.Run("file: empty path errors instead of being silently swallowed", func(t *testing.T) {
+		cmd := freshAgentMcpCmd()
+		_ = cmd.Flags().Set("mcp-config-file", "")
+		if !cmd.Flags().Changed("mcp-config-file") {
+			t.Fatal("setup: expected mcp-config-file flag to be marked Changed")
+		}
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--mcp-config-file") {
+			t.Fatalf("expected --mcp-config-file empty-path error, got %v", err)
+		}
+	})
+
+	t.Run("file: non-existent path surfaces filesystem error", func(t *testing.T) {
+		cmd := freshAgentMcpCmd()
+		_ = cmd.Flags().Set("mcp-config-file", filepath.Join(t.TempDir(), "does-not-exist.json"))
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--mcp-config-file") {
+			t.Fatalf("expected --mcp-config-file error, got %v", err)
+		}
+	})
+
+	t.Run("file: empty contents errors", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "empty.json")
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshAgentMcpCmd()
+		_ = cmd.Flags().Set("mcp-config-file", path)
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--mcp-config-file") || !strings.Contains(err.Error(), "{}") {
+			t.Fatalf("expected --mcp-config-file empty-contents error mentioning '{}', got %v", err)
+		}
+	})
+
+	t.Run("inline: empty string errors", func(t *testing.T) {
+		cmd := freshAgentMcpCmd()
+		_ = cmd.Flags().Set("mcp-config", "")
+		got, ok, err := resolveMcpConfig(cmd)
+		// Empty string is a Changed flag with empty value — parseMcpConfig rejects it.
+		if err == nil {
+			t.Fatalf("expected error for empty --mcp-config, got ok=%v got=%v", ok, got)
+		}
+		if !strings.Contains(err.Error(), "--mcp-config") {
+			t.Fatalf("error must mention --mcp-config, got: %v", err)
+		}
+	})
+
+	t.Run("inline: invalid JSON errors without leaking content", func(t *testing.T) {
+		cmd := freshAgentMcpCmd()
+		_ = cmd.Flags().Set("mcp-config", `not-valid-json`)
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil {
+			t.Fatal("expected error for invalid JSON")
+		}
+		if strings.Contains(err.Error(), "not-valid-json") {
+			t.Fatalf("error must not leak input content, got: %v", err)
 		}
 	})
 }

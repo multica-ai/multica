@@ -164,6 +164,8 @@ func init() {
 	agentCreateCmd.Flags().String("custom-env", "", "Custom environment variables as JSON object, e.g. '{\"KEY\":\"value\"}'. Treated as secret material — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --custom-env-stdin or --custom-env-file for real secrets. Pass '{}' to set an empty map.")
 	agentCreateCmd.Flags().Bool("custom-env-stdin", false, "Read the --custom-env JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --custom-env and --custom-env-file.")
 	agentCreateCmd.Flags().String("custom-env-file", "", "Read the --custom-env JSON object from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
+	agentCreateCmd.Flags().String("mcp-config", "", "MCP server config as JSON string (e.g. '{\"mcpServers\":{...}}'). Pass '{}' to clear. Values on the command line are visible to shell history and 'ps'; prefer --mcp-config-file for secrets.")
+	agentCreateCmd.Flags().String("mcp-config-file", "", "Read the MCP server config JSON from a file path (suggested mode: 0600). Mutually exclusive with --mcp-config.")
 	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -179,6 +181,8 @@ func init() {
 	// custom_env is intentionally NOT part of `agent update`. Use
 	// `multica agent env set <id>` — that path is owner/admin-only,
 	// denies agent actors, and writes a persisted audit trail.
+	agentUpdateCmd.Flags().String("mcp-config", "", "New MCP server config as JSON string. Pass '{}' to clear. Values on the command line are visible to shell history and 'ps'; prefer --mcp-config-file for secrets.")
+	agentUpdateCmd.Flags().String("mcp-config-file", "", "Read the new MCP server config JSON from a file path (suggested mode: 0600). Mutually exclusive with --mcp-config.")
 	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks")
@@ -448,6 +452,11 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	} else if ok {
 		body["custom_env"] = ce
 	}
+	if mc, ok, err := resolveMcpConfig(cmd); err != nil {
+		return err
+	} else if ok {
+		body["mcp_config"] = mc
+	}
 	if cmd.Flags().Changed("model") {
 		v, _ := cmd.Flags().GetString("model")
 		body["model"] = v
@@ -578,13 +587,18 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("status")
 		body["status"] = v
 	}
+	if mc, ok, err := resolveMcpConfig(cmd); err != nil {
+		return err
+	} else if ok {
+		body["mcp_config"] = mc
+	}
 	if cmd.Flags().Changed("max-concurrent-tasks") {
 		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
 		body["max_concurrent_tasks"] = v
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --mcp-config, --mcp-config-file, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1026,6 +1040,68 @@ func resolveCustomEnv(cmd *cobra.Command) (map[string]string, bool, error) {
 		return nil, false, err
 	}
 	return ce, true, nil
+}
+
+// parseMcpConfig parses the --mcp-config flag value (any valid JSON) into a
+// raw message for the request body. Type validation is left to the server since
+// the MCP config schema is server-owned. Error messages are kept content-free
+// to avoid leaking sensitive config fragments through json error messages.
+func parseMcpConfig(raw string) (json.RawMessage, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, fmt.Errorf("--mcp-config: empty input; pass '{}' to clear")
+	}
+	if !json.Valid([]byte(raw)) {
+		return nil, fmt.Errorf("--mcp-config must be valid JSON")
+	}
+	return json.RawMessage(raw), nil
+}
+
+// resolveMcpConfig collects the --mcp-config and --mcp-config-file flags and
+// returns the parsed raw message, a bool indicating whether the caller
+// supplied either, and any error. The two channels are mutually exclusive.
+// File input is recommended for keeping secrets out of shell history and 'ps'.
+func resolveMcpConfig(cmd *cobra.Command) (json.RawMessage, bool, error) {
+	inline := cmd.Flags().Changed("mcp-config")
+	filePath, _ := cmd.Flags().GetString("mcp-config-file")
+	fromFile := cmd.Flags().Changed("mcp-config-file")
+
+	count := 0
+	if inline {
+		count++
+	}
+	if fromFile {
+		count++
+	}
+	switch {
+	case count == 0:
+		return nil, false, nil
+	case count > 1:
+		return nil, false, fmt.Errorf("--mcp-config and --mcp-config-file are mutually exclusive; pick one")
+	}
+
+	var raw string
+	switch {
+	case inline:
+		raw, _ = cmd.Flags().GetString("mcp-config")
+	case fromFile:
+		if filePath == "" {
+			return nil, false, fmt.Errorf("--mcp-config-file: path must not be empty")
+		}
+		buf, err := os.ReadFile(filePath)
+		if err != nil {
+			return nil, false, fmt.Errorf("read --mcp-config-file: %w", err)
+		}
+		raw = string(buf)
+		if strings.TrimSpace(raw) == "" {
+			return nil, false, fmt.Errorf("--mcp-config-file %q: empty contents; pass '{}' to clear", filePath)
+		}
+	}
+
+	mc, err := parseMcpConfig(raw)
+	if err != nil {
+		return nil, false, err
+	}
+	return mc, true, nil
 }
 
 func strVal(m map[string]any, key string) string {
