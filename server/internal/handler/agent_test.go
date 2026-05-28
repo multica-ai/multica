@@ -330,7 +330,7 @@ func TestCopyAgentCopiesConfigFields(t *testing.T) {
 		t.Fatalf("skills = %#v, want skill %s", resp.Skills, skillID)
 	}
 	if !resp.HasCustomEnv || resp.CustomEnvKeyCount != 2 {
-		t.Fatalf("custom_env values should be preserved when copying own agent, got %#v", resp.CustomEnv)
+		t.Fatalf("custom_env metadata should be preserved when copying own agent, has_custom_env=%v key_count=%d", resp.HasCustomEnv, resp.CustomEnvKeyCount)
 	}
 	if resp.CustomEnvCopiedPending {
 		t.Fatal("custom_env_copied_pending = true, want false for own agent copy")
@@ -409,7 +409,7 @@ func TestCopyAgentStripsEnvValuesForOtherOwners(t *testing.T) {
 		t.Fatalf("owner_id = %v, want requester %s", resp.OwnerID, testUserID)
 	}
 	if !resp.HasCustomEnv || resp.CustomEnvKeyCount != 2 {
-		t.Fatalf("custom_env values should be stripped when copying another owner's agent, got %#v", resp.CustomEnv)
+		t.Fatalf("custom_env metadata should be preserved when copying another owner's agent, has_custom_env=%v key_count=%d", resp.HasCustomEnv, resp.CustomEnvKeyCount)
 	}
 	if !resp.CustomEnvCopiedPending {
 		t.Fatal("custom_env_copied_pending = false, want true")
