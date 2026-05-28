@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/daemon/trace"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // HealthResponse is returned by the daemon's local health endpoint.
@@ -59,10 +60,11 @@ type repoCheckoutRequest struct {
 }
 
 type traceResponse struct {
-	TaskID string            `json:"task_id"`
-	RunID  string            `json:"run_id"`
-	Runs   []string          `json:"runs,omitempty"`
-	Lines  []trace.TraceLine `json:"lines"`
+	TaskID        string            `json:"task_id"`
+	RunID         string            `json:"run_id"`
+	Runs          []string          `json:"runs,omitempty"`
+	Lines         []trace.TraceLine `json:"lines"`
+	StreamDisplay *bool             `json:"stream_display,omitempty"`
 }
 
 // healthHandler returns the /health HTTP handler. Extracted from serveHealth
@@ -704,12 +706,17 @@ func (d *Daemon) streamTrace(w http.ResponseWriter, r *http.Request, taskID stri
 	}
 
 	sendReady := func(runs []string) bool {
-		return sendEvent("ready", traceResponse{
+		resp := traceResponse{
 			TaskID: taskID,
 			RunID:  runID,
 			Runs:   runs,
 			Lines:  []trace.TraceLine{},
-		})
+		}
+		if prov, ok := d.taskProviders.Load(taskID); ok {
+			cap := agent.CapabilityOrDefault(prov.(string))
+			resp.StreamDisplay = &cap.StreamDisplay
+		}
+		return sendEvent("ready", resp)
 	}
 
 	sendLines := func(lines []trace.TraceLine) bool {

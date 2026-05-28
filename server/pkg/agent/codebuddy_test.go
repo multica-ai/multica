@@ -32,11 +32,13 @@ func TestNewCodebuddyHonoursExplicitPath(t *testing.T) {
 	}
 }
 
-func TestCodebuddyCapabilitiesMatchClaude(t *testing.T) {
-	claude := Capabilities("claude")
-	cb := Capabilities("codebuddy")
-	if claude != cb {
-		t.Errorf("codebuddy capabilities %+v differ from claude %+v", cb, claude)
+func TestCodebuddyKeepsClaudeNonStreamCapabilities(t *testing.T) {
+	cb := CapabilityOrDefault("codebuddy")
+	if cb.StreamDisplay || cb.ToolCallStream {
+		t.Fatalf("codebuddy must not opt into standardized stream display yet: %+v", cb)
+	}
+	if !cb.Approval || !cb.ResumeSession || !cb.PlanMode || !cb.StructuredOutput {
+		t.Fatalf("unexpected codebuddy capability: %+v", cb)
 	}
 }
 

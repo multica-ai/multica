@@ -15,13 +15,20 @@ func newTraceRunID(t time.Time) string {
 // BuildTraceCallback adapts provider-level trace events into the daemon-local
 // JSONL trace store. A nil store disables tracing without changing agent
 // execution behaviour.
-func BuildTraceCallback(store trace.TraceStore, taskID, runID, providerName string) agent.TraceCallback {
+//
+// When streamDisplay is true, the callback suppresses raw_stdout and
+// provider_event channels so the user-visible trace only contains
+// display_event and approval channels — the standardised output layer.
+func BuildTraceCallback(store trace.TraceStore, taskID, runID, providerName string, streamDisplay bool) agent.TraceCallback {
 	if store == nil || taskID == "" || runID == "" {
 		return nil
 	}
 	return func(channel, content, rawPayload string) {
 		if channel == "" {
 			channel = trace.ChannelNormalized
+		}
+		if streamDisplay && (channel == trace.ChannelRawStdout || channel == trace.ChannelProviderEvent) {
+			return
 		}
 		_, _ = store.Append(context.Background(), trace.TraceLine{
 			TaskID:     taskID,

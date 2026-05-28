@@ -141,6 +141,8 @@ type Daemon struct {
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 
+	taskProviders sync.Map // taskID (string) -> provider (string); set on task start, deleted on completion
+
 	// bgSyncs tracks background goroutines started by registerTaskRepos so
 	// callers (notably tests using t.TempDir-backed cache roots) can wait for
 	// them to drain before tearing the daemon down. Without this the bg
@@ -2243,16 +2245,27 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			}
 		}
 	default:
+		if result.Status == "cancelled" {
+			taskLog.Info("task cancelled by runtime", "status", result.Status)
+			if err := d.client.CancelTask(ctx, taskID, result.SessionID, result.WorkDir); err != nil {
+				taskLog.Error("cancel task from daemon failed", "error", err)
+			}
+			return
+		}
 		failureReason := result.FailureReason
 		if failureReason == "" {
-			if result.Status == "cancelled" {
-				failureReason = "cancelled"
-			} else {
-				failureReason = "agent_error"
+			failureReason = "agent_error"
+		}
+		// Apply unified taxonomy mapping before persisting.
+		taxonomyReason := MapToTaxonomy(failureReason)
+		// If the coarse mapping yields unknown but we have error text, try finer classification.
+		if taxonomyReason == TaxonomyUnknown && result.Comment != "" {
+			if finer := ClassifyErrorText(result.Comment); finer != "" {
+				taxonomyReason = finer
 			}
 		}
-		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
-		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
+		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", taxonomyReason, "raw_reason", failureReason)
+		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, taxonomyReason); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
 		}
 	}
@@ -2298,6 +2311,16 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	default:
 		return false
 	}
+}
+
+func effectiveTaskRunMode(provider, requestedRunMode string) string {
+	if requestedRunMode != protocol.TaskRunModePlan {
+		return requestedRunMode
+	}
+	if agent.CapabilityOrDefault(provider).PlanMode {
+		return requestedRunMode
+	}
+	return protocol.TaskRunModeNormal
 }
 
 func (d *Daemon) notifyTaskResult(ctx context.Context, taskLog *slog.Logger, task Task, success bool, message string) {
@@ -2370,6 +2393,9 @@ func taskAgentName(task Task) string {
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
+	d.taskProviders.Store(task.ID, provider)
+	defer d.taskProviders.Delete(task.ID)
+
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
 	// CLI would otherwise silently fall back to the user-global config — a
@@ -2488,11 +2514,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
 
+	capability := agent.CapabilityOrDefault(provider)
 	requestedRunMode := protocol.ResolveTaskRunMode(task.Context)
-	effectiveRunMode := requestedRunMode
-	if requestedRunMode == protocol.TaskRunModePlan && !providerSupportsNativePlan(provider) {
-		effectiveRunMode = protocol.TaskRunModeNormal
-	}
+	effectiveRunMode := effectiveTaskRunMode(provider, requestedRunMode)
 	visibleLanguage := detectVisibleLanguage(task)
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
@@ -2675,11 +2699,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		Model:                     model,
 		Timeout:                   d.cfg.AgentTimeout,
 		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
-		ResumeSessionID:           task.PriorSessionID,
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 		ThinkingLevel:             thinkingLevel,
+	}
+	if capability.ResumeSession {
+		execOpts.ResumeSessionID = task.PriorSessionID
 	}
 	// Resolve approval policy from agent runtime_config and inject callback.
 	// Default is "auto" — nil callback preserves existing auto-approve behaviour.
@@ -2689,12 +2715,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			rtCfg = task.Agent.RuntimeConfig
 		}
 		policy := protocol.ResolveApprovalPolicy(rtCfg)
-		if providerSupportsNativePlan(provider) && effectiveRunMode == protocol.TaskRunModePlan {
-			execOpts.OnApproval = BuildPlanAwareApprovalCallback(policy, task.ID, provider, d.client)
-		} else {
-			execOpts.OnApproval = BuildApprovalCallback(policy, task.ID, provider, d.client)
+		execOpts.ApprovalPolicy = policy
+		if capability.Approval {
+			if provider == "claude" && effectiveRunMode == protocol.TaskRunModePlan {
+				execOpts.OnApproval = BuildPlanAwareApprovalCallback(policy, task.ID, provider, d.client)
+			} else {
+				execOpts.OnApproval = BuildApprovalCallback(policy, task.ID, provider, d.client)
+			}
 		}
-		traceEnabled := protocol.ResolveTraceEnabled(rtCfg)
+		traceEnabled := protocol.ResolveTraceEnabled(rtCfg) && capability.StreamDisplay
 		if traceEnabled {
 			if providerSupportsNativePlan(provider) && effectiveRunMode == protocol.TaskRunModePlan && policy == protocol.ApprovalPolicyAuto {
 				execOpts.OnApproval = WithApprovalTraceFilter(execOpts.OnApproval, d.traceStore, task.ID, traceRunID, provider, func(req agent.ApprovalRequest) bool {
@@ -2703,7 +2732,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			} else {
 				execOpts.OnApproval = WithApprovalTrace(execOpts.OnApproval, d.traceStore, task.ID, traceRunID, provider)
 			}
-			execOpts.TraceCallback = BuildTraceCallback(d.traceStore, task.ID, traceRunID, provider)
+			execOpts.TraceCallback = BuildTraceCallback(d.traceStore, task.ID, traceRunID, provider, capability.StreamDisplay)
 		}
 		if provider == "claude" || provider == "codebuddy" {
 			execOpts.ClaudePermissionMode = protocol.ResolveClaudePermissionMode(rtCfg)
@@ -2947,6 +2976,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// task resumes the same poisoned session and hits the same 400.
 		failureReason, _ := classifyPoisonedError(errMsg)
 		if failureReason != "" {
+			failureReason = MapToTaxonomy(failureReason)
 			taskLog.Warn("agent failed with poisoned API error, classifying as blocked",
 				"failure_reason", failureReason,
 			)

@@ -183,6 +183,9 @@ func promptViaServer(ctx context.Context, taskID, providerName string, client *C
 			if req.Type == protocol.InteractionPlanApproval {
 				return "timeout", false, ctx.Err()
 			}
+			if req.Type == protocol.InteractionCommandApproval {
+				return protocol.InteractionStatusTimedOut, false, ctx.Err()
+			}
 			return "deny", false, ctx.Err()
 		case <-ticker.C:
 			resp, err := client.GetInteraction(ctx, taskID, interactionID)
@@ -211,6 +214,9 @@ func promptViaServer(ctx context.Context, taskID, providerName string, client *C
 			case protocol.InteractionStatusTimedOut, protocol.InteractionStatusCancelled:
 				if req.Type == protocol.InteractionPlanApproval {
 					return status, false, fmt.Errorf("plan approval %s", status)
+				}
+				if req.Type == protocol.InteractionCommandApproval {
+					return status, false, nil
 				}
 				return "deny", false, nil
 				// pending — keep polling
