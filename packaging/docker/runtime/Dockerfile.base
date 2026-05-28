@@ -1,0 +1,54 @@
+# packaging/docker/runtime/Dockerfile.base
+#
+# Shared base for all Multica agent runtime images: the `multica` binary plus
+# the toolchain agents need (git, ssh, node, python, build tools). Per-provider
+# images (Dockerfile.claude, etc.) extend this and add their agent CLI.
+
+ARG GO_VERSION=1.26
+
+# ── Build the multica binary from source ──────────────────────────────
+FROM golang:${GO_VERSION}-bookworm AS multica-build
+WORKDIR /src
+COPY server/go.mod server/go.sum ./server/
+RUN cd server && go mod download
+COPY server/ ./server/
+ARG VERSION=dev
+ARG COMMIT=unknown
+RUN cd server && CGO_ENABLED=0 go build \
+      -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+      -o /out/multica ./cmd/multica
+
+# ── Runtime base ──────────────────────────────────────────────────────
+FROM node:22-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git \
+      openssh-client \
+      ca-certificates \
+      python3 \
+      python-is-python3 \
+      build-essential \
+      ripgrep \
+      curl \
+      jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user the daemon and agents run as.
+RUN groupadd -g 1001 multica \
+    && useradd -m -u 1001 -g 1001 -s /bin/bash multica
+
+COPY --from=multica-build /out/multica /usr/local/bin/multica
+
+# Pre-trust github.com so `git clone` over ssh doesn't prompt.
+RUN mkdir -p /home/multica/.ssh \
+    && ssh-keyscan github.com > /home/multica/.ssh/known_hosts 2>/dev/null \
+    && chown -R multica:multica /home/multica/.ssh \
+    && chmod 700 /home/multica/.ssh \
+    && chmod 644 /home/multica/.ssh/known_hosts
+
+USER multica
+WORKDIR /home/multica
+ENV HOME=/home/multica
+
+# Sanity: multica binary resolves and runs.
+RUN multica version || true
