@@ -233,6 +233,21 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	}
 }
 
+func TestListModelsGrokWithoutBinary(t *testing.T) {
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "grok")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "grok", "/nonexistent/grok")
+	if err != nil {
+		t.Fatalf("ListModels(grok) error: %v", err)
+	}
+	if got == nil {
+		t.Error("expected non-nil slice even when binary is missing")
+	}
+}
+
 func TestListModelsUnknownProvider(t *testing.T) {
 	ctx := context.Background()
 	_, err := ListModels(ctx, "nonexistent", "")

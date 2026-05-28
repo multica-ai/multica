@@ -105,6 +105,36 @@ func TestListRuntimeLocalSkills_Kiro(t *testing.T) {
 // path filtered every symlink out via os.ModeSymlink, so users with
 // dozens of installed skills only saw the few they had cloned in place.
 // listRuntimeLocalSkills must follow those symlinks.
+func TestListRuntimeLocalSkills_Grok(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".grok", "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Grok Review\ndescription: Review code with Grok\n---\n# Grok Review\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("grok")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("grok should be supported")
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if skills[0].Key != "review-helper" {
+		t.Fatalf("key = %q, want review-helper", skills[0].Key)
+	}
+	if skills[0].Name != "Grok Review" {
+		t.Fatalf("name = %q, want Grok Review", skills[0].Name)
+	}
+	if skills[0].SourcePath != "~/.grok/skills/review-helper" {
+		t.Fatalf("source_path = %q", skills[0].SourcePath)
+	}
+}
+
 func TestListRuntimeLocalSkills_FollowsSymlinkedSkillDirs(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

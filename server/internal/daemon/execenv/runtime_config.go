@@ -104,7 +104,7 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 	switch provider {
 	case "claude":
 		return content, os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
-	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro":
+	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "grok":
 		return content, os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
 	case "gemini":
 		return content, os.WriteFile(filepath.Join(workDir, "GEMINI.md"), []byte(content), 0o644)
@@ -402,8 +402,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		case "claude":
 			// Claude discovers skills natively from .claude/skills/ — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro":
-			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, and Kiro discover skills
+		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "grok":
+			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, Kiro, and Grok discover skills
 			// natively from their respective paths. For OpenClaw, the daemon also writes a
 			// per-task openclaw-config.json (exported via OPENCLAW_CONFIG_PATH) that pins
 			// agents.defaults.workspace to the task workdir so the CLI's scanner picks up
