@@ -8,6 +8,7 @@ interface IssueJumpFabProps {
   position: "bottom" | "top";
   onClick: () => void;
   label: string;
+  ariaLabel?: string;
   className?: string;
 }
 
@@ -16,13 +17,14 @@ export function IssueJumpFab({
   position,
   onClick,
   label,
+  ariaLabel,
   className,
 }: IssueJumpFabProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label={label}
+      aria-label={ariaLabel ?? label}
       className={cn(
         "absolute left-1/2 z-20 inline-flex min-h-10 max-w-[calc(100%-2rem)] -translate-x-1/2 touch-manipulation items-center gap-1.5 rounded-full border border-border/70 bg-card/95 px-4 py-2 text-sm font-medium text-foreground shadow-md backdrop-blur transition hover:bg-accent hover:text-accent-foreground active:scale-95",
         position === "bottom" ? "bottom-2" : "top-8 sm:top-4",

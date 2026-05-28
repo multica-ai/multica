@@ -1105,6 +1105,7 @@ describe("IssueDetail (shared)", () => {
     await flushAnimationFrame();
 
     const jumpToCommentBox = await screen.findByRole("button", { name: "Jump to comment box" });
+    expect(jumpToCommentBox).toHaveTextContent("Comment");
     expect(jumpToCommentBox).toHaveClass("absolute", "bottom-2");
     expect(jumpToCommentBox).not.toHaveClass("fixed", "right-2", "bottom-14");
     fireEvent.click(jumpToCommentBox);
@@ -1119,6 +1120,7 @@ describe("IssueDetail (shared)", () => {
     fireEvent.scroll(scrollContainer);
 
     const jumpToTop = await screen.findByRole("button", { name: "Jump to top" });
+    expect(jumpToTop).toHaveTextContent("Top");
     expect(jumpToTop).toHaveClass("absolute", "top-8", "sm:top-4");
     fireEvent.click(jumpToTop);
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
@@ -1186,6 +1188,7 @@ describe("IssueDetail (shared)", () => {
     await flushAnimationFrame();
 
     const jumpToCommentBox = await screen.findByRole("button", { name: "Jump to comment box" });
+    expect(jumpToCommentBox).toHaveTextContent("Comment");
     expect(jumpToCommentBox).toHaveClass("min-h-10", "max-w-[calc(100%-2rem)]", "touch-manipulation");
     expect(jumpToCommentBox).toHaveClass("bottom-2");
     expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();

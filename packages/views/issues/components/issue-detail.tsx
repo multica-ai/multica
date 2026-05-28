@@ -2141,6 +2141,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onClick={handleJumpScroll}
             label={
               jumpScrollAction === "to-top"
+                ? t(($) => $.detail.jump_to_top_short)
+                : t(($) => $.detail.jump_to_comment_box_short)
+            }
+            ariaLabel={
+              jumpScrollAction === "to-top"
                 ? t(($) => $.detail.jump_to_top)
                 : t(($) => $.detail.jump_to_comment_box)
             }
