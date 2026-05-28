@@ -190,6 +190,9 @@
     },
     "url": {
       "url_label": "Skill URL",
+      "gitee_token_label": "Gitee token",
+      "gitee_token_placeholder": "Optional for private Gitee repositories",
+      "gitee_token_hint": "Sent only with this import request. It is not stored.",
       "supported_sources": "Supported sources",
       "import": "Import",
       "importing": "Importing…",

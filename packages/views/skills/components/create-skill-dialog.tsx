@@ -244,8 +244,8 @@ function detectUrlSource(url: string): DetectedSource {
   const u = url.trim().toLowerCase();
   if (u.includes("clawhub.ai")) return "clawhub";
   if (u.includes("skills.sh")) return "skills.sh";
-  if (u.includes("github.com")) return "github";
-  if (u.includes("gitee.com")) return "gitee";
+  if (u.includes("github.com") || u.startsWith("git@github.com:")) return "github";
+  if (u.includes("gitee.com") || u.startsWith("git@gitee.com:")) return "gitee";
   return null;
 }
 
@@ -289,6 +289,7 @@ function UrlForm({
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [url, setUrl] = useState("");
+  const [giteeToken, setGiteeToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const source = detectUrlSource(url);
@@ -301,7 +302,11 @@ function UrlForm({
     setLoading(true);
     setError("");
     try {
-      const skill = await api.importSkill({ url: trimmed });
+      const token = giteeToken.trim();
+      const skill = await api.importSkill({
+        url: trimmed,
+        ...(source === "gitee" && token ? { gitee_token: token } : {}),
+      });
       seedAfterCreate(qc, wsId, skill);
       toast.success(t(($) => $.create.url.toast_imported));
       onCreated(skill);
@@ -346,6 +351,32 @@ function UrlForm({
             }}
           />
         </div>
+
+        {source === "gitee" && (
+          <div className="space-y-1.5">
+            <Label htmlFor="gitee-token" className="text-xs text-muted-foreground">
+              {t(($) => $.create.url.gitee_token_label)}
+            </Label>
+            <Input
+              id="gitee-token"
+              type="password"
+              autoComplete="off"
+              value={giteeToken}
+              onChange={(e) => {
+                setGiteeToken(e.target.value);
+                setError("");
+              }}
+              placeholder={t(($) => $.create.url.gitee_token_placeholder)}
+              className="font-mono text-sm"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submit();
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t(($) => $.create.url.gitee_token_hint)}
+            </p>
+          </div>
+        )}
 
         <div>
           <p className="mb-2 text-xs text-muted-foreground">
