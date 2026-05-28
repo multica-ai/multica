@@ -157,6 +157,67 @@ describe("runtime machine grouping", () => {
     });
   });
 
+  it("treats a runtime with the local device name as the current machine", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          daemon_id: "legacy-hostname",
+          name: "Claude (My Laptop)",
+          device_info: "My Laptop · claude 1.0.0",
+        }),
+      ],
+      {
+        now: NOW,
+        localDaemonId: "daemon-uuid",
+        localMachineName: "my laptop",
+        ensureLocalMachine: true,
+      },
+    );
+
+    expect(machines).toHaveLength(1);
+    expect(machines[0]).toMatchObject({
+      title: "my laptop",
+      section: "local",
+      isCurrent: true,
+      daemonId: "legacy-hostname",
+    });
+  });
+
+  it("does not treat a cloud runtime with the local device name as current", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          id: "cloud-1",
+          daemon_id: null,
+          runtime_mode: "cloud",
+          provider: "codex",
+          name: "Codex (My Laptop)",
+          device_info: "My Laptop · codex 1.0.0",
+        }),
+      ],
+      {
+        now: NOW,
+        localDaemonId: "daemon-uuid",
+        localMachineName: "my laptop",
+        ensureLocalMachine: true,
+      },
+    );
+
+    expect(machines).toHaveLength(2);
+    const cloud = machines.find((m) => m.id === "cloud:device:My Laptop");
+    expect(cloud).toMatchObject({
+      title: "My Laptop",
+      section: "cloud",
+      isCurrent: false,
+    });
+    const local = machines.find((m) => m.isCurrent);
+    expect(local).toMatchObject({
+      title: "my laptop",
+      section: "local",
+      runtimes: [],
+    });
+  });
+
   it("keeps cloud runtimes as cloud workers when they have no daemon", () => {
     const machines = buildRuntimeMachines(
       [

@@ -269,7 +269,7 @@ func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 func TestWriteProjectResourcesSkippedWhenNone(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := writeProjectResources(dir, TaskContextForEnv{}); err != nil {
+	if err := writeProjectResources(dir, TaskContextForEnv{}, nil); err != nil {
 		t.Fatalf("writeProjectResources: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".multica", "project", "resources.json")); !os.IsNotExist(err) {
@@ -352,7 +352,7 @@ func TestWriteContextFiles(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "", ctx); err != nil {
+	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -405,7 +405,7 @@ func TestWriteContextFilesOmitsSkillsWhenEmpty(t *testing.T) {
 		IssueID: "minimal-issue-id",
 	}
 
-	if err := writeContextFiles(dir, "", ctx); err != nil {
+	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -435,7 +435,7 @@ func TestWriteContextFilesAutopilotRunOnly(t *testing.T) {
 		AutopilotSource:      "manual",
 	}
 
-	if err := writeContextFiles(dir, "", ctx); err != nil {
+	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -479,7 +479,7 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "claude", ctx); err != nil {
+	if err := writeContextFiles(dir, "claude", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -819,7 +819,7 @@ func TestWriteContextFilesCopilotNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "copilot", ctx); err != nil {
+	if err := writeContextFiles(dir, "copilot", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -870,7 +870,7 @@ func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx); err != nil {
+	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -942,7 +942,7 @@ func TestWriteContextFilesPreservesExistingSkillFrontmatter(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx); err != nil {
+	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -977,7 +977,7 @@ func TestWriteContextFilesInjectsNameIntoNamelessFrontmatter(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx); err != nil {
+	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1015,7 +1015,7 @@ func TestWriteContextFilesOpenclawNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "openclaw", ctx); err != nil {
+	if err := writeContextFiles(dir, "openclaw", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1055,7 +1055,7 @@ func TestWriteContextFilesKiroNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "kiro", ctx); err != nil {
+	if err := writeContextFiles(dir, "kiro", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1134,6 +1134,74 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 	}
 	if !strings.Contains(s, "discovered automatically") {
 		t.Error("AGENTS.md missing native skill discovery hint")
+	}
+}
+
+// TestInjectRuntimeConfigAntigravity pins that AGENTS.md for Antigravity
+// advertises native skill discovery (rather than the .agent_context fallback)
+// — the CLI inherits Gemini CLI's workspace skill layout at .agents/skills/.
+func TestInjectRuntimeConfigAntigravity(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "antigravity", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "Coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md for Antigravity should advertise native skill discovery")
+	}
+	if strings.Contains(s, ".agent_context/skills/") {
+		t.Error("AGENTS.md for Antigravity must not reference the .agent_context/skills/ fallback")
+	}
+}
+
+// TestWriteContextFilesAntigravityNativeSkills pins that skills for the
+// antigravity provider land in {workDir}/.agents/skills/<slug>/, matching the
+// CLI's native workspace discovery path (Gemini CLI lineage).
+func TestWriteContextFilesAntigravityNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "antigravity-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "antigravity", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".agents", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .agents/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+	// The fallback path must NOT be written — Antigravity's scanner reads
+	// .agents/skills/, not .agent_context/skills/.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error(".agent_context/skills/ MUST NOT be written for antigravity — its scanner does not read that path")
 	}
 }
 
@@ -1544,7 +1612,7 @@ func TestWriteContextFilesHermesFallbackSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "hermes", ctx); err != nil {
+	if err := writeContextFiles(dir, "hermes", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 

@@ -68,7 +68,7 @@ type Config struct {
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
 	ConfigPath                     string                // explicit config path (empty = profile/default resolution)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	LocalNotificationEnabled       bool                  // enable local system notifications after task completion/failure
@@ -243,8 +243,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_DEEPSEEK_MODEL")),
 		}
 	}
+	// Antigravity has no `--model` flag and ModelSelectionSupported returns
+	// false for it (see server/pkg/agent/models.go). Pass an empty modelEnv
+	// so we don't seed AgentEntry.Model from an environment variable that
+	// the backend would silently ignore, and don't lead users to set it.
+	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", ""); ok {
+		agents["antigravity"] = e
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or DeepSeek-TUI (deepseek) and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, agy, or DeepSeek-TUI (deepseek) and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -609,7 +616,7 @@ func shellArgsFromEnv(name string) ([]string, error) {
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
 	"claude", "cbc", "codex", "opencode", "openclaw", "hermes",
-	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
+	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "agy",
 }
 
 var codexDesktopAppBundlePaths = func() []string {

@@ -193,8 +193,18 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	}
 
 	// Write context files into workdir (skills go to provider-native paths).
-	if err := writeContextFiles(workDir, params.Provider, params.Task); err != nil {
+	// Track every file/dir we create in a manifest so CleanupSidecars can
+	// roll a local_directory workdir back to its pre-Prepare state. Cloud
+	// tasks don't need the manifest (the GC loop wipes envRoot wholesale),
+	// but we always write one — it's cheap, keeps Prepare/Reuse symmetric,
+	// and avoids a conditional that would silently disable cleanup if the
+	// local_directory detection logic ever drifts.
+	manifest := &sidecarManifest{}
+	if err := writeContextFiles(workDir, params.Provider, params.Task, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
+	}
+	if err := writeSidecarManifest(envRoot, manifest); err != nil {
+		logger.Warn("execenv: write sidecar manifest failed (non-fatal)", "error", err)
 	}
 
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
@@ -275,9 +285,24 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		logger:         logger,
 	}
 
-	// Refresh context files (issue_context.md, skills).
-	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task); err != nil {
+	// Refresh context files (issue_context.md, skills). Reuse tracks a
+	// fresh manifest under env.RootDir so a later CleanupSidecars sees
+	// the up-to-date list of writes (an old manifest from a prior run
+	// would otherwise reference files this Reuse no longer creates). For
+	// local_directory tasks the daemon skips Reuse entirely (see
+	// daemon.runTask), but writing the manifest unconditionally keeps
+	// Prepare/Reuse symmetric so a future caller can rely on the
+	// manifest being current after either path. RootDir is empty on the
+	// legacy local_directory Reuse fallback — skip the persist in that
+	// case to avoid creating a stray manifest at the filesystem root.
+	manifest := &sidecarManifest{}
+	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task, manifest); err != nil {
 		logger.Warn("execenv: refresh context files failed", "error", err)
+	}
+	if env.RootDir != "" {
+		if err := writeSidecarManifest(env.RootDir, manifest); err != nil {
+			logger.Warn("execenv: refresh sidecar manifest failed", "error", err)
+		}
 	}
 
 	// Restore CodexHome for Codex provider — the per-task codex-home directory
@@ -349,7 +374,11 @@ func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, 
 	if len(workspaceSkills) == 0 {
 		return nil
 	}
-	return writeSkillFiles(skillsDir, workspaceSkills)
+	// Codex skills live under env.RootDir/codex-home, which the GC loop
+	// (cloud) or env teardown (local_directory) wipes wholesale — they
+	// don't sit inside the user's workdir and don't need sidecar manifest
+	// tracking.
+	return writeSkillFiles(skillsDir, workspaceSkills, nil)
 }
 
 func codexPromptModePrefersWorkspaceWrite(runtimeConfig json.RawMessage) bool {

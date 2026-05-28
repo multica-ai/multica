@@ -29,6 +29,7 @@
     "./members": "./members/index.ts",
     "./inbox": "./inbox/index.ts",
     "./runtimes": "./runtimes/index.ts",
+    "./billing": "./billing/index.ts",
     "./dashboard": "./dashboard/index.ts",
     "./agent-dashboard": "./agent-dashboard/index.ts",
     "./squads": "./squads/index.ts",

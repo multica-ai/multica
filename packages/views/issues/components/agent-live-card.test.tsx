@@ -57,9 +57,13 @@ vi.mock("../../common/actor-avatar", () => ({
 
 vi.mock("../../common/task-transcript", async () => {
   const buildTimeline = vi.fn().mockReturnValue([]);
+  const coalesceTimelineItems = vi.fn((items) => items);
+  const appendTimelineItem = vi.fn((items, item) => [...items, item]);
   return {
     TranscriptButton: () => <button data-testid="transcript-button">transcript</button>,
+    appendTimelineItem,
     buildTimeline,
+    coalesceTimelineItems,
   };
 });
 
