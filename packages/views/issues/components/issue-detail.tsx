@@ -46,7 +46,7 @@ import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, Upda
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker, IssueIdentifierBadge } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
@@ -1650,9 +1650,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
-            <span className="text-muted-foreground tabular-nums shrink-0">
-              {issue.identifier}
-            </span>
+            <IssueIdentifierBadge
+              issue={issue}
+              onCopy={actions.copyIdentifier}
+              className="shrink-0"
+            />
             <span className="truncate font-medium text-foreground">
               {issue.title}
             </span>

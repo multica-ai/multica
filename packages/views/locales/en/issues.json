@@ -217,6 +217,8 @@
     "update_failed": "Failed to update issue",
     "link_copied": "Link copied",
     "link_copy_failed": "Failed to copy link",
+    "identifier_copied": "Copied {{identifier}}",
+    "identifier_copy_failed": "Failed to copy identifier",
     "workdir_path_copied": "Workdir path copied",
     "workdir_path_copy_failed": "Failed to copy workdir path",
     "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent"
