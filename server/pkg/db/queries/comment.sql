@@ -201,6 +201,26 @@ ORDER BY p.last_activity_at ASC, p.root_id ASC, c.created_at ASC, c.id ASC;
 SELECT count(*) FROM comment
 WHERE issue_id = $1 AND workspace_id = $2;
 
+-- name: ListUnresolvedCommentsForIssue :many
+-- Unresolved-only chronological dump, capped at @row_limit. Powers the CLI's
+-- `comment list --unresolved` agent flow. Additive: existing callers stay on
+-- ListCommentsForIssue and are unaffected.
+SELECT * FROM comment
+WHERE issue_id = @issue_id AND workspace_id = @workspace_id
+  AND resolved_at IS NULL
+ORDER BY created_at ASC, id ASC
+LIMIT @row_limit;
+
+-- name: CountUnresolvedComments :one
+-- Counts unresolved comments on an issue, excluding any authored by the given
+-- agent (@author_id). Feeds the daemon claim response so the agent learns how
+-- many open comments are waiting without the server shipping their bodies.
+SELECT count(*) FROM comment
+WHERE issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND resolved_at IS NULL
+  AND NOT (author_type = 'agent' AND author_id = @author_id);
+
 -- name: GetComment :one
 SELECT * FROM comment
 WHERE id = $1;
