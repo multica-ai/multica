@@ -73,6 +73,15 @@ type Config struct {
 	// return 503 instead of attempting to dial a hard-coded private service.
 	CloudRuntimeFleetURL     string
 	CloudRuntimeFleetTimeout time.Duration
+	// Casdoor SSO configuration. When Endpoint is non-empty, the Casdoor
+	// OAuth flow is enabled. Login redirects to Casdoor's authorize endpoint;
+	// callback exchanges the code for a token and provisions the user.
+	CasdoorEndpoint     string
+	CasdoorClientID     string
+	CasdoorClientSecret string
+	CasdoorRedirectURI  string
+	CasdoorOrgName      string
+	CasdoorAppName      string
 }
 
 type cloudRuntimeProxy interface {
