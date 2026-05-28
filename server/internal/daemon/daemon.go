@@ -151,6 +151,14 @@ type Daemon struct {
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
 	runUpdateFn func(targetVersion string) (string, error)
+
+	// hooks is the localhost HTTP server that receives Claude Code hook
+	// deliveries (PreToolUse, PostToolUse, Stop, SessionStart) and routes
+	// them to per-task subscribers. Used by the claude-tui backend to
+	// recover the structured events the TUI doesn't expose on stdout. nil
+	// until Run() starts it; only initialised when the claude-tui provider
+	// is registered.
+	hooks *hookServer
 }
 
 // New creates a new Daemon instance.
@@ -588,6 +596,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 	healthLn, err := d.listenHealth()
 	if err != nil {
 		return err
+	}
+
+	// Start the hook server when claude-tui is registered. The TUI backend
+	// can't get structured events without it; other backends ignore the
+	// HookSubscriber field on agent.Config.
+	if _, hasTUI := d.cfg.Agents["claude-tui"]; hasTUI {
+		d.hooks = newHookServer(d.logger)
+		if _, err := d.hooks.Start(ctx); err != nil {
+			return fmt.Errorf("start hook server: %w", err)
+		}
 	}
 
 	agentNames := make([]string, 0, len(d.cfg.Agents))
@@ -2659,6 +2677,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
+		Hooks:          d.hookSubscriberFor(provider),
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)

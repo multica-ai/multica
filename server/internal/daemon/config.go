@@ -182,6 +182,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	agents := map[string]AgentEntry{}
 	if e, ok := probe("MULTICA_CLAUDE_PATH", "claude", "MULTICA_CLAUDE_MODEL"); ok {
 		agents["claude"] = e
+		// claude-tui is a demo backend that drives the same `claude` binary
+		// in TUI mode over a PTY. It's an opt-in alternative provider gated
+		// by MULTICA_CLAUDE_TUI_ENABLED so it doesn't register by default and
+		// surprise operators with two claude-shaped providers.
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("MULTICA_CLAUDE_TUI_ENABLED")), "1") {
+			agents["claude-tui"] = e
+		}
 	}
 	if e, ok := probe("MULTICA_CODEX_PATH", "codex", "MULTICA_CODEX_MODEL"); ok {
 		agents["codex"] = e
