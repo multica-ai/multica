@@ -370,10 +370,9 @@ multica.example.com {
 
 ```
 app.example.com {
-    reverse_proxy localhost:3000
-}
-
-api.example.com {
+    # The pre-built web image derives WebSocket URLs from the page origin, so
+    # /ws must be available on the frontend hostname unless you rebuild the web
+    # image with NEXT_PUBLIC_WS_URL pointing somewhere else.
     @multica_ws path /ws /ws/*
     handle @multica_ws {
         reverse_proxy localhost:8080 {
@@ -381,6 +380,10 @@ api.example.com {
         }
     }
 
+    reverse_proxy localhost:3000
+}
+
+api.example.com {
     reverse_proxy localhost:8080
 }
 ```
@@ -408,6 +411,18 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
+
+    # WebSocket support for the pre-built web image. The browser connects to
+    # wss://app.example.com/ws unless NEXT_PUBLIC_WS_URL was baked into a
+    # source-built image.
+    location /ws {
+        proxy_pass http://localhost:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400;
+    }
 }
 
 # Backend API
@@ -425,16 +440,6 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
-
-    # WebSocket support
-    location /ws {
-        proxy_pass http://localhost:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 86400;
-    }
 }
 ```
 
@@ -450,6 +455,8 @@ REMOTE_API_URL=https://api.example.com
 NEXT_PUBLIC_API_URL=https://api.example.com
 NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
 ```
+
+对于预构建的 Docker 镜像，只在运行时修改 `NEXT_PUBLIC_WS_URL` 不会改变浏览器 bundle。请按上例在 `app.example.com` 上代理 `/ws`，或者使用 `docker-compose.selfhost.build.yml` 重新构建 web 镜像，把 `NEXT_PUBLIC_WS_URL=wss://api.example.com/ws` 写入构建产物。默认的 `FRONTEND_ORIGIN=http://localhost:3000` 只适合同一台机器上的 localhost 访问；公开或 LAN 部署必须把它设置为浏览器可见的前端 origin。
 
 ## Health Check
 

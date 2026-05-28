@@ -328,10 +328,9 @@ multica.example.com {
 
 ```
 app.example.com {
-    reverse_proxy localhost:3000
-}
-
-api.example.com {
+    # The pre-built web image derives WebSocket URLs from the page origin, so
+    # /ws must be available on the frontend hostname unless you rebuild the web
+    # image with NEXT_PUBLIC_WS_URL pointing somewhere else.
     @multica_ws path /ws /ws/*
     handle @multica_ws {
         reverse_proxy localhost:8080 {
@@ -339,6 +338,10 @@ api.example.com {
         }
     }
 
+    reverse_proxy localhost:3000
+}
+
+api.example.com {
     reverse_proxy localhost:8080
 }
 ```
@@ -366,6 +369,18 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
+
+    # WebSocket support for the pre-built web image. The browser connects to
+    # wss://app.example.com/ws unless NEXT_PUBLIC_WS_URL was baked into a
+    # source-built image.
+    location /ws {
+        proxy_pass http://localhost:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400;
+    }
 }
 
 # Backend API
@@ -383,16 +398,6 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
-
-    # WebSocket support
-    location /ws {
-        proxy_pass http://localhost:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 86400;
-    }
 }
 ```
 
@@ -408,6 +413,8 @@ REMOTE_API_URL=https://api.example.com
 NEXT_PUBLIC_API_URL=https://api.example.com
 NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
 ```
+
+For the pre-built Docker image, runtime-only changes to `NEXT_PUBLIC_WS_URL` do not change the browser bundle. Either proxy `/ws` on `app.example.com` as shown above, or rebuild the web image with `docker-compose.selfhost.build.yml` so `NEXT_PUBLIC_WS_URL=wss://api.example.com/ws` is baked in. The default `FRONTEND_ORIGIN=http://localhost:3000` is only valid for same-machine localhost access; public or LAN deployments must set it to the browser-visible frontend origin.
 
 ## LAN / Non-localhost Access
 

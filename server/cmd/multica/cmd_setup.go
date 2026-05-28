@@ -189,6 +189,9 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 			appURL = fmt.Sprintf("http://localhost:%d", frontendPort)
 		}
 	}
+	if err := validateSelfHostURLs(serverURL, appURL); err != nil {
+		return err
+	}
 
 	cfg := cli.CLIConfig{
 		ServerURL: serverURL,
@@ -233,6 +236,49 @@ func serverHostIsLocal(serverURL string) bool {
 	if err != nil {
 		return false
 	}
+	h := parsed.Hostname()
+	if h == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+func validateSelfHostURLs(serverURL, appURL string) error {
+	server, err := parseHTTPURL(serverURL, "--server-url")
+	if err != nil {
+		return err
+	}
+	app, err := parseHTTPURL(appURL, "--app-url")
+	if err != nil {
+		return err
+	}
+
+	serverLocal := parsedURLHostIsLocal(server)
+	appLocal := parsedURLHostIsLocal(app)
+	if !serverLocal && appLocal {
+		return fmt.Errorf("--app-url %s points at localhost, but --server-url %s is remote; use the browser-visible frontend URL and set FRONTEND_ORIGIN to the same origin on the server", appURL, serverURL)
+	}
+	if !serverLocal && app.Scheme == "https" && server.Scheme == "http" {
+		return fmt.Errorf("--app-url uses https but --server-url uses http for a remote host; browsers will block mixed-content API/WebSocket requests, so put TLS in front of the backend or use matching http URLs")
+	}
+	return nil
+}
+
+func parseHTTPURL(raw, flagName string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("%s must be an absolute URL like https://app.example.com", flagName)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("%s must use http or https", flagName)
+	}
+	return parsed, nil
+}
+
+func parsedURLHostIsLocal(parsed *url.URL) bool {
 	h := parsed.Hostname()
 	if h == "localhost" {
 		return true

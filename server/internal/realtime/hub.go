@@ -688,7 +688,16 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		slog.Error("websocket upgrade failed", "error", err)
+		slog.Error(
+			"websocket upgrade failed",
+			"error", err,
+			"host", r.Host,
+			"origin", r.Header.Get("Origin"),
+			"upgrade", r.Header.Get("Upgrade"),
+			"connection", r.Header.Get("Connection"),
+			"x_forwarded_host", r.Header.Get("X-Forwarded-Host"),
+			"x_forwarded_proto", r.Header.Get("X-Forwarded-Proto"),
+		)
 		return
 	}
 
