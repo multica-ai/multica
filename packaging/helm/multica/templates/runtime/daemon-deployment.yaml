@@ -1,0 +1,112 @@
+{{- if and .Values.runtime.enabled (eq .Values.runtime.mode "daemon") }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multica-daemon
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "daemon" "ctx" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.runtime.daemon.replicaCount }}
+  strategy:
+    type: Recreate     # single daemon identity; avoid two registering at once
+  selector:
+    matchLabels:
+      {{- include "multica.componentSelector" (dict "name" "daemon" "ctx" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "multica.componentLabels" (dict "name" "daemon" "ctx" .) | nindent 8 }}
+    spec:
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecret }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+      initContainers:
+        # Expand the Claude OAuth bundle into a writable .claude dir.
+        - name: claude-auth
+          image: {{ include "multica.runtimeImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              tar xzf /secret/claude-auth.tgz -C /home/multica/.claude --strip-components=1
+              echo "claude credentials expanded:"
+              ls -la /home/multica/.claude
+          volumeMounts:
+            - { name: claude-oauth-secret, mountPath: /secret, readOnly: true }
+            - { name: claude-home, mountPath: /home/multica/.claude }
+      containers:
+        - name: daemon
+          image: {{ include "multica.runtimeImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["multica", "daemon", "start", "--foreground"]
+          env:
+            - name: MULTICA_SERVER_URL
+              value: {{ .Values.runtime.serverUrl | quote }}
+            - name: MULTICA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.runtime.tokenSecretName }}
+                  key: token
+            - name: MULTICA_DAEMON_ID
+              value: "multica-daemon"
+            - name: MULTICA_DAEMON_DEVICE_NAME
+              value: {{ .Values.runtime.daemon.deviceName | quote }}
+            - name: MULTICA_DAEMON_MAX_CONCURRENT_TASKS
+              value: {{ .Values.runtime.daemon.maxConcurrentTasks | quote }}
+            - name: MULTICA_WORKSPACES_ROOT
+              value: {{ .Values.runtime.daemon.workspacesRoot | quote }}
+            {{- if .Values.runtime.workspaceId }}
+            - name: MULTICA_WORKSPACE_ID
+              value: {{ .Values.runtime.workspaceId | quote }}
+            {{- end }}
+            {{- if eq .Values.runtime.daemon.agent.auth "apiKey" }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.runtime.daemon.agent.apiKeySecretName }}
+                  key: {{ .Values.runtime.daemon.agent.apiKeySecretKey }}
+            {{- end }}
+            {{- with .Values.runtime.daemon.agent.model }}
+            - name: MULTICA_CLAUDE_MODEL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.runtime.daemon.agent.extraArgs }}
+            - name: MULTICA_CLAUDE_ARGS
+              value: {{ . | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.runtime.daemon.resources | nindent 12 }}
+          volumeMounts:
+            - { name: claude-home, mountPath: /home/multica/.claude }
+            - { name: git-ssh, mountPath: /home/multica/.ssh-src, readOnly: true }
+            - { name: work, mountPath: {{ .Values.runtime.daemon.workspacesRoot | quote }} }
+          lifecycle:
+            postStart:
+              exec:
+                # Copy ssh key into place with correct perms (secret mounts are 0444).
+                command:
+                  - sh
+                  - -c
+                  - |
+                    cp /home/multica/.ssh-src/id_ed25519 /home/multica/.ssh/id_ed25519 2>/dev/null || true
+                    chmod 600 /home/multica/.ssh/id_ed25519 2>/dev/null || true
+      volumes:
+        - name: claude-oauth-secret
+          secret:
+            secretName: {{ .Values.runtime.daemon.agent.oauthSecretName }}
+        - name: claude-home
+          emptyDir: {}
+        - name: git-ssh
+          secret:
+            secretName: {{ .Values.runtime.gitSshSecretName }}
+            defaultMode: 0400
+        - name: work
+          emptyDir: {}
+{{- end }}
