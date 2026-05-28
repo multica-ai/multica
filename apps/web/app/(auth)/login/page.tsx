@@ -64,8 +64,9 @@ function LoginPageContent() {
   const searchParams = useSearchParams();
 
   const casdoorEnabled = process.env.NEXT_PUBLIC_CASDOOR_ENABLED === "true";
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "/tasks";
   const casdoorLoginUrl =
-    process.env.NEXT_PUBLIC_CASDOOR_LOGIN_URL || "/auth/casdoor/login";
+    process.env.NEXT_PUBLIC_CASDOOR_LOGIN_URL || `${basePath}/auth/casdoor/login`;
 
   const cliCallbackRaw = searchParams.get("cli_callback");
   const cliState = searchParams.get("cli_state") || "";
