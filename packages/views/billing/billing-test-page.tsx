@@ -15,7 +15,12 @@
 //
 // Anything past "make the API talk to Stripe and surface results" is
 // out of scope here on purpose — when the real billing UI ships it
-// will live elsewhere and this whole page can be deleted.
+// will live elsewhere and this whole page can be deleted. Until then,
+// the page intentionally hard-codes English labels rather than going
+// through useT(): it is dev-only, not localized, and slated for
+// deletion — so it is exempt from the package-wide i18next/no-literal-string
+// rule.
+/* eslint-disable i18next/no-literal-string */
 
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
