@@ -58,6 +58,14 @@ By default it pulls the latest stable release images from GHCR. To build the bac
 If the selected GHCR tag has not been published yet, `make selfhost` now tells you to fall back to `make selfhost-build`.
 `make selfhost-build` uses local `multica-backend:dev` / `multica-web:dev` tags, so it does not overwrite the pulled `:latest` images.
 
+The prebuilt `multica-web` image is intended for the documented Compose topology:
+
+- the backend service is named `backend` on the Docker network
+- browser traffic reaches the web app on one origin, and `/api`, `/auth`, `/uploads`, and `/ws` are proxied by the web server to the backend
+- the browser WebSocket URL is derived from the page origin unless `NEXT_PUBLIC_WS_URL` was baked into a locally built image
+
+For most custom-domain installs, put a reverse proxy in front of the frontend and preserve those same paths on the same origin. If you need the browser bundle to call a separate public API or WebSocket origin, build the web image locally with `make selfhost-build` and set the relevant build-time values before building; setting `NEXT_PUBLIC_*` only in the `environment:` block of a prebuilt image does not rewrite an already-built Next.js bundle.
+
 Once ready:
 
 - **Frontend:** http://localhost:3000
@@ -428,6 +436,15 @@ Then start everything:
 ```bash
 docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
+```
+
+For the official prebuilt images, keep `docker-compose.selfhost.yml` as the base file. The frontend service explicitly starts the Next.js standalone server with `node apps/web/server.js`; database migrations run in the backend container. A healthy startup should show `postgres`, `backend`, and `frontend` running, with the frontend healthcheck passing after Next.js is ready.
+
+If your deployment requires build-time frontend values such as `NEXT_PUBLIC_WS_URL`, use the local-build override instead:
+
+```bash
+NEXT_PUBLIC_WS_URL=wss://api.example.com/ws \
+docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
 ```
 
 ## Manual CLI Configuration

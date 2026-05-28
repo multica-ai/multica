@@ -8,7 +8,7 @@ require_config() {
   local config=$1
   local expected=$2
 
-  if ! grep -Fq "$expected" <<<"$config"; then
+  if ! grep -Fq -- "$expected" <<<"$config"; then
     echo "Missing expected docker compose config value:"
     echo "  $expected"
     exit 1
@@ -19,7 +19,7 @@ require_env() {
   local output=$1
   local expected=$2
 
-  if ! grep -Fxq "$expected" <<<"$output"; then
+  if ! grep -Fxq -- "$expected" <<<"$output"; then
     echo "Missing expected derived env value:"
     echo "  $expected"
     echo "Observed:"
@@ -27,6 +27,16 @@ require_env() {
     exit 1
   fi
 }
+
+if grep -Eq '(^|[[:space:]])(ENTRYPOINT|CMD).*(migrate|/app/server)' Dockerfile.web; then
+  echo "Dockerfile.web must start only the Next.js standalone server, not backend migrations or binaries."
+  exit 1
+fi
+
+if ! grep -Fq 'CMD ["node", "apps/web/server.js"]' Dockerfile.web; then
+  echo 'Dockerfile.web must keep the web runtime command as: CMD ["node", "apps/web/server.js"]'
+  exit 1
+fi
 
 config="$(
   FRONTEND_PORT=3100 BACKEND_PORT=9100 docker compose \
@@ -40,6 +50,13 @@ require_config "$config" 'published: "9100"'
 require_config "$config" 'FRONTEND_ORIGIN: http://localhost:3100'
 require_config "$config" 'GOOGLE_REDIRECT_URI: http://localhost:3100/auth/callback'
 require_config "$config" 'MULTICA_APP_URL: http://localhost:3100'
+require_config "$config" 'entrypoint:'
+require_config "$config" '- node'
+require_config "$config" 'command:'
+require_config "$config" '- apps/web/server.js'
+require_config "$config" 'image: ghcr.io/multica-ai/multica-web:latest'
+require_config "$config" 'HOSTNAME: 0.0.0.0'
+require_config "$config" "fetch('http://127.0.0.1:3000')"
 
 for script in scripts/dev.sh scripts/check.sh; do
   if ! grep -Fq '. scripts/local-env.sh' "$script"; then
