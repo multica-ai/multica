@@ -2651,13 +2651,8 @@ func TestBacklogToTodoTriggersAgent(t *testing.T) {
 func TestAgentCannotMarkDoneWithoutStructuredCompletionEvidence(t *testing.T) {
 	ctx := context.Background()
 
-	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND name = $2`,
-		testWorkspaceID, "Handler Test Agent",
-	).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("failed to find test agent: %v", err)
-	}
+	agentID := createHandlerTestAgent(t, "Done Evidence Missing Agent", nil)
+	runtimeID := handlerTestRuntimeID(t)
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
@@ -2715,13 +2710,8 @@ func TestAgentCannotMarkDoneWithoutStructuredCompletionEvidence(t *testing.T) {
 func TestAgentCanMarkDoneAfterStructuredCompletionEvidence(t *testing.T) {
 	ctx := context.Background()
 
-	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND name = $2`,
-		testWorkspaceID, "Handler Test Agent",
-	).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("failed to find test agent: %v", err)
-	}
+	agentID := createHandlerTestAgent(t, "Done Evidence Present Agent", nil)
+	runtimeID := handlerTestRuntimeID(t)
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
@@ -2746,7 +2736,7 @@ func TestAgentCanMarkDoneAfterStructuredCompletionEvidence(t *testing.T) {
 		VALUES ($1, 'agent', $2, $3, 'comment', now())
 	`, issueID, agentID, strings.Join([]string{
 		"Completion evidence:",
-		"Executor: Handler Test Agent",
+		"Executor: Done Evidence Present Agent",
 		"Repository: https://github.com/AndyMental/multica",
 		"Path: /workdir/multica",
 		"Branch: agent/dev/test",
@@ -2784,13 +2774,8 @@ func TestAgentCanMarkDoneAfterStructuredCompletionEvidence(t *testing.T) {
 func TestAgentBatchDoneWithoutStructuredCompletionEvidenceReturnsConflict(t *testing.T) {
 	ctx := context.Background()
 
-	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND name = $2`,
-		testWorkspaceID, "Handler Test Agent",
-	).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("failed to find test agent: %v", err)
-	}
+	agentID := createHandlerTestAgent(t, "Batch Done Evidence Missing Agent", nil)
+	runtimeID := handlerTestRuntimeID(t)
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
