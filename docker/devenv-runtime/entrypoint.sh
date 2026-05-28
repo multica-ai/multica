@@ -150,7 +150,17 @@ JSON
   echo "devenv: multica daemon started (pid $!)"
 fi
 
-# ── Configure arb ────────────────────────────────────────────────────────────
+install_arb() {
+  if command -v arb >/dev/null 2>&1; then return; fi
+  if [ -z "${GH_TOKEN:-}" ]; then return; fi
+  echo "@g2crowd:registry=https://npm.pkg.github.com" > /tmp/.npmrc
+  echo "//npm.pkg.github.com/:_authToken=${GH_TOKEN}" >> /tmp/.npmrc
+  HOME=/tmp npm install -g @g2crowd/arb-cli@latest 2>/dev/null
+  rm -f /tmp/.npmrc
+  echo "[entrypoint] Installed arb"
+}
+install_arb
+
 configure_arb() {
   if [ -z "${ARB_TOKEN:-}" ]; then return; fi
 

@@ -44,12 +44,7 @@ COPY --chmod=755 restart /usr/local/bin/restart
 COPY agent-templates/ /etc/multica/agent-templates/
 RUN chmod -R a+r /etc/multica/agent-templates/
 
-# ── arb (GitHub/Jira → OpenCode dispatcher) ──────────────────────────────────
-RUN --mount=type=secret,id=github_token \
-    echo "@g2crowd:registry=https://npm.pkg.github.com" > /tmp/.npmrc \
- && echo "//npm.pkg.github.com/:_authToken=$(cat /run/secrets/github_token 2>/dev/null || echo '')" >> /tmp/.npmrc \
- && HOME=/tmp npm install -g @g2crowd/arb-cli@latest \
- && rm -f /tmp/.npmrc
+# ── arb — installed at runtime via entrypoint (needs user's GH_TOKEN) ────────
 
 USER agent
 ENV HOME=/home/agent
@@ -85,7 +80,7 @@ COPY --chown=agent:agent config/AGENTS.md /opt/AGENTS.md
 RUN cd "${HOME}/.config/opencode" && bun install
 
 # ── Verify ───────────────────────────────────────────────────────────────────
-RUN opencode --version && bun --version && gh --version | head -1 && arb --help | head -1
+RUN opencode --version && bun --version && gh --version | head -1
 
 ENV OPENCODE_HOST=0.0.0.0 \
     OPENCODE_PORT=4096

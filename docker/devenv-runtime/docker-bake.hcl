@@ -36,7 +36,6 @@ target "default" {
     "org.opencontainers.image.description" = "DevEnv runtime — opencode server on the shared agent-runtime base"
     "org.opencontainers.image.licenses"    = "UNLICENSED"
   }
-  secret = ["id=github_token,env=GITHUB_TOKEN"]
   cache-from = ["type=gha,scope=devenv-runtime"]
   cache-to   = ["type=gha,scope=devenv-runtime,mode=max"]
 }
