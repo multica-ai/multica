@@ -347,9 +347,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `daemon-client` | server/internal/daemon/client.go | 6 | Daemon additions (sandbox/prompt/types) |
 | `capabilities-shim` | server/internal/daemon/capabilities.go<br>server/internal/cerebro/capabilities/discovery.go<br>server/internal/cerebro/capabilities/discovery_test.go | 1 upstream hook + cerebro package helper | JEH-1916 — daemon keeps only a one-line hook while the legacy `map[string]any` compatibility bridge lives with the cerebro capability registry. |
 | `daemon-config` | server/internal/cerebro/runtime/config.go<br>server/internal/daemon/config.go | 0 | Daemon additions (sandbox/prompt/types) |
-| `daemon-config-firtal-gateway` | server/internal/daemon/config.go | 66 | Register the managed gateway runtime from central URL/key/model environment variables |
-| `daemon-config-firtal-gateway-strict-bool` | server/internal/daemon/config.go | 1 | Refuse to silently disable the gateway on unrecognized `MULTICA_FIRTAL_GATEWAY_ENABLED` values |
-| `daemon-config-test-firtal-gateway` | server/internal/daemon/config_test.go | 41 | Tests for explicit / inferred / strict-bool managed gateway runtime registration |
+| `daemon-config-firtal-gateway` | server/internal/daemon/config.go | 55 | Register the managed gateway runtime when `MULTICA_RUNTIME_TYPE=firtal-registry` is set together with central URL/key/model env (FIR-2453 — URL+key alone no longer auto-registers) |
+| `daemon-config-test-firtal-gateway` | server/internal/daemon/config_test.go | 70 | Tests for the `MULTICA_RUNTIME_TYPE=firtal-registry` gate plus missing-URL / missing-key fail-fast paths |
 | `daemon-daemon` | server/internal/daemon/daemon.go | 31 | Daemon additions (sandbox/prompt/types) |
 | `daemon-daemon-firtal-gateway-usage-cost` | server/internal/daemon/daemon.go | 11 | Include exact gateway spend when converting backend usage into task usage reports |
 | `daemon-settings-refresh` | server/internal/daemon/daemon.go<br>server/internal/cerebro/daemonsettings/refresh.go | 2 inline + 64 new | JEH-1916 / FIR-1924 — existing-workspace sync calls a cerebro-zone helper so settings changes still reach a running daemon without keeping the refresh logic in upstream-zone `daemon.go`. |
