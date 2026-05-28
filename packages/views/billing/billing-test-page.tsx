@@ -17,7 +17,7 @@
 // out of scope here on purpose — when the real billing UI ships it
 // will live elsewhere and this whole page can be deleted.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, RefreshCw, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
@@ -30,6 +30,7 @@ import {
   billingTransactionsOptions,
   useCreateCloudBillingCheckoutSession,
   useCreateCloudBillingPortalSession,
+  useInvalidateBillingDataAfterCredit,
 } from "@multica/core/billing";
 import type {
   BillingBatch,
@@ -116,6 +117,26 @@ function CheckoutSessionStatusBanner({
   const status = data?.status ?? (isLoading ? "loading" : "");
   const terminal =
     status === "credited" || status === "failed" || status === "canceled";
+
+  // When the polling reaches a terminal state, the rest of the page
+  // (balance, transactions, batches, topups) is still showing the
+  // pre-checkout snapshot. Without this effect the user would see
+  // "Final status: credited" up here while the balance card still
+  // displays the old number — the only signal that things were stale
+  // would be a manual refresh click. Invalidate the dependent
+  // queries so they re-fetch in the background.
+  //
+  // Dep list `[terminal, ...]`: `terminal` only flips from false→true
+  // once per session-id, so the invalidation fires exactly once. If
+  // the caller mounts this banner with a session that is already in a
+  // terminal state (e.g. user revisits the success URL after closing
+  // and reopening the tab), `terminal` flips false→true on the first
+  // data load and we still re-fetch — which is what we want, because
+  // the cached snapshot is just as stale in that case.
+  const invalidateBillingDataAfterCredit = useInvalidateBillingDataAfterCredit();
+  useEffect(() => {
+    if (terminal) invalidateBillingDataAfterCredit();
+  }, [terminal, invalidateBillingDataAfterCredit]);
 
   return (
     <Card className="border-primary/40 bg-primary/5">
