@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -207,5 +208,51 @@ func TestKimiBackendInvokesACPSubcommand(t *testing.T) {
 		case "--yolo", "--auto-approve", "--yes", "-y":
 			t.Errorf("kimi acp doesn't accept %q; auto-approval is handled in hermesClient.handleAgentRequest", l)
 		}
+	}
+}
+
+// TestKimiResumeIncludesMcpServers pins the same contract as the matching
+// Hermes test: session/resume must carry the managed MCP set so a resumed
+// Kimi task has the same MCP tools as a fresh one.
+func TestKimiResumeIncludesMcpServers(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_resume", `{}`)))
+
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_resume",
+		McpConfig:       json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx"}}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/resume")
+	params := frame["params"].(map[string]any)
+	servers, ok := params["mcpServers"].([]any)
+	if !ok {
+		t.Fatalf("session/resume.mcpServers: got %T, want []any", params["mcpServers"])
+	}
+	if len(servers) != 1 || servers[0].(map[string]any)["name"] != "fetch" {
+		t.Fatalf("session/resume.mcpServers: got %v, want one entry named fetch", servers)
 	}
 }

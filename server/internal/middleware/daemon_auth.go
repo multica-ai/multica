@@ -79,6 +79,16 @@ func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) contex
 func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// X-Actor-Source is server-set only — strip any
+			// client-supplied value before any branch can re-stamp
+			// it. This mirrors what Auth middleware does (see auth.go
+			// "X-Actor-Source is server-set only..." comment) and
+			// keeps the contract uniform across both middlewares: a
+			// downstream guard like handler.RequireHumanActor can
+			// trust this header regardless of which auth path the
+			// request arrived on.
+			r.Header.Del("X-Actor-Source")
+
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				slog.Debug("daemon_auth: missing authorization header", "path", r.URL.Path)
@@ -161,6 +171,16 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					return
 				}
 				r.Header.Set("X-User-ID", identity.OwnerID)
+				// Mirror the regular Auth middleware: tag the auth
+				// path so any downstream guard (handler.
+				// RequireHumanActor and friends) can recognize this
+				// request as a machine credential rather than a
+				// human PAT. Daemon routes don't currently use these
+				// guards, but keeping the stamp uniform with Auth
+				// avoids a future surprise where an endpoint moved
+				// or shared between the two middlewares would behave
+				// differently depending on which one routed it.
+				r.Header.Set("X-Actor-Source", "cloud_pat")
 				ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathCloudPAT)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return

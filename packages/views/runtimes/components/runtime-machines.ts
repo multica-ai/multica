@@ -174,7 +174,15 @@ function finalizeRuntimeMachine(
   const first = runtimes[0];
   const providerNames = Array.from(new Set(runtimes.map((r) => r.provider))).sort();
   const isCurrent =
-    !!options.localDaemonId && draft.daemonId === options.localDaemonId;
+    (!!options.localDaemonId && draft.daemonId === options.localDaemonId) ||
+    (draft.mode === "local" &&
+      !!options.localMachineName &&
+      (draft.daemonId?.toLowerCase() === options.localMachineName.toLowerCase() ||
+        runtimes.some(
+          (r) =>
+            runtimeDeviceName(r)?.toLowerCase() ===
+            options.localMachineName?.toLowerCase(),
+        )));
   const title = machineTitle(runtimes, {
     isCurrent,
     localMachineName: options.localMachineName,

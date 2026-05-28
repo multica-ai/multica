@@ -10,6 +10,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -192,6 +193,14 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{}, fmt.Errorf("increment counter: %w", err)
 	}
 
+	// New issues sort to the top of their (workspace, status) column for
+	// manual ordering. Computed inside the tx so a concurrent create and
+	// a concurrent manual reorder can't both land on the same position.
+	newPosition, err := issueposition.NextTopPosition(ctx, tx, p.WorkspaceID, p.Status)
+	if err != nil {
+		return IssueCreateResult{}, fmt.Errorf("next top position: %w", err)
+	}
+
 	var issue db.Issue
 	if p.OriginType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
@@ -205,7 +214,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			CreatorType:   p.CreatorType,
 			CreatorID:     p.CreatorID,
 			ParentIssueID: p.ParentIssueID,
-			Position:      0,
+			Position:      newPosition,
 			StartDate:     p.StartDate,
 			DueDate:       p.DueDate,
 			Number:        issueNumber,
@@ -225,7 +234,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			CreatorType:   p.CreatorType,
 			CreatorID:     p.CreatorID,
 			ParentIssueID: p.ParentIssueID,
-			Position:      0,
+			Position:      newPosition,
 			StartDate:     p.StartDate,
 			DueDate:       p.DueDate,
 			Number:        issueNumber,

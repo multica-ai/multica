@@ -19,9 +19,10 @@ import { useT } from "../../../i18n";
  * it fits a single PropRow. Drops the "select a runtime first" state because
  * the inspector only renders this picker after a runtime is bound.
  *
- * Unsupported providers (e.g. hermes, which reads its own config) render an
- * inert italic "Managed by runtime" label instead of a clickable picker —
- * the back-end ignores agent.model for those runtimes anyway.
+ * Unsupported providers (e.g. antigravity, whose `agy` CLI has no
+ * `--model` flag and reads model selection from its own settings) render
+ * an inert italic "Managed by runtime" label instead of a clickable
+ * picker — the back-end ignores agent.model for those runtimes anyway.
  */
 export function ModelPicker({
   runtimeId,

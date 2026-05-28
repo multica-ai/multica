@@ -1,3 +1,4 @@
+{{- $frontendImageTag := default .Chart.AppVersion .Values.images.frontend.tag -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,7 +21,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: "{{ .Values.images.frontend.repository }}:{{ .Values.images.frontend.tag }}"
+          image: "{{ .Values.images.frontend.repository }}:{{ $frontendImageTag }}"
           imagePullPolicy: {{ .Values.images.frontend.pullPolicy }}
           ports:
             - containerPort: 3000

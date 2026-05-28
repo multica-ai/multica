@@ -296,7 +296,14 @@
       "skills_meta": "可复用的剧本",
       "more_label": "更多",
       "more_meta": "等等"
-    }
+    },
+    "creation_disabled_eyebrow": "已禁用创建工作区",
+    "creation_disabled_headline": "请联系管理员邀请你加入工作区。",
+    "creation_disabled_lede": "该 Multica 实例不允许创建新的工作区。等管理员把你邀请到某个工作区后，接受邀请并刷新即可继续。",
+    "creation_disabled_logout": "退出登录",
+    "creation_disabled_eyebrow_resume": "你的工作区",
+    "creation_disabled_headline_resume": "继续使用 {{name}}。",
+    "creation_disabled_lede_resume": "该实例已禁用创建工作区，继续进入你已有的工作区即可。"
   },
   "step_runtime": {
     "scanning_headline": "正在连接这台电脑…",

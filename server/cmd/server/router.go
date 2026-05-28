@@ -144,6 +144,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowSignup:              os.Getenv("ALLOW_SIGNUP") != "false",
 		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		DisableWorkspaceCreation: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
 		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
 		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
 		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
@@ -434,6 +435,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
 	r.Get("/api/github/setup", h.GitHubSetupCallback)
+	// Stripe webhook (no Multica auth — Stripe signs the raw body
+	// with a shared secret, the multica-cloud upstream verifies. We
+	// only forward the bytes + the Stripe-Signature header; see
+	// HandleCloudBillingStripeWebhook for the rationale).
+	r.Post("/api/webhooks/stripe", h.HandleCloudBillingStripeWebhook)
+
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier))
@@ -575,7 +582,45 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Route("/api/tokens", func(r chi.Router) {
 			r.Get("/", h.ListPersonalAccessTokens)
 			r.Post("/", h.CreatePersonalAccessToken)
+			r.Post("/current/renew", h.RenewCurrentPersonalAccessToken)
 			r.Delete("/{id}", h.RevokePersonalAccessToken)
+		})
+
+		// Cloud Billing proxy. Same upstream service / port as
+		// cloud-runtime — multica-cloud's Fleet and Billing share
+		// :8080 and the same chi router. All routes here forward
+		// to /api/v1/billing/* with X-User-ID stamped from the
+		// authenticated context.
+		//
+		// User-scoped (account-level), NOT workspace-scoped — sits
+		// outside the RequireWorkspaceMember group so a user can
+		// inspect their balance, top up, and open the Billing Portal
+		// without an active workspace selected. The upstream owner
+		// model is single-user; X-Workspace-ID would be ignored even
+		// if we sent it. The Stripe webhook is the public outlier
+		// and lives outside the entire Auth group (see above).
+		//
+		// IMPORTANT — task-token actors are blocked here. The Auth
+		// middleware happily turns an mat_ task token into a normal
+		// X-User-ID stamp (so agents can comment, claim issues, etc.
+		// as their owner), but billing is account-level and a running
+		// agent reading its owner's balance / opening a checkout
+		// session is the kind of lateral-movement we're explicitly
+		// trying to prevent. handler.RequireHumanActor checks the
+		// authoritative server-set X-Actor-Source header and 403s
+		// any task-token request. See actor_guards.go for the full
+		// rationale.
+		r.Route("/api/cloud-billing", func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
+
+			r.Get("/balance", h.GetCloudBillingBalance)
+			r.Get("/transactions", h.ListCloudBillingTransactions)
+			r.Get("/batches", h.ListCloudBillingBatches)
+			r.Get("/topups", h.ListCloudBillingTopups)
+			r.Get("/price-tiers", h.ListCloudBillingPriceTiers)
+			r.Post("/checkout-sessions", h.CreateCloudBillingCheckoutSession)
+			r.Get("/checkout-sessions/{sessionId}", h.GetCloudBillingCheckoutSession)
+			r.Post("/portal-sessions", h.CreateCloudBillingPortalSession)
 		})
 
 		// --- Workspace-scoped routes (all require workspace membership) ---
