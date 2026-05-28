@@ -1,0 +1,58 @@
+{
+  "title": "Uso",
+  "subtitle": "Consumo de tokens y actividad de agents en este workspace.",
+  "filter": {
+    "project_label": "Proyecto",
+    "all_projects": "Todos los proyectos",
+    "period_label": "Período"
+  },
+  "kpi": {
+    "cost_label": "Costo · {{days}}D",
+    "tokens_label": "Tokens · {{days}}D",
+    "tokens_hint": "Entrada {{input}} · Salida {{output}}",
+    "run_time_label": "Tiempo de ejecución · {{days}}D",
+    "run_time_hint": "En {{tasks}} tareas",
+    "tasks_label": "Tareas · {{days}}D",
+    "tasks_hint": "{{failed}} fallidas"
+  },
+  "dim": {
+    "label": "Dimensión",
+    "daily": "Diario",
+    "weekly": "Semanal"
+  },
+  "daily": {
+    "title_cost": "Costo diario",
+    "title_tokens": "Tokens diarios",
+    "title_time": "Tiempo de ejecución diario",
+    "title_tasks": "Tareas diarias",
+    "metric_cost": "Costo",
+    "metric_tokens": "Tokens",
+    "metric_time": "Tiempo",
+    "metric_tasks": "Tareas",
+    "no_data": "Sin uso en este período."
+  },
+  "weekly": {
+    "title_cost": "Costo semanal",
+    "title_tokens": "Tokens semanales",
+    "title_time": "Tiempo de ejecución semanal",
+    "title_tasks": "Tareas semanales",
+    "partial_label": "{{range}} (parcial · {{covered}} / 7 días)"
+  },
+  "leaderboard": {
+    "title": "Tabla de posiciones",
+    "caption": "{{count}} agents",
+    "header_agent": "Agent",
+    "header_tokens": "Tokens",
+    "header_cost": "Costo",
+    "header_time": "Tiempo",
+    "header_tasks": "Tareas",
+    "no_data": "Sin actividad de agents en este período."
+  },
+  "empty": {
+    "title": "Sin uso todavía",
+    "body": "Una vez que los agents empiecen a ejecutar tareas acá, su consumo de tokens y tiempo de ejecución van a aparecer en esta vista."
+  },
+  "duration": {
+    "less_than_minute": "<1m"
+  }
+}
