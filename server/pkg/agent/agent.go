@@ -233,20 +233,20 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
-	"antigravity": "agy -p (print mode)",
-	"claude":      "claude (stream-json)",
-	"codebuddy":   "codebuddy (stream-json)",
-	"codex":       "codex app-server",
-	"copilot":     "copilot (json)",
-	"cursor":      "cursor-agent (stream-json)",
+	"antigravity":  "agy -p (print mode)",
+	"claude":       "claude (stream-json)",
+	"codebuddy":    "codebuddy (stream-json)",
+	"codex":        "codex app-server",
+	"copilot":      "copilot (json)",
+	"cursor":       "cursor-agent (stream-json)",
 	"DeepSeek-TUI": "deepseek app-server (native)",
-	"gemini":      "gemini (stream-json)",
-	"hermes":      "hermes acp",
-	"kimi":        "kimi acp",
-	"kiro":        "kiro-cli acp",
-	"openclaw":    "openclaw agent (json)",
-	"opencode":    "opencode run (json)",
-	"pi":          "pi (json mode)",
+	"gemini":       "gemini (stream-json)",
+	"hermes":       "hermes acp",
+	"kimi":         "kimi acp",
+	"kiro":         "kiro-cli acp",
+	"openclaw":     "openclaw agent (json)",
+	"opencode":     "opencode run (json)",
+	"pi":           "pi (json mode)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

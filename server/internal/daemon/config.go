@@ -68,7 +68,7 @@ type Config struct {
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
 	ConfigPath                     string                // explicit config path (empty = profile/default resolution)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI, antigravity
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	LocalNotificationEnabled       bool                  // enable local system notifications after task completion/failure
@@ -105,7 +105,7 @@ type RateLimitConfig struct {
 // Overrides allows CLI flags to override environment variables and defaults.
 // Zero values are ignored and the env/default value is used instead.
 type Overrides struct {
-ServerURL                      string
+	ServerURL                      string
 	WorkspacesRoot                 string
 	PollInterval                   time.Duration
 	HeartbeatInterval              time.Duration
@@ -236,12 +236,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
-	deepseekPath := envOrDefault("MULTICA_DEEPSEEK_PATH", "deepseek")
-	if _, err := exec.LookPath(deepseekPath); err == nil {
-		agents["DeepSeek-TUI"] = AgentEntry{
-			Path:  deepseekPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_DEEPSEEK_MODEL")),
-		}
+	if e, ok := probe("MULTICA_DEEPSEEK_PATH", "deepseek", "MULTICA_DEEPSEEK_MODEL"); ok {
+		agents["DeepSeek-TUI"] = e
 	}
 	// Antigravity has no `--model` flag and ModelSelectionSupported returns
 	// false for it (see server/pkg/agent/models.go). Pass an empty modelEnv
@@ -251,7 +247,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		agents["antigravity"] = e
 	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, agy, or DeepSeek-TUI (deepseek) and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, DeepSeek-TUI (deepseek), or agy and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -616,7 +612,7 @@ func shellArgsFromEnv(name string) ([]string, error) {
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
 	"claude", "cbc", "codex", "opencode", "openclaw", "hermes",
-	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "agy",
+	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "deepseek", "agy",
 }
 
 var codexDesktopAppBundlePaths = func() []string {

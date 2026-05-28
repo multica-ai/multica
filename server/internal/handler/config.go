@@ -9,7 +9,7 @@ import (
 )
 
 type AppConfig struct {
-	CdnDomain          string `json:"cdn_domain"`
+	CdnDomain string `json:"cdn_domain"`
 	// Public auth config consumed by the web app at runtime so self-hosted
 	// deployments do not need to rebuild the frontend image when operators
 	// toggle signup or wire Google OAuth.

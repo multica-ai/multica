@@ -2037,7 +2037,7 @@ func (h *Handler) CancelTaskFromDaemon(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task cancelled by daemon", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
-	writeJSON(w, http.StatusOK, taskToResponse(*task))
+	writeJSON(w, http.StatusOK, taskToResponse(*task, ""))
 }
 
 // ChatRetryProgressRequest represents a chat retry progress event from daemon.
@@ -2236,10 +2236,9 @@ func (h *Handler) GetActiveTaskForIssue(w http.ResponseWriter, r *http.Request) 
 		tasks = nil
 	}
 
-	workspaceID := uuidToString(issue.WorkspaceID)
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
-		resp[i] = taskToSlimResponse(t)
+		resp[i] = taskToSlimResponse(t, uuidToString(issue.WorkspaceID))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": resp})
@@ -2288,10 +2287,9 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := uuidToString(issue.WorkspaceID)
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
-		resp[i] = taskToSlimResponse(t)
+		resp[i] = taskToSlimResponse(t, uuidToString(issue.WorkspaceID))
 	}
 	localRuns, err := h.listLocalCLIRunsByIssue(r, issue)
 	if err != nil {

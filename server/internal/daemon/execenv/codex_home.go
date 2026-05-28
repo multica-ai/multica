@@ -170,7 +170,7 @@ func syncCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, log
 	}
 
 	if len(workspaceSkills) > 0 {
-		if err := writeSkillFiles(skillsDir, workspaceSkills); err != nil {
+		if err := writeSkillFiles(skillsDir, workspaceSkills, nil); err != nil {
 			return fmt.Errorf("write workspace codex skills: %w", err)
 		}
 	}
