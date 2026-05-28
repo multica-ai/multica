@@ -1,0 +1,16 @@
+# packaging/docker/runtime/Dockerfile.claude
+#
+# Multica agent runtime for Claude Code. Extends the runtime base with the
+# Anthropic Claude Code CLI. Adding another provider = copy this file,
+# swap the npm/install line.
+
+ARG BASE_IMAGE=multica-runtime-base:test
+FROM ${BASE_IMAGE}
+
+USER root
+RUN npm install -g @anthropic-ai/claude-code \
+    && npm cache clean --force
+USER multica
+
+# Sanity: claude resolves on PATH (the daemon discovers it this way).
+RUN claude --version || true
