@@ -337,6 +337,16 @@ func main() {
 	// shutdown so any pending bumps are flushed before we exit.
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
 
+	// Skill proxy: when COSTRICT_API_INTERNAL is set, create a proxy client
+	// that forwards skill requests to the costrict-web internal API with
+	// rate limiting, caching, and audit logging.
+	var skillProxy *service.SkillProxy
+	if costrictAPI := strings.TrimSpace(os.Getenv("COSTRICT_API_INTERNAL")); costrictAPI != "" {
+		costrictSecret := os.Getenv("COSTRICT_INTERNAL_SECRET")
+		skillProxy = service.NewSkillProxy(costrictAPI, costrictSecret, 5*time.Minute, queries)
+		slog.Info("skill proxy enabled", "base_url", costrictAPI)
+	}
+
 	r := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:        httpMetrics,
 		DaemonHub:          daemonHub,
@@ -345,6 +355,7 @@ func main() {
 		JWKSProvider:       jwksProvider,
 		SubjectResolver:    subjectResolver,
 		CasdoorEnabled:     casdoorEnabled,
+		SkillProxy:         skillProxy,
 	})
 
 	srv := &http.Server{

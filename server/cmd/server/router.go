@@ -112,6 +112,9 @@ type RouterOptions struct {
 	JWKSProvider    *auth.JWKSProvider
 	SubjectResolver middleware.SubjectResolver
 	CasdoorEnabled  bool
+	// SkillProxy, when non-nil, enables the /api/agent-skills endpoints that
+	// proxy skill fetches to the costrict-web internal API.
+	SkillProxy *service.SkillProxy
 }
 
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) chi.Router {
@@ -709,6 +712,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Put("/", h.UpdateNotificationPreferences)
 			})
 		})
+
+		// Agent skills proxy — forwards to costrict-web internal API.
+		// Only registered when the proxy is configured (COSTRICT_API_INTERNAL set).
+		if opts.SkillProxy != nil {
+			sph := handler.NewSkillProxyHandler(opts.SkillProxy)
+			r.Get("/api/agent-skills", sph.ListAgentSkills)
+			r.Get("/api/agent-skills/{id}", sph.GetAgentSkill)
+		}
 	})
 
 	return r
