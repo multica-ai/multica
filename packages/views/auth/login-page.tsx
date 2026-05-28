@@ -61,6 +61,11 @@ interface LoginPageProps {
    *  app?" prompt; desktop omits it (a download prompt inside the app
    *  would be absurd). */
   extra?: ReactNode;
+  /** Enable Casdoor SSO mode. When true (with casdoorLoginUrl), replaces
+   *  the email/code login with a single "Sign in with SSO" button. */
+  casdoorEnabled?: boolean;
+  /** URL the SSO button navigates to (e.g. "/auth/casdoor/login"). */
+  casdoorLoginUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +110,8 @@ export function LoginPage({
   onTokenObtained,
   onGoogleLogin,
   extra,
+  casdoorEnabled,
+  casdoorLoginUrl,
 }: LoginPageProps) {
   const { t } = useT("auth");
   const qc = useQueryClient();
@@ -281,6 +288,40 @@ export function LoginPage({
     if (google.state) params.set("state", google.state);
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   };
+
+  // -------------------------------------------------------------------------
+  // Casdoor SSO mode — simplified single-button login
+  // -------------------------------------------------------------------------
+
+  if (casdoorEnabled && casdoorLoginUrl) {
+    return (
+      <div className="flex min-h-svh items-center justify-center">
+        <Card className="w-full max-w-sm">
+          <CardHeader className="text-center">
+            {logo && <div className="mx-auto mb-4">{logo}</div>}
+            <CardTitle className="text-2xl">
+              {t(($) => $.signin.title)}
+            </CardTitle>
+            <CardDescription>
+              {t(($) => $.signin.description)}
+            </CardDescription>
+          </CardHeader>
+          <CardFooter>
+            <Button
+              type="button"
+              className="w-full"
+              size="lg"
+              onClick={() => {
+                window.location.href = casdoorLoginUrl;
+              }}
+            >
+              Sign in with SSO
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
 
   // -------------------------------------------------------------------------
   // CLI confirm step
