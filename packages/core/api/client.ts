@@ -1366,6 +1366,8 @@ export class ApiClient {
     posthog_key?: string;
     posthog_host?: string;
     analytics_environment?: string;
+    daemon_server_url?: string;
+    daemon_app_url?: string;
     // Self-host gate (#3433). Optional because older servers omit the field
     // entirely; consumers must default to false.
     workspace_creation_disabled?: boolean;

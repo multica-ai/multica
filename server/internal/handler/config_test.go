@@ -16,6 +16,8 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
 	t.Setenv("POSTHOG_API_KEY", "phc_test")
 	t.Setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
+	t.Setenv("MULTICA_PUBLIC_URL", "https://api.example.com/")
+	t.Setenv("MULTICA_APP_URL", "https://app.example.com/")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
@@ -50,6 +52,59 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 	if cfg.WorkspaceCreationDisabled {
 		t.Fatalf("workspace_creation_disabled: want false by default, got true")
+	}
+	if cfg.DaemonServerURL != "https://api.example.com" {
+		t.Fatalf("daemon_server_url: want https://api.example.com, got %q", cfg.DaemonServerURL)
+	}
+	if cfg.DaemonAppURL != "https://app.example.com" {
+		t.Fatalf("daemon_app_url: want https://app.example.com, got %q", cfg.DaemonAppURL)
+	}
+}
+
+func TestGetConfigUsesAppURLForSameOriginDaemonSetup(t *testing.T) {
+	t.Setenv("MULTICA_APP_URL", "https://multica.internal.example/")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.DaemonServerURL != "https://multica.internal.example" {
+		t.Fatalf("daemon_server_url: want same-origin URL, got %q", cfg.DaemonServerURL)
+	}
+	if cfg.DaemonAppURL != "https://multica.internal.example" {
+		t.Fatalf("daemon_app_url: want app URL, got %q", cfg.DaemonAppURL)
+	}
+}
+
+func TestGetConfigOmitsOfficialCloudDaemonSetup(t *testing.T) {
+	t.Setenv("MULTICA_PUBLIC_URL", "https://api.multica.ai")
+	t.Setenv("FRONTEND_ORIGIN", "https://multica.ai")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.DaemonServerURL != "" {
+		t.Fatalf("daemon_server_url: want omitted for cloud, got %q", cfg.DaemonServerURL)
+	}
+	if cfg.DaemonAppURL != "" {
+		t.Fatalf("daemon_app_url: want omitted for cloud, got %q", cfg.DaemonAppURL)
 	}
 }
 

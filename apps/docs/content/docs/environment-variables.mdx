@@ -183,6 +183,8 @@ For a full explanation of how each parameter affects daemon behavior, see [Daemo
 | Variable | Default | Description |
 |---|---|---|
 | `FRONTEND_ORIGIN` | empty | Frontend address. Invite email links, the CORS allowlist, and the cookie domain are all derived from this. When unset, invite email links fall back to the hosted domain `https://app.multica.ai` — self-host must set this explicitly |
+| `MULTICA_APP_URL` | empty | Frontend URL for CLI login flow. Also used by the web UI to show self-host daemon setup commands with your app domain; for same-origin deployments this is also used as daemon `server_url` when `MULTICA_PUBLIC_URL` is unset |
+| `MULTICA_PUBLIC_URL` | empty | Public API URL, without trailing slash. Used for autopilot webhook URLs and by the web UI as the daemon `server_url` |
 | `CORS_ALLOWED_ORIGINS` | empty | Additional allowed CORS origins (comma-separated) |
 | `ALLOWED_ORIGINS` | empty | WebSocket-specific origin allowlist (comma-separated); when unset, fallback order is `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` |
 
