@@ -64,7 +64,7 @@ function LoginPageContent() {
   const searchParams = useSearchParams();
 
   const casdoorEnabled = process.env.NEXT_PUBLIC_CASDOOR_ENABLED === "true";
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "/tasks";
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const casdoorLoginUrl =
     process.env.NEXT_PUBLIC_CASDOOR_LOGIN_URL || `${basePath}/auth/casdoor/login`;
 
