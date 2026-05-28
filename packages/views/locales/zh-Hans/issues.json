@@ -217,7 +217,11 @@
     "link_copy_failed": "复制链接失败",
     "workdir_path_copied": "已复制本地 workdir 路径",
     "workdir_path_copy_failed": "复制本地 workdir 路径失败",
-    "workdir_path_unavailable": "暂无本地 workdir — 这个 issue 还没被本地 agent 运行过"
+    "workdir_path_unavailable": "暂无本地 workdir — 这个 issue 还没被本地 agent 运行过",
+    "export_copy_markdown": "复制对话为 Markdown",
+    "export_download_markdown": "下载对话为 Markdown",
+    "export_copy_success": "已复制对话为 Markdown",
+    "export_copy_failed": "复制对话失败"
   },
   "timeline": {
     "loading": "加载中…"

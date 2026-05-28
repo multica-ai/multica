@@ -14,6 +14,8 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  Copy,
+  Download,
   MoreHorizontal,
   PanelRight,
   Pin,
@@ -72,6 +74,7 @@ import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
+import { buildIssueMarkdown, downloadMarkdown } from "../utils/build-issue-markdown";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
@@ -1154,6 +1157,36 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { data: attachedLabels = [] } = useQuery(issueLabelsOptions(wsId, id));
   const attachedLabelsCount = attachedLabels.length;
 
+  // Markdown export of the currently-fetched conversation (issue metadata +
+  // description + comments). Reuses the already-loaded React Query caches —
+  // no extra API call. Activity entries are intentionally excluded; the
+  // export is the human conversation, not the audit log.
+  const buildExportMarkdown = useCallback(() => {
+    if (!issue) return "";
+    return buildIssueMarkdown({
+      issue,
+      timeline,
+      labels: attachedLabels,
+      projectName: breadcrumbProject?.title ?? null,
+      getActorName,
+    });
+  }, [issue, timeline, attachedLabels, breadcrumbProject?.title, getActorName]);
+
+  const handleCopyMarkdown = useCallback(async () => {
+    if (!issue) return;
+    try {
+      await navigator.clipboard.writeText(buildExportMarkdown());
+      toast.success(t(($) => $.detail.export_copy_success));
+    } catch {
+      toast.error(t(($) => $.detail.export_copy_failed));
+    }
+  }, [issue, buildExportMarkdown, t]);
+
+  const handleDownloadMarkdown = useCallback(() => {
+    if (!issue) return;
+    downloadMarkdown(`${issue.identifier}.md`, buildExportMarkdown());
+  }, [issue, buildExportMarkdown]);
+
   // Seed the visible-optional-props set:
   //   - on issue switch, reset to whichever fields are currently set
   //   - on the SAME issue, additively pick up fields the user just set
@@ -1910,6 +1943,36 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <h2 className="text-base font-semibold">{t(($) => $.detail.activity_section)}</h2>
               </div>
               <div className="flex items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        onClick={handleCopyMarkdown}
+                        aria-label={t(($) => $.detail.export_copy_markdown)}
+                        className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                    }
+                  />
+                  <TooltipContent side="bottom">{t(($) => $.detail.export_copy_markdown)}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        onClick={handleDownloadMarkdown}
+                        aria-label={t(($) => $.detail.export_download_markdown)}
+                        className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+                    }
+                  />
+                  <TooltipContent side="bottom">{t(($) => $.detail.export_download_markdown)}</TooltipContent>
+                </Tooltip>
                 <button
                   type="button"
                   onClick={handleToggleSubscribe}
