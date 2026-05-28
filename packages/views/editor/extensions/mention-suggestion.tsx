@@ -66,6 +66,11 @@ export interface MentionItem {
   // private agent the current user does not own — the mention won't wake it,
   // so the row reads "won't trigger" (FIR-2349).
   wontTrigger?: boolean;
+  // CEREBRO-PATCH(private-agent-owner-name): FIR-2385 follow-up. Display
+  // name of the agent's owner, surfaced on the locked row so a non-owner sees
+  // who will receive the run-request. Optional — omitted when wontTrigger is
+  // false or the owner is not in the members cache.
+  ownerName?: string;
 }
 
 interface MentionListProps {
@@ -345,7 +350,14 @@ function MentionRow({
   const accessLabel = t(($) => $.mention.no_project_access);
   // CEREBRO-PATCH(private-agent-owner-only-trigger): non-owner sees a muted row
   // + "won't trigger" tooltip for a personal agent it cannot wake (FIR-2349).
-  const noTriggerLabel = t(($) => $.mention.no_trigger_private);
+  // FIR-2385: tooltip now names the owner explicitly when known, and the row
+  // shows an "{owner} approves" suffix instead of generic "won't trigger".
+  const noTriggerTooltip = item.ownerName
+    ? t(($) => $.mention.no_trigger_private, { owner: item.ownerName })
+    : t(($) => $.mention.no_trigger_private_unknown_owner);
+  const noTriggerSuffix = item.ownerName
+    ? t(($) => $.mention.run_request_owner_suffix, { owner: item.ownerName })
+    : t(($) => $.mention.no_trigger_private_unknown_owner);
   const dimmed = item.restricted || item.wontTrigger;
   return (
     <button
@@ -360,7 +372,7 @@ function MentionRow({
         item.restricted
           ? accessLabel
           : item.wontTrigger
-            ? noTriggerLabel
+            ? noTriggerTooltip
             : undefined
       }
     >
@@ -381,8 +393,11 @@ function MentionRow({
       )}
       {item.type === "agent" && !item.restricted && item.wontTrigger && (
         <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
-          <Lock aria-label={noTriggerLabel} className="size-3 shrink-0" />
-          {noTriggerLabel}
+          <Lock
+            aria-label={noTriggerTooltip}
+            className="size-3 shrink-0"
+          />
+          {noTriggerSuffix}
         </span>
       )}
       {item.type === "agent" && !item.restricted && !item.wontTrigger && (
@@ -474,16 +489,30 @@ export function createMentionSuggestion(
           (canAssignAgentToIssue(a, { userId, role: myRole }).allowed ||
             a.visibility === "private"),
       )
-      .map((a) => ({
-        id: a.id,
-        label: a.name,
-        type: "agent" as const,
-        // CEREBRO-PATCH(private-agent-owner-only-trigger): flag visible-but-
-        // non-triggerable private agents (e.g. an admin seeing another member's
-        // personal agent) so the row warns the mention won't wake it (FIR-2349).
-        wontTrigger: !canTriggerPrivateAgentMention(a, { userId, role: myRole })
-          .allowed,
-      }));
+      .map((a) => {
+        const wontTrigger = !canTriggerPrivateAgentMention(a, {
+          userId,
+          role: myRole,
+        }).allowed;
+        // CEREBRO-PATCH(private-agent-owner-name): FIR-2385 — when the row is
+        // locked, surface the owner's display name so the tagger can see who
+        // will receive the run-request. Cheap O(N) lookup; members[] is the
+        // same array filtered above.
+        const ownerName =
+          wontTrigger && a.owner_id
+            ? members.find((m) => m.user_id === a.owner_id)?.name
+            : undefined;
+        return {
+          id: a.id,
+          label: a.name,
+          type: "agent" as const,
+          // CEREBRO-PATCH(private-agent-owner-only-trigger): flag visible-but-
+          // non-triggerable private agents (e.g. an admin seeing another member's
+          // personal agent) so the row warns the mention won't wake it (FIR-2349).
+          wontTrigger,
+          ownerName,
+        };
+      });
 
     const squadItems: MentionItem[] = squads
       .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)))
