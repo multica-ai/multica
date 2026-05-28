@@ -259,6 +259,29 @@ describe("useTabStore actions", () => {
     expect(s.activeWorkspaceSlug).toBeNull();
   });
 
+  it("validateWorkspaceSlugs seeds the first valid workspace when no group exists", () => {
+    const store = useTabStore.getState();
+    store.validateWorkspaceSlugs(new Set(["acme", "butter"]));
+    const s = useTabStore.getState();
+    expect(s.activeWorkspaceSlug).toBe("acme");
+    expect(s.byWorkspace.acme.tabs).toHaveLength(1);
+    expect(s.byWorkspace.acme.tabs[0].path).toBe("/acme/issues");
+  });
+
+  it("validateWorkspaceSlugs reactivates an existing valid group before seeding", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const existingTabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+
+    useTabStore.setState({ activeWorkspaceSlug: null });
+    store.validateWorkspaceSlugs(new Set(["acme"]));
+
+    const s = useTabStore.getState();
+    expect(s.activeWorkspaceSlug).toBe("acme");
+    expect(s.byWorkspace.acme.tabs).toHaveLength(1);
+    expect(s.byWorkspace.acme.tabs[0].id).toBe(existingTabId);
+  });
+
   it("reset wipes the whole store", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");
