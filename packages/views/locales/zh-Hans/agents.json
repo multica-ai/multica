@@ -245,7 +245,10 @@
       "upload_aria": "上传头像",
       "remove_aria": "移除头像",
       "select_image_toast": "请选择图片文件。",
-      "upload_failed_toast": "头像上传失败"
+      "upload_failed_toast": "头像上传失败",
+      "tab_upload": "上传",
+      "tab_generate": "生成",
+      "regenerate_aria": "重新生成头像"
     }
   },
   "tab_body": {

@@ -1,8 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Camera, ImagePlus, Loader2, X } from "lucide-react";
+import { useRef, useState, useCallback } from "react";
+import { Camera, ImagePlus, Loader2, X, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import ReactNiceAvatar, { genConfig } from "react-nice-avatar";
+import domtoimage from "dom-to-image";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -33,16 +35,27 @@ interface AvatarPickerProps {
  *                 overlay for "click to change". A small × in the corner
  *                 clears the choice.
  */
+type Mode = "upload" | "generate";
+
+/**
+ * Compact avatar picker with upload/generate tab switch.
+ * - Upload mode: file input → upload to server → URL stored
+ * - Generate mode: react-nice-avatar → canvas → blob → upload → URL stored
+ */
 export function AvatarPicker({ value, onChange, size = 56 }: AvatarPickerProps) {
   const { t } = useT("agents");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const avatarRef = useRef<HTMLDivElement>(null);
   const { upload, uploading } = useFileUpload(api);
   const [previewError, setPreviewError] = useState(false);
+  const [mode, setMode] = useState<Mode>("upload");
+  const [avatarConfig, setAvatarConfig] = useState(() => genConfig());
+  const [generating, setGenerating] = useState(false);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    e.target.value = ""; // allow re-selecting the same file
+    e.target.value = "";
     if (!file.type.startsWith("image/")) {
       toast.error(t(($) => $.create_dialog.avatar.select_image_toast));
       return;
@@ -61,63 +74,169 @@ export function AvatarPicker({ value, onChange, size = 56 }: AvatarPickerProps) 
     }
   };
 
+  const uploadGeneratedAvatar = useCallback(async () => {
+    if (!avatarRef.current) return;
+    setGenerating(true);
+    try {
+      const blob = await domtoimage.toBlob(avatarRef.current, {
+        width: size * 2,
+        height: size * 2,
+        style: {
+          width: `${size * 2}px`,
+          height: `${size * 2}px`,
+        },
+      });
+      if (!blob) return;
+      const file = new File([blob], "avatar.png", { type: "image/png" });
+      const result = await upload(file);
+      if (!result) return;
+      setPreviewError(false);
+      onChange(result.link);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t(($) => $.create_dialog.avatar.upload_failed_toast),
+      );
+    } finally {
+      setGenerating(false);
+    }
+  }, [avatarRef, size, upload, onChange, t]);
+
+  const handleRegenerate = () => {
+    setAvatarConfig({ ...genConfig() });
+  };
+
   const hasValue = !!value && !previewError;
   const dimensionStyle = { width: size, height: size };
 
   return (
     <div className="relative shrink-0" style={dimensionStyle}>
-      <button
-        type="button"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={uploading}
-        className={cn(
-          "group relative h-full w-full overflow-hidden rounded-lg outline-none transition-colors",
-          "focus-visible:ring-2 focus-visible:ring-ring",
-          hasValue
-            ? "border"
-            : "border border-dashed bg-muted/40 hover:bg-muted",
-        )}
-        aria-label={
-          hasValue
-            ? t(($) => $.create_dialog.avatar.change_aria)
-            : t(($) => $.create_dialog.avatar.upload_aria)
-        }
-        style={dimensionStyle}
-      >
-        {hasValue ? (
-          <img
-            src={resolvePublicFileUrl(value) ?? undefined}
-            alt=""
-            className="h-full w-full object-cover"
-            onError={() => setPreviewError(true)}
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-            {uploading ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <ImagePlus className="h-5 w-5" />
-            )}
-          </div>
-        )}
+      {/* Mode tabs */}
+      <div className="absolute -top-6 left-0 z-10 flex gap-1">
+        <button
+          type="button"
+          onClick={() => setMode("upload")}
+          className={cn(
+            "flex items-center gap-1 rounded-t-xs border border-b-0 px-2 py-0.5 text-xs transition-colors",
+            mode === "upload"
+              ? "border-input bg-background text-foreground"
+              : "border-transparent bg-muted/50 text-muted-foreground hover:bg-muted",
+          )}
+        >
+          <ImagePlus className="h-3 w-3" />
+          {t(($) => $.create_dialog.avatar.tab_upload ?? "Upload")}
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("generate")}
+          className={cn(
+            "flex items-center gap-1 rounded-t-xs border border-b-0 px-2 py-0.5 text-xs transition-colors",
+            mode === "generate"
+              ? "border-input bg-background text-foreground"
+              : "border-transparent bg-muted/50 text-muted-foreground hover:bg-muted",
+          )}
+        >
+          <RefreshCw className="h-3 w-3" />
+          {t(($) => $.create_dialog.avatar.tab_generate ?? "Generate")}
+        </button>
+      </div>
 
-        {/* Hover overlay only when there's already an image — otherwise the
-            placeholder icon already invites the click. */}
-        {hasValue && (
+      {/* Upload mode */}
+      {mode === "upload" && (
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className={cn(
+            "group relative h-full w-full overflow-hidden rounded-lg outline-none transition-colors",
+            "focus-visible:ring-2 focus-visible:ring-ring",
+            hasValue
+              ? "border"
+              : "border border-dashed bg-muted/40 hover:bg-muted",
+          )}
+          aria-label={
+            hasValue
+              ? t(($) => $.create_dialog.avatar.change_aria)
+              : t(($) => $.create_dialog.avatar.upload_aria)
+          }
+          style={dimensionStyle}
+        >
+          {hasValue ? (
+            <img
+              src={resolvePublicFileUrl(value) ?? undefined}
+              alt=""
+              className="h-full w-full object-cover"
+              onError={() => setPreviewError(true)}
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+              {uploading ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <ImagePlus className="h-5 w-5" />
+              )}
+            </div>
+          )}
+
+          {hasValue && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+              {uploading ? (
+                <Loader2 className="h-4 w-4 animate-spin text-white" />
+              ) : (
+                <Camera className="h-4 w-4 text-white" />
+              )}
+            </div>
+          )}
+        </button>
+      )}
+
+      {/* Generate mode */}
+      {mode === "generate" && (
+        <div className="relative h-full w-full overflow-hidden rounded-lg border">
+          {/* Hidden avatar for canvas capture */}
+          <div
+            ref={avatarRef}
+            className="absolute left-0 top-0 overflow-hidden"
+            style={{ width: size * 2, height: size * 2 }}
+          >
+            <ReactNiceAvatar {...avatarConfig} style={{ width: size * 2, height: size * 2 }} shape="rounded" />
+          </div>
+
+          {/* Visible preview */}
+          <div
+            className="h-full w-full cursor-pointer"
+            onClick={uploadGeneratedAvatar}
+          >
+            <ReactNiceAvatar {...avatarConfig} style={{ width: size, height: size }} shape="rounded" />
+          </div>
+
+          {/* Hover overlay */}
           <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-            {uploading ? (
+            {generating ? (
               <Loader2 className="h-4 w-4 animate-spin text-white" />
             ) : (
               <Camera className="h-4 w-4 text-white" />
             )}
           </div>
-        )}
-      </button>
 
-      {/* Tiny X to clear, only shown when there's a value. Positioned just
-          outside the avatar's top-right corner so it doesn't cover the
-          image. */}
-      {hasValue && !uploading && (
+          {/* Regenerate button */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRegenerate();
+            }}
+            className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+            aria-label={t(($) => $.create_dialog.avatar.regenerate_aria)}
+          >
+            <RefreshCw className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
+      {/* Clear button for upload mode */}
+      {hasValue && mode === "upload" && !uploading && (
         <button
           type="button"
           onClick={(e) => {

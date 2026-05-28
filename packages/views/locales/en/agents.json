@@ -250,7 +250,10 @@
       "upload_aria": "Upload avatar",
       "remove_aria": "Remove avatar",
       "select_image_toast": "Please select an image file.",
-      "upload_failed_toast": "Avatar upload failed"
+      "upload_failed_toast": "Avatar upload failed",
+      "tab_upload": "Upload",
+      "tab_generate": "Generate",
+      "regenerate_aria": "Regenerate avatar"
     }
   },
   "tab_body": {

@@ -6,8 +6,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Camera, Loader2, Pencil } from "lucide-react";
+import { Camera, Loader2, Pencil, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import ReactNiceAvatar, { genConfig } from "react-nice-avatar";
+import domtoimage from "dom-to-image";
 import type {
   Agent,
   AgentRuntime,
@@ -236,6 +238,8 @@ function Section({
 // Identity — avatar / name / description editors
 // ---------------------------------------------------------------------------
 
+type AvatarMode = "upload" | "generate";
+
 function AvatarEditor({
   agent,
   canEdit,
@@ -247,7 +251,11 @@ function AvatarEditor({
 }) {
   const { t } = useT("agents");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const avatarRef = useRef<HTMLDivElement>(null);
   const { upload, uploading } = useFileUpload(api);
+  const [avatarMode, setAvatarMode] = useState<AvatarMode>("upload");
+  const [avatarConfig, setAvatarConfig] = useState(() => genConfig());
+  const [generating, setGenerating] = useState(false);
 
   if (!canEdit) {
     return (
@@ -276,39 +284,121 @@ function AvatarEditor({
     }
   };
 
+  const uploadGeneratedAvatar = async () => {
+    if (!avatarRef.current) return;
+    setGenerating(true);
+    try {
+      const blob = await domtoimage.toBlob(avatarRef.current, {
+        width: 112,
+        height: 112,
+        style: { width: "112px", height: "112px" },
+      });
+      if (!blob) return;
+      const file = new File([blob], "avatar.png", { type: "image/png" });
+      const result = await upload(file);
+      if (!result) return;
+      await onUpdate({ avatar_url: result.link });
+      toast.success(t(($) => $.inspector.avatar_updated_toast));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.inspector.avatar_upload_failed_toast));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   return (
-    <>
-      <button
-        type="button"
-        // rounded-lg matches the standard agent avatar treatment used in
-        // list rows. Avoid rounded-full — circles are reserved for humans.
-        className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={uploading}
-        aria-label={t(($) => $.inspector.change_avatar_aria)}
-      >
-        <ActorAvatar
-          actorType="agent"
-          actorId={agent.id}
-          size={56}
-          className="rounded-none"
-        />
-        <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-          {uploading ? (
-            <Loader2 className="h-4 w-4 animate-spin text-white" />
-          ) : (
-            <Camera className="h-4 w-4 text-white" />
-          )}
-        </div>
-      </button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleFile}
-      />
-    </>
+    <div className="flex flex-col items-center gap-1">
+      {/* Mode tabs */}
+      <div className="flex gap-1">
+        <button
+          type="button"
+          onClick={() => setAvatarMode("upload")}
+          className="flex items-center gap-1 rounded-t-xs border border-b-0 px-2 py-0.5 text-xs transition-colors"
+        >
+          <Camera className="h-3 w-3" />
+          {t(($) => $.create_dialog.avatar.tab_upload ?? "上传")}
+        </button>
+        <button
+          type="button"
+          onClick={() => setAvatarMode("generate")}
+          className="flex items-center gap-1 rounded-t-xs border border-b-0 px-2 py-0.5 text-xs transition-colors"
+        >
+          <RefreshCw className="h-3 w-3" />
+          {t(($) => $.create_dialog.avatar.tab_generate ?? "生成")}
+        </button>
+      </div>
+
+      {avatarMode === "upload" ? (
+        <>
+          <button
+            type="button"
+            className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            aria-label={t(($) => $.inspector.change_avatar_aria)}
+          >
+            <ActorAvatar
+              actorType="agent"
+              actorId={agent.id}
+              size={56}
+              className="rounded-none"
+            />
+            <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+              {uploading ? (
+                <Loader2 className="h-4 w-4 animate-spin text-white" />
+              ) : (
+                <Camera className="h-4 w-4 text-white" />
+              )}
+            </div>
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleFile}
+          />
+        </>
+      ) : (
+        <>
+          {/* Hidden avatar for canvas capture */}
+          <div
+            ref={avatarRef}
+            className="absolute left-0 top-0 overflow-hidden"
+            style={{ width: 112, height: 112 }}
+          >
+            <ReactNiceAvatar {...avatarConfig} style={{ width: 112, height: 112 }} shape="rounded" />
+          </div>
+
+          <button
+            type="button"
+            className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={uploadGeneratedAvatar}
+            disabled={generating}
+            aria-label={t(($) => $.inspector.change_avatar_aria)}
+          >
+            <ReactNiceAvatar {...avatarConfig} style={{ width: 56, height: 56 }} shape="rounded" />
+            <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+              {generating ? (
+                <Loader2 className="h-4 w-4 animate-spin text-white" />
+              ) : (
+                <Camera className="h-4 w-4 text-white" />
+              )}
+            </div>
+          </button>
+
+          {/* Regenerate button */}
+          <button
+            type="button"
+            onClick={() => setAvatarConfig({ ...genConfig() })}
+            className="flex h-5 w-5 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+            aria-label={t(($) => $.create_dialog.avatar.regenerate_aria)}
+          >
+            <RefreshCw className="h-3 w-3" />
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 
