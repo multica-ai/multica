@@ -106,19 +106,38 @@ jobs:
           - { os: ubuntu-latest,  target: linux, arch: x64,   label: linux-x64 }
     runs-on: ${{ matrix.os }}
     env:
-      # First-stage rollout: no Apple Developer ID signing, no
-      # notarization, no Windows EV cert. Trust on the client side is
-      # HTTPS-only until those secrets land. See CLAUDE.md
-      # "Desktop Auto-Update → Trust model" for the full justification.
+      # Apple Developer ID signing + notarization on macOS, with graceful
+      # fallback. When all five signing secrets are configured on the repo,
+      # the mac matrix entry signs the bundle with a Developer ID Application
+      # cert imported from CSC_LINK and submits to notarytool. When any are
+      # missing, the values render empty — electron-builder falls back to an
+      # ad-hoc signature and package.mjs's `disableMacNotarize` branch
+      # (keyed off APPLE_TEAM_ID) skips notarization, so a partially-
+      # configured state cannot break the release.
       #
-      # Without CSC_IDENTITY_AUTO_DISCOVERY=false, electron-builder
-      # searches the runner keychain for any signing identity and aborts
-      # with an opaque error when it doesn't find one. We want the
-      # build to proceed unsigned, falling back to an ad-hoc signature.
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      # Intentionally do NOT set APPLE_TEAM_ID / APPLE_ID — the package
-      # script's `disableMacNotarize` branch keys off APPLE_TEAM_ID, so
-      # omitting it skips the notarize call.
+      # Secrets to configure on CopilotDemo/multica
+      # (Settings → Secrets and variables → Actions):
+      #   CSC_LINK                    — base64 of the .p12 (cert + private key)
+      #   CSC_KEY_PASSWORD            — password used when exporting the .p12
+      #   APPLE_ID                    — Apple ID email of a team member
+      #   APPLE_APP_SPECIFIC_PASSWORD — app-specific password for APPLE_ID
+      #   APPLE_TEAM_ID               — 10-char Apple Developer Team ID
+      #
+      # Every value below is gated on `matrix.target == 'mac'` so Windows
+      # and Linux jobs never see Apple credentials, and electron-builder
+      # doesn't mistakenly attempt to sign on those platforms.
+      CSC_LINK: ${{ matrix.target == 'mac' && secrets.CSC_LINK || '' }}
+      CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.CSC_KEY_PASSWORD || '' }}
+      # 'false' preserves the historical ad-hoc fallback when CSC_LINK is
+      # not configured; flip to 'true' only when we actually have a cert
+      # so electron-builder can locate the identity it just imported into
+      # the runner's temporary keychain. Without this guard electron-builder
+      # would scan the system keychain for any signing identity and abort
+      # with an opaque error on a fresh GitHub-hosted runner.
+      CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.target == 'mac' && secrets.CSC_LINK != '' && 'true' || 'false' }}
+      APPLE_ID: ${{ matrix.target == 'mac' && secrets.APPLE_ID || '' }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.target == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ matrix.target == 'mac' && secrets.APPLE_TEAM_ID || '' }}
 
       # ── OSS upload credentials (S3-compatible) ────────────────────────
       # The AWS CLI is pre-installed on every GitHub runner, so it is the

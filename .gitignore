@@ -66,3 +66,16 @@ server/server
 data/
 .kilo
 .idea
+
+# Code-signing artifacts — NEVER commit these.
+# .p12/.pfx/.p8/.keychain bundle private keys; leaking one lets anyone
+# sign a malicious binary as Lilith. .cer and .certSigningRequest are
+# public-only but have no business in the repo and confuse new contributors.
+*.p12
+*.pfx
+*.p8
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.keychain
+*.keychain-db
