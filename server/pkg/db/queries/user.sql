@@ -67,6 +67,15 @@ UPDATE "user" SET
 WHERE id = $1
 RETURNING *;
 
+-- name: GetUserBySubjectID :one
+SELECT * FROM "user"
+WHERE subject_id = $1
+LIMIT 1;
+
+-- name: SetUserSubjectID :exec
+UPDATE "user" SET subject_id = $2, updated_at = now()
+WHERE id = $1;
+
 -- name: SetStarterContentState :one
 -- Atomically transition starter_content_state. The handler is
 -- responsible for checking the current value first (to decide between

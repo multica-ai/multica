@@ -1,0 +1,1 @@
+ALTER TABLE "user" ADD COLUMN subject_id TEXT UNIQUE;
