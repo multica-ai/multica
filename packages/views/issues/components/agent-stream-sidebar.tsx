@@ -127,61 +127,89 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
     return () => document.removeEventListener("mousedown", handler);
   }, [selectorOpen]);
 
+  const handleSelect = useCallback((id: string) => {
+    manualSelection.current = true;
+    setSelectedId(id);
+  }, []);
+
   const handleSelectAndClose = useCallback((id: string) => {
     manualSelection.current = true;
     setSelectedId(id);
     setSelectorOpen(false);
   }, []);
 
+  // Items shown in the collapsed panel: all active runs, or fallback to latest recent.
+  const collapsedItems = useMemo(
+    () => activeTasks.length > 0 ? activeTasks : recentTasks.slice(0, 1),
+    [activeTasks, recentTasks],
+  );
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2">
-      {/* Run Selector */}
-      <div className="relative" ref={selectorRef}>
-        <button
-          type="button"
-          onClick={() => setSelectorOpen((v) => !v)}
-          className={cn(
-            "flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors",
-            selectorOpen ? "border-border bg-accent/50" : "border-transparent hover:bg-accent/30",
-          )}
-        >
-          {paused ? (
-            <PauseCircle className="h-3 w-3 shrink-0 text-indigo-500" />
-          ) : isLive ? (
-            <span className="relative flex h-2 w-2 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-info opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-info" />
-            </span>
-          ) : (
-            <Radio className="h-3 w-3 shrink-0 text-muted-foreground" />
-          )}
-          {selectedTask ? (
-            <SelectorRowCompact task={selectedTask} timeAgo={timeAgo} />
-          ) : (
-            <span className="text-muted-foreground">No runs yet</span>
-          )}
-          <ChevronDown
-            className={cn(
-              "ml-auto h-3 w-3 shrink-0 text-muted-foreground transition-transform",
-              selectorOpen && "rotate-180",
-            )}
-          />
-        </button>
-        {/* Active count badge when selector collapsed and multiple active */}
-        {!selectorOpen && activeTasks.length > 1 && (
-          <span className="absolute right-7 top-1/2 -translate-y-1/2 rounded-full bg-info/15 px-1.5 py-px text-[10px] font-medium tabular-nums text-info">
-            {activeTasks.length}
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      {/* Run Selector Panel */}
+      <div
+        ref={selectorRef}
+        className="shrink-0 rounded-md border bg-muted/30"
+      >
+        {/* Panel header */}
+        <div className="flex items-center justify-between border-b px-2.5 py-1.5">
+          <span className="text-[11px] font-medium text-foreground/80">
+            {selectorOpen ? "All Runs" : activeTasks.length > 0 ? `Active Runs` : "Runs"}
           </span>
-        )}
-        {selectorOpen && (
-          <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
+          <div className="flex items-center gap-1.5">
+            {!selectorOpen && activeTasks.length > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-info">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-info opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-info" />
+                </span>
+                {activeTasks.length}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setSelectorOpen((v) => !v)}
+              className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {selectorOpen ? "Collapse" : "All runs"}
+              <ChevronDown
+                className={cn(
+                  "h-3 w-3 transition-transform",
+                  selectorOpen && "rotate-180",
+                )}
+              />
+            </button>
+          </div>
+        </div>
+
+        {!selectorOpen ? (
+          /* Collapsed: show all active runs directly (or latest recent if none active) */
+          <div className="max-h-40 overflow-y-auto">
+            {collapsedItems.map((task) => (
+              <PanelRunRow
+                key={task.id}
+                task={task}
+                selected={task.id === selectedId}
+                timeAgo={timeAgo}
+                onSelect={handleSelect}
+              />
+            ))}
+            {collapsedItems.length === 0 && (
+              <div className="px-2.5 py-3 text-center text-xs text-muted-foreground">
+                No runs yet
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Expanded: full grouped list with Active + Recent */
+          <div className="max-h-56 overflow-y-auto">
             {activeTasks.length > 0 && (
               <>
-                <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                <div className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                   Active
                 </div>
                 {activeTasks.map((task) => (
-                  <SelectorRowItem
+                  <PanelRunRow
                     key={task.id}
                     task={task}
                     selected={task.id === selectedId}
@@ -193,12 +221,12 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
             )}
             {recentTasks.length > 0 && (
               <>
-                {activeTasks.length > 0 && <div className="my-1 border-t" />}
-                <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                {activeTasks.length > 0 && <div className="border-t" />}
+                <div className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                   Recent
                 </div>
                 {recentTasks.slice(0, 20).map((task) => (
-                  <SelectorRowItem
+                  <PanelRunRow
                     key={task.id}
                     task={task}
                     selected={task.id === selectedId}
@@ -208,37 +236,58 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
                 ))}
               </>
             )}
+            {activeTasks.length === 0 && recentTasks.length === 0 && (
+              <div className="px-2.5 py-3 text-center text-xs text-muted-foreground">
+                No runs yet
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Status indicator */}
-      {selectedTask && (
-        <div className="flex items-center gap-1.5 px-1 text-[11px]">
-          {paused ? (
-            <span className="rounded bg-indigo-500/10 px-1.5 py-0.5 text-indigo-500">paused</span>
-          ) : isLive ? (
-            <span className="rounded bg-info/10 px-1.5 py-0.5 text-info">live</span>
+      {/* Stream Viewer Panel */}
+      <div className="min-h-0 flex-1 rounded-md border bg-muted/30">
+        {/* Panel header */}
+        <div className="flex items-center gap-1.5 border-b px-2.5 py-1.5">
+          {!selectedTask ? (
+            <span className="text-[11px] font-medium text-foreground/80">Stream</span>
           ) : (
-            <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">recent</span>
-          )}
-          {selectedTask.agent_id && (
-            <AgentName agentId={selectedTask.agent_id} />
+            <>
+              {paused ? (
+                <span className="flex items-center gap-1 text-[11px] font-medium text-indigo-500">
+                  <PauseCircle className="h-3 w-3" />
+                  paused
+                </span>
+              ) : isLive ? (
+                <span className="flex items-center gap-1 text-[11px] font-medium text-info">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-info opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-info" />
+                  </span>
+                  live
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                  <Radio className="h-3 w-3" />
+                  recent
+                </span>
+              )}
+              {selectedTask.agent_id && (
+                <AgentName agentId={selectedTask.agent_id} />
+              )}
+            </>
           )}
         </div>
-      )}
 
-      {/* Active Stream Viewer */}
-      <div className="min-h-0 flex-1">
-        {!selectedTask ? (
-          <div className="rounded border border-dashed px-3 py-4 text-xs text-muted-foreground">
-            No local agent stream yet.
-          </div>
-        ) : (
-          <div className="h-full min-h-0 overflow-hidden rounded-md border bg-background">
+        <div className="h-[calc(100%-29px)] min-h-0">
+          {!selectedTask ? (
+            <div className="flex h-full items-center justify-center px-3 py-4 text-xs text-muted-foreground">
+              No local agent stream yet.
+            </div>
+          ) : (
             <TaskTraceOutput task={selectedTask} defaultOpen fill />
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
@@ -259,18 +308,22 @@ const STATUS_TONE: Record<string, string> = {
   cancelled: "text-muted-foreground",
 };
 
-function SelectorRowCompact({ task, timeAgo }: { task: AgentTask; timeAgo: (d: string) => string }) {
-  const trigger = useTriggerText(task);
-  const time = activeTimeText(task, timeAgo);
-  return (
-    <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-muted-foreground">
-      {trigger}
-      <span className="text-muted-foreground/60"> · {time}</span>
-    </span>
-  );
+function StatusDot({ status, paused }: { status: string; paused: boolean }) {
+  if (paused) {
+    return <PauseCircle className="h-3.5 w-3.5 shrink-0 text-indigo-500" />;
+  }
+  if (ACTIVE_STATUSES.has(status)) {
+    return (
+      <span className="relative flex h-2.5 w-2.5 shrink-0">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-info opacity-75" />
+        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-info" />
+      </span>
+    );
+  }
+  return <Radio className="h-3 w-3 shrink-0 text-muted-foreground/60" />;
 }
 
-function SelectorRowItem({
+function PanelRunRow({
   task,
   selected,
   timeAgo,
@@ -285,17 +338,19 @@ function SelectorRowItem({
   const time = activeTimeText(task, timeAgo);
   const tone = STATUS_TONE[task.status] ?? "text-muted-foreground";
   const statusLabel = statusText(task.status);
+  const isActive = ACTIVE_STATUSES.has(task.status);
 
   return (
     <button
       type="button"
-      onClick={() => {
-        onSelect(task.id);
-        // Auto-close handled by parent via state
-      }}
+      onClick={() => onSelect(task.id)}
       className={cn(
-        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors",
-        selected ? "bg-accent" : "hover:bg-accent/40",
+        "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors",
+        selected
+          ? "bg-accent/70"
+          : isActive
+            ? "hover:bg-info/5"
+            : "hover:bg-accent/40",
       )}
     >
       {task.agent_id ? (
@@ -303,7 +358,10 @@ function SelectorRowItem({
       ) : (
         <span className="inline-block h-[18px] w-[18px] shrink-0 rounded-full bg-muted" />
       )}
-      <span className="min-w-0 flex-1 truncate text-muted-foreground">{trigger}</span>
+      <StatusDot status={task.status} paused={false} />
+      <span className={cn("min-w-0 flex-1 truncate", isActive ? "text-foreground/90" : "text-muted-foreground")}>
+        {trigger}
+      </span>
       <span className="shrink-0 whitespace-nowrap">
         <span className={tone}>{statusLabel}</span>
         <span className="text-muted-foreground/60"> · {time}</span>
