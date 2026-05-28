@@ -1440,3 +1440,200 @@ func TestBuildCodexArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
 		t.Fatalf("expected extra args before custom args, got %v", args)
 	}
 }
+
+func TestBuildCodexMcpArgsEmptyConfig(t *testing.T) {
+	t.Parallel()
+
+	args, err := buildCodexMcpArgs(nil)
+	if err != nil {
+		t.Fatalf("nil config should not error: %v", err)
+	}
+	if args != nil {
+		t.Fatalf("nil config should yield no args, got %v", args)
+	}
+
+	args, err = buildCodexMcpArgs(json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("empty object should not error: %v", err)
+	}
+	if args != nil {
+		t.Fatalf("empty object should yield no args, got %v", args)
+	}
+
+	args, err = buildCodexMcpArgs(json.RawMessage(`{"mcpServers":{}}`))
+	if err != nil {
+		t.Fatalf("empty mcpServers should not error: %v", err)
+	}
+	if args != nil {
+		t.Fatalf("empty mcpServers should yield no args, got %v", args)
+	}
+}
+
+func TestBuildCodexMcpArgsStdioServer(t *testing.T) {
+	t.Parallel()
+
+	// Plain stdio server with command + args + env should become a single
+	// `-c mcp_servers.<name>=<inline-table>` flag. The inline table must
+	// quote string values and keep the env nested inside the same table.
+	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch","--cache"],"env":{"FOO":"bar"}}}}`)
+	args, err := buildCodexMcpArgs(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(args) != 2 || args[0] != "-c" {
+		t.Fatalf("expected one -c flag pair, got %v", args)
+	}
+	got := args[1]
+	wantPrefix := "mcp_servers.fetch="
+	if !strings.HasPrefix(got, wantPrefix) {
+		t.Fatalf("expected prefix %q in %q", wantPrefix, got)
+	}
+	value := strings.TrimPrefix(got, wantPrefix)
+	for _, want := range []string{
+		`command = "uvx"`,
+		`args = ["mcp-server-fetch", "--cache"]`,
+		`env = { FOO = "bar" }`,
+	} {
+		if !strings.Contains(value, want) {
+			t.Fatalf("expected substring %q in inline TOML %q", want, value)
+		}
+	}
+}
+
+func TestBuildCodexMcpArgsMultipleServersAreDeterministic(t *testing.T) {
+	t.Parallel()
+
+	// Two servers should emit two flag pairs in a stable order so daemon
+	// logs and tests don't churn between runs.
+	raw := json.RawMessage(`{"mcpServers":{"zeta":{"command":"a"},"alpha":{"command":"b"}}}`)
+	args, err := buildCodexMcpArgs(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(args) != 4 {
+		t.Fatalf("expected 4 args (-c pair per server), got %v", args)
+	}
+	if !strings.HasPrefix(args[1], "mcp_servers.alpha=") {
+		t.Fatalf("expected alpha first (alphabetical), got %v", args)
+	}
+	if !strings.HasPrefix(args[3], "mcp_servers.zeta=") {
+		t.Fatalf("expected zeta second, got %v", args)
+	}
+}
+
+func TestBuildCodexMcpArgsURLServer(t *testing.T) {
+	t.Parallel()
+
+	// HTTP-style servers use `url` + bearer-token env var. Verify the
+	// scalar fields pass through and the URL stays quoted.
+	raw := json.RawMessage(`{"mcpServers":{"remote":{"url":"https://example.com/mcp","bearer_token_env_var":"TOKEN"}}}`)
+	args, err := buildCodexMcpArgs(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(args) != 2 {
+		t.Fatalf("expected one -c pair, got %v", args)
+	}
+	value := strings.TrimPrefix(args[1], "mcp_servers.remote=")
+	for _, want := range []string{
+		`url = "https://example.com/mcp"`,
+		`bearer_token_env_var = "TOKEN"`,
+	} {
+		if !strings.Contains(value, want) {
+			t.Fatalf("expected %q in %q", want, value)
+		}
+	}
+}
+
+func TestBuildCodexMcpArgsStringEscaping(t *testing.T) {
+	t.Parallel()
+
+	// Backslashes, quotes and newlines must escape into TOML basic-string
+	// form so the value round-trips through Codex's TOML parser intact.
+	raw := json.RawMessage(`{"mcpServers":{"esc":{"command":"a\"b\\c\nd"}}}`)
+	args, err := buildCodexMcpArgs(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	value := strings.TrimPrefix(args[1], "mcp_servers.esc=")
+	if !strings.Contains(value, `command = "a\"b\\c\nd"`) {
+		t.Fatalf("expected escaped string in %q", value)
+	}
+}
+
+func TestBuildCodexMcpArgsRejectsBadShapes(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"non-json", `not json`},
+		{"top-level array", `[1,2,3]`},
+		{"server is array", `{"mcpServers":{"x":[1,2]}}`},
+		{"server is string", `{"mcpServers":{"x":"oops"}}`},
+		{"null value inside server", `{"mcpServers":{"x":{"command":null}}}`},
+		{"bad server name", `{"mcpServers":{"has space":{"command":"a"}}}`},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := buildCodexMcpArgs(json.RawMessage(tc.raw)); err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.name)
+			}
+		})
+	}
+}
+
+func TestBuildCodexArgsInjectsMcpBeforeCustomArgs(t *testing.T) {
+	t.Parallel()
+
+	// MCP overrides need to land in Codex's arg list ahead of any -c the
+	// user wrote in custom_args, otherwise a `-c mcp_servers.foo=bar` in
+	// custom_args could silently shadow the daemon's server entry.
+	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx"}}}`)
+	args := buildCodexArgs(ExecOptions{
+		McpConfig:  raw,
+		CustomArgs: []string{"-c", "model=\"o3\""},
+	}, slog.Default())
+
+	mcpIdx, customIdx := -1, -1
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-c" && strings.HasPrefix(args[i+1], "mcp_servers.fetch=") {
+			mcpIdx = i
+		}
+		if args[i] == "-c" && args[i+1] == "model=\"o3\"" {
+			customIdx = i
+		}
+	}
+	if mcpIdx == -1 {
+		t.Fatalf("expected mcp -c flag, got %v", args)
+	}
+	if customIdx == -1 {
+		t.Fatalf("expected user custom -c flag preserved, got %v", args)
+	}
+	if mcpIdx >= customIdx {
+		t.Fatalf("expected mcp args before custom args (mcp=%d, custom=%d): %v", mcpIdx, customIdx, args)
+	}
+}
+
+func TestBuildCodexArgsTolerantOfMalformedMcp(t *testing.T) {
+	t.Parallel()
+
+	// A malformed mcp_config must NOT crash the run — buildCodexArgs logs
+	// and continues so the agent still launches without MCP servers.
+	args := buildCodexArgs(ExecOptions{
+		McpConfig: json.RawMessage(`{not json`),
+	}, slog.Default())
+
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-c" && strings.HasPrefix(args[i+1], "mcp_servers.") {
+			t.Fatalf("expected no mcp_servers args when JSON is invalid, got %v", args)
+		}
+	}
+	// The base launch flags must still be there.
+	if len(args) < 3 || args[0] != "app-server" || args[1] != "--listen" || args[2] != "stdio://" {
+		t.Fatalf("expected base app-server flags, got %v", args)
+	}
+}

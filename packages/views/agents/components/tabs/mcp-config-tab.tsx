@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eraser, Info, Loader2, Lock, Save } from "lucide-react";
-import type { Agent, RuntimeDevice } from "@multica/core/types";
+import { Eraser, Loader2, Lock, Save } from "lucide-react";
+import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { toast } from "sonner";
@@ -20,12 +20,10 @@ function configToText(value: unknown): string {
 
 export function McpConfigTab({
   agent,
-  runtimeDevice,
   onSave,
   onDirtyChange,
 }: {
   agent: Agent;
-  runtimeDevice?: RuntimeDevice;
   onSave: (updates: { mcp_config: unknown | null }) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -52,13 +50,6 @@ export function McpConfigTab({
     );
     previousOriginalRef.current = original;
   }, [original]);
-
-  // Only the Claude runtime currently consumes `mcp_config` — the daemon
-  // forwards it via Claude's `--mcp-config` flag and no other provider
-  // reads it. We surface that explicitly so saving on e.g. a Codex agent
-  // doesn't quietly look like it took effect.
-  const providerSupportsMcp =
-    runtimeDevice === undefined || runtimeDevice.provider === "claude";
 
   const trimmed = text.trim();
   const parseResult = useMemo<
@@ -157,20 +148,6 @@ export function McpConfigTab({
           </Button>
         )}
       </div>
-
-      {!providerSupportsMcp && (
-        <div
-          role="note"
-          className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-2.5 text-xs text-warning-foreground"
-        >
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <p>
-            {t(($) => $.tab_body.mcp_config.provider_unsupported, {
-              provider: runtimeDevice?.provider ?? "",
-            })}
-          </p>
-        </div>
-      )}
 
       <Textarea
         value={text}

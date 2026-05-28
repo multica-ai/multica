@@ -9,13 +9,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
-// overridden by user-configured custom_args.
+// overridden by user-configured custom_args. The mcp_servers config keys
+// are injected by buildCodexMcpArgs from agent.mcp_config — a user-supplied
+// `-c mcp_servers.…` would silently override the daemon's value.
 var codexBlockedArgs = map[string]blockedArgMode{
 	"--listen": blockedWithValue, // stdio:// transport for daemon communication
 }
@@ -68,9 +72,178 @@ type codexBackend struct {
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
+	// MCP servers from agent.mcp_config are injected first so they sit
+	// inside Codex's config layer before any user-supplied custom_args
+	// can collide with them.
+	if mcpArgs, err := buildCodexMcpArgs(opts.McpConfig); err != nil {
+		// A malformed mcp_config shouldn't kill the run — the agent will
+		// still launch, just without the configured MCP servers. The
+		// admin sees the warning in daemon logs and can fix the JSON.
+		logger.Warn("codex: ignoring invalid mcp_config", "error", err)
+	} else {
+		args = append(args, mcpArgs...)
+	}
 	args = append(args, filterCustomArgs(opts.ExtraArgs, codexBlockedArgs, logger)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, codexBlockedArgs, logger)...)
 	return args
+}
+
+// buildCodexMcpArgs translates the agent's mcp_config JSON (Claude-style
+// `{"mcpServers": {...}}`) into Codex `-c mcp_servers.<name>=<toml>`
+// overrides. Each server is emitted as one inline TOML table so the entire
+// per-server config is replaced as a unit (a dotted-path-per-leaf approach
+// would leave stale fields from the user's global config.toml fused into
+// the daemon-managed entry, which the user would never see).
+//
+// We translate Claude-style camelCase keys (`args`, `env`, `command`,
+// `url`) to whatever Codex's config schema expects — today they happen to
+// be the same names so the JSON passes through verbatim. If Codex ever
+// diverges, do the rename here, not in the UI editor.
+func buildCodexMcpArgs(raw json.RawMessage) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var parsed struct {
+		McpServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, fmt.Errorf("parse mcp_config json: %w", err)
+	}
+	if len(parsed.McpServers) == 0 {
+		return nil, nil
+	}
+
+	names := make([]string, 0, len(parsed.McpServers))
+	for name := range parsed.McpServers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	args := make([]string, 0, len(names)*2)
+	for _, name := range names {
+		if !isCodexBareTomlKey(name) {
+			return nil, fmt.Errorf("mcp server name %q must be ASCII alphanumeric / _ / - to fit Codex's bare-key requirement", name)
+		}
+		var serverVal any
+		if err := json.Unmarshal(parsed.McpServers[name], &serverVal); err != nil {
+			return nil, fmt.Errorf("mcp_servers.%s: %w", name, err)
+		}
+		if _, ok := serverVal.(map[string]any); !ok {
+			return nil, fmt.Errorf("mcp_servers.%s must be a JSON object", name)
+		}
+		tomlValue, err := jsonValueToCodexTOMLInline(serverVal)
+		if err != nil {
+			return nil, fmt.Errorf("mcp_servers.%s: %w", name, err)
+		}
+		args = append(args, "-c", fmt.Sprintf("mcp_servers.%s=%s", name, tomlValue))
+	}
+	return args, nil
+}
+
+// jsonValueToCodexTOMLInline serialises a JSON value as a TOML inline
+// value. Only the subset Codex's `-c` accepts is supported: strings,
+// numbers, booleans, arrays, and inline tables. JSON nulls are rejected
+// because TOML has no null and silently dropping them would be confusing.
+func jsonValueToCodexTOMLInline(v any) (string, error) {
+	switch x := v.(type) {
+	case nil:
+		return "", fmt.Errorf("null is not a valid TOML value")
+	case bool:
+		if x {
+			return "true", nil
+		}
+		return "false", nil
+	case float64:
+		if x == float64(int64(x)) {
+			return strconv.FormatInt(int64(x), 10), nil
+		}
+		return strconv.FormatFloat(x, 'f', -1, 64), nil
+	case string:
+		return codexTOMLBasicString(x), nil
+	case []any:
+		parts := make([]string, len(x))
+		for i, e := range x {
+			p, err := jsonValueToCodexTOMLInline(e)
+			if err != nil {
+				return "", err
+			}
+			parts[i] = p
+		}
+		return "[" + strings.Join(parts, ", ") + "]", nil
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, len(keys))
+		for i, k := range keys {
+			p, err := jsonValueToCodexTOMLInline(x[k])
+			if err != nil {
+				return "", err
+			}
+			parts[i] = codexTOMLKey(k) + " = " + p
+		}
+		return "{ " + strings.Join(parts, ", ") + " }", nil
+	default:
+		return "", fmt.Errorf("unsupported value type %T", v)
+	}
+}
+
+func codexTOMLBasicString(s string) string {
+	var sb strings.Builder
+	sb.Grow(len(s) + 2)
+	sb.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '\\':
+			sb.WriteString(`\\`)
+		case '"':
+			sb.WriteString(`\"`)
+		case '\b':
+			sb.WriteString(`\b`)
+		case '\t':
+			sb.WriteString(`\t`)
+		case '\n':
+			sb.WriteString(`\n`)
+		case '\f':
+			sb.WriteString(`\f`)
+		case '\r':
+			sb.WriteString(`\r`)
+		default:
+			if r < 0x20 || r == 0x7f {
+				sb.WriteString(fmt.Sprintf(`\u%04x`, r))
+			} else {
+				sb.WriteRune(r)
+			}
+		}
+	}
+	sb.WriteByte('"')
+	return sb.String()
+}
+
+func codexTOMLKey(s string) string {
+	if isCodexBareTomlKey(s) {
+		return s
+	}
+	return codexTOMLBasicString(s)
+}
+
+func isCodexBareTomlKey(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '_' || r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {

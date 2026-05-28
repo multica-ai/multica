@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Agent, RuntimeDevice } from "@multica/core/types";
+import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enAgents from "../../../locales/en/agents.json";
@@ -42,35 +42,14 @@ const baseAgent: Agent = {
   archived_by: null,
 };
 
-function makeRuntime(provider: string): RuntimeDevice {
-  return {
-    id: "runtime-1",
-    workspace_id: "ws-1",
-    daemon_id: null,
-    name: "Runtime",
-    runtime_mode: "local",
-    provider,
-    launch_header: "",
-    status: "online",
-    device_info: "",
-    metadata: {},
-    owner_id: null,
-    visibility: "private",
-    last_seen_at: null,
-    created_at: "2026-05-28T00:00:00Z",
-    updated_at: "2026-05-28T00:00:00Z",
-  };
-}
-
 function renderTab(
   overrides: Partial<Agent> = {},
   onSave = vi.fn().mockResolvedValue(undefined),
-  runtimeDevice?: RuntimeDevice,
 ) {
   const agent = { ...baseAgent, ...overrides };
   const result = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <McpConfigTab agent={agent} onSave={onSave} runtimeDevice={runtimeDevice} />
+      <McpConfigTab agent={agent} onSave={onSave} />
     </I18nProvider>,
   );
   return { ...result, onSave };
@@ -240,21 +219,4 @@ describe("McpConfigTab", () => {
     expect(editor.value).toBe(draft);
   });
 
-  it("warns when the agent's runtime provider is not Claude", () => {
-    renderTab({ mcp_config: null }, undefined, makeRuntime("codex"));
-
-    expect(
-      screen.getByText(/Only the Claude runtime reads this config/i),
-    ).toBeInTheDocument();
-    // Editor is still rendered — the warning is informational, not a block.
-    expect(screen.getByLabelText(/MCP config JSON editor/i)).toBeInTheDocument();
-  });
-
-  it("does not warn for a Claude runtime", () => {
-    renderTab({ mcp_config: null }, undefined, makeRuntime("claude"));
-
-    expect(
-      screen.queryByText(/Only the Claude runtime reads this config/i),
-    ).not.toBeInTheDocument();
-  });
 });
