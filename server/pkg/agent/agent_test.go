@@ -121,20 +121,12 @@ func TestCapabilityValues(t *testing.T) {
 		t.Fatalf("unexpected codex capability: %+v", codex)
 	}
 
-	gemini, ok := CapabilityFor("gemini")
-	if !ok {
-		t.Fatal("missing gemini capability")
-	}
-	if !gemini.StreamDisplay || !gemini.ToolCallStream || gemini.Approval || !gemini.ResumeSession || gemini.PlanMode || !gemini.StructuredOutput {
-		t.Fatalf("unexpected gemini capability: %+v", gemini)
-	}
-
 	if got := CapabilityOrDefault("unknown"); got != (Capability{}) {
 		t.Fatalf("unknown capability = %+v", got)
 	}
 }
 
-func TestStreamDisplayGatingForUnknownProvider(t *testing.T) {
+func TestStreamDisplayGating(t *testing.T) {
 	t.Parallel()
 
 	cap := CapabilityOrDefault("unregistered_provider")
@@ -142,13 +134,23 @@ func TestStreamDisplayGatingForUnknownProvider(t *testing.T) {
 		t.Fatal("unknown provider must default to StreamDisplay=false")
 	}
 
-	for _, name := range []string{"claude", "codex", "copilot", "opencode"} {
+	streamProviders := map[string]bool{
+		"claude":   true,
+		"codex":    true,
+		"copilot":  true,
+		"opencode": true,
+	}
+
+	for _, name := range RegisteredProviders() {
 		cap, ok := CapabilityFor(name)
 		if !ok {
 			t.Fatalf("missing %s", name)
 		}
-		if !cap.StreamDisplay {
-			t.Fatalf("%s must have StreamDisplay=true", name)
+		if cap.StreamDisplay != streamProviders[name] {
+			t.Fatalf("%s StreamDisplay=%v, want %v", name, cap.StreamDisplay, streamProviders[name])
+		}
+		if cap.ToolCallStream != streamProviders[name] {
+			t.Fatalf("%s ToolCallStream=%v, want %v", name, cap.ToolCallStream, streamProviders[name])
 		}
 	}
 }
