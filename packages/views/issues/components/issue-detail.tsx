@@ -1076,6 +1076,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     return names.join(", ") || "Direct message";
   }, [isDM, subscribers, user?.id, getActorName]);
 
+  // CEREBRO-PATCH(channel-issue-redirect): FIR-2452 — DM/channel opened via /issues/ → replace to /channels/.
+  useEffect(() => {
+    if (isChat && issue?.id) router.replace(paths.channelDetail(issue.id));
+  }, [isChat, issue?.id, router, paths]);
+
   // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);

@@ -95,6 +95,10 @@ vi.mock("@multica/core/paths", async () => {
 });
 
 // Mock navigation
+const navigationMocks = vi.hoisted(() => ({
+  replace: vi.fn(),
+}));
+
 vi.mock("../../navigation", () => ({
   AppLink: ({ children, href, ...props }: any) => (
     <a href={href} {...props}>
@@ -103,6 +107,7 @@ vi.mock("../../navigation", () => ({
   ),
   useNavigation: () => ({
     push: vi.fn(),
+    replace: navigationMocks.replace,
     pathname: "/issues/issue-1",
     getShareableUrl: (p: string) => `https://app.multica.com${p}`,
   }),
@@ -1269,6 +1274,38 @@ describe("IssueDetail (channel/DM)", () => {
 
     // Activity (not Messages) is the section heading for issues.
     expect(screen.getAllByText("Activity").length).toBeGreaterThanOrEqual(1);
+  });
+
+  // CEREBRO-PATCH(channel-issue-redirect): FIR-2452 — when a DM or channel
+  // is opened via /issues/<id>, IssueDetail must navigate.replace to the
+  // chat route so the hybrid issue-chrome layout never reaches the user.
+  it("replace-navigates to /channels/<id> when loaded with a channel kind", async () => {
+    mockApiObj.getIssue.mockResolvedValue(mockChannelIssue);
+    renderIssueDetail("channel-1");
+
+    await waitFor(() => {
+      expect(navigationMocks.replace).toHaveBeenCalledWith("/test/channels/channel-1");
+    });
+  });
+
+  it("replace-navigates to /channels/<id> when loaded with a DM kind", async () => {
+    mockApiObj.getIssue.mockResolvedValue(mockDMIssue);
+    renderIssueDetail("dm-1");
+
+    await waitFor(() => {
+      expect(navigationMocks.replace).toHaveBeenCalledWith("/test/channels/dm-1");
+    });
+  });
+
+  it("does not redirect for a regular issue", async () => {
+    mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    renderIssueDetail("issue-1");
+
+    await waitFor(() => {
+      expect(screen.getByText("Properties")).toBeInTheDocument();
+    });
+
+    expect(navigationMocks.replace).not.toHaveBeenCalled();
   });
 });
 
