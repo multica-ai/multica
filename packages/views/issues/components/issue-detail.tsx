@@ -395,6 +395,8 @@ const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
 const JUMP_SCROLL_MIN_RANGE = 300;
 const JUMP_NEAR_EDGE_THRESHOLD = 120;
 const JUMP_PROGRAMMATIC_SCROLL_TIMEOUT_MS = 3000;
+type JumpScrollAction = "to-comment-box" | "to-top";
+type JumpScrollVisibility = JumpScrollAction | "both" | null;
 
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
@@ -726,8 +728,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
-  const [jumpScrollAction, setJumpScrollAction] = useState<"to-comment-box" | "to-top" | null>(null);
-  const pendingJumpScrollActionRef = useRef<"to-comment-box" | "to-top" | null>(null);
+  const [jumpScrollAction, setJumpScrollAction] = useState<JumpScrollVisibility>(null);
+  const pendingJumpScrollActionRef = useRef<JumpScrollAction | null>(null);
   const jumpScrollRafRef = useRef<number | null>(null);
   const jumpProgrammaticScrollRef = useRef(false);
   const jumpProgrammaticScrollTimeoutRef = useRef<number | null>(null);
@@ -1116,7 +1118,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         pendingJumpScrollActionRef.current = null;
         jumpProgrammaticScrollRef.current = false;
         clearJumpProgrammaticScrollTimeout();
-        setJumpScrollAction(distanceFromBottom > JUMP_SCROLL_MIN_RANGE ? "to-comment-box" : null);
+        setJumpScrollAction(distanceFromBottom > JUMP_NEAR_EDGE_THRESHOLD ? "to-comment-box" : null);
         return;
       }
 
@@ -1126,12 +1128,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
     if (jumpProgrammaticScrollRef.current) return;
 
-    if (distanceFromBottom <= JUMP_NEAR_EDGE_THRESHOLD) {
+    const canJumpToTop = scrollTop > JUMP_NEAR_EDGE_THRESHOLD;
+    const canJumpToCommentBox = distanceFromBottom > JUMP_NEAR_EDGE_THRESHOLD;
+
+    if (canJumpToTop && canJumpToCommentBox) {
+      setJumpScrollAction("both");
+      return;
+    }
+
+    if (canJumpToTop) {
       setJumpScrollAction("to-top");
       return;
     }
 
-    if (distanceFromBottom > JUMP_SCROLL_MIN_RANGE) {
+    if (canJumpToCommentBox) {
       setJumpScrollAction("to-comment-box");
       return;
     }
@@ -1160,7 +1170,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     finishJumpProgrammaticScroll();
   }, [finishJumpProgrammaticScroll]);
 
-  const beginJumpProgrammaticScroll = useCallback((action: "to-comment-box" | "to-top") => {
+  const beginJumpProgrammaticScroll = useCallback((action: JumpScrollAction) => {
     pendingJumpScrollActionRef.current = action;
     jumpProgrammaticScrollRef.current = true;
     clearJumpProgrammaticScrollTimeout();
@@ -1203,13 +1213,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [clearJumpProgrammaticScrollTimeout, finishJumpProgrammaticScroll, scrollContainerEl, scheduleJumpScrollStateUpdate, updateJumpScrollState, items.length]);
 
 
-  const handleJumpScroll = useCallback(() => {
+  const handleJumpScroll = useCallback((action: JumpScrollAction) => {
     if (!scrollContainerEl) return;
 
-    if (!jumpScrollAction) return;
-    beginJumpProgrammaticScroll(jumpScrollAction);
+    beginJumpProgrammaticScroll(action);
 
-    if (jumpScrollAction === "to-top") {
+    if (action === "to-top") {
       scrollContainerEl.scrollTo({ top: 0, behavior: "smooth" });
       setJumpScrollAction(null);
       return;
@@ -1228,7 +1237,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const maxScrollTop = scrollContainerEl.scrollHeight - scrollContainerEl.clientHeight;
     scrollContainerEl.scrollTo({ top: maxScrollTop, behavior: "smooth" });
     setJumpScrollAction(null);
-  }, [beginJumpProgrammaticScroll, items.length, jumpScrollAction, scrollContainerEl]);
+  }, [beginJumpProgrammaticScroll, items.length, scrollContainerEl]);
 
   // Deep-link landing. Semantically equivalent to navigating to
   // `#comment-${id}`: find the element with that id, scrollIntoView it.
@@ -2193,21 +2202,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>
         </div>
         </div>
-        {jumpScrollAction && (
+        {(jumpScrollAction === "to-top" || jumpScrollAction === "both") && (
           <IssueJumpFab
-            direction={jumpScrollAction === "to-top" ? "up" : "down"}
-            position={jumpScrollAction === "to-top" ? "top" : "bottom"}
-            onClick={handleJumpScroll}
-            label={
-              jumpScrollAction === "to-top"
-                ? t(($) => $.detail.jump_to_top_short)
-                : t(($) => $.detail.jump_to_comment_box_short)
-            }
-            ariaLabel={
-              jumpScrollAction === "to-top"
-                ? t(($) => $.detail.jump_to_top)
-                : t(($) => $.detail.jump_to_comment_box)
-            }
+            direction="up"
+            position="top"
+            onClick={() => handleJumpScroll("to-top")}
+            label={t(($) => $.detail.jump_to_top_short)}
+            ariaLabel={t(($) => $.detail.jump_to_top)}
+          />
+        )}
+        {(jumpScrollAction === "to-comment-box" || jumpScrollAction === "both") && (
+          <IssueJumpFab
+            direction="down"
+            position="bottom"
+            onClick={() => handleJumpScroll("to-comment-box")}
+            label={t(($) => $.detail.jump_to_comment_box_short)}
+            ariaLabel={t(($) => $.detail.jump_to_comment_box)}
           />
         )}
       </div>

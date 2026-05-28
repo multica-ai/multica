@@ -1172,6 +1172,29 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByRole("button", { name: "Jump to top" })).not.toBeInTheDocument();
   });
 
+  it("shows both top and comment-box jump pills from the middle of a long thread", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    const scrollContainer = screen.getByTestId("issue-detail-scroll-container");
+    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 2500 });
+    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 500 });
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 900 });
+
+    fireEvent.scroll(scrollContainer);
+    await flushAnimationFrame();
+
+    const jumpToTop = await screen.findByRole("button", { name: "Jump to top" });
+    const jumpToCommentBox = await screen.findByRole("button", { name: "Jump to comment box" });
+    expect(jumpToTop).toHaveTextContent("Top");
+    expect(jumpToCommentBox).toHaveTextContent("Comment");
+    expect(jumpToTop).toHaveClass("top-8", "sm:top-4");
+    expect(jumpToCommentBox).toHaveClass("bottom-2");
+  });
+
   it("keeps the comment-box jump pill visible while scrolling down until the comment box is nearby", async () => {
     renderIssueDetail();
 
