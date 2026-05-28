@@ -1,6 +1,6 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, Codex, Copilot, OpenCode, OpenClaw, Hermes,
-// Gemini, Pi, Cursor, Kimi, Kiro). It mirrors the happy-cli AgentBackend
+// Gemini, Grok Build, Pi, Cursor, Kimi, Kiro). It mirrors the happy-cli AgentBackend
 // pattern, translated to idiomatic Go.
 package agent
 
@@ -101,7 +101,7 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli)
+	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, grok, pi, cursor, kimi, kiro-cli)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
@@ -128,6 +128,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &hermesBackend{cfg: cfg}, nil
 	case "gemini":
 		return &geminiBackend{cfg: cfg}, nil
+	case "grok":
+		return &grokBackend{cfg: cfg}, nil
 	case "pi":
 		return &piBackend{cfg: cfg}, nil
 	case "cursor":
@@ -137,7 +139,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "kiro":
 		return &kiroBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, grok, pi, cursor, kimi, kiro)", agentType)
 	}
 }
 
@@ -158,6 +160,7 @@ var launchHeaders = map[string]string{
 	"copilot":  "copilot (json)",
 	"cursor":   "cursor-agent (stream-json)",
 	"gemini":   "gemini (stream-json)",
+	"grok":     "grok (streaming-json)",
 	"hermes":   "hermes acp",
 	"openclaw": "openclaw agent (json)",
 	"opencode": "opencode run (json)",
