@@ -218,18 +218,20 @@ export function LoginPage({
       setError("");
       try {
         await useAuthStore.getState().sendCode(email);
-        // Dev mode: auto-verify with fixed code, skip OTP input
-        await handleVerify("123456");
+        setStep("code");
+        setCode("");
+        setCooldown(60);
       } catch (err) {
         setError(
           err instanceof Error
             ? err.message
             : `${t(($) => $.errors.send_failed)} ${t(($) => $.errors.server_unreachable)}`,
         );
+      } finally {
         setLoading(false);
       }
     },
-    [email, t, handleVerify],
+    [email, t],
   );  const handleResend = async () => {
     if (cooldown > 0) return;
     setError("");
