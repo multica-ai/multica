@@ -725,6 +725,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [jumpScrollAction, setJumpScrollAction] = useState<"to-comment-box" | "to-top" | null>(null);
   const jumpScrollRafRef = useRef<number | null>(null);
+  const jumpProgrammaticScrollRef = useRef(false);
+  const jumpProgrammaticScrollTimeoutRef = useRef<number | null>(null);
   const jumpAutoDismissTimeoutRef = useRef<number | null>(null);
 
   // Per-session: which resolved threads the user has temporarily expanded.
@@ -1078,8 +1080,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     jumpAutoDismissTimeoutRef.current = null;
   }, []);
 
+  const clearJumpProgrammaticScrollTimeout = useCallback(() => {
+    if (jumpProgrammaticScrollTimeoutRef.current === null) return;
+    window.clearTimeout(jumpProgrammaticScrollTimeoutRef.current);
+    jumpProgrammaticScrollTimeoutRef.current = null;
+  }, []);
+
   const updateJumpScrollState = useCallback(() => {
-    if (!scrollContainerEl) return;
+    if (!scrollContainerEl || jumpProgrammaticScrollRef.current) return;
 
     const { scrollTop, scrollHeight, clientHeight } = scrollContainerEl;
     const maxScrollTop = scrollHeight - clientHeight;
@@ -1114,11 +1122,26 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     });
   }, [updateJumpScrollState]);
 
+  const finishJumpProgrammaticScroll = useCallback(() => {
+    if (!scrollContainerEl) return;
+
+    jumpProgrammaticScrollRef.current = false;
+    clearJumpProgrammaticScrollTimeout();
+    updateJumpScrollState();
+  }, [clearJumpProgrammaticScrollTimeout, scrollContainerEl, updateJumpScrollState]);
+
+  const beginJumpProgrammaticScroll = useCallback(() => {
+    jumpProgrammaticScrollRef.current = true;
+    clearJumpProgrammaticScrollTimeout();
+    jumpProgrammaticScrollTimeoutRef.current = window.setTimeout(finishJumpProgrammaticScroll, 900);
+  }, [clearJumpProgrammaticScrollTimeout, finishJumpProgrammaticScroll]);
+
   useLayoutEffect(() => {
     if (!scrollContainerEl) return;
 
     updateJumpScrollState();
     scrollContainerEl.addEventListener("scroll", scheduleJumpScrollStateUpdate, { passive: true });
+    scrollContainerEl.addEventListener("scrollend", finishJumpProgrammaticScroll);
     window.addEventListener("resize", scheduleJumpScrollStateUpdate);
 
     let resizeObserver: ResizeObserver | null = null;
@@ -1134,6 +1157,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
     return () => {
       scrollContainerEl.removeEventListener("scroll", scheduleJumpScrollStateUpdate);
+      scrollContainerEl.removeEventListener("scrollend", finishJumpProgrammaticScroll);
       window.removeEventListener("resize", scheduleJumpScrollStateUpdate);
       resizeObserver?.disconnect();
       if (jumpScrollRafRef.current !== null) {
@@ -1141,14 +1165,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         jumpScrollRafRef.current = null;
       }
       clearJumpAutoDismissTimeout();
+      clearJumpProgrammaticScrollTimeout();
+      jumpProgrammaticScrollRef.current = false;
       window.clearTimeout(timeout);
     };
-  }, [clearJumpAutoDismissTimeout, scrollContainerEl, scheduleJumpScrollStateUpdate, updateJumpScrollState, items.length]);
+  }, [clearJumpAutoDismissTimeout, clearJumpProgrammaticScrollTimeout, finishJumpProgrammaticScroll, scrollContainerEl, scheduleJumpScrollStateUpdate, updateJumpScrollState, items.length]);
+
 
   const handleJumpScroll = useCallback(() => {
     if (!scrollContainerEl) return;
 
     clearJumpAutoDismissTimeout();
+    beginJumpProgrammaticScroll();
 
     if (jumpScrollAction === "to-top") {
       scrollContainerEl.scrollTo({ top: 0, behavior: "smooth" });
@@ -1169,7 +1197,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const maxScrollTop = scrollContainerEl.scrollHeight - scrollContainerEl.clientHeight;
     scrollContainerEl.scrollTo({ top: maxScrollTop, behavior: "smooth" });
     setJumpScrollAction(null);
-  }, [clearJumpAutoDismissTimeout, items.length, jumpScrollAction, scrollContainerEl]);
+  }, [beginJumpProgrammaticScroll, clearJumpAutoDismissTimeout, items.length, jumpScrollAction, scrollContainerEl]);
 
   // Deep-link landing. Semantically equivalent to navigating to
   // `#comment-${id}`: find the element with that id, scrollIntoView it.

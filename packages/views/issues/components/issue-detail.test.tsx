@@ -1116,6 +1116,11 @@ describe("IssueDetail (shared)", () => {
     });
     expect(scrollTo).not.toHaveBeenCalledWith({ top: 1500, behavior: "smooth" });
 
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 500 });
+    fireEvent.scroll(scrollContainer);
+    await flushAnimationFrame();
+    expect(screen.queryByRole("button", { name: "Jump to comment box" })).not.toBeInTheDocument();
+
     Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 1450 });
     fireEvent.scroll(scrollContainer);
 
