@@ -194,6 +194,7 @@ export function AgentOverviewPane({
           <TabContent>
             <McpConfigTab
               agent={agent}
+              runtimeDevice={runtime ?? undefined}
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
             />

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Eraser, Loader2, Lock, Save } from "lucide-react";
-import type { Agent } from "@multica/core/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Eraser, Info, Loader2, Lock, Save } from "lucide-react";
+import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { toast } from "sonner";
@@ -20,10 +20,12 @@ function configToText(value: unknown): string {
 
 export function McpConfigTab({
   agent,
+  runtimeDevice,
   onSave,
   onDirtyChange,
 }: {
   agent: Agent;
+  runtimeDevice?: RuntimeDevice;
   onSave: (updates: { mcp_config: unknown | null }) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -36,11 +38,27 @@ export function McpConfigTab({
 
   // Sync local draft when the agent prop changes (e.g. after a successful
   // save invalidates the cache and a fresh agent arrives). We only sync
-  // when the user has no in-flight edits — otherwise a background WS
-  // event would clobber whatever they typed.
+  // when the user has no in-flight edits — comparing the current draft
+  // against the *previous* original (not the new one) is what tells us
+  // "they haven't touched this since the last sync". Comparing against
+  // the new original would skip the sync whenever the server-side value
+  // changes underneath an untouched draft, leaving the editor showing a
+  // stale value that a later Save would write back, clobbering another
+  // admin's edit.
+  const previousOriginalRef = useRef(original);
   useEffect(() => {
-    setText((current) => (current === original ? original : current));
+    setText((current) =>
+      current === previousOriginalRef.current ? original : current,
+    );
+    previousOriginalRef.current = original;
   }, [original]);
+
+  // Only the Claude runtime currently consumes `mcp_config` — the daemon
+  // forwards it via Claude's `--mcp-config` flag and no other provider
+  // reads it. We surface that explicitly so saving on e.g. a Codex agent
+  // doesn't quietly look like it took effect.
+  const providerSupportsMcp =
+    runtimeDevice === undefined || runtimeDevice.provider === "claude";
 
   const trimmed = text.trim();
   const parseResult = useMemo<
@@ -139,6 +157,20 @@ export function McpConfigTab({
           </Button>
         )}
       </div>
+
+      {!providerSupportsMcp && (
+        <div
+          role="note"
+          className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-2.5 text-xs text-warning-foreground"
+        >
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <p>
+            {t(($) => $.tab_body.mcp_config.provider_unsupported, {
+              provider: runtimeDevice?.provider ?? "",
+            })}
+          </p>
+        </div>
+      )}
 
       <Textarea
         value={text}

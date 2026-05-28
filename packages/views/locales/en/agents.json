@@ -305,7 +305,8 @@
       "saved_toast": "MCP config saved",
       "save_failed_toast": "Failed to save MCP config",
       "redacted_title": "Configured — hidden from your view",
-      "redacted_hint": "Only the agent owner or a workspace admin can read this config."
+      "redacted_hint": "Only the agent owner or a workspace admin can read this config.",
+      "provider_unsupported": "Only the Claude runtime reads this config. This agent runs on a \"{{provider}}\" runtime, so the value will be stored but the CLI won't load it at launch."
     },
     "skills": {
       "intro": "Workspace skills assigned to this agent. Local runtime skills are always available automatically.",

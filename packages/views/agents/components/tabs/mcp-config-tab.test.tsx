@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Agent } from "@multica/core/types";
+import type { Agent, RuntimeDevice } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enAgents from "../../../locales/en/agents.json";
@@ -42,11 +42,35 @@ const baseAgent: Agent = {
   archived_by: null,
 };
 
-function renderTab(overrides: Partial<Agent> = {}, onSave = vi.fn().mockResolvedValue(undefined)) {
+function makeRuntime(provider: string): RuntimeDevice {
+  return {
+    id: "runtime-1",
+    workspace_id: "ws-1",
+    daemon_id: null,
+    name: "Runtime",
+    runtime_mode: "local",
+    provider,
+    launch_header: "",
+    status: "online",
+    device_info: "",
+    metadata: {},
+    owner_id: null,
+    visibility: "private",
+    last_seen_at: null,
+    created_at: "2026-05-28T00:00:00Z",
+    updated_at: "2026-05-28T00:00:00Z",
+  };
+}
+
+function renderTab(
+  overrides: Partial<Agent> = {},
+  onSave = vi.fn().mockResolvedValue(undefined),
+  runtimeDevice?: RuntimeDevice,
+) {
   const agent = { ...baseAgent, ...overrides };
   const result = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <McpConfigTab agent={agent} onSave={onSave} />
+      <McpConfigTab agent={agent} onSave={onSave} runtimeDevice={runtimeDevice} />
     </I18nProvider>,
   );
   return { ...result, onSave };
@@ -143,5 +167,94 @@ describe("McpConfigTab", () => {
       screen.getByText(/MCP config must be a JSON object/i),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
+  });
+
+  it("syncs the editor to a refreshed agent prop when the user hasn't edited", () => {
+    // Reproduces the stale-editor bug: a background refetch / WS event swaps
+    // in a newer `agent.mcp_config`, and the editor must follow it (so the
+    // next Save writes the new value, not the old one). Comparing the draft
+    // against the *previous* original — not the new one — is what makes this
+    // work. Without the ref, the effect would self-defeat: on re-render the
+    // draft already equals the new original, the equality check is true,
+    // but the conditional only re-assigns `original` to itself, so a draft
+    // that started life equal to the OLD original is never touched.
+    const initial = { mcpServers: { fetch: { command: "uvx" } } };
+    const updated = { mcpServers: { fetch: { command: "npx" } } };
+    const agent = { ...baseAgent, mcp_config: initial };
+
+    const { rerender } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <McpConfigTab agent={agent} onSave={vi.fn()} />
+      </I18nProvider>,
+    );
+
+    const editor = screen.getByLabelText(
+      /MCP config JSON editor/i,
+    ) as HTMLTextAreaElement;
+    expect(editor.value).toBe(JSON.stringify(initial, null, 2));
+
+    rerender(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <McpConfigTab
+          agent={{ ...agent, mcp_config: updated }}
+          onSave={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    // Editor follows the new prop and the dirty hint is NOT shown — if it
+    // were, the next Save would write the *old* JSON back over the new one.
+    expect(editor.value).toBe(JSON.stringify(updated, null, 2));
+    expect(screen.queryByText(/unsaved changes/i)).not.toBeInTheDocument();
+  });
+
+  it("preserves an in-flight edit when the agent prop is refreshed underneath", () => {
+    // The mirror of the test above: if the user IS editing, a background
+    // refresh must not clobber their draft.
+    const initial = { mcpServers: { fetch: { command: "uvx" } } };
+    const updated = { mcpServers: { fetch: { command: "npx" } } };
+    const agent = { ...baseAgent, mcp_config: initial };
+
+    const { rerender } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <McpConfigTab agent={agent} onSave={vi.fn()} />
+      </I18nProvider>,
+    );
+
+    const editor = screen.getByLabelText(
+      /MCP config JSON editor/i,
+    ) as HTMLTextAreaElement;
+    const draft = JSON.stringify({ mcpServers: { fetch: { command: "wip" } } });
+    fireEvent.change(editor, { target: { value: draft } });
+    expect(editor.value).toBe(draft);
+
+    rerender(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <McpConfigTab
+          agent={{ ...agent, mcp_config: updated }}
+          onSave={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    expect(editor.value).toBe(draft);
+  });
+
+  it("warns when the agent's runtime provider is not Claude", () => {
+    renderTab({ mcp_config: null }, undefined, makeRuntime("codex"));
+
+    expect(
+      screen.getByText(/Only the Claude runtime reads this config/i),
+    ).toBeInTheDocument();
+    // Editor is still rendered — the warning is informational, not a block.
+    expect(screen.getByLabelText(/MCP config JSON editor/i)).toBeInTheDocument();
+  });
+
+  it("does not warn for a Claude runtime", () => {
+    renderTab({ mcp_config: null }, undefined, makeRuntime("claude"));
+
+    expect(
+      screen.queryByText(/Only the Claude runtime reads this config/i),
+    ).not.toBeInTheDocument();
   });
 });
