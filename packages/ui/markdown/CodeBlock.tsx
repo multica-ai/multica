@@ -5,6 +5,10 @@ import { useTranslation } from "react-i18next"
 import { Button } from "@multica/ui/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip"
 import { cn } from '@multica/ui/lib/utils'
+import {
+  CODE_LIGATURE_CLASS,
+  CODE_LIGATURE_DESCENDANT_CLASS,
+} from '@multica/ui/lib/code-style'
 
 export interface CodeBlockProps {
   code: string
@@ -37,9 +41,6 @@ const LANGUAGE_ALIASES: Record<string, BundledLanguage> = {
 // Simple LRU cache for highlighted code
 const highlightCache = new Map<string, string>()
 const CACHE_MAX_SIZE = 200
-export const CODE_LIGATURE_CLASS = "[font-variant-ligatures:none] [font-feature-settings:'liga'_0]"
-export const CODE_LIGATURE_DESCENDANT_CLASS =
-  '[&_code]:[font-variant-ligatures:none] [&_code]:[font-feature-settings:"liga"_0]'
 
 function getCacheKey(code: string, lang: string): string {
   return `${lang}:${code}`

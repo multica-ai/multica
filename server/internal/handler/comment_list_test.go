@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // cursorQuery builds a properly URL-encoded query string for the recent +
@@ -1014,68 +1012,4 @@ func TestListComments_ThreadTailNotFoundReturns404(t *testing.T) {
 		t.Fatalf("expected 404 for unknown anchor, got %d: %s", w.Code, w.Body.String())
 	}
 	_ = fx
-}
-
-// resolveCommentRow marks a comment resolved directly in the DB (test helper —
-// the public path goes through ResolveComment, but for list-filter tests we
-// just need the column set).
-func resolveCommentRow(t *testing.T, commentID string) {
-	t.Helper()
-	if _, err := testPool.Exec(context.Background(),
-		`UPDATE comment SET resolved_at = now(), resolved_by_type = 'member', resolved_by_id = $2 WHERE id = $1`,
-		commentID, testUserID,
-	); err != nil {
-		t.Fatalf("resolve comment row: %v", err)
-	}
-}
-
-// TestCountNewCommentsSince_ExcludesAgentOwn pins the claim-side count query: it
-// counts comments created after the given anchor and excludes the agent's own,
-// so a chatty agent does not inflate its own new-comment count.
-func TestCountNewCommentsSince_ExcludesAgentOwn(t *testing.T) {
-	if testHandler == nil || testPool == nil {
-		t.Skip("database not available")
-	}
-	fx := newCommentListFixture(t)
-	agentID := createHandlerTestAgent(t, "count-agent", []byte("[]"))
-
-	// Two agent-authored comments — must NOT be counted.
-	for _, body := range []string{"agent reply 1", "agent reply 2"} {
-		if _, err := testPool.Exec(context.Background(), `
-			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
-			VALUES ($1, $2, 'agent', $3, $4, 'comment', $5)
-		`, fx.IssueID, testWorkspaceID, agentID, body, fx.Root2); err != nil {
-			t.Fatalf("insert agent comment: %v", err)
-		}
-	}
-
-	ctx := context.Background()
-
-	// Anchor in the far past: all 7 member comments are newer; agent's 2 excluded.
-	got, err := testHandler.Queries.CountNewCommentsSince(ctx, db.CountNewCommentsSinceParams{
-		IssueID:     parseUUID(fx.IssueID),
-		WorkspaceID: parseUUID(testWorkspaceID),
-		Since:       pgtype.Timestamptz{Time: time.Unix(0, 0), Valid: true},
-		AuthorID:    parseUUID(agentID),
-	})
-	if err != nil {
-		t.Fatalf("count new since epoch: %v", err)
-	}
-	if got != 7 {
-		t.Fatalf("expected 7 new member comments since epoch (agent's own excluded), got %d", got)
-	}
-
-	// Anchor in the future: nothing is newer.
-	got, err = testHandler.Queries.CountNewCommentsSince(ctx, db.CountNewCommentsSinceParams{
-		IssueID:     parseUUID(fx.IssueID),
-		WorkspaceID: parseUUID(testWorkspaceID),
-		Since:       pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
-		AuthorID:    parseUUID(agentID),
-	})
-	if err != nil {
-		t.Fatalf("count new since future: %v", err)
-	}
-	if got != 0 {
-		t.Fatalf("expected 0 new comments after a future anchor, got %d", got)
-	}
 }

@@ -249,6 +249,69 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
+// TestBuildPromptCommentTriggerPromotesThreadReads pins MUL-2387 + MUL-2421:
+// the per-turn prompt for a comment-triggered task must default the trigger
+// thread read to `--thread <id> --tail 30` (so long threads don't dump
+// hundreds of replies into the agent's context) and explain reply-cursor
+// pagination for older replies. --recent N stays as the cross-thread
+// fallback. Locking this in test stops the guidance from decaying back to
+// either the legacy full-flat-dump or the unbounded `--thread` recipe.
+func TestBuildPromptCommentTriggerPromotesThreadReads(t *testing.T) {
+	const (
+		issueID   = "issue-thread-1"
+		triggerID = "trigger-comment-1"
+	)
+	task := Task{
+		IssueID:               issueID,
+		TriggerCommentID:      triggerID,
+		TriggerCommentContent: "anything",
+		TriggerAuthorType:     "member",
+		TriggerAuthorName:     "Bohan",
+	}
+	out := BuildPrompt(task, "claude")
+
+	mustContain := []string{
+		// Thread-first read pinned by trigger comment id, capped via --tail 30.
+		"--thread " + triggerID,
+		"--tail 30",
+		"`multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json`",
+		// Reply cursor walks older replies inside the same thread.
+		"Next reply cursor:",
+		"--before-id <reply-id>",
+		// --recent stays as the cross-thread background fallback.
+		"--recent 20 --output json",
+		// Cursor walks via the stderr line the CLI emits, not invented flags.
+		"Next thread cursor",
+		"--before",
+		"--before-id",
+		// --since is preserved as an additional, combinable knob (now scoped
+		// to the post-MUL-2421 mode names).
+		"--since",
+		"may combine with `--thread --tail` or `--recent`",
+		// Discourage the unfiltered full dump on long-running issues.
+		"Avoid the unfiltered",
+		"wastes context",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("buildCommentPrompt missing thread-first guidance %q\n--- output ---\n%s", s, out)
+		}
+	}
+
+	// The old "dump everything via --output json alone" prose is exactly the
+	// pattern this PR is replacing — guard against the legacy phrasing
+	// sneaking back in.
+	if strings.Contains(out, "returns all comments for the issue (server caps at 2000)") {
+		t.Errorf("buildCommentPrompt still carries the legacy full-dump phrasing")
+	}
+	// The pre-MUL-2421 unbounded `--thread` recipe (no --tail) is also a
+	// regression target: it dumps the entire thread on long threads, which
+	// is exactly what --tail 30 is meant to bound.
+	if strings.Contains(out, "--thread "+triggerID+" --output json") {
+		t.Errorf("buildCommentPrompt regressed to unbounded --thread recipe (no --tail) — long threads will overflow context\n--- output ---\n%s", out)
+	}
+}
+
 // TestBuildPromptDefaultMentionsRecent pins that the catch-all fallback
 // prompt (no trigger comment, no chat, no autopilot, no quick-create) also
 // teaches the agent about --recent as the long-issue-friendly alternative
@@ -294,59 +357,5 @@ func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {
 	out := BuildPrompt(task, "claude")
 	if strings.Contains(out, "Squad leader no_action rule") {
 		t.Errorf("buildCommentPrompt must NOT inject squad leader no_action rule for non-squad-leader agents, got:\n%s", out)
-	}
-}
-
-// TestBuildPromptNewCommentsHint pins that a comment-triggered task whose agent
-// ran before on this issue (NewCommentsSince set, NewCommentCount > 0) gets the
-// one-line since-delta hint pointing at `--since`, so the agent catches up on
-// exactly the comments that arrived since its last run instead of re-reading
-// everything or walking threads blind.
-func TestBuildPromptNewCommentsHint(t *testing.T) {
-	const (
-		issueID = "issue-new-1"
-		since   = "2026-05-28T11:00:00Z"
-	)
-	task := Task{
-		IssueID:               issueID,
-		TriggerCommentID:      "trigger-1",
-		TriggerCommentContent: "please look",
-		TriggerAuthorType:     "member",
-		NewCommentCount:       3,
-		NewCommentsSince:      since,
-	}
-	out := BuildPrompt(task, "claude")
-
-	if !strings.Contains(out, "3 new comment(s) since your last run") {
-		t.Errorf("hint must report the new-comment count, got:\n%s", out)
-	}
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --output json") {
-		t.Errorf("hint must point at the --since catch-up read, got:\n%s", out)
-	}
-	// The old cursor-heavy paragraph must be gone.
-	if strings.Contains(out, "Next reply cursor") || strings.Contains(out, "--before-id") {
-		t.Errorf("the old cursor-pagination paragraph must not render, got:\n%s", out)
-	}
-}
-
-// TestBuildPromptColdStartNoHint pins the cold-start case: no prior run means no
-// since anchor (NewCommentsSince empty), so we suppress the delta hint and fall
-// back to a plain "read the discussion" line.
-func TestBuildPromptColdStartNoHint(t *testing.T) {
-	const issueID = "issue-cold-1"
-	task := Task{
-		IssueID:               issueID,
-		TriggerCommentID:      "trigger-1",
-		TriggerCommentContent: "hi",
-		TriggerAuthorType:     "member",
-		NewCommentCount:       0,
-		NewCommentsSince:      "",
-	}
-	out := BuildPrompt(task, "claude")
-	if strings.Contains(out, "new comment(s) since your last run") {
-		t.Errorf("no since-delta hint should render on cold start, got:\n%s", out)
-	}
-	if !strings.Contains(out, "Read the discussion: `multica issue comment list "+issueID+" --output json`") {
-		t.Errorf("cold start must fall back to the plain read line, got:\n%s", out)
 	}
 }

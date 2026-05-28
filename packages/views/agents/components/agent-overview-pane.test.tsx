@@ -109,6 +109,14 @@ describe("AgentOverviewPane MCP tab visibility", () => {
     expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
   });
 
+  it("renders the MCP tab when the agent runs on the OpenClaw runtime", () => {
+    // OpenClaw materialises mcp_config via the per-task wrapper config
+    // (OPENCLAW_CONFIG_PATH) rather than ExecOptions, but the Tab must still
+    // surface so admins can save the managed set.
+    renderPane([makeRuntime("openclaw")]);
+    expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
+  });
+
   it("hides the MCP tab for providers whose backend does not read mcp_config", () => {
     // Saving an MCP config on e.g. Gemini would be a silent no-op at run
     // time — that's the bug this hiding logic is meant to prevent.

@@ -293,6 +293,31 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.11",
+        date: "2026-05-28",
+        title: "Antigravity CLI 支持",
+        changes: [],
+        features: [
+          "Antigravity CLI 现在可作为编码运行环境使用",
+          "智能体详情页新增 MCP 配置，可用于 Hermes、Kimi 和 Kiro",
+          "自托管管理员可以关闭自助创建工作区",
+          "桌面端本机运行环境会在访问令牌过期前自动续期",
+        ],
+        improvements: [
+          "Helm Chart 可发布到 GHCR，邮件配置文档更清晰",
+          "任务记录会显示更短、更安全的工作目录",
+          "手动排序时，新 Issue 会留在列顶部，已删除 Issue 不再回到最近列表",
+          "本机运行环境会按设备名合并同一台机器",
+        ],
+        fixes: [
+          "任务完成回传遇到短暂错误时会重试",
+          "本地目录运行不会覆盖已有的 CLAUDE.md、AGENTS.md 或 GEMINI.md",
+          "Windows 上的 Pi 会保留多行提示词",
+          "运行环境 Logo 显示更稳定",
+          "本机运行服务清理时会跳过不完整父级信息",
+        ],
+      },
+      {
         version: "0.3.10",
         date: "2026-05-27",
         title: "本地工作目录",

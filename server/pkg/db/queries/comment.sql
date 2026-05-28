@@ -201,17 +201,6 @@ ORDER BY p.last_activity_at ASC, p.root_id ASC, c.created_at ASC, c.id ASC;
 SELECT count(*) FROM comment
 WHERE issue_id = $1 AND workspace_id = $2;
 
--- name: CountNewCommentsSince :one
--- Counts comments on an issue created strictly after @since, excluding any
--- authored by the given agent (@author_id). Feeds the daemon claim response so
--- a comment-triggered task can tell the agent how many comments arrived since
--- its last run on this issue, without shipping their bodies.
-SELECT count(*) FROM comment
-WHERE issue_id = @issue_id
-  AND workspace_id = @workspace_id
-  AND created_at > @since
-  AND NOT (author_type = 'agent' AND author_id = @author_id);
-
 -- name: GetComment :one
 SELECT * FROM comment
 WHERE id = $1;

@@ -293,6 +293,31 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.11",
+        date: "2026-05-28",
+        title: "Antigravity CLI Support",
+        changes: [],
+        features: [
+          "Antigravity CLI is now a supported coding runtime",
+          "Agent settings now include MCP configuration for Hermes, Kimi, and Kiro",
+          "Self-hosted admins can turn off self-service workspace creation",
+          "Desktop local runtimes can renew access tokens before they expire",
+        ],
+        improvements: [
+          "Helm charts can be published to GHCR, and email setup docs are clearer",
+          "Task transcripts show shorter, safer working-folder labels",
+          "New Issues stay at the top in manual boards, and deleted Issues stay out of recents",
+          "Local runtime machines are grouped by device name",
+        ],
+        fixes: [
+          "Terminal task completion retries brief callback failures",
+          "Local-directory runs preserve existing CLAUDE.md, AGENTS.md, and GEMINI.md files",
+          "Windows Pi runs keep multi-line prompts intact",
+          "Provider logos render consistently",
+          "Daemon cleanup skips incomplete parent-task metadata",
+        ],
+      },
+      {
         version: "0.3.10",
         date: "2026-05-27",
         title: "Local Working Directories",
