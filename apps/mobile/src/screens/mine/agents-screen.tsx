@@ -572,7 +572,12 @@ function AgentDetailModal({
             />
           ) : null}
           {activeTab === "advanced" ? (
-            <AdvancedTab agent={agent} readOnly={!canEdit || isArchived} onUpdate={onUpdate} />
+            <AdvancedTab
+              agent={agent}
+              canManageEnv={!!currentUserId && agent.owner_id === currentUserId && !isArchived}
+              readOnly={!canEdit || isArchived}
+              onUpdate={onUpdate}
+            />
           ) : null}
         </ScrollView>
       </Screen>
@@ -1012,18 +1017,27 @@ function SettingsTab({
 
 function AdvancedTab({
   agent,
+  canManageEnv,
   readOnly,
   onUpdate,
 }: {
   agent: Agent;
+  canManageEnv: boolean;
   readOnly: boolean;
   onUpdate: (agentId: string, data: UpdateAgentRequest) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const [envText, setEnvText] = useState("");
+  const [initialEnvText, setInitialEnvText] = useState("");
+  const [envLoaded, setEnvLoaded] = useState(false);
   const [argsText, setArgsText] = useState((agent.custom_args ?? []).join("\n"));
   const [saving, setSaving] = useState(false);
+  const [revealingEnv, setRevealingEnv] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const dirty = argsText !== (agent.custom_args ?? []).join("\n");
+  const envReadOnly = !canManageEnv || !envLoaded;
+  const envDirty = canManageEnv && envLoaded && envText !== initialEnvText;
+  const argsDirty = argsText !== (agent.custom_args ?? []).join("\n");
+  const dirty = envDirty || argsDirty;
   const envKeyCount = agent.custom_env_key_count ?? 0;
   const envStatusText =
     envKeyCount > 0
@@ -1033,20 +1047,58 @@ function AdvancedTab({
         : t("agents.environment_empty");
 
   useEffect(() => {
+    setEnvText("");
+    setInitialEnvText("");
+    setEnvLoaded(false);
     setArgsText((agent.custom_args ?? []).join("\n"));
     setError(null);
   }, [agent]);
 
+  async function revealEnv() {
+    if (!canManageEnv || revealingEnv) return;
+    setRevealingEnv(true);
+    setError(null);
+    try {
+      const response = await api.getAgentEnv(agent.id);
+      const text = envMapToText(response.custom_env ?? {});
+      setEnvText(text);
+      setInitialEnvText(text);
+      setEnvLoaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("agents.unable_to_load_environment"));
+    } finally {
+      setRevealingEnv(false);
+    }
+  }
+
   async function save() {
+    let customEnv: Record<string, string> | null = null;
+    if (envDirty) {
+      try {
+        customEnv = parseEnvText(envText);
+      } catch {
+        setError(t("agents.invalid_environment"));
+        return;
+      }
+    }
     setSaving(true);
     setError(null);
     try {
-      await onUpdate(agent.id, {
-        custom_args: argsText
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean),
-      });
+      if (customEnv) {
+        const response = await api.updateAgentEnv(agent.id, { custom_env: customEnv });
+        const text = envMapToText(response.custom_env ?? {});
+        setEnvText(text);
+        setInitialEnvText(text);
+        setEnvLoaded(true);
+      }
+      if (argsDirty) {
+        await onUpdate(agent.id, {
+          custom_args: argsText
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean),
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t("agents.unable_to_save_advanced"));
     } finally {
@@ -1065,10 +1117,36 @@ function AdvancedTab({
         </View>
       ) : null}
       <Text style={styles.optionLabel}>{t("agents.environment")}</Text>
-      <View style={styles.infoNotice}>
-        <Text style={styles.infoValue}>{envStatusText}</Text>
-        <Text style={styles.infoNoticeText}>{t("agents.environment_managed_on_web")}</Text>
-      </View>
+      {canManageEnv ? (
+        <>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!envReadOnly}
+            multiline
+            onChangeText={setEnvText}
+            placeholder="ANTHROPIC_API_KEY=..."
+            placeholderTextColor={colors.mutedForeground}
+            style={[styles.textArea, envReadOnly && styles.inputReadOnly]}
+            textAlignVertical="top"
+            value={
+              envLoaded
+                ? envText
+                : t("agents.hidden_values", { count: agent.custom_env_key_count ?? 0 })
+            }
+          />
+          {!envLoaded ? (
+            <Button disabled={revealingEnv} onPress={() => void revealEnv()}>
+              {revealingEnv ? t("agents.loading_environment") : t("agents.reveal_environment")}
+            </Button>
+          ) : null}
+        </>
+      ) : (
+        <View style={styles.infoNotice}>
+          <Text style={styles.infoValue}>{envStatusText}</Text>
+          <Text style={styles.infoNoticeText}>{t("agents.environment_managed_on_web")}</Text>
+        </View>
+      )}
       <Text style={styles.optionLabel}>{t("agents.custom_args")}</Text>
       <TextInput
         autoCapitalize="none"
@@ -1664,6 +1742,27 @@ function formatTaskTime(task: AgentTask) {
           ? task.completed_at
           : task.created_at;
   return new Date(source).toLocaleString();
+}
+
+function envMapToText(env: Record<string, string>) {
+  return Object.entries(env)
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+}
+
+function parseEnvText(value: string) {
+  const result: Record<string, string> = {};
+  for (const rawLine of value.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const index = line.indexOf("=");
+    if (index <= 0) throw new Error(`Invalid env line: ${line}`);
+    const key = line.slice(0, index).trim();
+    const envValue = line.slice(index + 1);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error(`Invalid env key: ${key}`);
+    result[key] = envValue;
+  }
+  return result;
 }
 
 const styles = StyleSheet.create({

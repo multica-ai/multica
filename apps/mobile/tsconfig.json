@@ -4,7 +4,13 @@
     "jsx": "react-native",
     "allowJs": true,
     "noEmit": true,
-    "types": ["react"]
+    "types": [
+      "react"
+    ]
   },
-  "include": ["index.ts", "src/**/*.ts", "src/**/*.tsx"]
+  "include": [
+    "index.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ]
 }
