@@ -859,8 +859,11 @@ func TestCodexStartOrResumeThreadStartsFresh(t *testing.T) {
 				if params["cwd"] != "/work" {
 					t.Errorf("cwd = %v, want /work", params["cwd"])
 				}
-				if params["persistExtendedHistory"] != true {
-					t.Error("expected persistExtendedHistory=true on thread/start")
+				if params["ephemeral"] != true {
+					t.Error("expected ephemeral=true on thread/start")
+				}
+				if params["persistExtendedHistory"] != false {
+					t.Error("expected persistExtendedHistory=false on thread/start")
 				}
 			},
 		},
@@ -930,6 +933,14 @@ func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 		{
 			method: "thread/start",
 			result: json.RawMessage(`{"thread":{"id":"thr_new"}}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["ephemeral"] != true {
+					t.Error("expected fallback thread/start to stay ephemeral")
+				}
+				if params["persistExtendedHistory"] != false {
+					t.Error("expected fallback thread/start to skip extended history persistence")
+				}
+			},
 		},
 	})
 	defer wait()
