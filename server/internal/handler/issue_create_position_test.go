@@ -1,10 +1,16 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // TestCreateIssuePositionTopOfColumn verifies that a newly created issue is
@@ -104,5 +110,87 @@ func TestCreateIssuePositionBelowExplicitMinimum(t *testing.T) {
 	if newIssue.Position >= simulatedMinPos {
 		t.Errorf("new issue position (%v) should be less than simulated min (%v); got position 0 (unfixed behavior)?",
 			newIssue.Position, simulatedMinPos)
+	}
+}
+
+func TestAutopilotCreateIssuePositionBelowCurrentMinimum(t *testing.T) {
+	ctx := context.Background()
+	seedTitle := fmt.Sprintf("position-autopilot seed %d", time.Now().UnixNano())
+	autopilotIssueTitle := fmt.Sprintf("position-autopilot issue %d", time.Now().UnixNano())
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":    seedTitle,
+		"status":   "todo",
+		"priority": "low",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("seed CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var seed IssueResponse
+	json.NewDecoder(w.Body).Decode(&seed)
+	t.Cleanup(func() { deleteTestIssue(t, seed.ID) })
+
+	const simulatedMinPos = -9999.0
+	if _, err := testPool.Exec(ctx,
+		`UPDATE issue SET position = $1 WHERE id = $2`,
+		simulatedMinPos, seed.ID,
+	); err != nil {
+		t.Fatalf("failed to set explicit position: %v", err)
+	}
+
+	var minBefore float64
+	if err := testPool.QueryRow(ctx,
+		`SELECT MIN(position) FROM issue WHERE workspace_id = $1 AND status = 'todo'`,
+		testWorkspaceID,
+	).Scan(&minBefore); err != nil {
+		t.Fatalf("load min position: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Position autopilot",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": autopilotIssueTitle,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, autopilot.ID) })
+
+	queries := db.New(testPool)
+	ap, err := queries.GetAutopilot(ctx, parseUUID(autopilot.ID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil || !run.IssueID.Valid {
+		t.Fatalf("dispatch run = %+v, want linked issue", run)
+	}
+	issueID := uuidToString(run.IssueID)
+	t.Cleanup(func() { deleteTestIssue(t, issueID) })
+
+	var createdPos float64
+	if err := testPool.QueryRow(ctx, `SELECT position FROM issue WHERE id = $1`, issueID).Scan(&createdPos); err != nil {
+		t.Fatalf("load autopilot-created issue position: %v", err)
+	}
+	if createdPos >= minBefore {
+		t.Errorf("autopilot-created issue position (%v) should be less than current min (%v); fixed position 0 would sort in the middle",
+			createdPos, minBefore)
 	}
 }
