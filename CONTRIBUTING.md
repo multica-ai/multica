@@ -361,7 +361,7 @@ make dev
 Wait for the backend to be healthy:
 
 ```bash
-PORT=$(grep '^PORT=' .env.worktree 2>/dev/null || grep '^PORT=' .env | head -1 | cut -d= -f2)
+PORT=$({ grep '^PORT=' .env.worktree 2>/dev/null || grep '^PORT=' .env; } | head -1 | cut -d= -f2)
 PORT=${PORT:-8080}
 SERVER="http://localhost:${PORT}"
 
@@ -410,7 +410,7 @@ HASH="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
 OFFSET=$((HASH % 1000))
 PROFILE="dev-${SLUG}-${OFFSET}"
 
-FRONTEND_PORT=$(grep '^FRONTEND_PORT=' .env.worktree 2>/dev/null || grep '^FRONTEND_PORT=' .env | head -1 | cut -d= -f2)
+FRONTEND_PORT=$({ grep '^FRONTEND_PORT=' .env.worktree 2>/dev/null || grep '^FRONTEND_PORT=' .env; } | head -1 | cut -d= -f2)
 FRONTEND_PORT=${FRONTEND_PORT:-3000}
 
 CONFIG_DIR="$HOME/.multica/profiles/$PROFILE"
