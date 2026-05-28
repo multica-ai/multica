@@ -327,6 +327,58 @@ func TestTraceHandlerStreamSendsInitialLines(t *testing.T) {
 	}
 }
 
+func TestTraceHandlerStreamReadyReportsStreamDisplayCapability(t *testing.T) {
+	t.Parallel()
+
+	store := newTraceStoreForTest(t)
+	defer store.Close()
+	d := &Daemon{traceStore: store, logger: slog.Default()}
+	d.taskProviders.Store("task-stream-gemini", "gemini")
+	d.taskProviders.Store("task-stream-codex", "codex")
+
+	srv := httptest.NewServer(d.traceHandler())
+	defer srv.Close()
+
+	for _, tt := range []struct {
+		name string
+		task string
+		want bool
+	}{
+		{name: "unsupported provider", task: "task-stream-gemini", want: false},
+		{name: "stream provider", task: "task-stream-codex", want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			reqCtx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, srv.URL+"/"+tt.task+"/stream?tail=0", nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("stream request: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
+			}
+
+			_, data := readSSEEventForTest(t, bufio.NewReader(resp.Body), "ready")
+			var payload traceResponse
+			if err := json.Unmarshal([]byte(data), &payload); err != nil {
+				t.Fatalf("decode ready payload: %v", err)
+			}
+			if payload.StreamDisplay == nil {
+				t.Fatal("expected stream_display in ready payload")
+			}
+			if *payload.StreamDisplay != tt.want {
+				t.Fatalf("stream_display=%v, want %v", *payload.StreamDisplay, tt.want)
+			}
+		})
+	}
+}
+
 func TestPreviewStreamHandlerRejectsNonGet(t *testing.T) {
 	t.Parallel()
 

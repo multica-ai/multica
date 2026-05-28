@@ -125,15 +125,11 @@ cd server && go test ./internal/handler/ -run TestName
 # Run a single E2E test (requires backend + frontend running)
 pnpm exec playwright test e2e/tests/specific-test.spec.ts
 
-# Mobile (Expo) — two environments only: dev and staging
-pnpm dev:mobile                  # Metro, dev env       (reads apps/mobile/.env.development.local)
-pnpm dev:mobile:staging          # Metro, staging env   (reads apps/mobile/.env.staging)
-pnpm ios:mobile                  # Native build + install dev-client to iOS Simulator, dev env
-pnpm ios:mobile:staging          # Native build + install dev-client to iOS Simulator, staging env
-pnpm ios:mobile:device           # Native build + install dev-client to USB iPhone, dev env
-pnpm ios:mobile:device:staging   # Native build + install dev-client to USB iPhone, staging env
-# Daily flow: run `pnpm dev:mobile:staging` (or :dev). Only re-run `ios:mobile*` when
-# native code or any expo-*/react-native-* dependency changes (lockfile drift counts).
+# Mobile (Expo)
+pnpm dev:mobile                  # Metro dev server
+pnpm ios:mobile                  # Native build + install to iOS Simulator
+# For local backend testing on a device, set apps/mobile/.env.development.local
+# with EXPO_PUBLIC_API_BASE_URL / EXPO_PUBLIC_WS_URL using a device-reachable host.
 
 # Desktop build & package
 pnpm --filter @multica/desktop build      # Compile TS → JS (reads .env.production)

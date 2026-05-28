@@ -1982,6 +1982,46 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, taskToResponse(*task))
 }
 
+// CancelTaskFromDaemon handles a daemon reporting that the agent process exited
+// with a cancelled status. Unlike FailTask, this preserves the task's cancelled
+// semantics (status='cancelled') rather than marking it as failed.
+func (h *Handler) CancelTaskFromDaemon(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+		return
+	}
+
+	var req struct {
+		SessionID string `json:"session_id"`
+		WorkDir   string `json:"work_dir"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	uid := parseUUID(taskID)
+
+	if req.SessionID != "" || req.WorkDir != "" {
+		_ = h.Queries.UpdateAgentTaskSession(r.Context(), db.UpdateAgentTaskSessionParams{
+			ID:        uid,
+			SessionID: pgtype.Text{String: req.SessionID, Valid: req.SessionID != ""},
+			WorkDir:   pgtype.Text{String: req.WorkDir, Valid: req.WorkDir != ""},
+		})
+	}
+
+	task, err := h.TaskService.CancelTask(r.Context(), uid)
+	if err != nil {
+		slog.Warn("cancel task from daemon failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	slog.Info("task cancelled by daemon", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
+	writeJSON(w, http.StatusOK, taskToResponse(*task))
+}
+
 // ChatRetryProgressRequest represents a chat retry progress event from daemon.
 type ChatRetryProgressRequest struct {
 	WorkspaceID   string `json:"workspace_id"`

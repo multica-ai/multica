@@ -51,33 +51,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
-	// Anchor OpenCode's project discovery (AGENTS.md walk-up + .opencode/skills/
-	// project config scan) at the task workdir. Without this, OpenCode falls
-	// back to PWD (inherited from the daemon process) or process.cwd(), which
-	// in self-host deployments can resolve to the user's shell working
-	// directory and silently bypass the per-task workdir — agents lose
-	// visibility into their assigned skills and AGENTS.md instructions.
-	// PWD is also overridden below because OpenCode prefers PWD over cwd when
-	// `--dir` is absent and uses it as the starting point for any further
-	// path resolution.
-	if opts.Cwd != "" {
-		args = append(args, "--dir", opts.Cwd)
-	}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
-	}
-	if opts.SystemPrompt != "" {
-		args = append(args, "--prompt", opts.SystemPrompt)
-	}
-	if opts.MaxTurns > 0 {
-		b.cfg.Logger.Warn("opencode does not support --max-turns; ignoring", "maxTurns", opts.MaxTurns)
-	}
-	if opts.ResumeSessionID != "" {
-		args = append(args, "--session", opts.ResumeSessionID)
-	}
-	args = append(args, filterCustomArgs(opts.CustomArgs, opencodeBlockedArgs, b.cfg.Logger)...)
-	args = append(args, prompt)
+	args := b.buildRunArgs(prompt, opts)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
@@ -111,6 +85,9 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		return nil, fmt.Errorf("opencode stdout pipe: %w", err)
 	}
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[opencode:stderr] ")
+	if opts.TraceCallback != nil {
+		cmd.Stderr = io.MultiWriter(cmd.Stderr, newTraceWriter("raw_stderr", opts.TraceCallback))
+	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -134,7 +111,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		defer close(resCh)
 
 		startTime := time.Now()
-		scanResult := b.processEvents(stdout, msgCh)
+		scanResult := b.processEvents(runCtx, stdout, msgCh, opts)
 
 		// Wait for process exit.
 		exitErr := cmd.Wait()
@@ -189,12 +166,45 @@ type eventResult struct {
 	usage     TokenUsage // accumulated token usage across all steps
 }
 
+func (b *opencodeBackend) buildRunArgs(prompt string, opts ExecOptions) []string {
+	args := []string{"run", "--format", "json"}
+	switch opts.ApprovalPolicy {
+	case "deny":
+		b.cfg.Logger.Info("opencode running in deny mode; commands will be blocked by internal permission rules")
+	default:
+		args = append(args, "--dangerously-skip-permissions")
+		if opts.ApprovalPolicy == "prompt" {
+			b.cfg.Logger.Info("opencode approval degraded: prompt mode behaves as auto with post-hoc observability (no interactive protocol)")
+			emitDisplayEvent(opts.TraceCallback, "approval_degraded", "OpenCode", "prompt mode degraded to auto — no interactive approval protocol available", nil)
+		}
+	}
+	if opts.Cwd != "" {
+		args = append(args, "--dir", opts.Cwd)
+	}
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
+	}
+	if opts.SystemPrompt != "" {
+		args = append(args, "--prompt", opts.SystemPrompt)
+	}
+	if opts.MaxTurns > 0 {
+		b.cfg.Logger.Warn("opencode does not support --max-turns; ignoring", "maxTurns", opts.MaxTurns)
+	}
+	if opts.ResumeSessionID != "" {
+		args = append(args, "--session", opts.ResumeSessionID)
+	}
+	args = append(args, filterCustomArgs(opts.CustomArgs, opencodeBlockedArgs, b.cfg.Logger)...)
+	args = append(args, prompt)
+	return args
+}
+
 // processEvents reads JSON lines from r, dispatches events to ch, and returns
 // the accumulated result. This is the core scanner loop, extracted for testability.
-func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventResult {
+func (b *opencodeBackend) processEvents(ctx context.Context, r io.Reader, ch chan<- Message, opts ExecOptions) eventResult {
 	var output strings.Builder
 	var sessionID string
 	var usage TokenUsage
+	var pendingToolCalls int
 	finalStatus := "completed"
 	var finalError string
 
@@ -219,12 +229,25 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		switch event.Type {
 		case "text":
 			b.handleTextEvent(event, ch, &output)
+			if event.Part.Text != "" {
+				emitDisplayEvent(opts.TraceCallback, "assistant_text", "OpenCode", event.Part.Text, nil)
+			}
 		case "tool_use":
-			b.handleToolUseEvent(event, ch)
+			b.handleToolUseEvent(ctx, event, ch, opts)
+			if event.Part.State != nil && event.Part.State.Status == "completed" {
+				pendingToolCalls--
+			} else {
+				pendingToolCalls++
+			}
+			emitOpencodeToolDisplayEvent(opts.TraceCallback, event.Part.Tool, event.Part.CallID, inputFromToolState(event.Part.State))
+			if event.Part.State != nil && event.Part.State.Status == "completed" {
+				emitOpencodeToolResultDisplayEvent(opts.TraceCallback, event.Part.Tool, event.Part.CallID, inputFromToolState(event.Part.State), event.Part.State)
+			}
 		case "error":
 			b.handleErrorEvent(event, ch, &finalStatus, &finalError)
 		case "step_start":
 			trySend(ch, Message{Type: MessageStatus, Status: "running"})
+			emitDisplayEvent(opts.TraceCallback, "status", "OpenCode", "running", nil)
 		case "step_finish":
 			// Accumulate token usage from step_finish events.
 			if t := event.Part.Tokens; t != nil {
@@ -247,6 +270,13 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		}
 	}
 
+	if pendingToolCalls > 0 && finalStatus == "completed" {
+		b.cfg.Logger.Warn("opencode stream ended with incomplete tool calls", "pending", pendingToolCalls)
+		emitDisplayEvent(opts.TraceCallback, "warning", "OpenCode", fmt.Sprintf("%d tool call(s) did not complete before stream ended", pendingToolCalls), nil)
+	}
+
+	emitDisplayEvent(opts.TraceCallback, "status", "OpenCode", finalStatus, map[string]any{"error": finalError})
+
 	return eventResult{
 		status:    finalStatus,
 		errMsg:    finalError,
@@ -267,12 +297,9 @@ func (b *opencodeBackend) handleTextEvent(event opencodeEvent, ch chan<- Message
 // handleToolUseEvent processes "tool_use" events from opencode. A single
 // tool_use event contains both the call and result in part.state when the
 // tool has completed (state.status == "completed").
-func (b *opencodeBackend) handleToolUseEvent(event opencodeEvent, ch chan<- Message) {
+func (b *opencodeBackend) handleToolUseEvent(ctx context.Context, event opencodeEvent, ch chan<- Message, opts ExecOptions) {
 	// Extract input from state.input (the tool invocation parameters).
-	var input map[string]any
-	if event.Part.State != nil && event.Part.State.Input != nil {
-		_ = json.Unmarshal(event.Part.State.Input, &input)
-	}
+	input := inputFromToolState(event.Part.State)
 
 	// Emit the tool-use message.
 	trySend(ch, Message{
@@ -377,6 +404,97 @@ func extractToolOutput(output any) string {
 	}
 	data, _ := json.Marshal(output)
 	return string(data)
+}
+
+func inputFromToolState(state *opencodeToolState) map[string]any {
+	if state == nil || state.Input == nil {
+		return nil
+	}
+	var input map[string]any
+	_ = json.Unmarshal(state.Input, &input)
+	return input
+}
+
+func emitOpencodeToolDisplayEvent(trace TraceCallback, tool, callID string, input map[string]any) {
+	metadata := opencodeDisplayMetadata(callID, tool, input)
+	switch opencodeDisplayKind(tool, input) {
+	case "command":
+		emitDisplayEvent(trace, "command_start", "Command", opencodeCommandDisplayContent(tool, input), metadata)
+	case "file_change":
+		emitDisplayEvent(trace, "file_change", "File change", "started", metadata)
+	default:
+		emitDisplayEvent(trace, "tool_call", opencodeToolTitle(tool, input), "", metadata)
+	}
+}
+
+func emitOpencodeToolResultDisplayEvent(trace TraceCallback, tool, callID string, input map[string]any, state *opencodeToolState) {
+	if state == nil {
+		return
+	}
+	metadata := opencodeDisplayMetadata(callID, tool, input)
+	output := extractToolOutput(state.Output)
+	switch opencodeDisplayKind(tool, input) {
+	case "command":
+		emitDisplayEvent(trace, "command_output", "Command output", output, metadata)
+	case "file_change":
+		emitDisplayEvent(trace, "file_change", "File change", "completed", metadata)
+	default:
+		emitDisplayEvent(trace, "tool_result", "Tool result", output, metadata)
+	}
+}
+
+func opencodeDisplayMetadata(callID, tool string, input map[string]any) map[string]any {
+	metadata := map[string]any{
+		"call_id": callID,
+		"tool":    tool,
+	}
+	if len(input) > 0 {
+		metadata["input"] = input
+	}
+	return metadata
+}
+
+func opencodeDisplayKind(tool string, input map[string]any) string {
+	if tool == "bash" || opencodeCommandSummary(input) != "" {
+		return "command"
+	}
+	switch tool {
+	case "edit", "patch", "write":
+		return "file_change"
+	}
+	return ""
+}
+
+func opencodeToolTitle(tool string, input map[string]any) string {
+	if command := opencodeCommandSummary(input); command != "" {
+		return command
+	}
+	if path := opencodePathSummary(input); path != "" {
+		return tool + ": " + path
+	}
+	return tool
+}
+
+func opencodeCommandSummary(input map[string]any) string {
+	command, _ := input["command"].(string)
+	return strings.TrimSpace(command)
+}
+
+func opencodeCommandDisplayContent(tool string, input map[string]any) string {
+	if command := opencodeCommandSummary(input); command != "" {
+		return command
+	}
+	return tool
+}
+
+func opencodePathSummary(input map[string]any) string {
+	for _, key := range []string{"file_path", "path"} {
+		path, _ := input[key].(string)
+		if strings.TrimSpace(path) != "" {
+			return strings.TrimSpace(path)
+		}
+	}
+	return ""
 }
 
 // ── JSON types for `opencode run --format json` stdout events ──

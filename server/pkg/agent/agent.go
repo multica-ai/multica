@@ -87,11 +87,12 @@ type ExecOptions struct {
 	MaxTurns                  int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
-	ResumeSessionID           string          // if non-empty, resume a previous agent session
-	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
-	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
-	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	ResumeSessionID           string           // if non-empty, resume a previous agent session
+	ExtraArgs                 []string         // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
+	CustomArgs                []string         // per-agent CLI arguments appended after ExtraArgs
+	McpConfig                 json.RawMessage  // if non-nil, MCP server config to pass via --mcp-config
 	OnApproval                ApprovalCallback // nil = auto-approve (default behaviour)
+	ApprovalPolicy            string           // "auto", "prompt", or "deny"; empty treated as "auto"
 	TraceCallback             TraceCallback    // nil = no trace recording (default)
 	ClaudePermissionMode      string           // optional controlled override: default, plan, acceptEdits
 	ClaudeUseSDKBridge        bool             // route Claude execution through the Agent SDK bridge
@@ -166,49 +167,6 @@ type Config struct {
 	Logger         *slog.Logger
 }
 
-type PlanCapability struct {
-	PromptPlan          bool
-	NativePlan          string // "", "experimental", or "verified"
-	NativeApproval      bool
-	NativeUserInput     bool
-	StructuredStreaming bool
-}
-
-func Capabilities(agentType string) PlanCapability {
-	switch agentType {
-	case "claude", "codebuddy":
-		// CodeBuddy reuses Claude Code's stream-json + control_request
-		// protocol and exposes the same `--permission-mode plan`
-		// option, so plan/approval/streaming capabilities are identical.
-		return PlanCapability{
-			PromptPlan:          true,
-			NativePlan:          "experimental",
-			NativeApproval:      true,
-			StructuredStreaming: true,
-		}
-	case "codex":
-		return PlanCapability{
-			PromptPlan:          true,
-			NativeApproval:      true,
-			NativeUserInput:     true,
-			StructuredStreaming: true,
-		}
-	case "hermes", "kimi", "kiro":
-		return PlanCapability{
-			PromptPlan:          true,
-			NativeApproval:      true,
-			StructuredStreaming: true,
-		}
-	case "copilot", "cursor", "gemini", "opencode", "openclaw", "pi":
-		return PlanCapability{
-			PromptPlan:          true,
-			StructuredStreaming: true,
-		}
-	default:
-		return PlanCapability{}
-	}
-}
-
 // New creates a Backend for the given agent type.
 // Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI".
 func New(agentType string, cfg Config) (Backend, error) {
@@ -246,6 +204,19 @@ func New(agentType string, cfg Config) (Backend, error) {
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI)", agentType)
 	}
+}
+
+// SupportedBackends returns the set of agent types accepted by New.
+func SupportedBackends() []string {
+	return []string{
+		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw",
+		"hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI",
+	}
+}
+
+// RegisteredProviders returns the set of provider names with capability entries.
+func RegisteredProviders() []string {
+	return registeredProviders()
 }
 
 // DetectVersion runs the agent CLI with --version and returns the output.

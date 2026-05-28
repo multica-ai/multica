@@ -232,6 +232,17 @@ func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDi
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil)
 }
 
+func (c *Client) CancelTask(ctx context.Context, taskID, sessionID, workDir string) error {
+	body := map[string]any{}
+	if sessionID != "" {
+		body["session_id"] = sessionID
+	}
+	if workDir != "" {
+		body["work_dir"] = workDir
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/cancel", taskID), body, nil)
+}
+
 // PinTaskSession persists the agent's session_id and work_dir on the task
 // row mid-flight so a daemon crash doesn't lose the resume pointer.
 func (c *Client) PinTaskSession(ctx context.Context, taskID, sessionID, workDir string) error {

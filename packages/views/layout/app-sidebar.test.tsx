@@ -55,10 +55,18 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   SidebarMenuButton: ({
     children,
     onClick,
+    render,
   }: {
     children: React.ReactNode;
     onClick?: () => void;
-  }) => <button type="button" onClick={onClick}>{children}</button>,
+    render?: React.ReactNode;
+  }) => render ? (
+    <a href={(render as React.ReactElement<{ href: string }>).props.href} onClick={onClick}>
+      {children}
+    </a>
+  ) : (
+    <button type="button" onClick={onClick}>{children}</button>
+  ),
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarRail: () => null,
 }));
@@ -100,6 +108,8 @@ vi.mock("@multica/core/paths", () => ({
     workspace: (slug: string) => ({
       root: () => `/${slug}`,
       issues: () => `/${slug}/issues`,
+      issueDetail: (id: string) => `/${slug}/issues/${id}`,
+      projectDetail: (id: string) => `/${slug}/projects/${id}`,
     }),
   },
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
@@ -190,6 +200,13 @@ describe("PinRow", () => {
     detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
     render(<AppSidebar />);
     expect(await screen.findByText("MUL-123 Keep this pin")).toBeInTheDocument();
+  });
+
+  it("uses the workspace slug and issue identifier for pinned issue links", async () => {
+    detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
+    render(<AppSidebar />);
+    const link = await screen.findByRole("link", { name: /MUL-123 Keep this pin/ });
+    expect(link).toHaveAttribute("href", "/acme/issues/MUL-123");
   });
 
   it("opens manual create issue with project prefill on the global shortcut", () => {

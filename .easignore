@@ -13,18 +13,13 @@ bin
 artifacts/
 dist-electron
 *.tsbuildinfo
-# ...except electron-builder's source resources dir, which holds tracked
-# config files (entitlements, icons) — not build output.
-!apps/desktop/build/
-!apps/desktop/build/**
 
 # env
 .env*
 !.env.bot
 !.env.example
-# Desktop production config is public (backend URL, etc.) — track it so
-# `pnpm package` produces a release-ready build without extra setup.
 !apps/desktop/.env.production
+
 # test coverage
 coverage
 
@@ -55,10 +50,16 @@ apps/mobile/**/*.p12
 apps/mobile/**/*.key
 apps/mobile/**/*.mobileprovision
 
+# Keep the committed Android native project in EAS uploads.
+!apps/mobile/android/
+!apps/mobile/android/**
+apps/mobile/android/.gradle/
+apps/mobile/android/build/
+apps/mobile/android/app/build/
+apps/mobile/android/app/.cxx/
+
 # context (agent workspace)
 .context
-.agent_context/
-.multica/
 
 # local settings
 .claude/
