@@ -3345,13 +3345,14 @@ func TestBuildMetaSkillContentOmitsRequestingUserWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigCommentTriggerColdStartRead checks the
-// comment-triggered Workflow on cold start (no prior run): it falls back to a
-// plain catch-up read with no since-delta hint, while the Available Commands
-// core line still surfaces the thread/recent/cursor flags so they remain
-// discoverable for CLI use even though the verbose cursor walkthrough was
-// dropped from the workflow steps.
-func TestInjectRuntimeConfigCommentTriggerColdStartRead(t *testing.T) {
+// TestInjectRuntimeConfigCommentTriggerThreadFirstReads locks in
+// MUL-2387 + MUL-2421: the runtime config's comment-triggered Workflow
+// section must steer the agent at thread-aware reads first, default the
+// trigger thread to `--thread <id> --tail 30` (bounded), and explain the
+// reply-cursor walk for older replies. `--recent N` stays as the
+// cross-thread fallback. The Available Commands core line also has to
+// surface the `--tail` flag so the agent has a single place to discover it.
+func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -3372,17 +3373,33 @@ func TestInjectRuntimeConfigCommentTriggerColdStartRead(t *testing.T) {
 	}
 	s := string(data)
 
-	// Cold start (no prior run) → plain catch-up line, no since-delta hint.
+	// Workflow step 2 must read the trigger's thread with --thread anchored
+	// on the exact trigger comment id from this task, bounded to --tail 30.
 	for _, want := range []string{
-		"Catch up on comments",
-		"multica issue comment list " + issueID + " --output json",
+		"--thread " + triggerID,
+		"--tail 30",
+		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
+		// Reply cursor walks older replies inside the same thread.
+		"Next reply cursor:",
+		"--before-id <reply-id>",
+		// --recent fallback at the documented default N=20 for cross-thread context.
+		"multica issue comment list " + issueID + " --recent 20 --output json",
+		// Cursor walks via the stderr line the CLI emits, not invented flags.
+		"Next thread cursor",
+		"--before",
+		"--before-id",
+		// --since is still available and combinable (now scoped to the
+		// post-MUL-2421 mode names).
+		"--since",
+		"may combine with `--thread --tail` or `--recent`",
+		// Explicit pushback on the legacy full-dump recipe so the model has
+		// no reason to fall back to it on long issues.
+		"Avoid the unfiltered",
+		"wastes context",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("comment-triggered Workflow missing cold-start read %q\n---\n%s", want, s)
+			t.Errorf("comment-triggered Workflow missing %q\n---\n%s", want, s)
 		}
-	}
-	if strings.Contains(s, "new comment(s) since your last run") {
-		t.Errorf("cold-start workflow must not render the since-delta hint\n---\n%s", s)
 	}
 
 	// Available Commands core line must surface the new flags (this is the

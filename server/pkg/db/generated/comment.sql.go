@@ -28,37 +28,6 @@ func (q *Queries) CountComments(ctx context.Context, arg CountCommentsParams) (i
 	return count, err
 }
 
-const countNewCommentsSince = `-- name: CountNewCommentsSince :one
-SELECT count(*) FROM comment
-WHERE issue_id = $1
-  AND workspace_id = $2
-  AND created_at > $3
-  AND NOT (author_type = 'agent' AND author_id = $4)
-`
-
-type CountNewCommentsSinceParams struct {
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Since       pgtype.Timestamptz `json:"since"`
-	AuthorID    pgtype.UUID        `json:"author_id"`
-}
-
-// Counts comments on an issue created strictly after @since, excluding any
-// authored by the given agent (@author_id). Feeds the daemon claim response so
-// a comment-triggered task can tell the agent how many comments arrived since
-// its last run on this issue, without shipping their bodies.
-func (q *Queries) CountNewCommentsSince(ctx context.Context, arg CountNewCommentsSinceParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countNewCommentsSince,
-		arg.IssueID,
-		arg.WorkspaceID,
-		arg.Since,
-		arg.AuthorID,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createComment = `-- name: CreateComment :one
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)

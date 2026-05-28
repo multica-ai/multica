@@ -2,30 +2,6 @@ package execenv
 
 import "fmt"
 
-// BuildNewCommentsHint returns a one-line pointer telling a comment-triggered
-// agent how many comments arrived since its last run on this issue, and the
-// exact `--since` invocation to fetch just those. It ships only the COUNT and
-// the cursor — never the comment bodies — so the server stays cheap and the
-// agent pulls details on demand.
-//
-// Both the per-turn prompt (daemon.buildCommentPrompt) and the CLAUDE.md
-// workflow (InjectRuntimeConfig) call this so the two surfaces cannot drift
-// (hard requirement from PR #2816).
-//
-// Renders nothing on cold start (no prior run → newCommentsSince empty) or when
-// there are no new comments (newCommentCount <= 0) or issueID is empty. In
-// those cases the caller falls back to a plain "read the discussion" line.
-func BuildNewCommentsHint(issueID, newCommentsSince string, newCommentCount int) string {
-	if newCommentCount <= 0 || newCommentsSince == "" || issueID == "" {
-		return ""
-	}
-	return fmt.Sprintf(
-		"%d new comment(s) since your last run. Catch up: "+
-			"`multica issue comment list %s --since %s --output json`.\n\n",
-		newCommentCount, issueID, newCommentsSince,
-	)
-}
-
 // BuildCommentReplyInstructions returns the canonical block telling an agent
 // how to post its reply for a comment-triggered task. Both the per-turn
 // prompt (daemon.buildCommentPrompt) and the CLAUDE.md workflow
