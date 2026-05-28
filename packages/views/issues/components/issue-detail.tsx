@@ -724,6 +724,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [jumpScrollAction, setJumpScrollAction] = useState<"to-comment-box" | "to-top" | null>(null);
+  const pendingJumpScrollActionRef = useRef<"to-comment-box" | "to-top" | null>(null);
   const jumpScrollRafRef = useRef<number | null>(null);
   const jumpProgrammaticScrollRef = useRef(false);
   const jumpProgrammaticScrollTimeoutRef = useRef<number | null>(null);
@@ -1087,16 +1088,51 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, []);
 
   const updateJumpScrollState = useCallback(() => {
-    if (!scrollContainerEl || jumpProgrammaticScrollRef.current) return;
+    if (!scrollContainerEl) return;
 
     const { scrollTop, scrollHeight, clientHeight } = scrollContainerEl;
     const maxScrollTop = scrollHeight - clientHeight;
     const distanceFromBottom = maxScrollTop - scrollTop;
     if (maxScrollTop <= 0) {
+      pendingJumpScrollActionRef.current = null;
+      jumpProgrammaticScrollRef.current = false;
       clearJumpAutoDismissTimeout();
       setJumpScrollAction(null);
       return;
     }
+
+    const pendingJumpScrollAction = pendingJumpScrollActionRef.current;
+    if (pendingJumpScrollAction === "to-comment-box") {
+      if (distanceFromBottom <= 120) {
+        pendingJumpScrollActionRef.current = null;
+        jumpProgrammaticScrollRef.current = false;
+        clearJumpProgrammaticScrollTimeout();
+        clearJumpAutoDismissTimeout();
+        setJumpScrollAction("to-top");
+        return;
+      }
+
+      clearJumpAutoDismissTimeout();
+      setJumpScrollAction(null);
+      return;
+    }
+
+    if (pendingJumpScrollAction === "to-top") {
+      if (scrollTop <= 120) {
+        pendingJumpScrollActionRef.current = null;
+        jumpProgrammaticScrollRef.current = false;
+        clearJumpProgrammaticScrollTimeout();
+        clearJumpAutoDismissTimeout();
+        setJumpScrollAction(distanceFromBottom > 300 ? "to-comment-box" : null);
+        return;
+      }
+
+      clearJumpAutoDismissTimeout();
+      setJumpScrollAction(null);
+      return;
+    }
+
+    if (jumpProgrammaticScrollRef.current) return;
 
     if (distanceFromBottom <= 120) {
       clearJumpAutoDismissTimeout();
@@ -1112,7 +1148,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
     clearJumpAutoDismissTimeout();
     setJumpScrollAction(null);
-  }, [clearJumpAutoDismissTimeout, scrollContainerEl]);
+  }, [clearJumpAutoDismissTimeout, clearJumpProgrammaticScrollTimeout, scrollContainerEl]);
 
   const scheduleJumpScrollStateUpdate = useCallback(() => {
     if (jumpScrollRafRef.current !== null) return;
@@ -1130,11 +1166,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     updateJumpScrollState();
   }, [clearJumpProgrammaticScrollTimeout, scrollContainerEl, updateJumpScrollState]);
 
-  const beginJumpProgrammaticScroll = useCallback(() => {
+  const clearPendingJumpScrollAction = useCallback(() => {
+    pendingJumpScrollActionRef.current = null;
+    finishJumpProgrammaticScroll();
+  }, [finishJumpProgrammaticScroll]);
+
+  const beginJumpProgrammaticScroll = useCallback((action: "to-comment-box" | "to-top") => {
+    pendingJumpScrollActionRef.current = action;
     jumpProgrammaticScrollRef.current = true;
     clearJumpProgrammaticScrollTimeout();
-    jumpProgrammaticScrollTimeoutRef.current = window.setTimeout(finishJumpProgrammaticScroll, 900);
-  }, [clearJumpProgrammaticScrollTimeout, finishJumpProgrammaticScroll]);
+    jumpProgrammaticScrollTimeoutRef.current = window.setTimeout(clearPendingJumpScrollAction, 3000);
+  }, [clearJumpProgrammaticScrollTimeout, clearPendingJumpScrollAction]);
 
   useLayoutEffect(() => {
     if (!scrollContainerEl) return;
@@ -1166,6 +1208,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
       clearJumpAutoDismissTimeout();
       clearJumpProgrammaticScrollTimeout();
+      pendingJumpScrollActionRef.current = null;
       jumpProgrammaticScrollRef.current = false;
       window.clearTimeout(timeout);
     };
@@ -1176,7 +1219,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (!scrollContainerEl) return;
 
     clearJumpAutoDismissTimeout();
-    beginJumpProgrammaticScroll();
+    if (!jumpScrollAction) return;
+    beginJumpProgrammaticScroll(jumpScrollAction);
 
     if (jumpScrollAction === "to-top") {
       scrollContainerEl.scrollTo({ top: 0, behavior: "smooth" });
