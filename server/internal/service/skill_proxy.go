@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -12,6 +13,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// skillMaxBody is the maximum bytes read from a skill API response.
+// Skills are small JSON objects; 1MB is a generous upper bound that protects
+// against a misbehaving upstream filling memory.
+const skillMaxBody = 1 << 20 // 1 MB
 
 // Skill represents a skill fetched from the costrict-web internal API.
 type Skill struct {
@@ -139,8 +145,11 @@ func (sp *SkillProxy) FetchSkill(ctx context.Context, id, agentID string) (*Skil
 		return nil, fmt.Errorf("fetching skill %s: status %d", id, resp.StatusCode)
 	}
 
+	// Limit body size to protect against misbehaving upstream.
+	limitedBody := io.LimitReader(resp.Body, skillMaxBody)
+
 	var skill Skill
-	if err := json.NewDecoder(resp.Body).Decode(&skill); err != nil {
+	if err := json.NewDecoder(limitedBody).Decode(&skill); err != nil {
 		sp.logAudit(ctx, agentID, "fetch_skill", "skill", id, resp.StatusCode, err.Error())
 		return nil, fmt.Errorf("decoding skill %s: %w", id, err)
 	}
@@ -176,8 +185,11 @@ func (sp *SkillProxy) ListSkills() ([]Skill, error) {
 		return nil, fmt.Errorf("listing skills: status %d", resp.StatusCode)
 	}
 
+	// Limit body size to protect against misbehaving upstream.
+	limitedBody := io.LimitReader(resp.Body, skillMaxBody)
+
 	var skills []Skill
-	if err := json.NewDecoder(resp.Body).Decode(&skills); err != nil {
+	if err := json.NewDecoder(limitedBody).Decode(&skills); err != nil {
 		return nil, fmt.Errorf("decoding skills list: %w", err)
 	}
 

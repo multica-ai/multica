@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // SkillProxyHandler proxies skill requests to the costrict-web internal API.
@@ -47,6 +48,16 @@ func (h *SkillProxyHandler) GetAgentSkill(w http.ResponseWriter, r *http.Request
 	agentID := r.URL.Query().Get("agent_id")
 	if agentID == "" {
 		writeError(w, http.StatusBadRequest, "missing agent_id query parameter")
+		return
+	}
+
+	// Validate agent_id is a well-formed UUID. Prevents garbage input from
+	// polluting audit logs or creating spurious rate-limit buckets.
+	// TODO(costrict-integration): validate that the authenticated user owns
+	// this agent (or that the agent's daemon token matches) once agent auth
+	// is fully wired through the Casdoor middleware.
+	if _, err := util.ParseUUID(agentID); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid agent_id: must be a UUID")
 		return
 	}
 
