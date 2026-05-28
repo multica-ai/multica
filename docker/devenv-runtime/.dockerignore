@@ -5,5 +5,10 @@
 !agentfarm-bootstrap.sh
 !agent-templates/
 !agent-templates/**
+!config/
+!config/**
+!git-sudo
+!setup
+!restart
 !README.md
 !.dockerignore
