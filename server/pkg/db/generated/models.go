@@ -504,6 +504,13 @@ type CerebroGroupRuntimeAccess struct {
 	GrantedAt pgtype.Timestamptz `json:"granted_at"`
 }
 
+type CerebroIssueDateReminder struct {
+	IssueID      pgtype.UUID        `json:"issue_id"`
+	Kind         string             `json:"kind"`
+	ReminderDate pgtype.Date        `json:"reminder_date"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroIssueDueTime struct {
 	IssueID   pgtype.UUID        `json:"issue_id"`
 	DueAt     pgtype.Timestamptz `json:"due_at"`
@@ -1233,6 +1240,7 @@ type TaskUsage struct {
 	CacheWriteTokens int64              `json:"cache_write_tokens"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	CostCents        int64              `json:"cost_cents"`
 }
 
 type TaskUsageHourly struct {
@@ -1250,6 +1258,7 @@ type TaskUsageHourly struct {
 	TaskCount        int64              `json:"task_count"`
 	EventCount       int64              `json:"event_count"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	CostCents        int64              `json:"cost_cents"`
 }
 
 type TaskUsageHourlyDirty struct {

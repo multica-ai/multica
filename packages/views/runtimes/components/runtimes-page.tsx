@@ -108,7 +108,8 @@ export function RuntimesPage({
   const scopedRuntimes = useMemo(() => {
     if (scope !== "mine") return runtimes;
     if (!currentUserId) return [];
-    return runtimes.filter((r) => r.owner_id === currentUserId);
+    // CEREBRO-PATCH(runtimes-mine-includes-cloud): cloud runtimes have no owner_id but are shared by the whole workspace — show them under "Mine" so the user sees the runtime they actually run agents on (FIR-2405).
+    return runtimes.filter((r) => r.owner_id === currentUserId || r.runtime_mode === "cloud");
   }, [runtimes, scope, currentUserId]);
 
   const healthCounts = useMemo(() => {

@@ -69,6 +69,9 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"due_date_changed.follower":   false,
 		"priority_changed.assignee":   true,
 		"priority_changed.follower":   false,
+		// CEREBRO-PATCH(issue-date-reminders): fire a reminder to the assignee when the date arrives.
+		"due_date_reminder":   true,
+		"start_date_reminder": true,
 	},
 	channelNotifications: {
 		"issue_assigned":              false,
@@ -86,6 +89,9 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"due_date_changed.follower":   true,
 		"priority_changed.assignee":   false,
 		"priority_changed.follower":   true,
+		// CEREBRO-PATCH(issue-date-reminders): date reminders are personal — they ring the inbox, not the notifications feed.
+		"due_date_reminder":   false,
+		"start_date_reminder": false,
 	},
 	channelMobile: {
 		"issue_assigned":              true,
@@ -103,6 +109,9 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"due_date_changed.follower":   false,
 		"priority_changed.assignee":   true,
 		"priority_changed.follower":   false,
+		// CEREBRO-PATCH(issue-date-reminders): push the reminder to mobile by default.
+		"due_date_reminder":   true,
+		"start_date_reminder": true,
 	},
 	channelDesktop: {
 		"issue_assigned":              true,
@@ -120,6 +129,9 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"due_date_changed.follower":   false,
 		"priority_changed.assignee":   true,
 		"priority_changed.follower":   false,
+		// CEREBRO-PATCH(issue-date-reminders): show a desktop banner for the reminder by default.
+		"due_date_reminder":   true,
+		"start_date_reminder": true,
 	},
 	// Mail is forward-compatible; no events fire by default until the
 	// transport is built.

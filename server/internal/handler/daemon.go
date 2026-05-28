@@ -2272,6 +2272,8 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			OutputTokens:     u.OutputTokens,
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
+			// CEREBRO-PATCH(task-usage-gateway-cost): persist gateway-reported spend.
+			CostCents: u.CostCents,
 		}); err != nil {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 		}
@@ -2706,22 +2708,14 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		selfCacheRead += row.TotalCacheReadTokens
 		selfCacheWrite += row.TotalCacheWriteTokens
 		selfTaskCount += row.TaskCount
-		selfCostCents += pricing.ComputeCents(row.Model, pricing.Usage{
-			InputTokens:      row.TotalInputTokens,
-			OutputTokens:     row.TotalOutputTokens,
-			CacheReadTokens:  row.TotalCacheReadTokens,
-			CacheWriteTokens: row.TotalCacheWriteTokens,
-		})
+		// CEREBRO-PATCH(task-usage-gateway-cost): prefer the exact spend the
+		// gateway reported (stored per model) over the pricing-table estimate.
+		selfCostCents += preferGatewayCost(row.TotalCostCents, row.Model, row.TotalInputTokens, row.TotalOutputTokens, row.TotalCacheReadTokens, row.TotalCacheWriteTokens)
 	}
 
 	var subtreeCostCents int64
 	for _, row := range subtreeRows {
-		subtreeCostCents += pricing.ComputeCents(row.Model, pricing.Usage{
-			InputTokens:      row.TotalInputTokens,
-			OutputTokens:     row.TotalOutputTokens,
-			CacheReadTokens:  row.TotalCacheReadTokens,
-			CacheWriteTokens: row.TotalCacheWriteTokens,
-		})
+		subtreeCostCents += preferGatewayCost(row.TotalCostCents, row.Model, row.TotalInputTokens, row.TotalOutputTokens, row.TotalCacheReadTokens, row.TotalCacheWriteTokens)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

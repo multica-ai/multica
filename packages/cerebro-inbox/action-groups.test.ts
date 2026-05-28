@@ -119,6 +119,25 @@ describe("classifyInboxAction — notifications", () => {
       classifyInboxAction(notif({ type: "new_comment", severity: "info", read: true, issue_status: "done" }), ctx()),
     ).toBe("calm");
   });
+
+  // FIR-2445 — reminders and date-arrival notifications get their own bucket.
+  it("puts a reminder in Reminders even when it is unread", () => {
+    expect(
+      classifyInboxAction(notif({ type: "reminder", read: false }), ctx()),
+    ).toBe("reminders");
+  });
+
+  it("puts a due-date reminder in Reminders", () => {
+    expect(
+      classifyInboxAction(notif({ type: "due_date_reminder", read: true }), ctx()),
+    ).toBe("reminders");
+  });
+
+  it("puts a start-date reminder in Reminders", () => {
+    expect(
+      classifyInboxAction(notif({ type: "start_date_reminder", read: false }), ctx()),
+    ).toBe("reminders");
+  });
 });
 
 describe("classifyInboxAction — chats and channels", () => {
@@ -160,18 +179,30 @@ describe("classifyInboxAction — chats and channels", () => {
 });
 
 describe("ordering + bucketize adapter", () => {
-  it("orders categories Unread → Running → Done → Waiting", () => {
-    expect(INBOX_ACTION_ORDER).toEqual(["act_now", "watching", "calm", "waiting"]);
-    expect(inboxActionOrderIndex("act_now")).toBeLessThan(inboxActionOrderIndex("waiting"));
+  it("orders categories Unread → Reminders → Running → Done → Waiting", () => {
+    expect(INBOX_ACTION_ORDER).toEqual(["act_now", "reminders", "watching", "calm", "waiting"]);
+    expect(inboxActionOrderIndex("act_now")).toBeLessThan(inboxActionOrderIndex("reminders"));
+    expect(inboxActionOrderIndex("reminders")).toBeLessThan(inboxActionOrderIndex("watching"));
+    expect(inboxActionOrderIndex("reminders")).toBeLessThan(inboxActionOrderIndex("waiting"));
   });
 
   it("returns key, localized label, and sort order from bucketizeInboxAction", () => {
-    const labels = { act_now: "Unread", watching: "Running", waiting: "Waiting", calm: "Done" };
+    const labels = { act_now: "Unread", reminders: "Reminders", watching: "Running", waiting: "Waiting", calm: "Done" };
     const bucket = bucketizeInboxAction(
       notif({ type: "mentioned", severity: "action_required", read: false }),
       ctx(),
       labels,
     );
     expect(bucket).toEqual({ key: "act_now", label: "Unread", isFallback: false, order: 0 });
+  });
+
+  it("places Reminders right below Unread", () => {
+    const labels = { act_now: "Unread", reminders: "Reminders", watching: "Running", waiting: "Waiting", calm: "Done" };
+    const bucket = bucketizeInboxAction(
+      notif({ type: "reminder", read: false }),
+      ctx(),
+      labels,
+    );
+    expect(bucket).toEqual({ key: "reminders", label: "Reminders", isFallback: false, order: 1 });
   });
 });

@@ -18,6 +18,7 @@ SELECT
     COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
     COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COALESCE(SUM(tu.cost_cents), 0)::bigint AS total_cost_cents,
     COUNT(DISTINCT tu.task_id)::int AS task_count
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
@@ -31,6 +32,7 @@ type GetChatSessionUsageByModelRow struct {
 	TotalOutputTokens     int64  `json:"total_output_tokens"`
 	TotalCacheReadTokens  int64  `json:"total_cache_read_tokens"`
 	TotalCacheWriteTokens int64  `json:"total_cache_write_tokens"`
+	TotalCostCents        int64  `json:"total_cost_cents"`
 	TaskCount             int32  `json:"task_count"`
 }
 
@@ -51,6 +53,7 @@ func (q *Queries) GetChatSessionUsageByModel(ctx context.Context, chatSessionID 
 			&i.TotalOutputTokens,
 			&i.TotalCacheReadTokens,
 			&i.TotalCacheWriteTokens,
+			&i.TotalCostCents,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
@@ -77,6 +80,7 @@ SELECT
     COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
     COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COALESCE(SUM(tu.cost_cents), 0)::bigint AS total_cost_cents,
     COUNT(DISTINCT tu.task_id)::int AS task_count
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
@@ -90,6 +94,7 @@ type GetIssueSubtreeUsageByModelRow struct {
 	TotalOutputTokens     int64  `json:"total_output_tokens"`
 	TotalCacheReadTokens  int64  `json:"total_cache_read_tokens"`
 	TotalCacheWriteTokens int64  `json:"total_cache_write_tokens"`
+	TotalCostCents        int64  `json:"total_cost_cents"`
 	TaskCount             int32  `json:"task_count"`
 }
 
@@ -112,6 +117,7 @@ func (q *Queries) GetIssueSubtreeUsageByModel(ctx context.Context, id pgtype.UUI
 			&i.TotalOutputTokens,
 			&i.TotalCacheReadTokens,
 			&i.TotalCacheWriteTokens,
+			&i.TotalCostCents,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
@@ -131,6 +137,9 @@ SELECT
     COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
     COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    -- CEREBRO-PATCH(task-usage-gateway-cost): real gateway spend; the handler
+    -- prefers this over the token estimate when it is > 0.
+    COALESCE(SUM(tu.cost_cents), 0)::bigint AS total_cost_cents,
     COUNT(DISTINCT tu.task_id)::int AS task_count
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
@@ -144,6 +153,7 @@ type GetIssueUsageByModelRow struct {
 	TotalOutputTokens     int64  `json:"total_output_tokens"`
 	TotalCacheReadTokens  int64  `json:"total_cache_read_tokens"`
 	TotalCacheWriteTokens int64  `json:"total_cache_write_tokens"`
+	TotalCostCents        int64  `json:"total_cost_cents"`
 	TaskCount             int32  `json:"task_count"`
 }
 
@@ -166,6 +176,7 @@ func (q *Queries) GetIssueUsageByModel(ctx context.Context, issueID pgtype.UUID)
 			&i.TotalOutputTokens,
 			&i.TotalCacheReadTokens,
 			&i.TotalCacheWriteTokens,
+			&i.TotalCostCents,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
@@ -212,7 +223,7 @@ func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID)
 }
 
 const getTaskUsage = `-- name: GetTaskUsage :many
-SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at FROM task_usage
+SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at, cost_cents FROM task_usage
 WHERE task_id = $1
 ORDER BY model
 `
@@ -237,6 +248,7 @@ func (q *Queries) GetTaskUsage(ctx context.Context, taskID pgtype.UUID) ([]TaskU
 			&i.CacheWriteTokens,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CostCents,
 		); err != nil {
 			return nil, err
 		}
@@ -458,6 +470,9 @@ SELECT
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    -- CEREBRO-PATCH(task-usage-gateway-cost): real gateway spend per (agent, model)
+    -- so the dashboard's per-agent cost matches the real charge (FIR-2405).
+    SUM(cost_cents)::bigint          AS cost_cents,
     SUM(task_count)::int             AS task_count
 FROM task_usage_hourly
 WHERE workspace_id = $1
@@ -480,6 +495,7 @@ type ListDashboardUsageByAgentRow struct {
 	OutputTokens     int64       `json:"output_tokens"`
 	CacheReadTokens  int64       `json:"cache_read_tokens"`
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	CostCents        int64       `json:"cost_cents"`
 	TaskCount        int32       `json:"task_count"`
 }
 
@@ -511,6 +527,7 @@ func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboa
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+			&i.CostCents,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
@@ -531,6 +548,10 @@ SELECT
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    -- CEREBRO-PATCH(task-usage-gateway-cost): real gateway spend rolled into the
+    -- hourly bucket so the workspace dashboard trend chart shows the real charge
+    -- instead of a token estimate (FIR-2405).
+    SUM(cost_cents)::bigint          AS cost_cents,
     SUM(task_count)::int             AS task_count
 FROM task_usage_hourly
 WHERE workspace_id = $1
@@ -554,6 +575,7 @@ type ListDashboardUsageDailyRow struct {
 	OutputTokens     int64       `json:"output_tokens"`
 	CacheReadTokens  int64       `json:"cache_read_tokens"`
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	CostCents        int64       `json:"cost_cents"`
 	TaskCount        int32       `json:"task_count"`
 }
 
@@ -592,6 +614,7 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+			&i.CostCents,
 			&i.TaskCount,
 		); err != nil {
 			return nil, err
@@ -605,14 +628,15 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 }
 
 const upsertTaskUsage = `-- name: UpsertTaskUsage :exec
-INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_cents, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
 ON CONFLICT (task_id, provider, model)
 DO UPDATE SET
     input_tokens = EXCLUDED.input_tokens,
     output_tokens = EXCLUDED.output_tokens,
     cache_read_tokens = EXCLUDED.cache_read_tokens,
     cache_write_tokens = EXCLUDED.cache_write_tokens,
+    cost_cents = EXCLUDED.cost_cents,
     updated_at = now()
 `
 
@@ -624,12 +648,17 @@ type UpsertTaskUsageParams struct {
 	OutputTokens     int64       `json:"output_tokens"`
 	CacheReadTokens  int64       `json:"cache_read_tokens"`
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	CostCents        int64       `json:"cost_cents"`
 }
 
 // Bumps `updated_at` on INSERT and on conflict so the hourly-rollup worker
 // detects the row as dirty and re-aggregates its bucket.
 // Without the conflict-side bump, a correction to historical token counts
 // would never propagate to the rollup.
+// CEREBRO-PATCH(task-usage-gateway-cost): persist the gateway-reported exact
+// spend ($8) next to tokens so per-issue/session/task cost reads the real
+// charge instead of re-estimating from a pricing table. 0 for runtimes that
+// report no cost.
 func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams) error {
 	_, err := q.db.Exec(ctx, upsertTaskUsage,
 		arg.TaskID,
@@ -639,6 +668,7 @@ func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams
 		arg.OutputTokens,
 		arg.CacheReadTokens,
 		arg.CacheWriteTokens,
+		arg.CostCents,
 	)
 	return err
 }

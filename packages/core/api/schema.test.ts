@@ -165,6 +165,55 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  // CEREBRO-PATCH(squad-list-element-resilience): FIR-2394 — a single malformed
+  // squad (or preview entry) must not blank the whole squad list.
+  describe("listSquads", () => {
+    const validSquad = {
+      id: "squad-1",
+      workspace_id: "ws-1",
+      name: "Platform",
+      leader_id: "agent-1",
+      creator_id: "member-1",
+      created_at: "2026-05-27T00:00:00Z",
+      updated_at: "2026-05-27T00:00:00Z",
+      member_count: 1,
+      member_preview: [{ member_type: "agent", member_id: "agent-1", role: "leader" }],
+    };
+
+    it("keeps the valid squads and drops only the malformed one", async () => {
+      // Second squad is missing the required leader_id field.
+      stubFetchJson([validSquad, { id: "squad-2", workspace_id: "ws-1", name: "Broken" }]);
+      const client = new ApiClient("https://api.example.test");
+      const squads = await client.listSquads();
+      expect(squads).toHaveLength(1);
+      expect(squads[0]?.id).toBe("squad-1");
+    });
+
+    it("keeps the squad when one member_preview entry is malformed", async () => {
+      // Preview entry missing member_id — must not take down the squad.
+      const squad = {
+        ...validSquad,
+        member_preview: [
+          { member_type: "agent", member_id: "agent-1", role: "leader" },
+          { member_type: "agent", role: "member" },
+        ],
+      };
+      stubFetchJson([squad]);
+      const client = new ApiClient("https://api.example.test");
+      const squads = await client.listSquads();
+      expect(squads).toHaveLength(1);
+      expect(squads[0]?.member_preview).toHaveLength(1);
+      expect(squads[0]?.member_preview?.[0]?.member_id).toBe("agent-1");
+    });
+
+    it("still falls back to [] when the whole body is not an array", async () => {
+      stubFetchJson({ not: "an array" });
+      const client = new ApiClient("https://api.example.test");
+      const squads = await client.listSquads();
+      expect(squads).toEqual([]);
+    });
+  });
+
   // CEREBRO-PATCH(agent-tools-schema-test): JEH-1359 — workspace-scoped tools and legacy row normalization.
   describe("getAgentTools", () => {
     it("passes workspace_id and normalizes older tool_name rows", async () => {

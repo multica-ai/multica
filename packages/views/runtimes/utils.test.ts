@@ -6,6 +6,7 @@ import {
   aggregateCostByModel,
   collectUnmappedModels,
   estimateCost,
+  estimateCostBreakdown,
   isModelPriced,
   isSelfHealingRuntime,
 } from "./utils";
@@ -519,5 +520,74 @@ describe("user-supplied custom pricing", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const after = aggregateCostByModel(rows as any);
     expect(after[0]?.cost).toBeCloseTo(2, 5);
+  });
+});
+
+// FIR-2405: when the Firtal gateway reports a real charge, the cost utils must
+// prefer it over the token estimate so every cost surface (runtimes overview,
+// workspace trend) shows the real money instead of a recomputed approximation.
+describe("gateway cost preference (cost_cents)", () => {
+  it("returns the real gateway charge instead of the token estimate", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-sonnet-4-6",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      // Token estimate would be $18; the gateway billed $5.00 (500 cents).
+      cost_cents: 500,
+    });
+    expect(cost).toBeCloseTo(5, 5);
+  });
+
+  it("falls back to the token estimate when no gateway cost is present", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "claude-sonnet-4-6",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cost_cents: 0,
+      }),
+    ).toBeCloseTo(18, 5);
+    // Field absent entirely → still estimates.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "claude-sonnet-4-6",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(18, 5);
+  });
+
+  it("scales the breakdown so its components sum to the real charge", () => {
+    // Token estimate splits $18 as $3 input / $15 output. The gateway billed
+    // $9 (900 cents) — half the estimate — so each component should halve while
+    // keeping the 3:15 proportion.
+    const b = estimateCostBreakdown({
+      ...zeroUsage,
+      model: "claude-sonnet-4-6",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cost_cents: 900,
+    });
+    expect(b.input).toBeCloseTo(1.5, 5);
+    expect(b.output).toBeCloseTo(7.5, 5);
+    expect(b.input + b.output + b.cacheRead + b.cacheWrite).toBeCloseTo(9, 5);
+  });
+
+  it("attributes the whole charge to input when the model is unpriced", () => {
+    // No pricing row → no proportions to scale by; the real charge still has
+    // to land somewhere, so it goes to input rather than vanishing.
+    const b = estimateCostBreakdown({
+      ...zeroUsage,
+      model: "totally-unknown-model",
+      input_tokens: 1_000_000,
+      cost_cents: 250,
+    });
+    expect(b.input).toBeCloseTo(2.5, 5);
+    expect(b.output).toBe(0);
+    expect(b.cacheRead).toBe(0);
+    expect(b.cacheWrite).toBe(0);
   });
 });

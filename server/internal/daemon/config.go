@@ -243,7 +243,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		agents["firtal-gateway"] = entry
 	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent runtime found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli on PATH, or configure FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL and FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY")
+		return Config{}, fmt.Errorf("no agent runtime found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli on PATH, or set MULTICA_RUNTIME_TYPE=%s together with FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL and FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", FirtalRegistryRuntimeType)
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -578,13 +578,17 @@ func patternsFromEnv(name string, defaults []string) []string {
 	return out
 }
 
+// FirtalRegistryRuntimeType is the value MULTICA_RUNTIME_TYPE must hold for a
+// local daemon to register as the firtal-gateway runtime. The env is an open
+// string field; future values may be added as new runtime types appear.
+const FirtalRegistryRuntimeType = "firtal-registry"
+
 func firtalGatewayAgentEntry() (AgentEntry, bool, error) {
-	// CEREBRO-PATCH(daemon-config-firtal-gateway): register managed gateway runtime from central credentials.
-	enabled, explicit, err := boolFromEnv("MULTICA_FIRTAL_GATEWAY_ENABLED")
-	if err != nil {
-		return AgentEntry{}, false, err
-	}
-	if explicit && !enabled {
+	// CEREBRO-PATCH(daemon-config-firtal-gateway): register managed gateway runtime ONLY when MULTICA_RUNTIME_TYPE=firtal-registry.
+	// URL+key alone is no longer enough — without the explicit opt-in every dev/codex
+	// machine that happened to inherit the registry creds would silently register itself
+	// as its own gateway runtime row (FIR-2453).
+	if strings.TrimSpace(os.Getenv("MULTICA_RUNTIME_TYPE")) != FirtalRegistryRuntimeType {
 		return AgentEntry{}, false, nil
 	}
 
@@ -598,14 +602,11 @@ func firtalGatewayAgentEntry() (AgentEntry, bool, error) {
 		"FIRTAL_AE_GATEWAY_KEY",
 		"FIRTAL_DATA_REGISTRY_API_KEY",
 	)
-	if !explicit && (baseURL == "" || apiKey == "") {
-		return AgentEntry{}, false, nil
-	}
 	if baseURL == "" {
-		return AgentEntry{}, false, fmt.Errorf("MULTICA_FIRTAL_GATEWAY_ENABLED is true but FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL is not set")
+		return AgentEntry{}, false, fmt.Errorf("MULTICA_RUNTIME_TYPE=%s but FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL is not set", FirtalRegistryRuntimeType)
 	}
 	if apiKey == "" {
-		return AgentEntry{}, false, fmt.Errorf("MULTICA_FIRTAL_GATEWAY_ENABLED is true but FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY is not set")
+		return AgentEntry{}, false, fmt.Errorf("MULTICA_RUNTIME_TYPE=%s but FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY is not set", FirtalRegistryRuntimeType)
 	}
 
 	return AgentEntry{
@@ -615,21 +616,6 @@ func firtalGatewayAgentEntry() (AgentEntry, bool, error) {
 			"FIRTAL_AE_GATEWAY_MODEL",
 		),
 	}, true, nil
-}
-
-// CEREBRO-PATCH(daemon-config-firtal-gateway-strict-bool): refuse to silently disable on garbage env values.
-func boolFromEnv(name string) (bool, bool, error) {
-	raw := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
-	switch raw {
-	case "":
-		return false, false, nil
-	case "1", "true", "yes", "on":
-		return true, true, nil
-	case "0", "false", "no", "off":
-		return false, true, nil
-	default:
-		return false, false, fmt.Errorf("%s: unrecognized boolean value %q (use 1/0, true/false, yes/no, on/off)", name, raw)
-	}
 }
 
 func firstNonEmptyEnv(keys ...string) string {

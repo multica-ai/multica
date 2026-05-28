@@ -140,11 +140,12 @@ func TestRunToolLoopForcesFinalAnswerWhenModelKeepsCallingTools(t *testing.T) {
 	}
 }
 
-func TestRunToolLoopForcedFinalCallOmitsTools(t *testing.T) {
-	// Verify the mechanism that prevents an infinite loop: the FINAL gateway
-	// request (the one made after the tool-round budget is exhausted) must
-	// not include a `tools` field, otherwise the model can keep calling tools
-	// forever.
+func TestRunToolLoopForcedFinalCallKeepsToolsAndForcesText(t *testing.T) {
+	// FIR-2421 root cause: the forced-final call used to DROP `tools`, which left
+	// the request referencing tool_use/tool_result blocks with no tool defs —
+	// Anthropic rejects that as malformed (HTTP 400). The fix keeps `tools`
+	// attached and sets tool_choice="none" so the request stays valid AND the
+	// model is forced to answer with text instead of calling another tool.
 	var captured []map[string]any
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -183,16 +184,78 @@ func TestRunToolLoopForcedFinalCallOmitsTools(t *testing.T) {
 	if len(captured) != firtalGatewayMaxToolRounds+1 {
 		t.Fatalf("captured %d requests, want %d", len(captured), firtalGatewayMaxToolRounds+1)
 	}
-	// All tool-round requests MUST include `tools`.
+	// All tool-round requests MUST include `tools` and MUST NOT pin tool_choice.
 	for i := 0; i < firtalGatewayMaxToolRounds; i++ {
 		if _, ok := captured[i]["tools"]; !ok {
 			t.Errorf("request %d (tool round) is missing `tools`", i+1)
 		}
+		if _, ok := captured[i]["tool_choice"]; ok {
+			t.Errorf("request %d (tool round) must not set tool_choice", i+1)
+		}
 	}
-	// The final request MUST NOT include `tools` — that's how the loop forces
-	// the model to produce text instead of another tool call.
-	if _, ok := captured[firtalGatewayMaxToolRounds]["tools"]; ok {
-		t.Fatalf("final request still has `tools`; loop will not terminate cleanly")
+	// The final request MUST keep `tools` (so the transcript stays valid for
+	// Anthropic) and MUST set tool_choice="none" (so the model produces text).
+	final := captured[firtalGatewayMaxToolRounds]
+	if _, ok := final["tools"]; !ok {
+		t.Fatalf("final request dropped `tools`; transcript references tools without defining them — Anthropic rejects this")
+	}
+	if final["tool_choice"] != "none" {
+		t.Fatalf("final request tool_choice = %v, want \"none\"", final["tool_choice"])
+	}
+}
+
+func TestGatewayCompatRegistryToolLoopForcedFinalKeepsToolsAndForcesText(t *testing.T) {
+	// FIR-2421 root cause on the PRIMARY production path: when the model keeps
+	// calling tools until the round budget is exhausted, the forced-final call
+	// must keep `tools` attached and set tool_choice="none" so the transcript
+	// stays valid for Anthropic and the model is forced to answer with text.
+	var captured []map[string]any
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/ai/proxy/v1/chat/completions" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		var body map[string]any
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		captured = append(captured, body)
+		w.Header().Set("Content-Type", "application/json")
+		if len(captured) <= firtalGatewayMaxToolRounds {
+			w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"echo","arguments":"{\"text\":\"x\"}"}}]}}]}`))
+			return
+		}
+		w.Write([]byte(`{"choices":[{"message":{"content":"forced final"}}]}`))
+	}))
+	defer srv.Close()
+
+	reg := NewRegistry(nil)
+	reg.Register(fallbackTestTool{})
+	e := &FirtalGatewayExecutor{gateway: NewGatewayClient(FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096}, srv.Client()), logger: testLogger()}
+	completion, err := e.runGatewayCompatRegistryToolLoop(context.Background(),
+		FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096},
+		db.Agent{},
+		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
+		GatewayRequestMeta{TaskID: "t1"},
+		pgtype.UUID{},
+		pgtype.UUID{},
+		reg,
+		[]Tool{fallbackTestTool{}},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("runGatewayCompatRegistryToolLoop error = %v", err)
+	}
+	if completion.Output != "forced final" {
+		t.Fatalf("Output = %q, want forced final", completion.Output)
+	}
+	if len(captured) != firtalGatewayMaxToolRounds+1 {
+		t.Fatalf("captured %d requests, want %d", len(captured), firtalGatewayMaxToolRounds+1)
+	}
+	final := captured[firtalGatewayMaxToolRounds]
+	if _, ok := final["tools"]; !ok {
+		t.Fatalf("final request dropped `tools`; Anthropic rejects a transcript that references undefined tools")
+	}
+	if final["tool_choice"] != "none" {
+		t.Fatalf("final request tool_choice = %v, want \"none\"", final["tool_choice"])
 	}
 }
 

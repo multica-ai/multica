@@ -60,13 +60,21 @@ type AnthropicMessage struct {
 	Content any    `json:"content"` // string | []AnthropicContentBlock
 }
 
+// anthropicToolChoice is the Anthropic-native tool_choice directive. type="none"
+// keeps the tool definitions attached but tells the model not to call any of
+// them — used by the tool-loop's forced-final call to terminate with text.
+type anthropicToolChoice struct {
+	Type string `json:"type"`
+}
+
 // anthropicRequest is the JSON body sent to /api/ai/proxy/v1/messages.
 type anthropicRequest struct {
-	Model     string                 `json:"model"`
-	MaxTokens int                    `json:"max_tokens"`
-	System    []AnthropicSystemBlock `json:"system,omitempty"`
-	Messages  []AnthropicMessage     `json:"messages"`
-	Tools     []AnthropicTool        `json:"tools,omitempty"`
+	Model      string                 `json:"model"`
+	MaxTokens  int                    `json:"max_tokens"`
+	System     []AnthropicSystemBlock `json:"system,omitempty"`
+	Messages   []AnthropicMessage     `json:"messages"`
+	Tools      []AnthropicTool        `json:"tools,omitempty"`
+	ToolChoice *anthropicToolChoice   `json:"tool_choice,omitempty"`
 }
 
 // anthropicResponse is the parsed response from /api/ai/proxy/v1/messages.
@@ -104,6 +112,34 @@ func (c *GatewayClient) CompleteAnthropicWithTools(
 	tools []AnthropicTool,
 	meta GatewayRequestMeta,
 ) (GatewayCompletion, error) {
+	return c.completeAnthropic(ctx, model, systemText, messages, tools, nil, meta)
+}
+
+// CompleteAnthropicForcingText is the Anthropic-native tool-loop's forced-final
+// call. It keeps the tool definitions attached but sets tool_choice={type:"none"}
+// so the model must answer with text. Keeping `tools` attached is what keeps the
+// request valid — Anthropic rejects a transcript that references tool_use/
+// tool_result blocks when the request omits their definitions (FIR-2421).
+func (c *GatewayClient) CompleteAnthropicForcingText(
+	ctx context.Context,
+	model string,
+	systemText string,
+	messages []AnthropicMessage,
+	tools []AnthropicTool,
+	meta GatewayRequestMeta,
+) (GatewayCompletion, error) {
+	return c.completeAnthropic(ctx, model, systemText, messages, tools, &anthropicToolChoice{Type: "none"}, meta)
+}
+
+func (c *GatewayClient) completeAnthropic(
+	ctx context.Context,
+	model string,
+	systemText string,
+	messages []AnthropicMessage,
+	tools []AnthropicTool,
+	toolChoice *anthropicToolChoice,
+	meta GatewayRequestMeta,
+) (GatewayCompletion, error) {
 	model = strings.TrimSpace(model)
 	if model == "" || model == "auto" {
 		model = c.cfg.Model
@@ -136,11 +172,12 @@ func (c *GatewayClient) CompleteAnthropicWithTools(
 	}
 
 	reqBody := anthropicRequest{
-		Model:     model,
-		MaxTokens: c.cfg.MaxTokens,
-		System:    system,
-		Messages:  messages,
-		Tools:     toolsCopy,
+		Model:      model,
+		MaxTokens:  c.cfg.MaxTokens,
+		System:     system,
+		Messages:   messages,
+		Tools:      toolsCopy,
+		ToolChoice: toolChoice,
 	}
 
 	raw, err := json.Marshal(reqBody)

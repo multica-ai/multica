@@ -474,6 +474,17 @@ func (e *FirtalGatewayExecutor) completeGatewayWithTools(ctx context.Context, cf
 	return NewGatewayClient(cfg, nil).CompleteWithTools(ctx, model, messages, tools, meta)
 }
 
+// completeGatewayForcingText is the tool-loop's forced-final call. It keeps the
+// tool definitions attached and sets tool_choice="none" (via CompleteForcingText)
+// so the transcript stays valid for Anthropic while the model is constrained to
+// produce text instead of another tool call. See FIR-2421.
+func (e *FirtalGatewayExecutor) completeGatewayForcingText(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, tools []GatewayToolDef, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	if e.gateway != nil {
+		return e.gateway.CompleteForcingText(ctx, model, messages, tools, meta)
+	}
+	return NewGatewayClient(cfg, nil).CompleteForcingText(ctx, model, messages, tools, meta)
+}
+
 // runToolLoop runs the model in an Anthropic-native tool-call loop. Up to
 // firtalGatewayMaxToolRounds (or cfg.MaxToolRounds when set) rounds dispatch
 // tools; each round sends the running transcript plus tool definitions, and if
@@ -687,15 +698,17 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 		}
 	}
 
-	// Tool-round budget exhausted. Make one final gateway call WITHOUT tools
-	// so the model has to produce a text answer.
-	e.logger.Info("firtal gateway tool loop forcing final no-tool call",
+	// Tool-round budget exhausted. Make one final gateway call that keeps the
+	// tool definitions attached but forces tool_choice="none", so the model has
+	// to produce a text answer while the transcript (which references
+	// tool_use/tool_result) stays valid for Anthropic (FIR-2421).
+	e.logger.Info("firtal gateway tool loop forcing final text-only call",
 		"task_id", meta.TaskID,
 		"agent_id", meta.AgentID,
 		"workspace_id", meta.WorkspaceID,
 		"max_tool_rounds", maxRounds,
 	)
-	final, err := e.completeGateway(ctx, cfg, agent.Model.String, history, meta)
+	final, err := e.completeGatewayForcingText(ctx, cfg, agent.Model.String, history, tools, meta)
 	if err != nil {
 		return GatewayCompletion{}, err
 	}
@@ -810,13 +823,13 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 		}
 	}
 
-	e.logger.Info("firtal gateway chat-completions fallback forcing final no-tool call",
+	e.logger.Info("firtal gateway chat-completions fallback forcing final text-only call",
 		"task_id", meta.TaskID,
 		"agent_id", meta.AgentID,
 		"workspace_id", meta.WorkspaceID,
 		"max_tool_rounds", maxRounds,
 	)
-	final, err := e.completeGateway(ctx, cfg, agent.Model.String, history, meta)
+	final, err := e.completeGatewayForcingText(ctx, cfg, agent.Model.String, history, toolDefs, meta)
 	if err != nil {
 		return GatewayCompletion{}, err
 	}
@@ -998,15 +1011,17 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 		}
 	}
 
-	// Tool-round budget exhausted. Make one final call without tools so the
-	// model can emit a text summary.
-	e.logger.Info("firtal gateway anthropic tool loop forcing final no-tool call",
+	// Tool-round budget exhausted. Make one final call that keeps the tool
+	// definitions attached but forces tool_choice={type:"none"} so the model
+	// emits a text summary while the transcript (which references tool_use/
+	// tool_result) stays valid for Anthropic (FIR-2421).
+	e.logger.Info("firtal gateway anthropic tool loop forcing final text-only call",
 		"task_id", meta.TaskID,
 		"agent_id", meta.AgentID,
 		"workspace_id", meta.WorkspaceID,
 		"max_tool_rounds", maxRounds,
 	)
-	final, err := gwClient.CompleteAnthropicWithTools(ctx, agent.Model.String, systemText, history, nil, meta)
+	final, err := gwClient.CompleteAnthropicForcingText(ctx, agent.Model.String, systemText, history, tools, meta)
 	if err != nil {
 		return GatewayCompletion{}, err
 	}
@@ -1270,6 +1285,7 @@ func (e *FirtalGatewayExecutor) recordTaskUsage(ctx context.Context, task db.Age
 		OutputTokens:     usage.OutputTokens,
 		CacheReadTokens:  usage.CacheReadTokens,
 		CacheWriteTokens: usage.CacheWriteTokens,
+		CostCents:        usage.CostCents,
 	}); err != nil {
 		e.logger.Warn("firtal gateway task usage upsert failed", "task_id", util.UUIDToString(task.ID), "model", completion.Model, "error", err)
 	}

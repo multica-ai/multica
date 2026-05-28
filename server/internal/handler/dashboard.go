@@ -61,7 +61,11 @@ type DashboardUsageDailyResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	TaskCount        int32  `json:"task_count"`
+	// CEREBRO-PATCH(task-usage-gateway-cost): real gateway charge for this
+	// (date, model) bucket when present (0 otherwise); the trend chart prefers
+	// it over the token estimate (FIR-2405).
+	CostCents int64 `json:"cost_cents"`
+	TaskCount int32 `json:"task_count"`
 }
 
 // GetDashboardUsageDaily returns per-(date, model) token rows for the
@@ -137,7 +141,9 @@ func (h *Handler) listDashboardUsageDaily(
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
-			TaskCount:        row.TaskCount,
+			// CEREBRO-PATCH(task-usage-gateway-cost): prefer the real gateway spend.
+			CostCents: preferGatewayCost(row.CostCents, row.Model, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheWriteTokens),
+			TaskCount: row.TaskCount,
 		}
 	}
 	return resp, nil
@@ -151,7 +157,10 @@ type DashboardUsageByAgentResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	TaskCount        int32  `json:"task_count"`
+	// CEREBRO-PATCH(task-usage-gateway-cost): real gateway charge per (agent,
+	// model) bucket when present (0 otherwise).
+	CostCents int64 `json:"cost_cents"`
+	TaskCount int32 `json:"task_count"`
 }
 
 // GetDashboardUsageByAgent returns per-(agent, model) token aggregates
@@ -202,7 +211,9 @@ func (h *Handler) listDashboardUsageByAgent(
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
-			TaskCount:        row.TaskCount,
+			// CEREBRO-PATCH(task-usage-gateway-cost): prefer the real gateway spend.
+			CostCents: preferGatewayCost(row.CostCents, row.Model, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheWriteTokens),
+			TaskCount: row.TaskCount,
 		}
 	}
 	return resp, nil

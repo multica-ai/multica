@@ -273,7 +273,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-inbox-routes): mounts cerebro-only inbox actions
 	// (mute/unmute/mark-unread). Adding new endpoints here keeps the conflict
 	// surface to a single line per cerebro inbox feature.
-	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries, h.TaskService) // CEREBRO-PATCH(cerebro-inbox-routes): FIR-2385 task service for owner-run endpoint.
+	// CEREBRO-PATCH(cerebro-inbox-realtime): FIR-2394 event bus fans inbox metadata mutations out to other sessions; FIR-2385 task service backs the owner-run endpoint.
+	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries, bus, h.TaskService)
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler instance
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-dictation-routes): JEH-729 workspace-scoped WebSocket proxy; inference deploy stays out of this slice.
@@ -1232,6 +1233,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/unread", cerebroInboxHandler.MarkInboxUnread)
 				// CEREBRO-PATCH(cerebro-inbox-unarchive): JEH-1166 — unarchive action from archived view.
 				r.Post("/{id}/unarchive", cerebroInboxHandler.UnarchiveInboxItem)
+				// CEREBRO-PATCH(cerebro-notifications-routes): FIR-2394 — wire the
+				// route='notifications' inbox slice that the frontend has been
+				// calling all along; previously these returned 404 in prod.
+				r.Get("/notifications", cerebroInboxHandler.ListNotifications)
+				r.Get("/notifications/unread-count", cerebroInboxHandler.CountUnreadNotifications)
+				r.Post("/notifications/mark-all-read", cerebroInboxHandler.MarkAllNotificationsRead)
+				r.Post("/notifications/archive-all", cerebroInboxHandler.ArchiveAllNotifications)
 				// CEREBRO-PATCH(cerebro-inbox-routes): FIR-2385 — owner accepts a private-agent run-request.
 				r.Post("/{id}/run-private-agent", cerebroInboxHandler.RunPrivateAgentRequest)
 

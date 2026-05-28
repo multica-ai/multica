@@ -50,7 +50,10 @@
     "quick_create_failed": "通过智能体创建失败",
     "reminder": "提醒",
     "_comment_cerebro_patch": "CEREBRO-PATCH(inbox-types-locale-zh): FIR-2385 private_agent_run_request label",
-    "private_agent_run_request": "运行请求"
+    "private_agent_run_request": "运行请求",
+    "_comment_cerebro_patch_date_reminders": "CEREBRO-PATCH(issue-date-reminders): FIR-2412 start/due date reminder labels",
+    "due_date_reminder": "截止日期提醒",
+    "start_date_reminder": "开始日期提醒"
   },
   "labels": {
     "set_status_to": "状态设为",

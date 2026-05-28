@@ -34,8 +34,9 @@ func TestPatternsFromEnv_DropsSeparatorBearingEntries(t *testing.T) {
 	}
 }
 
-func TestFirtalGatewayAgentEntryFromURLAndKey(t *testing.T) {
-	// CEREBRO-PATCH(daemon-config-test-firtal-gateway): validate managed gateway registration env handling.
+func TestFirtalGatewayAgentEntryRegistersWhenRuntimeTypeAndCredsSet(t *testing.T) {
+	// CEREBRO-PATCH(daemon-config-test-firtal-gateway): validate MULTICA_RUNTIME_TYPE gate.
+	t.Setenv("MULTICA_RUNTIME_TYPE", "firtal-registry")
 	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://registry.example.com")
 	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
 	t.Setenv("FIRTAL_DATA_REGISTRY_AI_MODEL", "claude-sonnet-4-6")
@@ -55,8 +56,42 @@ func TestFirtalGatewayAgentEntryFromURLAndKey(t *testing.T) {
 	}
 }
 
-func TestFirtalGatewayAgentEntryFailsFastWhenExplicitlyEnabledWithoutKey(t *testing.T) {
-	t.Setenv("MULTICA_FIRTAL_GATEWAY_ENABLED", "true")
+func TestFirtalGatewayAgentEntrySkipsWhenRuntimeTypeUnset(t *testing.T) {
+	// FIR-2453: URL+key alone must NOT trigger registration. Without the explicit
+	// MULTICA_RUNTIME_TYPE=firtal-registry opt-in every dev machine that happens to
+	// share the registry credentials would silently register itself as its own gateway.
+	t.Setenv("MULTICA_RUNTIME_TYPE", "")
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://registry.example.com")
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+
+	_, ok, err := firtalGatewayAgentEntry()
+	if err != nil {
+		t.Fatalf("firtalGatewayAgentEntry error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected firtal gateway to be disabled without MULTICA_RUNTIME_TYPE=firtal-registry")
+	}
+}
+
+func TestFirtalGatewayAgentEntrySkipsForUnknownRuntimeType(t *testing.T) {
+	// MULTICA_RUNTIME_TYPE is an open string field. Values other than "firtal-registry"
+	// must NOT enable the gateway runtime — they're future runtime types this code does
+	// not yet handle.
+	t.Setenv("MULTICA_RUNTIME_TYPE", "something-else")
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://registry.example.com")
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+
+	_, ok, err := firtalGatewayAgentEntry()
+	if err != nil {
+		t.Fatalf("firtalGatewayAgentEntry error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected firtal gateway to be disabled for unrecognized MULTICA_RUNTIME_TYPE")
+	}
+}
+
+func TestFirtalGatewayAgentEntryFailsFastWhenRuntimeTypeSetWithoutKey(t *testing.T) {
+	t.Setenv("MULTICA_RUNTIME_TYPE", "firtal-registry")
 	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://registry.example.com")
 
 	_, _, err := firtalGatewayAgentEntry()
@@ -65,13 +100,13 @@ func TestFirtalGatewayAgentEntryFailsFastWhenExplicitlyEnabledWithoutKey(t *test
 	}
 }
 
-func TestFirtalGatewayAgentEntryRejectsUnknownEnabledValue(t *testing.T) {
-	// CEREBRO-PATCH(daemon-config-test-firtal-gateway): refuse to silently disable on garbage MULTICA_FIRTAL_GATEWAY_ENABLED.
-	t.Setenv("MULTICA_FIRTAL_GATEWAY_ENABLED", "maybe")
+func TestFirtalGatewayAgentEntryFailsFastWhenRuntimeTypeSetWithoutURL(t *testing.T) {
+	t.Setenv("MULTICA_RUNTIME_TYPE", "firtal-registry")
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
 
 	_, _, err := firtalGatewayAgentEntry()
 	if err == nil {
-		t.Fatal("expected error for unrecognized boolean value")
+		t.Fatal("expected missing URL error")
 	}
 }
 
