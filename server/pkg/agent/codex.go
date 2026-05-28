@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -75,15 +76,38 @@ type codexBackend struct {
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
-	args = append(args, filterCodexCustomConfigOverrides(
-		filterCustomArgs(opts.ExtraArgs, codexBlockedArgs, logger),
-		logger,
-	)...)
-	args = append(args, filterCodexCustomConfigOverrides(
-		filterCustomArgs(opts.CustomArgs, codexBlockedArgs, logger),
-		logger,
-	)...)
+	extra := filterCustomArgs(opts.ExtraArgs, codexBlockedArgs, logger)
+	custom := filterCustomArgs(opts.CustomArgs, codexBlockedArgs, logger)
+	// Only claim ownership of the `mcp_servers` namespace when the agent
+	// actually has a managed mcp_config in the MCP Tab. Otherwise existing
+	// users who configure MCP via `custom_args: ["-c", "mcp_servers.…"]`
+	// would silently lose those entries after this PR ships. With managed
+	// mcp_config present, daemon-written `$CODEX_HOME/config.toml` is the
+	// authoritative source and stray `-c mcp_servers.*` overrides are
+	// dropped to keep last-wins from re-shadowing it.
+	if hasManagedCodexMcpConfig(opts.McpConfig) {
+		extra = filterCodexCustomConfigOverrides(extra, logger)
+		custom = filterCodexCustomConfigOverrides(custom, logger)
+	}
+	args = append(args, extra...)
+	args = append(args, custom...)
 	return args
+}
+
+// hasManagedCodexMcpConfig reports whether the agent's mcp_config field is
+// "present" in the API three-state sense: a non-null JSON value. Both
+// `{}` and `{"mcpServers":{}}` count as present (the admin saved an empty
+// managed set — strict mode, no global fallback); only SQL NULL or the
+// literal JSON `null` count as absent (CLI default).
+func hasManagedCodexMcpConfig(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return false
+	}
+	if bytes.Equal(trimmed, []byte("null")) {
+		return false
+	}
+	return true
 }
 
 // codexManagedMcpConfigKeyRe matches the daemon-managed config namespace
@@ -190,31 +214,44 @@ func ensureCodexMcpConfig(configPath string, mcpConfig json.RawMessage, logger *
 	// converge on a clean state.
 	stripped := codexMcpBlockRe.ReplaceAllString(existing, "")
 
-	block, hasServers, renderErr := renderCodexMcpServersBlock(mcpConfig)
+	managed := hasManagedCodexMcpConfig(mcpConfig)
+	block, _, renderErr := renderCodexMcpServersBlock(mcpConfig)
 	if renderErr != nil {
 		return renderErr
 	}
 
 	var updated string
-	if hasServers {
-		// With an agent-managed set, strip any user-defined `[mcp_servers.*]`
-		// tables inherited from the shared `~/.codex/config.toml`. Two reasons:
-		//   1. TOML rejects redefining the same table; a user table named
-		//      `[mcp_servers.fetch]` would crash codex if the agent also
-		//      defined `fetch`.
-		//   2. The agent's mcp_config is meant to be the strict source for
-		//      this task — same as Claude's `--strict-mcp-config`. Mixing in
-		//      user-global servers would surprise the admin who edited the
-		//      MCP Tab expecting an explicit list.
+	if managed {
+		// Agent has a managed MCP set (possibly empty — `{}` /
+		// `{"mcpServers":{}}` count as "saved an empty set" in the API's
+		// three-state semantics, distinct from nil/null which means
+		// "fall back to CLI default"). Strip any user-defined
+		// `[mcp_servers.*]` tables inherited from `~/.codex/config.toml`
+		// so the managed set is strict — mirrors Claude's
+		// `--strict-mcp-config`. Two reasons we cannot mix:
+		//   1. TOML rejects redefining the same table; a user table
+		//      named `[mcp_servers.fetch]` would crash codex if the
+		//      agent also defined `fetch`.
+		//   2. An admin saving an explicit list in the MCP Tab would
+		//      otherwise see user-global servers silently joined in,
+		//      which contradicts the UI affordance.
 		stripped = stripCodexUserMcpServerTables(stripped)
 		stripped = strings.TrimRight(stripped, "\n")
+		// When the managed set is empty we still write the marker
+		// block (with no tables between). This pins "managed but
+		// empty" on disk so the next run can find and strip the
+		// markers, and so the file's intent is grep-able by ops.
+		if block == "" {
+			block = multicaCodexMcpBeginMarker + "\n" + multicaCodexMcpEndMarker + "\n"
+		}
 		if stripped == "" {
 			updated = block
 		} else {
 			updated = stripped + "\n\n" + block
 		}
 	} else {
-		// No managed servers: leave any inherited user tables alone.
+		// No managed config: just remove any prior managed block and
+		// leave inherited user tables alone (CLI default fallback).
 		updated = stripped
 	}
 
@@ -235,7 +272,7 @@ func ensureCodexMcpConfig(configPath string, mcpConfig json.RawMessage, logger *
 	}
 	if logger != nil {
 		logger.Debug("codex: wrote managed mcp_servers block to config.toml",
-			"config_path", configPath, "has_servers", hasServers)
+			"config_path", configPath, "managed", managed)
 	}
 	return nil
 }
@@ -482,13 +519,22 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	// config.toml at 0o600 keeps the secret values out of argv and logs.
 	if codexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"]); codexHome != "" {
 		if err := ensureCodexMcpConfig(filepath.Join(codexHome, "config.toml"), opts.McpConfig, b.cfg.Logger); err != nil {
-			// A malformed mcp_config shouldn't kill the run — the agent
-			// still launches, just without the configured MCP servers.
-			// The admin sees the warning in daemon logs and can fix it.
-			b.cfg.Logger.Warn("codex: ignoring invalid mcp_config", "error", err)
+			// Fail closed when we can't materialise the managed config.
+			// Warning-and-launching would silently fall back to the
+			// user's global `~/.codex/config.toml` MCP servers and
+			// look indistinguishable from "the saved config was
+			// applied", which is exactly the surprise the MCP Tab is
+			// supposed to remove.
+			cancel()
+			return nil, fmt.Errorf("apply codex mcp_config: %w", err)
 		}
-	} else if len(opts.McpConfig) > 0 {
-		b.cfg.Logger.Warn("codex: mcp_config provided but CODEX_HOME is not set; MCP servers will not be loaded")
+	} else if hasManagedCodexMcpConfig(opts.McpConfig) {
+		// Managed mcp_config saved but no CODEX_HOME to anchor it.
+		// Same reasoning as above: silently launching would inherit
+		// whatever MCP setup the host user has, which is the wrong
+		// shape of failure.
+		cancel()
+		return nil, fmt.Errorf("codex: mcp_config is set but CODEX_HOME env var is not configured; cannot apply managed MCP")
 	}
 
 	codexArgs := buildCodexArgs(opts, b.cfg.Logger)

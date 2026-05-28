@@ -1481,6 +1481,129 @@ func TestBuildCodexArgsDoesNotLeakMcpToArgv(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteFailsClosedWhenMcpConfigInvalid(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// When the admin has a managed mcp_config but the JSON is malformed
+	// (or any other reason ensureCodexMcpConfig fails), fail closed
+	// instead of silently launching with the user's global MCP — that
+	// would look indistinguishable from "the saved config was applied"
+	// and is exactly the surprise the MCP Tab is supposed to remove.
+	fakePath := writeFakeCodexAppServer(t, "exit 0\n")
+
+	codexHome := t.TempDir()
+	backend, err := New("codex", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"CODEX_HOME": codexHome},
+	})
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = backend.Execute(ctx, "prompt", ExecOptions{
+		Timeout:   2 * time.Second,
+		McpConfig: json.RawMessage(`not json`),
+	})
+	if err == nil {
+		t.Fatal("expected Execute to fail closed on malformed mcp_config, got nil error")
+	}
+	if !strings.Contains(err.Error(), "mcp_config") {
+		t.Fatalf("expected error to mention mcp_config, got %q", err)
+	}
+}
+
+func TestCodexExecuteFailsClosedWhenManagedMcpButNoCodexHome(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Managed mcp_config saved but no CODEX_HOME to anchor it — same
+	// fail-closed reasoning: silently launching would inherit whatever
+	// MCP setup the host user has, which is the wrong shape of failure.
+	fakePath := writeFakeCodexAppServer(t, "exit 0\n")
+
+	backend, err := New("codex", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{}, // no CODEX_HOME
+	})
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = backend.Execute(ctx, "prompt", ExecOptions{
+		Timeout:   2 * time.Second,
+		McpConfig: json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx"}}}`),
+	})
+	if err == nil {
+		t.Fatal("expected Execute to fail closed when managed mcp_config but no CODEX_HOME, got nil error")
+	}
+	if !strings.Contains(err.Error(), "CODEX_HOME") {
+		t.Fatalf("expected error to mention CODEX_HOME, got %q", err)
+	}
+}
+
+func TestBuildCodexArgsPreservesCustomMcpOverridesWhenUnmanaged(t *testing.T) {
+	t.Parallel()
+
+	// Existing Codex agents may rely on `custom_args: ["-c", "mcp_servers.…"]`
+	// because before MUL-2764 there was no MCP Tab. When the agent has
+	// no managed mcp_config saved, the daemon must leave those entries
+	// alone — silently dropping them would break the only way those
+	// users had to configure MCP. We only claim the `mcp_servers`
+	// namespace once an admin opts in via the MCP Tab.
+	args := buildCodexArgs(ExecOptions{
+		CustomArgs: []string{"-c", `mcp_servers.fetch={ command = "uvx" }`, "-c", `model="o3"`},
+	}, slog.Default())
+	foundMcp := false
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-c" && strings.HasPrefix(args[i+1], "mcp_servers.") {
+			foundMcp = true
+		}
+	}
+	if !foundMcp {
+		t.Fatalf("custom_args mcp_servers entry must survive when agent has no managed mcp_config, got %v", args)
+	}
+}
+
+func TestBuildCodexArgsDropsCustomMcpOverridesWhenManaged(t *testing.T) {
+	t.Parallel()
+
+	// Once an admin saves a managed mcp_config, the daemon owns
+	// the `mcp_servers` namespace via $CODEX_HOME/config.toml. Codex's
+	// `-c` is last-wins, so any `-c mcp_servers.…` left in custom_args
+	// would silently shadow the saved managed entries.
+	raw := json.RawMessage(`{"mcpServers":{"managed":{"command":"managed-cmd"}}}`)
+	args := buildCodexArgs(ExecOptions{
+		McpConfig:  raw,
+		CustomArgs: []string{"-c", `mcp_servers.fetch={ command = "evil" }`, "-c", `model="o3"`},
+	}, slog.Default())
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-c" && strings.HasPrefix(args[i+1], "mcp_servers.") {
+			t.Fatalf("custom_args mcp_servers must be filtered when managed mcp_config is present, got %v", args)
+		}
+	}
+	// Unrelated -c key still passes through.
+	foundModel := false
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-c" && args[i+1] == `model="o3"` {
+			foundModel = true
+		}
+	}
+	if !foundModel {
+		t.Fatalf("unrelated -c override must still survive, got %v", args)
+	}
+}
+
 func TestFilterCodexCustomConfigOverridesDropsMcpServers(t *testing.T) {
 	t.Parallel()
 
@@ -1734,19 +1857,17 @@ func TestEnsureCodexMcpConfigRejectsBadShapes(t *testing.T) {
 	}
 }
 
-func TestEnsureCodexMcpConfigEmptyInputsAreNoop(t *testing.T) {
+func TestEnsureCodexMcpConfigAbsentLeavesUserTablesAlone(t *testing.T) {
 	t.Parallel()
 
-	// nil / empty object / empty mcpServers must all clear any prior
-	// managed block but produce no error and leave non-managed content
-	// alone.
-	for _, raw := range []json.RawMessage{
-		nil,
-		json.RawMessage(`{}`),
-		json.RawMessage(`{"mcpServers":{}}`),
-	} {
+	// nil / `null` map to the API's "absent" state: the agent has no
+	// managed mcp_config, so the daemon must not touch the user's
+	// inherited `[mcp_servers.*]` tables — the run falls back to the
+	// user's global CLI config.
+	for _, raw := range []json.RawMessage{nil, json.RawMessage(`null`)} {
 		tmp := filepath.Join(t.TempDir(), "config.toml")
-		initial := "sandbox_mode = \"workspace-write\"\n"
+		initial := "sandbox_mode = \"workspace-write\"\n\n" +
+			"[mcp_servers.user_global]\ncommand = \"keep\"\n"
 		if err := os.WriteFile(tmp, []byte(initial), 0o600); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
@@ -1754,8 +1875,100 @@ func TestEnsureCodexMcpConfigEmptyInputsAreNoop(t *testing.T) {
 			t.Fatalf("ensure (%q): %v", string(raw), err)
 		}
 		data, _ := os.ReadFile(tmp)
-		if string(data) != initial {
-			t.Fatalf("file mutated for empty input %q: %q", string(raw), data)
+		got := string(data)
+		if !strings.Contains(got, "[mcp_servers.user_global]") {
+			t.Fatalf("absent mcp_config (%q) must leave user MCP tables alone, got:\n%s", string(raw), got)
 		}
+		if strings.Contains(got, multicaCodexMcpBeginMarker) {
+			t.Fatalf("absent mcp_config (%q) must not write managed markers, got:\n%s", string(raw), got)
+		}
+	}
+}
+
+func TestEnsureCodexMcpConfigEmptyManagedSetStripsUserMcp(t *testing.T) {
+	t.Parallel()
+
+	// `{}` / `{"mcpServers":{}}` map to the API's "present, empty" state.
+	// The admin saved an explicit (empty) MCP list, so the daemon must
+	// strip inherited user `[mcp_servers.*]` tables and pin the managed
+	// markers — equivalent to Claude's --strict-mcp-config with an empty
+	// servers map. Falling back to the user's global MCP would defeat
+	// the affordance.
+	for _, raw := range []json.RawMessage{
+		json.RawMessage(`{}`),
+		json.RawMessage(`{"mcpServers":{}}`),
+	} {
+		tmp := filepath.Join(t.TempDir(), "config.toml")
+		initial := "sandbox_mode = \"workspace-write\"\n\n" +
+			"[mcp_servers.user_global]\ncommand = \"keep\"\n"
+		if err := os.WriteFile(tmp, []byte(initial), 0o600); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+			t.Fatalf("ensure (%q): %v", string(raw), err)
+		}
+		data, _ := os.ReadFile(tmp)
+		got := string(data)
+		if strings.Contains(got, "user_global") {
+			t.Fatalf("managed empty set (%q) must strip user MCP tables, got:\n%s", string(raw), got)
+		}
+		if !strings.Contains(got, multicaCodexMcpBeginMarker) || !strings.Contains(got, multicaCodexMcpEndMarker) {
+			t.Fatalf("managed empty set (%q) must still write markers so future runs find them, got:\n%s", string(raw), got)
+		}
+		if !strings.Contains(got, `sandbox_mode = "workspace-write"`) {
+			t.Fatalf("unrelated content must survive (%q), got:\n%s", string(raw), got)
+		}
+	}
+}
+
+func TestEnsureCodexMcpConfigEmptyManagedSetIdempotent(t *testing.T) {
+	t.Parallel()
+
+	// Running ensure twice with the same `{}` input must produce
+	// byte-identical output — guards against the empty-marker block
+	// accreting blank lines or duplicate markers across reruns.
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tmp, []byte("sandbox_mode = \"workspace-write\"\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	raw := json.RawMessage(`{}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("first ensure: %v", err)
+	}
+	first, _ := os.ReadFile(tmp)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("second ensure: %v", err)
+	}
+	second, _ := os.ReadFile(tmp)
+	if string(first) != string(second) {
+		t.Fatalf("non-idempotent write:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestHasManagedCodexMcpConfig(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		raw  json.RawMessage
+		want bool
+	}{
+		{"nil", nil, false},
+		{"empty bytes", json.RawMessage(""), false},
+		{"whitespace only", json.RawMessage("   \n\t"), false},
+		{"json null", json.RawMessage(`null`), false},
+		{"json null with whitespace", json.RawMessage(" null \n"), false},
+		{"empty object", json.RawMessage(`{}`), true},
+		{"empty mcp servers map", json.RawMessage(`{"mcpServers":{}}`), true},
+		{"populated", json.RawMessage(`{"mcpServers":{"x":{"command":"a"}}}`), true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := hasManagedCodexMcpConfig(tc.raw); got != tc.want {
+				t.Fatalf("hasManagedCodexMcpConfig(%q) = %v, want %v", string(tc.raw), got, tc.want)
+			}
+		})
 	}
 }
