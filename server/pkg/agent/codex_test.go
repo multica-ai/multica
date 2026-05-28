@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -1441,127 +1443,273 @@ func TestBuildCodexArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
 	}
 }
 
-func TestBuildCodexMcpArgsEmptyConfig(t *testing.T) {
+func TestBuildCodexArgsDoesNotLeakMcpToArgv(t *testing.T) {
 	t.Parallel()
 
-	args, err := buildCodexMcpArgs(nil)
-	if err != nil {
-		t.Fatalf("nil config should not error: %v", err)
-	}
-	if args != nil {
-		t.Fatalf("nil config should yield no args, got %v", args)
-	}
+	// MCP config is materialised into $CODEX_HOME/config.toml, never into
+	// argv — otherwise `mcp_servers.<id>.env` secrets would land in
+	// `ps aux` output and in the daemon's `agent command` log line. This
+	// test pins the contract: even with a non-empty mcp_config, no -c /
+	// --config / mcp_servers.* entry shows up in buildCodexArgs output.
+	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","env":{"SECRET":"hunter2"}}}}`)
+	args := buildCodexArgs(ExecOptions{
+		McpConfig:  raw,
+		CustomArgs: []string{"-c", `model="o3"`},
+	}, slog.Default())
 
-	args, err = buildCodexMcpArgs(json.RawMessage(`{}`))
-	if err != nil {
-		t.Fatalf("empty object should not error: %v", err)
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "mcp_servers") {
+		t.Fatalf("argv must not mention mcp_servers (now lives in config.toml), got %v", args)
 	}
-	if args != nil {
-		t.Fatalf("empty object should yield no args, got %v", args)
+	if strings.Contains(joined, "hunter2") {
+		t.Fatalf("argv must not leak secret env values, got %v", args)
 	}
-
-	args, err = buildCodexMcpArgs(json.RawMessage(`{"mcpServers":{}}`))
-	if err != nil {
-		t.Fatalf("empty mcpServers should not error: %v", err)
-	}
-	if args != nil {
-		t.Fatalf("empty mcpServers should yield no args, got %v", args)
-	}
-}
-
-func TestBuildCodexMcpArgsStdioServer(t *testing.T) {
-	t.Parallel()
-
-	// Plain stdio server with command + args + env should become a single
-	// `-c mcp_servers.<name>=<inline-table>` flag. The inline table must
-	// quote string values and keep the env nested inside the same table.
-	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch","--cache"],"env":{"FOO":"bar"}}}}`)
-	args, err := buildCodexMcpArgs(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(args) != 2 || args[0] != "-c" {
-		t.Fatalf("expected one -c flag pair, got %v", args)
-	}
-	got := args[1]
-	wantPrefix := "mcp_servers.fetch="
-	if !strings.HasPrefix(got, wantPrefix) {
-		t.Fatalf("expected prefix %q in %q", wantPrefix, got)
-	}
-	value := strings.TrimPrefix(got, wantPrefix)
-	for _, want := range []string{
-		`command = "uvx"`,
-		`args = ["mcp-server-fetch", "--cache"]`,
-		`env = { FOO = "bar" }`,
-	} {
-		if !strings.Contains(value, want) {
-			t.Fatalf("expected substring %q in inline TOML %q", want, value)
+	for i := 0; i+1 < len(args); i++ {
+		if (args[i] == "-c" || args[i] == "--config") && strings.HasPrefix(args[i+1], "mcp_servers.") {
+			t.Fatalf("expected no -c mcp_servers.* in argv, got %v", args)
 		}
 	}
-}
-
-func TestBuildCodexMcpArgsMultipleServersAreDeterministic(t *testing.T) {
-	t.Parallel()
-
-	// Two servers should emit two flag pairs in a stable order so daemon
-	// logs and tests don't churn between runs.
-	raw := json.RawMessage(`{"mcpServers":{"zeta":{"command":"a"},"alpha":{"command":"b"}}}`)
-	args, err := buildCodexMcpArgs(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(args) != 4 {
-		t.Fatalf("expected 4 args (-c pair per server), got %v", args)
-	}
-	if !strings.HasPrefix(args[1], "mcp_servers.alpha=") {
-		t.Fatalf("expected alpha first (alphabetical), got %v", args)
-	}
-	if !strings.HasPrefix(args[3], "mcp_servers.zeta=") {
-		t.Fatalf("expected zeta second, got %v", args)
-	}
-}
-
-func TestBuildCodexMcpArgsURLServer(t *testing.T) {
-	t.Parallel()
-
-	// HTTP-style servers use `url` + bearer-token env var. Verify the
-	// scalar fields pass through and the URL stays quoted.
-	raw := json.RawMessage(`{"mcpServers":{"remote":{"url":"https://example.com/mcp","bearer_token_env_var":"TOKEN"}}}`)
-	args, err := buildCodexMcpArgs(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(args) != 2 {
-		t.Fatalf("expected one -c pair, got %v", args)
-	}
-	value := strings.TrimPrefix(args[1], "mcp_servers.remote=")
-	for _, want := range []string{
-		`url = "https://example.com/mcp"`,
-		`bearer_token_env_var = "TOKEN"`,
-	} {
-		if !strings.Contains(value, want) {
-			t.Fatalf("expected %q in %q", want, value)
+	// Legitimate non-mcp `-c model=…` from custom_args must still survive.
+	foundModel := false
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-c" && args[i+1] == `model="o3"` {
+			foundModel = true
 		}
 	}
+	if !foundModel {
+		t.Fatalf("expected non-mcp -c override to be preserved, got %v", args)
+	}
 }
 
-func TestBuildCodexMcpArgsStringEscaping(t *testing.T) {
+func TestFilterCodexCustomConfigOverridesDropsMcpServers(t *testing.T) {
 	t.Parallel()
 
-	// Backslashes, quotes and newlines must escape into TOML basic-string
-	// form so the value round-trips through Codex's TOML parser intact.
-	raw := json.RawMessage(`{"mcpServers":{"esc":{"command":"a\"b\\c\nd"}}}`)
-	args, err := buildCodexMcpArgs(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// Codex `-c` is last-wins, so a user-supplied `-c mcp_servers.…` in
+	// custom_args would silently shadow whatever the MCP Tab wrote into
+	// CODEX_HOME/config.toml. Verify that all spellings of the override
+	// get dropped, while unrelated `-c` keys pass through.
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "separated -c mcp_servers.fetch=…",
+			in:   []string{"-c", `mcp_servers.fetch={ command = "evil" }`, "-c", `model="o3"`},
+			want: []string{"-c", `model="o3"`},
+		},
+		{
+			name: "inline -c=mcp_servers.fetch=…",
+			in:   []string{`-c=mcp_servers.fetch={ command = "evil" }`, "--listen=keep"},
+			want: []string{"--listen=keep"},
+		},
+		{
+			name: "long form --config mcp_servers.x.env.KEY=val",
+			in:   []string{"--config", `mcp_servers.x.env.KEY="leak"`, "--config", `sandbox="workspace-write"`},
+			want: []string{"--config", `sandbox="workspace-write"`},
+		},
+		{
+			name: "passes through unrelated -c overrides",
+			in:   []string{"-c", `model="o3"`, "-c", `sandbox.network_access=true`},
+			want: []string{"-c", `model="o3"`, "-c", `sandbox.network_access=true`},
+		},
+		{
+			name: "matches mcp_servers root assignment",
+			in:   []string{"-c", `mcp_servers={fetch={command="evil"}}`, "-c", `model="o3"`},
+			want: []string{"-c", `model="o3"`},
+		},
 	}
-	value := strings.TrimPrefix(args[1], "mcp_servers.esc=")
-	if !strings.Contains(value, `command = "a\"b\\c\nd"`) {
-		t.Fatalf("expected escaped string in %q", value)
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := filterCodexCustomConfigOverrides(tc.in, slog.Default())
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("filterCodexCustomConfigOverrides(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 
-func TestBuildCodexMcpArgsRejectsBadShapes(t *testing.T) {
+func TestEnsureCodexMcpConfigEmptyClearsBlock(t *testing.T) {
+	t.Parallel()
+
+	// When agent.mcp_config is null/empty the managed block is removed
+	// from config.toml, but unrelated content (sandbox block, user-level
+	// `[mcp_servers.user]`) is left untouched.
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	initial := "sandbox_mode = \"workspace-write\"\n\n" +
+		multicaCodexMcpBeginMarker + "\n" +
+		"[mcp_servers.fetch]\ncommand = \"uvx\"\n" +
+		multicaCodexMcpEndMarker + "\n\n" +
+		"[mcp_servers.user_global]\ncommand = \"keep\"\n"
+	if err := os.WriteFile(tmp, []byte(initial), 0o600); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	if err := ensureCodexMcpConfig(tmp, nil, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+	if strings.Contains(got, multicaCodexMcpBeginMarker) {
+		t.Fatalf("managed block should be cleared, got:\n%s", got)
+	}
+	if !strings.Contains(got, "[mcp_servers.user_global]") {
+		t.Fatalf("user-defined mcp_servers should be left alone when agent has no mcp_config, got:\n%s", got)
+	}
+	if !strings.Contains(got, `sandbox_mode = "workspace-write"`) {
+		t.Fatalf("unrelated config preserved, got:\n%s", got)
+	}
+}
+
+func TestEnsureCodexMcpConfigWritesManagedBlock(t *testing.T) {
+	t.Parallel()
+
+	// A non-empty mcp_config writes one `[mcp_servers.<name>]` table per
+	// server, in stable alphabetical order, into the managed block. The
+	// file mode is 0o600 because env values may carry secrets.
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tmp, []byte("sandbox_mode = \"workspace-write\"\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	raw := json.RawMessage(`{"mcpServers":{"zeta":{"command":"b"},"alpha":{"command":"a","env":{"K":"v"}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	if !strings.Contains(got, multicaCodexMcpBeginMarker) || !strings.Contains(got, multicaCodexMcpEndMarker) {
+		t.Fatalf("expected managed block markers, got:\n%s", got)
+	}
+	alphaIdx := strings.Index(got, "[mcp_servers.alpha]")
+	zetaIdx := strings.Index(got, "[mcp_servers.zeta]")
+	if alphaIdx == -1 || zetaIdx == -1 {
+		t.Fatalf("expected both server tables, got:\n%s", got)
+	}
+	if alphaIdx > zetaIdx {
+		t.Fatalf("expected alpha before zeta (alphabetical), got:\n%s", got)
+	}
+	for _, want := range []string{
+		`command = "a"`,
+		`env = { K = "v" }`,
+		`command = "b"`,
+		`sandbox_mode = "workspace-write"`, // unrelated user content preserved
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+
+	fi, err := os.Stat(tmp)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if mode := fi.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("expected mode 0o600 for secret-bearing config, got %o", mode)
+	}
+}
+
+func TestEnsureCodexMcpConfigForces0600OnPreexistingFile(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions only")
+	}
+
+	// `execenv.copyFile` seeds the per-task config.toml at 0o644. Once we
+	// add secret-bearing mcp_servers tables to it, the mode must drop to
+	// 0o600 — `os.WriteFile` alone keeps the existing mode, so the chmod
+	// is the part we need to pin.
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tmp, []byte("sandbox_mode = \"workspace-write\"\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","env":{"API_KEY":"secret"}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	fi, err := os.Stat(tmp)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if mode := fi.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("expected 0o600 after overwrite of pre-existing 0o644 file, got %o", mode)
+	}
+}
+
+func TestEnsureCodexMcpConfigStripsUserMcpServersWhenManaged(t *testing.T) {
+	t.Parallel()
+
+	// When agent.mcp_config is non-empty, ALL user-defined `[mcp_servers.*]`
+	// tables (inherited from ~/.codex/config.toml) are stripped to avoid
+	// (a) TOML "table already exists" errors when names collide and (b) the
+	// user's global servers silently being mixed in with the strict
+	// agent-managed list. Sub-tables like `[mcp_servers.x.env]` are also
+	// dropped as part of their parent.
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	initial := "sandbox_mode = \"workspace-write\"\n\n" +
+		"[mcp_servers.global_fetch]\ncommand = \"uvx-old\"\n\n" +
+		"[mcp_servers.global_fetch.env]\nOLD_KEY = \"old\"\n\n" +
+		"[other_section]\nkeep_me = true\n"
+	if err := os.WriteFile(tmp, []byte(initial), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	raw := json.RawMessage(`{"mcpServers":{"new_server":{"command":"new"}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, _ := os.ReadFile(tmp)
+	got := string(data)
+
+	if strings.Contains(got, "global_fetch") {
+		t.Fatalf("user mcp_servers tables must be stripped when agent has its own mcp_config, got:\n%s", got)
+	}
+	if strings.Contains(got, "OLD_KEY") {
+		t.Fatalf("user mcp_servers sub-tables must be stripped too, got:\n%s", got)
+	}
+	if !strings.Contains(got, "[other_section]") || !strings.Contains(got, "keep_me = true") {
+		t.Fatalf("unrelated tables must survive, got:\n%s", got)
+	}
+	if !strings.Contains(got, "[mcp_servers.new_server]") {
+		t.Fatalf("managed server should be written, got:\n%s", got)
+	}
+}
+
+func TestEnsureCodexMcpConfigIdempotent(t *testing.T) {
+	t.Parallel()
+
+	// Running ensure twice with the same input must produce byte-identical
+	// output — needed because Prepare and Reuse may both call into this on
+	// the same per-task config.toml across a task's lifetime.
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["a","b"]}}}`)
+
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("first ensure: %v", err)
+	}
+	first, _ := os.ReadFile(tmp)
+
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("second ensure: %v", err)
+	}
+	second, _ := os.ReadFile(tmp)
+
+	if string(first) != string(second) {
+		t.Fatalf("non-idempotent write:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestEnsureCodexMcpConfigRejectsBadShapes(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -1569,7 +1717,6 @@ func TestBuildCodexMcpArgsRejectsBadShapes(t *testing.T) {
 		raw  string
 	}{
 		{"non-json", `not json`},
-		{"top-level array", `[1,2,3]`},
 		{"server is array", `{"mcpServers":{"x":[1,2]}}`},
 		{"server is string", `{"mcpServers":{"x":"oops"}}`},
 		{"null value inside server", `{"mcpServers":{"x":{"command":null}}}`},
@@ -1579,61 +1726,36 @@ func TestBuildCodexMcpArgsRejectsBadShapes(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := buildCodexMcpArgs(json.RawMessage(tc.raw)); err == nil {
+			tmp := filepath.Join(t.TempDir(), "config.toml")
+			if err := ensureCodexMcpConfig(tmp, json.RawMessage(tc.raw), slog.Default()); err == nil {
 				t.Fatalf("expected error for %s, got nil", tc.name)
 			}
 		})
 	}
 }
 
-func TestBuildCodexArgsInjectsMcpBeforeCustomArgs(t *testing.T) {
+func TestEnsureCodexMcpConfigEmptyInputsAreNoop(t *testing.T) {
 	t.Parallel()
 
-	// MCP overrides need to land in Codex's arg list ahead of any -c the
-	// user wrote in custom_args, otherwise a `-c mcp_servers.foo=bar` in
-	// custom_args could silently shadow the daemon's server entry.
-	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx"}}}`)
-	args := buildCodexArgs(ExecOptions{
-		McpConfig:  raw,
-		CustomArgs: []string{"-c", "model=\"o3\""},
-	}, slog.Default())
-
-	mcpIdx, customIdx := -1, -1
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] == "-c" && strings.HasPrefix(args[i+1], "mcp_servers.fetch=") {
-			mcpIdx = i
+	// nil / empty object / empty mcpServers must all clear any prior
+	// managed block but produce no error and leave non-managed content
+	// alone.
+	for _, raw := range []json.RawMessage{
+		nil,
+		json.RawMessage(`{}`),
+		json.RawMessage(`{"mcpServers":{}}`),
+	} {
+		tmp := filepath.Join(t.TempDir(), "config.toml")
+		initial := "sandbox_mode = \"workspace-write\"\n"
+		if err := os.WriteFile(tmp, []byte(initial), 0o600); err != nil {
+			t.Fatalf("seed: %v", err)
 		}
-		if args[i] == "-c" && args[i+1] == "model=\"o3\"" {
-			customIdx = i
+		if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+			t.Fatalf("ensure (%q): %v", string(raw), err)
 		}
-	}
-	if mcpIdx == -1 {
-		t.Fatalf("expected mcp -c flag, got %v", args)
-	}
-	if customIdx == -1 {
-		t.Fatalf("expected user custom -c flag preserved, got %v", args)
-	}
-	if mcpIdx >= customIdx {
-		t.Fatalf("expected mcp args before custom args (mcp=%d, custom=%d): %v", mcpIdx, customIdx, args)
-	}
-}
-
-func TestBuildCodexArgsTolerantOfMalformedMcp(t *testing.T) {
-	t.Parallel()
-
-	// A malformed mcp_config must NOT crash the run — buildCodexArgs logs
-	// and continues so the agent still launches without MCP servers.
-	args := buildCodexArgs(ExecOptions{
-		McpConfig: json.RawMessage(`{not json`),
-	}, slog.Default())
-
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] == "-c" && strings.HasPrefix(args[i+1], "mcp_servers.") {
-			t.Fatalf("expected no mcp_servers args when JSON is invalid, got %v", args)
+		data, _ := os.ReadFile(tmp)
+		if string(data) != initial {
+			t.Fatalf("file mutated for empty input %q: %q", string(raw), data)
 		}
-	}
-	// The base launch flags must still be there.
-	if len(args) < 3 || args[0] != "app-server" || args[1] != "--listen" || args[2] != "stdio://" {
-		t.Fatalf("expected base app-server flags, got %v", args)
 	}
 }

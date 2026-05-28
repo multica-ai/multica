@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,8 +19,10 @@ import (
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args. The mcp_servers config keys
-// are injected by buildCodexMcpArgs from agent.mcp_config — a user-supplied
-// `-c mcp_servers.…` would silently override the daemon's value.
+// live in the per-task `$CODEX_HOME/config.toml` (written by
+// ensureCodexMcpConfig); user-supplied `-c mcp_servers.…` overrides are
+// stripped separately by filterCodexCustomConfigOverrides because they
+// share the `-c` flag with legitimate non-MCP overrides like `-c model=…`.
 var codexBlockedArgs = map[string]blockedArgMode{
 	"--listen": blockedWithValue, // stdio:// transport for daemon communication
 }
@@ -72,45 +75,193 @@ type codexBackend struct {
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
-	// MCP servers from agent.mcp_config are injected first so they sit
-	// inside Codex's config layer before any user-supplied custom_args
-	// can collide with them.
-	if mcpArgs, err := buildCodexMcpArgs(opts.McpConfig); err != nil {
-		// A malformed mcp_config shouldn't kill the run — the agent will
-		// still launch, just without the configured MCP servers. The
-		// admin sees the warning in daemon logs and can fix the JSON.
-		logger.Warn("codex: ignoring invalid mcp_config", "error", err)
-	} else {
-		args = append(args, mcpArgs...)
-	}
-	args = append(args, filterCustomArgs(opts.ExtraArgs, codexBlockedArgs, logger)...)
-	args = append(args, filterCustomArgs(opts.CustomArgs, codexBlockedArgs, logger)...)
+	args = append(args, filterCodexCustomConfigOverrides(
+		filterCustomArgs(opts.ExtraArgs, codexBlockedArgs, logger),
+		logger,
+	)...)
+	args = append(args, filterCodexCustomConfigOverrides(
+		filterCustomArgs(opts.CustomArgs, codexBlockedArgs, logger),
+		logger,
+	)...)
 	return args
 }
 
-// buildCodexMcpArgs translates the agent's mcp_config JSON (Claude-style
-// `{"mcpServers": {...}}`) into Codex `-c mcp_servers.<name>=<toml>`
-// overrides. Each server is emitted as one inline TOML table so the entire
-// per-server config is replaced as a unit (a dotted-path-per-leaf approach
-// would leave stale fields from the user's global config.toml fused into
-// the daemon-managed entry, which the user would never see).
+// codexManagedMcpConfigKeyRe matches the daemon-managed config namespace
+// (`mcp_servers.…`) when it appears as the value of a Codex `-c` /
+// `--config` flag. Used by filterCodexCustomConfigOverrides to drop user
+// overrides that would otherwise shadow what the MCP Tab writes into
+// `$CODEX_HOME/config.toml`.
+var codexManagedMcpConfigKeyRe = regexp.MustCompile(`^\s*mcp_servers(?:\s*\.|\s*=|\s*$)`)
+
+// filterCodexCustomConfigOverrides drops `-c mcp_servers.…=` and
+// `--config mcp_servers.…=` entries from custom args. Codex's `-c` is
+// last-wins (verified against codex-cli 0.132.0), so without this filter a
+// user-written `-c mcp_servers.fetch=…` in custom_args would silently
+// override whatever the MCP Tab saved into the per-task config.toml. We
+// own the `mcp_servers` namespace via the managed block, so user attempts
+// to write into it are dropped with a warning rather than allowed to win.
+// Other `-c`/`--config` keys (e.g. `-c model="o3"`) pass through unchanged.
+func filterCodexCustomConfigOverrides(args []string, logger *slog.Logger) []string {
+	if len(args) == 0 {
+		return args
+	}
+	filtered := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		flag := arg
+		inlineValue := ""
+		hasInlineValue := false
+		if idx := strings.Index(arg, "="); idx > 0 {
+			flag = arg[:idx]
+			inlineValue = arg[idx+1:]
+			hasInlineValue = true
+		}
+		if flag == "-c" || flag == "--config" {
+			value := inlineValue
+			if !hasInlineValue && i+1 < len(args) {
+				value = args[i+1]
+			}
+			if codexManagedMcpConfigKeyRe.MatchString(value) {
+				if logger != nil {
+					// Log the key only, never the value — mcp_servers.<name>.env
+					// is allowed to carry secrets and the whole point of moving
+					// this to config.toml is to keep raw values out of logs/argv.
+					key := value
+					if eqIdx := strings.Index(value, "="); eqIdx >= 0 {
+						key = value[:eqIdx]
+					}
+					logger.Warn("custom_args: blocked mcp_servers override; daemon manages this via CODEX_HOME/config.toml",
+						"flag", flag, "key", strings.TrimSpace(key))
+				}
+				if !hasInlineValue && i+1 < len(args) {
+					i++ // skip the value arg
+				}
+				continue
+			}
+		}
+		filtered = append(filtered, arg)
+	}
+	return filtered
+}
+
+// Markers delimiting the daemon-managed `[mcp_servers.*]` block in
+// `$CODEX_HOME/config.toml`. Match the existing sandbox / multi-agent /
+// memory marker pattern so ops can grep all managed blocks consistently.
+const (
+	multicaCodexMcpBeginMarker = "# BEGIN multica-managed mcp_servers (do not edit; regenerated by daemon)"
+	multicaCodexMcpEndMarker   = "# END multica-managed mcp_servers"
+)
+
+var codexMcpBlockRe = regexp.MustCompile(
+	`(?ms)^` + regexp.QuoteMeta(multicaCodexMcpBeginMarker) +
+		`.*?^` + regexp.QuoteMeta(multicaCodexMcpEndMarker) + `\n*`)
+
+// userCodexMcpServersTableHeaderRe matches `[mcp_servers.<name>]` (and its
+// quoted-key form `[mcp_servers."<name>"]`) at the start of a line. Used
+// to strip user-provided mcp_servers tables from the per-task config when
+// the agent has its own mcp_config — mirrors Claude's `--strict-mcp-config`
+// model where the daemon's set is authoritative.
+var userCodexMcpServersTableHeaderRe = regexp.MustCompile(
+	`^\s*\[\s*mcp_servers\s*\.\s*(?:"[^"]*"|[^\]\s]+)\s*\]\s*(?:#.*)?$`)
+
+// ensureCodexMcpConfig writes (or clears) the daemon-managed
+// `[mcp_servers.*]` block in `$CODEX_HOME/config.toml`. The block is the
+// authoritative source of MCP servers for this run: with mcp_config set
+// in the agent UI the daemon also strips any inherited
+// `[mcp_servers.*]` tables from the per-task config so the user's global
+// `~/.codex/config.toml` doesn't shadow or collide with the managed set.
 //
-// We translate Claude-style camelCase keys (`args`, `env`, `command`,
-// `url`) to whatever Codex's config schema expects — today they happen to
-// be the same names so the JSON passes through verbatim. If Codex ever
-// diverges, do the rename here, not in the UI editor.
-func buildCodexMcpArgs(raw json.RawMessage) ([]string, error) {
+// The file mode is 0o600 because `mcp_servers.<id>.env` values may carry
+// secrets (API keys, bearer tokens); the per-task home is owned by the
+// daemon's user, so 0o600 keeps secrets out of any world-readable copy
+// while still letting the codex child read them.
+//
+// A malformed mcp_config is returned as an error and the caller decides
+// whether to surface or warn — same fail-soft contract the prior argv
+// path had.
+func ensureCodexMcpConfig(configPath string, mcpConfig json.RawMessage, logger *slog.Logger) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read config.toml: %w", err)
+	}
+	existing := string(data)
+
+	// Always strip a prior managed block so reruns and clear-config flows
+	// converge on a clean state.
+	stripped := codexMcpBlockRe.ReplaceAllString(existing, "")
+
+	block, hasServers, renderErr := renderCodexMcpServersBlock(mcpConfig)
+	if renderErr != nil {
+		return renderErr
+	}
+
+	var updated string
+	if hasServers {
+		// With an agent-managed set, strip any user-defined `[mcp_servers.*]`
+		// tables inherited from the shared `~/.codex/config.toml`. Two reasons:
+		//   1. TOML rejects redefining the same table; a user table named
+		//      `[mcp_servers.fetch]` would crash codex if the agent also
+		//      defined `fetch`.
+		//   2. The agent's mcp_config is meant to be the strict source for
+		//      this task — same as Claude's `--strict-mcp-config`. Mixing in
+		//      user-global servers would surprise the admin who edited the
+		//      MCP Tab expecting an explicit list.
+		stripped = stripCodexUserMcpServerTables(stripped)
+		stripped = strings.TrimRight(stripped, "\n")
+		if stripped == "" {
+			updated = block
+		} else {
+			updated = stripped + "\n\n" + block
+		}
+	} else {
+		// No managed servers: leave any inherited user tables alone.
+		updated = stripped
+	}
+
+	if updated == existing {
+		return nil
+	}
+	if err := os.WriteFile(configPath, []byte(updated), 0o600); err != nil {
+		return fmt.Errorf("write config.toml: %w", err)
+	}
+	// os.WriteFile applies the mode only when creating a new file; if the
+	// per-task config.toml was already on disk at 0o644 (the default mode
+	// used by execenv.copyFile when seeding from ~/.codex/config.toml),
+	// the secret-bearing values we just wrote would inherit that wider
+	// mode. Chmod unconditionally to keep the secret in the daemon
+	// owner's lane regardless of the prior mode.
+	if err := os.Chmod(configPath, 0o600); err != nil {
+		return fmt.Errorf("chmod config.toml to 0600: %w", err)
+	}
+	if logger != nil {
+		logger.Debug("codex: wrote managed mcp_servers block to config.toml",
+			"config_path", configPath, "has_servers", hasServers)
+	}
+	return nil
+}
+
+// renderCodexMcpServersBlock renders the agent's mcp_config JSON
+// (Claude-style `{"mcpServers": {...}}`) as a TOML block of
+// `[mcp_servers.<name>]` tables wrapped in BEGIN/END markers. Returns
+// (block, hasServers, err); hasServers=false means the input had no
+// servers to render (empty/null mcp_config) and the caller should only
+// strip the prior managed block.
+//
+// Claude-style camelCase keys (`args`, `env`, `command`, `url`) pass
+// through verbatim — Codex's config schema happens to use the same
+// names today. If they ever diverge, rename here rather than in the UI.
+func renderCodexMcpServersBlock(raw json.RawMessage) (string, bool, error) {
 	if len(raw) == 0 {
-		return nil, nil
+		return "", false, nil
 	}
 	var parsed struct {
 		McpServers map[string]json.RawMessage `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, fmt.Errorf("parse mcp_config json: %w", err)
+		return "", false, fmt.Errorf("parse mcp_config json: %w", err)
 	}
 	if len(parsed.McpServers) == 0 {
-		return nil, nil
+		return "", false, nil
 	}
 
 	names := make([]string, 0, len(parsed.McpServers))
@@ -119,25 +270,80 @@ func buildCodexMcpArgs(raw json.RawMessage) ([]string, error) {
 	}
 	sort.Strings(names)
 
-	args := make([]string, 0, len(names)*2)
-	for _, name := range names {
+	var sb strings.Builder
+	sb.WriteString(multicaCodexMcpBeginMarker)
+	sb.WriteString("\n")
+	for i, name := range names {
 		if !isCodexBareTomlKey(name) {
-			return nil, fmt.Errorf("mcp server name %q must be ASCII alphanumeric / _ / - to fit Codex's bare-key requirement", name)
+			return "", false, fmt.Errorf("mcp server name %q must be ASCII alphanumeric / _ / - to fit Codex's bare-key requirement", name)
 		}
-		var serverVal any
+		var serverVal map[string]any
 		if err := json.Unmarshal(parsed.McpServers[name], &serverVal); err != nil {
-			return nil, fmt.Errorf("mcp_servers.%s: %w", name, err)
+			return "", false, fmt.Errorf("mcp_servers.%s: %w", name, err)
 		}
-		if _, ok := serverVal.(map[string]any); !ok {
-			return nil, fmt.Errorf("mcp_servers.%s must be a JSON object", name)
+		if serverVal == nil {
+			return "", false, fmt.Errorf("mcp_servers.%s must be a JSON object", name)
 		}
-		tomlValue, err := jsonValueToCodexTOMLInline(serverVal)
-		if err != nil {
-			return nil, fmt.Errorf("mcp_servers.%s: %w", name, err)
+		if i > 0 {
+			sb.WriteString("\n")
 		}
-		args = append(args, "-c", fmt.Sprintf("mcp_servers.%s=%s", name, tomlValue))
+		sb.WriteString("[mcp_servers.")
+		sb.WriteString(name)
+		sb.WriteString("]\n")
+		keys := make([]string, 0, len(serverVal))
+		for k := range serverVal {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			tomlValue, err := jsonValueToCodexTOMLInline(serverVal[k])
+			if err != nil {
+				return "", false, fmt.Errorf("mcp_servers.%s.%s: %w", name, k, err)
+			}
+			sb.WriteString(codexTOMLKey(k))
+			sb.WriteString(" = ")
+			sb.WriteString(tomlValue)
+			sb.WriteString("\n")
+		}
 	}
-	return args, nil
+	sb.WriteString(multicaCodexMcpEndMarker)
+	sb.WriteString("\n")
+	return sb.String(), true, nil
+}
+
+// stripCodexUserMcpServerTables removes every `[mcp_servers.*]` table
+// (header + body lines until the next top-level table header or EOF) from
+// a TOML config string. Sub-tables like `[mcp_servers.fetch.env]` count
+// as part of the parent table and are dropped along with it.
+func stripCodexUserMcpServerTables(content string) string {
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	skipping := false
+	for _, line := range lines {
+		if userCodexMcpServersTableHeaderRe.MatchString(line) {
+			skipping = true
+			continue
+		}
+		if skipping {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "[") {
+				// Next table header. If it's still an `mcp_servers.*`
+				// table (including a sub-table), keep skipping; otherwise
+				// stop and emit this line.
+				if userCodexMcpServersTableHeaderRe.MatchString(line) ||
+					strings.HasPrefix(trimmed, "[mcp_servers.") ||
+					strings.HasPrefix(trimmed, "[ mcp_servers.") {
+					continue
+				}
+				skipping = false
+				out = append(out, line)
+				continue
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 // jsonValueToCodexTOMLInline serialises a JSON value as a TOML inline
@@ -264,6 +470,26 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		semanticInactivityTimeout = defaultCodexSemanticInactivityTimeout
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
+
+	// Materialise the agent's MCP config into the per-task
+	// `$CODEX_HOME/config.toml`. Argv would be the simpler path, but
+	// `mcp_servers.<id>.env` is allowed to carry secrets (Codex docs:
+	// https://developers.openai.com/codex/mcp#configure-with-configtoml)
+	// and our UI already treats mcp_config as a redacted-for-non-admins
+	// field. Process argv ends up in OS-level `ps` listings and is also
+	// echoed into the daemon's `agent command` log line below, so any
+	// inline env-bearing TOML would defeat the redaction. Writing through
+	// config.toml at 0o600 keeps the secret values out of argv and logs.
+	if codexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"]); codexHome != "" {
+		if err := ensureCodexMcpConfig(filepath.Join(codexHome, "config.toml"), opts.McpConfig, b.cfg.Logger); err != nil {
+			// A malformed mcp_config shouldn't kill the run — the agent
+			// still launches, just without the configured MCP servers.
+			// The admin sees the warning in daemon logs and can fix it.
+			b.cfg.Logger.Warn("codex: ignoring invalid mcp_config", "error", err)
+		}
+	} else if len(opts.McpConfig) > 0 {
+		b.cfg.Logger.Warn("codex: mcp_config provided but CODEX_HOME is not set; MCP servers will not be loaded")
+	}
 
 	codexArgs := buildCodexArgs(opts, b.cfg.Logger)
 	cmd := exec.CommandContext(runCtx, execPath, codexArgs...)
