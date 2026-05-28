@@ -191,6 +191,7 @@
     "skills": "Skills",
     "environment": "环境变量",
     "custom_args": "自定义参数",
+    "mcp_config": "MCP",
     "discard_dialog_title": "放弃未保存的修改？",
     "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
     "discard_keep": "继续编辑",
@@ -287,6 +288,18 @@
       "remove_aria": "移除参数",
       "saved_toast": "已保存自定义参数",
       "save_failed_toast": "保存自定义参数失败"
+    },
+    "mcp_config": {
+      "intro": "转发给运行时 CLI 的 MCP 服务器配置（例如 Claude 的 --mcp-config）。原样保存，可能包含密钥 —— 只有智能体所有者和工作区管理员可以读取。留空则回退到 CLI 自身的默认设置。",
+      "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
+      "editor_aria": "MCP 配置 JSON 编辑器",
+      "clear_action": "清空",
+      "invalid_json": "JSON 无效：{{error}}",
+      "invalid_not_object": "MCP 配置必须是 JSON 对象（例如 {\"mcpServers\": …}）。",
+      "saved_toast": "已保存 MCP 配置",
+      "save_failed_toast": "保存 MCP 配置失败",
+      "redacted_title": "已配置 —— 当前账号无权查看",
+      "redacted_hint": "只有智能体所有者或工作区管理员可以读取该配置。"
     },
     "skills": {
       "intro": "分配给该智能体的工作区 skill。本地运行时 skill 会自动可用。",
