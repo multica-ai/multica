@@ -31,6 +31,8 @@ type localCLIRun struct {
 	CommentsMode string
 	TopCommentID pgtype.UUID
 	Error        pgtype.Text
+	Source       pgtype.Text
+	SourceKey    pgtype.Text
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
 }
@@ -41,6 +43,8 @@ type createLocalCLIRunRequest struct {
 	ContextDir     string `json:"context_dir"`
 	CommentsMode   string `json:"comments_mode"`
 	NoStatusUpdate bool   `json:"no_status_update"`
+	Source         string `json:"source"`
+	SourceKey      string `json:"source_key"`
 }
 
 type updateLocalCLIRunRequest struct {
@@ -101,10 +105,28 @@ func (h *Handler) CreateLocalCLIRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid comments_mode")
 		return
 	}
+	req.Source = strings.TrimSpace(req.Source)
+	req.SourceKey = strings.TrimSpace(req.SourceKey)
 
 	userID, ok := parseUUIDOrBadRequest(w, requestUserID(r), "user_id")
 	if !ok {
 		return
+	}
+
+	if req.Source != "" && req.SourceKey != "" {
+		run, found, err := h.loadLocalCLIRunBySource(r.Context(), issue.WorkspaceID, req.Source, req.SourceKey)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check local run source")
+			return
+		}
+		if found {
+			if uuidToString(run.IssueID) != uuidToString(issue.ID) {
+				writeError(w, http.StatusConflict, "source_key is already bound to a different issue")
+				return
+			}
+			writeJSON(w, http.StatusOK, localCLIRunToResponse(run))
+			return
+		}
 	}
 
 	var topCommentID pgtype.UUID
@@ -152,14 +174,33 @@ func (h *Handler) CreateLocalCLIRun(w http.ResponseWriter, r *http.Request) {
 	row := h.DB.QueryRow(r.Context(), `
 		INSERT INTO local_cli_run (
 			workspace_id, issue_id, owner_id, cli_name, status,
-			work_dir, context_dir, comments_mode, top_comment_id
-		) VALUES ($1, $2, $3, $4, 'running', $5, $6, $7, $8)
+			work_dir, context_dir, comments_mode, top_comment_id,
+			source, source_key
+		) VALUES ($1, $2, $3, $4, 'running', $5, $6, $7, $8, NULLIF($9, ''), NULLIF($10, ''))
+		ON CONFLICT (workspace_id, source, source_key)
+			WHERE source IS NOT NULL AND source_key IS NOT NULL
+			DO NOTHING
 		RETURNING id, workspace_id, issue_id, owner_id, cli_name, status,
 			started_at, completed_at, exit_code, work_dir, context_dir,
-			comments_mode, top_comment_id, error, created_at, updated_at
-	`, issue.WorkspaceID, issue.ID, userID, req.CLIName, textOrNil(req.WorkDir), textOrNil(req.ContextDir), req.CommentsMode, uuidOrNil(topCommentID))
+			comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
+	`, issue.WorkspaceID, issue.ID, userID, req.CLIName, textOrNil(req.WorkDir), textOrNil(req.ContextDir), req.CommentsMode, uuidOrNil(topCommentID), req.Source, req.SourceKey)
 	run, err := scanLocalCLIRun(row)
 	if err != nil {
+		if req.Source != "" && req.SourceKey != "" && err == pgx.ErrNoRows {
+			existing, found, loadErr := h.loadLocalCLIRunBySource(r.Context(), issue.WorkspaceID, req.Source, req.SourceKey)
+			if loadErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to load local run source")
+				return
+			}
+			if found {
+				if uuidToString(existing.IssueID) != uuidToString(issue.ID) {
+					writeError(w, http.StatusConflict, "source_key is already bound to a different issue")
+					return
+				}
+				writeJSON(w, http.StatusOK, localCLIRunToResponse(existing))
+				return
+			}
+		}
 		writeError(w, http.StatusInternalServerError, "failed to create local run")
 		return
 	}
@@ -208,7 +249,7 @@ func (h *Handler) UpdateLocalCLIRun(w http.ResponseWriter, r *http.Request) {
 		WHERE id = $1 AND workspace_id = $6
 		RETURNING id, workspace_id, issue_id, owner_id, cli_name, status,
 			started_at, completed_at, exit_code, work_dir, context_dir,
-			comments_mode, top_comment_id, error, created_at, updated_at
+			comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
 	`, completedExpr), run.ID, req.Status, exitCode, req.Error, req.ContextDir, run.WorkspaceID)
 	updated, err := scanLocalCLIRun(row)
 	if err != nil {
@@ -315,11 +356,12 @@ func (h *Handler) CreateLocalCLIMessage(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var commentID pgtype.UUID
-	createsReply := (req.Type == "final" || (req.Type == "user_input" && !localCLIMessageIsNonCommentableCommand(req)) || localCLIMessageIsCodexProposedPlan(req)) &&
+	createsThreadReply := (req.Type == "final" || (req.Type == "user_input" && !localCLIMessageIsNonCommentableCommand(req)) || localCLIMessageIsCodexProposedPlan(req)) &&
 		run.CommentsMode == "thread" &&
-		run.TopCommentID.Valid &&
-		strings.TrimSpace(req.Content) != ""
+		run.TopCommentID.Valid
+	createsReply := createsThreadReply && strings.TrimSpace(req.Content) != ""
 	if createsReply {
+		parentID := run.TopCommentID
 		comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 			IssueID:     run.IssueID,
 			WorkspaceID: run.WorkspaceID,
@@ -327,7 +369,7 @@ func (h *Handler) CreateLocalCLIMessage(w http.ResponseWriter, r *http.Request) 
 			AuthorID:    run.OwnerID,
 			Content:     req.Content,
 			Type:        "comment",
-			ParentID:    run.TopCommentID,
+			ParentID:    parentID,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to create final reply")
@@ -500,7 +542,7 @@ func (h *Handler) loadLocalCLIRunForUser(w http.ResponseWriter, r *http.Request,
 	row := h.DB.QueryRow(r.Context(), `
 		SELECT id, workspace_id, issue_id, owner_id, cli_name, status,
 			started_at, completed_at, exit_code, work_dir, context_dir,
-			comments_mode, top_comment_id, error, created_at, updated_at
+			comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
 		FROM local_cli_run
 		WHERE id = $1 AND workspace_id = $2
 	`, runUUID, wsUUID)
@@ -512,11 +554,29 @@ func (h *Handler) loadLocalCLIRunForUser(w http.ResponseWriter, r *http.Request,
 	return run, true
 }
 
+func (h *Handler) loadLocalCLIRunBySource(ctx context.Context, workspaceID pgtype.UUID, source, sourceKey string) (localCLIRun, bool, error) {
+	row := h.DB.QueryRow(ctx, `
+		SELECT id, workspace_id, issue_id, owner_id, cli_name, status,
+			started_at, completed_at, exit_code, work_dir, context_dir,
+			comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
+		FROM local_cli_run
+		WHERE workspace_id = $1 AND source = $2 AND source_key = $3
+	`, workspaceID, source, sourceKey)
+	run, err := scanLocalCLIRun(row)
+	if err == nil {
+		return run, true, nil
+	}
+	if err == pgx.ErrNoRows {
+		return localCLIRun{}, false, nil
+	}
+	return localCLIRun{}, false, err
+}
+
 func (h *Handler) listLocalCLIRunsByIssue(r *http.Request, issue db.Issue) ([]localCLIRun, error) {
 	rows, err := h.DB.Query(r.Context(), `
 		SELECT id, workspace_id, issue_id, owner_id, cli_name, status,
 			started_at, completed_at, exit_code, work_dir, context_dir,
-			comments_mode, top_comment_id, error, created_at, updated_at
+			comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
 		FROM local_cli_run
 		WHERE issue_id = $1 AND workspace_id = $2
 		ORDER BY created_at DESC
@@ -589,7 +649,7 @@ func scanLocalCLIRun(row localCLIRunScanner) (localCLIRun, error) {
 		&run.ID, &run.WorkspaceID, &run.IssueID, &run.OwnerID,
 		&run.CLIName, &run.Status, &run.StartedAt, &run.CompletedAt,
 		&run.ExitCode, &run.WorkDir, &run.ContextDir, &run.CommentsMode,
-		&run.TopCommentID, &run.Error, &run.CreatedAt, &run.UpdatedAt,
+		&run.TopCommentID, &run.Error, &run.Source, &run.SourceKey, &run.CreatedAt, &run.UpdatedAt,
 	)
 	return run, err
 }
@@ -658,6 +718,12 @@ func localCLIRunToResponse(run localCLIRun) map[string]any {
 	}
 	if run.TopCommentID.Valid {
 		resp["top_comment_id"] = uuidToString(run.TopCommentID)
+	}
+	if run.Source.Valid {
+		resp["source"] = run.Source.String
+	}
+	if run.SourceKey.Valid {
+		resp["source_key"] = run.SourceKey.String
 	}
 	return resp
 }

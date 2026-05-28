@@ -137,6 +137,46 @@ func TestCreateLocalCLIRun_CommentsOffAndNoStatusUpdate(t *testing.T) {
 	}
 }
 
+func TestCreateLocalCLIRunDedupesBySourceKey(t *testing.T) {
+	issue := createIssueForLocalRunTest(t, "todo")
+	body := map[string]any{
+		"cli_name":         "codex_app",
+		"work_dir":         "/tmp/project",
+		"context_dir":      "codex_thread_id=thread-1\nbranch=feat/OPE-1493-codex-plugin",
+		"comments_mode":    "thread",
+		"no_status_update": true,
+		"source":           "codex_app_plugin",
+		"source_key":       "thread-1:bind",
+	}
+
+	first := createLocalRunForTest(t, issue.ID, body)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issue.ID+"/local-runs", body)
+	req = withURLParam(req, "id", issue.ID)
+	testHandler.CreateLocalCLIRun(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("duplicate CreateLocalCLIRun: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var second map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&second); err != nil {
+		t.Fatalf("decode duplicate run: %v", err)
+	}
+	if first["id"] != second["id"] || second["source_key"] != "thread-1:bind" {
+		t.Fatalf("duplicate run response = %+v, first = %+v", second, first)
+	}
+
+	var runs int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM local_cli_run WHERE issue_id = $1 AND source = 'codex_app_plugin' AND source_key = 'thread-1:bind'
+	`, issue.ID).Scan(&runs); err != nil {
+		t.Fatalf("count local runs: %v", err)
+	}
+	if runs != 1 {
+		t.Fatalf("local run count = %d, want 1", runs)
+	}
+}
+
 func TestCreateLocalCLIRunRejectsInvalidCommentsMode(t *testing.T) {
 	issue := createIssueForLocalRunTest(t, "todo")
 

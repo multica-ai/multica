@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "multica": {
+      "command": "/Users/tenglvjun/.multica/bin/multica",
+      "args": [
+        "codex-plugin",
+        "mcp"
+      ],
+      "env": {}
+    }
+  }
+}
