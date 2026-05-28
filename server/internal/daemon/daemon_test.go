@@ -205,6 +205,36 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestProviderSupportsMcpConfig(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		provider string
+		want     bool
+	}{
+		{provider: "claude", want: true},
+		{provider: "codex", want: true},
+		{provider: "cursor", want: true},
+		{provider: "hermes", want: true},
+		{provider: "kimi", want: true},
+		{provider: "kiro", want: true},
+		{provider: "copilot", want: false},
+		{provider: "gemini", want: false},
+		{provider: "opencode", want: false},
+		{provider: "openclaw", want: false},
+		{provider: "pi", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			if got := providerSupportsMcpConfig(tc.provider); got != tc.want {
+				t.Fatalf("providerSupportsMcpConfig(%q) = %v, want %v", tc.provider, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestComposeOpenclawIncludeRoots — the Elon must-fix regression: the
 // daemon must grant OpenClaw permission to follow the wrapper's $include
 // link from envRoot into the user's active config dir, while preserving

@@ -3,6 +3,8 @@ package agent
 import (
 	"encoding/json"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -70,6 +72,88 @@ func TestBuildCursorArgsMinimal(t *testing.T) {
 
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+	}
+}
+
+func TestPrepareCursorMcpConfigNoConfig(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cleanup, err := prepareCursorMcpConfig(dir, nil)
+	if err != nil {
+		t.Fatalf("prepareCursorMcpConfig: %v", err)
+	}
+	if cleanup != nil {
+		t.Fatalf("expected nil cleanup for empty mcp_config")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".cursor", "mcp.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected no cursor mcp config file, stat err=%v", err)
+	}
+}
+
+func TestPrepareCursorMcpConfigWritesPerRunFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	raw := json.RawMessage(`{"mcpServers":{"demo":{"command":"echo","args":["ok"]}}}`)
+
+	cleanup, err := prepareCursorMcpConfig(dir, raw)
+	if err != nil {
+		t.Fatalf("prepareCursorMcpConfig: %v", err)
+	}
+	if cleanup == nil {
+		t.Fatalf("expected cleanup function")
+	}
+
+	path := filepath.Join(dir, ".cursor", "mcp.json")
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read cursor mcp config: %v", err)
+	}
+	if string(got) != string(raw) {
+		t.Fatalf("cursor mcp config = %s, want %s", string(got), string(raw))
+	}
+
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected cleanup to remove generated mcp config, stat err=%v", err)
+	}
+}
+
+func TestPrepareCursorMcpConfigRestoresExistingFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cursorDir := filepath.Join(dir, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0o700); err != nil {
+		t.Fatalf("mkdir cursor dir: %v", err)
+	}
+	path := filepath.Join(cursorDir, "mcp.json")
+	previous := []byte(`{"mcpServers":{"existing":{"command":"old"}}}`)
+	if err := os.WriteFile(path, previous, 0o600); err != nil {
+		t.Fatalf("write existing cursor mcp config: %v", err)
+	}
+
+	raw := json.RawMessage(`{"mcpServers":{"new":{"command":"new"}}}`)
+	cleanup, err := prepareCursorMcpConfig(dir, raw)
+	if err != nil {
+		t.Fatalf("prepareCursorMcpConfig: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read written cursor mcp config: %v", err)
+	}
+	if string(got) != string(raw) {
+		t.Fatalf("cursor mcp config = %s, want %s", string(got), string(raw))
+	}
+
+	cleanup()
+	restored, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read restored cursor mcp config: %v", err)
+	}
+	if string(restored) != string(previous) {
+		t.Fatalf("restored cursor mcp config = %s, want %s", string(restored), string(previous))
 	}
 }
 
