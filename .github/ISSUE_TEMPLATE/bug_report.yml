@@ -10,7 +10,7 @@ body:
       description: Are you using the Official App (multica.ai) or a self-hosted instance?
       options:
         - Official App
-        - self-host
+        - Self-hosted
     validations:
       required: true
 
