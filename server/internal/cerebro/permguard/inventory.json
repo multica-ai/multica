@@ -1865,6 +1865,10 @@
       "exempt": "read-only — wraps GET /api/runtimes/{runtimeId}/activity"
     },
     {
+      "id": "runtime delete",
+      "gate": "via:DELETE /api/runtimes/{runtimeId}"
+    },
+    {
       "id": "runtime list",
       "exempt": "read-only — wraps GET /api/runtimes/"
     },

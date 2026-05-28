@@ -7,7 +7,7 @@
 // explicit @agent mentions in the draft. Lives outside reply-input.tsx so the
 // top-level composer can reuse it without dragging the reply-only UI along.
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, UserPlus } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
@@ -18,7 +18,11 @@ import { agentListOptions, memberListOptions } from "@multica/core/workspace/que
 import type { MemberWithUser } from "@multica/core/types";
 import { canTriggerPrivateAgentMention } from "@multica/cerebro-access/views";
 import { useT } from "../../i18n";
-import { getReplyTargetAgents, memberMentionMarkdown } from "./reply-targets";
+import {
+  extractMentionedAgentIds,
+  getReplyTargetAgents,
+  memberMentionMarkdown,
+} from "./reply-targets";
 
 interface TriggerTargetBarProps {
   /**
@@ -58,6 +62,31 @@ function TriggerTargetBar({ markdown, triggerAgentId, onTagOwner }: TriggerTarge
     () => getReplyTargetAgents({ markdown, triggerAgentId, agents }),
     [agents, markdown, triggerAgentId],
   );
+
+  // CEREBRO-PATCH(reply-trigger-auto-tag-owner): FIR-2465 — auto-tag the owner
+  // once per explicitly @mentioned private agent that can't trigger. The ref
+  // prevents re-injection if the user removes the owner manually, and clears
+  // when the draft is empty (e.g. after submit).
+  const autoTaggedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!markdown.trim()) {
+      autoTaggedRef.current.clear();
+      return;
+    }
+    const explicitIds = new Set(extractMentionedAgentIds(markdown));
+    for (const agent of targetAgents) {
+      if (!explicitIds.has(agent.id)) continue;
+      if (autoTaggedRef.current.has(agent.id)) continue;
+      if (!agent.owner_id) continue;
+      const decision = canTriggerPrivateAgentMention(agent, { userId, role: myRole });
+      if (decision.allowed) continue;
+      const owner = members.find((m) => m.user_id === agent.owner_id);
+      if (!owner) continue;
+      autoTaggedRef.current.add(agent.id);
+      if (markdown.includes(`mention://member/${owner.user_id}`)) continue;
+      onTagOwner(owner);
+    }
+  }, [targetAgents, markdown, members, userId, myRole, onTagOwner]);
 
   if (targetAgents.length === 0) return null;
 
