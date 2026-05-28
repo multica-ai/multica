@@ -1153,6 +1153,25 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByRole("button", { name: "Jump to top" })).not.toBeInTheDocument();
   });
 
+  it("does not show the jump pill for short scroll ranges", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    const scrollContainer = screen.getByTestId("issue-detail-scroll-container");
+    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 600 });
+    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 500 });
+    Object.defineProperty(scrollContainer, "scrollTop", { configurable: true, writable: true, value: 0 });
+
+    fireEvent.scroll(scrollContainer);
+    await flushAnimationFrame();
+
+    expect(screen.queryByRole("button", { name: "Jump to comment box" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Jump to top" })).not.toBeInTheDocument();
+  });
+
   it("keeps the comment-box jump pill visible while scrolling down until the comment box is nearby", async () => {
     renderIssueDetail();
 
