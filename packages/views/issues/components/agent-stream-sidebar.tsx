@@ -56,18 +56,17 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
     [activeTasks, recentTasks],
   );
 
-  // Selection logic: auto-follow unless user manually picks.
+  // Selection logic: pick a sensible default, then keep the current active run focused.
   const manualSelection = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Auto-select: latest active, or latest recent.
+  // Auto-select only when there is no current valid selection.
   useEffect(() => {
     if (manualSelection.current) return;
+    if (selectedId && allSorted.some((task) => task.id === selectedId)) return;
     const candidate = activeTasks[0] ?? recentTasks[0];
-    if (candidate && candidate.id !== selectedId) {
-      setSelectedId(candidate.id);
-    }
-  }, [activeTasks, recentTasks, selectedId]);
+    setSelectedId(candidate?.id ?? null);
+  }, [activeTasks, recentTasks, allSorted, selectedId]);
 
   const selectedTask = useMemo(
     () => allSorted.find((t) => t.id === selectedId) ?? allSorted[0] ?? null,
@@ -146,13 +145,13 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
             selectorOpen ? "border-border bg-accent/50" : "border-transparent hover:bg-accent/30",
           )}
         >
-          {isLive ? (
+          {paused ? (
+            <PauseCircle className="h-3 w-3 shrink-0 text-indigo-500" />
+          ) : isLive ? (
             <span className="relative flex h-2 w-2 shrink-0">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-info opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-info" />
             </span>
-          ) : paused ? (
-            <PauseCircle className="h-3 w-3 shrink-0 text-indigo-500" />
           ) : (
             <Radio className="h-3 w-3 shrink-0 text-muted-foreground" />
           )}
