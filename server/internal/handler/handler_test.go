@@ -2673,9 +2673,9 @@ func TestAgentCannotMarkDoneWithoutStructuredCompletionEvidence(t *testing.T) {
 		t.Fatalf("failed to create task: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO comment (issue_id, author_type, author_id, content, type, created_at)
-		VALUES ($1, 'agent', $2, 'Implemented the change.', 'comment', now())
-	`, issueID, agentID); err != nil {
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+		VALUES ($1, $2, 'agent', $3, 'Implemented the change.', 'comment', now())
+	`, issueID, testWorkspaceID, agentID); err != nil {
 		t.Fatalf("failed to create generic comment: %v", err)
 	}
 
@@ -2732,9 +2732,9 @@ func TestAgentCanMarkDoneAfterStructuredCompletionEvidence(t *testing.T) {
 		t.Fatalf("failed to create task: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO comment (issue_id, author_type, author_id, content, type, created_at)
-		VALUES ($1, 'agent', $2, $3, 'comment', now())
-	`, issueID, agentID, strings.Join([]string{
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+		VALUES ($1, $2, 'agent', $3, $4, 'comment', now())
+	`, issueID, testWorkspaceID, agentID, strings.Join([]string{
 		"Completion evidence:",
 		"Executor: Done Evidence Present Agent",
 		"Repository: https://github.com/AndyMental/multica",
