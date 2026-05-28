@@ -257,6 +257,76 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type DagCitationChainProjection struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AssertionID string             `json:"assertion_id"`
+	Citations   []byte             `json:"citations"`
+	EventID     pgtype.UUID        `json:"event_id"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DagConflictState struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	LeftFactID  pgtype.UUID        `json:"left_fact_id"`
+	RightFactID pgtype.UUID        `json:"right_fact_id"`
+	Severity    string             `json:"severity"`
+	Status      string             `json:"status"`
+	Reason      string             `json:"reason"`
+	EventID     pgtype.UUID        `json:"event_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ResolvedAt  pgtype.Timestamptz `json:"resolved_at"`
+}
+
+type DagEvent struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RecordIds   []string           `json:"record_ids"`
+	AgentID     string             `json:"agent_id"`
+	Dvt         []byte             `json:"dvt"`
+	Operation   string             `json:"operation"`
+	Payload     []byte             `json:"payload"`
+	Reason      string             `json:"reason"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type DagFactProjection struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Predicate   string             `json:"predicate"`
+	Args        []byte             `json:"args"`
+	EventID     pgtype.UUID        `json:"event_id"`
+	GroundedBy  []string           `json:"grounded_by"`
+	Confidence  pgtype.Float8      `json:"confidence"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type DagLinkProjection struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	FromID      string             `json:"from_id"`
+	ToID        string             `json:"to_id"`
+	Type        string             `json:"type"`
+	EventID     pgtype.UUID        `json:"event_id"`
+	Active      bool               `json:"active"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DagRecordProjection struct {
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ID                string             `json:"id"`
+	Type              string             `json:"type"`
+	CreatedEventID    pgtype.UUID        `json:"created_event_id"`
+	TombstonedEventID pgtype.UUID        `json:"tombstoned_event_id"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DagSchemaDependency struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	TypeName      string             `json:"type_name"`
+	DependsOnType string             `json:"depends_on_type"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type Feedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`

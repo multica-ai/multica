@@ -153,7 +153,7 @@ export class TestApiClient {
     return this.token;
   }
 
-  private async authedFetch(path: string, init?: RequestInit) {
+  async authedFetch(path: string, init?: RequestInit) {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...((init?.headers as Record<string, string>) ?? {}),

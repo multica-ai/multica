@@ -441,6 +441,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
 
+			// DAG core endpoints
+			r.Route("/api/dag", func(r chi.Router) {
+				r.Post("/events", h.DAGEventAppend)
+				r.Get("/analysis", h.DAGGraphAnalysis)
+			})
+
 			// Labels
 			r.Route("/api/labels", func(r chi.Router) {
 				r.Get("/", h.ListLabels)

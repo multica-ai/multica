@@ -102,6 +102,8 @@ import type {
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
+  DAGAnalysisResponse,
+  DAGEvent,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -591,6 +593,18 @@ export class ApiClient {
     return this.fetch("/api/issues/batch-delete", {
       method: "POST",
       body: JSON.stringify({ issue_ids: issueIds }),
+    });
+  }
+
+  // DAG core
+  async getDAGAnalysis(): Promise<DAGAnalysisResponse> {
+    return this.fetch("/api/dag/analysis");
+  }
+
+  async appendDAGEvent(event: DAGEvent): Promise<{ event_id: string; status: string }> {
+    return this.fetch("/api/dag/events", {
+      method: "POST",
+      body: JSON.stringify({ event }),
     });
   }
 

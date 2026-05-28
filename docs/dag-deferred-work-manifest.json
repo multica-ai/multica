@@ -1,0 +1,460 @@
+{
+  "manifest_version": "1.2.0",
+  "generated_at": "2026-05-24T03:20:00Z",
+  "workspace_id": "102766bf-450f-4b2e-9f13-7f4daf389282",
+  "workspace_slug": "pex",
+  "description": "Deferred work ecosystem for DAG core fork. Agents enriched with nuanced instructions and multi-skill assignments. Frontend viz agent significantly improved with HTML visualization patterns (julianoczkowski/html, thariqs/html-effectiveness, Azhi-ss/html-effectiveness) and Hallmark anti-slop design system (nutlope/hallmark).",
+  "projects": [
+    {
+      "id": "c1c11059-5712-47eb-b6b8-fc5fd9b23be1",
+      "title": "DAG Core Architecture",
+      "slug": "dag-core-architecture",
+      "status": "in_progress",
+      "description": "Complete DAG core implementation with agents, squads, skills, and autopilots",
+      "issue_count": 10
+    },
+    {
+      "id": "dd98355c-7626-46a0-b4ac-60c67ab71e5c",
+      "title": "DAG Agent Skills",
+      "slug": "dag-agent-skills",
+      "status": "in_progress",
+      "description": "Skills for DAG analysis and graph traversal agents",
+      "issue_count": 0
+    },
+    {
+      "id": "5602dae6-e286-496e-a63a-3691bc9f3071",
+      "title": "DAG Monitoring & Constraints",
+      "slug": "dag-monitoring-constraints",
+      "status": "planned",
+      "description": "Monitoring, alerting, and constraint enforcement for DAG operations",
+      "issue_count": 5
+    }
+  ],
+  "agents": [
+    {
+      "id": "e3719959-1062-4948-a253-9c6813636a60",
+      "name": "dag-frontend-viz",
+      "model": "gemini-2.5-pro",
+      "description": "Builds React components for DAG cycle warnings, dependency graph visualization, and interactive topology views",
+      "squad_id": "d8643887-a3ff-41fc-a1b1-5ccf877b0622",
+      "skills": [
+        "dag-frontend-rendering",
+        "dag-html-artifact-viz",
+        "dag-hallmark-design"
+      ],
+      "instructions_length": 9050,
+      "focus": "React components, single-file HTML artifacts, anti-slop design (22 themes, 4 verbs, 65 gates)",
+      "enriched": true,
+      "design_influences": [
+        "julianoczkowski/html",
+        "thariqs/html-effectiveness",
+        "Azhi-ss/html-effectiveness",
+        "nutlope/hallmark"
+      ]
+    },
+    {
+      "id": "01adc5b0-b3fb-44bc-b3a9-09ada4a6dcf5",
+      "name": "dag-dependency-linker",
+      "model": "gemini-2.5-pro",
+      "description": "Implements dependency link/unlink API endpoints and auto-wiring for issue_dependency table events into DAG event log",
+      "squad_id": "5932f17e-0f3d-4537-adb1-4523776c54cb",
+      "skills": [
+        "dag-event-projection",
+        "dag-constraint-enforcement",
+        "dag-backfill-orchestration"
+      ],
+      "instructions_length": 1731,
+      "focus": "Link/unlink API, constraint validation, backfill orchestration",
+      "enriched": true
+    },
+    {
+      "id": "d8de2912-49c5-40fe-ae5d-aad3b615558f",
+      "name": "dag-robot-cli",
+      "model": "gemini-2.5-flash",
+      "description": "Builds robot-triage CLI wrapper around GET /api/dag/analysis with deterministic, status-tagged terminal output",
+      "squad_id": "54c06f17-b204-4e57-9934-7ab9cf6cc0ab",
+      "skills": [
+        "dag-robot-triage",
+        "dag-performance-optimization",
+        "dag-audit-logging"
+      ],
+      "instructions_length": 1230,
+      "focus": "Deterministic CLI output, performance gates, audit trails",
+      "enriched": true
+    },
+    {
+      "id": "ff89d28a-6de1-4897-8f8f-99a71c0bb30f",
+      "name": "dag-conformance-guard",
+      "model": "gemini-2.5-pro",
+      "description": "Implements cross-writer conformance gate: Obsidian plugin, CLI, TUI, Android, browser extension conflict matrix",
+      "squad_id": "26c936ab-009d-4098-89d2-5ce0a56197f0",
+      "skills": [
+        "dag-conformance-testing",
+        "dag-constraint-enforcement",
+        "dag-audit-logging"
+      ],
+      "instructions_length": 1246,
+      "focus": "Cross-writer validation, hard constraints, compliance auditing",
+      "enriched": true
+    },
+    {
+      "id": "dbc83423-914a-4286-97c9-a9ebdbeb8c08",
+      "name": "dag-schema-validator",
+      "model": "gemini-2.5-flash",
+      "description": "Validates DAG schema assertions, checks acyclic constraints, detects schema drift across writers",
+      "squad_id": "ab5d656e-c570-4c54-8b6d-58e27361dc42",
+      "skills": [
+        "dag-schema-validation",
+        "dag-constraint-enforcement",
+        "dag-event-stream-processing"
+      ],
+      "instructions_length": 1527,
+      "focus": "Schema integrity, runtime constraints, stream processing",
+      "enriched": true
+    },
+    {
+      "id": "a2f23a10-a5f2-4999-a649-8b318635dc8a",
+      "name": "dag-graph-renderer",
+      "model": "gemini-2.5-pro",
+      "description": "Renders DAG graph structures: Cytoscape/D3 layouts, critical path highlighting, cycle visualization",
+      "squad_id": "3962128f-7dbe-41bf-9faa-2d60319611e9",
+      "skills": [
+        "dag-graph-analysis",
+        "dag-performance-optimization",
+        "dag-event-stream-processing"
+      ],
+      "instructions_length": 1845,
+      "focus": "Graph visualization, render performance, real-time updates",
+      "enriched": true
+    }
+  ],
+  "squads": [
+    {
+      "id": "d8643887-a3ff-41fc-a1b1-5ccf877b0622",
+      "name": "Frontend DAG Squad",
+      "leader_agent_id": "e3719959-1062-4948-a253-9c6813636a60",
+      "description": "Builds DAG visualization and interaction components for the web frontend"
+    },
+    {
+      "id": "5932f17e-0f3d-4537-adb1-4523776c54cb",
+      "name": "Dependency API Squad",
+      "leader_agent_id": "01adc5b0-b3fb-44bc-b3a9-09ada4a6dcf5",
+      "description": "Implements dependency management endpoints and DAG event auto-wiring for issue links"
+    },
+    {
+      "id": "54c06f17-b204-4e57-9934-7ab9cf6cc0ab",
+      "name": "Robot CLI Squad",
+      "leader_agent_id": "d8de2912-49c5-40fe-ae5d-aad3b615558f",
+      "description": "Builds deterministic robot-triage CLI for agent consumption of DAG analysis"
+    },
+    {
+      "id": "26c936ab-009d-4098-89d2-5ce0a56197f0",
+      "name": "Conformance Gate Squad",
+      "leader_agent_id": "ff89d28a-6de1-4897-8f8f-99a71c0bb30f",
+      "description": "Enforces cross-writer conformance, conflict detection, and integrity validation across all DAG clients"
+    },
+    {
+      "id": "ab5d656e-c570-4c54-8b6d-58e27361dc42",
+      "name": "Schema Validation Squad",
+      "leader_agent_id": "dbc83423-914a-4286-97c9-a9ebdbeb8c08",
+      "description": "Maintains DAG schema contracts, acyclic validation, and schema dependency enforcement"
+    },
+    {
+      "id": "3962128f-7dbe-41bf-9faa-2d60319611e9",
+      "name": "Graph Rendering Squad",
+      "leader_agent_id": "a2f23a10-a5f2-4999-a649-8b318635dc8a",
+      "description": "Renders interactive DAG graphs with cycle highlighting, topological ordering, and critical path views"
+    }
+  ],
+  "skills": [
+    {
+      "id": "8c2940dc-b8d4-4143-8c1e-120eb2f624b3",
+      "name": "dag-graph-analysis",
+      "description": "Analyze DAG structures: detect cycles, compute topological order, find critical paths, identify missing inverse links"
+    },
+    {
+      "id": "6c00c847-87ea-4bef-a18d-3aba1ec710da",
+      "name": "dag-schema-validation",
+      "description": "Validate DAG schemas: check acyclic constraints, verify schema dependencies, detect contradictions and concurrent field conflicts"
+    },
+    {
+      "id": "1939ba39-6499-4a81-96b2-1a099dac515a",
+      "name": "dag-event-projection",
+      "description": "Project DAG events into materialized views: records, links, facts, citations, conflict states"
+    },
+    {
+      "id": "bff25ad4-6db1-4a9b-9160-0e25faab10ee",
+      "name": "dag-conformance-testing",
+      "description": "Run conformance tests across all DAG writers: check for cross-writer conflicts, validate idempotent updates, verify replay determinism"
+    },
+    {
+      "id": "350dc582-5b9d-4739-90a1-265eff46a282",
+      "name": "dag-frontend-rendering",
+      "description": "Render DAG visualizations: Cytoscape layouts, D3 force graphs, cycle highlighting, topological ordering displays"
+    },
+    {
+      "id": "2fba589b-c755-46d4-b0e4-51f2686c7408",
+      "name": "dag-robot-triage",
+      "description": "Generate deterministic robot-mode output: status-tagged graph insights, concise critical path reports, cycle alerts"
+    },
+    {
+      "id": "7742ce51-f1fa-426c-afb9-062792253213",
+      "name": "dag-constraint-enforcement",
+      "description": "Enforces DAG hard constraints at runtime"
+    },
+    {
+      "id": "77fcf8ad-6151-45a2-ab1d-d7bea29fd8b8",
+      "name": "dag-backfill-orchestration",
+      "description": "Orchestrates backfill from existing tables into DAG event log"
+    },
+    {
+      "id": "8c6bc5a4-f48c-4833-bec2-1311973c2251",
+      "name": "dag-event-stream-processing",
+      "description": "Processes real-time DAG event streams with exactly-once semantics"
+    },
+    {
+      "id": "2a8400f9-8926-4916-9df1-cc24ef01f79b",
+      "name": "dag-obsidian-integration",
+      "description": "Integrates DAG core with Obsidian vault operations"
+    },
+    {
+      "id": "0fa755a0-54f1-4bcd-8512-9256e52fd86f",
+      "name": "dag-performance-optimization",
+      "description": "Optimizes DAG query and projection performance"
+    },
+    {
+      "id": "ade85e54-de1d-438b-8bb4-f9c29dcd06cb",
+      "name": "dag-audit-logging",
+      "description": "Maintains comprehensive audit trail for all DAG operations"
+    },
+    {
+      "id": "ab0a60e4-41af-4b4d-9f43-d5441c419f70",
+      "name": "dag-html-artifact-viz",
+      "description": "Single-file HTML artifact generation for DAG visualizations based on unreasonable effectiveness of HTML"
+    },
+    {
+      "id": "cae5ad8e-096e-4ac6-b1d2-4f751dcd4f91",
+      "name": "dag-hallmark-design",
+      "description": "Anti-AI-slop design system with 22 themes, 4 verbs, 65 slop-test gates, pre-emit self-critique"
+    }
+  ],
+  "autopilots": [
+    {
+      "id": "5ef92acd-2951-4c9a-9806-8e1934b17642",
+      "title": "dag-frontend-viz-autopilot",
+      "agent_id": "e3719959-1062-4948-a253-9c6813636a60",
+      "project_id": "c1c11059-5712-47eb-b6b8-fc5fd9b23be1",
+      "mode": "create_issue",
+      "status": "active",
+      "description": "Continuously creates and updates frontend issues for DAG visualization: cycle warnings, dependency graphs, topology views"
+    },
+    {
+      "id": "3d0ed381-d50e-44f0-86c3-9bd76db6673c",
+      "title": "dag-dependency-api-autopilot",
+      "agent_id": "01adc5b0-b3fb-44bc-b3a9-09ada4a6dcf5",
+      "project_id": "c1c11059-5712-47eb-b6b8-fc5fd9b23be1",
+      "mode": "create_issue",
+      "status": "active",
+      "description": "Monitors for missing dependency link endpoints and auto-creates implementation tasks with DAG event wiring"
+    },
+    {
+      "id": "b143b809-bbe7-45cb-a4a1-6b43de66e3c3",
+      "title": "dag-robot-cli-autopilot",
+      "agent_id": "d8de2912-49c5-40fe-ae5d-aad3b615558f",
+      "project_id": "c1c11059-5712-47eb-b6b8-fc5fd9b23be1",
+      "mode": "create_issue",
+      "status": "active",
+      "description": "Generates robot-triage CLI commands and validates deterministic output from DAG analysis API"
+    },
+    {
+      "id": "c3103ba7-d278-4859-969c-9bd2e60e9989",
+      "title": "dag-conformance-autopilot",
+      "agent_id": "ff89d28a-6de1-4897-8f8f-99a71c0bb30f",
+      "project_id": "5602dae6-e286-496e-a63a-3691bc9f3071",
+      "mode": "create_issue",
+      "status": "active",
+      "description": "Runs conformance checks across all DAG writers and creates issues for any cross-writer conflicts detected"
+    },
+    {
+      "id": "a5f7de0d-934c-4190-9a5e-96b630f65437",
+      "title": "dag-schema-monitor-autopilot",
+      "agent_id": "dbc83423-914a-4286-97c9-a9ebdbeb8c08",
+      "project_id": "5602dae6-e286-496e-a63a-3691bc9f3071",
+      "mode": "create_issue",
+      "status": "active",
+      "description": "Monitors DAG schema health: validates acyclic constraints, schema dependencies, and triggers alerts on violations"
+    },
+    {
+      "id": "ffcb2cfd-3ec9-4c11-8179-58d1170fb18e",
+      "title": "dag-graph-render-autopilot",
+      "agent_id": "a2f23a10-a5f2-4999-a649-8b318635dc8a",
+      "project_id": "5602dae6-e286-496e-a63a-3691bc9f3071",
+      "mode": "create_issue",
+      "status": "active",
+      "description": "Renders updated DAG graph views when new events are appended: cycle detection, topological sort, critical path"
+    }
+  ],
+  "issues": {
+    "parent_tracker": {
+      "id": "873a848e-529e-4bd0-86de-d2f715ecf2a4",
+      "identifier": "PEX-10",
+      "title": "DAG Core Deferred Work Tracker",
+      "status": "in_progress",
+      "priority": "high",
+      "project_id": "c1c11059-5712-47eb-b6b8-fc5fd9b23be1"
+    },
+    "by_stream": [
+      {
+        "stream": "frontend_viz",
+        "issues": [
+          {
+            "id": "3c093d68-66f6-4431-ae06-96319d439c89",
+            "identifier": "PEX-11",
+            "title": "Frontend: DAG Cycle Warning Component",
+            "status": "todo",
+            "priority": "high",
+            "assignee": "dag-frontend-viz"
+          },
+          {
+            "id": "4f9e4a06-bcf3-4f5a-9133-c466f9fe396c",
+            "identifier": "PEX-12",
+            "title": "Frontend: Dependency Graph Visualization",
+            "status": "todo",
+            "priority": "high",
+            "assignee": "dag-frontend-viz"
+          },
+          {
+            "id": "cb3ea0e4-380b-4745-a56e-73965ea140a0",
+            "identifier": "PEX-13",
+            "title": "Frontend: Topological Order Display",
+            "status": "todo",
+            "priority": "medium",
+            "assignee": "dag-frontend-viz"
+          }
+        ]
+      },
+      {
+        "stream": "dependency_api",
+        "issues": [
+          {
+            "id": "822a8edd-3518-4c7b-be52-38e40c3ed611",
+            "identifier": "PEX-14",
+            "title": "API: Issue Dependency Link Endpoint",
+            "status": "todo",
+            "priority": "high",
+            "assignee": "dag-dependency-linker"
+          },
+          {
+            "id": "8aafa260-b9e1-4871-b3cf-b5cedbd8dcc7",
+            "identifier": "PEX-15",
+            "title": "API: Issue Dependency Unlink Endpoint",
+            "status": "todo",
+            "priority": "high",
+            "assignee": "dag-dependency-linker"
+          },
+          {
+            "id": "dca82f53-8d7e-4243-8717-d3c013084cf3",
+            "identifier": "PEX-16",
+            "title": "API: Dependency Auto-Wiring on Issue CRUD",
+            "status": "todo",
+            "priority": "medium",
+            "assignee": "dag-dependency-linker"
+          }
+        ]
+      },
+      {
+        "stream": "robot_cli",
+        "issues": [
+          {
+            "id": "f9b1bacb-3738-4831-aed8-b933a76cbe90",
+            "identifier": "PEX-17",
+            "title": "CLI: Robot-Triage Command",
+            "status": "todo",
+            "priority": "medium",
+            "assignee": "dag-robot-cli"
+          },
+          {
+            "id": "03828e8f-8491-46ef-9c13-26ca1d1d51ac",
+            "identifier": "PEX-18",
+            "title": "CLI: DAG Event Append Command",
+            "status": "todo",
+            "priority": "low",
+            "assignee": "dag-robot-cli"
+          }
+        ]
+      },
+      {
+        "stream": "conformance_gate",
+        "issues": [
+          {
+            "id": "836c101c-2d26-47dc-9d78-f758655f75b7",
+            "identifier": "PEX-19",
+            "title": "Conformance: Cross-Writer Conflict Matrix",
+            "status": "todo",
+            "priority": "high",
+            "assignee": "dag-conformance-guard"
+          },
+          {
+            "id": "228ac5a8-34bd-4c81-b9b9-7077dbc7796c",
+            "identifier": "PEX-20",
+            "title": "Conformance: Idempotent Update Tests",
+            "status": "todo",
+            "priority": "high",
+            "assignee": "dag-conformance-guard"
+          },
+          {
+            "id": "9c5d2e21-2b28-4799-b71e-0b16f0399fab",
+            "identifier": "PEX-21",
+            "title": "Conformance: Replay Determinism Verification",
+            "status": "todo",
+            "priority": "medium",
+            "assignee": "dag-conformance-guard"
+          }
+        ]
+      },
+      {
+        "stream": "schema_validation",
+        "issues": [
+          {
+            "id": "d5327983-0238-45d4-840e-573773091db9",
+            "identifier": "PEX-22",
+            "title": "Schema: dag_schema_dependency Enforcement",
+            "status": "todo",
+            "priority": "medium",
+            "assignee": "dag-schema-validator"
+          },
+          {
+            "id": "b25dbb3f-5ce1-46e0-b042-9dccde99ad03",
+            "identifier": "PEX-23",
+            "title": "Schema: Acyclic Validation API",
+            "status": "todo",
+            "priority": "medium",
+            "assignee": "dag-schema-validator"
+          }
+        ]
+      }
+    ]
+  },
+  "enrichment": {
+    "agents_with_instructions": 6,
+    "agents_with_multiple_skills": 6,
+    "average_instructions_length": 1531,
+    "total_skills": 14,
+    "skill_coverage": [
+      "rendering",
+      "validation",
+      "constraints",
+      "performance",
+      "auditing",
+      "streaming",
+      "backfill",
+      "obsidian"
+    ],
+    "design_references": [
+      "https://github.com/julianoczkowski/html",
+      "https://github.com/thariqs/html-effectiveness",
+      "https://github.com/Azhi-ss/html-effectiveness",
+      "https://github.com/nutlope/hallmark"
+    ]
+  }
+}
