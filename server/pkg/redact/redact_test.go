@@ -162,6 +162,7 @@ func TestRedactPasswordEnvVar(t *testing.T) {
 		{"PASSWORD", "PASSWORD=hunter2"},
 		{"SECRET", "SECRET=mysecretvalue"},
 		{"TOKEN", "TOKEN=abc123xyz"},
+		{"JWT", "AUTH_TOKEN=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.signaturepart"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -212,5 +213,81 @@ func TestRedactMultipleSecrets(t *testing.T) {
 	}
 	if strings.Contains(got, "ghp_") {
 		t.Fatal("GitHub token not redacted in multi-secret text")
+	}
+}
+
+func TestRedactAgentListJSONCustomEnv(t *testing.T) {
+	t.Parallel()
+	input := `[
+		{
+			"id": "agent-1",
+			"name": "Router",
+			"status": "online",
+			"runtime_mode": "cloud",
+			"skills": [{"id": "skill-1", "name": "route"}],
+			"custom_env": {
+				"SECOND_BRAIN_TOKEN": "token-value-123",
+				"SEARCH_API_KEY": "key-value-456",
+				"DB_PASSWORD": "password-value-789",
+				"SESSION_JWT": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+			},
+			"custom_env_redacted": false
+		}
+	]`
+	got := Text(input)
+	for _, leak := range []string{
+		"SECOND_BRAIN_TOKEN",
+		"SEARCH_API_KEY",
+		"DB_PASSWORD",
+		"SESSION_JWT",
+		"token-value-123",
+		"key-value-456",
+		"password-value-789",
+		"eyJhbGci",
+	} {
+		if strings.Contains(got, leak) {
+			t.Fatalf("custom_env leak %q in redacted JSON: %s", leak, got)
+		}
+	}
+	for _, kept := range []string{`"id":"agent-1"`, `"name":"Router"`, `"status":"online"`, `"runtime_mode":"cloud"`, `"skills"`} {
+		if !strings.Contains(got, kept) {
+			t.Fatalf("routing metadata %q missing from redacted JSON: %s", kept, got)
+		}
+	}
+	if !strings.Contains(got, `"custom_env_redacted":true`) {
+		t.Fatalf("expected custom_env_redacted=true, got: %s", got)
+	}
+	if !strings.Contains(got, `"custom_env_key_count":4`) {
+		t.Fatalf("expected custom_env_key_count=4, got: %s", got)
+	}
+}
+
+func TestInputMapRedactsNestedCustomEnv(t *testing.T) {
+	t.Parallel()
+	got := InputMap(map[string]any{
+		"command": "multica agent list --output json",
+		"payload": map[string]any{
+			"custom_env": map[string]any{
+				"API_TOKEN": "token-value",
+				"API_KEY":   "key-value",
+			},
+			"name": "Router",
+		},
+	})
+	payload, ok := got["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload should remain an object, got %#v", got["payload"])
+	}
+	if _, ok := payload["custom_env"]; ok {
+		t.Fatalf("custom_env should be removed from nested payload: %#v", payload)
+	}
+	if payload["custom_env_redacted"] != true {
+		t.Fatalf("expected custom_env_redacted=true, got %#v", payload)
+	}
+	if payload["custom_env_key_count"] != 2 {
+		t.Fatalf("expected custom_env_key_count=2, got %#v", payload)
+	}
+	if payload["name"] != "Router" {
+		t.Fatalf("non-sensitive metadata changed: %#v", payload)
 	}
 }

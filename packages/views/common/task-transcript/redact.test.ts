@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { redactSecrets } from "./redact";
+import { redactSecrets, redactValue } from "./redact";
 
 describe("redactSecrets", () => {
   it("redacts AWS access key", () => {
@@ -65,6 +65,64 @@ describe("redactSecrets", () => {
       expect(result).toContain("[REDACTED CREDENTIAL]");
       expect(result).not.toContain("supersecretvalue123");
     }
+  });
+
+  it("redacts custom_env from agent list JSON without dropping routing metadata", () => {
+    const result = redactSecrets(JSON.stringify([
+      {
+        id: "agent-1",
+        name: "Router",
+        status: "online",
+        runtime_mode: "cloud",
+        skills: [{ id: "skill-1", name: "route" }],
+        custom_env: {
+          SECOND_BRAIN_TOKEN: "token-value-123",
+          SEARCH_API_KEY: "key-value-456",
+          DB_PASSWORD: "password-value-789",
+          SESSION_JWT: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+        },
+        custom_env_redacted: false,
+      },
+    ]));
+    for (const leak of [
+      "SECOND_BRAIN_TOKEN",
+      "SEARCH_API_KEY",
+      "DB_PASSWORD",
+      "SESSION_JWT",
+      "token-value-123",
+      "key-value-456",
+      "password-value-789",
+      "eyJhbGci",
+    ]) {
+      expect(result).not.toContain(leak);
+    }
+    expect(result).toContain('"id":"agent-1"');
+    expect(result).toContain('"name":"Router"');
+    expect(result).toContain('"status":"online"');
+    expect(result).toContain('"runtime_mode":"cloud"');
+    expect(result).toContain('"skills"');
+    expect(result).toContain('"custom_env_redacted":true');
+    expect(result).toContain('"custom_env_key_count":4');
+  });
+
+  it("redacts nested custom_env values in structured input", () => {
+    const result = redactValue({
+      command: "multica agent list --output json",
+      payload: {
+        name: "Router",
+        custom_env: {
+          API_TOKEN: "token-value",
+          API_KEY: "key-value",
+        },
+      },
+    }) as Record<string, unknown>;
+    const payload = result.payload as Record<string, unknown>;
+    expect(payload.name).toBe("Router");
+    expect(payload.custom_env).toBeUndefined();
+    expect(payload.custom_env_redacted).toBe(true);
+    expect(payload.custom_env_key_count).toBe(2);
+    expect(JSON.stringify(result)).not.toContain("token-value");
+    expect(JSON.stringify(result)).not.toContain("API_TOKEN");
   });
 
   it("redacts multiple secrets in one string", () => {

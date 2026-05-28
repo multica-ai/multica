@@ -237,7 +237,12 @@ func TestGetAgent_ResponseHasNoCustomEnv(t *testing.T) {
 	ctx := context.Background()
 
 	agentID := createHandlerTestAgent(t, "noenv-get-agent", nil)
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{
+		"SECRET_KEY": "super-secret",
+		"SECOND_BRAIN_TOKEN": "token-secret",
+		"DB_PASSWORD": "password-secret",
+		"SESSION_JWT": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+	}' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to set custom_env: %v", err)
 	}
 
@@ -260,8 +265,11 @@ func TestGetAgent_ResponseHasNoCustomEnv(t *testing.T) {
 	if got, _ := raw["has_custom_env"].(bool); !got {
 		t.Errorf("has_custom_env expected true, got %v", raw["has_custom_env"])
 	}
-	if got, _ := raw["custom_env_key_count"].(float64); got != 1 {
-		t.Errorf("custom_env_key_count expected 1, got %v", raw["custom_env_key_count"])
+	if got, _ := raw["custom_env_key_count"].(float64); got != 4 {
+		t.Errorf("custom_env_key_count expected 4, got %v", raw["custom_env_key_count"])
+	}
+	if raw["id"] != agentID || raw["name"] != "noenv-get-agent" || raw["status"] == "" || raw["runtime_mode"] == "" {
+		t.Errorf("routing metadata should remain present, got id=%v name=%v status=%v runtime_mode=%v", raw["id"], raw["name"], raw["status"], raw["runtime_mode"])
 	}
 
 	// Sanity-check the typed shape too — the struct must not have
@@ -273,8 +281,8 @@ func TestGetAgent_ResponseHasNoCustomEnv(t *testing.T) {
 	if typed.HasCustomEnv != true {
 		t.Errorf("typed.HasCustomEnv expected true")
 	}
-	if typed.CustomEnvKeyCount != 1 {
-		t.Errorf("typed.CustomEnvKeyCount expected 1, got %d", typed.CustomEnvKeyCount)
+	if typed.CustomEnvKeyCount != 4 {
+		t.Errorf("typed.CustomEnvKeyCount expected 4, got %d", typed.CustomEnvKeyCount)
 	}
 }
 
@@ -289,7 +297,12 @@ func TestListAgents_ResponseHasNoCustomEnv(t *testing.T) {
 
 	agentName := "noenv-list-agent"
 	agentID := createHandlerTestAgent(t, agentName, nil)
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "super-secret", "OTHER": "y"}' WHERE id = $1`, agentID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{
+		"SECRET_KEY": "super-secret",
+		"SECOND_BRAIN_TOKEN": "token-secret",
+		"DB_PASSWORD": "password-secret",
+		"SESSION_JWT": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+	}' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to set custom_env: %v", err)
 	}
 
@@ -318,11 +331,14 @@ func TestListAgents_ResponseHasNoCustomEnv(t *testing.T) {
 	if _, ok := found["custom_env"]; ok {
 		t.Errorf("custom_env must not appear in list response")
 	}
-	if got, _ := found["custom_env_key_count"].(float64); got != 2 {
-		t.Errorf("custom_env_key_count expected 2, got %v", found["custom_env_key_count"])
+	if got, _ := found["custom_env_key_count"].(float64); got != 4 {
+		t.Errorf("custom_env_key_count expected 4, got %v", found["custom_env_key_count"])
 	}
 	if got, _ := found["has_custom_env"].(bool); !got {
 		t.Errorf("has_custom_env expected true")
+	}
+	if found["id"] != agentID || found["name"] != agentName || found["status"] == "" || found["runtime_mode"] == "" || found["skills"] == nil {
+		t.Errorf("routing metadata should remain present, got %#v", found)
 	}
 }
 

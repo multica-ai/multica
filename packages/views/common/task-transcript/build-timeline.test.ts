@@ -76,4 +76,32 @@ describe("task transcript timeline", () => {
     expect(items[0]?.content).not.toContain("abc123xyz");
     expect(items[0]?.content).not.toContain("def456");
   });
+
+  it("redacts tool input before transcript summaries can render it", () => {
+    const items = buildTimeline([
+      {
+        task_id: "task-1",
+        issue_id: "issue-1",
+        seq: 1,
+        type: "tool_use",
+        tool: "multica",
+        input: {
+          command: "multica agent list --output json",
+          custom_env: {
+            SECOND_BRAIN_TOKEN: "token-value",
+            SEARCH_API_KEY: "key-value",
+          },
+        },
+      },
+    ]);
+
+    expect(items[0]?.input).toEqual({
+      command: "multica agent list --output json",
+      has_custom_env: true,
+      custom_env_key_count: 2,
+      custom_env_redacted: true,
+    });
+    expect(JSON.stringify(items[0]?.input)).not.toContain("SECOND_BRAIN_TOKEN");
+    expect(JSON.stringify(items[0]?.input)).not.toContain("token-value");
+  });
 });
