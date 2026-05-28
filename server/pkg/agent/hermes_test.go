@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -141,6 +143,58 @@ func TestResolveResumedSessionIDEmptyResponse(t *testing.T) {
 		}
 		if changed {
 			t.Errorf("body=%q: changed: got true, want false", body)
+		}
+	}
+}
+
+func TestIsACPMissingSessionError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "string data from hermes",
+			err:  errors.New("session/prompt: Internal error (code=-32603, data=No session found with id)"),
+			want: true,
+		},
+		{
+			name: "not found wording",
+			err:  errors.New("session/prompt: session not found (code=-32603)"),
+			want: true,
+		},
+		{
+			name: "session id does not exist",
+			err:  errors.New("session/set_model: Internal error (code=-32603, data=session ses_stale does not exist)"),
+			want: true,
+		},
+		{
+			name: "provider error",
+			err:  errors.New("session/prompt: No LLM provider configured (code=-32603)"),
+			want: false,
+		},
+		{
+			name: "workspace not found",
+			err:  errors.New("session/prompt: workspace not found (code=-32603)"),
+			want: false,
+		},
+		{
+			name: "model not found",
+			err:  errors.New("session/prompt: model not found (code=-32603)"),
+			want: false,
+		},
+		{
+			name: "nil",
+			err:  nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		if got := isACPMissingSessionError(tt.err); got != tt.want {
+			t.Errorf("%s: got %v, want %v", tt.name, got, tt.want)
 		}
 	}
 }
@@ -1361,4 +1415,258 @@ func TestHermesBackendDoesNotPromoteOnTransientRetry(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
 	}
+}
+
+func fakeHermesACPStaleResumeScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$MULTICA_HERMES_REQ_LOG"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+	    *'"method":"session/resume"'*)
+	      if [ "$MULTICA_HERMES_FAIL_RESUME" = "1" ]; then
+	        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"No session found with id"}}\n' "$id"
+	        continue
+	      fi
+	      # Some ACP servers create a replacement session internally but cannot
+	      # return its id in session/resume. The client will discover the stale id
+	      # only when session/prompt fails below.
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"models":[],"modes":[]}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_fresh"}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      case "$line" in
+        *'"sessionId":"ses_stale"'*)
+          if [ "$MULTICA_HERMES_FAIL_STALE_SET_MODEL" = "1" ]; then
+            printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"No session found with id"}}\n' "$id"
+          else
+            printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+          fi
+          ;;
+        *)
+          printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+          ;;
+      esac
+      ;;
+    *'"method":"session/prompt"'*)
+      case "$line" in
+        *'"sessionId":"ses_stale"'*)
+          printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"No session found with id"}}\n' "$id"
+          ;;
+        *'"sessionId":"ses_fresh"'*)
+          printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_fresh","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Recovered in a fresh session."}}}}\n'
+          printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+          exit 0
+          ;;
+      esac
+      ;;
+  esac
+done
+`
+}
+
+func TestHermesBackendRetriesDirectStaleResumeFailureInFreshSession(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	fakePath := filepath.Join(tmp, "hermes")
+	reqLog := filepath.Join(tmp, "requests.jsonl")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesACPStaleResumeScript()))
+
+	backend, err := New("hermes", Config{
+		ExecutablePath: fakePath,
+		Env: map[string]string{
+			"MULTICA_HERMES_REQ_LOG":     reqLog,
+			"MULTICA_HERMES_FAIL_RESUME": "1",
+		},
+		Logger: slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "please continue", ExecOptions{
+		Model:           "team-model",
+		ResumeSessionID: "ses_stale",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected direct stale resume fallback to complete, got status=%q error=%q", result.Status, result.Error)
+		}
+		if result.SessionID != "ses_fresh" {
+			t.Fatalf("expected fresh session id, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	requests := readFileString(t, reqLog)
+	if got := strings.Count(requests, `"method":"session/resume"`); got != 1 {
+		t.Fatalf("expected exactly one failed resume, got %d requests:\n%s", got, requests)
+	}
+	if got := strings.Count(requests, `"method":"session/new"`); got != 1 {
+		t.Fatalf("expected exactly one fallback session/new, got %d requests:\n%s", got, requests)
+	}
+	if got := strings.Count(requests, `"method":"session/set_model"`); got != 1 {
+		t.Fatalf("expected model set only on fresh session, got %d requests:\n%s", got, requests)
+	}
+	if got := strings.Count(requests, `"method":"session/prompt"`); got != 1 {
+		t.Fatalf("expected prompt only on fresh session, got %d requests:\n%s", got, requests)
+	}
+}
+
+func TestHermesBackendRetriesStaleResumePromptInFreshSession(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	fakePath := filepath.Join(tmp, "hermes")
+	reqLog := filepath.Join(tmp, "requests.jsonl")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesACPStaleResumeScript()))
+
+	backend, err := New("hermes", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"MULTICA_HERMES_REQ_LOG": reqLog},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "please continue", ExecOptions{
+		Model:           "team-model",
+		ResumeSessionID: "ses_stale",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected stale resume fallback to complete, got status=%q error=%q", result.Status, result.Error)
+		}
+		if result.SessionID != "ses_fresh" {
+			t.Fatalf("expected fresh session id, got %q", result.SessionID)
+		}
+		if !strings.Contains(result.Output, "Recovered in a fresh session.") {
+			t.Fatalf("expected fresh-session output, got %q", result.Output)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	requests := readFileString(t, reqLog)
+	if got := strings.Count(requests, `"method":"session/prompt"`); got != 2 {
+		t.Fatalf("expected one stale prompt and one fresh retry, got %d requests:\n%s", got, requests)
+	}
+	if got := strings.Count(requests, `"method":"session/new"`); got != 1 {
+		t.Fatalf("expected exactly one fallback session/new, got %d requests:\n%s", got, requests)
+	}
+	if got := strings.Count(requests, `"method":"session/set_model"`); got != 2 {
+		t.Fatalf("expected model set on resumed and fresh sessions, got %d requests:\n%s", got, requests)
+	}
+}
+
+func TestHermesBackendRetriesStaleResumeSetModelInFreshSession(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	fakePath := filepath.Join(tmp, "hermes")
+	reqLog := filepath.Join(tmp, "requests.jsonl")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesACPStaleResumeScript()))
+
+	backend, err := New("hermes", Config{
+		ExecutablePath: fakePath,
+		Env: map[string]string{
+			"MULTICA_HERMES_REQ_LOG":              reqLog,
+			"MULTICA_HERMES_FAIL_STALE_SET_MODEL": "1",
+		},
+		Logger: slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "please continue", ExecOptions{
+		Model:           "team-model",
+		ResumeSessionID: "ses_stale",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected stale set_model fallback to complete, got status=%q error=%q", result.Status, result.Error)
+		}
+		if result.SessionID != "ses_fresh" {
+			t.Fatalf("expected fresh session id, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	requests := readFileString(t, reqLog)
+	if got := strings.Count(requests, `"method":"session/prompt"`); got != 1 {
+		t.Fatalf("expected only the fresh prompt after set_model recovery, got %d requests:\n%s", got, requests)
+	}
+	if got := strings.Count(requests, `"method":"session/new"`); got != 1 {
+		t.Fatalf("expected exactly one fallback session/new, got %d requests:\n%s", got, requests)
+	}
+	if got := strings.Count(requests, `"method":"session/set_model"`); got != 2 {
+		t.Fatalf("expected model set on stale and fresh sessions, got %d requests:\n%s", got, requests)
+	}
+}
+
+func readFileString(tb testing.TB, path string) string {
+	tb.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		tb.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
 }
