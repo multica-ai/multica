@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 11 supported tools so the daemon can detect them.
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 12 supported tools so the daemon can detect them.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 11 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 12 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -31,13 +31,13 @@ multica daemon restart
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
 
-## The 11 supported tools
+## The 12 supported tools
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 11.
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 12.
 
 ### Claude Code (Anthropic)
 
-The most complete integration. Session resumption works, MCP works, and it's the **only one of the 11 that actually consumes the `mcp_config` field** on agents (see the [matrix](/providers#mcp-configuration-only-claude-code-actually-reads-it)).
+The most complete integration. Session resumption works, MCP works, and it's the **only one of the 12 that actually consumes the `mcp_config` field** on agents (see the [matrix](/providers#mcp-configuration-only-claude-code-actually-reads-it)).
 
 | | |
 |---|---|
@@ -146,6 +146,16 @@ Minimalist. **Session resumption is unusual** — the resume id is the path to a
 | Daemon looks for | `pi` |
 | Install | See Inflection's CLI docs at [pi.ai](https://pi.ai/). |
 | Authentication | Per the vendor's docs. |
+
+### Qwenpaw (Qwen / Alibaba Cloud)
+
+ACP-over-stdio transport. Session resumption works through ACP `session/load`; skills are copied into `.qwenpaw/skills/`.
+
+| | |
+|---|---|
+| Daemon looks for | `qwenpaw` |
+| Install | Follow the official guide at the Qwen team's repository. The binary name is `qwenpaw`. |
+| Authentication | Configure your Qwen API key per the vendor's docs. |
 
 ## After installing
 

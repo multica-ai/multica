@@ -163,6 +163,11 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
 		skillsDir = filepath.Join(workDir, ".kiro", "skills")
+	case "qwenpaw":
+		// QwenPaw ACP mode discovers skills natively from the workspace via its
+		// own config — same pattern as hermes/kiro. Write to the default skills
+		// directory for the agent to pick up.
+		skillsDir = filepath.Join(workDir, "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		skillsDir = filepath.Join(workDir, ".agent_context", "skills")

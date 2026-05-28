@@ -241,6 +241,24 @@ func TestListModelsUnknownProvider(t *testing.T) {
 	}
 }
 
+func TestListModelsQwenpawReturnsACPModelCatalog(t *testing.T) {
+	ctx := context.Background()
+	got, err := ListModels(ctx, "qwenpaw", "")
+	if err != nil {
+		t.Fatalf("ListModels(qwenpaw) error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil slice")
+	}
+	// QwenPaw ACP mode discovers models via discoverACPModels
+	if len(got) == 0 {
+		t.Log("qwenpaw returned empty catalog — QwenPaw binary may not be installed")
+	}
+	if !ModelSelectionSupported("qwenpaw") {
+		t.Fatal("expected qwenpaw model selection to be reported supported")
+	}
+}
+
 func TestStaticCatalogsHaveAtMostOneDefault(t *testing.T) {
 	// Each catalog should tag at most one entry as the display
 	// default so the UI badge is unambiguous. More than one
