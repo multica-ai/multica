@@ -230,6 +230,43 @@ func TestListRuntimeLocalSkills_CopilotUsesConfiguredAndSharedRoots(t *testing.T
 	}
 }
 
+func TestLoadRuntimeLocalSkillBundle_SkipsInvalidEarlierRootCandidate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := os.MkdirAll(filepath.Join(home, ".copilot", "skills", "lark-doc"), 0o755); err != nil {
+		t.Fatalf("mkdir invalid candidate: %v", err)
+	}
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "lark-doc", map[string]string{
+		"SKILL.md": "---\nname: Lark Doc\n---\n# Lark Doc\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("copilot")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("copilot should be supported")
+	}
+	if len(skills) != 1 || skills[0].SourcePath != "~/.agents/skills/lark-doc" {
+		t.Fatalf("skills = %+v, want shared lark-doc only", skills)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("copilot", "lark-doc")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported {
+		t.Fatal("copilot should be supported")
+	}
+	if bundle.Name != "Lark Doc" {
+		t.Fatalf("name = %q, want Lark Doc", bundle.Name)
+	}
+	if bundle.SourcePath != "~/.agents/skills/lark-doc" {
+		t.Fatalf("source_path = %q", bundle.SourcePath)
+	}
+}
+
 // opencode (and possibly future providers) lay skills out one level deep,
 // e.g. ~/.config/opencode/skills/release/reporter/SKILL.md.
 // loadRuntimeLocalSkillBundle already accepts that nested key, so the list

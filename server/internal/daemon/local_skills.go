@@ -387,6 +387,31 @@ func enumerateLocalSkills(
 	}
 }
 
+func loadLocalSkillBundleFromDir(provider, skillDir string) (*runtimeLocalSkillBundle, error) {
+	content, err := readLocalSkillMainFile(skillDir)
+	if err != nil {
+		return nil, err
+	}
+	name, description := parseLocalSkillFrontmatter(content)
+	if name == "" {
+		name = filepath.Base(skillDir)
+	}
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		return nil, err
+	}
+
+	return &runtimeLocalSkillBundle{
+		Name:        name,
+		Description: description,
+		Content:     content,
+		SourcePath:  relativizeHomePath(skillDir),
+		Provider:    provider,
+		Files:       files,
+	}, nil
+}
+
 func loadRuntimeLocalSkillBundle(provider, skillKey string) (*runtimeLocalSkillBundle, bool, error) {
 	roots, supported, err := localSkillRootsForProvider(provider)
 	if err != nil || !supported {
@@ -408,31 +433,14 @@ func loadRuntimeLocalSkillBundle(provider, skillKey string) (*runtimeLocalSkillB
 			return nil, true, err
 		}
 		if !info.IsDir() {
-			return nil, true, fmt.Errorf("local skill is not a directory")
+			continue
 		}
 
-		content, err := readLocalSkillMainFile(skillDir)
+		bundle, err := loadLocalSkillBundleFromDir(provider, skillDir)
 		if err != nil {
-			return nil, true, err
+			continue
 		}
-		name, description := parseLocalSkillFrontmatter(content)
-		if name == "" {
-			name = filepath.Base(skillDir)
-		}
-
-		files, err := collectLocalSkillFiles(skillDir, true)
-		if err != nil {
-			return nil, true, err
-		}
-
-		return &runtimeLocalSkillBundle{
-			Name:        name,
-			Description: description,
-			Content:     content,
-			SourcePath:  relativizeHomePath(skillDir),
-			Provider:    provider,
-			Files:       files,
-		}, true, nil
+		return bundle, true, nil
 	}
 
 	return nil, true, fmt.Errorf("local skill not found")
