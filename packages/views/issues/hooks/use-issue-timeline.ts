@@ -33,6 +33,7 @@ import {
   useToggleCommentReaction,
   type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
+import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
@@ -105,7 +106,7 @@ export function useIssueTimeline(
           const entry = commentToTimelineEntry(comment);
           if (!old) return [entry];
           if (old.some((e) => e.id === comment.id)) return old;
-          return [...old, entry];
+          return sortTimelineEntriesAsc([...old, entry]);
         });
       },
       [qc, issueId],
@@ -209,7 +210,7 @@ export function useIssueTimeline(
         qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
           if (!old) return [entry];
           if (old.some((e) => e.id === entry.id)) return old;
-          return [...old, entry];
+          return sortTimelineEntriesAsc([...old, entry]);
         });
       },
       [qc, issueId],

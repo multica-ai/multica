@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
-import type { RuntimeUsage } from "@multica/core/types";
+import type { AgentRuntime, RuntimeUsage } from "@multica/core/types";
 
 import {
   addDaysIso,
@@ -10,6 +10,7 @@ import {
   computeCostInWindow,
   estimateCost,
   isModelPriced,
+  isSelfHealingRuntime,
   sliceWindow,
   todayIso,
   weekStartIso,
@@ -26,6 +27,61 @@ const zeroUsage = {
   cache_read_tokens: 0,
   cache_write_tokens: 0,
 };
+
+describe("isSelfHealingRuntime", () => {
+  function makeRuntime(overrides: Partial<AgentRuntime>): AgentRuntime {
+    return {
+      id: "rt-1",
+      workspace_id: "ws-1",
+      daemon_id: null,
+      name: "rt",
+      runtime_mode: "local",
+      provider: "claude",
+      launch_header: "",
+      status: "online",
+      device_info: "",
+      metadata: {},
+      owner_id: null,
+      visibility: "private",
+      last_seen_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("flags an online local runtime as self-healing", () => {
+    expect(
+      isSelfHealingRuntime(
+        makeRuntime({ runtime_mode: "local", status: "online" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("treats an offline local runtime as safe to delete", () => {
+    // Daemon isn't running, so the server-side delete is final — no
+    // re-registration race to worry about.
+    expect(
+      isSelfHealingRuntime(
+        makeRuntime({ runtime_mode: "local", status: "offline" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("treats cloud runtimes as safe to delete regardless of status", () => {
+    // Cloud workers are managed by Fleet, not a self-restarting local daemon.
+    expect(
+      isSelfHealingRuntime(
+        makeRuntime({ runtime_mode: "cloud", status: "online" }),
+      ),
+    ).toBe(false);
+    expect(
+      isSelfHealingRuntime(
+        makeRuntime({ runtime_mode: "cloud", status: "offline" }),
+      ),
+    ).toBe(false);
+  });
+});
 
 describe("estimateCost", () => {
   it("prices the canonical Anthropic Sonnet 4.6 SKU", () => {
@@ -110,6 +166,24 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(5 + 25, 5);
   });
 
+  it("prices the 1M-context Anthropic tag form (claude-opus-4-7[1m]) at the standard Opus tier", () => {
+    // Claude Code reports the 1M-context beta as `claude-opus-4-7[1m]`.
+    // Anthropic prices it at the standard Opus rate for prompts ≤200K
+    // input tokens (with a 2× surcharge above that, which we can't see
+    // from aggregated daily totals). Strip the bracketed context tag so
+    // the tokens still land in the cost total at standard pricing —
+    // mild under-estimate, but the alternative was excluding them
+    // entirely (the bug this fixes).
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-opus-4-7[1m]",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(5 + 25, 5);
+    expect(isModelPriced("claude-opus-4-7[1m]")).toBe(true);
+  });
+
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {
     // Every dotted minor version is priced independently. The resolver does
     // exact-match-after-date-strip (no startsWith fallback), so each row
@@ -175,6 +249,98 @@ describe("estimateCost", () => {
         input_tokens: 1_000_000,
       }),
     ).toBe(0);
+  });
+
+  // The Chinese-model rates below are spot-checked against the literal
+  // numbers on the three official price sheets cited in MODEL_PRICING's
+  // header comment. Pinning them in tests is what catches a future edit
+  // that copies a price from a near-named neighbour by accident — the
+  // mistake the previous attempt (PR #3170, closed) made.
+  it("prices deepseek-v4-flash at the official $0.14/$0.28 with ~50× cache-hit discount", () => {
+    // 1M input × $0.14 + 1M output × $0.28 + 1M cache read × $0.0028 = $0.4228.
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "deepseek-v4-flash",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(0.14 + 0.28 + 0.0028, 5);
+  });
+
+  it("prices the deepseek-chat / deepseek-reasoner aliases at the same rate as deepseek-v4-flash", () => {
+    // The DeepSeek docs explicitly route both legacy names to v4-flash —
+    // they must hit the same numbers, not the older $0.27/$1.10 tier.
+    const flash = estimateCost({
+      ...zeroUsage,
+      model: "deepseek-v4-flash",
+      input_tokens: 1_000_000,
+    });
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "deepseek-chat",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(flash, 5);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "deepseek-reasoner",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(flash, 5);
+  });
+
+  it("prices kimi-k2.6 at the official $0.95 / $4.00 tier (not the K2 tier)", () => {
+    // Moonshot's K2.6 page is the only authoritative source today; K2.6 is
+    // explicitly NOT priced like K2. 1M input × $0.95 + 1M output × $4.00 = $4.95.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "kimi-k2.6",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(4.95, 5);
+  });
+
+  it("prices glm-5.1 at the official $1.4 / $4.4 tier", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "glm-5.1",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(1.4 + 4.4, 5);
+  });
+
+  it("prices glm-4.5-flash at the official Free tier ($0)", () => {
+    // z.ai currently ships Free tiers for the *-flash family; $0 is the
+    // literal price on the page, not a placeholder. Anything non-zero
+    // here would mean we mis-copied a paid SKU's number into the row.
+    expect(isModelPriced("glm-4.5-flash")).toBe(true);
+    expect(isModelPriced("glm-4.7-flash")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "glm-4.5-flash",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBe(0);
+  });
+
+  it("recognises the provider-prefixed forms emitted by OpenRouter-style runtimes", () => {
+    // opencode + OpenRouter route IDs through as `<provider>/<model>`.
+    // canonicalCandidates strips the prefix; without this the rows above
+    // would only fire on bare IDs and the dashboard would still show
+    // $0.00 for the runtime that actually triggered this work.
+    expect(isModelPriced("deepseek/deepseek-v4-flash")).toBe(true);
+    expect(isModelPriced("moonshotai/kimi-k2.6")).toBe(true);
+    expect(isModelPriced("zhipuai/glm-5.1")).toBe(true);
+    expect(isModelPriced("zhipuai/glm-4.5-air")).toBe(true);
   });
 });
 

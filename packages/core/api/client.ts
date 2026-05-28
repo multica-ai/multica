@@ -20,6 +20,8 @@ import type {
   UpdateAgentRequest,
   AgentAllowedPrincipal,
   UpdateAgentAllowedPrincipalsRequest,
+  AgentEnvResponse,
+  UpdateAgentEnvRequest,
   AgentTask,
   LocalPreview,
   LocalPreviewLogs,
@@ -192,6 +194,8 @@ import {
   EMPTY_ISSUE_LABELS_RESPONSE,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_SQUAD,
+  EMPTY_SQUAD_LIST,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_USER,
@@ -207,6 +211,8 @@ import {
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  SquadSchema,
+  SquadListSchema,
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
@@ -1111,6 +1117,31 @@ export class ApiClient {
 
   async archiveAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/archive`, { method: "POST" });
+  }
+
+  /**
+   * Returns the plaintext `custom_env` map for an agent. Owner/admin
+   * only; calls from agent-actor sessions get a 403. Every successful
+   * call writes an `agent_env_revealed` activity_log row server-side.
+   * MUL-2600.
+   */
+  async getAgentEnv(id: string): Promise<AgentEnvResponse> {
+    return this.fetch(`/api/agents/${id}/env`);
+  }
+
+  /**
+   * Replaces an agent's `custom_env` wholesale. Values equal to
+   * `"****"` are preserved server-side (the **** guard) so a partial
+   * UI edit doesn't overwrite real secrets with the masked
+   * placeholder. Owner/admin only; agent actors get a 403. Every
+   * successful call writes an `agent_env_updated` activity_log row.
+   * MUL-2600.
+   */
+  async updateAgentEnv(id: string, data: UpdateAgentEnvRequest): Promise<AgentEnvResponse> {
+    return this.fetch(`/api/agents/${id}/env`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
   }
 
   async restoreAgent(id: string): Promise<Agent> {
@@ -2391,19 +2422,31 @@ export class ApiClient {
 
   // Squads
   async listSquads(): Promise<Squad[]> {
-    return this.fetch(`/api/squads`);
+    const raw = await this.fetch<unknown>(`/api/squads`);
+    return parseWithFallback(raw, SquadListSchema, EMPTY_SQUAD_LIST, {
+      endpoint: "GET /api/squads",
+    }) as Squad[];
   }
 
   async getSquad(id: string): Promise<Squad> {
-    return this.fetch(`/api/squads/${id}`);
+    const raw = await this.fetch<unknown>(`/api/squads/${id}`);
+    return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
+      endpoint: "GET /api/squads/:id",
+    }) as Squad;
   }
 
   async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string }): Promise<Squad> {
-    return this.fetch("/api/squads", { method: "POST", body: JSON.stringify(data) });
+    const raw = await this.fetch<unknown>("/api/squads", { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
+      endpoint: "POST /api/squads",
+    }) as Squad;
   }
 
   async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string }): Promise<Squad> {
-    return this.fetch(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
+    const raw = await this.fetch<unknown>(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
+    return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
+      endpoint: "PUT /api/squads/:id",
+    }) as Squad;
   }
 
   async deleteSquad(id: string): Promise<void> {

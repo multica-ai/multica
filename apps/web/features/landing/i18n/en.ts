@@ -5,9 +5,14 @@ export function createEnDict(allowSignup: boolean): LandingDict {
   return {
   header: {
     github: "GitHub",
-    login: "Log in",
+    cta: "Get started",
     dashboard: "Dashboard",
+    docs: "Docs",
     changelog: "Changelog",
+    useCases: "Use cases",
+    navigation: "Primary navigation",
+    openMenu: "Open navigation menu",
+    closeMenu: "Close navigation menu",
   },
 
   hero: {
@@ -228,6 +233,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "Features", href: "#features" },
           { label: "How it Works", href: "#how-it-works" },
+          { label: "Use cases", href: "/usecases" },
           { label: "Changelog", href: "/changelog" },
           { label: "Download", href: "/download" },
         ],
@@ -286,6 +292,32 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.3.7",
+        date: "2026-05-25",
+        title: "Multica for iOS, Helm Self-Hosting & Smoother Collaboration",
+        changes: [],
+        features: [
+          "Multica for iOS is now available as our first official usable mobile client, covering login, workspaces, inbox, Issues, projects, chat, comments, reactions, presence, and live updates; it is not on the App Store yet, so users need to build and install it manually",
+          "Self-hosted teams can now deploy Multica to Kubernetes with a Helm chart, while Docker-based installs keep clearer port and URL controls",
+          "Project resource pickers now include repository search, and workspace repository settings can store descriptions that help agents understand each codebase",
+          "Runtime usage now recognizes DeepSeek, Kimi K2.6, Zhipu GLM, and long-context Claude Opus model costs more accurately",
+          "The public site now supports use-case pages and a clearer path to Docs, Changelog, and getting started",
+        ],
+        improvements: [
+          "Squad avatars and board cards now show richer hover details, clearer member information, and better live status handling",
+          "Desktop tabs better preserve position in long Issues and chats when switching views, with navigation that avoids duplicate history entries",
+          "Code and rich-text content are easier to read, with literal command text preserved and editor styling split into focused areas",
+          "Repository descriptions now travel with the workspace context given to agents, so assigned work can include more useful project background",
+          "Documentation and README content now better reflect mobile support, automatic workflows, license details, and self-host options",
+        ],
+        fixes: [
+          "Issue timelines stay in chronological order when live comments and activity arrive close together",
+          "Codex runs no longer inherit hidden host memory during Multica tasks, and Pi runs receive a cleaner end-of-input signal",
+          "Local runtime delete actions now avoid self-healing rows that would immediately reappear, and dependency updates close server security advisories",
+          "Title fields now refresh safely after external updates, and markdown code no longer uses ligatures that can distort command flags",
+        ],
+      },
       {
         version: "0.3.6",
         date: "2026-05-22",

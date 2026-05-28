@@ -12,24 +12,27 @@ import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Attachment } from "../attachment";
 
-type AttachmentDisplayStorage = {
-  attachmentDisplay?: {
-    hideAttachments: boolean;
-  };
-};
-
-function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
+function ImageView({ node, editor, selected, deleteNode, getPos }: NodeViewProps) {
   const src = (node.attrs.src as string) || "";
   const alt = (node.attrs.alt as string) || "";
   const uploading = node.attrs.uploading as boolean;
-  const hidden = Boolean(
-    (editor.storage as AttachmentDisplayStorage).attachmentDisplay?.hideAttachments,
-  );
+
+  // Convert this image node into a compact fileCard node.
+  const handleCollapseToCard = () => {
+    if (!editor.isEditable) return;
+    const pos = getPos();
+    if (pos == null) return;
+    const fileCardType = editor.schema.nodes.fileCard;
+    if (!fileCardType) return;
+    const fileCardNode = fileCardType.create({ href: src, filename: alt || "image" });
+    const tr = editor.state.tr.replaceWith(pos, pos + node.nodeSize, fileCardNode);
+    editor.view.dispatch(tr);
+  };
 
   // <Attachment> emits its own .image-node wrapper, so the NodeViewWrapper
   // stays unclassed — no double image-node.
   return (
-    <NodeViewWrapper className={hidden ? "attachment-hidden-node" : undefined}>
+    <NodeViewWrapper>
       <Attachment
         attachment={{
           kind: "url",
@@ -42,6 +45,7 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
         editable={editor.isEditable}
         selected={selected}
         onDelete={() => deleteNode()}
+        onCollapseToCard={handleCollapseToCard}
       />
     </NodeViewWrapper>
   );

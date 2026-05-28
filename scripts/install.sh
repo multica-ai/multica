@@ -597,9 +597,11 @@ setup_server() {
 
   # Wait for health check
   info "Waiting for backend to be ready..."
+  local backend_port
+  backend_port="$(selfhost_backend_port .env)"
   local ready=false
   for i in $(seq 1 45); do
-    if curl -sf http://localhost:8080/health >/dev/null 2>&1; then
+    if curl -sf "http://localhost:${backend_port}/health" >/dev/null 2>&1; then
       ready=true
       break
     fi
@@ -665,8 +667,11 @@ run_with_server() {
   printf "${BOLD}${GREEN}  ✓ Multica server is running and CLI is ready!${RESET}\n"
   printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
   printf "\n"
-  printf "  ${BOLD}Frontend:${RESET}  http://localhost:3000\n"
-  printf "  ${BOLD}Backend:${RESET}   http://localhost:8080\n"
+  local frontend_port backend_port
+  frontend_port="$(selfhost_frontend_port "$INSTALL_DIR/.env")"
+  backend_port="$(selfhost_backend_port "$INSTALL_DIR/.env")"
+  printf "  ${BOLD}Frontend:${RESET}  http://localhost:%s\n" "$frontend_port"
+  printf "  ${BOLD}Backend:${RESET}   http://localhost:%s\n" "$backend_port"
   printf "  ${BOLD}Server at:${RESET} %s\n" "$INSTALL_DIR"
   printf "\n"
   printf "  ${BOLD}Next: configure your CLI to connect${RESET}\n"

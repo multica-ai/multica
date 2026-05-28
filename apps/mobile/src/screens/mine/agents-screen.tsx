@@ -1020,34 +1020,28 @@ function AdvancedTab({
   onUpdate: (agentId: string, data: UpdateAgentRequest) => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const [envText, setEnvText] = useState(envMapToText(agent.custom_env ?? {}));
   const [argsText, setArgsText] = useState((agent.custom_args ?? []).join("\n"));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const envReadOnly = readOnly || agent.custom_env_redacted;
-  const dirty =
-    envText !== envMapToText(agent.custom_env ?? {}) ||
-    argsText !== (agent.custom_args ?? []).join("\n");
+  const dirty = argsText !== (agent.custom_args ?? []).join("\n");
+  const envKeyCount = agent.custom_env_key_count ?? 0;
+  const envStatusText =
+    envKeyCount > 0
+      ? t("agents.environment_configured", { count: envKeyCount })
+      : agent.has_custom_env === true
+        ? t("agents.environment_configured_unknown")
+        : t("agents.environment_empty");
 
   useEffect(() => {
-    setEnvText(envMapToText(agent.custom_env ?? {}));
     setArgsText((agent.custom_args ?? []).join("\n"));
     setError(null);
   }, [agent]);
 
   async function save() {
-    let customEnv: Record<string, string>;
-    try {
-      customEnv = parseEnvText(envText);
-    } catch {
-      setError(t("agents.invalid_environment"));
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
       await onUpdate(agent.id, {
-        custom_env: envReadOnly ? undefined : customEnv,
         custom_args: argsText
           .split("\n")
           .map((line) => line.trim())
@@ -1071,18 +1065,10 @@ function AdvancedTab({
         </View>
       ) : null}
       <Text style={styles.optionLabel}>{t("agents.environment")}</Text>
-      <TextInput
-        autoCapitalize="none"
-        autoCorrect={false}
-        editable={!envReadOnly}
-        multiline
-        onChangeText={setEnvText}
-        placeholder="ANTHROPIC_API_KEY=..."
-        placeholderTextColor={colors.mutedForeground}
-        style={[styles.textArea, envReadOnly && styles.inputReadOnly]}
-        textAlignVertical="top"
-        value={agent.custom_env_redacted ? t("agents.hidden_values") : envText}
-      />
+      <View style={styles.infoNotice}>
+        <Text style={styles.infoValue}>{envStatusText}</Text>
+        <Text style={styles.infoNoticeText}>{t("agents.environment_managed_on_web")}</Text>
+      </View>
       <Text style={styles.optionLabel}>{t("agents.custom_args")}</Text>
       <TextInput
         autoCapitalize="none"
@@ -1678,27 +1664,6 @@ function formatTaskTime(task: AgentTask) {
           ? task.completed_at
           : task.created_at;
   return new Date(source).toLocaleString();
-}
-
-function envMapToText(env: Record<string, string>) {
-  return Object.entries(env)
-    .map(([key, value]) => `${key}=${value}`)
-    .join("\n");
-}
-
-function parseEnvText(value: string) {
-  const result: Record<string, string> = {};
-  for (const rawLine of value.split("\n")) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const index = line.indexOf("=");
-    if (index <= 0) throw new Error(`Invalid env line: ${line}`);
-    const key = line.slice(0, index).trim();
-    const envValue = line.slice(index + 1);
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error(`Invalid env key: ${key}`);
-    result[key] = envValue;
-  }
-  return result;
 }
 
 const styles = StyleSheet.create({

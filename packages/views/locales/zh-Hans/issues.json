@@ -247,7 +247,9 @@
     "squad_leader_failed_reason": "评估失败：{{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} 条动态",
-    "activity_count_other": "{{count}} 条动态"
+    "activity_count_other": "{{count}} 条动态",
+    "show_more_activities_one": "展开更早 {{count}} 条动态",
+    "show_more_activities_other": "展开更早 {{count}} 条动态"
   },
   "comment": {
     "delete_title": "删除评论",

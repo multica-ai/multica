@@ -61,7 +61,7 @@ kubectl rollout status deployment/backend -n multica-bot --timeout=180s
 
 - Jenkins job: `Multica-CLI-Prod`（生产环境）
 - Jenkins job: `Multica-CLI-Test`（测试环境）
-- 部署目标: OBS (`https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json`)
+- 部署目标: OBS (`https://obs-multica.wujieai.com/cli/manifest.json`)
 - 产出要求: Jenkins build URL、CLI version、manifest URL、artifact/checksum 发布结果
 
 #### 环境隔离
@@ -120,6 +120,25 @@ PROJECT_VERSION=v$(git describe --tags --long \
 - 如果 tag 已存在，必须确认它指向同一个 `FULL_SHA`，否则停止发布。
 - 不要基于旧的 git-describe-style 发布 tag 再 describe 出嵌套版本，例如 `v0.3.2-...-100-gxxxx-1-gyyyy`。
 
+#### 版本号倒退校验（强制 gate）
+
+```bash
+# 提取 base version（v0.3.6-845-gb05b01d1c → 0.3.6）
+BASE_VERSION=$(echo "$PROJECT_VERSION" | grep -oP '^v?\K\d+\.\d+\.\d+')
+PREV_RELEASE=$(git tag --sort=-v:refname \
+  --list 'v[0-9]*.[0-9]*.[0-9]*-[0-9]*-g*' \
+  --merged origin/main | head -1)
+PREV_BASE=$(echo "$PREV_RELEASE" | grep -oP '^v?\K\d+\.\d+\.\d+')
+
+if [ -n "$PREV_BASE" ] && [ "$(printf '%s\n' "$PREV_BASE" "$BASE_VERSION" | sort -V | tail -1)" != "$BASE_VERSION" ]; then
+  echo "ERROR: PROJECT_VERSION base ($BASE_VERSION) < previous release ($PREV_BASE). Version regression detected."
+  echo "This means git describe chose an older base tag. Check that --exclude patterns are applied."
+  exit 1
+fi
+```
+
+校验不通过 → 立即停止发布，禁止进入后续 Jenkins 触发阶段。
+
 ### A. 发布 backend/frontend 到 K3S
 
 触发并等待：
@@ -157,7 +176,7 @@ Building CLI artifacts ... $PROJECT_VERSION
 OBS manifest 中的版本也必须等于 `PROJECT_VERSION`：
 
 ```bash
-curl -fsSL https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json | jq -r .version
+curl -fsSL https://obs-multica.wujieai.com/cli/manifest.json | jq -r .version
 ```
 
 校验要求：
@@ -196,6 +215,14 @@ Release 内容必须至少包含：
 - Release 不是用来修正发布事实的地方；如果 Jenkins/OBS 实际版本和 `PROJECT_VERSION` 不一致，先修发布产物，再写 Release。
 - Release 只能记录当前 release tag 覆盖范围内的 PR / commit；不要把 tag 之后合入的 PR 写进去。
 - Release 是人类 changelog + 发布事实记录，不是原始流水日志；保留可追溯链接和关键校验结果，避免粘贴大段 console log。
+
+### Release 撰写防呆规则
+
+**必须遵守：**
+
+- **禁止在正文中使用 `@` 前缀词。** Gitee 会将 Markdown 中的 `@xxx` 解析为 mention 通知，误触无关人员。如需提及 mention 功能，写作 `mention`（不带 `@`）。
+- **所有 URL 使用 CDN 域名。** manifest 链接使用 `https://obs-multica.wujieai.com/cli/manifest.json`，不要使用旧 OBS 直链。
+- **Release 正文生成后，逐行扫描确认无 `@` 字符**（代码块内除外）。如有漏网，替换后重新发布。
 
 ### Release 标准结构
 
@@ -294,7 +321,7 @@ git log --oneline <PREVIOUS_RELEASE>..<PROJECT_VERSION> --reverse
 # 如果本次没有官方合入，明确跳过「官方上游变更」。
 
 # 5. CLI manifest 必须 live 校验
-curl -fsSL https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json | jq -r .version
+curl -fsSL https://obs-multica.wujieai.com/cli/manifest.json | jq -r .version
 ```
 
 最低验收：

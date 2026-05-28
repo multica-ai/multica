@@ -30,9 +30,9 @@ function agent(overrides: Partial<Agent>): Agent {
     avatar_url: overrides.avatar_url ?? null,
     runtime_mode: overrides.runtime_mode ?? "cloud",
     runtime_config: overrides.runtime_config ?? {},
-    custom_env: overrides.custom_env ?? {},
+    has_custom_env: overrides.has_custom_env ?? false,
+    custom_env_key_count: overrides.custom_env_key_count ?? 0,
     custom_args: overrides.custom_args ?? [],
-    custom_env_redacted: overrides.custom_env_redacted ?? false,
     visibility: overrides.visibility ?? "workspace",
     status: overrides.status ?? "idle",
     max_concurrent_tasks: overrides.max_concurrent_tasks ?? 1,
@@ -43,6 +43,7 @@ function agent(overrides: Partial<Agent>): Agent {
     created_at: overrides.created_at ?? "2026-01-01T00:00:00Z",
     updated_at: overrides.updated_at ?? "2026-01-01T00:00:00Z",
     archived_at: overrides.archived_at ?? null,
+    archived_by: overrides.archived_by ?? null,
   } as Agent;
 }
 

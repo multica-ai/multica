@@ -214,6 +214,20 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
+function invalidateSquadMemberStatusQueries(qc: QueryClient, wsId: string): void {
+  qc.invalidateQueries({
+    predicate: (query) => {
+      const key = query.queryKey;
+      return (
+        key[0] === "workspaces" &&
+        key[1] === wsId &&
+        key[2] === "squads" &&
+        key[4] === "members-status"
+      );
+    },
+  });
+}
+
 export interface RealtimeSyncStores {
   authStore: UseBoundStore<StoreApi<AuthState>>;
 }
@@ -270,10 +284,10 @@ export function useRealtimeSync(
           qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
           qc.invalidateQueries({ queryKey: agentDetailKeys.all(wsId) });
           // Squad members status is derived per agent, so any agent
-          // change (status flip, archive, runtime swap) needs to refresh
-          // the per-squad members-status cache. Prefix-matches both the
-          // squad list and every squadMemberStatus query.
-          qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+          // change (status flip, archive, runtime swap) needs to refresh the
+          // per-squad members-status cache without refetching the static squad
+          // list summary.
+          invalidateSquadMemberStatusQueries(qc, wsId);
         }
       },
       member: () => {
@@ -330,9 +344,8 @@ export function useRealtimeSync(
           qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
           // Runtime online/offline transitions move the derived status
           // for every agent that hosts on this runtime, which shifts the
-          // working/idle/offline pill on the squad page. Same prefix
-          // invalidation pattern as the agent handler above.
-          qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+          // working/idle/offline pill on the squad page.
+          invalidateSquadMemberStatusQueries(qc, wsId);
         }
       },
       autopilot: () => {

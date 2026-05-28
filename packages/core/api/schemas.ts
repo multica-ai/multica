@@ -11,6 +11,7 @@ import type {
   ListIssuesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
+  Squad,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -146,7 +147,7 @@ export const CommentsListSchema = z.array(CommentSchema);
 // to {} so consumers never need to nil-guard `issue.metadata`.
 const IssueMetadataSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({});
 
-const IssueSchema = z.object({
+export const IssueSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
   number: z.number(),
@@ -691,6 +692,51 @@ export const EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE: CreateAgentFromTemplateR
   agent: { id: "" } as Agent,
   imported_skill_ids: [],
   reused_skill_ids: [],
+};
+
+// Squad list responses carry lightweight membership previews used by hover
+// cards. The preview fields are additive API fields, so older backends default
+// cleanly to no preview instead of breaking newer frontends.
+const SquadMemberPreviewSchema = z.object({
+  member_type: z.string(),
+  member_id: z.string(),
+  role: z.string().default(""),
+}).loose();
+
+export const SquadSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  instructions: z.string().default(""),
+  avatar_url: z.string().nullable().optional().transform((v) => v ?? null),
+  leader_id: z.string(),
+  creator_id: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  archived_at: z.string().nullable().optional().transform((v) => v ?? null),
+  archived_by: z.string().nullable().optional().transform((v) => v ?? null),
+  member_count: z.number().default(0),
+  member_preview: z.array(SquadMemberPreviewSchema).default([]),
+}).loose();
+
+export const SquadListSchema = z.array(SquadSchema);
+export const EMPTY_SQUAD_LIST: Squad[] = [];
+export const EMPTY_SQUAD: Squad = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  description: "",
+  instructions: "",
+  avatar_url: null,
+  leader_id: "",
+  creator_id: "",
+  created_at: "",
+  updated_at: "",
+  archived_at: null,
+  archived_by: null,
+  member_count: 0,
+  member_preview: [],
 };
 
 // Squad member status — backs the Squad detail page's Members tab. status

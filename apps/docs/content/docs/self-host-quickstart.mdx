@@ -1,6 +1,6 @@
 ---
 title: Self-host quickstart
-description: Run Multica on your own server or machine with Docker. Takes about 10 minutes.
+description: Run Multica on your own server or machine with Docker (or Helm on Kubernetes). Takes about 10 minutes.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -17,6 +17,10 @@ Agent **execution** still relies on the [daemon](/daemon-runtimes) you run local
 - At least one AI coding tool installed on **the machine running the daemon** (not necessarily the one running the server — your dev laptop works)
 
 ## 1. Pull the project and start the backend
+
+<Callout type="info">
+**Already on Kubernetes?** Skip Docker and use the Helm chart instead — jump to [Kubernetes deployment](#kubernetes-deployment-alternative) below, then come back to [Step 4](#4-first-login--create-a-workspace) for first login.
+</Callout>
 
 ```bash
 git clone https://github.com/multica-ai/multica.git
@@ -154,6 +158,53 @@ After bringing the proxy up, set `FRONTEND_ORIGIN=https://multica.example.com` i
 ## 6. Create an agent + assign your first task
 
 Same flow as Cloud — see [Cloud quickstart → Steps 5-6](/cloud-quickstart#5-create-an-agent).
+
+## Kubernetes deployment (alternative)
+
+If you already run a Kubernetes cluster, the repo also ships a Helm chart at `deploy/helm/multica/`. It's the equivalent of `make selfhost` for k8s — same backend image, frontend image, and `pgvector/pgvector:pg17` Postgres, packaged as Deployments / Services / Ingresses with one `ConfigMap` rendered from `values.yaml`. Authored against k3s + Traefik + `local-path` and should work on any cluster with an Ingress controller and a default `ReadWriteOnce` StorageClass.
+
+The chart **does not template secret values**. It references a Secret named `multica-secrets` by name, so real JWT / DB / Resend / Google keys never need to live in git or in `values.yaml`. Create the namespace + Secret once with kubectl:
+
+```bash
+kubectl create namespace multica
+
+kubectl -n multica create secret generic multica-secrets \
+  --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
+  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+  --from-literal=RESEND_API_KEY="" \
+  --from-literal=GOOGLE_CLIENT_SECRET="" \
+  --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+  --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+```
+
+Then install the chart:
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+helm install multica deploy/helm/multica -n multica
+```
+
+Defaults assume the hostnames `multica.dev.lan` (web) and `api.multica.dev.lan` (backend). Add them to `/etc/hosts` (or local DNS) pointing at any node IP where your Ingress is reachable. To use different hostnames, copy `deploy/helm/multica/values.yaml`, edit `ingress.frontend.host` / `ingress.backend.host` and the matching `backend.config.appUrl` / `frontendOrigin` / `localUploadBaseUrl` / `googleRedirectUri`, then install with `-f my-values.yaml`.
+
+On a cold cluster the backend can stay `Running` but not `Ready` for a few minutes while it waits on Postgres and runs migrations — a startupProbe absorbs this, so the pod should not restart. Once it's `Ready`:
+
+```bash
+curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
+# {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+Then open `http://multica.dev.lan` and continue at [Step 4 — First login](#4-first-login--create-a-workspace) above. Point the CLI at your Ingress hostnames:
+
+```bash
+multica setup self-host \
+  --server-url http://api.multica.dev.lan \
+  --app-url http://multica.dev.lan
+```
+
+To pull the latest images without changing the chart, `kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend`. To pin a specific Multica release, set `images.backend.tag` / `images.frontend.tag` in your values file and `helm upgrade`. `helm -n multica uninstall multica` removes the workloads but keeps the PVCs and Secret; `kubectl delete namespace multica` wipes everything.
+
+The full reference — three login modes, the `backend` ExternalName workaround for the build-time-baked `REMOTE_API_URL` in the web image, resource limits, and TLS — lives in the repo's [`SELF_HOSTING.md`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative).
 
 ## Common issues
 

@@ -406,7 +406,7 @@ function IssueAttachmentList({
 
 function IssueAttachmentRow({
   attachment,
-  pending,
+  pending: _pending,
   onDelete,
   onAppendToDesc,
 }: {
@@ -425,7 +425,16 @@ function IssueAttachmentRow({
   };
 
   return (
-    <div className="flex items-center gap-1 group">
+    <div className="flex items-center gap-1 group" onMouseDown={(e) => {
+      // Prevent clicks in the attachment row from shifting focus to the
+      // editor above. Without this, after the dropdown closes the browser
+      // refocuses the editor and ProseMirror may process a stale delete
+      // event that removes the last line of content instead of the
+      // attachment card.
+      if ((e.target as HTMLElement).closest('[role="menu"]') || (e.target as HTMLElement).closest('button')) {
+        e.preventDefault();
+      }
+    }}>
       <div className="flex-1 min-w-0">
         <AttachmentCard
           filename={attachment.filename}
@@ -438,13 +447,14 @@ function IssueAttachmentRow({
         />
       </div>
       {preview.modal}
-      {!pending && (onDelete || onAppendToDesc) && (
+      {(onDelete || onAppendToDesc) && (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <button
                 type="button"
                 className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-opacity"
+                onMouseDown={(e) => e.preventDefault()}
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />
               </button>
@@ -637,6 +647,11 @@ function inferThreadRootId(selection: Selection): string | null {
   if (focusRoot && !anchorRoot) return focusRoot;
   return null;
 }
+// When the trailing block is expanded, we still truncate its body to the most
+// recent N entries — a single block of 50 status flips drowns the comment area
+// as badly as N blocks of 1 would. Older entries fold behind a "Show N more
+// activities" line that expands in place.
+const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
 
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
@@ -647,6 +662,9 @@ function ActivityBlock({
   entries,
   expanded,
   onToggle,
+  truncateOlder,
+  showOlder,
+  onToggleShowOlder,
   getActorName,
   t,
   timeAgo,
@@ -654,6 +672,12 @@ function ActivityBlock({
   entries: TimelineEntry[];
   expanded: boolean;
   onToggle: () => void;
+  // Trailing block only: when true, the body shows only the most recent
+  // LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT entries with the older ones folded
+  // behind a "Show N more activities" inline toggle.
+  truncateOlder: boolean;
+  showOlder: boolean;
+  onToggleShowOlder: () => void;
   getActorName: (type: string, id: string) => string;
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
@@ -674,17 +698,42 @@ function ActivityBlock({
       </div>
     );
   }
+  const hiddenOlderCount =
+    truncateOlder && !showOlder && entries.length > LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
+      ? entries.length - LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
+      : 0;
+  const visibleEntries =
+    hiddenOlderCount > 0 ? entries.slice(-LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT) : entries;
+  // Hide the "v N activities" collapse header while we're in the truncated
+  // default state. The "Show N more" link is the only control users need
+  // when they're glancing at recent activity — stacking two chevron rows
+  // looked like nested folds and added visual noise without value. Once the
+  // user explicitly reveals older entries, the header reappears so they can
+  // fold the whole block back to a single count line.
+  const showHeader = hiddenOlderCount === 0;
   return (
     <div className="pb-3 px-4 flex flex-col gap-3">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ChevronDown className="h-3 w-3 shrink-0" />
-        <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
-      </button>
-      {entries.map((entry) => {
+      {showHeader && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronDown className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
+        </button>
+      )}
+      {hiddenOlderCount > 0 && (
+        <button
+          type="button"
+          onClick={onToggleShowOlder}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.show_more_activities, { count: hiddenOlderCount })}</span>
+        </button>
+      )}
+      {visibleEntries.map((entry) => {
         const details = (entry.details ?? {}) as Record<string, string>;
         const isStatusChange = entry.action === "status_changed";
         const isPriorityChange = entry.action === "priority_changed";
@@ -822,7 +871,7 @@ function SubIssueRow({ child }: { child: Issue }) {
         }
       />
       <AppLink
-        href={paths.issueDetail(child.id)}
+        href={paths.issueDetail(child.identifier)}
         className="flex min-w-0 flex-1 items-center gap-2.5"
       >
         <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
@@ -1024,6 +1073,12 @@ export function IssueDetail({
   // versa). Not persisted, matches the resolved-thread behaviour above.
   const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
   const [collapsedActivityIds, setCollapsedActivityIds] = useState<Set<string>>(() => new Set());
+  // Block IDs where the user has explicitly chosen to also reveal the older
+  // (pre-last-8) entries within the trailing block. Kept independent of the
+  // expanded/collapsed sets so collapsing then re-expanding preserves the
+  // "show all" choice, and so the choice survives the block losing its
+  // trailing position when a new comment lands after it.
+  const [showOlderActivityIds, setShowOlderActivityIds] = useState<Set<string>>(() => new Set());
   const toggleActivityBlock = useCallback((id: string, currentlyExpanded: boolean) => {
     if (currentlyExpanded) {
       setCollapsedActivityIds((prev) => {
@@ -1050,6 +1105,14 @@ export function IssueDetail({
         return next;
       });
     }
+  }, []);
+  const showOlderActivities = useCallback((id: string) => {
+    setShowOlderActivityIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
   }, []);
   const didHighlightRef = useRef<string | null>(null);
 
@@ -1429,8 +1492,9 @@ export function IssueDetail({
   const queryClient = useQueryClient();
 
   // Attachments uploaded against this issue. Drives the description
-  // editor's click-time fresh-sign download.
-  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(id));
+  // editor's click-time fresh-sign download. Must use `resolvedId` so the
+  // cache key matches what `useUpdateIssue.onSettled` invalidates (UUID).
+  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(resolvedId));
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
@@ -1550,8 +1614,9 @@ export function IssueDetail({
     onDrop: (files) => descEditorRef.current?.uploadFiles(files),
   });
   // Pending uploads in the description editor. We bind them immediately after
-  // upload so IssueAttachmentList can be the canonical display surface while
-  // the description editor keeps the attachment markdown hidden.
+  // upload so IssueAttachmentList can show the compact attachment index while
+  // the description keeps rendering attachments inline at their markdown
+  // positions.
   const [descPendingAttachments, setDescPendingAttachments] = useState<Attachment[]>([]);
   useEffect(() => {
     setDescPendingAttachments([]);
@@ -1561,16 +1626,17 @@ export function IssueDetail({
     : issueAttachments;
   const handleDescriptionUpload = useCallback(
     async (file: File) => {
-      const result = await uploadWithToast(file);
+      // Pass issueId in upload context so the attachment record is created
+      // with issue_id pre-set in the DB. This ensures the attachment survives
+      // page refresh even if the separate link call races or the user removes
+      // the node from the body before the debounced save fires.
+      const result = await uploadWithToast(file, { issueId: resolvedId });
       if (result) {
         setDescPendingAttachments((prev) => [...prev, result]);
-        if (issue) {
-          handleUpdateField({ attachment_ids: [result.id] });
-        }
       }
       return result;
     },
-    [handleUpdateField, issue, uploadWithToast],
+    [resolvedId, uploadWithToast],
   );
 
   const insertQuoteToNewComment = useCallback((markdown: string) => {
@@ -2076,7 +2142,7 @@ export function IssueDetail({
           </button>
           {parentIssueOpen && <div className="pl-2">
             <AppLink
-              href={paths.issueDetail(parentIssue.id)}
+              href={paths.issueDetail(parentIssue.identifier)}
               className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
             >
               <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
@@ -2250,11 +2316,16 @@ export function IssueDetail({
       : collapsedActivityIds.has(item.id)
         ? false
         : item.id === lastActivityGroupId;
+    const truncateOlder = item.id === lastActivityGroupId;
+    const showOlder = showOlderActivityIds.has(item.id);
     return (
       <ActivityBlock
         entries={item.entries}
         expanded={expanded}
         onToggle={() => toggleActivityBlock(item.id, expanded)}
+        truncateOlder={truncateOlder}
+        showOlder={showOlder}
+        onToggleShowOlder={() => showOlderActivities(item.id)}
         getActorName={getActorName}
         t={t}
         timeAgo={timeAgo}
@@ -2319,7 +2390,7 @@ export function IssueDetail({
             {parentIssue && (
               <>
                 <AppLink
-                  href={paths.issueDetail(parentIssue.id)}
+                  href={paths.issueDetail(parentIssue.identifier)}
                   className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
                 >
                   {parentIssue.identifier}
@@ -2427,6 +2498,7 @@ export function IssueDetail({
         <div className="flex flex-1 min-h-0">
         <div
           ref={setScrollContainerEl}
+          data-tab-scroll-root
           className="relative flex-1 overflow-y-auto"
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
@@ -2443,7 +2515,7 @@ export function IssueDetail({
 
           {parentIssue && (
             <AppLink
-              href={paths.issueDetail(parentIssue.id)}
+              href={paths.issueDetail(parentIssue.identifier)}
               className="mt-2 inline-flex max-w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group/parent"
             >
               <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
@@ -2473,19 +2545,16 @@ export function IssueDetail({
               defaultValue={issue.description || ""}
               placeholder={t(($) => $.detail.desc_placeholder)}
               onUpdate={(md) => {
-                // Bind any pending uploads still referenced in the markdown
-                // so they appear in `issueAttachments` after refresh and the
-                // editor's text/code preview keeps working past reload.
-                const ids = descPendingAttachments
-                  .filter((a) => md.includes(a.url))
-                  .map((a) => a.id);
-                handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
+                // Attachments are linked to the issue at upload time (via
+                // issueId context), so we only save the description text here.
+                // Removing an attachment node from the body does NOT unlink or
+                // delete the attachment — only the attachment area delete does.
+                handleUpdateField({ description: md });
               }}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
               currentIssueId={resolvedId}
               attachments={descEditorAttachments}
-              hideAttachments
               selectionQuoteActions={{
                 onQuoteToNewComment: handleEditorQuoteToNewComment,
                 onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
