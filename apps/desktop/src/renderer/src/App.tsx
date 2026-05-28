@@ -25,6 +25,7 @@ import { RESOURCES } from "@multica/views/locales";
 function AppContent() {
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
+  const overlay = useWindowOverlayStore((s) => s.overlay);
   const qc = useQueryClient();
   // Deep-link login runs loginWithToken → syncToken → listWorkspaces →
   // setQueryData sequentially. loginWithToken sets user+isLoading=false
@@ -223,7 +224,18 @@ function AppContent() {
     }
   }, [user, workspaceListFetched, wsCount]);
 
-  if (isLoading || bootstrapping) {
+  // Pre-workspace flows (onboarding, invitations, create workspace) open a
+  // window-level overlay from useEffect. Until that overlay mounts,
+  // DesktopShell would render with activeWorkspaceSlug=null (TabContent →
+  // null, no sidebar) and WindowOverlay → null — a blank white window,
+  // especially visible while listMyInvitations() is in flight.
+  const needsPreWorkspaceFlow =
+    !!user &&
+    workspaceListFetched &&
+    !(hasOnboarded && wsCount > 0);
+  const awaitingPreWorkspaceOverlay = needsPreWorkspaceFlow && !overlay;
+
+  if (isLoading || bootstrapping || awaitingPreWorkspaceOverlay) {
     return (
       <div className="flex h-screen items-center justify-center">
         <MulticaIcon className="size-6 animate-pulse" />
