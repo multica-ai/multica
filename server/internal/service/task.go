@@ -1702,6 +1702,32 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		return nil, nil
 	}
 
+	// CEREBRO-PATCH(retry-pause-guard): FIR-2442 — skip auto-retry when the
+	// parent task's runtime is paused. Without this, every failure on a paused
+	// runtime spawns a fresh retry that the dispatcher rejects with
+	// runtime_paused, burning no LLM calls but flooding the queue with dead
+	// rows (Tine: 299 such rows in one rate-limit window). Lookup error =
+	// fail-safe: skip retry rather than risk a runaway on unknown pause state.
+	if parent.RuntimeID.Valid {
+		runtime, rtErr := s.Queries.GetAgentRuntime(ctx, parent.RuntimeID)
+		if rtErr != nil {
+			slog.Warn("task auto-retry skipped: runtime lookup failed",
+				"task_id", util.UUIDToString(parent.ID),
+				"runtime_id", util.UUIDToString(parent.RuntimeID),
+				"error", rtErr,
+			)
+			return nil, nil
+		}
+		if runtime.PausedAt.Valid {
+			slog.Info("task auto-retry skipped: runtime paused",
+				"task_id", util.UUIDToString(parent.ID),
+				"runtime_id", util.UUIDToString(parent.RuntimeID),
+				"reason", reason,
+			)
+			return nil, nil
+		}
+	}
+
 	child, err := s.Queries.CreateRetryTask(ctx, parent.ID)
 	if err != nil {
 		slog.Warn("task auto-retry failed",
