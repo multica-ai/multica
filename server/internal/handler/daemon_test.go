@@ -166,7 +166,8 @@ func createDispatchedClaimFixtureTask(t *testing.T, ctx context.Context, agentID
 }
 
 func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
-	ID string `json:"id"`
+	ID        string `json:"id"`
+	AuthToken string `json:"auth_token"`
 }, string) {
 	t.Helper()
 
@@ -182,13 +183,43 @@ func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
 
 	var resp struct {
 		Task *struct {
-			ID string `json:"id"`
+			ID        string `json:"id"`
+			AuthToken string `json:"auth_token"`
 		} `json:"task"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode claim response: %v", err)
 	}
 	return resp.Task, w.Body.String()
+}
+
+func TestClaimTaskByRuntime_OwnerlessRuntimeMintsAgentTaskToken(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Ownerless token runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Ownerless token agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	task, body := claimTaskByRuntimeForTest(t, runtimeID)
+	if task == nil {
+		t.Fatalf("expected task %s to be claimed, got nil response: %s", taskID, body)
+	}
+	if task.AuthToken == "" {
+		t.Fatalf("expected ownerless runtime claim to include auth_token, response: %s", body)
+	}
+
+	var tokenUserID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT user_id FROM task_token WHERE token_hash = $1 AND task_id = $2
+	`, auth.HashToken(task.AuthToken), taskID).Scan(&tokenUserID); err != nil {
+		t.Fatalf("load persisted task token: %v", err)
+	}
+	if tokenUserID != testUserID {
+		t.Fatalf("task token user_id = %s, want agent owner %s", tokenUserID, testUserID)
+	}
 }
 
 func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {

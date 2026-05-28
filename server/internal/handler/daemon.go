@@ -1096,7 +1096,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task)
+	var agentOwnerID pgtype.UUID
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
+		agentOwnerID = agent.OwnerID
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
 		var customEnv map[string]string
 		if agent.CustomEnv != nil {
@@ -1561,12 +1563,16 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// recognized server-side as actor=agent, closing the lateral-movement
 	// path on owner-only endpoints (e.g. `/api/agents/{id}/env`). MUL-2600.
 	//
-	// Skip silently when the runtime has no owning user (cloud / system
-	// runtimes installed before this PR) — the response carries no
-	// `auth_token`, and the daemon falls back to its existing credential.
+	// Prefer the runtime owner for user scoping. Ownerless cloud / system
+	// runtimes fall back to the claimed agent owner, so they still get an
+	// agent-bound credential instead of falling back to a daemon/member token.
 	// Token expires after the queue/runtime upper bound (24h) so it survives
 	// long-running tasks but cannot outlive a forgotten one.
-	if runtime.OwnerID.Valid {
+	tokenUserID := runtime.OwnerID
+	if !tokenUserID.Valid {
+		tokenUserID = agentOwnerID
+	}
+	if tokenUserID.Valid {
 		tokenStr, terr := auth.GenerateAgentTaskToken()
 		if terr != nil {
 			outcome = "error_token"
@@ -1580,7 +1586,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			TaskID:      task.ID,
 			AgentID:     task.AgentID,
 			WorkspaceID: parseUUID(resp.WorkspaceID),
-			UserID:      runtime.OwnerID,
+			UserID:      tokenUserID,
 			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
 		}); terr != nil {
 			outcome = "error_token"
