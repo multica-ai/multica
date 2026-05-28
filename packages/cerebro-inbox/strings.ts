@@ -45,9 +45,10 @@ type StringTable = {
   /** Badge label on the dedicated reminder row (FIR-2364). */
   reminder_label: string;
   // FIR-2115 — "Group by → Action" bucket headers. English in every locale by
-  // product decision. Names follow the agreed product wording: Unread, Running,
-  // Done, Waiting.
+  // product decision. Names follow the agreed product wording: Unread,
+  // Reminders, Running, Done, Waiting.
   action_act_now: string;
+  action_reminders: string;
   action_watching: string;
   action_waiting: string;
   action_calm: string;
@@ -61,6 +62,7 @@ type StringTable = {
 /** Action-bucket headers, identical across locales (see StringTable note). */
 const actionLabels = {
   action_act_now: "Unread",
+  action_reminders: "Reminders",
   action_watching: "Running",
   action_waiting: "Waiting",
   action_calm: "Done",
@@ -209,6 +211,7 @@ export function useInboxActionGroupLabels(): Record<InboxActionCategory, string>
   const s = useCerebroInboxStrings();
   return {
     act_now: s.action_act_now,
+    reminders: s.action_reminders,
     watching: s.action_watching,
     waiting: s.action_waiting,
     calm: s.action_calm,
