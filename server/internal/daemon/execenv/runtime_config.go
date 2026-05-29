@@ -251,7 +251,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("The following code repositories are available in this workspace.\n")
 		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory. Add `--ref <branch-or-sha>` when you need an exact branch, tag, or commit.\n\n")
 		for _, repo := range ctx.Repos {
-			fmt.Fprintf(&b, "- %s\n", repo.URL)
+			if repo.Description != "" {
+				fmt.Fprintf(&b, "- %s — %s\n", repo.URL, repo.Description)
+			} else {
+				fmt.Fprintf(&b, "- %s\n", repo.URL)
+			}
 		}
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed, and can pass `--ref` for review/QA on a non-default branch or commit.\n\n")
 	}
@@ -347,12 +351,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")
-		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
+		b.WriteString(commentIssueGetStep(ctx.IssueID, ctx.IssueSnapshotInlined, ctx.BundleContextHint)) // CEREBRO-PATCH(runtime-config-snapshot): skip/replace the issue get step when a fewer-calls saving is on (FIR-2384)
 		fmt.Fprintf(&b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
-		fmt.Fprintf(&b, "3. Read the triggering thread first — that is what this comment is actually about. Default to the 30 most recent replies in that thread: `multica issue comment list %s --thread %s --tail 30 --output json` returns the root + the 30 newest replies (root is always included, even at `--tail 0`).\n", ctx.IssueID, ctx.TriggerCommentID)
-		b.WriteString("   - If 30 replies aren't enough, walk older replies in the same thread one page at a time using the stderr `Next reply cursor: --before <ts> --before-id <reply-id>` line — pass the same pair back as `--before <ts> --before-id <reply-id>` on the next call. Under `--thread --tail` the cursor walks older *replies*, not older threads.\n")
-		fmt.Fprintf(&b, "   - If you also need cross-thread background, pull the most recently active threads on the issue: `multica issue comment list %s --recent 20 --output json`. Under `--recent` the same `--before` / `--before-id` flags walk older *threads* instead of older replies, and the stderr line is `Next thread cursor: --before <ts> --before-id <root-id>`. Pass the pair back to scroll to older threads when 20 still isn't enough.\n", ctx.IssueID)
-		b.WriteString("   - Avoid the unfiltered `multica issue comment list <issue-id> --output json` form on long-running issues — it dumps the entire flat timeline (cap 2000) and wastes context on chatter unrelated to the trigger. `--since <RFC3339-timestamp>` is still available for incremental polling against a known cursor and may combine with `--thread --tail` or `--recent`.\n")
+		b.WriteString(commentThreadStep(ctx.IssueID, ctx.TriggerCommentID, ctx.IssueSnapshotInlined, ctx.BundleContextHint)) // CEREBRO-PATCH(runtime-config-snapshot): skip/replace the comment-list step when a fewer-calls saving is on (FIR-2384)
 		fmt.Fprintf(&b, "4. Find the triggering comment (ID: `%s`) inside the thread you just read and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
 		if ctx.IsSquadLeader {
 			b.WriteString("5. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 7 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
@@ -368,9 +369,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	} else {
 		// Assignment-triggered: defer to agent Skills for workflow specifics.
 		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
-		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
+		b.WriteString(assignmentIssueGetStep(ctx.IssueID, ctx.IssueSnapshotInlined, ctx.BundleContextHint)) // CEREBRO-PATCH(runtime-config-snapshot): skip/replace the issue get step when a fewer-calls saving is on (FIR-2384)
 		fmt.Fprintf(&b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
-		fmt.Fprintf(&b, "3. Run `multica issue comment list %s --output json` to read the full comment history (returns all comments, capped server-side at 2000) — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions. When the flat dump is too large to ingest in one shot, treat `--recent 20 --output json` plus the `--before` / `--before-id` cursor (from the stderr `Next thread cursor:` line) as a paging strategy: keep walking older threads until you have read enough history to satisfy this mandatory step. `--recent` is a way to read the full history page-by-page, not a shortcut that replaces it.\n", ctx.IssueID)
+		b.WriteString(assignmentCommentListStep(ctx.IssueID, ctx.IssueSnapshotInlined, ctx.BundleContextHint)) // CEREBRO-PATCH(runtime-config-snapshot): the bundled/inlined thread satisfies the mandatory history read when a fewer-calls saving is on (FIR-2384)
 		fmt.Fprintf(&b, "4. Run `multica issue status %s in_progress`\n", ctx.IssueID)
 		b.WriteString("5. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)\n")
 		if ctx.IsSquadLeader {
@@ -460,6 +461,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- Keep cell content under ~60 characters per cell when possible\n")
 	b.WriteString("- For content longer than ~60 characters, prefer a bulleted list — it is more readable on mobile\n")
 	b.WriteString("- Use `<br>` inside a cell to add intentional line breaks when a table is still the right format\n\n")
+
+	// CEREBRO-PATCH(agent-todo-checklist): teach agents how to read and complete markdown checklists in descriptions/comments (FIR-2297)
+	b.WriteString("## Todo Checklists\n\n")
+	b.WriteString("Descriptions and comments can contain markdown checklists: `- [ ]` is an open item, `- [x]` is done. The platform renders each line as a checkbox.\n\n")
+	b.WriteString("- When a checklist tracks work you are doing, mark an item done the moment you finish it — change that line's `- [ ]` to `- [x]`.\n")
+	b.WriteString("- It persists only when you save the whole field: read the current description (`multica issue get <id> --output json`), flip just the relevant line(s), and write it back with `multica issue update <id> --description-stdin`. The update replaces the entire description, so resend every other line unchanged.\n")
+	b.WriteString("- Only check off items that already exist; do not invent or restructure a checklist unless you were asked to.\n\n")
 
 	b.WriteString("## Output\n\n")
 	switch {

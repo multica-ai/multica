@@ -12,6 +12,8 @@ export {
 } from "./components/cerebro-inbox-row-actions";
 export { CerebroUnarchiveToolbarButton } from "./components/cerebro-unarchive-toolbar-button";
 export { CerebroInboxTimestamp } from "./components/cerebro-inbox-timestamp";
+export { CerebroInboxReminderRow } from "./components/cerebro-inbox-reminder-row";
+export { CerebroInboxRunRequestRow } from "./components/cerebro-inbox-run-request-row";
 export { useInboxKeyboardShortcuts } from "./use-inbox-keyboard-shortcuts";
 export {
   useMuteInbox,
@@ -19,6 +21,7 @@ export {
   useMarkInboxUnread,
   useUnarchiveInbox,
   useCreateInboxReminder,
+  useRunPrivateAgentRequest,
 } from "./mutations";
 export {
   isMuted,
@@ -30,6 +33,7 @@ export {
   toDateTimeLocalValue,
   formatMutedUntilTime,
   formatPlannedDateTime,
+  isReminderOverdue,
 } from "./mute-time";
 // FIR-2115 — "Group by → Action" inbox grouping.
 export {
@@ -43,3 +47,6 @@ export {
   type InboxActionEntry,
 } from "./action-groups";
 export { useInboxActionGroupLabels } from "./strings";
+// FIR-2474 — pin the open inbox row in place until the message is closed.
+export { sortInboxEntriesPinned, type PinnedSelection } from "./pin-selected";
+export { pinnedBucketizer, type PinnedGroup, type InboxBucket } from "./pin-selected-group";

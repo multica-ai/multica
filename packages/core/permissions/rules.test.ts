@@ -28,9 +28,7 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     avatar_url: null,
     runtime_mode: "local",
     runtime_config: {},
-    custom_env: {},
     custom_args: [],
-    custom_env_redacted: false,
     visibility: "workspace",
     status: "idle",
     max_concurrent_tasks: 1,
@@ -150,6 +148,18 @@ describe("canEditAgent", () => {
     expect(canEditAgent(orphan, { userId: BOB, role: "admin" }).allowed).toBe(
       true,
     );
+  });
+  it("allows owner of a private (personal) agent who is a plain member", () => {
+    const personal = makeAgent({ visibility: "private", owner_id: ALICE });
+    expect(
+      canEditAgent(personal, { userId: ALICE, role: "member" }).allowed,
+    ).toBe(true);
+  });
+  it("denies non-owner member on a private agent", () => {
+    const personal = makeAgent({ visibility: "private", owner_id: ALICE });
+    const d = canEditAgent(personal, { userId: BOB, role: "member" });
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("not_admin_role");
   });
 });
 

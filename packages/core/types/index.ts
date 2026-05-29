@@ -4,6 +4,7 @@ export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueReactio
 export type { IssueDependencyRef, IssueDependenciesResponse } from "./issue";
 export type {
   Agent,
+  AgentAvatarBackfillStatus, // CEREBRO-PATCH(agent-avatar-backfill): backfill progress API type.
   AgentInfisicalFolder, // CEREBRO-PATCH(agent-infisical-secrets): export folder grant type.
   AgentStatus,
   AgentRuntimeMode,
@@ -22,6 +23,8 @@ export type {
   CreateAgentFromTemplateResponse,
   CreateAgentFromTemplateFailure,
   UpdateAgentRequest,
+  AgentEnvResponse,
+  UpdateAgentEnvRequest,
   Skill,
   SkillSummary,
   AgentSkillSummary,
@@ -72,7 +75,8 @@ export type {
 } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
 // CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 export thread move response type.
-export type { Comment, CommentType, CommentAuthorType, Reaction, MoveCommentToSubIssueResponse } from "./comment";
+// CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 export MoveCommentsToThreadResponse.
+export type { Comment, CommentType, CommentAuthorType, Reaction, MoveCommentToSubIssueResponse, MoveCommentsToThreadResponse } from "./comment";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
 export type {
   TimelineEntry,
@@ -169,6 +173,7 @@ export type {
   Squad,
   SquadMember,
   SquadMemberType,
+  SquadMemberPreview,
   SquadActivityLog,
   SquadActivityOutcome,
   CreateSquadRequest,

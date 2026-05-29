@@ -27,7 +27,6 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 // CEREBRO-PATCH(runtime-detail-sandbox-mutation): keep useUpdateRuntimeSandbox import
 import {
-  useDeleteRuntime,
   useUpdateRuntimeSandbox,
   useUpdateRuntimeSandboxPolicy,
 } from "@multica/core/runtimes/mutations";
@@ -43,16 +42,6 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -66,6 +55,7 @@ import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
+import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { useT } from "../../i18n";
 // CEREBRO-PATCH(runtime-detail-accounts): JEH-999 filter card to runtime's own account
 import { RuntimeAccountsCard } from "@multica/cerebro-runtime";
@@ -126,7 +116,6 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
-  const deleteMutation = useDeleteRuntime(wsId);
   // CEREBRO-PATCH(runtime-detail-sandbox-state): per-runtime sandbox override mutation + error surface
   const sandboxMutation = useUpdateRuntimeSandbox(wsId);
   const sandboxPolicyMutation = useUpdateRuntimeSandboxPolicy(wsId);
@@ -152,17 +141,13 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
     (a) => a.runtime_id === runtime.id && !a.archived_at,
   );
 
-  const handleDelete = () => {
-    deleteMutation.mutate(runtime.id, {
-      onSuccess: () => {
-        setDeleteOpen(false);
-        navigation.replace(paths.runtimes());
-        toast.success(t(($) => $.detail.toast_deleted));
-      },
-      onError: (e) => {
-        toast.error(e instanceof Error ? e.message : t(($) => $.detail.toast_delete_failed));
-      },
-    });
+  // Successful delete (light or cascade) closes the dialog and navigates
+  // back to the runtimes list. Toast lives here so the cascade-mode count
+  // and the light-mode "Runtime deleted" share one entry point.
+  const handleDeleted = () => {
+    setDeleteOpen(false);
+    navigation.replace(paths.runtimes());
+    toast.success(t(($) => $.detail.toast_deleted));
   };
 
   const daemonShort = shortDaemonId(runtime.daemon_id);
@@ -264,27 +249,16 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         </div>
       </div>
 
-      {/* Delete confirmation */}
-      <AlertDialog open={deleteOpen} onOpenChange={(v) => { if (!v) setDeleteOpen(false); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(($) => $.detail.delete_dialog.description, { name: runtime.name })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.detail.delete_dialog.cancel)}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? t(($) => $.detail.delete_dialog.deleting) : t(($) => $.detail.delete_dialog.confirm)}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Delete confirmation — unified light/cascade dialog. Shared across
+          this page and the runtime list kebab so the two entry points stay
+          in lockstep on copy and behaviour. */}
+      <DeleteRuntimeDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        runtime={runtime}
+        wsId={wsId}
+        onDeleted={handleDeleted}
+      />
     </div>
   );
 }

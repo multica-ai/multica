@@ -16,10 +16,19 @@
 
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
+import { useQuery } from "@tanstack/react-query";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { getCurrentWsId } from "@multica/core/platform";
+import { useAuthStore } from "@multica/core/auth";
+import {
+  agentListOptions,
+  memberListOptions,
+} from "@multica/core/workspace/queries";
+import { Lock } from "lucide-react";
 // CEREBRO-PATCH(skill-mention-view): render `mention://skill/<id>` nodes as a SkillMentionChip.
 import { SkillMentionChip } from "@multica/cerebro-skill-mention";
 import { useNavigation } from "../../navigation";
+import { useT } from "../../i18n";
 import { IssueChip } from "../../issues/components/issue-chip";
 
 export function MentionView({ node }: NodeViewProps) {
@@ -41,11 +50,78 @@ export function MentionView({ node }: NodeViewProps) {
     );
   }
 
+  if (type === "agent") {
+    return (
+      <NodeViewWrapper as="span" className="inline">
+        <AgentMention agentId={id} fallbackLabel={label} />
+      </NodeViewWrapper>
+    );
+  }
+
   return (
     <NodeViewWrapper as="span" className="inline">
       <span className="mention">@{label ?? id}</span>
     </NodeViewWrapper>
   );
+}
+
+// CEREBRO-PATCH(private-agent-owner-only-trigger): an @mention of a private
+// agent only wakes it for its owner (FIR-2349 / FIR-2385). When the current
+// viewer isn't the owner, the chip is muted with a lock + the owner's name
+// rendered as the approver so a non-owner can see at a glance whose
+// run-request inbox their tag will land in. Renders as a plain mention
+// otherwise, and also when the agent isn't in cache (a member who can't see
+// it never tagged it). Mirrors the Go gate `canTriggerPrivateAgent`.
+function AgentMention({
+  agentId,
+  fallbackLabel,
+}: {
+  agentId: string;
+  fallbackLabel?: string;
+}) {
+  const { t } = useT("editor");
+  const wsId = getCurrentWsId();
+  const userId = useAuthStore((s) => s.user?.id ?? null);
+  const { data: agents } = useQuery({
+    ...agentListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const { data: members } = useQuery({
+    ...memberListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const agent = agents?.find((a) => a.id === agentId);
+  const wontTrigger =
+    !!agent &&
+    agent.visibility === "private" &&
+    (agent.owner_id === null || agent.owner_id !== userId);
+
+  if (wontTrigger) {
+    const ownerName =
+      agent.owner_id != null
+        ? (members?.find((m) => m.user_id === agent.owner_id)?.name ?? null)
+        : null;
+    const tooltip = ownerName
+      ? t(($) => $.mention.no_trigger_private, { owner: ownerName })
+      : t(($) => $.mention.no_trigger_private_unknown_owner);
+    return (
+      <span
+        className="mention inline-flex items-center gap-0.5 opacity-60"
+        title={tooltip}
+      >
+        <Lock aria-label={tooltip} className="size-3 shrink-0" />@
+        {fallbackLabel ?? agentId}
+        {ownerName ? (
+          <span className="ml-1 text-xs text-muted-foreground">
+            ·{" "}
+            {t(($) => $.mention.run_request_owner_suffix, { owner: ownerName })}
+          </span>
+        ) : null}
+      </span>
+    );
+  }
+
+  return <span className="mention">@{fallbackLabel ?? agentId}</span>;
 }
 
 function IssueMention({

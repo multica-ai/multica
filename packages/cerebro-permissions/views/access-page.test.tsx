@@ -16,14 +16,6 @@ const mockAudit = vi.hoisted(() => vi.fn().mockResolvedValue({
   limit: 50,
   offset: 0,
 }));
-const mockListPendingApprovalAsks = vi.hoisted(() => vi.fn().mockResolvedValue({
-  approvals: [],
-  total: 0,
-  limit: 50,
-  offset: 0,
-}));
-const mockApproveAsk = vi.hoisted(() => vi.fn().mockResolvedValue({}));
-const mockRejectAsk = vi.hoisted(() => vi.fn().mockResolvedValue({}));
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -39,9 +31,6 @@ vi.mock("@multica/core/api", async () => {
       deletePersonaGrant: mockDeleteGrant,
       listPersonaGrantAudit: mockAudit,
       listSubjectsWithPermissions: undefined,
-      listPendingApprovalAsks: mockListPendingApprovalAsks,
-      approveAsk: mockApproveAsk,
-      rejectAsk: mockRejectAsk,
     },
   };
 });
@@ -52,6 +41,10 @@ vi.mock("@multica/core/hooks", () => ({
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "ws-1", slug: "acme", name: "Acme" }),
+}));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => true,
 }));
 
 type MockCurrentMember = {
@@ -114,12 +107,6 @@ beforeEach(() => {
   mockDeleteGrant.mockReset();
   mockAudit.mockReset();
   mockAudit.mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 });
-  mockListPendingApprovalAsks.mockReset();
-  mockListPendingApprovalAsks.mockResolvedValue({ approvals: [], total: 0, limit: 50, offset: 0 });
-  mockApproveAsk.mockReset();
-  mockApproveAsk.mockResolvedValue({});
-  mockRejectAsk.mockReset();
-  mockRejectAsk.mockResolvedValue({});
   mockUseCurrentMember.mockReturnValue({
     userId: "user-1",
     role: "admin" as const,
@@ -129,13 +116,16 @@ beforeEach(() => {
 });
 
 describe("AccessPage", () => {
-  it("renders Subjects tab as default active tab", async () => {
+  it("renders Subjects tab as default active tab, with all merged tabs present", async () => {
     const { ui } = makePage();
     render(ui);
-    // Subjects tab trigger should be visible
+    // FIR-2230 phase 7: the single Access page carries every tab — including
+    // Matrix / Roles / Effective folded in from the retired Permissions page.
     expect(await screen.findByRole("tab", { name: /People & Agents/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Pending/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /^Permissions$/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Matrix$/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Roles$/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Effective$/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Audit/i })).toBeInTheDocument();
   });
 
@@ -168,15 +158,6 @@ describe("AccessPage", () => {
     expect(await screen.findByText(/Access denied/i)).toBeInTheDocument();
   });
 
-  it("Pending tab shows empty state when no pending asks", async () => {
-    const user = userEvent.setup();
-    const { ui } = makePage();
-    render(ui);
-
-    await user.click(await screen.findByRole("tab", { name: /Pending/i }));
-    expect(await screen.findByText(/Nothing waiting for approval/i)).toBeInTheDocument();
-  });
-
   it("Grants tab renders table when switched to", async () => {
     const user = userEvent.setup();
     mockListGrants.mockResolvedValue({
@@ -191,6 +172,84 @@ describe("AccessPage", () => {
     await user.click(await screen.findByRole("tab", { name: /^Permissions$/i }));
     expect(await screen.findByText("Fætta")).toBeInTheDocument();
     expect(screen.getByText("issue.read")).toBeInTheDocument();
+  });
+
+  // The grant-editing behaviours below moved here from the retired
+  // permissions-page test when the two pages merged (FIR-2230 phase 7). They
+  // guard the GrantsTable / GrantDrawer / CreateGrantDialog that now live on
+  // the Access page's Permissions tab.
+  it("revokes a grant from the drawer instead of hard-deleting it", async () => {
+    const user = userEvent.setup();
+    mockListGrants.mockResolvedValue({
+      items: [sampleGrant],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    mockGetGrant.mockResolvedValue(sampleGrant);
+    mockUpdateGrant.mockResolvedValue({ ...sampleGrant, status: "revoked" });
+    const { ui } = makePage();
+    render(ui);
+
+    await user.click(await screen.findByRole("tab", { name: /^Permissions$/i }));
+    await user.click(await screen.findByText("Fætta"));
+    await user.click(await screen.findByRole("button", { name: /Revoke grant/i }));
+    await user.click(screen.getByRole("button", { name: /^Revoke$/i }));
+
+    await waitFor(() =>
+      expect(mockUpdateGrant).toHaveBeenCalledWith(
+        "ws-1",
+        "grant-1",
+        expect.objectContaining({ status: "revoked" }),
+      ),
+    );
+    expect(mockDeleteGrant).not.toHaveBeenCalled();
+  });
+
+  it("opens the create-grant dialog from the Permissions tab", async () => {
+    const user = userEvent.setup();
+    mockListGrants.mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 });
+    const { ui } = makePage();
+    render(ui);
+
+    await user.click(await screen.findByRole("tab", { name: /^Permissions$/i }));
+    await user.click(await screen.findByRole("button", { name: /New grant/i }));
+    expect(
+      await screen.findByRole("heading", { name: /New grant/i }),
+    ).toBeInTheDocument();
+    // Capability select defaults to the first sensitive action in the catalog.
+    expect(screen.getByRole("combobox", { name: "Capability" })).toHaveTextContent(
+      "Run a shell command",
+    );
+  });
+
+  it("create-grant dialog mounts a submit-button form (JEH-1529 regression)", async () => {
+    const user = userEvent.setup();
+    mockListGrants.mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 });
+    const { ui } = makePage();
+    render(ui);
+
+    await user.click(await screen.findByRole("tab", { name: /^Permissions$/i }));
+    await user.click(await screen.findByRole("button", { name: /New grant/i }));
+    await screen.findByRole("heading", { name: /New grant/i });
+
+    const submitBtn = screen.getByRole("button", {
+      name: /^Create grant$/,
+    }) as HTMLButtonElement;
+    expect(submitBtn.type).toBe("submit");
+    expect(submitBtn.closest("form")?.tagName).toBe("FORM");
+  });
+
+  it("Permissions tab falls back to an empty list on malformed grants data", async () => {
+    const user = userEvent.setup();
+    mockListGrants.mockResolvedValue({ broken: true });
+    const { ui } = makePage();
+    render(ui);
+
+    await user.click(await screen.findByRole("tab", { name: /^Permissions$/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/No grants match/i)).toBeInTheDocument(),
+    );
   });
 
   it("Audit tab renders empty state when no audit events", async () => {

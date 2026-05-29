@@ -42,7 +42,9 @@
     "preview_failed": "预览加载失败",
     "preview_too_large": "文件太大，无法在线预览，请下载查看。",
     "preview_unsupported": "该文件类型暂不支持预览。",
-    "close": "关闭"
+    "close": "关闭",
+    "open_in_new_tab": "在新标签页打开",
+    "remove": "移除附件"
   },
   "link_hover": {
     "copy_link": "复制链接",
@@ -51,13 +53,16 @@
     "copy_failed": "复制失败"
   },
   "mention": {
-    "_comment_cerebro_patch": "CEREBRO-PATCH(mention-access-locale-zh): JEH-1250 — no_project_access tooltip",
+    "_comment_cerebro_patch": "CEREBRO-PATCH(mention-access-locale-zh): JEH-1250 no_project_access + FIR-2349/FIR-2385 no_trigger_private tooltip (now run-request framing, 已插入所有者名字)",
     "group_users": "用户",
-    "group_issues": "issue",
+    "group_issues": "Issues",
     "all_members": "所有成员",
     "searching": "搜索中...",
     "no_results": "无结果",
-    "no_project_access": "无权访问此项目"
+    "no_project_access": "无权访问此项目",
+    "no_trigger_private": "已锁定 — 标记会向 {{owner}} 发送运行请求，由 {{owner}} 运行此个人 Agent",
+    "no_trigger_private_unknown_owner": "已锁定 — 标记会向所有者发送运行请求，由所有者运行此个人 Agent",
+    "run_request_owner_suffix": "由 {{owner}} 审批"
   },
   "code_block": {
     "copy_code": "复制代码"

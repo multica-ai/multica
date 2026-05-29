@@ -1,7 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
   fetchGrantAudit,
-  fetchPendingAsks,
   fetchPersonaGrant,
   fetchPersonaGrants,
   fetchSubjectsWithPermissions,
@@ -48,8 +47,6 @@ export const permissionsKeys = {
       f.limit,
       f.offset,
     ] as const,
-  pendingAsks: (wsId: string, f: { limit: number; offset: number }) =>
-    [...permissionsKeys.all(wsId), "pending-asks", f.limit, f.offset] as const,
 };
 
 export function grantsListOptions(wsId: string, filter: GrantsFilter) {
@@ -89,17 +86,6 @@ export function subjectsWithPermissionsOptions(
     queryFn: () => fetchSubjectsWithPermissions(wsId, filter),
     enabled: !!wsId,
     staleTime: 30 * 1000,
-    placeholderData: (prev) => prev,
-  });
-}
-
-export function pendingAsksOptions(wsId: string, filter: { limit: number; offset: number }) {
-  return queryOptions({
-    queryKey: permissionsKeys.pendingAsks(wsId, filter),
-    queryFn: () => fetchPendingAsks(wsId, filter),
-    enabled: !!wsId,
-    staleTime: 10 * 1000,
-    refetchInterval: 30 * 1000,
     placeholderData: (prev) => prev,
   });
 }

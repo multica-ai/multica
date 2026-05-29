@@ -1,7 +1,10 @@
 {
   "generate_ai": "AI 生成",
+  "modal_title": "使用 AI 生成头像",
+  "modal_description": "留空将自动生成写实风格的人像，或在下方描述你想要的外观。",
   "prompt_placeholder": "描述外观（可选）",
   "generate_button": "生成",
   "generating": "生成中…",
+  "cancel": "取消",
   "generate_error": "头像生成失败"
 }

@@ -125,6 +125,25 @@ const ROW_GROUPS: RowGroup[] = [
   },
 ];
 
+// Date reminders fire when a date actually arrives (not when it's edited).
+// Gated behind the `cerebro_date_reminders` feature flag and appended to the
+// row groups by NotificationsTab when enabled.
+const DATE_REMINDER_GROUP: RowGroup = {
+  title: "When a date arrives",
+  rows: [
+    {
+      routingKey: "due_date_reminder",
+      label: "Due date reached",
+      hint: "An issue you're assigned to is due today.",
+    },
+    {
+      routingKey: "start_date_reminder",
+      label: "Start date reached",
+      hint: "An issue you're assigned to starts today.",
+    },
+  ],
+};
+
 interface AutoSubscribeRowSpec {
   reason: AutoSubscribeReason;
   label: string;
@@ -241,6 +260,11 @@ export function NotificationsTab() {
   const channelMeta = webPushEnabled
     ? CHANNEL_META
     : CHANNEL_META.filter((m) => m.channel !== "mobile");
+  // FIR-2412: append the date-reminder group only when the feature is enabled.
+  const dateRemindersEnabled = useFeatureFlag("cerebro_date_reminders");
+  const rowGroups = dateRemindersEnabled
+    ? [...ROW_GROUPS, DATE_REMINDER_GROUP]
+    : ROW_GROUPS;
 
   const handleChannelToggle = async (
     channel: Channel,
@@ -354,6 +378,10 @@ export function NotificationsTab() {
     }
   };
 
+  const handleReminderMobileToggle = async (next: boolean) => {
+    await handleChannelToggle("mobile", "reminder", next ? "on" : "off");
+  };
+
   return (
     <div className="space-y-8">
       <section className="space-y-3">
@@ -387,6 +415,7 @@ export function NotificationsTab() {
           savingTransport={savingTransport}
           onToggle={handleChannelToggle}
           onTransportToggle={handleTransportToggle}
+          groups={rowGroups}
           extras={
             meta.channel === "mobile" ? (
               <>
@@ -395,6 +424,11 @@ export function NotificationsTab() {
                   saving={savingNotifyAllMobile}
                   onChange={handleNotifyAllMobileToggle}
                 />
+                <ReminderMobilePushCard
+                  user={user}
+                  saving={savingChannelKey === "mobile:reminder"}
+                  onChange={handleReminderMobileToggle}
+                />
                 <PushNotificationsSection />
               </>
             ) : null
@@ -402,6 +436,47 @@ export function NotificationsTab() {
         />
       ))}
     </div>
+  );
+}
+
+interface ReminderMobilePushCardProps {
+  user: ReturnType<typeof useAuthStore.getState>["user"];
+  saving: boolean;
+  onChange: (next: boolean) => void | Promise<void>;
+}
+
+function ReminderMobilePushCard({
+  user,
+  saving,
+  onChange,
+}: ReminderMobilePushCardProps) {
+  const checked =
+    getChannelChoice(
+      user?.preferences as Record<string, unknown> | undefined,
+      "mobile",
+      "reminder",
+    ) === "on";
+  return (
+    <Card>
+      <CardContent className="px-4 py-3">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <Label className="text-sm font-medium">
+              Send mobile push for reminders
+            </Label>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Sends a push at the reminder time. Other inbox events keep their
+              own settings.
+            </p>
+          </div>
+          <Switch
+            checked={checked}
+            disabled={saving || !user}
+            onCheckedChange={(next) => void onChange(next)}
+          />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -519,6 +594,9 @@ interface ChannelSectionProps {
     field: keyof ChannelTransport,
     next: boolean,
   ) => void | Promise<void>;
+  // The row groups to render for this channel. Passed in so feature-flagged
+  // groups (e.g. date reminders) can be added or omitted by the parent.
+  groups: RowGroup[];
   // Rendered after the per-event matrix and inside the same section block.
   // Used by the Mobile channel to pair its master toggle + device subscribe
   // controls under the same heading.
@@ -532,6 +610,7 @@ function ChannelSection({
   savingTransport,
   onToggle,
   onTransportToggle,
+  groups,
   extras,
 }: ChannelSectionProps) {
   const transport = getChannelTransport(
@@ -592,7 +671,7 @@ function ChannelSection({
 
       <Card className={cn(meta.comingSoon && "opacity-60")}>
         <CardContent className="p-0">
-          {ROW_GROUPS.map((group, groupIdx) => (
+          {groups.map((group, groupIdx) => (
             <div key={group.title}>
               {(groupIdx > 0 || (meta.transportFields?.length ?? 0) > 0) && null}
               <div className="px-4 py-2 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground bg-muted/40 border-b">

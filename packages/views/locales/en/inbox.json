@@ -48,7 +48,12 @@
     "reaction_added": "Reacted",
     "quick_create_done": "Created with agent",
     "quick_create_failed": "Create with agent failed",
-    "reminder": "Reminder"
+    "reminder": "Reminder",
+    "_comment_cerebro_patch": "CEREBRO-PATCH(inbox-types-locale-en): FIR-2385 private_agent_run_request label",
+    "private_agent_run_request": "Run request",
+    "_comment_cerebro_patch_date_reminders": "CEREBRO-PATCH(issue-date-reminders): FIR-2412 start/due date reminder labels",
+    "due_date_reminder": "Due date reminder",
+    "start_date_reminder": "Start date reminder"
   },
   "labels": {
     "set_status_to": "Set status to",

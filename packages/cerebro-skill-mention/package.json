@@ -31,7 +31,11 @@
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
+    "@tiptap/extension-mention": "^3.22.1",
+    "@tiptap/starter-kit": "^3.22.1",
     "@types/react": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

@@ -12,15 +12,20 @@
     "./views": "./views/index.ts"
   },
   "dependencies": {
+    "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/cerebro-groups": "workspace:*",
+    "@multica/cerebro-tool-policy": "workspace:*",
     "@multica/cerebro-types": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "lucide-react": "catalog:",
-    "sonner": "^2.0.7"
+    "sonner": "^2.0.7",
+    "zod": "catalog:"
   },
   "peerDependencies": {
-    "react": "catalog:"
+    "react": "catalog:",
+    "zustand": "catalog:"
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",

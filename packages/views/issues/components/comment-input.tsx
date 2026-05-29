@@ -22,6 +22,10 @@ import { api } from "@multica/core/api";
 import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
 import { PinButton, useFloatPosition, useInputPin } from "@multica/cerebro-pin-input";
 import { useT } from "../../i18n";
+// CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — top-level composer
+// shows the same "who will be triggered" bar as the reply composer so the
+// indicator follows the trigger logic everywhere.
+import { TriggerTargetBar, memberMentionMarkdown } from "./trigger-target-bar";
 
 interface CommentInputProps {
   issueId: string;
@@ -36,14 +40,22 @@ interface CommentInputProps {
    * surfaces stay unchanged.
    */
   pinnable?: boolean;
+  /**
+   * CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — agent the
+   * backend trigger will wake when the comment has no @agent mentions.
+   * Forwarded from `issue-detail.tsx` (resolved from issue assignee or
+   * squad leader). Channels/DMs pass nothing — the bar stays hidden there.
+   */
+  triggerAgentId?: string;
 }
 
-function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false }: CommentInputProps) {
+function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, triggerAgentId }: CommentInputProps) {
   const { t } = useT("issues");
   const editorRef = useRef<ContentEditorRef>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const submitOnEnter = useSubmitOnEnter();
   const [isEmpty, setIsEmpty] = useState(true);
+  const [markdown, setMarkdown] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const uploadMapRef = useRef<Map<string, string>>(new Map());
@@ -74,10 +86,13 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false }
       if (content.includes(url)) activeIds.push(id);
     }
     setSubmitting(true);
+    editorRef.current?.clearContent();
+    setIsEmpty(true);
     try {
       await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
       editorRef.current?.clearContent();
       setIsEmpty(true);
+      setMarkdown("");
       uploadMapRef.current.clear();
       if (isPinned) {
         unpin();
@@ -115,6 +130,16 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false }
         </div>
       )}
       <div style={floatStyle}>
+        {/* CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — sits
+            above the editor card so the user always sees who an untagged
+            comment will trigger, matching the reply composer. */}
+        <TriggerTargetBar
+          markdown={markdown}
+          triggerAgentId={triggerAgentId}
+          onTagOwner={(owner) => {
+            editorRef.current?.insertText(` ${memberMentionMarkdown(owner)} `);
+          }}
+        />
         <div
           {...dropZoneProps}
           data-testid="comment-input"
@@ -144,7 +169,10 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false }
               key={issueId}
               ref={editorRef}
               placeholder={t(($) => $.comment.leave_comment_placeholder)}
-              onUpdate={(md) => setIsEmpty(!md.trim())}
+              onUpdate={(md) => {
+                setMarkdown(md);
+                setIsEmpty(!md.trim());
+              }}
               onSubmit={handleSubmit}
               onUploadFile={handleUpload}
               debounceMs={100}

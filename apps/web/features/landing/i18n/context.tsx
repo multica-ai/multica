@@ -1,18 +1,32 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, useMemo } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
+import { useRouter } from "next/navigation";
 import { useConfigStore } from "@multica/core/config";
-import { LOCALE_COOKIE } from "@multica/core/i18n";
+import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
 import { createEnDict } from "./en";
 import { createZhDict } from "./zh";
-import type { LandingDict, Locale } from "./types";
+import {
+  toLandingDictionaryLocale,
+  type LandingDict,
+  type LandingDictionaryLocale,
+  type Locale,
+} from "./types";
 
-const dictionaryFactories: Record<Locale, (allowSignup: boolean) => LandingDict> = {
+const dictionaryFactories: Record<
+  LandingDictionaryLocale,
+  (allowSignup: boolean) => LandingDict
+> = {
   en: createEnDict,
   zh: createZhDict,
 };
-
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
 
 type LocaleContextValue = {
   locale: Locale;
@@ -30,25 +44,29 @@ export function LocaleProvider({
   initialLocale?: Locale;
 }) {
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
+  const [, startTransition] = useTransition();
+  const router = useRouter();
+  const localeAdapter = useMemo(() => createBrowserCookieLocaleAdapter(), []);
   const allowSignup = useConfigStore((state) => state.allowSignup);
   const t = useMemo(
-    () => dictionaryFactories[locale](allowSignup),
+    () => dictionaryFactories[toLandingDictionaryLocale(locale)](allowSignup),
     [allowSignup, locale],
   );
 
-  const setLocale = useCallback((l: Locale) => {
-    setLocaleState(l);
-    const secure =
-      typeof location !== "undefined" && location.protocol === "https:"
-        ? "; Secure"
-        : "";
-    document.cookie = `${LOCALE_COOKIE}=${l}; path=/; max-age=${COOKIE_MAX_AGE}; SameSite=Lax${secure}`;
-  }, []);
+  const setLocale = useCallback(
+    (l: Locale) => {
+      if (l === locale) return;
+      setLocaleState(l);
+      localeAdapter.persist(l);
+      startTransition(() => {
+        router.refresh();
+      });
+    },
+    [locale, localeAdapter, router, startTransition],
+  );
 
   return (
-    <LocaleContext.Provider
-      value={{ locale, t, setLocale }}
-    >
+    <LocaleContext.Provider value={{ locale, t, setLocale }}>
       {children}
     </LocaleContext.Provider>
   );

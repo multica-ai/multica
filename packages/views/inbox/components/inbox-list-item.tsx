@@ -5,7 +5,7 @@
 import { StatusIcon } from "../../issues/components";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Hash, MessagesSquare } from "lucide-react";
-import { CerebroInboxRowActions, CerebroSwipeArchive, CerebroUnarchiveAction, CerebroInboxTimestamp } from "@multica/cerebro-inbox"; // CEREBRO-PATCH(inbox-row-actions-mount) / CEREBRO-PATCH(inbox-unarchive-mount) / CEREBRO-PATCH(inbox-muted-timestamp)
+import { CerebroInboxRowActions, CerebroSwipeArchive, CerebroUnarchiveAction, CerebroInboxTimestamp, CerebroInboxReminderRow, CerebroInboxRunRequestRow, isReminderOverdue } from "@multica/cerebro-inbox"; // CEREBRO-PATCH(inbox-row-actions-mount) / CEREBRO-PATCH(inbox-unarchive-mount) / CEREBRO-PATCH(inbox-muted-timestamp) / CEREBRO-PATCH(inbox-reminder-row) / CEREBRO-PATCH(inbox-run-request-row): FIR-2385
 import { AvatarGroup } from "@multica/ui/components/ui/avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { Channel, ChannelMember, InboxItem } from "@multica/core/types";
@@ -117,6 +117,9 @@ export function InboxListItem({
   const mentioned = item.type === "mentioned" && unread;
   const timeAgo = useTimeAgo();
   const displayTitle = getInboxDisplayTitle(item);
+  // CEREBRO-PATCH(inbox-reminder-snooze-signal): a "remind me" on an
+  // existing row keeps the original inbox type, so muted_until is the signal.
+  const reminderSignal = item.type === "reminder" || isReminderOverdue(item.muted_until);
 
   return (
     <InboxListItemShell
@@ -147,8 +150,10 @@ export function InboxListItem({
           <span
             className={`shrink-0 text-xs ${unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}
           >
-            {/* CEREBRO-PATCH(inbox-muted-timestamp): JEH-663 — show "Muted til HH:MM" instead of relative time when row is only visible because the Muted filter is active. */}
-            <CerebroInboxTimestamp item={item} fallback={timeAgo(item.created_at)} />
+            {/* CEREBRO-PATCH(inbox-reminder-row): FIR-2364 — reminders keep a short relative time here so the long "Overdue since …" text no longer squeezes the title; it moves to the dedicated reminder row below. */}
+            {reminderSignal ? timeAgo(item.created_at) : (
+              <CerebroInboxTimestamp item={item} fallback={timeAgo(item.created_at)} />
+            )}
           </span>
         </div>
         <p
@@ -159,6 +164,10 @@ export function InboxListItem({
             <InboxDetailLabel item={item} />
           </span>
         </p>
+        {/* CEREBRO-PATCH(inbox-reminder-row): FIR-2364 — reminder badge + planned/overdue timestamp on their own row so the title stays fully readable. */}
+        <CerebroInboxReminderRow item={item} />
+        {/* CEREBRO-PATCH(inbox-run-request-row): FIR-2385 — owner's Run button for a private-agent run-request. */}
+        <CerebroInboxRunRequestRow item={item} />
       </div>
     </InboxListItemShell>
   );

@@ -558,9 +558,13 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
     Agent["runtime_mode"]
   >,
   runtime_config: z.record(z.string(), z.unknown()).default({}),
-  custom_env: z.record(z.string(), z.string()).default({}),
   custom_args: z.array(z.string()).default([]),
-  custom_env_redacted: z.boolean().default(true),
+  // MUL-2600: agent resource shape no longer carries custom_env or
+  // custom_env_redacted. Mobile keeps only the coarse metadata that
+  // mirrors web's expectations. Real env values are reachable via the
+  // dedicated /env endpoint and we don't expose env editing on mobile.
+  has_custom_env: z.boolean().optional(),
+  custom_env_key_count: z.number().optional(),
   visibility: z.string().catch("workspace") as unknown as z.ZodType<
     Agent["visibility"]
   >,

@@ -179,7 +179,28 @@ func (g *Gate) Evaluate(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return Result{Outcome: OutcomeDenied, Decision: decision, Reason: "permission lookup failed"}, err
 	}
+	return g.resultForDecision(ctx, req, decision)
+}
 
+// EvaluateDecision is Evaluate for a decision the caller already resolved
+// through its own engine (e.g. the FIR-2230 per-tool policy chain). It skips the
+// gate's own Resolver and goes straight to ask creation, so the inbox + await
+// machinery is shared by both the capability resolver and the tool-policy chain.
+// Like Evaluate it does NOT block — on needs_approval it returns OutcomePending
+// with a valid ApprovalID. An error means no decision could be recorded; the
+// caller MUST fail closed.
+func (g *Gate) EvaluateDecision(ctx context.Context, req Request, decision permissions.Decision) (Result, error) {
+	if g == nil || g.Approvals == nil {
+		return Result{Outcome: OutcomeDenied, Reason: "gate not configured"},
+			errors.New("permgate: gate not configured")
+	}
+	return g.resultForDecision(ctx, req, decision)
+}
+
+// resultForDecision maps a resolved Decision to a gate Result, materialising an
+// inbox ask on needs_approval. Shared by Evaluate (Resolver-driven) and
+// EvaluateDecision (caller-driven).
+func (g *Gate) resultForDecision(ctx context.Context, req Request, decision permissions.Decision) (Result, error) {
 	switch decision.Kind {
 	case permissions.DecisionAllow:
 		return Result{Outcome: OutcomeAllowed, Decision: decision, Reason: decision.Reason}, nil
@@ -210,6 +231,21 @@ func (g *Gate) Evaluate(ctx context.Context, req Request) (Result, error) {
 // outcome (allowed/approved/denied/rejected/expired/timed_out).
 func (g *Gate) Guard(ctx context.Context, req Request) (Result, error) {
 	res, err := g.Evaluate(ctx, req)
+	if err != nil || res.Outcome != OutcomePending {
+		return res, err
+	}
+	outcome, werr := g.Await(ctx, req.Permission.WorkspaceID, res.ApprovalID)
+	res.Outcome = outcome
+	return res, werr
+}
+
+// GuardDecision is Guard for a caller-resolved decision: EvaluateDecision, then
+// Await the human if the result is pending. The runtime tool gate uses it when
+// the per-tool policy chain (not the capability resolver) produced the verdict,
+// so a tool-policy "Ask" pauses the agent and lands in the same inbox as a
+// resolver-driven needs_approval. Like Guard it never returns OutcomePending.
+func (g *Gate) GuardDecision(ctx context.Context, req Request, decision permissions.Decision) (Result, error) {
+	res, err := g.EvaluateDecision(ctx, req, decision)
 	if err != nil || res.Outcome != OutcomePending {
 		return res, err
 	}

@@ -41,18 +41,28 @@ type StringTable = {
   /** Prefix shown on a row in the Muted filter, e.g. "Muted til 08:00". */
   muted_until_prefix: string;
   planned_for_prefix: string;
+  reminder_overdue_prefix: string;
+  /** Badge label on the dedicated reminder row (FIR-2364). */
+  reminder_label: string;
   // FIR-2115 — "Group by → Action" bucket headers. English in every locale by
-  // product decision. Names follow the agreed product wording: Unread, Running,
-  // Done, Waiting.
+  // product decision. Names follow the agreed product wording: Unread,
+  // Reminders, Running, Done, Waiting.
   action_act_now: string;
+  action_reminders: string;
   action_watching: string;
   action_waiting: string;
   action_calm: string;
+  // FIR-2385 — private-agent run-request row.
+  run_request_label: string;
+  run_request_by_prefix: string;
+  run_request_run: string;
+  run_request_running: string;
 };
 
 /** Action-bucket headers, identical across locales (see StringTable note). */
 const actionLabels = {
   action_act_now: "Unread",
+  action_reminders: "Reminders",
   action_watching: "Running",
   action_waiting: "Waiting",
   action_calm: "Done",
@@ -85,6 +95,12 @@ const en: StringTable = {
   drawer_title: "Actions",
   muted_until_prefix: "Muted until",
   planned_for_prefix: "Planned for",
+  reminder_overdue_prefix: "Overdue since",
+  reminder_label: "Reminder",
+  run_request_label: "Run request",
+  run_request_by_prefix: "Requested by",
+  run_request_run: "Run",
+  run_request_running: "Starting…",
   ...actionLabels,
 };
 
@@ -115,6 +131,12 @@ const da: StringTable = {
   drawer_title: "Handlinger",
   muted_until_prefix: "Muted til",
   planned_for_prefix: "Planlagt til",
+  reminder_overdue_prefix: "Forfalden siden",
+  reminder_label: "Påmindelse",
+  run_request_label: "Kør-anmodning",
+  run_request_by_prefix: "Anmodet af",
+  run_request_run: "Kør",
+  run_request_running: "Starter…",
   ...actionLabels,
 };
 
@@ -149,6 +171,12 @@ const zhHans: StringTable = {
   drawer_title: "操作",
   muted_until_prefix: "静音至",
   planned_for_prefix: "计划于",
+  reminder_overdue_prefix: "已逾期",
+  reminder_label: "提醒",
+  run_request_label: "运行请求",
+  run_request_by_prefix: "请求者",
+  run_request_run: "运行",
+  run_request_running: "正在启动…",
   ...actionLabels,
 };
 
@@ -183,6 +211,7 @@ export function useInboxActionGroupLabels(): Record<InboxActionCategory, string>
   const s = useCerebroInboxStrings();
   return {
     act_now: s.action_act_now,
+    reminders: s.action_reminders,
     watching: s.action_watching,
     waiting: s.action_waiting,
     calm: s.action_calm,

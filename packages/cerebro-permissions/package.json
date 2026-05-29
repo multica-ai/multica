@@ -11,11 +11,11 @@
     ".": "./index.ts",
     "./core": "./core/index.ts",
     "./views": "./views/index.ts",
-    "./views/permissions-nav-item": "./views/components/permissions-nav-item.tsx",
     "./views/access-nav-item": "./views/components/access-nav-item.tsx"
   },
   "dependencies": {
     "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/cerebro-tool-policy": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",

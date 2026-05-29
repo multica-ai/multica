@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { agentCapabilitiesSettingsTab } from "@multica/cerebro-agent-capabilities";
+import { cerebroCostOptimizationTabs } from "@multica/cerebro-cost-optimization/views";
 import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags/settings-tabs";
 import { SettingsPage, type ExtraSettingsTab } from "@multica/views/settings";
 import { useMembersTabCerebroExtras } from "@multica/cerebro-members/views";
@@ -11,7 +12,11 @@ import { useMembersTabCerebroExtras } from "@multica/cerebro-members/views";
 // Component (which throws "Functions cannot be passed directly to Client
 // Components"). Module-level constant keeps the array reference stable so it
 // doesn't bust SettingsPage's useMemo on every render.
-const extraAccountTabs: ExtraSettingsTab[] = [agentCapabilitiesSettingsTab, ...cerebroFeatureFlagTabs];
+const extraAccountTabs: ExtraSettingsTab[] = [
+  agentCapabilitiesSettingsTab,
+  ...cerebroCostOptimizationTabs,
+  ...cerebroFeatureFlagTabs,
+];
 
 export function SettingsPageClient({
   documentationContent,

@@ -53,6 +53,25 @@ FROM cerebro_role_assignment
 WHERE role_id = $1
 ORDER BY subject_type, added_at ASC;
 
+-- name: ListCerebroRoleAssignmentsWithNames :many
+-- Display variant: resolves the assigned subject's human-readable name (member
+-- -> user, agent) so the Roles tab never shows a raw UUID. Role assignments
+-- only ever target members and agents.
+SELECT
+    ra.role_id, ra.subject_type, ra.subject_id, ra.added_by, ra.added_at,
+    COALESCE(
+        NULLIF(u.name, ''),
+        NULLIF(ag.name, ''),
+        ''
+    )::text AS subject_display_name
+FROM cerebro_role_assignment ra
+LEFT JOIN "user" u
+  ON ra.subject_type = 'member' AND u.id = ra.subject_id
+LEFT JOIN agent ag
+  ON ra.subject_type = 'agent' AND ag.id = ra.subject_id
+WHERE ra.role_id = $1
+ORDER BY ra.subject_type, ra.added_at ASC;
+
 -- name: ListCerebroRoleIDsForSubject :many
 SELECT ra.role_id
 FROM cerebro_role_assignment ra

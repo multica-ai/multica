@@ -1,6 +1,7 @@
 {
   "_comment": "CEREBRO-PATCH(views-package-cerebro-deps): adds cerebro-* package deps (incl. cerebro-channels — JEH-718, cerebro-groups — JEH-1006, cerebro-pin-input — JEH-1065) + new exports for cerebro views (incl. ./agents/components/avatar-picker — FIR-1918). CEREBRO-PATCH(todo-list-editor): add Tiptap task-list dependencies.",
   "_comment_cerebro_agent_tools": "CEREBRO-PATCH(cerebro-agent-tools-dep): mounts the Cerebro-owned agent Tools tab extension from @multica/views",
+  "_comment_cerebro_status_models": "CEREBRO-PATCH(settings-page-status-models): adds @multica/cerebro-status-models dep for the FIR-1550 workflow v2a status-model settings tab + board presentation seam",
   "name": "@multica/views",
   "version": "0.0.0",
   "private": true,
@@ -10,7 +11,9 @@
     "lint": "eslint .",
     "test": "vitest run"
   },
+  "_comment_channels_export": "CEREBRO-PATCH(views-channels-export): FIR-2452 — expose ChannelDetail/NewMessageModal via @multica/views/channels so the standalone /channels/<id> route can render the dedicated chat component instead of IssueDetail.",
   "exports": {
+    "./channels": "./channels/index.ts",
     "./navigation": "./navigation/index.ts",
     "./common/actor-avatar": "./common/actor-avatar.tsx",
     "./common/actor-issues-panel": "./common/actor-issues-panel.tsx",
@@ -73,15 +76,18 @@
     "@multica/ui": "workspace:*",
     "@multica/cerebro-agent-tools": "workspace:*",
     "@multica/cerebro-channels": "workspace:*",
+    "@multica/cerebro-duplicate-check": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-groups": "workspace:*",
     "@multica/cerebro-inbox": "workspace:*",
     "@multica/cerebro-pin-input": "workspace:*",
+    "@multica/cerebro-status-models": "workspace:*",
     "@tiptap/core": "^3.22.1",
     "@tiptap/extension-code-block-lowlight": "^3.22.1",
     "@tiptap/extension-document": "^3.22.1",
     "@tiptap/extension-image": "^3.22.1",
     "@tiptap/extension-link": "^3.22.1",
+    "@tiptap/extension-list": "^3.22.1",
     "@tiptap/extension-mention": "^3.22.1",
     "@tiptap/extension-paragraph": "^3.22.1",
     "@tiptap/extension-placeholder": "^3.22.1",
@@ -115,6 +121,7 @@
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "catalog:",
+    "rehype-sanitize": "^6.0.0",
     "sonner": "^2.0.7"
   },
   "peerDependencies": {
@@ -128,6 +135,7 @@
     "zustand": "catalog:"
   },
   "devDependencies": {
+    "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
@@ -137,7 +145,6 @@
     "@vitejs/plugin-react": "catalog:",
     "eslint-plugin-i18next": "catalog:",
     "jsdom": "catalog:",
-    "rehype-sanitize": "^6.0.0",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

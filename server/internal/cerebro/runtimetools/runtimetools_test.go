@@ -88,6 +88,87 @@ func TestUpsertMCPToolRequiresServerName(t *testing.T) {
 	}
 }
 
+// TestStampScannedSetsLastScannedAt is the FIR-2284 regression: a local "Scan
+// now" must flip the admin UI's "Last scanned" label off "Never scanned" even
+// when the runtime has no MCP servers for the daemon to report. We seed rows
+// with a NULL last_scanned_at (the state the bid-6 backfill leaves them in),
+// stamp, and confirm every row gets a fresh timestamp.
+func TestStampScannedSetsLastScannedAt(t *testing.T) {
+	if runtimeToolsPool == nil {
+		t.Skip("DATABASE_URL not set")
+	}
+	ctx := context.Background()
+
+	var wsID pgtype.UUID
+	if err := runtimeToolsPool.QueryRow(ctx,
+		`INSERT INTO workspace (name, slug) VALUES ('rt-tools-stamp-test', $1) RETURNING id`,
+		"rt-tools-stamp-test-"+t.Name(),
+	).Scan(&wsID); err != nil {
+		t.Fatalf("insert workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = runtimeToolsPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	})
+
+	var runtimeID pgtype.UUID
+	if err := runtimeToolsPool.QueryRow(ctx,
+		`INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status)
+		 VALUES ($1, 'rt-tools-stamp', 'local', 'claude-code', 'online')
+		 RETURNING id`,
+		wsID,
+	).Scan(&runtimeID); err != nil {
+		t.Fatalf("insert runtime: %v", err)
+	}
+
+	svc := New(runtimeToolsPool)
+	// Seed two cloud rows the way the backfill does: no last_scanned_at, so the
+	// label starts on "Never scanned".
+	for _, name := range []string{"stamp_tool_alpha", "stamp_tool_beta"} {
+		if _, err := svc.UpsertTool(ctx, UpsertToolInput{
+			RuntimeID: runtimeID,
+			ToolName:  name,
+			Source:    SourceCloud,
+		}); err != nil {
+			t.Fatalf("seed tool %s: %v", name, err)
+		}
+	}
+
+	// Precondition: both rows start unscanned.
+	var nullCount int
+	if err := runtimeToolsPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM cerebro_runtime_tool
+		 WHERE runtime_id = $1 AND last_scanned_at IS NULL`,
+		runtimeID,
+	).Scan(&nullCount); err != nil {
+		t.Fatalf("count unscanned: %v", err)
+	}
+	if nullCount != 2 {
+		t.Fatalf("expected 2 unscanned rows before stamp, got %d", nullCount)
+	}
+
+	n, err := svc.StampScanned(ctx, runtimeID)
+	if err != nil {
+		t.Fatalf("StampScanned: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("expected 2 rows stamped, got %d", n)
+	}
+
+	// Every row now carries a fresh timestamp — the label reads MAX(last_scanned_at).
+	var stampedCount int
+	if err := runtimeToolsPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM cerebro_runtime_tool
+		 WHERE runtime_id = $1 AND last_scanned_at IS NOT NULL
+		   AND last_scanned_at > now() - interval '1 minute'`,
+		runtimeID,
+	).Scan(&stampedCount); err != nil {
+		t.Fatalf("count stamped: %v", err)
+	}
+	if stampedCount != 2 {
+		t.Errorf("expected 2 freshly-stamped rows, got %d", stampedCount)
+	}
+}
+
 // TestRecordScanSkipsServerErrors documents that a failing server (Error
 // set) does not zero out the previously-known inventory: RecordScan iterates
 // good servers only and returns nil so the daemon ack succeeds. We verify

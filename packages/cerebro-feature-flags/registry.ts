@@ -29,12 +29,23 @@ export type CerebroFlagKey =
   | "cerebro_persona_permissions"
   | "cerebro_skill_mention"
   | "cerebro_grants"
+  | "cerebro_tool_policy"
+  | "cerebro_simple_tool_policy"
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
+  | "cerebro_move_comment_to_thread"
   | "cerebro_agent_passes"
   | "cerebro_references"
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
-  | "cerebro_agent_avatar";
+  | "cerebro_agent_avatar"
+  // FIR-2385: private agents visible-but-locked + tag → run-request to owner.
+  | "cerebro_private_agent_requests"
+  // FIR-2412: notify the assignee when an issue's start/due date arrives.
+  | "cerebro_date_reminders"
+  // FIR-2490: Firtal-branded welcome page for new members (replaces upstream onboarding).
+  | "cerebro_firtal_welcome"
+  // FIR-2504: show similar open issues + LLM verdict when creating an issue.
+  | "cerebro_duplicate_check_on_create";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -67,12 +78,37 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_persona_permissions: true,
   cerebro_skill_mention: true,
   cerebro_grants: false,
-  cerebro_approvals: false,
+  cerebro_tool_policy: false,
+  cerebro_simple_tool_policy: false,
+  // Deliberately ON (FIR-2230 phase 5): the legacy duplicate "Pending" tab on
+  // the Access page was removed, so the approvals inbox is now the ONLY surface
+  // for needs_approval asks. Leaving this off would leave prod with no approvals
+  // surface at all — the change is intentional and coupled to that removal, not
+  // an accidental prod-behaviour flip.
+  cerebro_approvals: true,
   cerebro_move_comment_to_subissue: true,
+  cerebro_move_comment_to_thread: true,
   cerebro_agent_passes: true,
   cerebro_references: true,
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
   cerebro_agent_avatar: true,
+  // FIR-2385: private agents are visible-but-locked and a non-owner tag turns
+  // into a run-request in the owner's inbox. Off restores the old behavior
+  // (private agents hidden, tags silently dropped).
+  cerebro_private_agent_requests: true,
+  // FIR-2412: on by default — the assignee gets an inbox + push reminder when
+  // a start/due date arrives. Off hides the settings rows and the UI control.
+  cerebro_date_reminders: true,
+  // FIR-2490: OFF by default — opt-in per workspace. When on, new members are
+  // routed to a Firtal-branded welcome page (desktop install guide with hard
+  // gate, PWA install guide, members docs, bug-melding link to the Multica
+  // support workspace) instead of upstream `/onboarding`.
+  cerebro_firtal_welcome: false,
+  // FIR-2504: surface similar open issues + Haiku verdict in the create-issue
+  // modal so users can open an existing sag or attach as a sub-issue instead
+  // of duplicating. Defaults ON so the feature lands behind the standard
+  // workspace/user override (Off restores upstream create flow).
+  cerebro_duplicate_check_on_create: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -219,6 +255,18 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Enable the Persona grant control plane API and CLI (POST/PATCH/DELETE /api/workspaces/{id}/grants and `multica grant` commands).",
   },
   {
+    key: "cerebro_tool_policy",
+    label: "Unified tool permissions",
+    description:
+      "Enable the capability catalog on agent and runtime pages: one flat, filterable list of every tool (Tool · Class · Side effect · Decision · Resolved by), narrowed by combinable class / side-effect / decision filters + search, with one editable decision pill per row and a mobile card layout. Backed by the four-layer Runtime › Agent › Group › User chain. GET /api/workspaces/{id}/tool-policy (member) + PUT/DELETE (admin/owner). FIR-2284 (redesign of FIR-2230).",
+  },
+  {
+    key: "cerebro_simple_tool_policy",
+    label: "Simple tool permissions",
+    description:
+      "Show the simplified, user-facing tool permission table on the agent Tools tab: one Allow/Ask/Block toggle per tool, grouped into Read · Execute · Fetch · Destructive. Reuses the cerebro_tool_policy data layer — writes the agent layer only. The rich Effective-chain table stays behind cerebro_tool_policy as a power-view. FIR-2358.",
+  },
+  {
     key: "cerebro_approvals",
     label: "Approval inbox",
     description:
@@ -229,6 +277,12 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Move comment thread to sub-issue",
     description:
       "Show a 'Move to sub-issue' action on root comments. Lifts the thread (root + replies) into a new sub-issue and leaves a 'Moved to MUL-NN' breadcrumb on the original comment. JEH-1309.",
+  },
+  {
+    key: "cerebro_move_comment_to_thread",
+    label: "Move comments to a new thread",
+    description:
+      "Add a 'Reply in new thread' action on comments. Enters a select mode where you pick comments in the thread and lift them into a new thread on the same issue; each moved comment is left as a breadcrumb linking to the new thread. JEH-2488.",
   },
   {
     key: "cerebro_agent_passes",
@@ -248,5 +302,29 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "AI agent avatar generation",
     description:
       "Show a 'Generate AI avatar' button in the agent creation dialog. Uses the Firtal Data Registry AI Gateway with a Scandinavian-appearance prompt. Requires FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL and FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY.",
+  },
+  {
+    key: "cerebro_private_agent_requests",
+    label: "Private agent run requests",
+    description:
+      "Show private agents you don't own as visible-but-locked in the agent list and @-picker (name + description only). Tagging one no longer silently drops — it sends a run-request to the agent's owner, who can run it from their inbox. The owner stays in control; server-side foreign-trigger blocking is unchanged. FIR-2385.",
+  },
+  {
+    key: "cerebro_date_reminders",
+    label: "Start / due date reminders",
+    description:
+      "Notify the assignee when an issue's start or due date arrives (the day-of, in their timezone). Delivery follows each user's per-channel notification preferences (inbox / mobile push / desktop). Off hides the settings rows. FIR-2412.",
+  },
+  {
+    key: "cerebro_firtal_welcome",
+    label: "Firtal-branded welcome page",
+    description:
+      "Replace the upstream onboarding flow with a Firtal-branded welcome page for new members: desktop install guide (with hard-gate modal), PWA install guide (iOS Safari + Android Chrome), members documentation link, and a bug-melding button that opens the Multica support workspace at multica.firtal.com. Each member is shown the page once — completion is tracked client-side. FIR-2490.",
+  },
+  {
+    key: "cerebro_duplicate_check_on_create",
+    label: "Find similar at create",
+    description:
+      "When composing a new issue, show up to 3 similar open issues with an LLM-judged verdict (duplicate / related) so the user can open the existing sag or create the new one as a sub-issue. Off restores the upstream create flow. Requires the Firtal AI Gateway credentials. FIR-2504.",
   },
 ];

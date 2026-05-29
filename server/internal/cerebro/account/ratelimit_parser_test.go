@@ -9,10 +9,10 @@ func TestParseRateLimitReset(t *testing.T) {
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 
 	cases := []struct {
-		name    string
-		input   string
-		want    time.Time
-		wantOK  bool
+		name   string
+		input  string
+		want   time.Time
+		wantOK bool
 	}{
 		{
 			name:   "wall clock pm UTC",
@@ -193,6 +193,57 @@ func TestParseRateLimitReset(t *testing.T) {
 			input:  "GET /api/foo returned 401 Unauthorized",
 			want:   time.Time{},
 			wantOK: false,
+		},
+		{
+			// FIR-2388 — Codex emits "You've hit your usage limit. Try
+			// again at HH:MM" as a normal assistant turn. The wall-clock
+			// "Try again at 18:00" is parsed to an exact reset time; the
+			// "usage limit" detector phrase just confirms the signal.
+			name:   "codex usage-limit reply with wall-clock reset",
+			input:  "You've hit your usage limit. Try again at 18:00.",
+			want:   time.Date(2026, 5, 4, 18, 0, 0, 0, time.Local).UTC(),
+			wantOK: true,
+		},
+		{
+			// FIR-2388 — bare codex usage-limit reply (no time). Falls
+			// back to the 5-minute backoff so the sweeper keeps re-pausing
+			// every 5 min until the cap window clears.
+			name:   "codex usage-limit reply fallback",
+			input:  "You've hit your usage limit.",
+			want:   now.Add(DefaultRateLimitBackoff),
+			wantOK: true,
+		},
+		{
+			// FIR-2476 — the real Codex usage-limit reset string carries a
+			// full month-name date WITH an explicit year. No timezone token
+			// means the runtime machine's local zone (Codex prints local).
+			name:   "codex full-date reset with ordinal day and pm, local tz",
+			input:  "You've hit your usage limit. Try again at May 30th, 2026 10:12 PM",
+			want:   time.Date(2026, 5, 30, 22, 12, 0, 0, time.Local).UTC(),
+			wantOK: true,
+		},
+		{
+			// Explicit UTC token wins over the local-zone default.
+			name:   "codex full-date reset with explicit UTC",
+			input:  "Usage limit reached. Try again at May 30, 2026 10:12 PM (UTC)",
+			want:   time.Date(2026, 5, 30, 22, 12, 0, 0, time.UTC),
+			wantOK: true,
+		},
+		{
+			// IANA timezone + "resets ... at" phrasing + 24h time + seconds.
+			// Copenhagen in June is CEST (UTC+2), so 09:00 local → 07:00 UTC.
+			name:   "codex full-date reset with IANA tz and 24h time",
+			input:  "resets June 1st, 2026 at 09:00:00 (Europe/Copenhagen)",
+			want:   time.Date(2026, 6, 1, 7, 0, 0, 0, time.UTC),
+			wantOK: true,
+		},
+		{
+			// A far-future misparse (>400 days out) is rejected, falling back
+			// to the rate-limit backoff via the detector phrase.
+			name:   "codex full-date absurd year falls back to backoff",
+			input:  "You've hit your usage limit. Try again at May 30th, 2099 10:12 PM",
+			want:   now.Add(DefaultRateLimitBackoff),
+			wantOK: true,
 		},
 	}
 

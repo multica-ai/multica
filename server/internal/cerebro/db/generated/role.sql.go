@@ -157,6 +157,62 @@ func (q *Queries) ListCerebroRoleAssignments(ctx context.Context, roleID pgtype.
 	return items, nil
 }
 
+const listCerebroRoleAssignmentsWithNames = `-- name: ListCerebroRoleAssignmentsWithNames :many
+SELECT
+    ra.role_id, ra.subject_type, ra.subject_id, ra.added_by, ra.added_at,
+    COALESCE(
+        NULLIF(u.name, ''),
+        NULLIF(ag.name, ''),
+        ''
+    )::text AS subject_display_name
+FROM cerebro_role_assignment ra
+LEFT JOIN "user" u
+  ON ra.subject_type = 'member' AND u.id = ra.subject_id
+LEFT JOIN agent ag
+  ON ra.subject_type = 'agent' AND ag.id = ra.subject_id
+WHERE ra.role_id = $1
+ORDER BY ra.subject_type, ra.added_at ASC
+`
+
+type ListCerebroRoleAssignmentsWithNamesRow struct {
+	RoleID             pgtype.UUID        `json:"role_id"`
+	SubjectType        string             `json:"subject_type"`
+	SubjectID          pgtype.UUID        `json:"subject_id"`
+	AddedBy            pgtype.UUID        `json:"added_by"`
+	AddedAt            pgtype.Timestamptz `json:"added_at"`
+	SubjectDisplayName string             `json:"subject_display_name"`
+}
+
+// Display variant: resolves the assigned subject's human-readable name (member
+// -> user, agent) so the Roles tab never shows a raw UUID. Role assignments
+// only ever target members and agents.
+func (q *Queries) ListCerebroRoleAssignmentsWithNames(ctx context.Context, roleID pgtype.UUID) ([]ListCerebroRoleAssignmentsWithNamesRow, error) {
+	rows, err := q.db.Query(ctx, listCerebroRoleAssignmentsWithNames, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCerebroRoleAssignmentsWithNamesRow{}
+	for rows.Next() {
+		var i ListCerebroRoleAssignmentsWithNamesRow
+		if err := rows.Scan(
+			&i.RoleID,
+			&i.SubjectType,
+			&i.SubjectID,
+			&i.AddedBy,
+			&i.AddedAt,
+			&i.SubjectDisplayName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCerebroRoleIDsForSubject = `-- name: ListCerebroRoleIDsForSubject :many
 SELECT ra.role_id
 FROM cerebro_role_assignment ra

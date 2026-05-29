@@ -9,6 +9,7 @@ import {
 } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
+import { ChannelDetailPage } from "./pages/channel-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { AutopilotCreatePage, AutopilotEditPage } from "@multica/cerebro-autopilot-pages";
@@ -41,7 +42,7 @@ import { useMembersTabCerebroExtras } from "@multica/cerebro-members/views";
 import { useNavigation } from "@multica/views/navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { TasksPage } from "@multica/cerebro-tasks";
-import { PermissionsPage } from "@multica/cerebro-permissions";
+import { AccessPage } from "@multica/cerebro-permissions";
 import { ApprovalsPage } from "@multica/cerebro-approvals";
 import { SearchPage } from "@multica/views/search";
 import { useT } from "@multica/views/i18n";
@@ -52,6 +53,7 @@ import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags/settings-tabs";
+import { cerebroCostOptimizationTabs } from "@multica/cerebro-cost-optimization/views";
 import { IssueListReferenceFilter } from "@multica/cerebro-references/views";
 import { ReferencesByObjectPage } from "@multica/cerebro-references/views/pages";
 
@@ -105,6 +107,7 @@ function SettingsRoute() {
           content: <UpdatesSettingsTab />,
         },
         agentCapabilitiesSettingsTab,
+        ...cerebroCostOptimizationTabs,
         ...cerebroFeatureFlagTabs,
       ]}
       membersTabCerebroExtras={membersTabCerebroExtras}
@@ -181,7 +184,7 @@ export const appRoutes: RouteObject[] = [
           },
           {
             path: "channels/:id",
-            element: <IssueDetailPage />,
+            element: <ChannelDetailPage />,
             handle: { title: "Channel" },
           },
           {
@@ -286,9 +289,9 @@ export const appRoutes: RouteObject[] = [
           { path: "search", element: <SearchPage />, handle: { title: "Search" } },
           { path: "tasks", element: <TasksPage />, handle: { title: "Tasks" } },
           {
-            path: "permissions",
-            element: <PermissionsPage />,
-            handle: { title: "Permissions" },
+            path: "access",
+            element: <AccessPage />,
+            handle: { title: "Access" },
           },
           {
             path: "approvals",

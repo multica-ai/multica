@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/mcpscan"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // runtimeToolScanInterval bounds how often a single runtime is scanned. We
@@ -155,6 +156,25 @@ func (d *Daemon) scanRuntimeTools(ctx context.Context, runtimeID string) {
 	d.toolScanState.mark(runtimeID, time.Now())
 	d.logger.Debug("runtime tool scan: reported",
 		"runtime_id", runtimeID, "servers", len(results))
+}
+
+// CEREBRO-PATCH(daemon-tool-scan-now): FIR-2230 — react to an admin-triggered
+// scan request pushed over the daemon websocket. Runs the same scan routine the
+// heartbeat uses, but immediately and bypassing the debounce: the admin asked
+// for it now. The work runs in its own goroutine on the root context so a slow
+// MCP server can't block the websocket read loop or be cancelled by a per-tick
+// context.
+func (d *Daemon) handleToolScanRequested(raw json.RawMessage) {
+	var payload protocol.ToolScanRequestedPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		d.logger.Debug("tool scan request: invalid payload", "error", err)
+		return
+	}
+	if payload.RuntimeID == "" {
+		return
+	}
+	d.logger.Debug("tool scan requested", "runtime_id", payload.RuntimeID)
+	go d.scanRuntimeTools(d.rootCtx, payload.RuntimeID)
 }
 
 // maybeScanRuntimeTools is the heartbeat-loop hook. Called per runtime per

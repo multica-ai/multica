@@ -124,16 +124,22 @@ export function formatTokens(n: number): string {
 // Cost estimation
 // ---------------------------------------------------------------------------
 
-// Pricing per million tokens (USD). Anthropic figures sourced from
-// https://platform.claude.com/docs/en/about-claude/pricing; OpenAI figures
-// from https://openai.com/api/pricing — keep in sync when providers release
-// new models or adjust prices.
+// Pricing per million tokens (USD). Sources, each authoritative for the
+// rows tagged under it — keep in sync when providers release new models
+// or adjust prices.
+//
+//   Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
+//   OpenAI:    https://openai.com/api/pricing
+//   DeepSeek:  https://api-docs.deepseek.com/quick_start/pricing
+//   Moonshot:  https://www.kimi.com/resources/kimi-k2-6-pricing
+//   Zhipu:     https://docs.z.ai/guides/overview/pricing
 //
 // Anthropic's cacheWrite reflects the 5-minute cache TTL (1.25× input); the
 // daemon reports cache_creation_input_tokens without TTL metadata, so 5m is
-// the safest / cheapest assumption (matches the API default). OpenAI does
-// not bill cache writes separately (cached input is just discounted on
-// subsequent reads), so cacheWrite mirrors input there.
+// the safest / cheapest assumption (matches the API default). OpenAI,
+// DeepSeek, Moonshot and Zhipu do not bill cache writes separately (cached
+// input is just discounted on subsequent reads), so cacheWrite mirrors
+// input there.
 //
 // The resolver matches exact keys after stripping a trailing date snapshot
 // (see `resolvePricing` below). It deliberately does NOT do startsWith
@@ -186,6 +192,40 @@ const MODEL_PRICING: Record<
   // -- OpenAI: GPT-4o family (legacy, kept for runtimes still configured against it) --
   "gpt-4o-mini":        { input: 0.15, output: 0.60, cacheRead: 0.075, cacheWrite: 0.15 },
   "gpt-4o":             { input: 2.50, output: 10,   cacheRead: 1.25,  cacheWrite: 2.50 },
+
+  // -- DeepSeek (api-docs.deepseek.com/quick_start/pricing).
+  //    The official catalog lists exactly two current SKUs; `deepseek-chat`
+  //    and `deepseek-reasoner` are aliases that route to `deepseek-v4-flash`
+  //    (non-thinking and thinking mode respectively) per the same page.
+  //    `deepseek-v4-pro` is currently under a 75%-off promo that ends
+  //    2026-05-31 15:59 UTC; we price at the post-promo standard rate
+  //    ($1.74/$3.48) so the dashboard does not jump 4× on June 1 — accept
+  //    a brief over-estimate during the promo over a sudden cliff after it. --
+  "deepseek-v4-flash":  { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
+  "deepseek-v4-pro":    { input: 1.74, output: 3.48, cacheRead: 0.0145, cacheWrite: 1.74 },
+  "deepseek-chat":      { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
+  "deepseek-reasoner":  { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
+
+  // -- Moonshot Kimi (kimi.com/resources/kimi-k2-6-pricing).
+  //    Only K2.6 is on the official price sheet today; earlier K2 variants
+  //    are intentionally omitted until Moonshot publishes their rates. --
+  "kimi-k2.6":          { input: 0.95, output: 4.00, cacheRead: 0.16,   cacheWrite: 0.95 },
+
+  // -- Zhipu z.ai (docs.z.ai/guides/overview/pricing). Free flash tiers
+  //    are priced at 0 so they resolve cleanly instead of falling through
+  //    to the "unmapped" diagnostic. --
+  "glm-5.1":            { input: 1.4,  output: 4.4,  cacheRead: 0.26,   cacheWrite: 1.4 },
+  "glm-5":              { input: 1.0,  output: 3.2,  cacheRead: 0.2,    cacheWrite: 1.0 },
+  "glm-5-turbo":        { input: 1.2,  output: 4.0,  cacheRead: 0.24,   cacheWrite: 1.2 },
+  "glm-4.7":            { input: 0.6,  output: 2.2,  cacheRead: 0.11,   cacheWrite: 0.6 },
+  "glm-4.7-flashx":     { input: 0.07, output: 0.4,  cacheRead: 0.01,   cacheWrite: 0.07 },
+  "glm-4.7-flash":      { input: 0,    output: 0,    cacheRead: 0,      cacheWrite: 0 },
+  "glm-4.6":            { input: 0.6,  output: 2.2,  cacheRead: 0.11,   cacheWrite: 0.6 },
+  "glm-4.5":            { input: 0.6,  output: 2.2,  cacheRead: 0.11,   cacheWrite: 0.6 },
+  "glm-4.5-x":          { input: 2.2,  output: 8.9,  cacheRead: 0.45,   cacheWrite: 2.2 },
+  "glm-4.5-air":        { input: 0.2,  output: 1.1,  cacheRead: 0.03,   cacheWrite: 0.2 },
+  "glm-4.5-airx":       { input: 1.1,  output: 4.5,  cacheRead: 0.22,   cacheWrite: 1.1 },
+  "glm-4.5-flash":      { input: 0,    output: 0,    cacheRead: 0,      cacheWrite: 0 },
 };
 
 // Resolve a model string to its pricing tier. Exact match, with four
@@ -293,9 +333,18 @@ export function collectUnmappedModels(rows: readonly Priceable[]): string[] {
 type Priceable = Pick<
   RuntimeUsage,
   "model" | "input_tokens" | "output_tokens" | "cache_read_tokens" | "cache_write_tokens"
->;
+> & {
+  // CEREBRO-PATCH(task-usage-gateway-cost): optional real Firtal-gateway charge
+  // (in cents) for this usage row. Present on gateway-backed buckets, absent /
+  // 0 for daemon / non-gateway runtimes (FIR-2405).
+  cost_cents?: number;
+};
 
 export function estimateCost(usage: Priceable): number {
+  // CEREBRO-PATCH(task-usage-gateway-cost): prefer the real gateway charge when
+  // the row carries one; only fall back to the token estimate for buckets the
+  // gateway never priced (daemon / local runtimes).
+  if (usage.cost_cents && usage.cost_cents > 0) return usage.cost_cents / 100;
   const pricing = resolvePricing(usage.model);
   if (!pricing) return 0;
   return (
@@ -316,14 +365,31 @@ export interface CostBreakdown {
 
 export function estimateCostBreakdown(usage: Priceable): CostBreakdown {
   const pricing = resolvePricing(usage.model);
-  if (!pricing) {
-    return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-  }
+  const est: CostBreakdown = pricing
+    ? {
+        input: (usage.input_tokens * pricing.input) / 1_000_000,
+        output: (usage.output_tokens * pricing.output) / 1_000_000,
+        cacheRead: (usage.cache_read_tokens * pricing.cacheRead) / 1_000_000,
+        cacheWrite: (usage.cache_write_tokens * pricing.cacheWrite) / 1_000_000,
+      }
+    : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+  // CEREBRO-PATCH(task-usage-gateway-cost): when the gateway reported a real
+  // total for this row, rescale the per-component estimate so the stacked
+  // breakdown sums to the real charge while keeping the input/output/cache
+  // proportions. This keeps the cost charts on the real number (FIR-2405)
+  // without the gateway having to report a per-component split it doesn't
+  // emit. Unpriced models (no proportions) attribute the whole charge to input.
+  const real = usage.cost_cents && usage.cost_cents > 0 ? usage.cost_cents / 100 : null;
+  if (real == null) return est;
+  const estTotal = est.input + est.output + est.cacheRead + est.cacheWrite;
+  if (estTotal <= 0) return { input: real, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const k = real / estTotal;
   return {
-    input: (usage.input_tokens * pricing.input) / 1_000_000,
-    output: (usage.output_tokens * pricing.output) / 1_000_000,
-    cacheRead: (usage.cache_read_tokens * pricing.cacheRead) / 1_000_000,
-    cacheWrite: (usage.cache_write_tokens * pricing.cacheWrite) / 1_000_000,
+    input: est.input * k,
+    output: est.output * k,
+    cacheRead: est.cacheRead * k,
+    cacheWrite: est.cacheWrite * k,
   };
 }
 

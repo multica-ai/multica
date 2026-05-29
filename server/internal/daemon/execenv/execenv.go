@@ -16,7 +16,8 @@ import (
 
 // RepoContextForEnv describes a workspace repo available for checkout.
 type RepoContextForEnv struct {
-	URL string // remote URL
+	URL         string // remote URL
+	Description string // optional repo description
 }
 
 // ProjectResourceForEnv describes a single resource attached to the issue's
@@ -80,6 +81,10 @@ type TaskContextForEnv struct {
 	// context and the agent stays anonymous-user mode.
 	RequestingUserName               string
 	RequestingUserProfileDescription string
+	// CEREBRO-PATCH(runtime-config-snapshot): FIR-2384 — true when the snapshot_prompt cost saving inlined the issue+thread into the start prompt, so the runtime workflow brief must not also instruct the agent to run `multica issue get` + `multica issue comment list`.
+	IssueSnapshotInlined bool
+	// CEREBRO-PATCH(runtime-config-bundled): FIR-2384 — true when the bundled_read cost saving is on, so the runtime workflow brief points the agent at the single `multica issue context` call instead of separate `multica issue get` + `multica issue comment list` reads.
+	BundleContextHint bool
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

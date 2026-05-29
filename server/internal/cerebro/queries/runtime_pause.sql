@@ -25,6 +25,42 @@ SET paused_at    = NULL,
 WHERE id = $1
 RETURNING *;
 
+-- name: IncrementAutoPauseCount :one
+-- FIR-2476 circuit breaker: bump the consecutive auto-pause counter and return
+-- the new value. Called by MaybeAutoPauseOnFailure on every auto-pause. The
+-- returned count drives the growing backoff (5m → 10m → 20m …) and, once it
+-- crosses the circuit limit, the decision to stop auto-resuming and notify a
+-- human. Atomic increment-and-read so a burst of concurrent failures each get
+-- a distinct count (only one caller sees the exact trip value).
+UPDATE agent_runtime
+SET auto_pause_count = auto_pause_count + 1,
+    updated_at       = now()
+WHERE id = $1
+RETURNING auto_pause_count;
+
+-- name: ResetAutoPauseCount :exec
+-- FIR-2476: clear the consecutive auto-pause counter after a successful task
+-- run on the runtime (called from CompleteTask via the AutoPause seam). Guarded
+-- on auto_pause_count > 0 so the steady-state success path does a cheap no-op
+-- instead of a needless row write on every completion.
+UPDATE agent_runtime
+SET auto_pause_count = 0,
+    updated_at       = now()
+WHERE id = $1
+  AND auto_pause_count > 0;
+
+-- name: CreateAutoPauseAlertComment :one
+-- FIR-2476: posts the single circuit-breaker notice on the issue whose task
+-- tripped the breaker, attributed to the task's agent. Derives workspace_id
+-- from the issue row so the caller only supplies issue_id, author_id, content.
+-- The content is plain text with no @mentions by construction (an agent mention
+-- would re-trigger the very loop this breaker stops).
+INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+SELECT i.id, i.workspace_id, 'agent', @author_id, @content, 'comment'
+FROM issue i
+WHERE i.id = @issue_id
+RETURNING *;
+
 -- name: GetAgentRuntimePauseSnapshot :one
 -- Reads the current pause fields for a runtime. Used by UnpauseRuntime to
 -- capture paused_at *before* clearing it, so the resume-task selection can
@@ -145,3 +181,20 @@ FROM agent_task_queue p
 LEFT JOIN agent a ON a.id = p.agent_id
 WHERE p.id = $1
 RETURNING *;
+
+-- name: DeleteResumedTimeoutComment :exec
+-- Removes the BLOCKED timeout comment a prior segment posted on an issue
+-- once a resume task is created for that segment (FIR-2395). The unpause
+-- sweeper calls this immediately after CreateResumeFromPauseTask so the
+-- user only sees the live retry, not the stale timeout noise.
+--
+-- The comment is identified by its body shape and the embedded task UUID
+-- emitted by timeoutFailureCommentBody in server/internal/service/task.go.
+-- Scoped to the same agent on the same issue, so concurrent comments from
+-- other agents (autopilots, squad-mates) are untouched.
+DELETE FROM comment
+WHERE issue_id = @issue_id
+  AND author_type = 'agent'
+  AND author_id = @author_id
+  AND content LIKE 'BLOCKED: Agent-run timed out before it could post a final comment.%'
+  AND content LIKE '%Run: `' || @parent_task_id::text || '`%';

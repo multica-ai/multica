@@ -59,6 +59,78 @@ WHERE workspace_id = $1
   AND (NULLIF($4::text, '') IS NULL OR status       = $4)
 ORDER BY granted_at DESC;
 
+-- name: GetCerebroWorkspaceGrantWithName :one
+-- Display variant of GetCerebroWorkspaceGrant for the Access grant drawer.
+-- Resolves the subject's human-readable name so the drawer never shows a raw
+-- UUID. GetCerebroWorkspaceGrant is left untouched: the runtime gateway depends
+-- on its exact row shape.
+SELECT
+    g.id, g.workspace_id,
+    g.subject_type, g.subject_id,
+    g.resource_pattern, g.capability,
+    g.classification_ceiling,
+    g.time_window_start, g.time_window_end,
+    g.approval_required,
+    g.status,
+    g.granted_by_type, g.granted_by_id, g.granted_at,
+    g.revoked_by_id, g.revoked_at,
+    g.updated_at,
+    COALESCE(
+        NULLIF(u.name, ''),
+        NULLIF(ag.name, ''),
+        NULLIF(grp.name, ''),
+        NULLIF(rl.name, ''),
+        ''
+    )::text AS subject_display_name
+FROM cerebro_workspace_grant g
+LEFT JOIN "user" u
+  ON g.subject_type = 'member' AND u.id = g.subject_id
+LEFT JOIN agent ag
+  ON g.subject_type = 'agent' AND ag.id = g.subject_id
+LEFT JOIN cerebro_group grp
+  ON g.subject_type = 'group' AND grp.id = g.subject_id
+LEFT JOIN cerebro_role rl
+  ON g.subject_type = 'role' AND rl.id = g.subject_id
+WHERE g.id = $1 AND g.workspace_id = $2;
+
+-- name: ListCerebroWorkspaceGrantsWithNames :many
+-- Display variant of ListCerebroWorkspaceGrants for the Access UI. Resolves the
+-- subject's human-readable name (member -> user, agent, group, role) so the
+-- table never shows a raw UUID. The plain ListCerebroWorkspaceGrants is left
+-- untouched on purpose: the permission resolver depends on its exact row shape.
+SELECT
+    g.id, g.workspace_id,
+    g.subject_type, g.subject_id,
+    g.resource_pattern, g.capability,
+    g.classification_ceiling,
+    g.time_window_start, g.time_window_end,
+    g.approval_required,
+    g.status,
+    g.granted_by_type, g.granted_by_id, g.granted_at,
+    g.revoked_by_id, g.revoked_at,
+    g.updated_at,
+    COALESCE(
+        NULLIF(u.name, ''),
+        NULLIF(ag.name, ''),
+        NULLIF(grp.name, ''),
+        NULLIF(rl.name, ''),
+        ''
+    )::text AS subject_display_name
+FROM cerebro_workspace_grant g
+LEFT JOIN "user" u
+  ON g.subject_type = 'member' AND u.id = g.subject_id
+LEFT JOIN agent ag
+  ON g.subject_type = 'agent' AND ag.id = g.subject_id
+LEFT JOIN cerebro_group grp
+  ON g.subject_type = 'group' AND grp.id = g.subject_id
+LEFT JOIN cerebro_role rl
+  ON g.subject_type = 'role' AND rl.id = g.subject_id
+WHERE g.workspace_id = $1
+  AND (NULLIF($2::text, '') IS NULL OR g.subject_type = $2)
+  AND ($3::uuid  IS NULL OR g.subject_id   = $3)
+  AND (NULLIF($4::text, '') IS NULL OR g.status       = $4)
+ORDER BY g.granted_at DESC;
+
 -- name: UpdateCerebroWorkspaceGrant :one
 UPDATE cerebro_workspace_grant
 SET

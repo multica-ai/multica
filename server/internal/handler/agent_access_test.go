@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -157,11 +159,13 @@ func TestGetAgent_PrivateAgentForbidsPlainMember(t *testing.T) {
 	}
 }
 
-// TestListAgents_FiltersPrivateForPlainMember verifies that the workspace
-// agents listing hides private agents from members who lack access. This is
-// what makes the @-mention autocomplete picker (which feeds off this list)
-// drop unreachable private agents without any client-side logic.
-func TestListAgents_FiltersPrivateForPlainMember(t *testing.T) {
+// CEREBRO-PATCH(private-agent-visible-but-locked): FIR-2385 test coverage.
+// TestListAgents_PrivateVisibleButLockedForPlainMember verifies FIR-2385: with
+// the default-on flag a plain member SEES a private agent they don't own, but
+// it comes back locked (can_trigger=false) so the @-picker can mark it and turn
+// a tag into a run-request. With the flag overridden off the agent is hidden
+// again — the legacy behavior the @-picker used to rely on.
+func TestListAgents_PrivateVisibleButLockedForPlainMember(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -178,15 +182,54 @@ func TestListAgents_FiltersPrivateForPlainMember(t *testing.T) {
 		t.Fatalf("ListAgents as owner did not include private agent %s", agentID)
 	}
 
-	// Plain member does NOT see the agent.
+	// Default-on: plain member now SEES the agent, but locked.
 	w = httptest.NewRecorder()
 	testHandler.ListAgents(w, newRequestAs(memberID, "GET", "/api/agents", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("ListAgents as plain member: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if listContainsAgent(t, w.Body.Bytes(), agentID) {
-		t.Fatalf("ListAgents as plain member leaked private agent %s", agentID)
+	locked := findAgentInList(t, w.Body.Bytes(), agentID)
+	if locked == nil {
+		t.Fatalf("plain member should now SEE locked private agent %s", agentID)
 	}
+	if locked.CanTrigger {
+		t.Errorf("locked private agent must have can_trigger=false, got true")
+	}
+
+	// Flag overridden off → legacy hide. Wire CerebroQueries so the override is
+	// read, restoring nil afterwards so the rest of the suite is unaffected.
+	testHandler.CerebroQueries = cerebrodb.New(testPool)
+	t.Cleanup(func() { testHandler.CerebroQueries = nil })
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled)
+		VALUES ($1, $2, 'cerebro_private_agent_requests', false)
+		ON CONFLICT (workspace_id, user_id, flag_key) DO UPDATE SET enabled = EXCLUDED.enabled
+	`, testWorkspaceID, memberID); err != nil {
+		t.Fatalf("set flag override: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM cerebro_feature_flags WHERE user_id = $1`, memberID)
+	})
+
+	w = httptest.NewRecorder()
+	testHandler.ListAgents(w, newRequestAs(memberID, "GET", "/api/agents", nil))
+	if listContainsAgent(t, w.Body.Bytes(), agentID) {
+		t.Fatalf("flag off should hide private agent %s from plain member", agentID)
+	}
+}
+
+func findAgentInList(t *testing.T, body []byte, agentID string) *AgentResponse {
+	t.Helper()
+	var resp []AgentResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode ListAgents response: %v", err)
+	}
+	for i := range resp {
+		if resp[i].ID == agentID {
+			return &resp[i]
+		}
+	}
+	return nil
 }
 
 func listContainsAgent(t *testing.T, body []byte, agentID string) bool {
@@ -493,7 +536,8 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 	if delegationErr != nil {
 		t.Fatalf("member delegation context: %v", delegationErr)
 	}
-	testHandler.enqueueMentionedAgentTasks(ctx, nil, issue, comment, nil, "member", testUserID, delegation, nil)
+	// CEREBRO-PATCH(private-autopilot-member-agent-push): pass empty private autopilot owner for non-autopilot mention tests.
+	testHandler.enqueueMentionedAgentTasks(ctx, nil, issue, comment, nil, "member", testUserID, delegation, nil, pgtype.UUID{})
 
 	var afterCount int
 	if err := testPool.QueryRow(ctx,
@@ -505,5 +549,96 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 	if afterCount != beforeCount {
 		t.Fatalf("foreign agent task count changed: before=%d after=%d — cross-workspace mention was not rejected",
 			beforeCount, afterCount)
+	}
+}
+
+// TestShouldEnqueueOnComment_PrivateAgentGate is the regression test for
+// GH #3300: after an owner/admin assigns a private agent to an issue, the
+// agent's UUID is "welded" onto that issue and any member with comment
+// access could previously dispatch a new task to the private agent simply by
+// posting a plain (non-@mention) comment, bypassing the visibility gate that
+// #2359 added to chat / @mention / assignment.
+//
+// The gate must:
+//   - reject plain workspace members (not owner, not admin, not agent owner)
+//   - allow the agent owner
+//   - allow workspace owners/admins
+//   - allow agent-to-agent traffic regardless of agent visibility
+func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, ownerID, memberID := privateAgentTestFixture(t)
+
+	// Assign the private agent to a fresh issue. Owner/admin would normally
+	// be the one performing this step; we insert directly so the test
+	// focuses on the on_comment trigger path.
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id,
+		                   assignee_type, assignee_id, number)
+		VALUES ($1, 'on_comment private-agent gate test', 'todo', 'medium', 'member', $2,
+		        'agent', $3,
+		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue assigned to private agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+
+	cases := []struct {
+		name       string
+		actorType  string
+		actorID    string
+		want       bool
+		reason     string
+	}{
+		{
+			name:      "plain member — denied",
+			actorType: "member",
+			actorID:   memberID,
+			want:      false,
+			reason:    "GH #3300: plain members must not be able to dispatch a task to a private agent via on_comment",
+		},
+		{
+			name:      "agent owner — allowed",
+			actorType: "member",
+			actorID:   ownerID,
+			want:      true,
+			reason:    "agent owner is always in the allowed_principals set",
+		},
+		{
+			name:      "workspace owner — allowed",
+			actorType: "member",
+			actorID:   testUserID,
+			want:      true,
+			reason:    "workspace owners/admins are in the allowed_principals set",
+		},
+		{
+			name:      "agent-to-agent — allowed",
+			actorType: "agent",
+			actorID:   agentID,
+			want:      true,
+			reason:    "A2A traffic bypasses the visibility gate by design",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := testHandler.shouldEnqueueOnComment(ctx, issue, tc.actorType, tc.actorID)
+			if got != tc.want {
+				t.Fatalf("%s\n  actor=%s/%s got=%v want=%v",
+					tc.reason, tc.actorType, tc.actorID, got, tc.want)
+			}
+		})
 	}
 }

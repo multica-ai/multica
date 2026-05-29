@@ -36,6 +36,7 @@ type grantResponse struct {
 	WorkspaceID           string  `json:"workspace_id"`
 	SubjectType           string  `json:"subject_type"`
 	SubjectID             *string `json:"subject_id"`
+	SubjectDisplayName    *string `json:"subject_display_name"`
 	ResourcePattern       string  `json:"resource_pattern"`
 	Capability            string  `json:"capability"`
 	ClassificationCeiling *string `json:"classification_ceiling"`
@@ -123,14 +124,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		f.SubjectID = sid
 	}
 
-	grants, err := h.Svc.List(r.Context(), workspaceID, f)
+	grants, err := h.Svc.ListWithNames(r.Context(), workspaceID, f)
 	if err != nil {
 		h.serverError(w, r, "list grants", err)
 		return
 	}
 	resp := make([]grantResponse, len(grants))
 	for i, g := range grants {
-		resp[i] = toResponse(g)
+		resp[i] = toResponseWithName(g)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"grants": resp})
 }
@@ -223,7 +224,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid grant id")
 		return
 	}
-	g, err := h.Svc.Get(r.Context(), grantID, workspaceID)
+	g, err := h.Svc.GetWithName(r.Context(), grantID, workspaceID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "grant not found")
@@ -232,7 +233,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, "get grant", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toResponse(g))
+	writeJSON(w, http.StatusOK, toResponseGetWithName(g))
 }
 
 // Evaluate — POST /api/workspaces/{id}/grants/evaluate
@@ -548,6 +549,59 @@ func toResponse(g cerebrodb.CerebroWorkspaceGrant) grantResponse {
 		RevokedAt:             revokedAt,
 		UpdatedAt:             util.TimestampToString(g.UpdatedAt),
 	}
+}
+
+// toResponseWithName mirrors toResponse for the display-list row, adding the
+// resolved subject name. An empty resolved name (subject deleted, or a
+// subjectless type like workspace_default) is sent as null so the client falls
+// back to its own label.
+func toResponseWithName(g cerebrodb.ListCerebroWorkspaceGrantsWithNamesRow) grantResponse {
+	var revokedAt *string
+	if g.RevokedAt.Valid {
+		s := util.TimestampToString(g.RevokedAt)
+		revokedAt = &s
+	}
+	var twStart, twEnd *string
+	if g.TimeWindowStart.Valid {
+		s := util.TimestampToString(g.TimeWindowStart)
+		twStart = &s
+	}
+	if g.TimeWindowEnd.Valid {
+		s := util.TimestampToString(g.TimeWindowEnd)
+		twEnd = &s
+	}
+	var displayName *string
+	if g.SubjectDisplayName != "" {
+		name := g.SubjectDisplayName
+		displayName = &name
+	}
+	return grantResponse{
+		ID:                    util.UUIDToString(g.ID),
+		WorkspaceID:           util.UUIDToString(g.WorkspaceID),
+		SubjectType:           g.SubjectType,
+		SubjectID:             util.UUIDToPtr(g.SubjectID),
+		SubjectDisplayName:    displayName,
+		ResourcePattern:       g.ResourcePattern,
+		Capability:            g.Capability,
+		ClassificationCeiling: util.TextToPtr(g.ClassificationCeiling),
+		TimeWindowStart:       twStart,
+		TimeWindowEnd:         twEnd,
+		ApprovalRequired:      g.ApprovalRequired,
+		Status:                g.Status,
+		GrantedByType:         util.TextToPtr(g.GrantedByType),
+		GrantedByID:           util.UUIDToPtr(g.GrantedByID),
+		GrantedAt:             util.TimestampToString(g.GrantedAt),
+		RevokedByID:           util.UUIDToPtr(g.RevokedByID),
+		RevokedAt:             revokedAt,
+		UpdatedAt:             util.TimestampToString(g.UpdatedAt),
+	}
+}
+
+// toResponseGetWithName maps the single-grant display row. Its columns are
+// identical to the list row, so we reuse toResponseWithName via a struct
+// conversion — this fails to compile (safely) if the two queries ever diverge.
+func toResponseGetWithName(g cerebrodb.GetCerebroWorkspaceGrantWithNameRow) grantResponse {
+	return toResponseWithName(cerebrodb.ListCerebroWorkspaceGrantsWithNamesRow(g))
 }
 
 func toAuditResponse(row cerebrodb.ListCerebroGrantAuditRow) grantAuditResponse {

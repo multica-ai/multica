@@ -1,7 +1,10 @@
 {
   "generate_ai": "Generate AI",
+  "modal_title": "Generate avatar with AI",
+  "modal_description": "Leave the field blank for an auto-generated photorealistic portrait, or describe the look you want.",
   "prompt_placeholder": "Describe the look (optional)",
   "generate_button": "Generate",
   "generating": "Generating…",
+  "cancel": "Cancel",
   "generate_error": "Avatar generation failed"
 }

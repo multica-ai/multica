@@ -43,13 +43,15 @@ vi.mock("@multica/core/permissions", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { PermissionsPage } from "./permissions-page";
+// FIR-2230 phase 7: Roles + Matrix now live on the merged AccessPage (the old
+// PermissionsPage was folded in). The tabs are reached the same way.
+import { AccessPage } from "./access-page";
 
 function makePage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
-      <PermissionsPage />
+      <AccessPage />
     </QueryClientProvider>
   );
 }

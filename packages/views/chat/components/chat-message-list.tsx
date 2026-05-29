@@ -95,33 +95,36 @@ export function ChatMessageList({
   const showStatusPill = !!pendingTaskId && !pendingAssistantFinalized && !!pendingTask;
 
   return (
-    <div className="relative flex-1 min-h-0">
-      <div ref={scrollRef} style={fadeStyle} className="absolute inset-0 overflow-y-auto">
-        {/* Inner container matches issue / project detail width convention
-         *  (max-w-4xl + mx-auto) so switching between chat and content
-         *  views doesn't jolt the reading width. px-5 is a touch tighter
-         *  than issue-detail's px-8 because the chat window can be narrow. */}
-        <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
-          {messages.map((msg) => (
-            <MessageBubble
-              key={msg.id}
-              message={msg}
-              isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
-            />
-          ))}
-          {hasLive && (
-            <div className="w-full space-y-1.5">
-              <TimelineView items={liveTimeline} isStreaming />
-            </div>
-          )}
-          {showStatusPill && pendingTask && (
-            <TaskStatusPill
-              pendingTask={pendingTask}
-              taskMessages={liveTaskMessages ?? []}
-              availability={availability}
-            />
-          )}
-        </div>
+    <div
+      ref={scrollRef}
+      data-tab-scroll-root
+      style={fadeStyle}
+      className="flex-1 overflow-y-auto"
+    >
+      {/* Inner container matches issue / project detail width convention
+       *  (max-w-4xl + mx-auto) so switching between chat and content
+       *  views doesn't jolt the reading width. px-5 is a touch tighter
+       *  than issue-detail's px-8 because the chat window can be narrow. */}
+      <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
+        {messages.map((msg) => (
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
+          />
+        ))}
+        {hasLive && (
+          <div className="w-full space-y-1.5">
+            <TimelineView items={liveTimeline} isStreaming />
+          </div>
+        )}
+        {showStatusPill && pendingTask && (
+          <TaskStatusPill
+            pendingTask={pendingTask}
+            taskMessages={liveTaskMessages ?? []}
+            availability={availability}
+          />
+        )}
       </div>
       <JumpToLatestButton
         visible={hasNewBelow}
@@ -193,7 +196,8 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
              * render them through the same pipeline as assistant replies.
              * Neutralise prose's leading/trailing margin so single-line
              * bubbles stay as compact as the plain-text version used to. */}
-            <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+            {/* CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch */}
+            <div className="prose prose-sm dark:prose-invert max-w-[70ch] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
               <Markdown>{message.content}</Markdown>
             </div>
           </div>
@@ -251,7 +255,8 @@ function AssistantMessage({
       {timeline.length > 0 ? (
         <TimelineView items={timeline} />
       ) : (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+        // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch]">
           <Markdown>{message.content}</Markdown>
         </div>
       )}
@@ -438,7 +443,8 @@ function TimelineView({
   return (
     <>
       {preface.length > 0 && (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+        // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch]">
           <Markdown>{preface.map((t) => t.content ?? "").join("")}</Markdown>
         </div>
       )}
@@ -446,7 +452,8 @@ function TimelineView({
         <OuterProcessFold items={middle} defaultOpen={!!isStreaming} />
       )}
       {final.length > 0 && (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+        // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch]">
           <Markdown>{final.map((t) => t.content ?? "").join("")}</Markdown>
         </div>
       )}
@@ -497,7 +504,8 @@ function OuterProcessFold({
 // prose size.
 function MiddleTextRow({ item }: { item: ChatTimelineItem }) {
   return (
-    <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+    // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
+    <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-[70ch] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <Markdown>{item.content ?? ""}</Markdown>
     </div>
   );

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/cerebro/permissions"
 	"github.com/multica-ai/multica/server/internal/mcp"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -65,8 +66,11 @@ func TestRunToolLoopReturnsFinalTextAfterToolDispatch(t *testing.T) {
 			{Role: "user", Content: "do something"},
 		},
 		GatewayRequestMeta{TaskID: "t1"},
+		pgtype.UUID{},
+		pgtype.UUID{},
 		srv,
 		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "echo"}}},
+		false,
 	)
 	if err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
@@ -113,8 +117,11 @@ func TestRunToolLoopForcesFinalAnswerWhenModelKeepsCallingTools(t *testing.T) {
 		db.Agent{},
 		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
 		GatewayRequestMeta{TaskID: "t1"},
+		pgtype.UUID{},
+		pgtype.UUID{},
 		toolSrv,
 		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "echo"}}},
+		false,
 	)
 	if err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
@@ -133,11 +140,12 @@ func TestRunToolLoopForcesFinalAnswerWhenModelKeepsCallingTools(t *testing.T) {
 	}
 }
 
-func TestRunToolLoopForcedFinalCallOmitsTools(t *testing.T) {
-	// Verify the mechanism that prevents an infinite loop: the FINAL gateway
-	// request (the one made after the tool-round budget is exhausted) must
-	// not include a `tools` field, otherwise the model can keep calling tools
-	// forever.
+func TestRunToolLoopForcedFinalCallKeepsToolsAndForcesText(t *testing.T) {
+	// FIR-2421 root cause: the forced-final call used to DROP `tools`, which left
+	// the request referencing tool_use/tool_result blocks with no tool defs —
+	// Anthropic rejects that as malformed (HTTP 400). The fix keeps `tools`
+	// attached and sets tool_choice="none" so the request stays valid AND the
+	// model is forced to answer with text instead of calling another tool.
 	var captured []map[string]any
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -165,24 +173,89 @@ func TestRunToolLoopForcedFinalCallOmitsTools(t *testing.T) {
 		db.Agent{},
 		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
 		GatewayRequestMeta{TaskID: "t1"},
+		pgtype.UUID{},
+		pgtype.UUID{},
 		toolSrv,
 		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "echo"}}},
+		false,
 	); err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
 	}
 	if len(captured) != firtalGatewayMaxToolRounds+1 {
 		t.Fatalf("captured %d requests, want %d", len(captured), firtalGatewayMaxToolRounds+1)
 	}
-	// All tool-round requests MUST include `tools`.
+	// All tool-round requests MUST include `tools` and MUST NOT pin tool_choice.
 	for i := 0; i < firtalGatewayMaxToolRounds; i++ {
 		if _, ok := captured[i]["tools"]; !ok {
 			t.Errorf("request %d (tool round) is missing `tools`", i+1)
 		}
+		if _, ok := captured[i]["tool_choice"]; ok {
+			t.Errorf("request %d (tool round) must not set tool_choice", i+1)
+		}
 	}
-	// The final request MUST NOT include `tools` — that's how the loop forces
-	// the model to produce text instead of another tool call.
-	if _, ok := captured[firtalGatewayMaxToolRounds]["tools"]; ok {
-		t.Fatalf("final request still has `tools`; loop will not terminate cleanly")
+	// The final request MUST keep `tools` (so the transcript stays valid for
+	// Anthropic) and MUST set tool_choice="none" (so the model produces text).
+	final := captured[firtalGatewayMaxToolRounds]
+	if _, ok := final["tools"]; !ok {
+		t.Fatalf("final request dropped `tools`; transcript references tools without defining them — Anthropic rejects this")
+	}
+	if final["tool_choice"] != "none" {
+		t.Fatalf("final request tool_choice = %v, want \"none\"", final["tool_choice"])
+	}
+}
+
+func TestGatewayCompatRegistryToolLoopForcedFinalKeepsToolsAndForcesText(t *testing.T) {
+	// FIR-2421 root cause on the PRIMARY production path: when the model keeps
+	// calling tools until the round budget is exhausted, the forced-final call
+	// must keep `tools` attached and set tool_choice="none" so the transcript
+	// stays valid for Anthropic and the model is forced to answer with text.
+	var captured []map[string]any
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/ai/proxy/v1/chat/completions" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		var body map[string]any
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		captured = append(captured, body)
+		w.Header().Set("Content-Type", "application/json")
+		if len(captured) <= firtalGatewayMaxToolRounds {
+			w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"echo","arguments":"{\"text\":\"x\"}"}}]}}]}`))
+			return
+		}
+		w.Write([]byte(`{"choices":[{"message":{"content":"forced final"}}]}`))
+	}))
+	defer srv.Close()
+
+	reg := NewRegistry(nil)
+	reg.Register(fallbackTestTool{})
+	e := &FirtalGatewayExecutor{gateway: NewGatewayClient(FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096}, srv.Client()), logger: testLogger()}
+	completion, err := e.runGatewayCompatRegistryToolLoop(context.Background(),
+		FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096},
+		db.Agent{},
+		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
+		GatewayRequestMeta{TaskID: "t1"},
+		pgtype.UUID{},
+		pgtype.UUID{},
+		reg,
+		[]Tool{fallbackTestTool{}},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("runGatewayCompatRegistryToolLoop error = %v", err)
+	}
+	if completion.Output != "forced final" {
+		t.Fatalf("Output = %q, want forced final", completion.Output)
+	}
+	if len(captured) != firtalGatewayMaxToolRounds+1 {
+		t.Fatalf("captured %d requests, want %d", len(captured), firtalGatewayMaxToolRounds+1)
+	}
+	final := captured[firtalGatewayMaxToolRounds]
+	if _, ok := final["tools"]; !ok {
+		t.Fatalf("final request dropped `tools`; Anthropic rejects a transcript that references undefined tools")
+	}
+	if final["tool_choice"] != "none" {
+		t.Fatalf("final request tool_choice = %v, want \"none\"", final["tool_choice"])
 	}
 }
 
@@ -220,12 +293,15 @@ func TestRunToolLoopThreeStepAcceptanceFlow(t *testing.T) {
 			{Role: "user", Content: "Find JEH-1089, læs comment-tråden, og post et resumé."},
 		},
 		GatewayRequestMeta{TaskID: "t1"},
+		pgtype.UUID{},
+		pgtype.UUID{},
 		srv,
 		[]GatewayToolDef{
 			{Type: "function", Function: GatewayToolFunction{Name: "get_issue"}},
 			{Type: "function", Function: GatewayToolFunction{Name: "list_comments"}},
 			{Type: "function", Function: GatewayToolFunction{Name: "add_comment"}},
 		},
+		false,
 	)
 	if err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
@@ -279,8 +355,11 @@ func TestRunToolLoopSendsToolResultsAsRoleToolMessages(t *testing.T) {
 		db.Agent{},
 		[]GatewayMessage{{Role: "system", Content: "be helpful"}, {Role: "user", Content: "summarise"}},
 		GatewayRequestMeta{TaskID: "t1"},
+		pgtype.UUID{},
+		pgtype.UUID{},
 		toolSrv,
 		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "echo"}}},
+		false,
 	); err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
 	}
@@ -350,6 +429,7 @@ func TestGatewayCompatRegistryToolLoopDispatchesTools(t *testing.T) { // CEREBRO
 		pgtype.UUID{},
 		reg,
 		[]Tool{fallbackTestTool{}},
+		false,
 	)
 	if err != nil {
 		t.Fatalf("runGatewayCompatRegistryToolLoop error = %v", err)
@@ -401,6 +481,7 @@ func TestRunToolLoopUsesGatewayCompatTransportForToolEnabledTasks(t *testing.T) 
 		pgtype.UUID{},
 		pgtype.UUID{},
 		pgtype.UUID{},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("runToolLoop error = %v", err)
@@ -410,6 +491,82 @@ func TestRunToolLoopUsesGatewayCompatTransportForToolEnabledTasks(t *testing.T) 
 	}
 	if len(paths) != 1 || paths[0] != "/api/ai/proxy/v1/chat/completions" {
 		t.Fatalf("paths = %v, want only chat-completions", paths)
+	}
+}
+
+// TestRunToolLoopWithServerGateBlocksDeniedTool is the FIR-2230 reviewer ask:
+// prove the fallback MCP tool-loop (runToolLoopWithServer) routes every call
+// through the approval gate, not only the registry/Anthropic loops. A Deny
+// verdict must skip dispatch entirely — the MCP handler never runs — and feed a
+// "blocked by approval gate" result back to the model so the loop continues to a
+// final text answer instead of executing the tool.
+func TestRunToolLoopWithServerGateBlocksDeniedTool(t *testing.T) {
+	var captured [][]GatewayMessage
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []GatewayMessage `json:"messages"`
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		captured = append(captured, body.Messages)
+		w.Header().Set("Content-Type", "application/json")
+		if len(captured) == 1 {
+			// Round 1: model asks to call the gated tool.
+			w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"web_fetch","arguments":"{\"url\":\"https://x\"}"}}]}}]}`))
+			return
+		}
+		// Round 2: model returns text — loop exits.
+		w.Write([]byte(`{"choices":[{"message":{"content":"done without fetching"}}]}`))
+	}))
+	defer srv.Close()
+
+	// Deny resolver via the capability path (web_fetch → network.external).
+	res := &gateFakeResolver{decision: permissions.Decision{Kind: permissions.DecisionDeny, Reason: "no matching grant"}}
+	agentID := gateTestUUID(1)
+	e := newGatedExecutor(res, &gateFakeApprovals{}, agentID)
+	e.gateway = NewGatewayClient(FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096}, srv.Client())
+
+	dispatched := false
+	toolSrv := mcp.NewServer("test-tools", "0.0.0")
+	toolSrv.RegisterTool(mcp.Tool{Name: "web_fetch"}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		dispatched = true
+		return mcp.TextResult("SHOULD NOT RUN"), nil
+	})
+
+	completion, err := e.runToolLoopWithServer(context.Background(),
+		FirtalGatewayRuntimeConfig{BaseURL: "https://x", APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096},
+		db.Agent{},
+		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
+		GatewayRequestMeta{TaskID: "t1"},
+		agentID,
+		gateTestUUID(9),
+		toolSrv,
+		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "web_fetch"}}},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("runToolLoopWithServer error = %v", err)
+	}
+	if dispatched {
+		t.Fatal("denied tool was dispatched — the fallback loop bypassed the approval gate")
+	}
+	if res.calls == 0 {
+		t.Fatal("approval gate resolver was never consulted by the fallback loop")
+	}
+	if completion.Output != "done without fetching" {
+		t.Fatalf("Output = %q, want final text after the blocked call", completion.Output)
+	}
+	if len(captured) != 2 {
+		t.Fatalf("captured %d requests, want 2 (call round + final)", len(captured))
+	}
+	// Round 2 must carry the block notice back to the model as the tool result.
+	last := captured[1]
+	toolMsg := last[len(last)-1]
+	if toolMsg.Role != "tool" || toolMsg.ToolCallID != "c1" {
+		t.Fatalf("last message is not the tool result for c1: %+v", toolMsg)
+	}
+	if !strings.Contains(toolMsg.Content, "blocked by approval gate") {
+		t.Fatalf("tool result must explain the block, got %q", toolMsg.Content)
 	}
 }
 

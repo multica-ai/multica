@@ -1,0 +1,172 @@
+/*
+ * CEREBRO-PATCH(editor-css-cerebro): cerebro-owned editor style overrides.
+ *
+ * Upstream split content-editor.css into styles/*.css (shell/prose/code/...).
+ * The fork's editor customizations that have no upstream equivalent live here
+ * and are imported last from index.css so they layer on top of upstream prose.
+ * Selectors are scoped to .rich-text-editor, matching upstream's split files,
+ * so both ContentEditor and ReadonlyContent pick them up.
+ */
+
+/* CEREBRO-PATCH(todo-list-editor): render Tiptap task lists as checkbox lists. */
+.rich-text-editor ul[data-type="taskList"],
+.rich-text-editor ul.contains-task-list {
+  list-style: none;
+  padding-inline-start: 0;
+}
+
+/* CEREBRO-PATCH(todo-list-editor): custom checkbox design — replaces the cheap,
+   OS-native control with a design-token toggle that clearly reads as clickable,
+   so it is obvious how an item is marked done. Tiptap renders the task list as
+   <ul data-type="taskList"><li data-checked="..."> (data-type lives on the UL,
+   not the LI — FIR-2297 follow-up). GFM readonly renders <li class="task-list-item">.
+   Both render paths share the same look. */
+.rich-text-editor ul[data-type="taskList"] > li,
+.rich-text-editor li.task-list-item {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.625rem;
+  margin: 0.25rem 0;
+  list-style: none;
+}
+
+.rich-text-editor ul[data-type="taskList"] {
+  padding-left: 0;
+}
+
+.rich-text-editor ul[data-type="taskList"] > li > label {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 1.625rem;
+  margin: 0;
+  user-select: none;
+}
+
+.rich-text-editor ul[data-type="taskList"] > li > label > input[type="checkbox"],
+.rich-text-editor li.task-list-item > input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0;
+  border: 1.5px solid color-mix(in oklab, var(--foreground) 40%, transparent);
+  border-radius: 9999px;
+  background-color: transparent;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 0.75rem 0.75rem;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+/* Readonly (comments) has no <label> wrapper to centre the box, so nudge the
+   bare input down to align with the first line of text. */
+.rich-text-editor li.task-list-item > input[type="checkbox"] {
+  margin-top: 0.25rem;
+}
+
+.rich-text-editor ul[data-type="taskList"] > li > label > input[type="checkbox"]:hover:not(:disabled),
+.rich-text-editor li.task-list-item > input[type="checkbox"]:hover:not(:disabled) {
+  border-color: var(--brand);
+  background-color: color-mix(in oklab, var(--brand) 12%, var(--background));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 10%, transparent);
+}
+
+.rich-text-editor ul[data-type="taskList"] > li > label > input[type="checkbox"]:checked,
+.rich-text-editor li.task-list-item > input[type="checkbox"]:checked {
+  border-color: var(--brand);
+  background-color: var(--brand);
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%20fill='none'%20stroke='white'%20stroke-width='2.5'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M3.5%208.5l3%203%206-6'/%3E%3C/svg%3E");
+}
+
+.rich-text-editor ul[data-type="taskList"] > li > label > input[type="checkbox"]:focus-visible,
+.rich-text-editor li.task-list-item > input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* Disabled (readonly) checkboxes stay fully legible — only the cursor changes,
+   so a done/not-done state reads clearly in comments. */
+.rich-text-editor ul[data-type="taskList"] > li > label > input[type="checkbox"]:disabled,
+.rich-text-editor li.task-list-item > input[type="checkbox"]:disabled {
+  cursor: default;
+}
+
+.rich-text-editor ul[data-type="taskList"] > li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* CEREBRO-PATCH(todo-list-editor): Tiptap wraps task-item text in li > div > p,
+   so the generic `li > p` margin reset below misses it; the paragraph keeps its
+   0.625rem block margins and the text sits 10px below the top-aligned checkbox
+   (FIR-2297 alignment fix). Zero the margins so box and first text line align. */
+.rich-text-editor ul[data-type="taskList"] > li > div > p {
+  margin: 0;
+}
+
+.rich-text-editor ul[data-type="taskList"] > li > div > p + p {
+  margin-top: 0.25rem;
+}
+
+.rich-text-editor ul[data-type="taskList"] > li[data-checked="true"] > div,
+.rich-text-editor li.task-list-item:has(> input[type="checkbox"]:checked) {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* CEREBRO-PATCH(editor-readable-width): FIR-2114 cap rendered prose at the 50-75ch
+   readability sweet spot (Bringhurst, Nielsen Norman); wide tables/code/images
+   still overflow horizontally via their own rules. */
+/* CEREBRO-PATCH(editor-mobile-table-overflow): wide tables must scroll inside the
+   wrapper rather than push the page past the viewport on mobile (JEH-707). */
+.rich-text-editor {
+  min-width: 0;
+  max-width: min(100%, 70ch);
+}
+
+.rich-text-editor .tableWrapper {
+  overflow-x: auto;
+  max-width: 100%;
+  /* Anchor scroll-shadow so users see overflow exists on mobile. */
+  background:
+    linear-gradient(to right, var(--background) 30%, color-mix(in srgb, var(--background) 0%, transparent)) 0 0 / 20px 100% no-repeat,
+    linear-gradient(to left, var(--background) 30%, color-mix(in srgb, var(--background) 0%, transparent)) 100% 0 / 20px 100% no-repeat;
+}
+
+.rich-text-editor table {
+  /* On wide containers fill 100%, on narrow ones let cells be their natural
+     width and scroll horizontally. */
+  min-width: max-content;
+}
+
+.rich-text-editor th,
+.rich-text-editor td {
+  /* Don't shred sentences across 5 lines on a phone — let the cell take what it
+     needs and scroll horizontally instead. */
+  white-space: nowrap;
+}
+
+/* CEREBRO-PATCH(editor-longword-wrap): a long unbreakable string (URL, token,
+   hash) in a paragraph, list item, heading, blockquote or link has no natural
+   break opportunity, so without this it pushes the editor — and the whole
+   create-issue dialog — wider than the viewport (FIR-2487). overflow-wrap:
+   anywhere lets the browser break such a string at any point, but only when it
+   would otherwise overflow; normal text still breaks at spaces. Tables and code
+   blocks keep their own scroll behaviour (rules above), so they're untouched. */
+.rich-text-editor p,
+.rich-text-editor li,
+.rich-text-editor h1,
+.rich-text-editor h2,
+.rich-text-editor h3,
+.rich-text-editor blockquote,
+.rich-text-editor a {
+  overflow-wrap: anywhere;
+}

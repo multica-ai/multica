@@ -14,7 +14,12 @@ set -a
 source .env
 set +a
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+# Include ~/.local/bin so the daemon can resolve agent runtimes installed
+# under the user's home (e.g. `claude`, installed by the official installer
+# under $HOME/.local/bin). Without this, launchd's minimal PATH causes the
+# daemon to fail bootstrap with "no agent runtime found" — daemon now hard-
+# fails if no runtime resolves at start, rather than silently degrading.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # Claude-agenter spawned af denne daemon bruger Max-kontoen jesperhvejsel@gmail.com.
 # Per-host overridable; defaults under the running user's home rather than a

@@ -68,6 +68,14 @@ vi.mock("@multica/cerebro-inbox", () => {
     CerebroSwipeArchive: Archive,
     CerebroUnarchiveAction: Unarchive,
     CerebroInboxTimestamp: ({ fallback }: { fallback: string }) => <>{fallback}</>,
+    CerebroInboxReminderRow: ({ item }: { item: InboxItem }) =>
+      item.type === "reminder" || item.muted_until === "2000-01-01T11:00:00.000Z" ? (
+        <span>Reminder</span>
+      ) : null,
+    CerebroInboxRunRequestRow: ({ item }: { item: InboxItem }) =>
+      item.type === "private_agent_run_request" ? <span>Run request</span> : null,
+    isReminderOverdue: (value: string | null | undefined) =>
+      value === "2000-01-01T11:00:00.000Z",
   };
 });
 
@@ -82,6 +90,9 @@ vi.mock("../../i18n", () => ({
       const dict = {
         list: {
           archive_tooltip: "Archive",
+        },
+        types: {
+          reminder: "Reminder",
         },
       };
       if (typeof selectorOrKey === "function") {
@@ -181,6 +192,24 @@ describe("InboxListItem (issue variant)", () => {
     await user.click(archive);
     expect(onArchive).toHaveBeenCalledTimes(1);
     expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("marks resurfaced muted issue rows as reminders", () => {
+    render(
+      <InboxListItem
+        item={makeIssueInboxItem({
+          type: "new_comment",
+          muted_until: "2000-01-01T11:00:00.000Z",
+          body: "old comment preview",
+        })}
+        isSelected={false}
+        onClick={() => {}}
+        onArchive={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("Reminder")).toBeInTheDocument();
+    expect(screen.getByText("old comment preview")).toBeInTheDocument();
   });
 });
 

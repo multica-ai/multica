@@ -4,27 +4,37 @@
 // than by a workflow status field. Top-to-bottom precedence is fixed; every
 // entry lands in exactly one bucket:
 //
-//   act_now  — unread: any unread inbox item.
-//   watching — running: an agent is currently running on it.
-//   calm     — done: the issue is terminal (done/cancelled), or a non-issue
-//              chat/channel has been read.
-//   waiting  — an open thread to follow up: you've seen it, but it is not
-//              running or done yet.
+//   act_now   — unread: any unread inbox item.
+//   reminders — reminders and date-arrival notifications (FIR-2445): keeps
+//               time-driven items in their own section so they don't get lost
+//               in Unread, regardless of read state.
+//   watching  — running: an agent is currently running on it.
+//   calm      — done: the issue is terminal (done/cancelled), or a non-issue
+//               chat/channel has been read.
+//   waiting   — an open thread to follow up: you've seen it, but it is not
+//               running or done yet.
 //
 // The grouping logic lives here (cerebro zone) so the upstream inbox page only
 // needs a few marked CEREBRO-PATCH touchpoints that delegate into it.
 
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem, InboxItemType } from "@multica/core/types";
 
-export type InboxActionCategory = "act_now" | "watching" | "waiting" | "calm";
+export type InboxActionCategory = "act_now" | "reminders" | "watching" | "waiting" | "calm";
 
 /** Render order, top → bottom. Drives group sorting (not alphabetical). */
 export const INBOX_ACTION_ORDER: InboxActionCategory[] = [
   "act_now",
+  "reminders",
   "watching",
   "calm",
   "waiting",
 ];
+
+const REMINDER_TYPES: ReadonlySet<InboxItemType> = new Set<InboxItemType>([
+  "reminder",
+  "due_date_reminder",
+  "start_date_reminder",
+]);
 
 /** Zero-based render index for a category. Unknown categories sort last. */
 export function inboxActionOrderIndex(category: InboxActionCategory): number {
@@ -51,6 +61,8 @@ export interface InboxActionContext {
   userId: string;
   /** Issue ids with an in-flight agent run. */
   issueRunStates: ReadonlyMap<string, unknown>;
+  /** Parent issue ids that have an in-flight agent run on a sub-issue (FIR-2326). */
+  subIssueRunStates: ReadonlyMap<string, unknown>;
   /** Chat session ids with an in-flight agent run. */
   chatRunStates: ReadonlyMap<string, unknown>;
   /** Channel ids with an unread @mention for the viewing user. */
@@ -64,18 +76,26 @@ export type InboxActionEntry =
   | { kind: "channel"; channel: { id: string; unread_count: number } };
 
 function classifyNotif(item: InboxItem, ctx: InboxActionContext): InboxActionCategory {
-  // 1. Unread is a literal bucket: any unread notification belongs here.
+  // 1. Reminders and date-arrival items get their own bucket (FIR-2445),
+  //    checked before Unread so they don't disappear into the Unread pile
+  //    the moment they fire.
+  if (REMINDER_TYPES.has(item.type)) return "reminders";
+
+  // 2. Unread is a literal bucket: any unread notification belongs here.
   if (!item.read) return "act_now";
 
-  // 2. An agent is actively working the issue — watch, don't act. Checked
+  // 3. An agent is actively working the issue — watch, don't act. Checked
   //    before "waiting" so a running thread isn't mistaken for a stalled one.
-  if (item.issue_id && ctx.issueRunStates.has(item.issue_id)) return "watching";
+  //    FIR-2326: a parent whose sub-issue is running counts as watching too,
+  //    so the umbrella surfaces in Running even when its own row is idle.
+  if (item.issue_id && (ctx.issueRunStates.has(item.issue_id) || ctx.subIssueRunStates.has(item.issue_id)))
+    return "watching";
 
-  // 3. Done is also literal for issue notifications. A read item on an open
+  // 4. Done is also literal for issue notifications. A read item on an open
   //    issue is still follow-up, not done.
   if (item.issue_status === "done" || item.issue_status === "cancelled") return "calm";
 
-  // 4. Everything else is open and already seen.
+  // 5. Everything else is open and already seen.
   return "waiting";
 }
 

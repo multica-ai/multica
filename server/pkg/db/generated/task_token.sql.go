@@ -11,38 +11,46 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createTaskToken = `-- name: CreateTaskToken :exec
-INSERT INTO task_token (token_hash, task_id, issue_id, agent_id, workspace_id, scope, expires_at)
-VALUES ($1, $2, $7, $3, $4, $5, $6)
+const createTaskToken = `-- name: CreateTaskToken :one
+INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, user_id, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at
 `
 
 type CreateTaskTokenParams struct {
-	TokenHash   []byte             `json:"token_hash"`
+	TokenHash   string             `json:"token_hash"`
 	TaskID      pgtype.UUID        `json:"task_id"`
 	AgentID     pgtype.UUID        `json:"agent_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Scope       string             `json:"scope"`
+	UserID      pgtype.UUID        `json:"user_id"`
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
-	IssueID     pgtype.UUID        `json:"issue_id"`
 }
 
-// CEREBRO-PATCH(sqlc-task-token): cerebro modification of upstream file
-func (q *Queries) CreateTaskToken(ctx context.Context, arg CreateTaskTokenParams) error {
-	_, err := q.db.Exec(ctx, createTaskToken,
+func (q *Queries) CreateTaskToken(ctx context.Context, arg CreateTaskTokenParams) (TaskToken, error) {
+	row := q.db.QueryRow(ctx, createTaskToken,
 		arg.TokenHash,
 		arg.TaskID,
 		arg.AgentID,
 		arg.WorkspaceID,
-		arg.Scope,
+		arg.UserID,
 		arg.ExpiresAt,
-		arg.IssueID,
 	)
-	return err
+	var i TaskToken
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.TaskID,
+		&i.AgentID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const deleteExpiredTaskTokens = `-- name: DeleteExpiredTaskTokens :exec
-DELETE FROM task_token
-WHERE expires_at < now() - INTERVAL '24 hours'
+DELETE FROM task_token WHERE expires_at <= now()
 `
 
 func (q *Queries) DeleteExpiredTaskTokens(ctx context.Context) error {
@@ -50,37 +58,32 @@ func (q *Queries) DeleteExpiredTaskTokens(ctx context.Context) error {
 	return err
 }
 
-const getTaskTokenByHash = `-- name: GetTaskTokenByHash :one
-SELECT token_hash, task_id, issue_id, agent_id, workspace_id, scope, created_at, expires_at, revoked_at FROM task_token
-WHERE token_hash = $1
-  AND revoked_at IS NULL
-  AND expires_at > now()
+const deleteTaskTokensByTask = `-- name: DeleteTaskTokensByTask :exec
+DELETE FROM task_token WHERE task_id = $1
 `
 
-func (q *Queries) GetTaskTokenByHash(ctx context.Context, tokenHash []byte) (TaskToken, error) {
+func (q *Queries) DeleteTaskTokensByTask(ctx context.Context, taskID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteTaskTokensByTask, taskID)
+	return err
+}
+
+const getTaskTokenByHash = `-- name: GetTaskTokenByHash :one
+SELECT id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at FROM task_token
+WHERE token_hash = $1 AND expires_at > now()
+`
+
+func (q *Queries) GetTaskTokenByHash(ctx context.Context, tokenHash string) (TaskToken, error) {
 	row := q.db.QueryRow(ctx, getTaskTokenByHash, tokenHash)
 	var i TaskToken
 	err := row.Scan(
+		&i.ID,
 		&i.TokenHash,
 		&i.TaskID,
-		&i.IssueID,
 		&i.AgentID,
 		&i.WorkspaceID,
-		&i.Scope,
-		&i.CreatedAt,
+		&i.UserID,
 		&i.ExpiresAt,
-		&i.RevokedAt,
+		&i.CreatedAt,
 	)
 	return i, err
-}
-
-const revokeTaskTokensForTask = `-- name: RevokeTaskTokensForTask :exec
-UPDATE task_token
-SET revoked_at = now()
-WHERE task_id = $1 AND revoked_at IS NULL
-`
-
-func (q *Queries) RevokeTaskTokensForTask(ctx context.Context, taskID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, revokeTaskTokensForTask, taskID)
-	return err
 }

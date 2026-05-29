@@ -23,6 +23,13 @@ type TaskAvailablePayload struct {
 	TaskID    string `json:"task_id,omitempty"`
 }
 
+// CEREBRO-PATCH(daemon-tool-scan-now): FIR-2230 — payload for the server→daemon
+// "scan now" push. The daemon runs the same scan routine it runs on its
+// heartbeat schedule, immediately.
+type ToolScanRequestedPayload struct {
+	RuntimeID string `json:"runtime_id"`
+}
+
 // TaskProgressPayload is sent from daemon to server during task execution.
 type TaskProgressPayload struct {
 	TaskID  string `json:"task_id"`

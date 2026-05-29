@@ -164,7 +164,9 @@ function RoleAssignments({ wsId, roleId }: { wsId: string; roleId: string }) {
             <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
               {a.subject_type}
             </span>
-            <span className="flex-1 truncate font-mono text-xs">{a.subject_id}</span>
+            <span className="flex-1 truncate text-xs" title={a.subject_id}>
+              {a.subject_display_name ?? a.subject_id}
+            </span>
             <Button
               variant="ghost"
               size="sm"

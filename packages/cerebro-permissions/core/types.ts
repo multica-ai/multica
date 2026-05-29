@@ -278,20 +278,3 @@ export interface SubjectWithPermissions {
   permissions: SubjectPermission[];
   pending_count: number;
 }
-
-// ---------------------------------------------------------------------------
-// PendingAsk — for the Pending tab on the access page.
-// Shape matches Phase 3 (approval inbox) API contract.
-// ---------------------------------------------------------------------------
-
-export interface PendingAsk {
-  id: string;
-  workspace_id: string;
-  subject: GrantSubject;
-  capability: string;
-  resource: GrantResource;
-  reason: string | null;
-  requested_at: string;
-  expires_at: string | null;
-  status: "pending" | "approved" | "rejected" | "delegated" | string;
-}

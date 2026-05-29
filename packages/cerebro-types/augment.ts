@@ -33,6 +33,34 @@ declare module "@multica/core/types/agent" {
      * defaults (daemon falls back to agent.mcp_config alone).
      */
     tools_config?: unknown | null;
+    /**
+     * FIR-2230 phase 6: the named sandbox isolation profile this runtime's
+     * stored sandbox_policy currently equals ("developer" | "read_only" |
+     * "custom"). Classified server-side from the real enforced policy and
+     * surfaced via the runtime-sandbox-profile patch. Older servers omit it;
+     * the picker treats missing as "developer" (the system default).
+     */
+    sandbox_profile?: string;
+  }
+
+  // FIR-2405: the real Firtal-gateway charge (in cents) for a usage bucket.
+  // `RuntimeUsage` carries `cost_cents` in the upstream contract already; these
+  // sibling usage shapes only gained it on the cerebro side, where the server
+  // now rolls the gateway's exact spend through to every cost surface (runtimes
+  // overview, workspace dashboard trend, per-agent / per-hour breakdowns).
+  // Optional end-to-end: older servers and daemon / non-gateway runtimes omit
+  // it, and the cost utils fall back to the token estimate when it's absent.
+  interface RuntimeUsageByAgent {
+    cost_cents?: number;
+  }
+  interface RuntimeUsageByHour {
+    cost_cents?: number;
+  }
+  interface DashboardUsageDaily {
+    cost_cents?: number;
+  }
+  interface DashboardUsageByAgent {
+    cost_cents?: number;
   }
 }
 

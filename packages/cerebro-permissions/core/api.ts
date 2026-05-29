@@ -1,5 +1,4 @@
 import { api, parseWithFallback } from "@multica/core/api";
-import { z } from "zod";
 import {
   grantAuditListSchema,
   personaGrantListSchema,
@@ -11,7 +10,6 @@ import {
   type GrantAuditEntry,
   type GrantsFilter,
   type PaginatedResponse,
-  type PendingAsk,
   type PersonaGrant,
   type SubjectWithPermissions,
   type UpdatePersonaGrantRequest,
@@ -209,93 +207,6 @@ function groupGrantsIntoSubjects(
   );
 }
 
-// ---------------------------------------------------------------------------
-// Pending asks — Phase 3 API (mock-ready, stubs until live).
-// ---------------------------------------------------------------------------
-
-const EMPTY_ASKS_PAGE: PaginatedResponse<PendingAsk> = {
-  items: [],
-  total: 0,
-  limit: 50,
-  offset: 0,
-};
-
-const pendingAskSchema: z.ZodType<PendingAsk> = z.object({
-  id: z.string(),
-  workspace_id: z.string(),
-  subject: z.object({
-    type: z.string(),
-    id: z.string().nullable().default(null),
-    display_name: z.string().nullable().default(null),
-  }),
-  capability: z.string(),
-  resource: z.object({
-    type: z.string(),
-    pattern: z.string().default("*"),
-    display_name: z.string().nullable().optional(),
-  }),
-  reason: z.string().nullable().default(null),
-  requested_at: z.string(),
-  expires_at: z.string().nullable().default(null),
-  status: z.string().default("pending"),
-});
-
-const pendingAsksPageSchema = z.object({
-  items: z.array(pendingAskSchema).default([]),
-  total: z.number().default(0),
-  limit: z.number().default(50),
-  offset: z.number().default(0),
-});
-
-export async function fetchPendingAsks(
-  wsId: string,
-  filter: { limit: number; offset: number },
-): Promise<PaginatedResponse<PendingAsk>> {
-  const raw = await api.listPendingApprovalAsks(wsId, { limit: filter.limit, offset: filter.offset });
-  const normalized = normalizeApprovalsList(raw);
-  return parseWithFallback(normalized, pendingAsksPageSchema, EMPTY_ASKS_PAGE, {
-    endpoint: "listPendingApprovalAsks",
-  });
-}
-
-export async function approveAsk(wsId: string, askId: string): Promise<void> {
-  await api.approveAsk(wsId, askId);
-}
-
-export async function rejectAsk(wsId: string, askId: string): Promise<void> {
-  await api.rejectAsk(wsId, askId);
-}
-
-// Backend approval list returns { approvals: [...], ... }; frontend schema expects { items: [...], ... }.
-// Each approval item maps requester_type/requester_id → subject, created_at → requested_at.
-function normalizeApprovalsList(raw: unknown): unknown {
-  if (!raw || typeof raw !== "object") return raw;
-  const rec = raw as Record<string, unknown>;
-  if (Array.isArray(rec.items)) return rec;
-  const arr = Array.isArray(rec.approvals) ? rec.approvals : [];
-  const items = arr.map((a: unknown) => {
-    if (!a || typeof a !== "object") return a;
-    const r = a as Record<string, unknown>;
-    return {
-      id: r.id,
-      workspace_id: r.workspace_id,
-      subject: { type: r.requester_type ?? "member", id: r.requester_id ?? null, display_name: null },
-      capability: r.capability ?? "",
-      resource: { type: "resource", pattern: typeof r.resource === "string" ? r.resource : "*" },
-      reason: r.reason ?? null,
-      requested_at: r.created_at ?? "",
-      expires_at: r.expires_at ?? null,
-      status: r.status ?? "pending",
-    };
-  });
-  return {
-    items,
-    total: typeof rec.total === "number" ? rec.total : items.length,
-    limit: typeof rec.limit === "number" ? rec.limit : 50,
-    offset: typeof rec.offset === "number" ? rec.offset : 0,
-  };
-}
-
 function normalizeGrantList(raw: unknown): unknown {
   if (!raw || typeof raw !== "object") return raw;
   const rec = raw as Record<string, unknown>;
@@ -314,13 +225,20 @@ function normalizeGrant(raw: unknown): unknown {
   if (!raw || typeof raw !== "object") return raw;
   const rec = raw as Record<string, unknown>;
   if (rec.subject && rec.resource) return raw;
+  // The backend resolves the subject's human name server-side
+  // (subject_display_name). Fall back to the raw id only when it's missing —
+  // e.g. an older server, or a subject that was deleted.
+  const resolvedName =
+    typeof rec.subject_display_name === "string" && rec.subject_display_name.length > 0
+      ? rec.subject_display_name
+      : null;
   return {
     id: rec.id,
     workspace_id: rec.workspace_id,
     subject: {
       type: rec.subject_type ?? "workspace_default",
       id: rec.subject_id ?? null,
-      display_name: rec.subject_id ?? null,
+      display_name: resolvedName ?? rec.subject_id ?? null,
     },
     resource: {
       type: inferResourceType(String(rec.resource_pattern ?? "*")),

@@ -237,6 +237,20 @@ func (s *Service) RecordScan(ctx context.Context, runtimeID pgtype.UUID, scanned
 	return nil
 }
 
+// StampScanned marks every tool row for a runtime with a fresh last_scanned_at
+// (FIR-2284). The cloud scanner sets this timestamp per tool via UpsertTool; a
+// local daemon scan only stamps the MCP rows it reports back, so a local
+// runtime with no MCP servers never refreshed its "Last scanned" label. The
+// local "Scan now" path calls this so the label updates the same way it does
+// for a cloud runtime. Returns the number of rows stamped.
+func (s *Service) StampScanned(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
+	n, err := s.q.StampCerebroRuntimeToolsScanned(ctx, runtimeID)
+	if err != nil {
+		return 0, fmt.Errorf("stamp runtime tools scanned: %w", err)
+	}
+	return n, nil
+}
+
 // SetEnabled flips the enabled flag for a (runtime, tool) row.
 func (s *Service) SetEnabled(ctx context.Context, runtimeID pgtype.UUID, toolName string, enabled bool) (Tool, error) {
 	row, err := s.q.SetCerebroRuntimeToolEnabled(ctx, cerebrodb.SetCerebroRuntimeToolEnabledParams{

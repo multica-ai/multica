@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -143,6 +145,12 @@ func (h *Handler) ReportCapabilities(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) persistRuntimeCapabilitySnapshot(r *http.Request, rtID, workspaceID pgtype.UUID, snapshot json.RawMessage) {
+	h.persistRuntimeCapabilitySnapshotCtx(r.Context(), rtID, workspaceID, snapshot)
+}
+
+// persistRuntimeCapabilitySnapshotCtx is the context-based core so callers off
+// the HTTP request (e.g. the throttled heartbeat mirror below) can reuse it.
+func (h *Handler) persistRuntimeCapabilitySnapshotCtx(ctx context.Context, rtID, workspaceID pgtype.UUID, snapshot json.RawMessage) {
 	if h.capabilityRegister == nil {
 		return
 	}
@@ -167,7 +175,41 @@ func (h *Handler) persistRuntimeCapabilitySnapshot(r *http.Request, rtID, worksp
 			Users:    []CapabilitySubject{reporter},
 		})
 	}
-	_, _ = h.capabilityRegister.Report(r.Context(), workspaceID, reporter, reports)
+	_, _ = h.capabilityRegister.Report(ctx, workspaceID, reporter, reports)
+}
+
+// CEREBRO-PATCH(capability-register-heartbeat-mirror): FIR-2284 — load each
+// runtime's tools continuously. The register-time mirror only fires on daemon
+// (re)register or CLI-version drift, so a runtime that registered before this
+// bridge existed — or that simply never changes version — never lands its tools
+// in the register the unified table reads, and its runtime page shows none of
+// its own tools. The snapshot already lives on agent_runtime.capabilities, so
+// re-mirror it on the heartbeat: throttled per runtime, and run detached so it
+// never adds latency to the heartbeat ack. Best-effort, like the mirrors above.
+const runtimeCapabilitySnapshotMirrorInterval = 5 * time.Minute
+
+// runtimeCapabilitySnapshotMirroredAt debounces the heartbeat mirror per runtime
+// within this process. Prod is single-instance; a missed beat just retries on
+// the next interval. The key set is bounded by the number of runtimes.
+var runtimeCapabilitySnapshotMirroredAt sync.Map // runtimeID string -> time.Time
+
+func (h *Handler) maybeMirrorRuntimeCapabilitySnapshot(rtID, workspaceID pgtype.UUID, snapshot json.RawMessage) {
+	if h.capabilityRegister == nil || len(snapshot) == 0 {
+		return
+	}
+	key := uuidToString(rtID)
+	now := time.Now()
+	if prev, ok := runtimeCapabilitySnapshotMirroredAt.Load(key); ok {
+		if last, ok := prev.(time.Time); ok && now.Sub(last) < runtimeCapabilitySnapshotMirrorInterval {
+			return
+		}
+	}
+	runtimeCapabilitySnapshotMirroredAt.Store(key, now)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		h.persistRuntimeCapabilitySnapshotCtx(ctx, rtID, workspaceID, snapshot)
+	}()
 }
 
 func capabilityItemsFromSnapshot(snapshot map[string]json.RawMessage) []capabilityReportItem {
@@ -193,6 +235,59 @@ func capabilityItemsFromSnapshot(snapshot map[string]json.RawMessage) []capabili
 		}
 	}
 	return items
+}
+
+// CEREBRO-PATCH(capability-register-scan-bridge): FIR-2284 — a daemon MCP
+// tools/list scan ("Scan now") lands in the legacy cerebro_runtime_tool list,
+// but the unified FIR-2230 tool-policy table reads the capability register
+// (cerebro_capability). Mirror the scanned MCP tools into the register so a
+// scan actually surfaces them in the table the admin screen renders — the same
+// bridge persistRuntimeCapabilitySnapshot does for the heartbeat snapshot.
+// Best-effort: a register failure must not fail the daemon's scan ingest, so
+// the error is swallowed exactly like the heartbeat mirror above.
+func (h *Handler) persistScannedToolsToCapabilityRegister(r *http.Request, rtID, workspaceID pgtype.UUID, servers []RuntimeToolScanServer) {
+	if h.capabilityRegister == nil {
+		return
+	}
+	reporter := CapabilitySubject{Type: "runtime", ID: uuidToString(rtID)}
+	reports := scannedMCPToolCapabilityReports(servers, reporter)
+	if len(reports) == 0 {
+		return
+	}
+	_, _ = h.capabilityRegister.Report(r.Context(), workspaceID, reporter, reports)
+}
+
+// scannedMCPToolCapabilityReports maps a daemon tools/list scan payload to
+// capability-register reports. The capability key is the namespaced MCP action
+// "<server>.<tool>" (e.g. "bigquery.query") — the shape the tool-policy resolver
+// keys on (see toolpolicy/table.go) — so an Allow/Ask/Deny an admin sets on a
+// scanned row binds to the real call. Servers the daemon could not reach
+// (non-empty Error) and blank names are skipped, mirroring RecordScan, so a
+// transient scan failure never injects empty rows.
+func scannedMCPToolCapabilityReports(servers []RuntimeToolScanServer, reporter CapabilitySubject) []CapabilityReportInput {
+	reports := make([]CapabilityReportInput, 0)
+	for _, srv := range servers {
+		serverName := strings.TrimSpace(srv.Name)
+		if srv.Error != "" || serverName == "" {
+			continue
+		}
+		for _, t := range srv.Tools {
+			toolName := strings.TrimSpace(t.Name)
+			if toolName == "" {
+				continue
+			}
+			reports = append(reports, CapabilityReportInput{
+				Key:         serverName + "." + toolName,
+				Title:       toolName,
+				Category:    serverName,
+				Description: t.Description,
+				Source:      "scan",
+				Owners:      []CapabilitySubject{reporter},
+				Users:       []CapabilitySubject{reporter},
+			})
+		}
+	}
+	return reports
 }
 
 func (h *Handler) capabilityWorkspace(w http.ResponseWriter, r *http.Request) (string, pgtype.UUID, bool) {

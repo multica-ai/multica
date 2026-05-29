@@ -296,6 +296,111 @@ func TestGuard_AllowSkipsWait(t *testing.T) {
 	}
 }
 
+// --- EvaluateDecision / GuardDecision (caller-resolved verdict) -------------
+// These power the FIR-2230 tool-policy gate: the chain resolves the verdict and
+// the gate only handles the inbox + await. The Resolver is deliberately nil to
+// prove it is never consulted on this path.
+
+func TestEvaluateDecision_AllowNoAskNoResolver(t *testing.T) {
+	ap := &fakeApprovals{}
+	g := &Gate{Approvals: ap} // no Resolver on purpose
+	out, err := g.EvaluateDecision(context.Background(), baseReq(),
+		permissions.Decision{Kind: permissions.DecisionAllow, Reason: "Allowed by runtime default"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Outcome != OutcomeAllowed {
+		t.Fatalf("got %q, want allowed", out.Outcome)
+	}
+	if ap.intakes != 0 {
+		t.Fatalf("allow must not create an ask, got %d", ap.intakes)
+	}
+}
+
+func TestEvaluateDecision_DenyNoAsk(t *testing.T) {
+	ap := &fakeApprovals{}
+	g := &Gate{Approvals: ap}
+	out, err := g.EvaluateDecision(context.Background(), baseReq(),
+		permissions.Decision{Kind: permissions.DecisionDeny, Reason: "Capped by user"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Outcome != OutcomeDenied {
+		t.Fatalf("got %q, want denied", out.Outcome)
+	}
+	if !out.Outcome.Stops() {
+		t.Fatal("deny must stop the action")
+	}
+	if ap.intakes != 0 {
+		t.Fatalf("deny must not create an ask, got %d", ap.intakes)
+	}
+}
+
+func TestEvaluateDecision_NeedsApprovalCreatesAsk(t *testing.T) {
+	ap := &fakeApprovals{}
+	g := &Gate{Approvals: ap}
+	out, err := g.EvaluateDecision(context.Background(), baseReq(),
+		permissions.Decision{Kind: permissions.DecisionNeedsApproval, Reason: "Ask by agent"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Outcome != OutcomePending {
+		t.Fatalf("got %q, want pending", out.Outcome)
+	}
+	if ap.intakes != 1 {
+		t.Fatalf("needs_approval must create exactly one ask, got %d", ap.intakes)
+	}
+	if !out.ApprovalID.Valid {
+		t.Fatal("pending result must carry a valid approval id")
+	}
+}
+
+func TestEvaluateDecision_NilApprovalsFailsClosed(t *testing.T) {
+	g := &Gate{} // neither Resolver nor Approvals
+	out, err := g.EvaluateDecision(context.Background(), baseReq(),
+		permissions.Decision{Kind: permissions.DecisionAllow})
+	if err == nil {
+		t.Fatal("expected error when gate is not configured")
+	}
+	if out.Outcome != OutcomeDenied {
+		t.Fatalf("got %q, want denied (fail closed)", out.Outcome)
+	}
+}
+
+func TestGuardDecision_AskApprovedContinues(t *testing.T) {
+	ap := &fakeApprovals{}
+	g := &Gate{Approvals: ap, PollInterval: time.Millisecond, WaitTimeout: 2 * time.Second}
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		ap.setStatus(approvals.StatusApproved)
+	}()
+	out, err := g.GuardDecision(context.Background(), baseReq(),
+		permissions.Decision{Kind: permissions.DecisionNeedsApproval, Reason: "Ask by agent"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Outcome != OutcomeApproved || out.Outcome.Stops() {
+		t.Fatalf("got %q, want approved (continue)", out.Outcome)
+	}
+}
+
+func TestGuardDecision_AskRejectedStops(t *testing.T) {
+	ap := &fakeApprovals{}
+	g := &Gate{Approvals: ap, PollInterval: time.Millisecond, WaitTimeout: 2 * time.Second}
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		ap.setStatus(approvals.StatusRejected)
+	}()
+	out, err := g.GuardDecision(context.Background(), baseReq(),
+		permissions.Decision{Kind: permissions.DecisionNeedsApproval, Reason: "Ask by agent"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Outcome != OutcomeRejected || !out.Outcome.Stops() {
+		t.Fatalf("got %q, want rejected (stop)", out.Outcome)
+	}
+}
+
 // A delegated ask is still actionable — the waiter must keep waiting, then
 // resolve when the delegate decides.
 func TestAwait_DelegatedKeepsWaitingThenApproves(t *testing.T) {

@@ -29,14 +29,22 @@ const isAdminLike = (role: MemberRole | null) =>
  * restore identically to edit (`server/internal/handler/agent.go:519-535`),
  * so callers can use `canEditAgent` for all three.
  */
-export function canEditAgent(_agent: Agent, ctx: PermissionContext): Decision {
+export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to edit this agent.");
   }
   if (isAdminLike(ctx.role)) return ALLOW;
+  // CEREBRO-PATCH(personal-agent-owner-manage): MUL-2443 — owner can manage own private agent.
+  if (
+    agent.visibility === "private" &&
+    agent.owner_id !== null &&
+    agent.owner_id === ctx.userId
+  ) {
+    return ALLOW;
+  }
   return deny(
     "not_admin_role",
-    "Only workspace owners and admins can edit agents.",
+    "Only workspace owners/admins or the personal agent owner can edit agents.",
   );
 }
 

@@ -103,6 +103,17 @@ function fakeQc(data: {
   }
   return {
     getQueryData: (key: readonly unknown[]) => map.get(JSON.stringify(key)),
+    getQueriesData: <T,>(filter: { queryKey: readonly unknown[] }) => {
+      const prefix = filter.queryKey as unknown[];
+      const results: [readonly unknown[], T][] = [];
+      for (const [k, v] of map) {
+        const parsed = JSON.parse(k) as unknown[];
+        if (parsed.length >= prefix.length && prefix.every((seg, i) => JSON.stringify(seg) === JSON.stringify(parsed[i]))) {
+          results.push([parsed, v as T]);
+        }
+      }
+      return results;
+    },
   } as unknown as QueryClient;
 }
 
@@ -183,7 +194,7 @@ describe("createMentionSuggestion", () => {
     ).toBe(true);
   });
 
-  it("hides personal agents owned by someone else from a regular member", () => {
+  it("shows another member's personal agent locked (wontTrigger) so a tag becomes a run-request (FIR-2385)", () => {
     const qc = fakeQc({
       members: [
         { user_id: "u1", name: "Alice", role: "member" },
@@ -222,9 +233,50 @@ describe("createMentionSuggestion", () => {
     const result = config.items!({ query: "a", editor: {} as never });
     const items = result as MentionItem[];
 
-    expect(items.some((i) => i.type === "agent" && i.label === "Athena")).toBe(true);
-    expect(items.some((i) => i.type === "agent" && i.label === "Aether")).toBe(true);
-    expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(false);
+    // Own + workspace agents: visible and triggerable.
+    expect(
+      items.some((i) => i.type === "agent" && i.label === "Athena" && !i.wontTrigger),
+    ).toBe(true);
+    expect(
+      items.some((i) => i.type === "agent" && i.label === "Aether" && !i.wontTrigger),
+    ).toBe(true);
+    // Bob's personal agent now appears, but locked: a tag turns into a
+    // run-request to Bob instead of waking the agent.
+    const atlas = items.find((i) => i.type === "agent" && i.label === "Atlas");
+    expect(atlas).toBeDefined();
+    expect(atlas?.wontTrigger).toBe(true);
+    // FIR-2385 follow-up: the locked row carries the owner's display name so
+    // the picker can render "{owner} approves" instead of a generic warning.
+    expect(atlas?.ownerName).toBe("Bob");
+    // Athena is Alice's own agent — no run-request, no owner-name needed.
+    const athena = items.find((i) => i.type === "agent" && i.label === "Athena");
+    expect(athena?.ownerName).toBeUndefined();
+  });
+
+  it("omits ownerName on a locked row when the owner isn't in the members cache (FIR-2385)", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        // A personal agent whose owner_id doesn't match any cached member.
+        // The owner was removed from the workspace but the agent record lingers.
+        {
+          id: "a-orphan",
+          name: "Atlas",
+          archived_at: null,
+          visibility: "private",
+          owner_id: "u-missing",
+        },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "a", editor: {} as never });
+    const items = result as MentionItem[];
+
+    const atlas = items.find((i) => i.type === "agent" && i.label === "Atlas");
+    expect(atlas?.wontTrigger).toBe(true);
+    expect(atlas?.ownerName).toBeUndefined();
   });
 
   it("shows everyone's personal agents to a workspace admin", () => {

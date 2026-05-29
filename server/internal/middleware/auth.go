@@ -32,6 +32,15 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// X-Actor-Source is server-set only — any value supplied by
+			// the client is untrusted and discarded before the auth
+			// branches run. Only the mat_ branch below re-sets it. This
+			// is what prevents a client from sending a normal mul_ PAT
+			// plus a forged `X-Actor-Source: member` (or anything else)
+			// to convince a downstream handler that its request came
+			// from a non-task-token path.
+			r.Header.Del("X-Actor-Source")
+
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
 				slog.Debug("auth: no token found", "path", r.URL.Path)
@@ -46,44 +55,39 @@ func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.
 				return
 			}
 
-			// Per-task token: tokens starting with "mtt_". Short-lived
-			// and revocable, but otherwise grants the same access as the
-			// agent's owner — agents see the workspace through their
-			// owner's eyes (vanilla scope). The narrower task-scope
-			// behavior was rolled back; AllowTaskScopeFor*/RequireUserScope
-			// middlewares now no-op for mtt_ tokens.
-			if strings.HasPrefix(tokenString, auth.TaskTokenPrefix) {
+			// Agent task token: "mat_" prefix. Minted by the server at
+			// task-claim time and injected by the daemon into the agent
+			// process. Authoritative for actor identity — the bound
+			// (user_id, agent_id, task_id, workspace_id) triple is
+			// written into request headers here, OVERRIDING whatever the
+			// client sent, so a downstream actor-resolver cannot be
+			// tricked by a client that strips or forges X-Agent-ID /
+			// X-Task-ID. Owner-only endpoints (e.g. agent env
+			// management) reject requests authenticated this way; see
+			// `actorSourceFromRequest`. MUL-2600.
+			if strings.HasPrefix(tokenString, "mat_") {
 				if queries == nil {
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}
-				hash := auth.HashTokenBytes(tokenString)
+				hash := auth.HashToken(tokenString)
 				tt, err := queries.GetTaskTokenByHash(r.Context(), hash)
 				if err != nil {
 					slog.Warn("auth: invalid task token", "path", r.URL.Path, "error", err)
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}
-
-				// Populate header-based identity so downstream handlers
-				// (resolveActor, RequireWorkspaceMember) can route the
-				// request as if it were "the agent acting on its task".
-				// X-User-ID is the agent owner so workspace membership
-				// resolves; X-Agent-ID/X-Task-ID make resolveActor
-				// produce ("agent", agentID) for comment authorship.
-				agent, err := queries.GetAgent(r.Context(), tt.AgentID)
-				if err != nil {
-					slog.Warn("auth: task token agent missing", "path", r.URL.Path, "error", err)
-					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-					return
-				}
-				if agent.OwnerID.Valid {
-					r.Header.Set("X-User-ID", uuidToString(agent.OwnerID))
-				}
+				r.Header.Set("X-User-ID", uuidToString(tt.UserID))
 				r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
 				r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
-
-				next.ServeHTTP(w, r.WithContext(withUserScope(r.Context())))
+				r.Header.Set("X-Workspace-ID", uuidToString(tt.WorkspaceID))
+				// X-Actor-Source flags the auth path so resolveActor and
+				// any owner-only handler can deny without re-querying the
+				// token table. The value "task_token" is the only signal
+				// this header is allowed to carry — strip anything else a
+				// client tried to send.
+				r.Header.Set("X-Actor-Source", "task_token")
+				next.ServeHTTP(w, r)
 				return
 			}
 

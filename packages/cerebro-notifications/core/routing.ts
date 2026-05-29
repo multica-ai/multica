@@ -29,6 +29,7 @@ export type EmittedNotificationType = Extract<
   InboxItemType,
   | "issue_assigned"
   | "mentioned"
+  | "reminder"
   | "task_failed"
   | "unassigned"
   | "reaction_added"
@@ -52,6 +53,7 @@ export const SPLIT_TYPES: ReadonlySet<EmittedNotificationType> = new Set([
 export type RoutingKey =
   | "issue_assigned"
   | "mentioned"
+  | "reminder"
   | "task_failed"
   | "unassigned"
   | "reaction_added"
@@ -61,7 +63,10 @@ export type RoutingKey =
   | "due_date_changed.assignee"
   | "due_date_changed.follower"
   | "priority_changed.assignee"
-  | "priority_changed.follower";
+  | "priority_changed.follower"
+  // Fired by the server-side sweeper when an issue's date arrives (the day-of).
+  | "due_date_reminder"
+  | "start_date_reminder";
 
 // Per-channel default when the user has no override for a given key. Mirrors
 // `defaultChannelChoices` on the server — keep in sync.
@@ -72,6 +77,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
   inbox: {
     issue_assigned: "on",
     mentioned: "on",
+    reminder: "on",
     task_failed: "on",
     unassigned: "on",
     reaction_added: "off",
@@ -82,10 +88,13 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     "due_date_changed.follower": "off",
     "priority_changed.assignee": "on",
     "priority_changed.follower": "off",
+    due_date_reminder: "on",
+    start_date_reminder: "on",
   },
   notifications: {
     issue_assigned: "off",
     mentioned: "off",
+    reminder: "off",
     task_failed: "off",
     unassigned: "off",
     reaction_added: "on",
@@ -96,10 +105,13 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     "due_date_changed.follower": "on",
     "priority_changed.assignee": "off",
     "priority_changed.follower": "on",
+    due_date_reminder: "off",
+    start_date_reminder: "off",
   },
   mobile: {
     issue_assigned: "on",
     mentioned: "on",
+    reminder: "off",
     task_failed: "off",
     unassigned: "off",
     reaction_added: "off",
@@ -110,10 +122,13 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     "due_date_changed.follower": "off",
     "priority_changed.assignee": "on",
     "priority_changed.follower": "off",
+    due_date_reminder: "on",
+    start_date_reminder: "on",
   },
   desktop: {
     issue_assigned: "on",
     mentioned: "on",
+    reminder: "off",
     task_failed: "on",
     unassigned: "off",
     reaction_added: "off",
@@ -124,12 +139,15 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     "due_date_changed.follower": "off",
     "priority_changed.assignee": "on",
     "priority_changed.follower": "off",
+    due_date_reminder: "on",
+    start_date_reminder: "on",
   },
   // Mail is forward-compatible; no events fire by default until the
   // transport is built.
   mail: {
     issue_assigned: "off",
     mentioned: "off",
+    reminder: "off",
     task_failed: "off",
     unassigned: "off",
     reaction_added: "off",
@@ -140,6 +158,8 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     "due_date_changed.follower": "off",
     "priority_changed.assignee": "off",
     "priority_changed.follower": "off",
+    due_date_reminder: "off",
+    start_date_reminder: "off",
   },
 };
 

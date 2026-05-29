@@ -93,7 +93,9 @@ import { StatusIcon } from "./status-icon";
 // CEREBRO-PATCH(issue-dependencies): FIR-823 blocks/blocked-by/related sidebar section.
 import { DependenciesSection } from "./dependencies-section";
 import { AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker, PriorityPicker, StartDatePicker, StatusPicker } from "./pickers";
-import { useMoveCommentToSubIssue, useUpdateIssue } from "@multica/core/issues/mutations";
+// CEREBRO-PATCH(issue-detail-status-model): FIR-1550 provide the issue's project status-model presentation to status surfaces
+import { CerebroStatusModelProvider } from "@multica/cerebro-status-models/views";
+import { useMoveCommentToSubIssue, useMoveCommentsToNewThread, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
@@ -121,7 +123,7 @@ import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOpt
 import { useDeleteIssue } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { issueLabelsOptions } from "@multica/core/labels";
-import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
@@ -307,6 +309,12 @@ function TimelineSkeleton() {
   );
 }
 
+// When the trailing block is expanded, we still truncate its body to the most
+// recent N entries — a single block of 50 status flips drowns the comment area
+// as badly as N blocks of 1 would. Older entries fold behind a "Show N more
+// activities" line that expands in place.
+const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
+
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
 // priority / assignee churn; the trailing block stays expanded because it
@@ -316,6 +324,9 @@ function ActivityBlock({
   entries,
   expanded,
   onToggle,
+  truncateOlder,
+  showOlder,
+  onToggleShowOlder,
   getActorName,
   t,
   timeAgo,
@@ -323,6 +334,13 @@ function ActivityBlock({
   entries: TimelineEntry[];
   expanded: boolean;
   onToggle: () => void;
+  // Trailing block only: when true, the body shows only the most recent
+  // LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT entries with the older ones folded
+  // behind a "Show N more activities" inline toggle. Optional — the cerebro
+  // non-virtualized timeline renders every entry and omits these.
+  truncateOlder?: boolean;
+  showOlder?: boolean;
+  onToggleShowOlder?: () => void;
   getActorName: (type: string, id: string) => string;
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
@@ -342,17 +360,42 @@ function ActivityBlock({
       </div>
     );
   }
+  const hiddenOlderCount =
+    truncateOlder && !showOlder && entries.length > LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
+      ? entries.length - LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
+      : 0;
+  const visibleEntries =
+    hiddenOlderCount > 0 ? entries.slice(-LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT) : entries;
+  // Hide the "v N activities" collapse header while we're in the truncated
+  // default state. The "Show N more" link is the only control users need
+  // when they're glancing at recent activity — stacking two chevron rows
+  // looked like nested folds and added visual noise without value. Once the
+  // user explicitly reveals older entries, the header reappears so they can
+  // fold the whole block back to a single count line.
+  const showHeader = hiddenOlderCount === 0;
   return (
     <div className="pb-3 px-4 flex flex-col gap-3">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ChevronDown className="h-3 w-3 shrink-0" />
-        <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
-      </button>
-      {entries.map((entry) => {
+      {showHeader && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronDown className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
+        </button>
+      )}
+      {hiddenOlderCount > 0 && (
+        <button
+          type="button"
+          onClick={onToggleShowOlder}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.show_more_activities, { count: hiddenOlderCount })}</span>
+        </button>
+      )}
+      {visibleEntries.map((entry) => {
         const details = (entry.details ?? {}) as Record<string, string>;
         const isStatusChange = entry.action === "status_changed";
         const isPriorityChange = entry.action === "priority_changed";
@@ -604,6 +647,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — squad list is
+  // needed to resolve the squad leader when an issue is assigned to a
+  // squad, so the reply/comment indicators show the agent the trigger
+  // logic actually wakes.
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
   // Workspace owners and admins moderate any comment authored by anyone
   // (mirrors backend `comment.go:507-512`). Computed here so per-comment
   // rendering doesn't have to re-derive it for every row.
@@ -702,6 +750,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   // versa). Not persisted, matches the resolved-thread behaviour above.
   const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
   const [collapsedActivityIds, setCollapsedActivityIds] = useState<Set<string>>(() => new Set());
+  // Block IDs where the user has explicitly chosen to also reveal the older
+  // (pre-last-8) entries within the trailing block. Kept independent of the
+  // expanded/collapsed sets so collapsing then re-expanding preserves the
+  // "show all" choice, and so the choice survives the block losing its
+  // trailing position when a new comment lands after it.
+  const [showOlderActivityIds, setShowOlderActivityIds] = useState<Set<string>>(() => new Set());
   const toggleActivityBlock = useCallback((id: string, currentlyExpanded: boolean) => {
     if (currentlyExpanded) {
       setCollapsedActivityIds((prev) => {
@@ -728,6 +782,14 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
         return next;
       });
     }
+  }, []);
+  const showOlderActivities = useCallback((id: string) => {
+    setShowOlderActivityIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
   }, []);
   // Issue data from TQ — uses detail query, seeded from list cache if available.
   // Only seed when description is present; list API omits it, and ContentEditor
@@ -785,6 +847,15 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
       toast.success(t(($) => $.comment.move.success_toast, { identifier: result.identifier }));
     },
     [moveCommentToSubIssue, t],
+  );
+  // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 move picked comments to a new thread on this issue.
+  const { mutateAsync: moveCommentsToNewThread } = useMoveCommentsToNewThread(id);
+  const handleMoveCommentsToNewThread = useCallback(
+    async (commentIds: string[]) => {
+      await moveCommentsToNewThread({ commentIds });
+      toast.success(t(($) => $.comment.move_thread.success_toast));
+    },
+    [moveCommentsToNewThread, t],
   );
 
   // Resolve / unresolve must always clear the per-session expand entry so
@@ -988,7 +1059,22 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const channelsEnabled = useFeatureFlag("cerebro_channels");
   // CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 gate the thread lift UI.
   const moveCommentToSubIssueEnabled = useFeatureFlag("cerebro_move_comment_to_subissue");
+  // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 gate the new-thread action.
+  const moveCommentToThreadEnabled = useFeatureFlag("cerebro_move_comment_to_thread");
   const issueKind = issue?.kind ?? "issue";
+  // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — resolve the
+  // agent the backend trigger logic will wake when a member posts a
+  // comment/reply without an @agent mention. Mirrors the backend's
+  // `shouldEnqueueOnComment` + squad-leader fallback so the indicator and
+  // the trigger never disagree. `undefined` for member / unassigned issues.
+  const triggerAgentId = useMemo<string | undefined>(() => {
+    if (!issue?.assignee_type || !issue.assignee_id) return undefined;
+    if (issue.assignee_type === "agent") return issue.assignee_id;
+    if (issue.assignee_type === "squad") {
+      return squads.find((s) => s.id === issue.assignee_id)?.leader_id;
+    }
+    return undefined;
+  }, [issue?.assignee_type, issue?.assignee_id, squads]);
   const isChannel = channelsEnabled && issueKind === "channel";
   const isDM = channelsEnabled && issueKind === "dm";
   const isChat = isChannel || isDM;
@@ -1000,6 +1086,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     const names = others.map((s) => getActorName("member", s.user_id));
     return names.join(", ") || "Direct message";
   }, [isDM, subscribers, user?.id, getActorName]);
+
+  // CEREBRO-PATCH(channel-issue-redirect): FIR-2452 — DM/channel opened via /issues/ → replace to /channels/.
+  useEffect(() => {
+    if (isChat && issue?.id) router.replace(paths.channelDetail(issue.id));
+  }, [isChat, issue?.id, router, paths]);
 
   // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
   // Called before the `if (!issue)` early return so hook order stays stable.
@@ -2287,8 +2378,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                         onResolveToggle={handleResolveToggle}
                         canMoveToSubIssue={moveCommentToSubIssueEnabled && issue?.status !== "cancelled"}
                         onMoveToSubIssue={handleMoveCommentToSubIssue}
+                        canMoveToNewThread={moveCommentToThreadEnabled && issue?.status !== "cancelled"}
+                        onMoveToNewThread={handleMoveCommentsToNewThread}
                         onCollapseResolved={isResolved ? () => toggleResolvedExpand(entry.id, false) : undefined}
                         highlightedCommentId={highlightedId}
+                        triggerAgentId={triggerAgentId}
                       />
                     </div>
                   );
@@ -2306,6 +2400,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                     entries={group.entries}
                     expanded={expanded}
                     onToggle={() => toggleActivityBlock(activityId, expanded)}
+                    truncateOlder={activityId === lastActivityGroupId}
+                    showOlder={showOlderActivityIds.has(activityId)}
+                    onToggleShowOlder={() => showOlderActivities(activityId)}
                     getActorName={getActorName}
                     t={t}
                     timeAgo={timeAgo}
@@ -2322,7 +2419,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   this input into the pin toggle. Channels/DMs (which also
                   mount CommentInput via channel-detail.tsx) leave pinnable
                   off so chat-style surfaces stay unchanged. */}
-              <CommentInput issueId={id} onSubmit={submitComment} pinnable />
+              <CommentInput issueId={id} onSubmit={submitComment} pinnable triggerAgentId={triggerAgentId} />
             </div>
               </TabsContent>
             </Tabs>
@@ -2348,6 +2445,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
 
   if (isMobile) {
     return (
+      // CEREBRO-PATCH(issue-detail-status-model): wrap status surfaces in the issue's project status-model presentation
+      <CerebroStatusModelProvider projectId={issue.project_id ?? ""}>
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
@@ -2356,10 +2455,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           </SheetContent>
         </Sheet>
       </div>
+      </CerebroStatusModelProvider>
     );
   }
 
   return (
+    // CEREBRO-PATCH(issue-detail-status-model): wrap status surfaces in the issue's project status-model presentation
+    <CerebroStatusModelProvider projectId={issue.project_id ?? ""}>
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="content" minSize="50%">
         {detailContent}
@@ -2382,5 +2484,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
       </div>
       </ResizablePanel>
     </ResizablePanelGroup>
+    </CerebroStatusModelProvider>
   );
 }

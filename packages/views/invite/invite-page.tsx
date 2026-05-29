@@ -86,8 +86,12 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
       qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
       // Navigate into the joined workspace. The [workspaceSlug]/layout will
       // sync api client, stores, and the last_workspace_slug cookie from the URL.
+      // CEREBRO-PATCH(firtal-welcome-invite-detour): FIR-2490 route through the
+      // workspace-scoped /welcome page on invite-accept. The page redirects to
+      // /inbox immediately when the workspace's cerebro_firtal_welcome flag is
+      // off, so this detour is a no-op for non-Firtal workspaces.
       const dest = joined
-        ? paths.workspace(joined.slug).issues()
+        ? paths.workspace(joined.slug).welcome()
         : fallbackDest;
       setTimeout(() => push(dest), 1000);
     } catch (e) {

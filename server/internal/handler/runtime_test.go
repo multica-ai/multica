@@ -39,6 +39,12 @@ func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
 			handle: testHandler.DeleteAgentRuntime,
 		},
 		{
+			name:   "archive-agents-and-delete",
+			method: "POST",
+			path:   "/api/runtimes/not-a-uuid/archive-agents-and-delete",
+			handle: testHandler.ArchiveAgentsAndDeleteRuntime,
+		},
+		{
 			name:   "models",
 			method: "POST",
 			path:   "/api/runtimes/not-a-uuid/models",
@@ -195,6 +201,98 @@ func TestGetRuntimeUsage_BucketsByUsageTime(t *testing.T) {
 	// when ?days=N is interpreted as a rolling window instead of calendar days.
 	if byDate[yesterdayKey] != 2000 {
 		t.Errorf("yesterday morning task: yesterday bucket expected 2000 input tokens, got %d (full map: %v)", byDate[yesterdayKey], byDate)
+	}
+}
+
+// CEREBRO-PATCH(task-usage-gateway-cost): end-to-end test for the FIR-2405
+// real-cost rollup path.
+// TestGetRuntimeUsage_PrefersGatewayCost proves the FIR-2405 path end-to-end:
+// the gateway's real per-task charge (task_usage.cost_cents) is rolled into
+// task_usage_hourly and the runtimes-overview read returns it verbatim instead
+// of re-estimating from the pricing table.
+func TestGetRuntimeUsage_PrefersGatewayCost(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type)
+		VALUES ($1, 'gateway cost test', $2, 'member')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
+		VALUES ($1, $2, $3, 'completed', $4)
+		RETURNING id
+	`, agentID, issueID, runtimeID, today).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	// Tokens that would estimate to a clearly different number, plus a real
+	// gateway charge of 4242 cents. A priced model so the estimate is non-zero
+	// — only preferring the stored cost yields 4242.
+	const gatewayCents = 4242
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cost_cents, created_at)
+		VALUES ($1, 'claude', 'claude-sonnet-4-6', 1000000, 1000000, $2, $3)
+	`, taskID, gatewayCents, today); err != nil {
+		t.Fatalf("insert task_usage: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		SELECT rollup_task_usage_hourly_window('-infinity'::timestamptz, 'infinity'::timestamptz)
+	`); err != nil {
+		t.Fatalf("rollup window: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `
+			DELETE FROM task_usage_hourly
+			 WHERE runtime_id = $1 AND DATE(bucket_hour AT TIME ZONE 'UTC') = $2::date
+		`, runtimeID, today)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/runtimes/"+runtimeID+"/usage?days=1", nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.GetRuntimeUsage(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetRuntimeUsage: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp []RuntimeUsageResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	var total int64
+	for _, r := range resp {
+		total += r.CostCents
+	}
+	if total != gatewayCents {
+		t.Errorf("expected the real gateway charge %d cents, got %d (rows: %+v)", gatewayCents, total, resp)
 	}
 }
 

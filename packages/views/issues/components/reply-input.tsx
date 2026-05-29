@@ -25,6 +25,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
 import { PinButton, useFloatPosition, useInputPin } from "@multica/cerebro-pin-input";
 import { useT } from "../../i18n";
+import { TriggerTargetBar, memberMentionMarkdown } from "./trigger-target-bar";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,6 +38,14 @@ interface ReplyInputProps {
   avatarId: string;
   onSubmit: (content: string, attachmentIds?: string[]) => Promise<void>;
   size?: "sm" | "default";
+  /**
+   * CEREBRO-PATCH(reply-target-agent-indicator): the agent the backend
+   * trigger will actually wake when the draft has no @agent mentions —
+   * issue assignee (or squad leader). Explicit agent @mentions in the draft
+   * replace this fallback target. Plumbed in from `issue-detail.tsx` so the
+   * indicator matches the trigger logic exactly (FIR-2392).
+   */
+  triggerAgentId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,6 +59,7 @@ function ReplyInput({
   avatarId,
   onSubmit,
   size = "default",
+  triggerAgentId,
 }: ReplyInputProps) {
   const { t } = useT("issues");
   const placeholderText = placeholder ?? t(($) => $.reply.placeholder);
@@ -58,6 +68,7 @@ function ReplyInput({
   const anchorRef = useRef<HTMLDivElement>(null);
   const submitOnEnter = useSubmitOnEnter();
   const [isEmpty, setIsEmpty] = useState(true);
+  const [markdown, setMarkdown] = useState("");
   const [isExpanded, setIsExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const uploadMapRef = useRef<Map<string, string>>(new Map());
@@ -89,10 +100,13 @@ function ReplyInput({
       if (content.includes(url)) activeIds.push(id);
     }
     setSubmitting(true);
+    editorRef.current?.clearContent();
+    setIsEmpty(true);
     try {
       await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
       editorRef.current?.clearContent();
       setIsEmpty(true);
+      setMarkdown("");
       uploadMapRef.current.clear();
       if (isPinned) {
         unpin();
@@ -152,86 +166,98 @@ function ReplyInput({
             size={avatarSize}
             className="mt-0.5 shrink-0 hidden sm:block"
           />
-          <div
-            {...dropZoneProps}
-            // CEREBRO-PATCH(reply-input-click-to-focus): JEH-1200 — clicks
-            // anywhere in the card focus the editor (skip when the target is
-            // itself interactive so buttons/links still work).
-            onMouseDown={(e) => {
-              if ((e.target as HTMLElement).closest("button, a, input, textarea, [contenteditable]")) return;
-              e.preventDefault();
-              editorRef.current?.focus();
-            }}
-            className={cn(
-              "relative min-w-0 flex-1 flex flex-col rounded-md bg-card min-h-20",
-              isExpanded
-                ? "h-[60vh]"
-                : size === "sm" ? "max-h-40" : "max-h-56",
-            )}
-          >
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              <div ref={measureRef}>
-                <ContentEditor
-                  ref={editorRef}
-                  placeholder={placeholderText}
-                  onUpdate={(md) => setIsEmpty(!md.trim())}
-                  onSubmit={handleSubmit}
-                  onUploadFile={handleUpload}
-                  debounceMs={100}
-                  currentIssueId={issueId}
-                  submitOnEnter={submitOnEnter}
+          <div className="min-w-0 flex-1">
+            <TriggerTargetBar
+              markdown={markdown}
+              triggerAgentId={triggerAgentId}
+              onTagOwner={(owner) => {
+                editorRef.current?.insertText(` ${memberMentionMarkdown(owner)} `);
+              }}
+            />
+            <div
+              {...dropZoneProps}
+              // CEREBRO-PATCH(reply-input-click-to-focus): JEH-1200 — clicks
+              // anywhere in the card focus the editor (skip when the target is
+              // itself interactive so buttons/links still work).
+              onMouseDown={(e) => {
+                if ((e.target as HTMLElement).closest("button, a, input, textarea, [contenteditable]")) return;
+                e.preventDefault();
+                editorRef.current?.focus();
+              }}
+              className={cn(
+                "relative min-w-0 flex flex-col rounded-md bg-card min-h-20",
+                isExpanded
+                  ? "h-[60vh]"
+                  : size === "sm" ? "max-h-40" : "max-h-56",
+              )}
+            >
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <div ref={measureRef}>
+                  <ContentEditor
+                    ref={editorRef}
+                    placeholder={placeholderText}
+                    onUpdate={(md) => {
+                      setMarkdown(md);
+                      setIsEmpty(!md.trim());
+                    }}
+                    onSubmit={handleSubmit}
+                    onUploadFile={handleUpload}
+                    debounceMs={100}
+                    currentIssueId={issueId}
+                    submitOnEnter={submitOnEnter}
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-1 pt-1">
+                <FileUploadButton
+                  size="sm"
+                  onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
+                  onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
                 />
-              </div>
-            </div>
-            <div className="flex items-center justify-between gap-1 pt-1">
-              <FileUploadButton
-                size="sm"
-                onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
-                onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
-              />
-              <div className="flex items-center gap-1">
-                {pinEnabled && (
-                  <PinButton
-                    isPinned={isPinned}
-                    onToggle={togglePin}
-                    pinLabel={t(($) => $.reply.pin_tooltip)}
-                    unpinLabel={t(($) => $.reply.unpin_tooltip)}
-                  />
-                )}
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsExpanded((v) => !v);
-                          editorRef.current?.focus();
-                        }}
-                        aria-label={isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-                      >
-                        {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-                      </button>
-                    }
-                  />
-                  <TooltipContent side="top">{isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}</TooltipContent>
-                </Tooltip>
-                <button
-                  type="button"
-                  disabled={isEmpty || submitting}
-                  onClick={handleSubmit}
-                  aria-label="Send"
-                  className="inline-flex h-9 w-9 sm:h-7 sm:w-7 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:bg-muted disabled:text-muted-foreground disabled:pointer-events-none"
-                >
-                  {submitting ? (
-                    <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" />
-                  ) : (
-                    <ArrowUp className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                <div className="flex items-center gap-1">
+                  {pinEnabled && (
+                    <PinButton
+                      isPinned={isPinned}
+                      onToggle={togglePin}
+                      pinLabel={t(($) => $.reply.pin_tooltip)}
+                      unpinLabel={t(($) => $.reply.unpin_tooltip)}
+                    />
                   )}
-                </button>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsExpanded((v) => !v);
+                            editorRef.current?.focus();
+                          }}
+                          aria-label={isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                        >
+                          {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                        </button>
+                      }
+                    />
+                    <TooltipContent side="top">{isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}</TooltipContent>
+                  </Tooltip>
+                  <button
+                    type="button"
+                    disabled={isEmpty || submitting}
+                    onClick={handleSubmit}
+                    aria-label="Send"
+                    className="inline-flex h-9 w-9 sm:h-7 sm:w-7 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:bg-muted disabled:text-muted-foreground disabled:pointer-events-none"
+                  >
+                    {submitting ? (
+                      <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" />
+                    ) : (
+                      <ArrowUp className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                    )}
+                  </button>
+                </div>
               </div>
+              {isDragOver && <FileDropOverlay />}
             </div>
-            {isDragOver && <FileDropOverlay />}
           </div>
         </div>
       </div>

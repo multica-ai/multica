@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mcp"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -51,6 +52,14 @@ type FirtalGatewayExecutor struct {
 	// only these agents are gated; every other agent runs ungated even when the
 	// gate is set. Empty means "all agents" (used once the rollout is broad).
 	gateAgents map[[16]byte]struct{}
+
+	// toolPolicy is the FIR-2230 per-tool permission chain. When non-nil the
+	// gate resolves each tool call through the Runtime › Agent › Group › User
+	// chain (the unified model) instead of the capability resolver, so the
+	// Allow/Ask/Deny rows authored in the permission table actually gate real
+	// tool calls. Nil by default — it is only set under the toolpolicy gate mode
+	// (see MaybeEnableApprovalGate), keeping production on the prior behaviour.
+	toolPolicy *toolpolicy.Store
 }
 
 func NewFirtalGatewayExecutor(
@@ -161,6 +170,22 @@ func (e *FirtalGatewayExecutor) syncRuntimes(ctx context.Context) {
 			continue
 		}
 		if registered.Inserted {
+			// The DB default for agent_runtime.visibility is 'private' (see
+			// migration 083), which on the runtimes page hides the Firtal
+			// Gateway runtime from every workspace member except owners/admins
+			// and locks agent binding to the same set. The gateway is a
+			// shared, server-managed runtime with no human owner, so we flip
+			// freshly-inserted rows to 'public' so any workspace member can
+			// see it and bind agents to it. We only do this on insert — a
+			// later manual toggle in the UI survives across server restarts
+			// because UpsertAgentRuntime's ON CONFLICT branch never touches
+			// visibility.
+			if _, err := e.queries.UpdateAgentRuntimeVisibility(ctx, db.UpdateAgentRuntimeVisibilityParams{
+				ID:         registered.ID,
+				Visibility: "public",
+			}); err != nil {
+				e.logger.Warn("firtal gateway runtime visibility set failed", "workspace_id", util.UUIDToString(workspaceID), "runtime_id", util.UUIDToString(registered.ID), "error", err)
+			}
 			e.publishRuntimeRegistered(util.UUIDToString(workspaceID), util.UUIDToString(registered.ID))
 		}
 	}
@@ -296,6 +321,19 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		return
 	}
 
+	// FIR-2325: resolve the workspace's cost-saving modes once and apply the
+	// model_routing saving when it is "on". Default (no override) is off, so the
+	// requested model is unchanged for every workspace that hasn't opted in.
+	// Phase 5: a random holdout share of routed runs is kept on the requested
+	// (expensive) model as a control arm, so the dashboard can compare real cost.
+	costModes := e.loadCostSavingModes(parent, plan.workspaceID)
+	requestedModel := agent.Model.String
+	routingOn := costModes[savingModelRouting] == savingModeOn && e.cfg.CheapModel != ""
+	routingHeldOut := routingOn && costSavingHeldOut(task.ID, savingModelRouting, e.cfg.costSavingHoldoutPct())
+	if routingOn && !routingHeldOut {
+		agent.Model = pgtype.Text{String: e.cfg.CheapModel, Valid: true}
+	}
+
 	runCtx, cancel := context.WithTimeout(parent, cfg.TaskTimeout)
 	defer cancel()
 	meta := GatewayRequestMeta{
@@ -305,7 +343,7 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	}
 	var completion GatewayCompletion
 	if cfg.ToolsEnabledForAgent(task.AgentID) {
-		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID, task.OriginalUserID)
+		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID, task.OriginalUserID, costModes)
 	} else {
 		completion, err = e.completeGateway(runCtx, cfg, agent.Model.String, messages, meta)
 	}
@@ -318,6 +356,16 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	defer finalCancel()
 	e.recordTaskMessage(finalCtx, task, completion.Output)
 	e.recordTaskUsage(finalCtx, task, plan.workspaceID, completion)
+	e.recordCostSavingMeasurements(finalCtx, plan.workspaceID, task.ID, costModes, CostSavingRunFacts{
+		RequestedModel:        requestedModel,
+		EffectiveModel:        completion.Model,
+		Usage:                 pricing.Usage{InputTokens: completion.Usage.InputTokens, OutputTokens: completion.Usage.OutputTokens, CacheReadTokens: completion.Usage.CacheReadTokens, CacheWriteTokens: completion.Usage.CacheWriteTokens},
+		ActualCostCents:       completionCostCents(completion),
+		InlinedContextReads:   plan.inlinedContextReads,
+		ToolResultChars:       completion.ToolResultChars,
+		PrunedToolResultChars: completion.PrunedToolResultChars,
+		RoutingHeldOut:        routingHeldOut,
+	})
 
 	result, _ := json.Marshal(protocol.TaskCompletedPayload{
 		TaskID: taskID,
@@ -336,6 +384,10 @@ type taskPlan struct {
 	workspaceID       pgtype.UUID
 	messagesWithLimit func(limit int) []GatewayMessage
 	emptyMessageError string
+	// inlinedContextReads is how many platform reads this runtime folds into the
+	// start prompt instead of leaving the agent to fetch them — the input to the
+	// snapshot_prompt / bundled_read cost measurements (FIR-2325).
+	inlinedContextReads int
 }
 
 func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.AgentTaskQueue, agent db.Agent) (taskPlan, error) {
@@ -355,6 +407,8 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 				return buildGatewayMessages(agent, history, task.StartedAt, limit)
 			},
 			emptyMessageError: "chat task has no user message to answer",
+			// Chat history is inlined; a daemon agent would list it itself.
+			inlinedContextReads: 1,
 		}, nil
 
 	case task.IssueID.Valid:
@@ -377,12 +431,19 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 				triggerComment = &c
 			}
 		}
+		// Issue + comments are inlined; a daemon agent would fetch each itself
+		// (get_issue, list_comments, plus the trigger comment when present).
+		inlinedReads := 2
+		if triggerComment != nil {
+			inlinedReads = 3
+		}
 		return taskPlan{
 			workspaceID: issue.WorkspaceID,
 			messagesWithLimit: func(limit int) []GatewayMessage {
 				return buildGatewayIssueMessages(agent, issue, comments, triggerComment, task.StartedAt, limit)
 			},
-			emptyMessageError: "issue task has no user message to answer",
+			emptyMessageError:   "issue task has no user message to answer",
+			inlinedContextReads: inlinedReads,
 		}, nil
 
 	case task.AutopilotRunID.Valid:
@@ -429,6 +490,17 @@ func (e *FirtalGatewayExecutor) completeGatewayWithTools(ctx context.Context, cf
 	return NewGatewayClient(cfg, nil).CompleteWithTools(ctx, model, messages, tools, meta)
 }
 
+// completeGatewayForcingText is the tool-loop's forced-final call. It keeps the
+// tool definitions attached and sets tool_choice="none" (via CompleteForcingText)
+// so the transcript stays valid for Anthropic while the model is constrained to
+// produce text instead of another tool call. See FIR-2421.
+func (e *FirtalGatewayExecutor) completeGatewayForcingText(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, tools []GatewayToolDef, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	if e.gateway != nil {
+		return e.gateway.CompleteForcingText(ctx, model, messages, tools, meta)
+	}
+	return NewGatewayClient(cfg, nil).CompleteForcingText(ctx, model, messages, tools, meta)
+}
+
 // runToolLoop runs the model in an Anthropic-native tool-call loop. Up to
 // firtalGatewayMaxToolRounds (or cfg.MaxToolRounds when set) rounds dispatch
 // tools; each round sends the running transcript plus tool definitions, and if
@@ -436,8 +508,12 @@ func (e *FirtalGatewayExecutor) completeGatewayWithTools(ctx context.Context, cf
 // registry or the MCP server, results are appended, and the next round runs.
 // The first round without tool calls becomes the final output. Budget is
 // checked before each tool dispatch. Usage is summed across all rounds.
-func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID, originalUserID pgtype.UUID) (GatewayCompletion, error) {
+func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID, originalUserID pgtype.UUID, costModes map[string]string) (GatewayCompletion, error) {
 	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID}
+	// FIR-2325: prune_tool_results actually drops superseded tool output from the
+	// transcript mid-run when "on" for this workspace. Off/shadow keep the full
+	// transcript (no behavior change), so the default fleet is unaffected.
+	pruneOn := costModes[savingPruneToolResults] == savingModeOn
 
 	// Determine tools: registry-backed when available, else fall back to the
 	// hardcoded MCP server (POC compatibility).
@@ -485,14 +561,14 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 
 	if useRegistry && activeRegistry != nil {
 		// CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): use the provider-compatible tool loop as the primary path for enabled registry tools; prod Anthropic-native failures did not reliably lift Kristian into fallback.
-		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, activeRegistry, enabledTools)
+		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, pruneOn)
 	}
 	if toolSrv != nil {
 		// CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): keep the legacy three-tool path on the same compat transport so tool-enabled tasks avoid Anthropic-native malformed requests entirely.
-		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools))
+		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools), pruneOn)
 	}
 
-	completion, err := e.runAnthropicToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, anthropicTools, tctx, toolSrv, activeRegistry, useRegistry)
+	completion, err := e.runAnthropicToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, anthropicTools, tctx, toolSrv, activeRegistry, useRegistry, pruneOn)
 	if err == nil || !isAnthropicMalformedToolRequest(err) || len(anthropicTools) == 0 {
 		return completion, err
 	}
@@ -505,10 +581,10 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		"error", err,
 	)
 	if useRegistry && activeRegistry != nil {
-		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, activeRegistry, enabledTools)
+		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, pruneOn)
 	}
 	if toolSrv != nil {
-		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools))
+		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools), pruneOn)
 	}
 	return completion, err
 }
@@ -555,7 +631,13 @@ func anthropicToolsToGatewayToolDefs(tools []AnthropicTool) []GatewayToolDef {
 // runToolLoopWithServer is the testable inner form of the legacy OpenAI-compat
 // tool loop. Tests can register their own handlers on toolSrv so the loop's
 // control flow can be exercised without a real database.
-func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, toolSrv *mcp.Server, tools []GatewayToolDef) (GatewayCompletion, error) {
+//
+// FIR-2230: this fallback MCP path dispatches real tool calls, so every call is
+// routed through guardToolCall (Runtime › Agent › Group › User) before dispatch —
+// the same choke-point the registry and Anthropic-native loops use. Without it a
+// Deny/Ask row would silently not apply here. guardToolCall is a no-op when no
+// gate is configured, so the default fleet is unaffected.
+func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID pgtype.UUID, toolSrv *mcp.Server, tools []GatewayToolDef, pruneOn bool) (GatewayCompletion, error) {
 	history := withToolUsageHint(initialMessages)
 
 	var acc GatewayCompletion
@@ -591,6 +673,23 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 			ToolCalls: completion.ToolCalls,
 		})
 		for _, call := range completion.ToolCalls {
+			if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, decodeToolArgs(call.Function.Arguments), meta); !allowed {
+				e.logger.Info("firtal gateway tool call blocked by approval gate",
+					"task_id", meta.TaskID,
+					"agent_id", meta.AgentID,
+					"workspace_id", meta.WorkspaceID,
+					"round", round+1,
+					"tool", call.Function.Name,
+					"tool_call_id", call.ID,
+					"reason", reason,
+				)
+				history = append(history, GatewayMessage{
+					Role:       "tool",
+					ToolCallID: call.ID,
+					Content:    fmt.Sprintf("blocked by approval gate: %s", reason),
+				})
+				continue
+			}
 			result, dur := e.dispatchTool(ctx, toolSrv, call)
 			e.logger.Info("firtal gateway tool call",
 				"task_id", meta.TaskID,
@@ -602,23 +701,30 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 				"duration_ms", dur.Milliseconds(),
 				"is_error", result.IsError,
 			)
+			resultText := toolResultText(result)
+			acc.ToolResultChars += int64(len(resultText))
 			history = append(history, GatewayMessage{
 				Role:       "tool",
 				ToolCallID: call.ID,
-				Content:    toolResultText(result),
+				Content:    resultText,
 			})
+		}
+		if pruneOn {
+			acc.PrunedToolResultChars += pruneSupersededGatewayToolResults(history)
 		}
 	}
 
-	// Tool-round budget exhausted. Make one final gateway call WITHOUT tools
-	// so the model has to produce a text answer.
-	e.logger.Info("firtal gateway tool loop forcing final no-tool call",
+	// Tool-round budget exhausted. Make one final gateway call that keeps the
+	// tool definitions attached but forces tool_choice="none", so the model has
+	// to produce a text answer while the transcript (which references
+	// tool_use/tool_result) stays valid for Anthropic (FIR-2421).
+	e.logger.Info("firtal gateway tool loop forcing final text-only call",
 		"task_id", meta.TaskID,
 		"agent_id", meta.AgentID,
 		"workspace_id", meta.WorkspaceID,
 		"max_tool_rounds", maxRounds,
 	)
-	final, err := e.completeGateway(ctx, cfg, agent.Model.String, history, meta)
+	final, err := e.completeGatewayForcingText(ctx, cfg, agent.Model.String, history, tools, meta)
 	if err != nil {
 		return GatewayCompletion{}, err
 	}
@@ -636,6 +742,7 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 	agentID, workspaceID pgtype.UUID,
 	registry *Registry,
 	tools []Tool,
+	pruneOn bool,
 ) (GatewayCompletion, error) {
 	history := withRegistryToolUsageHint(initialMessages, tools)
 	toolDefs := toolsToGatewayToolDefs(tools)
@@ -720,21 +827,25 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 				"duration_ms", time.Since(start).Milliseconds(),
 				"is_error", isError,
 			)
+			acc.ToolResultChars += int64(len(resultText))
 			history = append(history, GatewayMessage{
 				Role:       "tool",
 				ToolCallID: call.ID,
 				Content:    resultText,
 			})
 		}
+		if pruneOn {
+			acc.PrunedToolResultChars += pruneSupersededGatewayToolResults(history)
+		}
 	}
 
-	e.logger.Info("firtal gateway chat-completions fallback forcing final no-tool call",
+	e.logger.Info("firtal gateway chat-completions fallback forcing final text-only call",
 		"task_id", meta.TaskID,
 		"agent_id", meta.AgentID,
 		"workspace_id", meta.WorkspaceID,
 		"max_tool_rounds", maxRounds,
 	)
-	final, err := e.completeGateway(ctx, cfg, agent.Model.String, history, meta)
+	final, err := e.completeGatewayForcingText(ctx, cfg, agent.Model.String, history, toolDefs, meta)
 	if err != nil {
 		return GatewayCompletion{}, err
 	}
@@ -761,6 +872,7 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 	toolSrv *mcp.Server,
 	registry *Registry,
 	useRegistry bool,
+	pruneOn bool,
 ) (GatewayCompletion, error) {
 	// Extract system prompt from the first message if present.
 	systemText := ""
@@ -895,6 +1007,7 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 				"is_error", isError,
 			)
 
+			acc.ToolResultChars += int64(len(resultText))
 			toolResultBlocks = append(toolResultBlocks, AnthropicContentBlock{
 				Type:      "tool_result",
 				ToolUseID: call.ID,
@@ -909,17 +1022,22 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 			Role:    "user",
 			Content: toolResultBlocks,
 		})
+		if pruneOn {
+			acc.PrunedToolResultChars += pruneSupersededAnthropicToolResults(history)
+		}
 	}
 
-	// Tool-round budget exhausted. Make one final call without tools so the
-	// model can emit a text summary.
-	e.logger.Info("firtal gateway anthropic tool loop forcing final no-tool call",
+	// Tool-round budget exhausted. Make one final call that keeps the tool
+	// definitions attached but forces tool_choice={type:"none"} so the model
+	// emits a text summary while the transcript (which references tool_use/
+	// tool_result) stays valid for Anthropic (FIR-2421).
+	e.logger.Info("firtal gateway anthropic tool loop forcing final text-only call",
 		"task_id", meta.TaskID,
 		"agent_id", meta.AgentID,
 		"workspace_id", meta.WorkspaceID,
 		"max_tool_rounds", maxRounds,
 	)
-	final, err := gwClient.CompleteAnthropicWithTools(ctx, agent.Model.String, systemText, history, nil, meta)
+	final, err := gwClient.CompleteAnthropicForcingText(ctx, agent.Model.String, systemText, history, tools, meta)
 	if err != nil {
 		return GatewayCompletion{}, err
 	}
@@ -1183,6 +1301,7 @@ func (e *FirtalGatewayExecutor) recordTaskUsage(ctx context.Context, task db.Age
 		OutputTokens:     usage.OutputTokens,
 		CacheReadTokens:  usage.CacheReadTokens,
 		CacheWriteTokens: usage.CacheWriteTokens,
+		CostCents:        usage.CostCents,
 	}); err != nil {
 		e.logger.Warn("firtal gateway task usage upsert failed", "task_id", util.UUIDToString(task.ID), "model", completion.Model, "error", err)
 	}

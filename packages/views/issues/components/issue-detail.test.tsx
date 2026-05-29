@@ -1,5 +1,5 @@
 import { forwardRef, useRef, useState, useImperativeHandle } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, TimelineEntry } from "@multica/core/types";
@@ -95,6 +95,10 @@ vi.mock("@multica/core/paths", async () => {
 });
 
 // Mock navigation
+const navigationMocks = vi.hoisted(() => ({
+  replace: vi.fn(),
+}));
+
 vi.mock("../../navigation", () => ({
   AppLink: ({ children, href, ...props }: any) => (
     <a href={href} {...props}>
@@ -103,6 +107,7 @@ vi.mock("../../navigation", () => ({
   ),
   useNavigation: () => ({
     push: vi.fn(),
+    replace: navigationMocks.replace,
     pathname: "/issues/issue-1",
     getShareableUrl: (p: string) => `https://app.multica.com${p}`,
   }),
@@ -473,6 +478,11 @@ const mockTimeline: TimelineEntry[] = [
 // ---------------------------------------------------------------------------
 
 import { IssueDetail } from "./issue-detail";
+// FIR-1550 regression: the issue detail status surfaces must read the project's
+// status model. These drive a test that seeds an assigned model and asserts the
+// picker shows the model label — proving issue-detail mounts the provider.
+import { useCerebroFeatureFlagsStore } from "@multica/cerebro-feature-flags";
+import { cerebroStatusModelsKeys } from "@multica/cerebro-status-models/core/queries";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -887,6 +897,140 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText(/changed priority/i)).toBeInTheDocument();
   });
 
+  it("truncates the trailing activity block to the most recent 8 entries with a show-more toggle", async () => {
+    // 10 activities, all in the trailing block (no comment after them, so it's
+    // the trailing block by definition). Alternating action types so the
+    // 2-minute coalesce window never merges consecutive entries — we end up
+    // with 10 distinct rows.
+    const trailingBlock: TimelineEntry[] = [
+      { type: "activity", id: "act-1", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "todo", to: "in_progress" }, created_at: "2026-01-18T00:00:00Z" },
+      { type: "activity", id: "act-2", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "low", to: "medium" }, created_at: "2026-01-18T00:01:00Z" },
+      { type: "activity", id: "act-3", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_progress", to: "in_review" }, created_at: "2026-01-18T00:02:00Z" },
+      { type: "activity", id: "act-4", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "medium", to: "high" }, created_at: "2026-01-18T00:03:00Z" },
+      { type: "activity", id: "act-5", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_review", to: "done" }, created_at: "2026-01-18T00:04:00Z" },
+      { type: "activity", id: "act-6", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "high", to: "urgent" }, created_at: "2026-01-18T00:05:00Z" },
+      { type: "activity", id: "act-7", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "done", to: "blocked" }, created_at: "2026-01-18T00:06:00Z" },
+      { type: "activity", id: "act-8", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "urgent", to: "low" }, created_at: "2026-01-18T00:07:00Z" },
+      { type: "activity", id: "act-9", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "blocked", to: "todo" }, created_at: "2026-01-18T00:08:00Z" },
+      { type: "activity", id: "act-10", actor_type: "member", actor_id: "user-1", action: "due_date_changed", details: { to: "2026-02-01T00:00:00Z" }, created_at: "2026-01-18T00:09:00Z" },
+    ] as TimelineEntry[];
+    mockApiObj.listTimeline.mockResolvedValue(trailingBlock);
+
+    renderIssueDetail();
+
+    // In the truncated default state the "N activities" collapse header
+    // stays hidden — the "Show N more" link is the only control we want
+    // to expose for a glance at recent activity.
+    await waitFor(() => {
+      expect(screen.getByText("Show 2 more activities")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("10 activities")).not.toBeInTheDocument();
+
+    // Only the 8 most recent entries (act-3..act-10) are rendered by default.
+    // act-1 and act-2 are folded behind the show-more line.
+    expect(screen.getByText(/from In Progress to In Review/i)).toBeInTheDocument(); // act-3
+    expect(screen.getByText(/set due date to/i)).toBeInTheDocument(); // act-10
+    expect(screen.queryByText(/from Todo to In Progress/i)).not.toBeInTheDocument(); // act-1
+    expect(screen.queryByText(/from Low to Medium/i)).not.toBeInTheDocument(); // act-2
+
+    // Clicking the toggle reveals the older entries in place and brings the
+    // full "N activities" header back (so the user can fold the block).
+    fireEvent.click(screen.getByText("Show 2 more activities"));
+    await waitFor(() => {
+      expect(screen.getByText(/from Todo to In Progress/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/from Low to Medium/i)).toBeInTheDocument();
+    expect(screen.getByText(/set due date to/i)).toBeInTheDocument();
+    expect(screen.getByText("10 activities")).toBeInTheDocument();
+    expect(screen.queryByText(/Show \d+ more activit/i)).not.toBeInTheDocument();
+  });
+
+  it("does not show the show-more toggle when the trailing block has 8 or fewer entries", async () => {
+    const trailingBlock: TimelineEntry[] = [
+      { type: "activity", id: "act-1", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "todo", to: "in_progress" }, created_at: "2026-01-18T00:00:00Z" },
+      { type: "activity", id: "act-2", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "low", to: "high" }, created_at: "2026-01-18T00:01:00Z" },
+      { type: "activity", id: "act-3", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_progress", to: "in_review" }, created_at: "2026-01-18T00:02:00Z" },
+      { type: "activity", id: "act-4", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "high", to: "urgent" }, created_at: "2026-01-18T00:03:00Z" },
+      { type: "activity", id: "act-5", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_review", to: "done" }, created_at: "2026-01-18T00:04:00Z" },
+      { type: "activity", id: "act-6", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "urgent", to: "low" }, created_at: "2026-01-18T00:05:00Z" },
+      { type: "activity", id: "act-7", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "done", to: "blocked" }, created_at: "2026-01-18T00:06:00Z" },
+      { type: "activity", id: "act-8", actor_type: "member", actor_id: "user-1", action: "due_date_changed", details: { to: "2026-02-01T00:00:00Z" }, created_at: "2026-01-18T00:07:00Z" },
+    ] as TimelineEntry[];
+    mockApiObj.listTimeline.mockResolvedValue(trailingBlock);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("8 activities")).toBeInTheDocument();
+    });
+    // Every one of the 8 entries should be visible — the trailing block fits
+    // exactly within the limit, so no "Show N more activities" line appears.
+    expect(screen.getByText(/from Todo to In Progress/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Low to High/i)).toBeInTheDocument();
+    expect(screen.getByText(/from In Progress to In Review/i)).toBeInTheDocument();
+    expect(screen.getByText(/from High to Urgent/i)).toBeInTheDocument();
+    expect(screen.getByText(/from In Review to Done/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Urgent to Low/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Done to Blocked/i)).toBeInTheDocument();
+    expect(screen.getByText(/set due date to/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Show \d+ more activit/i)).not.toBeInTheDocument();
+  });
+
+  it("expanding a non-trailing block shows every entry — only the trailing block truncates older ones", async () => {
+    // Non-trailing block (10 activities) + comment + trailing block (1 activity).
+    // Manually expanding the older block must reveal all 10 entries — the
+    // truncate-to-8 rule applies only to the trailing block.
+    const timeline: TimelineEntry[] = [
+      { type: "activity", id: "old-1", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "backlog", to: "todo" }, created_at: "2026-01-16T00:00:00Z" },
+      { type: "activity", id: "old-2", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "none", to: "low" }, created_at: "2026-01-16T00:01:00Z" },
+      { type: "activity", id: "old-3", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "todo", to: "in_progress" }, created_at: "2026-01-16T00:02:00Z" },
+      { type: "activity", id: "old-4", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "low", to: "medium" }, created_at: "2026-01-16T00:03:00Z" },
+      { type: "activity", id: "old-5", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_progress", to: "in_review" }, created_at: "2026-01-16T00:04:00Z" },
+      { type: "activity", id: "old-6", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "medium", to: "high" }, created_at: "2026-01-16T00:05:00Z" },
+      { type: "activity", id: "old-7", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_review", to: "done" }, created_at: "2026-01-16T00:06:00Z" },
+      { type: "activity", id: "old-8", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "high", to: "urgent" }, created_at: "2026-01-16T00:07:00Z" },
+      { type: "activity", id: "old-9", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "done", to: "blocked" }, created_at: "2026-01-16T00:08:00Z" },
+      { type: "activity", id: "old-10", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "urgent", to: "low" }, created_at: "2026-01-16T00:09:00Z" },
+      {
+        type: "comment", id: "comment-mid", actor_type: "member", actor_id: "user-1",
+        content: "Splitting the blocks", parent_id: null,
+        created_at: "2026-01-17T00:00:00Z", updated_at: "2026-01-17T00:00:00Z",
+        comment_type: "comment",
+      },
+      { type: "activity", id: "last-1", actor_type: "member", actor_id: "user-1", action: "due_date_changed", details: { to: "2026-02-01T00:00:00Z" }, created_at: "2026-01-18T00:00:00Z" },
+    ] as TimelineEntry[];
+    mockApiObj.listTimeline.mockResolvedValue(timeline);
+
+    renderIssueDetail();
+
+    // The older block defaults to collapsed; its summary reports 10.
+    await waitFor(() => {
+      expect(screen.getByText("10 activities")).toBeInTheDocument();
+    });
+    // None of the older entries are rendered before expansion.
+    expect(screen.queryByText(/from Backlog to Todo/i)).not.toBeInTheDocument();
+
+    // Expand the older block by clicking its summary line.
+    fireEvent.click(screen.getByText("10 activities"));
+
+    // Every one of the 10 entries should now be visible — even though the
+    // block has more than 8 entries, the truncate-to-8 rule does not apply
+    // to non-trailing blocks, so no "Show N more activities" line appears.
+    await waitFor(() => {
+      expect(screen.getByText(/from Backlog to Todo/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/from No priority to Low/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Todo to In Progress/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Low to Medium/i)).toBeInTheDocument();
+    expect(screen.getByText(/from In Progress to In Review/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Medium to High/i)).toBeInTheDocument();
+    expect(screen.getByText(/from In Review to Done/i)).toBeInTheDocument();
+    expect(screen.getByText(/from High to Urgent/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Done to Blocked/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Urgent to Low/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Show \d+ more activit/i)).not.toBeInTheDocument();
+  });
+
   describe("highlightCommentId scroll-to-comment", () => {
     it("scrolls to the highlighted comment after both issue and timeline finish loading", async () => {
       renderIssueDetailWithHighlight("comment-2");
@@ -1131,6 +1275,38 @@ describe("IssueDetail (channel/DM)", () => {
     // Activity (not Messages) is the section heading for issues.
     expect(screen.getAllByText("Activity").length).toBeGreaterThanOrEqual(1);
   });
+
+  // CEREBRO-PATCH(channel-issue-redirect): FIR-2452 — when a DM or channel
+  // is opened via /issues/<id>, IssueDetail must navigate.replace to the
+  // chat route so the hybrid issue-chrome layout never reaches the user.
+  it("replace-navigates to /channels/<id> when loaded with a channel kind", async () => {
+    mockApiObj.getIssue.mockResolvedValue(mockChannelIssue);
+    renderIssueDetail("channel-1");
+
+    await waitFor(() => {
+      expect(navigationMocks.replace).toHaveBeenCalledWith("/test/channels/channel-1");
+    });
+  });
+
+  it("replace-navigates to /channels/<id> when loaded with a DM kind", async () => {
+    mockApiObj.getIssue.mockResolvedValue(mockDMIssue);
+    renderIssueDetail("dm-1");
+
+    await waitFor(() => {
+      expect(navigationMocks.replace).toHaveBeenCalledWith("/test/channels/dm-1");
+    });
+  });
+
+  it("does not redirect for a regular issue", async () => {
+    mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    renderIssueDetail("issue-1");
+
+    await waitFor(() => {
+      expect(screen.getByText("Properties")).toBeInTheDocument();
+    });
+
+    expect(navigationMocks.replace).not.toHaveBeenCalled();
+  });
 });
 
 // CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — IssueDetail must
@@ -1177,5 +1353,112 @@ describe("IssueDetail unarchive toolbar (cerebro)", () => {
     if (!first) throw new Error("expected at least one unarchive button");
     fireEvent.click(first);
     expect(onUnarchive).toHaveBeenCalledTimes(1);
+  });
+});
+
+// CEREBRO-PATCH(issue-detail-status-model): FIR-1550 — the issue detail status
+// surfaces must resolve the issue's project status model. Tine's re-QA found the
+// status picker on issue detail still showed default labels because the page
+// never mounted CerebroStatusModelProvider (only project detail did). This block
+// seeds an assigned model and asserts the picker trigger renders the model label.
+describe("IssueDetail status-model presentation (cerebro)", () => {
+  const WS_ID = "ws-1";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockViewport.isMobile = false;
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-1" });
+    mockApiObj.listTimeline.mockResolvedValue([]);
+    mockApiObj.listIssueReactions.mockResolvedValue([]);
+    mockApiObj.listIssueSubscribers.mockResolvedValue([]);
+    mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
+    mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
+    mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.listMembers.mockResolvedValue([
+      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
+    ]);
+    mockApiObj.listAgents.mockResolvedValue([]);
+    mockApiObj.getProject.mockResolvedValue({
+      id: "p-1",
+      workspace_id: WS_ID,
+      title: "Workflow project",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+  });
+
+  afterEach(() => {
+    // Revert the flag override so the store does not leak into other suites.
+    useCerebroFeatureFlagsStore.getState().setFlag("cerebro_workflows", undefined);
+  });
+
+  it("shows the project model label on the status picker instead of the default", async () => {
+    useCerebroFeatureFlagsStore.getState().setFlag("cerebro_workflows", true);
+
+    // gcTime must outlive the gap between seeding and the provider mounting an
+    // observer — createTestQueryClient uses gcTime: 0, which would evict the
+    // seeded data before the provider reads it.
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: Infinity },
+        mutations: { retry: false },
+      },
+    });
+    // Seed the provider's two queries so it resolves a model without hitting the
+    // (mocked) API: project p-1 is assigned model m-1, which renames the
+    // in_progress base status (the fixture issue's status) to "Building".
+    queryClient.setQueryData(cerebroStatusModelsKeys.assignments(WS_ID), {
+      assignments: [
+        {
+          project_id: "p-1",
+          workspace_id: WS_ID,
+          status_model_id: "m-1",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    queryClient.setQueryData(cerebroStatusModelsKeys.list(WS_ID), {
+      status_models: [
+        {
+          id: "m-1",
+          workspace_id: WS_ID,
+          name: "Plan-first pipeline",
+          statuses: [
+            { key: "building", label: "Building", color: "#facc15", base_status: "in_progress", position: 0 },
+          ],
+          project_count: 1,
+          created_by_id: "user-1",
+          created_by_type: "member",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={queryClient}>
+          <IssueDetail issueId="issue-1" />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    // Status picker trigger now renders the model label, not the upstream
+    // "In Progress" default — this is the assertion that fails on the old code
+    // where issue-detail rendered <StatusPicker /> with no provider.
+    const labels = await screen.findAllByText("Building");
+    expect(labels.length).toBeGreaterThan(0);
+    expect(screen.queryByText("In Progress")).not.toBeInTheDocument();
   });
 });

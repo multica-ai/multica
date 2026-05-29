@@ -287,6 +287,9 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				continue
 			}
 			d.handleWSHeartbeatAck(context.Background(), &ack)
+		// CEREBRO-PATCH(daemon-tool-scan-now): FIR-2230 admin-triggered immediate scan.
+		case protocol.EventDaemonToolScanRequested:
+			d.handleToolScanRequested(msg.Payload)
 		}
 	}
 }

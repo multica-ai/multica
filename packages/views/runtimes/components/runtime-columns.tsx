@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import {
-  ArrowUpCircle,
   Globe,
   MoreHorizontal,
   Trash2,
@@ -16,17 +15,8 @@ import {
   deriveRuntimeHealth,
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
-import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
+// CEREBRO-PATCH(runtime-list-account-column): swap upstream CLI column for the cerebro Account column (FIR-2308).
+import { RuntimeAccountCell } from "@multica/cerebro-runtime/views";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -43,11 +33,11 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { workloadConfig } from "../../agents/presence";
 import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
+import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import {
   computeCostInWindow,
   formatLastSeen,
   isSelfHealingRuntime,
-  isVersionNewer,
   pctChange,
 } from "../utils";
 import { useT } from "../../i18n";
@@ -63,7 +53,7 @@ export interface RuntimeRow {
   canDelete: boolean;
 }
 
-// Column widths in px. Name, Health, and CLI grow together until the
+// Column widths in px. Name, Health, and Account grow together until the
 // user resizes them. Their `size` values still flow into table.getTotalSize()
 // to set the table's min-width, giving each grow column a real floor below
 // which the container scrolls horizontally instead of shrinking further.
@@ -78,7 +68,8 @@ const COL_WIDTHS = {
   agents: 100,
   workload: 140,
   cost: 100,
-  cli: 140,
+  // CEREBRO-PATCH(runtime-list-account-column): Account column replaces upstream CLI column (FIR-2308).
+  account: 180,
   // 60 = 16 left padding + 28 kebab + 16 right padding. Keeps the
   // kebab's right edge 16px from the card so it lines up with the
   // toolbar's px-4 right inset.
@@ -89,7 +80,6 @@ type RuntimesT = ReturnType<typeof useT<"runtimes">>["t"];
 
 interface CreateColumnsArgs {
   showOwner: boolean;
-  latestCliVersion: string | null;
   wsId: string;
   now: number;
   t: RuntimesT;
@@ -97,7 +87,6 @@ interface CreateColumnsArgs {
 
 export function createRuntimeColumns({
   showOwner,
-  latestCliVersion,
   wsId,
   now,
   t,
@@ -190,17 +179,13 @@ export function createRuntimeColumns({
       size: COL_WIDTHS.cost,
       cell: ({ row }) => <CostCell runtimeId={row.original.runtime.id} />,
     },
+    // CEREBRO-PATCH(runtime-list-account-column): cerebro Account column replaces upstream CLI column (FIR-2308).
     {
-      id: "cli",
-      header: () => t(($) => $.list.col_cli),
-      size: COL_WIDTHS.cli,
+      id: "account",
+      header: () => t(($) => $.list.col_account),
+      size: COL_WIDTHS.account,
       meta: { grow: true },
-      cell: ({ row }) => (
-        <CliCell
-          runtime={row.original.runtime}
-          latestCliVersion={latestCliVersion}
-        />
-      ),
+      cell: ({ row }) => <RuntimeAccountCell runtime={row.original.runtime} />,
     },
     {
       id: "actions",
@@ -449,64 +434,6 @@ function CostCell({ runtimeId }: { runtimeId: string }) {
   );
 }
 
-function CliCell({
-  runtime,
-  latestCliVersion,
-}: {
-  runtime: AgentRuntime;
-  latestCliVersion: string | null;
-}) {
-  const { t } = useT("runtimes");
-  if (runtime.runtime_mode === "cloud") {
-    return <span className="text-xs text-muted-foreground/50">—</span>;
-  }
-  const meta = runtime.metadata as Record<string, unknown> | null;
-  const cliVersion =
-    meta && typeof meta.cli_version === "string" ? meta.cli_version : null;
-  const launchedBy =
-    meta && typeof meta.launched_by === "string" ? meta.launched_by : null;
-  const isManaged = launchedBy === "desktop";
-
-  if (!cliVersion) {
-    return <span className="text-xs text-muted-foreground/50">—</span>;
-  }
-
-  // Desktop-managed daemons can never self-update from this page (the
-  // Electron app ships and replaces the binary), so the upgrade marker
-  // would lie — suppress regardless of version comparison.
-  const hasUpdate =
-    !isManaged &&
-    !!latestCliVersion &&
-    isVersionNewer(latestCliVersion, cliVersion);
-
-  return (
-    <div className="flex min-w-0 items-center gap-1 text-xs">
-      <span
-        className={`truncate font-mono ${
-          hasUpdate ? "text-warning" : "text-muted-foreground"
-        }`}
-      >
-        {cliVersion}
-      </span>
-      {hasUpdate && latestCliVersion && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <ArrowUpCircle
-                className="h-3 w-3 shrink-0 text-warning"
-                aria-label={t(($) => $.list.cli_update_available_aria)}
-              />
-            }
-          />
-          <TooltipContent>
-            {t(($) => $.list.cli_update_available_tooltip, { version: latestCliVersion })}
-          </TooltipContent>
-        </Tooltip>
-      )}
-    </div>
-  );
-}
-
 // Stacks up to 3 agent avatars, then a "+N" pill if more bind to this
 // runtime. Each avatar uses the wrapping ActorAvatar so hover automatically
 // surfaces AgentProfileCard.
@@ -550,7 +477,6 @@ function RowMenu({
   canDelete: boolean;
 }) {
   const { t } = useT("runtimes");
-  const deleteMutation = useDeleteRuntime(wsId);
   const [deleteOpen, setDeleteOpen] = useState(false);
   // Delete is currently the only row action; if the row can't run it, drop
   // the kebab entirely so the column doesn't render an empty popover. The
@@ -561,20 +487,6 @@ function RowMenu({
   if (!canDelete || selfHealing) {
     return <span aria-hidden />;
   }
-
-  const handleDelete = () => {
-    deleteMutation.mutate(runtime.id, {
-      onSuccess: () => {
-        toast.success(t(($) => $.detail.toast_deleted));
-        setDeleteOpen(false);
-      },
-      onError: (e) => {
-        toast.error(
-          e instanceof Error ? e.message : t(($) => $.detail.toast_delete_failed),
-        );
-      },
-    });
-  };
 
   return (
     <>
@@ -607,35 +519,16 @@ function RowMenu({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <AlertDialog
+      <DeleteRuntimeDialog
         open={deleteOpen}
-        onOpenChange={(v) => {
-          if (deleteMutation.isPending) return;
-          setDeleteOpen(v);
+        onOpenChange={setDeleteOpen}
+        runtime={runtime}
+        wsId={wsId}
+        onDeleted={() => {
+          setDeleteOpen(false);
+          toast.success(t(($) => $.detail.toast_deleted));
         }}
-      >
-        <AlertDialogContent onClick={(e) => e.stopPropagation()}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(($) => $.detail.delete_dialog.description, { name: runtime.name })}
-              <span className="mt-2 block text-xs text-muted-foreground/80">
-                {t(($) => $.list.delete_admin_hint)}
-              </span>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.detail.delete_dialog.cancel)}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? t(($) => $.detail.delete_dialog.deleting) : t(($) => $.detail.delete_dialog.confirm)}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      />
     </>
   );
 }

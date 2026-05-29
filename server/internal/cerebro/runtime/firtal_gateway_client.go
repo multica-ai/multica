@@ -59,6 +59,16 @@ type GatewayCompletion struct {
 	Output    string
 	ToolCalls []GatewayToolCall
 	Usage     GatewayUsage
+	// ToolResultChars is the total characters of tool-result content produced
+	// across the tool loop. It feeds the prune_tool_results cost measurement
+	// (FIR-2325); it is summed alongside Usage and is 0 for tool-free runs.
+	ToolResultChars int64
+	// PrunedToolResultChars is the characters of superseded tool-result content
+	// actually dropped from the transcript mid-run when the prune_tool_results
+	// saving is "on" (FIR-2325). 0 when the saving is off/shadow or when no round
+	// was ever superseded. This is the *measured* saving, as opposed to
+	// ToolResultChars which is the would-save estimate.
+	PrunedToolResultChars int64
 }
 
 type GatewayRequestMeta struct {
@@ -90,6 +100,25 @@ func (c *GatewayClient) Complete(ctx context.Context, model string, messages []G
 // in the GatewayCompletion. Callers (the executor's tool-loop) decide whether
 // to dispatch the calls and run another iteration, or treat the text as final.
 func (c *GatewayClient) CompleteWithTools(ctx context.Context, model string, messages []GatewayMessage, tools []GatewayToolDef, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	return c.completeChat(ctx, model, messages, tools, "", meta)
+}
+
+// CompleteForcingText is the tool-loop's forced-final call: it keeps the tool
+// definitions attached but sets tool_choice="none" so the model must answer
+// with text instead of emitting another tool call. Keeping `tools` attached
+// (rather than dropping it) is what keeps the request valid for Anthropic,
+// whose API rejects a transcript that references tool_use/tool_result blocks
+// when the request omits the tools that define them — the root cause of the
+// FIR-2421 HTTP 400. tool_choice="none" then guarantees the loop terminates
+// with text rather than risking yet another tool call.
+func (c *GatewayClient) CompleteForcingText(ctx context.Context, model string, messages []GatewayMessage, tools []GatewayToolDef, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	return c.completeChat(ctx, model, messages, tools, "none", meta)
+}
+
+// completeChat is the shared OpenAI-compat /v1/chat/completions call. toolChoice
+// is forwarded as the request's `tool_choice` field when non-empty (the gateway
+// translates "none"/"auto"/"required" to the Anthropic equivalent).
+func (c *GatewayClient) completeChat(ctx context.Context, model string, messages []GatewayMessage, tools []GatewayToolDef, toolChoice string, meta GatewayRequestMeta) (GatewayCompletion, error) {
 	model = strings.TrimSpace(model)
 	if model == "" || model == "auto" {
 		model = c.cfg.Model
@@ -113,6 +142,9 @@ func (c *GatewayClient) CompleteWithTools(ctx context.Context, model string, mes
 	}
 	if len(tools) > 0 {
 		body["tools"] = tools
+	}
+	if toolChoice != "" {
+		body["tool_choice"] = toolChoice
 	}
 
 	raw, err := json.Marshal(body)

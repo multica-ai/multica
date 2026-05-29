@@ -73,6 +73,9 @@ type TaskWakeupNotifier interface {
 // import cycle (cerebro/runtime → service → would loop back here).
 type AutoPauseInvoker interface {
 	MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTaskQueue) bool
+	// CEREBRO-PATCH(auto-pause-reset): FIR-2476 — clear the consecutive
+	// auto-pause circuit-breaker counter when a task completes successfully.
+	ResetAutoPauseCount(ctx context.Context, runtimeID pgtype.UUID)
 }
 
 // triggerSummaryMaxLen caps the snapshot length so the row stays cheap to
@@ -162,6 +165,18 @@ func (s *TaskService) CommentDelegationContext(ctx context.Context, authorType, 
 		return TaskDelegationContext{}, fmt.Errorf("agent delegation denied: source task does not belong to author")
 	}
 	if !task.OriginalUserID.Valid {
+		// CEREBRO-PATCH(task-delegation-issue-origin): direct issue tasks created before provenance seeding can still inherit a member issue creator.
+		if task.IssueID.Valid {
+			issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+			if err == nil && issue.CreatorType == "member" && issue.CreatorID.Valid {
+				return TaskDelegationContext{
+					OriginalUserID:    issue.CreatorID,
+					DelegatingAgentID: task.AgentID,
+					SourceTaskID:      task.ID,
+					Source:            pgtype.Text{String: source, Valid: true},
+				}, nil
+			}
+		}
 		return TaskDelegationContext{}, fmt.Errorf("agent delegation denied: missing original user")
 	}
 	return TaskDelegationContext{
@@ -283,6 +298,16 @@ func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTas
 		s.taskAnalyticsContext(ctx, task),
 		taskDurationMS(task),
 	))
+	// Revoke any mat_ task tokens minted for this task. Cancellation is
+	// a terminal transition, so the running agent process no longer
+	// needs to call back; eagerly deleting the token closes the
+	// window where a compromised process could keep authenticating
+	// against the API until the 24h expiry. Failure is non-fatal — the
+	// expiry / FK cascade are the durable guards. MUL-2600.
+	if err := s.Queries.DeleteTaskTokensByTask(ctx, task.ID); err != nil {
+		slog.Warn("cancel task: failed to revoke task tokens",
+			"task_id", util.UUIDToString(task.ID), "error", err)
+	}
 }
 
 func (s *TaskService) captureTaskEvent(ctx context.Context, event analytics.Event) {
@@ -949,7 +974,7 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 	// running agent can't keep posting comments after we say stop. Outside
 	// the cancel tx so a token-revoke failure can't roll back the cancel
 	// (and the persisted chat_message that goes with it).
-	if err := s.Queries.RevokeTaskTokensForTask(ctx, taskID); err != nil {
+	if err := s.Queries.DeleteTaskTokensByTask(ctx, taskID); err != nil {
 		slog.Warn("revoke task tokens on cancel failed (non-fatal)", "task_id", util.UUIDToString(taskID), "error", err)
 	}
 
@@ -1285,7 +1310,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		// Revoke the per-task token in the same transaction so a
 		// completed task can no longer be acted on through its token,
 		// even if the TTL hasn't elapsed.
-		if err := qtx.RevokeTaskTokensForTask(ctx, taskID); err != nil {
+		if err := qtx.DeleteTaskTokensByTask(ctx, taskID); err != nil {
 			return fmt.Errorf("revoke task tokens: %w", err)
 		}
 
@@ -1381,6 +1406,10 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	// CEREBRO-PATCH(auto-pause-reset): FIR-2476 — a success clears the runtime's auto-pause circuit breaker.
+	if s.AutoPause != nil && task.RuntimeID.Valid {
+		s.AutoPause.ResetAutoPauseCount(ctx, task.RuntimeID)
+	}
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
@@ -1492,7 +1521,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		task = t
 
 		// Same revoke-on-terminal-state contract as CompleteTask.
-		if err := qtx.RevokeTaskTokensForTask(ctx, taskID); err != nil {
+		if err := qtx.DeleteTaskTokensByTask(ctx, taskID); err != nil {
 			return fmt.Errorf("revoke task tokens: %w", err)
 		}
 
@@ -1566,7 +1595,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// want to spam the issue with "task timed out" messages on every
 	// daemon hiccup. Also skip when auto-paused so rate-limit failures do
 	// not post on every 5-min fail-safe loop tick.
-	if errMsg != "" && task.IssueID.Valid && retried == nil && !autoPaused { // CEREBRO-PATCH(auto-pause-on-failure)
+	// CEREBRO-PATCH(suppress-stale-blocked-comment): FIR-2395 — when this
+	// run already posted a visible agent comment, the BLOCKED timeout
+	// fallback is just noise stacked on top of the real answer.
+	if errMsg != "" && task.IssueID.Valid && retried == nil && !autoPaused && s.shouldPostTimeoutFailureComment(ctx, task) { // CEREBRO-PATCH(auto-pause-on-failure)
 		if failureReason == "timeout" {
 			s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(s.timeoutFailureCommentBody(ctx, task, errMsg)), "comment", task.TriggerCommentID)
 		} else {
@@ -1675,6 +1707,32 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	}
 	if !parent.IssueID.Valid && !parent.ChatSessionID.Valid {
 		return nil, nil
+	}
+
+	// CEREBRO-PATCH(retry-pause-guard): FIR-2442 — skip auto-retry when the
+	// parent task's runtime is paused. Without this, every failure on a paused
+	// runtime spawns a fresh retry that the dispatcher rejects with
+	// runtime_paused, burning no LLM calls but flooding the queue with dead
+	// rows (Tine: 299 such rows in one rate-limit window). Lookup error =
+	// fail-safe: skip retry rather than risk a runaway on unknown pause state.
+	if parent.RuntimeID.Valid {
+		runtime, rtErr := s.Queries.GetAgentRuntime(ctx, parent.RuntimeID)
+		if rtErr != nil {
+			slog.Warn("task auto-retry skipped: runtime lookup failed",
+				"task_id", util.UUIDToString(parent.ID),
+				"runtime_id", util.UUIDToString(parent.RuntimeID),
+				"error", rtErr,
+			)
+			return nil, nil
+		}
+		if runtime.PausedAt.Valid {
+			slog.Info("task auto-retry skipped: runtime paused",
+				"task_id", util.UUIDToString(parent.ID),
+				"runtime_id", util.UUIDToString(parent.RuntimeID),
+				"reason", reason,
+			)
+			return nil, nil
+		}
 	}
 
 	child, err := s.Queries.CreateRetryTask(ctx, parent.ID)
@@ -1892,7 +1950,10 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		}
 
 		issueKey := util.UUIDToString(t.IssueID)
-		if failureReason == "timeout" && t.IssueID.Valid && !taskRetried && !retriedIssues[issueKey] {
+		// CEREBRO-PATCH(suppress-stale-blocked-comment): FIR-2395 — same gate
+		// as the FailTask path so the sweeper-driven timeout sweep also
+		// stops piling BLOCKED comments on top of a delivered answer.
+		if failureReason == "timeout" && t.IssueID.Valid && !taskRetried && !retriedIssues[issueKey] && s.shouldPostTimeoutFailureComment(ctx, t) {
 			errMsg := "task timed out"
 			if t.Error.Valid && strings.TrimSpace(t.Error.String) != "" {
 				errMsg = t.Error.String
@@ -1925,6 +1986,51 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
 	return retried
+}
+
+// CEREBRO-PATCH(suppress-stale-blocked-comment): FIR-2395 — shared decision
+// for both FailTask and HandleFailedTasks. Returns false when the run already
+// delivered a visible agent comment to the issue after `started_at`; the
+// caller then skips the BLOCKED fallback (which would just be noise stacked
+// on top of the real reply). Defaults to true on missing data / query errors
+// so a genuine silent timeout still surfaces.
+func (s *TaskService) shouldPostTimeoutFailureComment(ctx context.Context, task db.AgentTaskQueue) bool {
+	if !task.IssueID.Valid {
+		return true
+	}
+	if s.Queries == nil {
+		return true
+	}
+	since := task.StartedAt
+	if !since.Valid {
+		// Tasks that never started (dispatched, then declared timed out)
+		// can't have been the source of a real reply — leave the BLOCKED
+		// fallback in place so the user sees something happened.
+		return true
+	}
+	commented, err := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
+		IssueID:  task.IssueID,
+		AuthorID: task.AgentID,
+		Since:    since,
+	})
+	if err != nil {
+		slog.Warn("suppress-stale-blocked-comment: agent-comment check failed; defaulting to post",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"agent_id", util.UUIDToString(task.AgentID),
+			"error", err,
+		)
+		return true
+	}
+	if commented {
+		slog.Info("suppress-stale-blocked-comment: agent already replied in this run; skipping BLOCKED",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"agent_id", util.UUIDToString(task.AgentID),
+		)
+		return false
+	}
+	return true
 }
 
 func (s *TaskService) timeoutFailureCommentBody(ctx context.Context, task db.AgentTaskQueue, errMsg string) string {

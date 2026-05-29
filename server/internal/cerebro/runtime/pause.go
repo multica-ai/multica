@@ -178,6 +178,26 @@ func (s *Service) UnpauseRuntime(ctx context.Context, runtimeID pgtype.UUID) (ha
 			)
 			continue
 		}
+		// FIR-2395: now that a resume is on the way, drop any BLOCKED
+		// timeout comment the parent posted on the issue. Without this
+		// the user sees a red scary "agent timed out" comment that the
+		// very next resume run renders stale within seconds. Best-effort
+		// — failure to delete is logged, not fatal, because the resume
+		// task is already enqueued.
+		if parent.IssueID.Valid {
+			if delErr := s.Cerebro.DeleteResumedTimeoutComment(ctx, cerebrodb.DeleteResumedTimeoutCommentParams{
+				IssueID:      parent.IssueID,
+				AuthorID:     parent.AgentID,
+				ParentTaskID: util.UUIDToString(parent.ID),
+			}); delErr != nil {
+				slog.Warn("unpause runtime: stale BLOCKED comment cleanup failed",
+					"runtime_id", util.UUIDToString(runtimeID),
+					"parent_task_id", util.UUIDToString(parent.ID),
+					"issue_id", util.UUIDToString(parent.IssueID),
+					"error", delErr,
+				)
+			}
+		}
 		s.publishTaskQueued(ctx, child)
 		resumed++
 	}

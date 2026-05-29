@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type {
   Agent,
+  AgentAvatarBackfillStatus,
   AgentTemplate,
   AgentTemplateSummary,
   Attachment,
@@ -9,6 +10,7 @@ import type {
   // CEREBRO-PATCH(issue-dependencies): dependency response type for the schema.
   IssueDependenciesResponse,
   ListIssuesResponse,
+  Squad,
   TimelineEntry,
   User,
 } from "../types";
@@ -374,6 +376,9 @@ const DashboardUsageDailySchema = z.object({
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
+  // CEREBRO-PATCH(task-usage-gateway-cost): real gateway charge (cents); 0 when
+  // absent so the cost utils fall back to the token estimate (FIR-2405).
+  cost_cents: z.number().default(0),
   task_count: z.number().default(0),
 }).loose();
 
@@ -386,6 +391,8 @@ const DashboardUsageByAgentSchema = z.object({
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
+  // CEREBRO-PATCH(task-usage-gateway-cost): real gateway charge (cents); 0 when absent.
+  cost_cents: z.number().default(0),
   task_count: z.number().default(0),
 }).loose();
 
@@ -493,6 +500,63 @@ export const EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE: CreateAgentFromTemplateR
   agent: { id: "" } as Agent,
   imported_skill_ids: [],
   reused_skill_ids: [],
+};
+
+// Squad list responses carry lightweight membership previews used by hover
+// cards. The preview fields are additive API fields, so older backends default
+// cleanly to no preview instead of breaking newer frontends.
+const SquadMemberPreviewSchema = z.object({
+  member_type: z.string(),
+  member_id: z.string(),
+  role: z.string().default(""),
+}).loose();
+
+export const SquadSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  instructions: z.string().default(""),
+  avatar_url: z.string().nullable().optional().transform((v) => v ?? null),
+  leader_id: z.string(),
+  creator_id: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  archived_at: z.string().nullable().optional().transform((v) => v ?? null),
+  archived_by: z.string().nullable().optional().transform((v) => v ?? null),
+  member_count: z.number().default(0),
+  // CEREBRO-PATCH(squad-list-element-resilience): FIR-2394 — drop a malformed
+  // preview entry instead of failing the whole squad. member_preview is a
+  // hover-card adornment; one bad entry must never blank the squad it adorns.
+  member_preview: z
+    .array(SquadMemberPreviewSchema.nullable().catch(null))
+    .transform((arr) => arr.filter((m): m is NonNullable<typeof m> => m !== null))
+    .default([]),
+}).loose();
+
+// CEREBRO-PATCH(squad-list-element-resilience): FIR-2394 — a single malformed
+// squad must not blank the entire list (board assignees, pickers, hover cards).
+// z.array fails atomically, so drop the bad element and keep the rest rather
+// than letting parseWithFallback collapse the whole list to empty.
+export const SquadListSchema = z
+  .array(SquadSchema.nullable().catch(null))
+  .transform((arr) => arr.filter((s): s is NonNullable<typeof s> => s !== null));
+export const EMPTY_SQUAD_LIST: Squad[] = [];
+export const EMPTY_SQUAD: Squad = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  description: "",
+  instructions: "",
+  avatar_url: null,
+  leader_id: "",
+  creator_id: "",
+  created_at: "",
+  updated_at: "",
+  archived_at: null,
+  archived_by: null,
+  member_count: 0,
+  member_preview: [],
 };
 
 // Squad member status — backs the Squad detail page's Members tab. status
@@ -670,6 +734,29 @@ export const EMPTY_USER: User = {
   profile_description: "",
   created_at: "",
   updated_at: "",
+};
+
+// CEREBRO-PATCH(agent-avatar-backfill): schema for admin avatar backfill progress.
+export const AgentAvatarBackfillStatusSchema = z.object({
+  workspace_id: z.string().default(""),
+  status: z.string().default("idle"),
+  missing: z.number().default(0),
+  total: z.number().default(0),
+  generated: z.number().default(0),
+  skipped: z.number().default(0),
+  failed: z.number().default(0),
+  errors: z.array(z.string()).default([]),
+}).loose();
+
+export const EMPTY_AGENT_AVATAR_BACKFILL_STATUS: AgentAvatarBackfillStatus = {
+  workspace_id: "",
+  status: "idle",
+  missing: 0,
+  total: 0,
+  generated: 0,
+  skipped: 0,
+  failed: 0,
+  errors: [],
 };
 
 // ---------------------------------------------------------------------------

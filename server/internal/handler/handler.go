@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/duplicatecheck"
 	cerebroinfisical "github.com/multica-ai/multica/server/internal/cerebro/infisical"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -130,6 +131,9 @@ type Handler struct {
 	GroupPermissions GroupPermissionsInvoker
 	// CEREBRO-PATCH(handler-mention-trigger-gate): cerebro @mention trigger gate.
 	MentionTriggerGate MentionTriggerGateInvoker
+	// CEREBRO-PATCH(handler-private-agent-run-request): FIR-2385 — turns a member's
+	// tag of an unowned private agent into a run-request in the owner's inbox.
+	PrivateAgentRunRequester PrivateAgentRunRequesterInvoker
 	// CEREBRO-PATCH(handler-runtime-account): cerebro daemon-driven account
 	// registration service. Wired by the router after construction.
 	RuntimeAccount RuntimeAccountInvoker
@@ -158,6 +162,12 @@ type Handler struct {
 	runtimeToolsScan RuntimeToolsScanService
 	// CEREBRO-PATCH(handler-capability-register): FIR-2129 normalized capability register.
 	capabilityRegister CapabilityRegisterService
+	// CEREBRO-PATCH(handler-cloud-runtime-tool-scan): FIR-2284 server-side scan for cloud runtimes.
+	cloudRuntimeToolScanner CloudRuntimeToolScanner
+	// CEREBRO-PATCH(handler-duplicate-check): FIR-2504 inject a custom judge
+	// (test fake or workspace-aware gateway) into CheckSimilarIssues; nil
+	// means the default env-resolved gateway is used.
+	DuplicateCheckJudger *duplicatecheck.Judger
 }
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime
@@ -191,6 +201,17 @@ type RuntimePauseState struct {
 // @mention trigger gate.
 type MentionTriggerGateInvoker interface {
 	CanTriggerMention(ctx context.Context, r *http.Request, workspaceID string, agentID, ownerID pgtype.UUID) (bool, error)
+}
+
+// PrivateAgentRunRequesterInvoker is the upstream-side seam for FIR-2385. It is
+// invoked from the comment mention path when a *member* tags a private agent
+// they do not own (the trigger gate has already refused). The cerebro
+// implementation records a run-request in the owner's inbox and dedups on
+// (agent, comment); the boolean trigger gate stays a pure authz answer.
+//
+// CEREBRO-PATCH(handler-private-agent-run-request-iface): seam for FIR-2385.
+type PrivateAgentRunRequesterInvoker interface {
+	RequestPrivateAgentRun(ctx context.Context, workspaceID string, agentID, ownerID, issueID, commentID, requesterID pgtype.UUID, agentName string) error
 }
 
 // ChannelListenInvoker is the upstream-side seam that the cerebro
@@ -398,20 +419,31 @@ func requestUserID(r *http.Request) string {
 }
 
 // resolveActor determines whether the request is from an agent or a human member.
-// To claim "agent" identity the request MUST carry both X-Agent-ID and a valid
-// X-Task-ID, and the task must belong to the claimed agent. Otherwise we fall
-// back to "member" using the user ID from the session.
+//
+// First-class signal: X-Actor-Source set to "task_token" means the request
+// authenticated via an `mat_` task-scoped token. The auth middleware sets
+// that header (and stripped any client-supplied value first), so it is
+// authoritative — the bound (agent_id, task_id) cannot be forged or
+// stripped by the agent process. This is the path MUL-2600 relies on to
+// reject agent-process traffic on owner-only endpoints.
+//
+// Fallback signal (legacy CLI / member-token paths): the request MUST
+// carry both X-Agent-ID and a valid X-Task-ID, and the task must belong
+// to the claimed agent. Otherwise we fall back to "member".
 //
 // X-Agent-ID alone is not trusted: any workspace member can guess or observe
 // an agent's UUID, and a member-supplied X-Agent-ID would otherwise let that
 // member impersonate the agent and bypass the private-agent gate (#2359
-// review). The daemon always pairs the two headers — X-Agent-ID names the
-// agent claiming the request, X-Task-ID names the in-flight task that
-// authorizes it — so requiring both has no effect on legitimate agent
-// callers but closes the impersonation path.
+// review). The daemon always pairs the two headers, so requiring both has
+// no effect on legitimate agent callers but closes the impersonation path.
 //
 // Returns ("agent", agentID) on success, ("member", userID) otherwise.
 func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		// Server-set header — auth middleware also forced X-Agent-ID
+		// from the token row. Trust it directly without re-querying.
+		return "agent", r.Header.Get("X-Agent-ID")
+	}
 	agentID := r.Header.Get("X-Agent-ID")
 	if agentID == "" {
 		return "member", userID

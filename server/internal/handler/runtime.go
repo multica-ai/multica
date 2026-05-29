@@ -13,10 +13,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 isolation-profile classify/expand
+	cerebrosandboxprofile "github.com/multica-ai/multica/server/internal/cerebro/sandboxprofile"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/pricing"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -39,6 +40,8 @@ type AgentRuntimeResponse struct {
 	// SandboxPolicy is Multica-owned runtime policy that shapes daemon
 	// Seatbelt enforcement for shell, host and path controls.
 	SandboxPolicy any `json:"sandbox_policy"`
+	// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 named isolation profile the stored policy currently equals (real status, not a default).
+	SandboxProfile string `json:"sandbox_profile"`
 	// CEREBRO-PATCH(runtime): persona integration additions.
 	// PersonaSandbox is the runtime-scoped persona sandbox (E1). When set it
 	// is the hard upper bound for every agent on this runtime — at spawn
@@ -93,6 +96,8 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		OwnerID:        uuidToPtr(rt.OwnerID),
 		SandboxEnabled: boolToPtr(rt.SandboxEnabled),
 		SandboxPolicy:  unmarshalJSONMap(rt.SandboxPolicy),
+		// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 classify stored policy into its profile.
+		SandboxProfile: cerebrosandboxprofile.Classify(rt.SandboxPolicy),
 		PersonaSandbox: rt.PersonaSandbox.String,
 		Capabilities:   capabilities,
 		LastSeenAt:     timestampToPtr(rt.LastSeenAt),
@@ -146,10 +151,11 @@ type RuntimeUsageResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	// CostCents is the row's cost computed against pkg/pricing — the same
-	// authoritative table used for budget enforcement. Returning it from the
-	// API keeps the dashboard from carrying a duplicate (and drifting)
-	// pricing table on the frontend.
+	// CostCents is the bucket's spend. CEREBRO-PATCH(task-usage-gateway-cost):
+	// it is the real Firtal-gateway charge when the bucket carried one, and
+	// otherwise the pkg/pricing token estimate (preferGatewayCost). Returning
+	// it from the API keeps the dashboard from carrying a duplicate (and
+	// drifting) pricing table on the frontend.
 	CostCents int64 `json:"cost_cents"`
 }
 
@@ -210,12 +216,10 @@ func (h *Handler) listRuntimeUsage(ctx context.Context, runtimeID pgtype.UUID, t
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
-			CostCents: pricing.ComputeCents(row.Model, pricing.Usage{
-				InputTokens:      row.InputTokens,
-				OutputTokens:     row.OutputTokens,
-				CacheReadTokens:  row.CacheReadTokens,
-				CacheWriteTokens: row.CacheWriteTokens,
-			}),
+			// CEREBRO-PATCH(task-usage-gateway-cost): prefer the real gateway spend
+			// rolled into the hourly bucket; fall back to the token estimate only
+			// for buckets with no gateway cost (FIR-2405).
+			CostCents: preferGatewayCost(row.CostCents, row.Model, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheWriteTokens),
 		}
 	}
 	return resp, nil
@@ -263,9 +267,10 @@ func (h *Handler) GetRuntimeTaskActivity(w http.ResponseWriter, r *http.Request)
 }
 
 // RuntimeUsageByAgentResponse is one (agent, model) row of "Cost by agent".
-// Model stays on the wire because cost is computed client-side from a model
-// pricing table, intentionally not stored server-side so pricing changes
-// don't require a back-fill. The client groups by agent_id and sums.
+// Model stays on the wire so the client can still estimate cost from its
+// pricing table for non-gateway runtimes. CEREBRO-PATCH(task-usage-gateway-cost):
+// cost_cents carries the real gateway charge for this (agent, model) bucket
+// when present (0 otherwise); the client prefers it over the estimate.
 type RuntimeUsageByAgentResponse struct {
 	AgentID          string `json:"agent_id"`
 	Model            string `json:"model"`
@@ -273,6 +278,7 @@ type RuntimeUsageByAgentResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	CostCents        int64  `json:"cost_cents"`
 	TaskCount        int32  `json:"task_count"`
 }
 
@@ -318,7 +324,9 @@ func (h *Handler) GetRuntimeUsageByAgent(w http.ResponseWriter, r *http.Request)
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
-			TaskCount:        row.TaskCount,
+			// CEREBRO-PATCH(task-usage-gateway-cost): prefer the real gateway spend.
+			CostCents: preferGatewayCost(row.CostCents, row.Model, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheWriteTokens),
+			TaskCount: row.TaskCount,
 		}
 	}
 
@@ -335,7 +343,10 @@ type RuntimeUsageByHourResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	TaskCount        int32  `json:"task_count"`
+	// CEREBRO-PATCH(task-usage-gateway-cost): real gateway charge for this
+	// (hour, model) bucket when present (0 otherwise).
+	CostCents int64 `json:"cost_cents"`
+	TaskCount int32 `json:"task_count"`
 }
 
 // GetRuntimeUsageByHour returns hourly (0..23) token aggregates for a
@@ -383,7 +394,9 @@ func (h *Handler) GetRuntimeUsageByHour(w http.ResponseWriter, r *http.Request) 
 			OutputTokens:     row.OutputTokens,
 			CacheReadTokens:  row.CacheReadTokens,
 			CacheWriteTokens: row.CacheWriteTokens,
-			TaskCount:        row.TaskCount,
+			// CEREBRO-PATCH(task-usage-gateway-cost): prefer the real gateway spend.
+			CostCents: preferGatewayCost(row.CostCents, row.Model, row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheWriteTokens),
+			TaskCount: row.TaskCount,
 		}
 	}
 
@@ -618,6 +631,13 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteAgentRuntime deletes a runtime after permission and dependency checks.
+//
+// The strict variant: refuses with 409 + structured `runtime_has_active_agents`
+// when any non-archived agent is still bound to the runtime, and returns the
+// blocking agent list in the response body so the front-end can pivot to the
+// cascade dialog without an extra round-trip. The cascade itself lives at
+// POST /api/runtimes/:id/archive-agents-and-delete (ArchiveAgentsAndDeleteRuntime
+// below) and runs the multi-write teardown inside a single transaction.
 func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
@@ -645,13 +665,16 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	userID := uuidToString(member.UserID)
 
 	// Check if any active (non-archived) agents are bound to this runtime.
-	activeCount, err := h.Queries.CountActiveAgentsByRuntime(r.Context(), rt.ID)
+	// Surface them on the 409 so the dialog can render the cascade plan
+	// directly from this response — saves a second round-trip when the
+	// user clicked Delete from a stale list page.
+	activeAgents, err := h.Queries.ListActiveAgentsByRuntime(r.Context(), rt.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check runtime dependencies")
 		return
 	}
-	if activeCount > 0 {
-		writeError(w, http.StatusConflict, "cannot delete runtime: it has active agents bound to it. Archive or reassign the agents first.")
+	if len(activeAgents) > 0 {
+		writeJSON(w, http.StatusConflict, runtimeHasActiveAgentsResponse(activeAgents))
 		return
 	}
 
@@ -704,6 +727,8 @@ type UpdateRuntimeSandboxRequest struct {
 
 type RuntimeSandboxPolicyRequest struct {
 	SandboxPolicy json.RawMessage `json:"sandbox_policy"`
+	// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 optional preset id; when set it expands to the canonical policy server-side.
+	Profile string `json:"profile,omitempty"`
 }
 
 // UpdateAgentRuntimeSandbox sets or clears the per-runtime sandbox override.
@@ -790,6 +815,12 @@ func (h *Handler) UpdateAgentRuntimeSandboxPolicy(w http.ResponseWriter, r *http
 	var req RuntimeSandboxPolicyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 expand a named profile to its canonical policy server-side.
+	req.SandboxPolicy, err = cerebrosandboxprofile.Resolve(req.Profile, req.SandboxPolicy)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if len(req.SandboxPolicy) == 0 || string(req.SandboxPolicy) == "null" {
@@ -910,4 +941,279 @@ func (h *Handler) UpdateAgentRuntimePersonaSandbox(w http.ResponseWriter, r *htt
 	})
 
 	writeJSON(w, http.StatusOK, runtimeToResponse(updated))
+}
+
+// runtimeHasActiveAgentsResponse builds the structured 409 body shared by
+// DeleteAgentRuntime (light-mode block) and ArchiveAgentsAndDeleteRuntime
+// (cascade-plan-changed). The shape is:
+//
+//	{
+//	  "error": "...",
+//	  "code":  "runtime_has_active_agents" | "runtime_delete_plan_changed",
+//	  "active_agents": [AgentResponse, ...]
+//	}
+//
+// Front-end branches on `code`. The caller picks which code to send; this
+// helper just normalises the agent serialisation and the error string.
+func runtimeHasActiveAgentsResponse(agents []db.Agent) map[string]any {
+	resp := make([]AgentResponse, len(agents))
+	for i, a := range agents {
+		resp[i] = agentToResponse(a)
+	}
+	return map[string]any{
+		"error":         "cannot delete runtime: it has active agents bound to it. Archive or reassign the agents first.",
+		"code":          "runtime_has_active_agents",
+		"active_agents": resp,
+	}
+}
+
+// archiveAgentsAndDeleteRuntimeRequest is the wire shape for the cascade
+// endpoint. expected_active_agent_ids is the snapshot the user just confirmed
+// in the dialog — the server compares it to the live set inside the
+// transaction and refuses with runtime_delete_plan_changed if anything moved
+// between dialog open and confirm. That guarantees the user is approving the
+// exact agent set that will be archived, even if a teammate adds or archives
+// an agent in the same window.
+type archiveAgentsAndDeleteRuntimeRequest struct {
+	ExpectedActiveAgentIDs []string `json:"expected_active_agent_ids"`
+}
+
+// ArchiveAgentsAndDeleteRuntime is the cascade entry point: archive every
+// agent currently bound to the runtime, cancel their queued/running tasks,
+// pause autopilots that target them, hard-delete the now-detached archived
+// rows so the agent.runtime_id FK no longer pins the runtime, and finally
+// delete the runtime row itself — all inside a single transaction so a
+// partial failure never leaves a runtime half-torn-down.
+//
+// Transaction order follows the reference revoke flow in
+// revokeAndRemoveMember (workspace_revoke.go) so the two cascade paths share
+// the same race-safety properties: the dispatcher can't claim a task whose
+// runtime is about to vanish, autopilots can't fire onto a dead assignee,
+// and post-commit publish events emit the same task:cancelled →
+// agent:archived → daemon:register fan-out.
+//
+// The expected_active_agent_ids check is the load-bearing piece for the UX:
+// the front-end snapshots the agent list when the dialog opens and presents
+// the user a checkbox confirmation; if a teammate adds or archives an agent
+// while that dialog is open, this endpoint refuses with
+// runtime_delete_plan_changed and the latest list, so the user never confirms
+// a stale plan.
+func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return
+	}
+
+	var req archiveAgentsAndDeleteRuntimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	expected, ok := parseExpectedActiveAgentIDs(req.ExpectedActiveAgentIDs)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "expected_active_agent_ids must be a list of valid UUIDs")
+		return
+	}
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	wsID := uuidToString(rt.WorkspaceID)
+	member, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found")
+	if !ok {
+		return
+	}
+	if !canEditRuntime(member, rt) {
+		writeError(w, http.StatusForbidden, "you can only delete your own runtimes")
+		return
+	}
+	userID := uuidToString(member.UserID)
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// Lock the runtime row first. PostgreSQL's FK validation on
+	// agent.runtime_id requires FOR KEY SHARE on the parent runtime row,
+	// which conflicts with FOR UPDATE — so any concurrent INSERT or
+	// UPDATE that would point a new/moved agent at this runtime now
+	// blocks until our tx finishes. This is the "兜底" lock that keeps
+	// new actives from appearing between our snapshot and our archive.
+	if _, err := qtx.LockAgentRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock runtime")
+		return
+	}
+
+	// Re-list active agents inside the transaction, with FOR UPDATE on
+	// each row so a concurrent archive/move of one of those existing
+	// agents also blocks until we commit. Comparing against the expected
+	// set here closes the dialog-open / user-confirm race: even if a
+	// teammate creates or archives an agent on this runtime while the
+	// dialog was open, the user is approving exactly the set the server
+	// is about to archive.
+	currentActive, err := qtx.ListActiveAgentsByRuntimeForUpdate(r.Context(), rt.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to enumerate active agents")
+		return
+	}
+	if !activeAgentSetMatches(currentActive, expected) {
+		// Refuse with the latest snapshot so the front-end can re-render
+		// the dialog and force a fresh user confirmation. Reuses the
+		// shared response helper but overrides the code to a planning
+		// signal so the dialog can distinguish "you opened from a stale
+		// page" from "the plan you confirmed just changed under you".
+		body := runtimeHasActiveAgentsResponse(currentActive)
+		body["code"] = "runtime_delete_plan_changed"
+		body["error"] = "the active agent set changed; please review and confirm again."
+		writeJSON(w, http.StatusConflict, body)
+		return
+	}
+
+	// Build the agent ID list once — it's the explicit allowlist for the
+	// archive UPDATE below and the runtime-or-agent task cancel further
+	// down. By keying the archive off this list (not off runtime_id) we
+	// guarantee that agents not in the user's confirmed set can never
+	// be silently archived, even if the row-level locks above somehow
+	// missed something. Defense in depth.
+	currentActiveIDs := make([]pgtype.UUID, len(currentActive))
+	for i, a := range currentActive {
+		currentActiveIDs[i] = a.ID
+	}
+
+	// 1. Archive every active agent on this runtime, narrowed to the
+	//    user-confirmed expected_active_agent_ids set (which equals
+	//    currentActive at this point). Returns the affected rows so the
+	//    post-commit publish loop can fan out agent:archived per agent.
+	archivedAgents, err := qtx.ArchiveAgentsByIDs(r.Context(), db.ArchiveAgentsByIDsParams{
+		ArchivedBy: member.UserID,
+		AgentIds:   currentActiveIDs,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to archive agents")
+		return
+	}
+
+	// 2. Cancel queued/dispatched/running tasks. Match by runtime_id AND
+	//    by archived agent ids: agent.runtime_id can be reassigned without
+	//    rewriting historical agent_task_queue rows, so an agent we just
+	//    archived may still own tasks pinned to a different runtime — and
+	//    ClaimAgentTask does not gate on agent.archived_at.
+	archivedIDs := make([]pgtype.UUID, len(archivedAgents))
+	for i, a := range archivedAgents {
+		archivedIDs[i] = a.ID
+	}
+	cancelledTasks, err := qtx.CancelAgentTasksByRuntimeOrAgent(r.Context(), db.CancelAgentTasksByRuntimeOrAgentParams{
+		RuntimeIds: []pgtype.UUID{rt.ID},
+		AgentIds:   archivedIDs,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to cancel tasks")
+		return
+	}
+
+	// 3. Pause autopilots whose assignee is one of the archived agents.
+	//    Snapshots the full archived set on this runtime — including any
+	//    that were already archived before this call — because the
+	//    DeleteArchivedAgentsByRuntime below will hard-delete the lot, and
+	//    a paused autopilot is much louder in the UI than a silently-
+	//    dangling assignee_id (see migration 096 for why the FK is gone).
+	allArchivedIDs, err := qtx.ListArchivedAgentIDsByRuntime(r.Context(), rt.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to enumerate archived agents")
+		return
+	}
+	if len(allArchivedIDs) > 0 {
+		if err := qtx.PauseAutopilotsByAgentAssignees(r.Context(), allArchivedIDs); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to pause autopilots")
+			return
+		}
+	}
+
+	// 4. Hard-delete the archived agents so the agent.runtime_id FK
+	//    (ON DELETE RESTRICT) no longer keeps the runtime alive.
+	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
+		return
+	}
+
+	// 5. Finally delete the runtime row itself.
+	if err := qtx.DeleteAgentRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit transaction")
+		return
+	}
+
+	// Post-commit fan-out — same ordering as publishRevocation so subscribers
+	// observe task:cancelled before agent:archived before the runtime list
+	// refresh, matching the order other revocation paths use.
+	if h.TaskService != nil && len(cancelledTasks) > 0 {
+		h.TaskService.BroadcastCancelledTasks(r.Context(), cancelledTasks)
+	}
+	for _, a := range archivedAgents {
+		h.publish(protocol.EventAgentArchived, wsID, "member", userID, map[string]any{
+			"agent": agentToResponse(a),
+		})
+	}
+	h.publish(protocol.EventDaemonRegister, wsID, "member", userID, map[string]any{
+		"action": "delete",
+	})
+
+	slog.Info("runtime deleted via cascade",
+		"runtime_id", uuidToString(rt.ID),
+		"deleted_by", userID,
+		"agents_archived", len(archivedAgents),
+		"tasks_cancelled", len(cancelledTasks),
+	)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":          "ok",
+		"agents_archived": len(archivedAgents),
+		"tasks_cancelled": len(cancelledTasks),
+	})
+}
+
+// parseExpectedActiveAgentIDs validates the cascade endpoint's
+// expected_active_agent_ids list. nil / empty is allowed (an empty set is a
+// valid plan: "I confirmed there are no active agents" — the cascade then
+// just deletes the runtime without archiving anything). Returns ok=false on
+// any malformed UUID so the handler responds 400 instead of silently
+// matching a different set.
+func parseExpectedActiveAgentIDs(raw []string) (map[string]struct{}, bool) {
+	out := make(map[string]struct{}, len(raw))
+	for _, s := range raw {
+		u, err := util.ParseUUID(s)
+		if err != nil || !u.Valid {
+			return nil, false
+		}
+		out[uuidToString(u)] = struct{}{}
+	}
+	return out, true
+}
+
+// activeAgentSetMatches reports whether the live set of active agents on the
+// runtime matches the snapshot the front-end confirmed. Order-insensitive
+// because the front-end may render in any order; size + membership is what
+// matters for "did the plan change?".
+func activeAgentSetMatches(current []db.Agent, expected map[string]struct{}) bool {
+	if len(current) != len(expected) {
+		return false
+	}
+	for _, a := range current {
+		if _, ok := expected[uuidToString(a.ID)]; !ok {
+			return false
+		}
+	}
+	return true
 }

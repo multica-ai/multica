@@ -32,9 +32,11 @@
     "card_properties": "Card properties",
     "view_board": "Board view",
     "view_list": "List view",
+    "view_swimlane": "Swimlane view",
     "view_label": "View",
     "view_board_short": "Board",
     "view_list_short": "List",
+    "view_swimlane_short": "Swimlane",
     "sort_manual": "Manual"
   },
   "errors": {

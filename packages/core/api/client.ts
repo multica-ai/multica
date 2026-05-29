@@ -14,6 +14,7 @@ import type {
   ListIssuesParams,
   ListGroupedIssuesParams,
   Agent,
+  AgentAvatarBackfillStatus,
   CreateAgentRequest,
   AgentTemplate,
   AgentTemplateSummary,
@@ -21,6 +22,8 @@ import type {
   CreateAgentFromTemplateResponse,
   UpdateAgentRequest,
   AgentInfisicalFolder,
+  AgentEnvResponse,
+  UpdateAgentEnvRequest,
   AgentTask,
   AgentActivityBucket,
   AgentRunCount,
@@ -29,6 +32,7 @@ import type {
   IssueSubscriber,
   Comment,
   MoveCommentToSubIssueResponse,
+  MoveCommentsToThreadResponse,
   Reaction,
   IssueReaction,
   Workspace,
@@ -159,6 +163,7 @@ import {
   RuntimeToolsListSchema,
   RuntimeToolGrantsSchema,
   CapabilityListResponseSchema,
+  AgentAvatarBackfillStatusSchema,
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
   AttachmentResponseSchema,
@@ -175,6 +180,7 @@ import {
   DashboardUsageDailyListSchema,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
+  EMPTY_AGENT_AVATAR_BACKFILL_STATUS,
   EMPTY_ATTACHMENT,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
@@ -182,6 +188,8 @@ import {
   EMPTY_ISSUE_DEPENDENCIES,
   IssueDependenciesResponseSchema,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_SQUAD,
+  EMPTY_SQUAD_LIST,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   EMPTY_TIMELINE_ENTRIES,
@@ -191,6 +199,8 @@ import {
   ListWebhookDeliveriesResponseSchema,
   OnboardingNoRuntimeBootstrapResponseSchema,
   OnboardingRuntimeBootstrapResponseSchema,
+  SquadSchema,
+  SquadListSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
   UserSchema,
@@ -469,6 +479,16 @@ export class ApiClient {
     if (res.status === 204) {
       return undefined as T;
     }
+    // CEREBRO-PATCH(api-client-202-no-body): FIR-2284 + FIR-2321 — some cerebro
+    // endpoints (POST /api/runtimes/{id}/tools/scan-now) reply 202 with an empty
+    // body; res.json() would throw "Unexpected end of JSON input". But others
+    // (POST /api/agents/backfill-avatars, FIR-2321) reply 202 WITH a status body
+    // the caller needs, so parse the body when present and only fall back to
+    // undefined for a genuinely empty 202.
+    if (res.status === 202) {
+      const text = await res.text();
+      return (text ? JSON.parse(text) : undefined) as T;
+    }
     return res.json() as Promise<T>;
   }
 
@@ -645,6 +665,34 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify({ enabled }),
     });
+  }
+
+  // CEREBRO-PATCH(cost-optimization-client): FIR-2325 per-workspace agent-saving
+  // mode overrides (off/shadow/on). Server returns ONLY the overrides — defaults
+  // are applied client-side from the cerebro-cost-optimization registry. PUT sets
+  // a mode; DELETE reverts a saving to its registry default (clears the override).
+  async listCostOptimization(wsId: string): Promise<{ overrides: Record<string, string> }> {
+    return this.fetch(`/api/workspaces/${wsId}/cost-optimization`);
+  }
+
+  async setCostOptimization(wsId: string, key: string, mode: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/cost-optimization/${key}`, {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    });
+  }
+
+  async clearCostOptimization(wsId: string, key: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/cost-optimization/${key}`, {
+      method: "DELETE",
+    });
+  }
+
+  // CEREBRO-PATCH(cost-optimization-dashboard-client): FIR-2325 phase-5 savings
+  // dashboard (estimated would-save vs holdout-measured actual). Returns raw;
+  // the cerebro-cost-optimization package validates the shape with a zod schema.
+  async getCostOptimizationDashboard(wsId: string): Promise<unknown> {
+    return this.fetch(`/api/workspaces/${wsId}/cost-optimization/dashboard`);
   }
 
   // CEREBRO-PATCH(cerebro-account-client): JEH-921 workspace accounts CRUD.
@@ -1072,6 +1120,40 @@ export class ApiClient {
     return this.fetch<T>(`/api/cerebro/references?${params.toString()}`);
   }
 
+  // CEREBRO-PATCH(cerebro-duplicate-check-client): FIR-2504 — ask the server
+  // for the top similar open issues + LLM verdict when composing a new issue.
+  // Body is `unknown` so the cerebro-duplicate-check package owns the schema.
+  async checkSimilarCerebroIssues<T = unknown>(payload: {
+    title: string;
+    description?: string;
+    project_id?: string;
+  }): Promise<T> {
+    return this.fetch<T>(`/api/cerebro/issues/check-similar`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // CEREBRO-PATCH(cerebro-duplicate-check-client): FIR-2504 — fire-and-forget
+  // adoption event from the create-issue panel (opened existing / attached as
+  // sub-issue / dismissed / created_anyway). Returns 204; the panel ignores
+  // the response so a slow log write never blocks issue creation.
+  async recordCerebroDuplicateCheckEvent(payload: {
+    action: "opened" | "attached" | "dismissed" | "created_anyway";
+    match_id?: string;
+    verdict?: string;
+    match_count?: number;
+  }): Promise<void> {
+    try {
+      await this.fetch<unknown>(`/api/cerebro/issues/check-similar/event`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      // Best-effort telemetry — never surface a failure to the user.
+    }
+  }
+
   // CEREBRO-PATCH(cerebro-persona-grants-client): JEH-1180 Persona grant
   // control plane UI. Endpoints mirror the JEH-1179 description:
   //   GET    /api/workspaces/{id}/grants[?subject_type=…&subject_id=…&resource_type=…&status=…&classification=…]
@@ -1188,28 +1270,7 @@ export class ApiClient {
     );
   }
 
-  // CEREBRO-PATCH(approvals-client): FIR-2133 — approval inbox endpoints (list pending / approve / reject)
-  async listPendingApprovalAsks<T = unknown>(
-    wsId: string,
-    filter: { limit?: number; offset?: number } = {},
-  ): Promise<T> {
-    const params = new URLSearchParams({ status: "pending" });
-    if (filter.limit !== undefined) params.set("limit", String(filter.limit));
-    if (filter.offset !== undefined) params.set("offset", String(filter.offset));
-    return this.fetch<T>(`/api/workspaces/${wsId}/approvals?${params.toString()}`);
-  }
-
-  async approveAsk<T = unknown>(wsId: string, askId: string): Promise<T> {
-    return this.fetch<T>(`/api/workspaces/${wsId}/approvals/${askId}/approve`, { method: "POST" });
-  }
-
-  async rejectAsk<T = unknown>(wsId: string, askId: string, reason?: string): Promise<T> {
-    return this.fetch<T>(`/api/workspaces/${wsId}/approvals/${askId}/reject`, {
-      method: "POST",
-      body: reason ? JSON.stringify({ note: reason }) : undefined,
-    });
-  }
-
+  // CEREBRO-PATCH(approvals-client-removed): FIR-2230 phase 5 — the approval-ask client methods (listPendingApprovalAsks/approveAsk/rejectAsk) were removed when the duplicate "Pending" view was consolidated into the dedicated approvals inbox (which calls cerebroRequest). No remaining caller in the upstream client.
   // Web Push (per-device subscriptions). The server returns enabled=false
   // when VAPID keys aren't configured — callers should hide the subscribe UI
   // in that case.
@@ -1256,6 +1317,8 @@ export class ApiClient {
     if (params?.open_only) search.set("open_only", "true");
     if (params?.scheduled) search.set("scheduled", "true");
     if (params?.reference) search.set("reference", params.reference);
+    if (params?.sort_by) search.set("sort", params.sort_by);
+    if (params?.sort_direction) search.set("direction", params.sort_direction);
     const path = `/api/issues?${search}`;
     const raw = await this.fetch<unknown>(path);
     return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
@@ -1289,7 +1352,8 @@ export class ApiClient {
     if (params.reference) search.set("reference", params.reference);
     if (params.group_assignee_type) search.set("group_assignee_type", params.group_assignee_type);
     if (params.group_assignee_id) search.set("group_assignee_id", params.group_assignee_id);
-    if (params.reference) search.set("reference", params.reference);
+    if (params.sort_by) search.set("sort", params.sort_by);
+    if (params.sort_direction) search.set("direction", params.sort_direction);
     const raw = await this.fetch<unknown>(`/api/issues/grouped?${search}`);
     return parseWithFallback(raw, GroupedIssuesResponseSchema, EMPTY_GROUPED_ISSUES_RESPONSE, {
       endpoint: "GET /api/issues/grouped",
@@ -1442,6 +1506,14 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 lift picked comments into a new thread.
+  async moveCommentsToNewThread(commentIds: string[]): Promise<MoveCommentsToThreadResponse> {
+    return this.fetch(`/api/comments/move-to-thread`, {
+      method: "POST",
+      body: JSON.stringify({ comment_ids: commentIds }),
+    });
+  }
+
   async resolveComment(commentId: string): Promise<Comment> {
     return this.fetch(`/api/comments/${commentId}/resolve`, { method: "POST" });
   }
@@ -1523,6 +1595,39 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // CEREBRO-PATCH(agent-avatar-backfill): admin backfill status endpoint.
+  async getAgentAvatarBackfillStatus(): Promise<AgentAvatarBackfillStatus> {
+    const raw = await this.fetch<unknown>("/api/agents/backfill-avatars");
+    return parseWithFallback(
+      raw,
+      AgentAvatarBackfillStatusSchema,
+      EMPTY_AGENT_AVATAR_BACKFILL_STATUS,
+      { endpoint: "GET /api/agents/backfill-avatars" },
+    );
+  }
+
+  // CEREBRO-PATCH(agent-avatar-backfill): mode/exclude regenerates all avatars except kept agents.
+  async startAgentAvatarBackfill(opts?: {
+    mode?: "missing" | "all";
+    excludeAgentIds?: string[];
+  }): Promise<AgentAvatarBackfillStatus> {
+    const raw = await this.fetch<unknown>("/api/agents/backfill-avatars", {
+      method: "POST",
+      body: opts
+        ? JSON.stringify({
+            mode: opts.mode,
+            exclude_agent_ids: opts.excludeAgentIds,
+          })
+        : undefined,
+    });
+    return parseWithFallback(
+      raw,
+      AgentAvatarBackfillStatusSchema,
+      EMPTY_AGENT_AVATAR_BACKFILL_STATUS,
+      { endpoint: "POST /api/agents/backfill-avatars" },
+    );
   }
 
   async listAgentTemplates(): Promise<AgentTemplateSummary[]> {
@@ -1646,6 +1751,31 @@ export class ApiClient {
 
   async archiveAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/archive`, { method: "POST" });
+  }
+
+  /**
+   * Returns the plaintext `custom_env` map for an agent. Owner/admin
+   * only; calls from agent-actor sessions get a 403. Every successful
+   * call writes an `agent_env_revealed` activity_log row server-side.
+   * MUL-2600.
+   */
+  async getAgentEnv(id: string): Promise<AgentEnvResponse> {
+    return this.fetch(`/api/agents/${id}/env`);
+  }
+
+  /**
+   * Replaces an agent's `custom_env` wholesale. Values equal to
+   * `"****"` are preserved server-side (the **** guard) so a partial
+   * UI edit doesn't overwrite real secrets with the masked
+   * placeholder. Owner/admin only; agent actors get a 403. Every
+   * successful call writes an `agent_env_updated` activity_log row.
+   * MUL-2600.
+   */
+  async updateAgentEnv(id: string, data: UpdateAgentEnvRequest): Promise<AgentEnvResponse> {
+    return this.fetch(`/api/agents/${id}/env`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
   }
 
   async restoreAgent(id: string): Promise<Agent> {
@@ -1879,6 +2009,24 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/persona-sandbox`, {
       method: "PATCH",
       body: JSON.stringify({ persona_sandbox: personaSandbox }),
+    });
+  }
+
+  // Cascade variant of deleteRuntime. The strict DELETE refuses with
+  // structured 409 (`code: "runtime_has_active_agents"`, body carries the
+  // blocking agents) when active agents are bound; the front-end then opens
+  // the cascade-mode confirmation dialog and submits the user-confirmed
+  // active agent set here. Server compares the snapshot to the live set
+  // inside the transaction and refuses with `code: "runtime_delete_plan_changed"`
+  // (same shape, fresh `active_agents`) if they don't match — caller should
+  // re-render the agent list and force the user to re-confirm.
+  async archiveAgentsAndDeleteRuntime(
+    runtimeId: string,
+    expectedActiveAgentIds: string[],
+  ): Promise<{ status: string; agents_archived: number; tasks_cancelled: number }> {
+    return this.fetch(`/api/runtimes/${runtimeId}/archive-agents-and-delete`, {
+      method: "POST",
+      body: JSON.stringify({ expected_active_agent_ids: expectedActiveAgentIds }),
     });
   }
 
@@ -2192,7 +2340,8 @@ export class ApiClient {
   }
 
   // CEREBRO-PATCH(active-issue-tasks-status): extended response with per-task status for run-state pip (JEH-1332)
-  async listActiveIssueTasks(): Promise<{ issue_ids: string[]; tasks?: { issue_id: string; status: string }[] }> {
+  // CEREBRO-PATCH(active-issue-tasks-parent): FIR-2326 — parent_issue_id surfaces a running sub-issue on its parent row.
+  async listActiveIssueTasks(): Promise<{ issue_ids: string[]; tasks?: { issue_id: string; status: string; parent_issue_id?: string | null }[] }> {
     return this.fetch("/api/inbox/active-issue-tasks");
   }
 
@@ -2241,6 +2390,14 @@ export class ApiClient {
         issue_id: params.issueId ?? null,
       }),
     });
+  }
+
+  // CEREBRO-PATCH(inbox-run-private-agent-client): FIR-2385 — the agent owner
+  // accepts a private_agent_run_request; the server enqueues the agent on the
+  // tagged comment and archives the request. Returns a small ack, not a full
+  // InboxItem (the row is removed from the active inbox on settle).
+  async runPrivateAgentRunRequest(id: string): Promise<{ id: string; status: string }> {
+    return this.fetch(`/api/inbox/${id}/run-private-agent`, { method: "POST" });
   }
 
   async getUnreadInboxCount(): Promise<{ count: number }> {
@@ -3016,11 +3173,17 @@ export class ApiClient {
 
   // Squads
   async listSquads(): Promise<Squad[]> {
-    return this.fetch(`/api/squads`);
+    const raw = await this.fetch<unknown>(`/api/squads`);
+    return parseWithFallback(raw, SquadListSchema, EMPTY_SQUAD_LIST, {
+      endpoint: "GET /api/squads",
+    }) as Squad[];
   }
 
   async getSquad(id: string): Promise<Squad> {
-    return this.fetch(`/api/squads/${id}`);
+    const raw = await this.fetch<unknown>(`/api/squads/${id}`);
+    return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
+      endpoint: "GET /api/squads/:id",
+    }) as Squad;
   }
 
   async createSquad(data: {
@@ -3029,11 +3192,17 @@ export class ApiClient {
     leader_id: string;
     avatar_url?: string; // CEREBRO-PATCH(upstream-create-squad-avatar): JEH-1541 align typed client with squad create modal/backend.
   }): Promise<Squad> {
-    return this.fetch("/api/squads", { method: "POST", body: JSON.stringify(data) });
+    const raw = await this.fetch<unknown>("/api/squads", { method: "POST", body: JSON.stringify(data) });
+    return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
+      endpoint: "POST /api/squads",
+    }) as Squad;
   }
 
   async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string }): Promise<Squad> {
-    return this.fetch(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
+    const raw = await this.fetch<unknown>(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
+    return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
+      endpoint: "PUT /api/squads/:id",
+    }) as Squad;
   }
 
   async deleteSquad(id: string): Promise<void> {

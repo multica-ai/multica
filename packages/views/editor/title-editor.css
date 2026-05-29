@@ -6,6 +6,10 @@
 
 .title-editor.ProseMirror p {
   margin: 0;
+  /* CEREBRO-PATCH(title-editor-longword-wrap): a long unbreakable string (URL,
+     token) pasted into the title field would otherwise overflow the dialog
+     horizontally instead of wrapping (FIR-2487). */
+  overflow-wrap: anywhere;
 }
 
 /* Placeholder */

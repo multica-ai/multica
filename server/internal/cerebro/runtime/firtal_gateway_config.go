@@ -60,6 +60,35 @@ type FirtalGatewayRuntimeConfig struct {
 	// MaxToolRounds overrides firtalGatewayMaxToolRounds when > 0. Loaded from
 	// MULTICA_SERVER_FIRTAL_GATEWAY_MAX_TOOL_ITERATIONS.
 	MaxToolRounds int
+
+	// CheapModel is the cheaper model the model_routing cost saving (FIR-2325)
+	// routes to when it is turned "on" for a workspace. Empty means no routing
+	// target is configured, so routing is a no-op and is not measured — the
+	// runtime never invents an alternative model to compare against.
+	CheapModel string
+
+	// CostSavingHoldoutPct is the share (0-100) of "on" model_routing runs kept
+	// on the requested model as a holdout control arm (FIR-2325 phase 5). nil
+	// means unconfigured, which resolves to defaultCostSavingHoldoutPct via
+	// costSavingHoldoutPct(). Loaded from
+	// MULTICA_SERVER_FIRTAL_GATEWAY_COST_HOLDOUT_PCT.
+	CostSavingHoldoutPct *int
+}
+
+// costSavingHoldoutPct resolves the configured holdout share, applying the
+// default when unset and clamping to [0,100].
+func (c FirtalGatewayRuntimeConfig) costSavingHoldoutPct() int {
+	if c.CostSavingHoldoutPct == nil {
+		return defaultCostSavingHoldoutPct
+	}
+	pct := *c.CostSavingHoldoutPct
+	if pct < 0 {
+		return 0
+	}
+	if pct > 100 {
+		return 100
+	}
+	return pct
 }
 
 // ToolsEnabledForAgent reports whether the per-agent allowlist includes
@@ -190,6 +219,16 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 
 	if maxIter := positiveIntFromEnv(0, "MULTICA_SERVER_FIRTAL_GATEWAY_MAX_TOOL_ITERATIONS"); maxIter > 0 {
 		cfg.MaxToolRounds = maxIter
+	}
+
+	// FIR-2325: cheap model + holdout share for the model_routing cost saving.
+	cfg.CheapModel = strings.TrimSpace(firstNonEmptyEnv("MULTICA_SERVER_FIRTAL_GATEWAY_CHEAP_MODEL", "FIRTAL_DATA_REGISTRY_AI_CHEAP_MODEL"))
+	if raw := strings.TrimSpace(os.Getenv("MULTICA_SERVER_FIRTAL_GATEWAY_COST_HOLDOUT_PCT")); raw != "" {
+		pct, err := strconv.Atoi(raw)
+		if err != nil {
+			return FirtalGatewayRuntimeConfig{}, fmt.Errorf("invalid MULTICA_SERVER_FIRTAL_GATEWAY_COST_HOLDOUT_PCT value %q: %w", raw, err)
+		}
+		cfg.CostSavingHoldoutPct = &pct
 	}
 
 	if cfg.Enabled && cfg.BaseURL != "" {

@@ -5,14 +5,14 @@ import { findSkillSuggestionMatch } from "./find-suggestion-match";
 /**
  * The matcher only touches three things on the resolved position: the text
  * of the preceding text node, whether that node `isText`, and the absolute
- * position offset returned by `before()`. Mocking the surface lets each
- * case stay readable instead of dragging a full ProseMirror document in.
+ * cursor position `pos`. Mocking the surface lets each case stay readable
+ * instead of dragging a full ProseMirror document in.
  */
-function mockPosition(text: string | null, before = 0): ResolvedPos {
+function mockPosition(text: string | null, pos = 0): ResolvedPos {
   return {
     nodeBefore:
       text === null ? null : { isText: true, text },
-    before: () => before,
+    pos,
   } as unknown as ResolvedPos;
 }
 
@@ -93,24 +93,36 @@ describe("findSkillSuggestionMatch", () => {
     ).toBeNull();
   });
 
-  it("computes the replacement range relative to the resolved position", () => {
-    // `before()` returns the offset of the parent node before the cursor; the
-    // function adds 1 to land on the first character inside that node. A
-    // `/foo` at the very start of the text should rewrite `[before+1, end]`.
+  it("computes the replacement range relative to the cursor position", () => {
+    // The range is anchored to the cursor: `nodeBefore.text` ("/foo", len 4)
+    // ends at pos=15, so it starts at 11. `/foo` therefore rewrites [11, 15].
     const match = findSkillSuggestionMatch({
-      $position: mockPosition("/foo", 10),
+      $position: mockPosition("/foo", 15),
     });
     expect(match?.range.from).toBe(11);
     expect(match?.range.to).toBe(15);
   });
 
   it("computes the range past the leading whitespace when / follows text", () => {
-    // For "hi /foo" the trigger starts at index 3; with before()=10 the
-    // text starts at offset 11, so `/foo` starts at 14.
+    // For "hi /foo" (len 7) ending at pos=18, the text starts at 11; the
+    // trigger sits after the leading space, so `/foo` starts at 14.
     const match = findSkillSuggestionMatch({
-      $position: mockPosition("hi /foo", 10),
+      $position: mockPosition("hi /foo", 18),
     });
     expect(match?.range.from).toBe(14);
     expect(match?.range.to).toBe(18);
+  });
+
+  it("anchors the range to the cursor even when the text node starts mid-paragraph (FIR-2299)", () => {
+    // Regression: when earlier inline content (another mention chip, a hard
+    // break) pushes the text node deep into the paragraph, the trigger text
+    // "/foo" might end at pos=53. Cursor-relative math keeps the range exactly
+    // on the typed `/foo` ([49, 53]); the old paragraph-relative math produced
+    // a too-small offset and inserted the skill at a random earlier position.
+    const match = findSkillSuggestionMatch({
+      $position: mockPosition("/foo", 53),
+    });
+    expect(match?.range.from).toBe(49);
+    expect(match?.range.to).toBe(53);
   });
 });

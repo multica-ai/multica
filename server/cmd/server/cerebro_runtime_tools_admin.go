@@ -45,6 +45,12 @@ func (a *runtimeToolsAdminAdapter) SetEnabled(ctx context.Context, runtimeID pgt
 	return toolToView(tool), nil
 }
 
+// CEREBRO-PATCH(runtime-tools-scan-now-local-stamp): FIR-2284 stamp last_scanned_at on a local scan.
+func (a *runtimeToolsAdminAdapter) StampScanned(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := a.svc.StampScanned(ctx, runtimeID)
+	return err
+}
+
 func (a *runtimeToolsAdminAdapter) ListGroupGrants(ctx context.Context, runtimeID pgtype.UUID) ([]handler.RuntimeToolGroupGrantView, error) {
 	grants, err := a.svc.ListGroupGrants(ctx, runtimeID)
 	if err != nil {

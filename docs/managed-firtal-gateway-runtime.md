@@ -90,7 +90,7 @@ MULTICA_SERVER_FIRTAL_GATEWAY_POLL_INTERVAL=2s
 MULTICA_SERVER_FIRTAL_GATEWAY_SYNC_INTERVAL=30s
 ```
 
-Restart the server. It will register a runtime with provider `firtal-gateway`. Create or update a Multica agent to use that runtime. Existing daemon-side mode still exists for deployments that want a central daemon; use `MULTICA_FIRTAL_GATEWAY_ENABLED=true` on that daemon host instead.
+Restart the server. It will register a runtime with provider `firtal-gateway`. Create or update a Multica agent to use that runtime. Existing daemon-side mode still exists for deployments that want a central daemon; set `MULTICA_RUNTIME_TYPE=firtal-registry` on that daemon host (together with `FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL` and `FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY`) — URL+key alone no longer triggers registration (FIR-2453).
 
 ## Known Risks
 

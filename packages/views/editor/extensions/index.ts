@@ -16,7 +16,7 @@
  * Mention suggestion is only attached in edit mode — readonly doesn't need
  * the autocomplete popup.
  *
- * All link styling is controlled by content-editor.css (var(--brand) color),
+ * All link styling is controlled by styles/prose.css (var(--brand) color),
  * not Tailwind HTMLAttributes, to keep a single source of truth.
  */
 import type { RefObject } from "react";

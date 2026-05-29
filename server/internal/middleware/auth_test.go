@@ -228,6 +228,39 @@ func TestAuth_InvalidPAT(t *testing.T) {
 	}
 }
 
+// TestAuth_StripsClientSuppliedActorSource enforces the invariant that
+// X-Actor-Source is a server-only header: any value the client sends
+// must be discarded before downstream code sees it. Without this
+// guarantee a client carrying a normal mul_ PAT could supply a forged
+// `X-Actor-Source: task_token` (or any other value) to fool a handler
+// into treating the request differently — exactly the kind of trust
+// boundary MUL-2600 introduces.
+func TestAuth_StripsClientSuppliedActorSource(t *testing.T) {
+	var gotActorSource string
+	mw := Auth(nil, nil)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotActorSource = r.Header.Get("X-Actor-Source")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	token := generateToken(validClaims(), auth.JWTSecret())
+	req := httptest.NewRequest("GET", "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	// Client tries to forge the actor-source header. The middleware must
+	// discard it before the JWT branch runs (which doesn't set it again
+	// for human sessions).
+	req.Header.Set("X-Actor-Source", "task_token")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if gotActorSource != "" {
+		t.Fatalf("X-Actor-Source must be cleared on non-task-token paths, got %q", gotActorSource)
+	}
+}
+
 // TestAuth_PATCacheHit pins the optimization: when the PAT cache already
 // holds an entry for this token, the middleware MUST NOT call into queries
 // — it short-circuits before the DB lookup and the last_used_at update.

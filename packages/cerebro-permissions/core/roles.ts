@@ -26,6 +26,7 @@ export interface RoleAssignment {
   role_id: string;
   subject_type: string;
   subject_id: string;
+  subject_display_name: string | null;
   added_by: string | null;
   added_at: string;
 }
@@ -46,6 +47,7 @@ const roleAssignmentSchema: z.ZodType<RoleAssignment> = z.object({
   role_id: z.string(),
   subject_type: z.string(),
   subject_id: z.string(),
+  subject_display_name: z.string().nullable().default(null),
   added_by: z.string().nullable().default(null),
   added_at: z.string(),
 });

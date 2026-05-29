@@ -161,15 +161,45 @@ if ! make build; then
 fi
 
 echo "Running migrations…"
-make migrate-up || echo "WARN: migrate-up failed (may be no-op)"
+# Run migrate directly instead of `make migrate-up`: the make target calls
+# scripts/ensure-postgres.sh which requires Docker (Colima) to be running.
+# On the self-hosted Mac mini Postgres runs natively, not via Docker, so
+# the wrapper fails and the migration is silently swallowed by `|| echo`.
+# That left backend in /healthz=503 (migrations:out_of_date) after every
+# deploy that shipped a new migration — and daemon registrations 500ing
+# against the stale schema until someone ran migrations by hand.
+(
+  set -a
+  # shellcheck source=/dev/null
+  source "$REPO/.env"
+  set +a
+  cd "$REPO/server" && go run ./cmd/migrate up
+) || { echo "ERROR: migrate failed — aborting before restarting services." >&2; exit 1; }
 
-echo "Restarting backend and daemon after migrations…"
+echo "Restarting backend after migrations…"
 # Keep the schema window short: once migrations have run, the old
-# backend/daemon binaries must stop serving traffic before the frontend
-# build starts. Frontend remains untouched until the out-of-tree build
-# and atomic swap below have succeeded.
+# backend binary must stop serving traffic before the frontend build
+# starts. Frontend remains untouched until the out-of-tree build and
+# atomic swap below have succeeded.
 launchctl kickstart -k gui/$(id -u)/com.multica.backend || true
-launchctl kickstart -k gui/$(id -u)/com.multica.daemon || true
+
+# Daemon: restart only when daemon source changed. The daemon runs
+# long-lived agent tasks — kickstart -k sends SIGKILL and interrupts any
+# task in flight. Skipping the restart on deploys that only touch
+# frontend or non-daemon backend code lets running agent tasks finish
+# uninterrupted. Multica migrations are expected to be additive
+# (backward-compatible), so a daemon still on the previous binary can
+# keep querying through a schema bump.
+#
+# To force a daemon restart manually after a deploy:
+#   launchctl kickstart -k gui/$(id -u)/com.multica.daemon
+if git diff --name-only "$OLD_SHA" "$NEW_SHA" \
+    | grep -qE '^server/cmd/multica/|^server/internal/daemon/|^server/internal/daemonws/'; then
+  echo "Daemon source changed — restarting daemon (running agent tasks will be interrupted)."
+  launchctl kickstart -k gui/$(id -u)/com.multica.daemon || true
+else
+  echo "Daemon source unchanged — skipping daemon restart to preserve running agent tasks."
+fi
 
 echo "Building Next.js frontend (out-of-tree)…"
 # Build into apps/web/.next.new while the live next-server keeps serving
