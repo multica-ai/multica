@@ -2334,12 +2334,12 @@ export function IssueDetail({
   };
 
   const sidebarContent = (
-    <Tabs defaultValue="stream" className="flex h-full min-h-0 flex-col">
+    <Tabs defaultValue="runs" className="flex h-full min-h-0 flex-col">
       <TabsList className="mb-3 grid w-full grid-cols-2">
-        <TabsTrigger value="stream">Stream</TabsTrigger>
+        <TabsTrigger value="runs">Runs</TabsTrigger>
         <TabsTrigger value="properties">Properties</TabsTrigger>
       </TabsList>
-      <TabsContent value="stream" keepMounted className="mt-0 min-h-0 flex-1">
+      <TabsContent value="runs" keepMounted className="mt-0 min-h-0 flex-1">
         <AgentStreamSidebar issueId={issue.id} />
       </TabsContent>
       <TabsContent value="properties" keepMounted className="mt-0 min-h-0 flex-1 overflow-y-auto">
