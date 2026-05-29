@@ -3497,11 +3497,12 @@ func claimCommentTask(t *testing.T, runtimeID, daemonID string) claimCommentTask
 	return resp
 }
 
-// TestClaimTaskByRuntime_CommentTaskPopulatesNewCommentCount verifies the claim
-// response carries new_comment_count + new_comments_since for a comment task
-// when the agent ran on this issue before: the count is comments created after
-// the prior run's started_at, and the since anchor is that started_at.
-func TestClaimTaskByRuntime_CommentTaskPopulatesNewCommentCount(t *testing.T) {
+// TestClaimTaskByRuntime_CommentTaskPopulatesThreadScopedNewCommentCount
+// verifies the claim response carries new_comment_count + new_comments_since for
+// a comment task when the agent ran before: the count is scoped to the
+// triggering thread, excludes the injected trigger comment, excludes the
+// agent's own comments, and the since anchor is the prior run's started_at.
+func TestClaimTaskByRuntime_CommentTaskPopulatesThreadScopedNewCommentCount(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -3520,8 +3521,39 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesNewCommentCount(t *testing.T) {
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, priorTaskID) })
 
-	// The trigger comment (member-authored, created now) lands after the anchor.
-	_, triggerID := createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
+	var threadRootID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'member', $3, 'same-thread context', 'comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&threadRootID); err != nil {
+		t.Fatalf("insert trigger thread root: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, threadRootID) })
+
+	var unrelatedRootID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'member', $3, 'unrelated thread context', 'comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&unrelatedRootID); err != nil {
+		t.Fatalf("insert unrelated thread root: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, unrelatedRootID) })
+
+	var agentOwnID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+		VALUES ($1, $2, 'agent', $3, 'agent self reply', 'comment', $4)
+		RETURNING id
+	`, issueID, testWorkspaceID, agentID, threadRootID).Scan(&agentOwnID); err != nil {
+		t.Fatalf("insert agent self reply: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, agentOwnID) })
+
+	// The trigger comment (member-authored, created now) lands after the anchor
+	// but is injected into the prompt, so it should not be counted.
+	_, triggerID := createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, &threadRootID)
 
 	resp := claimCommentTask(t, runtimeID, "comment-newcount-claim")
 	if resp.Task.TriggerCommentID != triggerID {
@@ -3530,8 +3562,40 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesNewCommentCount(t *testing.T) {
 	if resp.Task.NewCommentsSince == "" {
 		t.Errorf("new_comments_since must be set when a prior run exists, got empty")
 	}
-	if resp.Task.NewCommentCount < 1 {
-		t.Errorf("new_comment_count = %d, want >= 1 (the trigger comment is newer than the anchor)", resp.Task.NewCommentCount)
+	if resp.Task.NewCommentCount != 1 {
+		t.Errorf("new_comment_count = %d, want 1 (same-thread context only)", resp.Task.NewCommentCount)
+	}
+}
+
+func TestClaimTaskByRuntime_CommentTaskOmitsDeltaWhenOnlyTriggerIsNew(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Comment trigger-only runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Comment trigger-only agent")
+
+	var priorTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 hour', now() - interval '50 minutes')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&priorTaskID); err != nil {
+		t.Fatalf("insert prior task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, priorTaskID) })
+
+	_, triggerID := createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
+
+	resp := claimCommentTask(t, runtimeID, "comment-trigger-only-claim")
+	if resp.Task.TriggerCommentID != triggerID {
+		t.Fatalf("trigger_comment_id = %s, want %s", resp.Task.TriggerCommentID, triggerID)
+	}
+	if resp.Task.NewCommentCount != 0 {
+		t.Errorf("new_comment_count = %d, want 0 when only the injected trigger is new", resp.Task.NewCommentCount)
+	}
+	if resp.Task.NewCommentsSince != "" {
+		t.Errorf("new_comments_since = %q, want empty when only the injected trigger is new", resp.Task.NewCommentsSince)
 	}
 }
 

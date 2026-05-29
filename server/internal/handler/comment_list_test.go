@@ -1320,44 +1320,47 @@ func resolveCommentRow(t *testing.T, commentID string) {
 	}
 }
 
-// TestCountNewCommentsSince_ExcludesAgentOwn pins the claim-side count query: it
-// counts comments created after the given anchor and excludes the agent's own,
-// so a chatty agent does not inflate its own new-comment count.
-func TestCountNewCommentsSince_ExcludesAgentOwn(t *testing.T) {
+// TestCountNewCommentsSince_ThreadScopedExcludesAgentOwnAndTrigger pins the
+// claim-side count query: it counts comments created after the given anchor only
+// within the triggering thread, excludes the triggering comment because it is
+// injected into the prompt, and excludes the agent's own comments so a chatty
+// agent does not inflate its own new-comment count.
+func TestCountNewCommentsSince_ThreadScopedExcludesAgentOwnAndTrigger(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
 	fx := newCommentListFixture(t)
 	agentID := createHandlerTestAgent(t, "count-agent", []byte("[]"))
 
-	// Two agent-authored comments — must NOT be counted.
-	for _, body := range []string{"agent reply 1", "agent reply 2"} {
-		if _, err := testPool.Exec(context.Background(), `
-			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
-			VALUES ($1, $2, 'agent', $3, $4, 'comment', $5)
-		`, fx.IssueID, testWorkspaceID, agentID, body, fx.Root2); err != nil {
-			t.Fatalf("insert agent comment: %v", err)
-		}
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at)
+		VALUES ($1, $2, 'agent', $3, 'agent reply', 'comment', $4, $5)
+	`, fx.IssueID, testWorkspaceID, agentID, fx.Root1, fx.Base.Add(4*time.Minute)); err != nil {
+		t.Fatalf("insert agent comment: %v", err)
 	}
 
 	ctx := context.Background()
 
-	// Anchor in the far past: all 7 member comments are newer; agent's 2 excluded.
+	// Anchor after r1a: root1/r1a are stale, r1b is the only non-trigger,
+	// non-agent comment in the triggering thread. r1b1 is the trigger and root2's
+	// whole thread is unrelated noise.
 	got, err := testHandler.Queries.CountNewCommentsSince(ctx, db.CountNewCommentsSinceParams{
+		AnchorID:    parseUUID(fx.R1b1),
 		IssueID:     parseUUID(fx.IssueID),
 		WorkspaceID: parseUUID(testWorkspaceID),
-		Since:       pgtype.Timestamptz{Time: time.Unix(0, 0), Valid: true},
+		Since:       pgtype.Timestamptz{Time: fx.Base.Add(90 * time.Second), Valid: true},
 		AuthorID:    parseUUID(agentID),
 	})
 	if err != nil {
-		t.Fatalf("count new since epoch: %v", err)
+		t.Fatalf("count new since anchor: %v", err)
 	}
-	if got != 7 {
-		t.Fatalf("expected 7 new member comments since epoch (agent's own excluded), got %d", got)
+	if got != 1 {
+		t.Fatalf("expected only r1b to count, got %d", got)
 	}
 
 	// Anchor in the future: nothing is newer.
 	got, err = testHandler.Queries.CountNewCommentsSince(ctx, db.CountNewCommentsSinceParams{
+		AnchorID:    parseUUID(fx.R1b1),
 		IssueID:     parseUUID(fx.IssueID),
 		WorkspaceID: parseUUID(testWorkspaceID),
 		Since:       pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},

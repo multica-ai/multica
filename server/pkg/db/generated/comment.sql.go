@@ -29,26 +29,50 @@ func (q *Queries) CountComments(ctx context.Context, arg CountCommentsParams) (i
 }
 
 const countNewCommentsSince = `-- name: CountNewCommentsSince :one
-SELECT count(*) FROM comment
-WHERE issue_id = $1
-  AND workspace_id = $2
-  AND created_at > $3
-  AND NOT (author_type = 'agent' AND author_id = $4)
+WITH RECURSIVE root_of AS (
+    SELECT c.id, c.parent_id
+    FROM comment c
+    WHERE c.id = $1 AND c.issue_id = $2 AND c.workspace_id = $3
+    UNION ALL
+    SELECT p.id, p.parent_id
+    FROM comment p
+    JOIN root_of r ON p.id = r.parent_id
+),
+thread_root AS (
+    SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1
+),
+descendants AS (
+    SELECT c.id, c.created_at, c.author_type, c.author_id
+    FROM comment c
+    JOIN thread_root tr ON c.id = tr.id
+    UNION
+    SELECT c.id, c.created_at, c.author_type, c.author_id
+    FROM comment c
+    JOIN descendants d ON c.parent_id = d.id
+    WHERE c.issue_id = $2 AND c.workspace_id = $3
+)
+SELECT count(*) FROM descendants
+WHERE created_at > $4
+  AND id <> $1
+  AND NOT (author_type = 'agent' AND author_id = $5)
 `
 
 type CountNewCommentsSinceParams struct {
+	AnchorID    pgtype.UUID        `json:"anchor_id"`
 	IssueID     pgtype.UUID        `json:"issue_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Since       pgtype.Timestamptz `json:"since"`
 	AuthorID    pgtype.UUID        `json:"author_id"`
 }
 
-// Counts comments on an issue created strictly after @since, excluding any
-// authored by the given agent (@author_id). Feeds the daemon claim response so
-// a comment-triggered task can tell the agent how many comments arrived since
-// its last run on this issue, without shipping their bodies.
+// Counts non-injected comments in the thread containing @anchor_id created
+// strictly after @since, excluding any authored by the given agent
+// (@author_id). The triggering comment body is already injected into the
+// prompt, so @anchor_id itself is excluded from the count. Feeds the daemon
+// claim response without shipping comment bodies.
 func (q *Queries) CountNewCommentsSince(ctx context.Context, arg CountNewCommentsSinceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countNewCommentsSince,
+		arg.AnchorID,
 		arg.IssueID,
 		arg.WorkspaceID,
 		arg.Since,

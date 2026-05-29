@@ -156,9 +156,9 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 	}
 }
 
-// The CLAUDE.md workflow surface must carry the same since-delta new-comment
-// hint as the per-turn prompt. PR #2816 requires the two surfaces stay in sync,
-// so this pins the count-driven `--since` hint into the comment-triggered brief.
+// The CLAUDE.md workflow surface must carry the same thread-scoped since-delta
+// new-comment hint as the per-turn prompt. PR #2816 requires the two surfaces
+// stay in sync.
 func TestCommentTriggeredBriefCarriesNewCommentsHint(t *testing.T) {
 	t.Parallel()
 	const (
@@ -173,14 +173,14 @@ func TestCommentTriggeredBriefCarriesNewCommentsHint(t *testing.T) {
 	}
 	out := buildMetaSkillContent("claude", ctx)
 
-	if !strings.Contains(out, "4 new comment(s) since your last run") {
+	if !strings.Contains(out, "4 other new comment(s) in this thread since your last run") {
 		t.Errorf("comment brief must report the new-comment count, got:\n%s", out)
 	}
-	if !strings.Contains(out, "--since "+since+" --output json") {
-		t.Errorf("comment brief must point at the --since catch-up read, got:\n%s", out)
+	if !strings.Contains(out, "--thread reply-abc --since "+since+" --output json") {
+		t.Errorf("comment brief must point at the thread-scoped --since catch-up read, got:\n%s", out)
 	}
-	// Warm path also keeps a --thread pointer for the triggering thread's
-	// pre-anchor history that --since cannot cover.
+	// Warm path also keeps a bounded full-thread pointer for the triggering
+	// thread's pre-anchor history that --since cannot cover.
 	if !strings.Contains(out, "--thread reply-abc --tail 30 --output json") {
 		t.Errorf("warm brief must also point at the triggering thread, got:\n%s", out)
 	}
