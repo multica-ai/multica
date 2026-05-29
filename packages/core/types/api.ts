@@ -140,6 +140,7 @@ export interface CreateViewRequest {
   filters?: ViewFilters;
   display?: Record<string, unknown>;
   position?: number;
+  shared?: boolean;
 }
 
 export interface UpdateViewRequest {
@@ -147,6 +148,7 @@ export interface UpdateViewRequest {
   filters?: ViewFilters;
   display?: Record<string, unknown>;
   position?: number;
+  shared?: boolean;
 }
 
 export interface ReorderViewsRequest {

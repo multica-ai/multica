@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { IssueStatus, IssuePriority } from "../../types";
+import type { IssueStatus, IssuePriority, SavedView, ViewFilters } from "../../types";
 import { ALL_STATUSES } from "../config";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
@@ -59,7 +59,26 @@ export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }
   { key: "childProgress", label: "Sub-issue progress" },
 ];
 
+/**
+ * The subset of {@link IssueViewState} that a saved view controls. `setFilters`
+ * patches these; `setActiveView` replaces them wholesale from a view's stored
+ * `filters`. Excludes view-mode / sort / display preferences — those are
+ * per-user surface settings, not part of the view's filter contract.
+ */
+export interface ViewFilterFields {
+  statusFilters: IssueStatus[];
+  priorityFilters: IssuePriority[];
+  assigneeFilters: ActorFilterValue[];
+  includeNoAssignee: boolean;
+  creatorFilters: ActorFilterValue[];
+  projectFilters: string[];
+  includeNoProject: boolean;
+  labelFilters: string[];
+}
+
 export interface IssueViewState {
+  /** Active saved-view id, or null for an ad-hoc (unsaved) filter set. */
+  currentViewId: string | null;
   viewMode: ViewMode;
   grouping: IssueGrouping;
   statusFilters: IssueStatus[];
@@ -107,6 +126,14 @@ export interface IssueViewState {
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
+  /** Patch any subset of the view-controlled filter fields in one set(). */
+  setFilters: (partial: Partial<ViewFilterFields>) => void;
+  /**
+   * Activate a saved view: pin its id and REPLACE all filter fields from its
+   * stored `filters` in a single set() (not a toggle loop). Passing null clears
+   * the active view and resets all filter fields to empty.
+   */
+  setActiveView: (view: SavedView | null) => void;
   setSortBy: (field: SortField) => void;
   setSortDirection: (dir: SortDirection) => void;
   toggleCardProperty: (key: keyof CardProperties) => void;
@@ -118,7 +145,111 @@ export interface IssueViewState {
   toggleSwimlaneCollapsed: (key: string) => void;
 }
 
+/** Empty value for every view-controlled filter field. */
+export const EMPTY_VIEW_FILTER_FIELDS: ViewFilterFields = {
+  statusFilters: [],
+  priorityFilters: [],
+  assigneeFilters: [],
+  includeNoAssignee: false,
+  creatorFilters: [],
+  projectFilters: [],
+  includeNoProject: false,
+  labelFilters: [],
+};
+
+/**
+ * Split a saved view's `assignee_filters` / `creator_filters` tokens
+ * ("type:id", id possibly a `{me}` / `{my_agents}` / `{my_squads}` placeholder)
+ * back into the store's {@link ActorFilterValue} shape. Tokens without a `:`
+ * (bare `{my_agents}` style) are dropped — they have no UI actor to render.
+ */
+function tokensToActors(tokens: string[] | undefined): ActorFilterValue[] {
+  if (!tokens) return [];
+  const out: ActorFilterValue[] = [];
+  for (const token of tokens) {
+    const sep = token.indexOf(":");
+    if (sep === -1) continue;
+    const type = token.slice(0, sep);
+    if (type !== "member" && type !== "agent" && type !== "squad") continue;
+    out.push({ type, id: token.slice(sep + 1) });
+  }
+  return out;
+}
+
+/**
+ * Translate a saved view's stored {@link ViewFilters} into the store's filter
+ * fields. `any_of` views (cross-dimension OR) can't be represented in the flat
+ * filter-bar state, so their filter fields collapse to empty — the page still
+ * drives its server fetch from the raw view `filters`, the store state only
+ * backs the filter-bar UI and dirty-check.
+ */
+export function viewFiltersToState(filters: ViewFilters): ViewFilterFields {
+  if (filters.any_of) return { ...EMPTY_VIEW_FILTER_FIELDS };
+  return {
+    statusFilters: filters.statuses ?? [],
+    priorityFilters: filters.priorities ?? [],
+    assigneeFilters: tokensToActors(filters.assignee_filters),
+    includeNoAssignee: filters.include_no_assignee === true,
+    creatorFilters: tokensToActors(filters.creator_filters),
+    projectFilters: filters.project_ids ?? [],
+    includeNoProject: filters.include_no_project === true,
+    labelFilters: filters.label_ids ?? [],
+  };
+}
+
+/**
+ * Inverse of {@link viewFiltersToState}: project the store's flat filter fields
+ * back into the API `ViewFilters` shape the server fetch consumes. Empty
+ * fields are omitted so the request stays minimal. `any_of` is never produced
+ * here — cross-dimension OR can't be expressed in the flat filter bar, so a
+ * view that needs it (My Issues "All") must fetch from its raw stored filters,
+ * not from reconstructed store state.
+ */
+export function stateToViewFilters(fields: ViewFilterFields): ViewFilters {
+  const actorsToTokens = (actors: ActorFilterValue[]) =>
+    actors.map((a) => `${a.type}:${a.id}`);
+  const out: ViewFilters = {};
+  if (fields.statusFilters.length) out.statuses = fields.statusFilters;
+  if (fields.priorityFilters.length) out.priorities = fields.priorityFilters;
+  if (fields.assigneeFilters.length) out.assignee_filters = actorsToTokens(fields.assigneeFilters);
+  if (fields.includeNoAssignee) out.include_no_assignee = true;
+  if (fields.creatorFilters.length) out.creator_filters = actorsToTokens(fields.creatorFilters);
+  if (fields.projectFilters.length) out.project_ids = fields.projectFilters;
+  if (fields.includeNoProject) out.include_no_project = true;
+  if (fields.labelFilters.length) out.label_ids = fields.labelFilters;
+  return out;
+}
+
+/**
+ * Build the effective {@link ViewFilters} a page sends to the server: the live
+ * filter-bar store fields (via {@link stateToViewFilters}) PLUS the active
+ * view's view-only fields that have no filter-bar representation and so can't
+ * survive the store round-trip — `assignee_types` (class-level Members /
+ * Agents) and `any_of` (cross-dimension OR). Filter-bar edits layer on top as
+ * outer AND fields.
+ *
+ * Without re-layering `assignee_types`, a flat Members/Agents view collapses to
+ * `{}` after reconstruction and fetches every issue. `assignee_types` is only
+ * applied when the filter bar hasn't pinned a specific assignee — the two are
+ * mutually exclusive server-side (sending both is a 400), so a concrete
+ * assignee selection wins over the class-level default.
+ */
+export function buildActiveViewFilters(
+  fields: ViewFilterFields,
+  activeView: SavedView | undefined,
+): ViewFilters {
+  const out = stateToViewFilters(fields);
+  if (activeView?.filters.assignee_types?.length && !out.assignee_filters) {
+    out.assignee_types = activeView.filters.assignee_types;
+  }
+  if (activeView?.filters.any_of) {
+    out.any_of = activeView.filters.any_of;
+  }
+  return out;
+}
+
 export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): IssueViewState => ({
+  currentViewId: null,
   viewMode: "board",
   grouping: "status",
   statusFilters: [],
@@ -228,6 +359,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     }),
   clearFilters: () =>
     set({
+      currentViewId: null,
       statusFilters: [],
       priorityFilters: [],
       assigneeFilters: [],
@@ -237,6 +369,12 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       includeNoProject: false,
       labelFilters: [],
       agentRunningFilter: false,
+    }),
+  setFilters: (partial) => set(partial),
+  setActiveView: (view) =>
+    set({
+      currentViewId: view?.id ?? null,
+      ...(view ? viewFiltersToState(view.filters) : EMPTY_VIEW_FILTER_FIELDS),
     }),
   setSortBy: (field) => set({ sortBy: field }),
   setSortDirection: (dir) => set({ sortDirection: dir }),
@@ -279,6 +417,7 @@ export const viewStorePersistOptions = (name: string) => ({
     // state changes second-to-second, and a stored toggle would let users
     // return to an unexplained empty list. Keep it ephemeral. See the
     // field comment on IssueViewState.
+    currentViewId: state.currentViewId,
     viewMode: state.viewMode,
     grouping: state.grouping,
     statusFilters: state.statusFilters,

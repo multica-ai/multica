@@ -30,6 +30,13 @@
     "agents_label": "Agents",
     "agents_description": "Issues assigned to AI agents"
   },
+  "views": {
+    "defaults": {
+      "all": "All",
+      "members": "Members",
+      "agents": "Agents"
+    }
+  },
   "filters": {
     "tooltip": "Filter",
     "placeholder": "Filter...",

@@ -6,3 +6,8 @@ export {
   useReorderViews,
 } from "./mutations";
 export { resolveViewRequests, dedupeIssuesById } from "./resolver";
+export {
+  DEFAULT_VIEWS,
+  buildDefaultViewRequests,
+  type DefaultViewSpec,
+} from "./defaults";

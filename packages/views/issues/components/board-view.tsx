@@ -14,8 +14,8 @@ import {
 import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
 import type { Issue, IssueAssigneeGroup, IssueStatus } from "@multica/core/types";
-import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { AssigneeGroupedIssuesFilter, IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
+import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus, type LoadMoreView } from "@multica/core/issues/mutations";
+import type { AssigneeGroupedIssuesFilter, IssueSortParam } from "@multica/core/issues/queries";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -117,8 +117,7 @@ export function BoardView({
   hiddenStatuses,
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
-  myIssuesScope,
-  myIssuesFilter,
+  view,
   sort,
   projectId,
 }: {
@@ -130,9 +129,8 @@ export function BoardView({
   hiddenStatuses: IssueStatus[];
   onMoveIssue: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   childProgressMap?: Map<string, ChildProgress>;
-  /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
-  myIssuesScope?: string;
-  myIssuesFilter?: MyIssuesFilter;
+  /** Active saved view — per-status load-more targets its view-driven cache. */
+  view?: LoadMoreView;
   /** Must match the sort the page queried with — embedded in the cache key. */
   sort?: IssueSortParam;
   /** When set, the per-column "+" pre-fills the project on the create form. */
@@ -146,9 +144,6 @@ export function BoardView({
     ? t(($) => $.board.ordered_by, { field: t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]) })
     : null;
   const { getActorName } = useActorName();
-  const myIssuesOpts = myIssuesScope
-    ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
-    : undefined;
   const groupedIssues = useMemo(
     () =>
       grouping === "assignee" && assigneeGroups
@@ -409,7 +404,7 @@ export function BoardView({
                 issueIds={columns[group.id] ?? EMPTY_IDS}
                 issueMap={issueMapRef.current}
                 childProgressMap={childProgressMap}
-                myIssuesOpts={myIssuesOpts}
+                view={view}
                 sort={sort}
                 projectId={projectId}
                 sortLabel={sortLabel}
@@ -447,7 +442,7 @@ export function BoardView({
         {grouping === "status" && hiddenStatuses.length > 0 && (
           <BoardHiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
-            myIssuesOpts={myIssuesOpts}
+            view={view}
             sort={sort}
           />
         )}
@@ -518,7 +513,7 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   issueIds,
   issueMap,
   childProgressMap,
-  myIssuesOpts,
+  view,
   sort,
   projectId,
   sortLabel,
@@ -527,15 +522,16 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  view?: LoadMoreView;
   sort?: IssueSortParam;
   projectId?: string;
   sortLabel?: string | null;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     group.status,
-    myIssuesOpts,
+    undefined,
     sort,
+    view,
   );
   return (
     <BoardColumn
@@ -559,29 +555,29 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
  * Board-view-specific row that pulls the server-aggregated total from
  * `useLoadMoreByStatus` and hands it to the shared {@link HiddenColumnRow}.
  * Lives here (not in `hidden-columns-panel.tsx`) so the shared panel stays
- * free of `useLoadMoreByStatus` / `myIssuesOpts` coupling — the swimlane
+ * free of `useLoadMoreByStatus` / view coupling — the swimlane
  * uses an in-memory total instead.
  */
 function BoardHiddenColumnRow({
   status,
-  myIssuesOpts,
+  view,
   sort,
 }: {
   status: IssueStatus;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  view?: LoadMoreView;
   sort?: IssueSortParam;
 }) {
-  const { total } = useLoadMoreByStatus(status, myIssuesOpts, sort);
+  const { total } = useLoadMoreByStatus(status, undefined, sort, view);
   return <HiddenColumnRow status={status} total={total} />;
 }
 
 function BoardHiddenColumnsPanel({
   hiddenStatuses,
-  myIssuesOpts,
+  view,
   sort,
 }: {
   hiddenStatuses: IssueStatus[];
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  view?: LoadMoreView;
   sort?: IssueSortParam;
 }) {
   return (
@@ -591,7 +587,7 @@ function BoardHiddenColumnsPanel({
         <BoardHiddenColumnRow
           key={status}
           status={status}
-          myIssuesOpts={myIssuesOpts}
+          view={view}
           sort={sort}
         />
       )}

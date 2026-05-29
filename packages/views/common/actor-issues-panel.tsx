@@ -8,9 +8,9 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import {
   childIssueProgressOptions,
-  myIssueListOptions,
-  type MyIssuesFilter,
+  viewIssueListOptions,
 } from "@multica/core/issues/queries";
+import type { ViewFilters } from "@multica/core/types";
 import {
   actorIssuesViewStore,
   type ActorIssuesScope,
@@ -68,16 +68,19 @@ export function ActorIssuesPanel({
     useIssueSelectionStore.getState().clear();
   }, [scope, actorType, actorId]);
 
-  const queryFilter: MyIssuesFilter = useMemo(
+  // View-driven (single-branch) filter for this actor's issues. `viewId` is a
+  // synthetic stable id so the per-status load-more cache keys off this panel's
+  // scope, not a saved view.
+  const queryFilters: ViewFilters = useMemo(
     () =>
       scope === "assigned"
-        ? { assignee_id: actorId }
-        : { creator_id: actorId },
-    [scope, actorId],
+        ? { assignee_filters: [`${actorType}:${actorId}`] }
+        : { creator_filters: [`${actorType}:${actorId}`] },
+    [scope, actorType, actorId],
   );
-  const queryScope = `${actorType}:${actorId}:${scope}`;
+  const queryViewId = `${actorType}:${actorId}:${scope}`;
 
-  const rawIssuesQuery = useQuery(myIssueListOptions(wsId, queryScope, queryFilter));
+  const rawIssuesQuery = useQuery(viewIssueListOptions(wsId, queryViewId, queryFilters));
   const rawIssues = useMemo(
     () => rawIssuesQuery.data ?? [],
     [rawIssuesQuery.data],
@@ -211,8 +214,7 @@ export function ActorIssuesPanel({
               issues={issues}
               visibleStatuses={visibleStatuses}
               childProgressMap={childProgressMap}
-              myIssuesScope={queryScope}
-              myIssuesFilter={queryFilter}
+              view={{ viewId: queryViewId, filters: queryFilters }}
             />
           </div>
         )}

@@ -6,15 +6,16 @@ import { ChevronRight, ListTodo } from "lucide-react";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
-import { useIssueViewStore, useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
-import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
+import { useIssueViewStore, useClearFiltersOnWorkspaceChange, buildActiveViewFilters } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
-import { filterIssues } from "../utils/filter";
+import { viewListOptions } from "@multica/core/views";
+import { filterIssues, EMPTY_CLIENT_FILTERS } from "../utils/filter";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
+import { viewIssueAssigneeGroupsOptions, viewIssueListOptions, viewFiltersToGroupedFilter, withBoardStatusScope, childIssueProgressOptions } from "@multica/core/issues/queries";
+import type { SavedView, ViewFilters } from "@multica/core/types";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -34,7 +35,8 @@ export function IssuesPage() {
   const wsId = useWorkspaceId();
 
   const workspace = useCurrentWorkspace();
-  const scope = useIssuesScopeStore((s) => s.scope);
+  const currentViewId = useIssueViewStore((s) => s.currentViewId);
+  const setActiveView = useIssueViewStore((s) => s.setActiveView);
   const viewMode = useIssueViewStore((s) => s.viewMode);
   const grouping = useIssueViewStore((s) => s.grouping);
   const statusFilters = useIssueViewStore((s) => s.statusFilters);
@@ -73,25 +75,61 @@ export function IssuesPage() {
     return ids;
   }, [snapshot]);
 
-  const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(() => {
-    const filter: AssigneeGroupedIssuesFilter = {
-      statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
-      priorities: priorityFilters,
-      assignee_filters: assigneeFilters,
-      include_no_assignee: includeNoAssignee,
-      creator_filters: creatorFilters,
-      project_ids: projectFilters,
-      include_no_project: includeNoProject,
-      label_ids: labelFilters,
-    };
-    if (scope === "members") filter.assignee_types = ["member"];
-    if (scope === "agents") filter.assignee_types = ["agent", "squad"];
-    return filter;
-  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, scope, statusFilters]);
+  // The active view's RAW stored filters (with any_of intact) are the source
+  // of truth for the server fetch. For a flat view, the filter-bar edits are
+  // already mirrored into the store fields (setActiveView loads them), so we
+  // reconstruct from the store. An any_of view can't be reconstructed flat
+  // (the filter bar has no OR), so we fetch from its raw filters and the
+  // filter-bar narrowing is layered as outer AND fields onto every branch.
+  const { data: savedViews } = useQuery(viewListOptions(wsId, "issues"));
+  const activeView = useMemo<SavedView | undefined>(
+    () => savedViews?.find((v) => v.id === currentViewId),
+    [savedViews, currentViewId],
+  );
+  const activeFilters = useMemo<ViewFilters>(
+    () =>
+      buildActiveViewFilters(
+        {
+          statusFilters,
+          priorityFilters,
+          assigneeFilters,
+          includeNoAssignee,
+          creatorFilters,
+          projectFilters,
+          includeNoProject,
+          labelFilters,
+        },
+        activeView,
+      ),
+    [activeView, assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, statusFilters],
+  );
 
-  const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, sort);
+  const loadMoreView = useMemo(
+    () => ({ viewId: currentViewId, filters: activeFilters }),
+    [currentViewId, activeFilters],
+  );
+
+  // The assignee-grouped board issues a single grouped fetch (not a per-status
+  // sweep), so it must default to BOARD_STATUSES when no status filter is set —
+  // see withBoardStatusScope. The per-status list path keeps using activeFilters.
+  const boardFilters = useMemo<ViewFilters>(
+    () => withBoardStatusScope(activeFilters),
+    [activeFilters],
+  );
+
+  // The assignee-grouped board's per-group load-more needs the flat grouped
+  // filter. Only flat (non-any_of) views can paginate a group — for an any_of
+  // view this is undefined, which makes BoardView render plain (no-load-more)
+  // assignee columns. See viewIssueAssigneeGroupsOptions / the plan's note that
+  // multi-branch pagination is intentionally disabled.
+  const assigneeGroupFilter = useMemo(
+    () => (boardFilters.any_of ? undefined : viewFiltersToGroupedFilter(boardFilters)),
+    [boardFilters],
+  );
+
+  const assigneeGroupsOptions = viewIssueAssigneeGroupsOptions(wsId, currentViewId, boardFilters, sort);
   const statusIssuesQuery = useQuery({
-    ...issueListOptions(wsId, sort),
+    ...viewIssueListOptions(wsId, currentViewId, activeFilters, sort),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({
@@ -115,29 +153,26 @@ export function IssuesPage() {
 
   useEffect(() => {
     useIssueSelectionStore.getState().clear();
-  }, [viewMode, scope]);
+  }, [viewMode, currentViewId]);
 
-  // Scope pre-filter: narrow by assignee type
-  const scopedIssues = useMemo(() => {
-    if (scope === "members")
-      return allIssues.filter((i) => i.assignee_type === "member");
-    if (scope === "agents")
-      return allIssues.filter((i) => i.assignee_type === "agent" || i.assignee_type === "squad");
-    return allIssues;
-  }, [allIssues, scope]);
+  const headerIssues = usesAssigneeBoard ? assigneeIssues : allIssues;
 
-  const headerIssues = usesAssigneeBoard ? assigneeIssues : scopedIssues;
-
+  // The view + filter bar now filter server-side, so the only remaining
+  // client filter is the ephemeral `agentRunningFilter` chip (never persisted,
+  // not expressible as a saved-view param). Everything else is already applied
+  // by viewIssueListOptions.
   const issues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
-    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(allIssues, { ...EMPTY_CLIENT_FILTERS, agentRunningFilter, runningIssueIds }),
+    [allIssues, agentRunningFilter, runningIssueIds],
   );
 
-  // Status-unfiltered companion for Swimlane — same narrowing as `issues`
-  // minus the status filter.
+  // Status-unfiltered companion for Swimlane. Status narrowing happens
+  // server-side via the view's `statuses`; the swimlane still wants every
+  // returned issue regardless of the board's collapsed columns, which the
+  // visibleStatuses split below handles — so this mirrors `issues`.
   const swimlaneIssues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
-    [scopedIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(allIssues, { ...EMPTY_CLIENT_FILTERS, agentRunningFilter, runningIssueIds }),
+    [allIssues, agentRunningFilter, runningIssueIds],
   );
 
   // Fetch sub-issue progress from the backend so counts are accurate
@@ -203,7 +238,16 @@ export function IssuesPage() {
       </PageHeader>
 
       <ViewStoreProvider store={useIssueViewStore}>
-        <IssuesHeader scopedIssues={headerIssues} />
+        <IssuesHeader
+          scopedIssues={headerIssues}
+          viewTabs={{
+            page: "issues",
+            currentViewId,
+            onSelectView: setActiveView,
+            resolveDefaultName: (nameKey) =>
+              t(($) => $.views.defaults[nameKey as keyof typeof $.views.defaults] ?? nameKey),
+          }}
+        />
 
         {loading ? contentSkeleton : headerIssues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
@@ -223,6 +267,7 @@ export function IssuesPage() {
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
+                view={loadMoreView}
                 sort={sort}
               />
             ) : viewMode === "swimlane" ? (
@@ -233,10 +278,11 @@ export function IssuesPage() {
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
+                view={loadMoreView}
                 sort={sort}
               />
             ) : (
-              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} sort={sort} onMoveIssue={handleMoveIssue} />
+              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} view={loadMoreView} sort={sort} onMoveIssue={handleMoveIssue} />
             )}
           </div>
         )}

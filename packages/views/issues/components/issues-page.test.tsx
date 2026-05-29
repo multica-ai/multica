@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -50,8 +50,35 @@ vi.mock("../../navigation", () => ({
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
+  useNavigation: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    pathname: "/issues",
+    searchParams: new URLSearchParams(),
+  }),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+// Mock the saved-views layer. The page + ViewTabs read viewListOptions; we
+// return a fixed three-view list (the seeded defaults). The mutations/seed
+// hook are stubbed so no network seeding fires during the test.
+const mockViews = vi.hoisted(() => [
+  { id: "view-all", workspace_id: "ws-1", creator_id: null, name: "All", page: "issues", project_id: null, filters: {}, display: {}, position: 0, shared: true, is_default: false, created_at: "", updated_at: "" },
+  { id: "view-members", workspace_id: "ws-1", creator_id: null, name: "Members", page: "issues", project_id: null, filters: { assignee_types: ["member"] }, display: {}, position: 1, shared: true, is_default: false, created_at: "", updated_at: "" },
+  { id: "view-agents", workspace_id: "ws-1", creator_id: null, name: "Agents", page: "issues", project_id: null, filters: { assignee_types: ["agent", "squad"] }, display: {}, position: 2, shared: true, is_default: false, created_at: "", updated_at: "" },
+]);
+vi.mock("@multica/core/views", () => ({
+  viewListOptions: (wsId: string) => ({
+    queryKey: ["views", wsId, "issues", null],
+    queryFn: () => Promise.resolve({ views: mockViews }),
+    select: (data: any) => data.views,
+    enabled: true,
+  }),
+  viewKeys: { list: (wsId: string, page: string, p?: string) => ["views", wsId, page, p ?? null] },
+  buildDefaultViewRequests: () => [],
+}));
+vi.mock("../../views/use-seed-default-views", () => ({
+  useSeedDefaultViews: () => {},
 }));
 
 // Mock workspace avatar
@@ -160,6 +187,7 @@ vi.mock("@multica/core/issues/config", () => ({
 
 // Mock view store
 const mockViewState = {
+  currentViewId: "view-all" as string | null,
   viewMode: "board" as "board" | "list",
   grouping: "status" as "status" | "assignee",
   statusFilters: [] as string[],
@@ -191,6 +219,8 @@ const mockViewState = {
   setSortDirection: vi.fn(),
   toggleCardProperty: vi.fn(),
   toggleListCollapsed: vi.fn(),
+  setFilters: vi.fn(),
+  setActiveView: vi.fn(),
 };
 
 vi.mock("@multica/core/issues/stores/view-store", () => ({
@@ -198,6 +228,23 @@ vi.mock("@multica/core/issues/stores/view-store", () => ({
   viewStorePersistOptions: () => ({ name: "test", storage: undefined, partialize: (s: any) => s }),
   mergeViewStatePersisted: (_p: unknown, c: any) => c,
   viewStoreSlice: vi.fn(),
+  // Real reducer behavior is unit-tested in core; the page only needs a flat
+  // projection of the current store fields here.
+  stateToViewFilters: (fields: any) => {
+    const out: any = {};
+    if (fields.statusFilters?.length) out.statuses = fields.statusFilters;
+    if (fields.priorityFilters?.length) out.priorities = fields.priorityFilters;
+    return out;
+  },
+  buildActiveViewFilters: (fields: any, activeView: any) => {
+    const out: any = {};
+    if (fields.statusFilters?.length) out.statuses = fields.statusFilters;
+    if (fields.priorityFilters?.length) out.priorities = fields.priorityFilters;
+    if (activeView?.filters?.assignee_types?.length && !out.assignee_filters)
+      out.assignee_types = activeView.filters.assignee_types;
+    if (activeView?.filters?.any_of) out.any_of = activeView.filters.any_of;
+    return out;
+  },
   useIssueViewStore: Object.assign(
     (selector?: any) => (selector ? selector(mockViewState) : mockViewState),
     { getState: () => mockViewState, setState: vi.fn() },
@@ -233,18 +280,6 @@ vi.mock("@multica/core/issues/stores/view-store-context", () => ({
   ViewStoreProvider: ({ children }: { children: React.ReactNode }) => children,
   useViewStore: (selector?: any) => (selector ? selector(mockViewState) : mockViewState),
   useViewStoreApi: () => ({ getState: () => mockViewState, setState: vi.fn(), subscribe: vi.fn() }),
-}));
-
-let mockScope = "all";
-
-vi.mock("@multica/core/issues/stores/issues-scope-store", () => ({
-  useIssuesScopeStore: Object.assign(
-    (selector?: any) => {
-      const state = { scope: mockScope, setScope: vi.fn() };
-      return selector ? selector(state) : state;
-    },
-    { getState: () => ({ scope: mockScope, setScope: vi.fn() }) },
-  ),
 }));
 
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
@@ -486,7 +521,7 @@ describe("IssuesPage (shared)", () => {
     mockViewState.grouping = "status";
     mockViewState.statusFilters = [];
     mockViewState.priorityFilters = [];
-    mockScope = "all";
+    mockViewState.currentViewId = "view-all";
   });
 
   it("shows loading skeletons initially", () => {
@@ -590,37 +625,33 @@ describe("IssuesPage (shared)", () => {
     expect(screen.getByText("Agents")).toBeInTheDocument();
   });
 
-  it("agents scope includes squad-assigned issues", async () => {
-    mockScope = "agents";
+  // The Members/Agents scope is now a saved view whose `assignee_types` filter
+  // is pushed to the server (no client-side `.filter()`). These guard the
+  // view→server wiring: the active view's class-level `assignee_types` must
+  // reach api.listIssues, which regressed once when activeFilters was
+  // reconstructed from store state alone (assignee_types has no filter-bar
+  // field, so it was silently dropped and the tabs fetched every issue).
+  it("agents view pushes assignee_types agent+squad to the server", async () => {
+    mockViewState.currentViewId = "view-agents";
     mockViewState.viewMode = "list";
-    mockListIssues.mockImplementation((params: any) =>
-      Promise.resolve({
-        issues: mockIssues.filter((i) => i.status === params?.status),
-        total: mockIssues.filter((i) => i.status === params?.status).length,
-      }),
-    );
     renderWithQuery(<IssuesPage />);
 
-    // Squad task and agent task should be visible
-    await screen.findByText("Design landing page");
-    expect(screen.getByText("Squad task")).toBeInTheDocument();
-    // Member task should NOT be visible
-    expect(screen.queryByText("Implement auth")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(mockListIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ assignee_types: ["agent", "squad"] }),
+      ),
+    );
   });
 
-  it("members scope excludes squad-assigned issues", async () => {
-    mockScope = "members";
+  it("members view pushes assignee_types member to the server", async () => {
+    mockViewState.currentViewId = "view-members";
     mockViewState.viewMode = "list";
-    mockListIssues.mockImplementation((params: any) =>
-      Promise.resolve({
-        issues: mockIssues.filter((i) => i.status === params?.status),
-        total: mockIssues.filter((i) => i.status === params?.status).length,
-      }),
-    );
     renderWithQuery(<IssuesPage />);
 
-    await screen.findByText("Implement auth");
-    expect(screen.queryByText("Squad task")).not.toBeInTheDocument();
-    expect(screen.queryByText("Design landing page")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(mockListIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ assignee_types: ["member"] }),
+      ),
+    );
   });
 });

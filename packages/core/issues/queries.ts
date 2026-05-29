@@ -7,7 +7,10 @@ import type {
   ListGroupedIssuesParams,
   ListIssuesParams,
   ListIssuesCache,
+  ViewFilters,
+  IssueActorRef,
 } from "../types";
+import { resolveViewRequests } from "../views/resolver";
 import { BOARD_STATUSES } from "./config";
 
 export interface IssueSortParam {
@@ -22,10 +25,33 @@ export const issueKeys = {
   /** FULL KEY for queryOptions — includes sort. */
   listSorted: (wsId: string, sort?: IssueSortParam) =>
     [...issueKeys.list(wsId), sort ?? {}] as const,
+  /** All view-driven list queries — prefix for invalidation. */
+  viewListAll: (wsId: string) => [...issueKeys.all(wsId), "view-list"] as const,
+  /**
+   * View-driven issue list, keyed on (wsId, viewId, filters, sort). viewId is
+   * part of the key so two views with structurally identical filters still get
+   * distinct cache entries (and `null` ad-hoc filters never collide with a
+   * saved view). filters are embedded too so an edited-but-unsaved view still
+   * re-fetches.
+   */
+  viewListSorted: (
+    wsId: string,
+    viewId: string | null,
+    filters: ViewFilters,
+    sort?: IssueSortParam,
+  ) => [...issueKeys.viewListAll(wsId), viewId, filters, sort ?? {}] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
     [...issueKeys.assigneeGroupsAll(wsId), filter] as const,
+  /** All view-driven board queries — prefix for invalidation. */
+  viewAssigneeGroupsAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "view-assignee-groups"] as const,
+  viewAssigneeGroups: (
+    wsId: string,
+    viewId: string | null,
+    filter: ViewFilters & IssueSortParam,
+  ) => [...issueKeys.viewAssigneeGroupsAll(wsId), viewId, filter] as const,
   /** All "my issues" queries — use for bulk invalidation. */
   myAll: (wsId: string) => [...issueKeys.all(wsId), "my"] as const,
   /** PREFIX for per-scope invalidation — no sort. */
@@ -109,7 +135,10 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
   return out;
 }
 
-async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortParam): Promise<ListIssuesCache> {
+async function fetchFirstPages(
+  filter: Partial<ListIssuesParams> = {},
+  sort?: IssueSortParam,
+): Promise<ListIssuesCache> {
   const responses = await Promise.all(
     PAGINATED_STATUSES.map((status) =>
       api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter }),
@@ -121,6 +150,150 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortPara
     byStatus[status] = { issues: res.issues, total: res.total };
   });
   return { byStatus };
+}
+
+/**
+ * Union several {@link ListIssuesCache}es into one, deduping issues by id
+ * within each status bucket and preserving first-seen order. `total` per
+ * bucket becomes the merged length, not the server total — multi-source
+ * unions don't have a meaningful server total to page against, so pagination
+ * is disabled for them (the per-source first pages are what renders). A
+ * single-element input passes through bucket-for-bucket with its server
+ * totals intact, so single-source callers keep working pagination.
+ */
+export function mergeIssueCaches(caches: ListIssuesCache[]): ListIssuesCache {
+  if (caches.length === 1) return caches[0]!;
+  const byStatus: ListIssuesCache["byStatus"] = {};
+  for (const status of PAGINATED_STATUSES) {
+    const seen = new Set<string>();
+    const merged: Issue[] = [];
+    for (const cache of caches) {
+      const bucket = cache.byStatus[status];
+      if (!bucket) continue;
+      for (const issue of bucket.issues) {
+        if (seen.has(issue.id)) continue;
+        seen.add(issue.id);
+        merged.push(issue);
+      }
+    }
+    byStatus[status] = { issues: merged, total: merged.length };
+  }
+  return { byStatus };
+}
+
+/**
+ * View-driven list fetch. Resolves the view's filters into one request per
+ * any_of branch (see resolveViewRequests), fetches the first page of each
+ * paginated status for each branch in parallel, then unions the branches by
+ * status (dedupe by id). A flat (single-branch) view goes straight through
+ * fetchFirstPages with its server totals intact, so per-status pagination via
+ * useLoadMoreByStatus keeps working. A multi-branch (any_of) view has no
+ * single server total per status, so pagination is disabled for it — the
+ * first page per status per branch is what renders.
+ */
+async function fetchViewFirstPages(
+  filters: ViewFilters,
+  sort?: IssueSortParam,
+): Promise<ListIssuesCache> {
+  const requests = resolveViewRequests(filters);
+  const caches = await Promise.all(requests.map((req) => fetchFirstPages(req, sort)));
+  return mergeIssueCaches(caches);
+}
+
+/**
+ * Union several {@link GroupedIssuesResponse}es into one, merging groups by
+ * (assignee_type, assignee_id) and deduping issues within each group. `total`
+ * per group becomes the merged length. A single input passes through
+ * unchanged (server totals intact) so single-source pagination keeps working.
+ */
+export function mergeAssigneeGroups(
+  responses: GroupedIssuesResponse[],
+): GroupedIssuesResponse {
+  if (responses.length === 1) return responses[0]!;
+  const groupKey = (g: GroupedIssuesResponse["groups"][number]) =>
+    `${g.assignee_type ?? "_"}::${g.assignee_id ?? "_"}`;
+  const merged = new Map<string, GroupedIssuesResponse["groups"][number]>();
+  for (const res of responses) {
+    for (const group of res.groups) {
+      const key = groupKey(group);
+      const existing = merged.get(key);
+      if (!existing) {
+        merged.set(key, {
+          ...group,
+          issues: [...group.issues],
+          total: group.issues.length,
+        });
+        continue;
+      }
+      const seen = new Set(existing.issues.map((i) => i.id));
+      for (const issue of group.issues) {
+        if (seen.has(issue.id)) continue;
+        seen.add(issue.id);
+        existing.issues.push(issue);
+      }
+      existing.total = existing.issues.length;
+    }
+  }
+  return { groups: [...merged.values()] };
+}
+
+async function fetchViewAssigneeGroups(
+  filters: ViewFilters,
+  sort?: IssueSortParam,
+): Promise<GroupedIssuesResponse> {
+  const requests = resolveViewRequests(filters);
+  const responses = await Promise.all(
+    requests.map((req) =>
+      api.listGroupedIssues({
+        group_by: "assignee",
+        limit: ISSUE_PAGE_SIZE,
+        offset: 0,
+        ...sort,
+        ...toGroupedFilter(req),
+      }),
+    ),
+  );
+  return mergeAssigneeGroups(responses);
+}
+
+/**
+ * Project a resolved {@link ListIssuesParams} (string CSV `assignee_filters` /
+ * `creator_filters` of the form `type:id`) onto the {@link ListGroupedIssuesParams}
+ * shape, which carries those two filters as {@link IssueActorRef}[]. The
+ * server-expanded `{me}` / `{my_agents}` / `{my_squads}` tokens have no `:`
+ * and pass through as `{ type: token, id: "" }` — the backend re-expands them.
+ */
+export function viewFiltersToGroupedFilter(filters: ViewFilters): AssigneeGroupedIssuesFilter {
+  const { any_of: _any_of, ...flat } = filters;
+  return toGroupedFilter(flat) as AssigneeGroupedIssuesFilter;
+}
+
+/**
+ * Constrain a view's filters to the assignee-grouped board's status scope.
+ * The per-status list path enumerates {@link PAGINATED_STATUSES} itself, but
+ * the board issues a single grouped fetch — so when a view sets no explicit
+ * status filter it must default to {@link BOARD_STATUSES}, otherwise the board
+ * pulls every status (including `cancelled`, which it never renders) and the
+ * two surfaces disagree. An explicit status filter is left untouched.
+ */
+export function withBoardStatusScope(filters: ViewFilters): ViewFilters {
+  return { ...filters, statuses: filters.statuses ?? [...BOARD_STATUSES] };
+}
+
+function toGroupedFilter(req: Partial<ListIssuesParams>): Partial<ListGroupedIssuesParams> {
+  const { assignee_filters, creator_filters, ...rest } = req;
+  const toRefs = (tokens: string[]): IssueActorRef[] =>
+    tokens.map((token) => {
+      const sep = token.indexOf(":");
+      const type = (sep === -1 ? token : token.slice(0, sep)) as IssueActorRef["type"];
+      const id = sep === -1 ? "" : token.slice(sep + 1);
+      return { type, id };
+    });
+  return {
+    ...rest,
+    ...(assignee_filters ? { assignee_filters: toRefs(assignee_filters) } : {}),
+    ...(creator_filters ? { creator_filters: toRefs(creator_filters) } : {}),
+  };
 }
 
 /**
@@ -143,27 +316,12 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortPara
  * 50-per-status × 3 widening (deduped) is what the page renders.
  */
 async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Promise<ListIssuesCache> {
-  const [byAssignee, byCreator, byInvolves] = await Promise.all([
+  const caches = await Promise.all([
     fetchFirstPages({ assignee_id: userId }, sort),
     fetchFirstPages({ creator_id: userId }, sort),
     fetchFirstPages({ involves_user_id: userId }, sort),
   ]);
-  const byStatus: ListIssuesCache["byStatus"] = {};
-  for (const status of PAGINATED_STATUSES) {
-    const seen = new Set<string>();
-    const merged: Issue[] = [];
-    for (const cache of [byAssignee, byCreator, byInvolves]) {
-      const bucket = cache.byStatus[status];
-      if (!bucket) continue;
-      for (const issue of bucket.issues) {
-        if (seen.has(issue.id)) continue;
-        seen.add(issue.id);
-        merged.push(issue);
-      }
-    }
-    byStatus[status] = { issues: merged, total: merged.length };
-  }
-  return { byStatus };
+  return mergeIssueCaches(caches);
 }
 
 /**
@@ -194,31 +352,7 @@ async function fetchAllMyAssigneeGroups(
       }),
     ),
   );
-  const groupKey = (g: GroupedIssuesResponse["groups"][number]) =>
-    `${g.assignee_type ?? "_"}::${g.assignee_id ?? "_"}`;
-  const merged = new Map<string, GroupedIssuesResponse["groups"][number]>();
-  for (const res of responses) {
-    for (const group of res.groups) {
-      const key = groupKey(group);
-      const existing = merged.get(key);
-      if (!existing) {
-        merged.set(key, {
-          ...group,
-          issues: [...group.issues],
-          total: group.issues.length,
-        });
-        continue;
-      }
-      const seen = new Set(existing.issues.map((i) => i.id));
-      for (const issue of group.issues) {
-        if (seen.has(issue.id)) continue;
-        seen.add(issue.id);
-        existing.issues.push(issue);
-      }
-      existing.total = existing.issues.length;
-    }
-  }
-  return { groups: [...merged.values()] };
+  return mergeAssigneeGroups(responses);
 }
 
 /**
@@ -239,6 +373,30 @@ export function issueListOptions(wsId: string, sort?: IssueSortParam) {
   });
 }
 
+/**
+ * View-driven list options. Replaces {@link issueListOptions} +
+ * client-side scope filtering: the view's filters are pushed to the server.
+ * Keyed on (wsId, viewId, filters, sort). `select` flattens the bucketed
+ * cache to Issue[] for the list/board/swimlane consumers.
+ *
+ * Single-branch views paginate via {@link useLoadMoreByStatus} (the bucket
+ * `total` is the server count). Multi-branch (any_of) views render the first
+ * page per status per branch and do NOT paginate — see fetchViewFirstPages.
+ */
+export function viewIssueListOptions(
+  wsId: string,
+  viewId: string | null,
+  filters: ViewFilters,
+  sort?: IssueSortParam,
+) {
+  return queryOptions({
+    queryKey: issueKeys.viewListSorted(wsId, viewId, filters, sort),
+    queryFn: () => fetchViewFirstPages(filters, sort),
+    select: flattenIssueBuckets,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function issueAssigneeGroupsOptions(
   wsId: string,
   filter: AssigneeGroupedIssuesFilter,
@@ -254,6 +412,26 @@ export function issueAssigneeGroupsOptions(
         ...sort,
         ...filter,
       }),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * View-driven assignee-grouped board options. Sibling of
+ * {@link viewIssueListOptions} for the board (group_by=assignee). Resolves the
+ * view's any_of branches, runs one grouped fetch per branch, and merges groups
+ * by (assignee_type, assignee_id). The board's own status/priority/etc filters
+ * are folded into `filters` by the caller, so this takes a ViewFilters too.
+ */
+export function viewIssueAssigneeGroupsOptions(
+  wsId: string,
+  viewId: string | null,
+  filters: ViewFilters,
+  sort?: IssueSortParam,
+) {
+  return queryOptions<GroupedIssuesResponse>({
+    queryKey: issueKeys.viewAssigneeGroups(wsId, viewId, { ...filters, ...sort }),
+    queryFn: () => fetchViewAssigneeGroups(filters, sort),
     placeholderData: keepPreviousData,
   });
 }
