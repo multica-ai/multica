@@ -3280,3 +3280,58 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 		t.Fatalf("expected 0 tasks for Agent A (no self-trigger on own mention), got %d", got)
 	}
 }
+
+// TestResolveActorActAsMember covers the X-On-Behalf-Of attribution path:
+// a privileged (owner/admin) caller may attribute an action to another
+// workspace member; everything else falls back to the token owner.
+func TestResolveActorActAsMember(t *testing.T) {
+	ctx := context.Background()
+
+	const (
+		targetUserID  = "11111111-1111-1111-1111-111111111111"
+		nonPrivUserID = "22222222-2222-2222-2222-222222222222"
+		nonMemberID   = "33333333-3333-3333-3333-333333333333"
+		adminUserID   = "44444444-4444-4444-4444-444444444444"
+	)
+
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member'), ($1, $3, 'member'), ($1, $4, 'admin')`,
+		testWorkspaceID, targetUserID, nonPrivUserID, adminUserID,
+	); err != nil {
+		t.Fatalf("failed to seed members: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM member WHERE workspace_id = $1 AND user_id = ANY($2)`,
+			testWorkspaceID, []string{targetUserID, nonPrivUserID, adminUserID})
+	})
+
+	tests := []struct {
+		name        string
+		caller      string
+		onBehalfOf  string
+		wantActorID string
+	}{
+		{"owner impersonates member", testUserID, targetUserID, targetUserID},
+		{"admin impersonates member", adminUserID, targetUserID, targetUserID},
+		{"self on-behalf is no-op", testUserID, testUserID, testUserID},
+		{"non-privileged cannot forge", nonPrivUserID, targetUserID, nonPrivUserID},
+		{"non-member target ignored", testUserID, nonMemberID, testUserID},
+		{"absent header keeps caller", testUserID, "", testUserID},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := newRequest("GET", "/test", nil)
+			if tt.onBehalfOf != "" {
+				req.Header.Set("X-On-Behalf-Of", tt.onBehalfOf)
+			}
+			actorType, actorID := testHandler.resolveActor(req, tt.caller, testWorkspaceID)
+			if actorType != "member" {
+				t.Errorf("actorType = %q, want member", actorType)
+			}
+			if actorID != tt.wantActorID {
+				t.Errorf("actorID = %q, want %q", actorID, tt.wantActorID)
+			}
+		})
+	}
+}
