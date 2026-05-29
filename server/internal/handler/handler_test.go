@@ -3280,3 +3280,199 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 		t.Fatalf("expected 0 tasks for Agent A (no self-trigger on own mention), got %d", got)
 	}
 }
+
+func TestCreateSkillSkipsSkillMdFile(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database available")
+	}
+
+	body, _ := json.Marshal(CreateSkillRequest{
+		Name:    "test-skill-create-skip-skillmd",
+		Content: "# SKILL.md content",
+		Files: []CreateSkillFileRequest{
+			{Path: "README.md", Content: "readme"},
+			{Path: "SKILL.md", Content: "should be skipped"},
+			{Path: "helper.go", Content: "package main"},
+		},
+	})
+
+	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/skills", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	testHandler.CreateSkill(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp SkillWithFilesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	// Should only have README.md and helper.go, not SKILL.md
+	if len(resp.Files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(resp.Files))
+	}
+	for _, f := range resp.Files {
+		if strings.EqualFold(f.Path, "SKILL.md") {
+			t.Fatalf("SKILL.md should not be in response files")
+		}
+	}
+
+	// Verify DB state directly
+	ctx := context.Background()
+	rows, err := testPool.Query(ctx, "SELECT path FROM skill_file WHERE skill_id = $1", resp.ID)
+	if err != nil {
+		t.Fatalf("query skill_file: %v", err)
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			t.Fatalf("scan path: %v", err)
+		}
+		paths = append(paths, p)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 rows in skill_file, got %d", len(paths))
+	}
+	for _, p := range paths {
+		if strings.EqualFold(p, "SKILL.md") {
+			t.Fatalf("SKILL.md should not be stored in skill_file")
+		}
+	}
+}
+
+func TestUpdateSkillSkipsSkillMdFile(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database available")
+	}
+
+	// Create a skill first
+	body, _ := json.Marshal(CreateSkillRequest{
+		Name:    "test-skill-update-skip-skillmd",
+		Content: "# SKILL.md content",
+		Files: []CreateSkillFileRequest{
+			{Path: "README.md", Content: "readme"},
+		},
+	})
+
+	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/skills", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	testHandler.CreateSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create skill: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var createResp SkillWithFilesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("unmarshal create response: %v", err)
+	}
+
+	// Update with SKILL.md in files
+	updateBody, _ := json.Marshal(UpdateSkillRequest{
+		Name:    strPtr("updated-name"),
+		Content: strPtr("updated content"),
+		Files: []CreateSkillFileRequest{
+			{Path: "README.md", Content: "updated readme"},
+			{Path: "SKILL.md", Content: "should be skipped"},
+			{Path: "new.go", Content: "package main"},
+		},
+	})
+
+	updateReq := newRequest(http.MethodPut, "/api/skills/"+createResp.ID, bytes.NewReader(updateBody))
+	updateReq = withURLParam(updateReq, "skillID", createResp.ID)
+	updateRec := httptest.NewRecorder()
+	testHandler.UpdateSkill(updateRec, updateReq)
+
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update skill: expected 200, got %d: %s", updateRec.Code, updateRec.Body.String())
+	}
+
+	var updateResp SkillWithFilesResponse
+	if err := json.Unmarshal(updateRec.Body.Bytes(), &updateResp); err != nil {
+		t.Fatalf("unmarshal update response: %v", err)
+	}
+
+	if len(updateResp.Files) != 2 {
+		t.Fatalf("expected 2 files after update, got %d", len(updateResp.Files))
+	}
+	for _, f := range updateResp.Files {
+		if strings.EqualFold(f.Path, "SKILL.md") {
+			t.Fatalf("SKILL.md should not be in updated response files")
+		}
+	}
+
+	// Verify DB state
+	ctx := context.Background()
+	rows, err := testPool.Query(ctx, "SELECT path FROM skill_file WHERE skill_id = $1", createResp.ID)
+	if err != nil {
+		t.Fatalf("query skill_file: %v", err)
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			t.Fatalf("scan path: %v", err)
+		}
+		paths = append(paths, p)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 rows in skill_file after update, got %d", len(paths))
+	}
+	for _, p := range paths {
+		if strings.EqualFold(p, "SKILL.md") {
+			t.Fatalf("SKILL.md should not be stored in skill_file after update")
+		}
+	}
+}
+
+func strPtr(s string) *string {
+	return &s
+}
+
+func TestUpsertSkillFileRejectsSkillMd(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database available")
+	}
+
+	// Create a skill first
+	body, _ := json.Marshal(CreateSkillRequest{
+		Name:    "test-skill-upsert-reject-skillmd",
+		Content: "# SKILL.md content",
+	})
+
+	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/skills", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	testHandler.CreateSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create skill: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var createResp SkillWithFilesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("unmarshal create response: %v", err)
+	}
+
+	// Try to upsert SKILL.md
+	upsertBody, _ := json.Marshal(CreateSkillFileRequest{
+		Path:    "SKILL.md",
+		Content: "should be rejected",
+	})
+
+	upsertReq := newRequest(http.MethodPut, "/api/skills/"+createResp.ID+"/files", bytes.NewReader(upsertBody))
+	upsertReq = withURLParam(upsertReq, "skillID", createResp.ID)
+	upsertRec := httptest.NewRecorder()
+	testHandler.UpsertSkillFile(upsertRec, upsertReq)
+
+	if upsertRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", upsertRec.Code, upsertRec.Body.String())
+	}
+	if !strings.Contains(upsertRec.Body.String(), "SKILL.md is reserved") {
+		t.Fatalf("expected error message about reserved SKILL.md, got: %s", upsertRec.Body.String())
+	}
+}

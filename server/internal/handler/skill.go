@@ -396,6 +396,10 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 		}
 		fileResps = make([]SkillFileResponse, 0, len(req.Files))
 		for _, f := range req.Files {
+			// SKILL.md is reserved for the primary skill content (skill.Content).
+			if strings.EqualFold(f.Path, "SKILL.md") {
+				continue
+			}
 			sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
 				SkillID: skill.ID,
 				Path:    sanitizeNullBytes(f.Path),
@@ -1708,6 +1712,10 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 
 	if !validateFilePath(req.Path) {
 		writeError(w, http.StatusBadRequest, "invalid file path")
+		return
+	}
+	if strings.EqualFold(req.Path, "SKILL.md") {
+		writeError(w, http.StatusBadRequest, "SKILL.md is reserved for the primary skill content")
 		return
 	}
 
