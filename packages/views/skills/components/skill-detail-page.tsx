@@ -622,7 +622,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       {/* Body: file tree | editor | sidebar */}
       <div className="flex flex-1 min-h-0 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
         {/* File tree */}
-        <aside className="flex max-h-44 w-full shrink-0 flex-col border-b md:max-h-none md:w-56 md:border-b-0 md:border-r">
+        <aside className="flex max-h-44 w-full shrink-0 flex-col border-b md:max-h-none md:min-h-0 md:w-56 md:border-b-0 md:border-r">
           <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
             <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
               {t(($) => $.detail.files_label, { count: totalFileCount(skill) })}
@@ -654,7 +654,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               onCancel={() => setAddingFile(false)}
             />
           )}
-          <div className="flex-1 overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             <FileTree
               filePaths={filePaths}
               selectedPath={selectedPath}
@@ -678,7 +678,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         </aside>
 
         {/* Editor */}
-        <section className="flex min-h-[32rem] min-w-0 shrink-0 flex-col md:min-h-0 md:flex-1 md:shrink">
+        <section className="flex min-h-[32rem] min-w-0 shrink-0 flex-col md:min-h-0 md:flex-1 md:shrink md:overflow-hidden">
           {/* Name + description + subline */}
           <div className="space-y-2 border-b px-4 py-4 sm:px-5">
             <Input
@@ -816,7 +816,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         </section>
 
         {/* Sidebar */}
-        <aside className="flex w-full shrink-0 flex-col gap-4 border-t bg-muted/20 px-4 py-4 md:w-72 md:overflow-y-auto md:border-l md:border-t-0">
+        <aside className="flex w-full shrink-0 flex-col gap-4 border-t bg-muted/20 px-4 py-4 md:min-h-0 md:w-72 md:overflow-y-auto md:border-l md:border-t-0">
           <div>
             <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               {t(($) => $.detail.sidebar.metadata)}
