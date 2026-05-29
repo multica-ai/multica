@@ -9,8 +9,8 @@
 #   ./build-images.sh [--no-push] [--registry REG] [--tag TAG] [image…]
 #
 # Defaults: registry=ghcr.io/chrissnell, tag=$(git rev-parse --short HEAD).
-# With no image args, builds backend/web/postgres. Pass `runtime` explicitly
-# to build the runtime base + runtime-claude images (Plan C).
+# With no image args, builds backend/web/postgres/controller. Pass `runtime`
+# explicitly to build the runtime base + runtime-claude images (Plan C).
 
 set -euo pipefail
 
@@ -41,6 +41,7 @@ declare -A IMAGES=(
   [backend]="Dockerfile"
   [web]="Dockerfile.web"
   [postgres]="packaging/docker/postgres/Dockerfile"
+  [controller]="packaging/docker/controller/Dockerfile"
 )
 
 build_runtime() {
