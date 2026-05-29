@@ -86,7 +86,10 @@
   "picker": {
     "no_project": "No project",
     "remove": "Remove from project",
-    "empty": "No projects yet"
+    "empty": "No projects yet",
+    "search_placeholder": "Search projects…",
+    "search_aria": "Search projects",
+    "no_results": "No projects match \"{{query}}\""
   },
   "chip": {
     "fallback_label": "Project"
