@@ -51,7 +51,7 @@ import {
  *     1. Full-screen loading veil ("Preparing your Helper…")
  *     2. Find-or-create a "Multica Helper" agent on the picked runtime
  *        — `listAgents` first to dedupe against re-entries, then
- *        `createAgent` with the EN/ZH instructions from
+ *        `createAgent` with the localized instructions from
  *        `onboarding/templates/helper-instructions.ts`.
  *     3. Blocking Dialog (no close button, no Escape, no outside-click).
  *        Renders the agent's name + description and 3 starter cards.
