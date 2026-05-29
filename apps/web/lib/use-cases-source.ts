@@ -2,6 +2,7 @@ import { loader } from "fumadocs-core/source";
 import { defineI18n } from "fumadocs-core/i18n";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { useCases } from "@/.source";
+import { mergeUseCasePagesWithEnglishFallback } from "./use-case-locale-fallback";
 
 // Use-case content uses dot-suffixed MDX files (`<slug>.en.mdx`,
 // `<slug>.zh.mdx`, and `<slug>.ko.mdx`). The public route remains prefix-free; request locale is
@@ -26,3 +27,27 @@ export const useCasesSource = loader({
   source: useCases.toFumadocsSource(),
   i18n,
 });
+
+export function getUseCasePagesForLocale(locale: SupportedLocale) {
+  const lang = getUseCaseLangForLocale(locale);
+  const pages = useCasesSource.getPages(lang);
+
+  if (lang === i18n.defaultLanguage) return pages;
+
+  return mergeUseCasePagesWithEnglishFallback(
+    pages,
+    useCasesSource.getPages(i18n.defaultLanguage),
+  );
+}
+
+export function getUseCasePageForLocale(
+  slugs: string[],
+  locale: SupportedLocale,
+) {
+  const lang = getUseCaseLangForLocale(locale);
+  const page = useCasesSource.getPage(slugs, lang);
+
+  if (page || lang === i18n.defaultLanguage) return page;
+
+  return useCasesSource.getPage(slugs, i18n.defaultLanguage);
+}
