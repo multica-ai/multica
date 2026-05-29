@@ -999,13 +999,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   } = useIssueSubscribers(wsId, id, user?.id);
 
   // Token usage
-  const { data: usage } = useQuery(issueUsageOptions(id));
+  const { data: usage } = useQuery(issueUsageOptions(wsId, id));
 
   // Attachments uploaded against this issue. Drives the description
   // editor's click-time fresh-sign download: NodeViews match
   // `src`/`href` against this list to resolve an attachment id before
   // calling `/api/attachments/{id}`.
-  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(id));
+  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(wsId, id));
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
