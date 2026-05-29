@@ -38,20 +38,20 @@ function expectJapaneseScopedOverride(source: string) {
 
 describe("CJK font fallback order", () => {
   it("keeps docs Chinese font fallbacks before Korean font fallbacks", () => {
-    const layoutSource = readFileSync(
-      resolve(process.cwd(), "app/[lang]/layout.tsx"),
+    const cssSource = readFileSync(
+      resolve(process.cwd(), "app/global.css"),
       "utf8",
     );
 
-    expectChineseFontsBeforeKoreanFonts(layoutSource);
+    expectChineseFontsBeforeKoreanFonts(cssSource);
   });
 
   it("scopes the Japanese-first CJK stack to html[lang|='ja']", () => {
-    const layoutSource = readFileSync(
-      resolve(process.cwd(), "app/[lang]/layout.tsx"),
+    const cssSource = readFileSync(
+      resolve(process.cwd(), "app/global.css"),
       "utf8",
     );
 
-    expectJapaneseScopedOverride(layoutSource);
+    expectJapaneseScopedOverride(cssSource);
   });
 });

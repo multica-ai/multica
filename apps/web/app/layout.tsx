@@ -9,30 +9,19 @@ import { RESOURCES } from "@multica/views/locales";
 import { getRequestLocale } from "@/lib/request-locale";
 import "./globals.css";
 
-// Font stack: Inter for Latin UI text + system CJK fonts for localized content.
-// Desktop app uses the same stack via apps/desktop/src/renderer/src/globals.css —
-// keep the CJK fallback tail in sync across both files. The Inter primary family
-// differs by design: next/font produces `__Inter_xxx` (with a synthetic size-adjusted
-// fallback face to prevent FOUT layout shift); desktop uses fontsource's "Inter Variable".
-// Both resolve to Inter glyphs, so rendering is identical in practice.
-// Per-character fallback: Latin chars render with Inter, CJK chars render with the
-// platform-native Chinese/Korean fallback when needed. Chinese fonts must stay before
-// Korean fonts so zh users do not receive Korean Hanja glyph shapes.
+// Inter is the Latin UI face. next/font produces a hashed family (`__Inter_xxx`)
+// plus a synthetic size-adjusted fallback face to prevent FOUT layout shift —
+// both are exposed under the `--font-inter` CSS variable.
+//
+// The full `--font-sans` stack (Inter + the per-locale CJK fallback chain) is
+// assembled in static CSS in ./globals.css, not here: it must be overridable per
+// `<html lang>` (Japanese Kanji are Han ideographs and need a Japanese-first CJK
+// stack), and a hashed family name can only be referenced from CSS via a variable.
+// Keeping the CJK chain in CSS also keeps it CSP-safe and in sync with the desktop
+// app, which defines the same chain in apps/desktop/src/renderer/src/globals.css.
 const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-sans",
-  fallback: [
-    "-apple-system",
-    "BlinkMacSystemFont",
-    "Segoe UI",
-    "PingFang SC",
-    "Microsoft YaHei",
-    "Noto Sans CJK SC",
-    "Apple SD Gothic Neo",
-    "Malgun Gothic",
-    "Noto Sans CJK KR",
-    "sans-serif",
-  ],
+  variable: "--font-inter",
 });
 // Mono font has no explicit CJK fallback: CJK chars in code blocks are inherently
 // non-aligned with a mono grid (Chinese is proportional), so listing CJK fonts
@@ -112,44 +101,6 @@ const HTML_LANG: Record<SupportedLocale, string> = {
   ja: "ja-JP",
 };
 
-// Japanese-scoped CJK font override.
-//
-// Japanese Kanji are Han ideographs in the SAME Unicode block as Chinese
-// Hanzi (unlike Korean Hangul, which has its own block). CSS picks the first
-// font in the stack that contains a glyph, and `<html lang>` does NOT change
-// that order — so the "append after Chinese" tactic used for Korean would
-// hand Japanese users Chinese glyph shapes for every shared ideograph
-// (e.g. 直/今/絵 render with the wrong regional forms). The global stack must
-// stay Chinese-first so zh/en users never regress, so we instead scope a
-// Japanese-first CJK chain to `<html lang="ja-*">` only. Inter still leads for
-// Latin so the brand face is unchanged; the Chinese/Korean families remain as
-// a deep fallback for any glyph the Japanese fonts lack.
-const JA_FONT_FAMILY = [
-  inter.style.fontFamily,
-  '"Hiragino Sans"',
-  '"Hiragino Kaku Gothic ProN"',
-  '"Yu Gothic"',
-  '"YuGothic"',
-  '"Meiryo"',
-  '"Noto Sans CJK JP"',
-  '"Noto Sans JP"',
-  "-apple-system",
-  "BlinkMacSystemFont",
-  '"Segoe UI"',
-  '"PingFang SC"',
-  '"Microsoft YaHei"',
-  '"Noto Sans CJK SC"',
-  '"Apple SD Gothic Neo"',
-  '"Malgun Gothic"',
-  '"Noto Sans CJK KR"',
-  "sans-serif",
-].join(", ");
-// `[lang|="ja"]` is the BCP-47 language-range selector: it matches exactly
-// `lang="ja"` or `lang="ja-<region>"` (e.g. ja-JP) and nothing else. A bare
-// prefix match (`[lang^="ja"]`) would also catch unrelated 3-letter subtags
-// like `jam` (Jamaican Creole), so we use `|=` here.
-const JA_FONT_OVERRIDE_CSS = `html[lang|="ja"]{--font-sans:${JA_FONT_FAMILY};}`;
-
 export default async function RootLayout({
   children,
 }: {
@@ -165,7 +116,6 @@ export default async function RootLayout({
       className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
     >
       <body className="h-full overflow-hidden">
-        <style dangerouslySetInnerHTML={{ __html: JA_FONT_OVERRIDE_CSS }} />
         <ThemeProvider>
           <WebProviders locale={locale} resources={resources}>
             {children}
