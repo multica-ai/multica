@@ -32,21 +32,21 @@ const (
 	// daemon-visible activity — see MUL-2300. 30 min keeps the safety net for
 	// truly stuck runs (dockerd hang) while leaving headroom for long writes.
 	// Set MULTICA_AGENT_IDLE_WATCHDOG=0 to disable.
-	DefaultAgentIdleWatchdog = 30 * time.Minute
-	DefaultRuntimeName                    = "Local Agent"
-	DefaultWorkspaceSyncInterval          = 30 * time.Second
-	DefaultHealthPort                     = 19514
-	DefaultMaxConcurrentTasks             = 20
-	DefaultGCInterval                     = 1 * time.Hour
-	DefaultGCTTL                          = 5 * 24 * time.Hour  // 5 days
-	DefaultGCOrphanTTL                    = 30 * 24 * time.Hour // 30 days
-	DefaultGCArtifactTTL                  = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
+	DefaultAgentIdleWatchdog     = 30 * time.Minute
+	DefaultRuntimeName           = "Local Agent"
+	DefaultWorkspaceSyncInterval = 30 * time.Second
+	DefaultHealthPort            = 19514
+	DefaultMaxConcurrentTasks    = 20
+	DefaultGCInterval            = 1 * time.Hour
+	DefaultGCTTL                 = 5 * 24 * time.Hour  // 5 days
+	DefaultGCOrphanTTL           = 30 * 24 * time.Hour // 30 days
+	DefaultGCArtifactTTL         = 12 * time.Hour      // 12h — drop regenerable artifacts on completed but still-open issues
 
 	// Rate Limit retry configuration
-	DefaultRateLimitInitialDelay  = 5 * time.Second // 5 seconds
-	DefaultRateLimitMaxRetries    = 6               // max 6 retries
-	DefaultRateLimitBackoffFactor = 2.0             // exponential backoff
-	DefaultAutoUpdateCheckInterval        = 6 * time.Hour  // how often the daemon polls GitHub for a newer CLI release
+	DefaultRateLimitInitialDelay   = 5 * time.Second // 5 seconds
+	DefaultRateLimitMaxRetries     = 6               // max 6 retries
+	DefaultRateLimitBackoffFactor  = 2.0             // exponential backoff
+	DefaultAutoUpdateCheckInterval = 6 * time.Hour   // how often the daemon polls GitHub for a newer CLI release
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
@@ -105,7 +105,7 @@ type RateLimitConfig struct {
 // Overrides allows CLI flags to override environment variables and defaults.
 // Zero values are ignored and the env/default value is used instead.
 type Overrides struct {
-ServerURL                      string
+	ServerURL                      string
 	WorkspacesRoot                 string
 	PollInterval                   time.Duration
 	HeartbeatInterval              time.Duration
@@ -163,8 +163,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		})
 		return shellResolved
 	}
-	probe := func(envVar, defaultCmd, modelEnv string) (AgentEntry, bool) {
-		cmd := envOrDefault(envVar, defaultCmd)
+	probeCommand := func(cmd, modelEnv string) (AgentEntry, bool) {
 		if _, err := exec.LookPath(cmd); err == nil {
 			return AgentEntry{
 				Path:  cmd,
@@ -185,6 +184,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			}, true
 		}
 		return AgentEntry{}, false
+	}
+	probe := func(envVar, defaultCmd, modelEnv string) (AgentEntry, bool) {
+		return probeCommand(envOrDefault(envVar, defaultCmd), modelEnv)
 	}
 
 	agents := map[string]AgentEntry{}
@@ -224,15 +226,18 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
-	deepseekPath := envOrDefault("MULTICA_DEEPSEEK_PATH", "deepseek")
-	if _, err := exec.LookPath(deepseekPath); err == nil {
-		agents["DeepSeek-TUI"] = AgentEntry{
-			Path:  deepseekPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_DEEPSEEK_MODEL")),
+	deepseekCandidates := []string{"deepseek-tui", "deepseek"}
+	if pinned := strings.TrimSpace(os.Getenv("MULTICA_DEEPSEEK_PATH")); pinned != "" {
+		deepseekCandidates = []string{pinned}
+	}
+	for _, deepseekPath := range deepseekCandidates {
+		if e, ok := probeCommand(deepseekPath, "MULTICA_DEEPSEEK_MODEL"); ok {
+			agents["DeepSeek-TUI"] = e
+			break
 		}
 	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or DeepSeek-TUI (deepseek) and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or DeepSeek-TUI (deepseek-tui) and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -598,6 +603,7 @@ func shellArgsFromEnv(name string) ([]string, error) {
 var defaultAgentCommandNames = []string{
 	"claude", "cbc", "codex", "opencode", "openclaw", "hermes",
 	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
+	"deepseek-tui", "deepseek",
 }
 
 // loginShellResolveTimeout caps how long the daemon will wait for the user's
