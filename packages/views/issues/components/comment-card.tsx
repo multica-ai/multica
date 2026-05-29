@@ -953,27 +953,31 @@ function CommentCardImpl({
             </div>
           ))}
 
-          {/* Reply input — replaced by the select-action bar while picking. */}
+          {/* Reply input — hidden while picking; the floating action bar takes over. */}
           {selectMode ? (
-            // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 select-mode action bar.
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/50 px-3 sm:px-4 py-2.5">
-              <span className="text-xs text-muted-foreground">
-                {t(($) => $.comment.move_thread.select_hint)}
-              </span>
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant="ghost" onClick={cancelSelect} disabled={movingThread}>
-                  {t(($) => $.comment.cancel_action)}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={selectedIds.size === 0 || movingThread}
-                  onClick={confirmMoveThread}
-                >
-                  {movingThread
-                    ? t(($) => $.comment.move_thread.moving_action)
-                    : t(($) => $.comment.move_thread.move_action, { count: selectedIds.size })}
-                </Button>
+            // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 floating select-action
+            // bar pinned to the viewport, so it stays reachable on long threads instead
+            // of scrolling out of view at the bottom of the thread.
+            <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
+              <div className="pointer-events-auto flex w-full max-w-[min(36rem,calc(100vw-2rem))] flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-popover px-4 py-2.5 text-popover-foreground shadow-lg">
+                <span className="text-xs text-muted-foreground">
+                  {t(($) => $.comment.move_thread.select_hint)}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="ghost" onClick={cancelSelect} disabled={movingThread}>
+                    {t(($) => $.comment.cancel_action)}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    disabled={selectedIds.size === 0 || movingThread}
+                    onClick={confirmMoveThread}
+                  >
+                    {movingThread
+                      ? t(($) => $.comment.move_thread.moving_action)
+                      : t(($) => $.comment.move_thread.move_action, { count: selectedIds.size })}
+                  </Button>
+                </div>
               </div>
             </div>
           ) : (
