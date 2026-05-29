@@ -128,6 +128,9 @@ runtime:
     image: { name: multica-controller, tag: "" }   # "" → falls back to image.tag
     pollInterval: 3s
     heartbeatInterval: 15s
+    workdir:
+      storageClass: ""
+      size: 5Gi
     resources:
       requests: { cpu: 100m, memory: 128Mi }
       limits:   { cpu: 500m, memory: 256Mi }
