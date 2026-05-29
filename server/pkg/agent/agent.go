@@ -231,19 +231,19 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
-	"claude":    "claude (stream-json)",
-	"codebuddy": "codebuddy (stream-json)",
-	"codex":     "codex app-server",
-	"copilot":  "copilot (json)",
-	"cursor":   "cursor-agent (stream-json)",
-	"gemini":   "gemini (stream-json)",
-	"hermes":   "hermes acp",
-	"openclaw": "openclaw agent (json)",
-	"opencode": "opencode run (json)",
-	"pi":       "pi (json mode)",
-	"kimi":     "kimi acp",
-	"kiro":     "kiro-cli acp",
-	"DeepSeek-TUI": "deepseek app-server (native)",
+	"claude":       "claude (stream-json)",
+	"codebuddy":    "codebuddy (stream-json)",
+	"codex":        "codex app-server",
+	"copilot":      "copilot (json)",
+	"cursor":       "cursor-agent (stream-json)",
+	"gemini":       "gemini (stream-json)",
+	"hermes":       "hermes acp",
+	"openclaw":     "openclaw agent (json)",
+	"opencode":     "opencode run (json)",
+	"pi":           "pi (json mode)",
+	"kimi":         "kimi acp",
+	"kiro":         "kiro-cli acp",
+	"DeepSeek-TUI": "deepseek-tui exec --json --auto",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +13,7 @@ import (
 
 func TestNewReturnsDeepseekBackend(t *testing.T) {
 	t.Parallel()
-	b, err := New("DeepSeek-TUI", Config{ExecutablePath: "/nonexistent/deepseek"})
+	b, err := New("DeepSeek-TUI", Config{ExecutablePath: "/nonexistent/deepseek-tui"})
 	if err != nil {
 		t.Fatalf("New(deepseek) error: %v", err)
 	}
@@ -46,9 +47,7 @@ func TestDeepseekToolName(t *testing.T) {
 		{"web_fetch", "web_fetch"},
 		{"fetch", "web_fetch"},
 		{"todo_write", "todo_write"},
-		// Fallback: pass through as snake_case.
 		{"custom_thing", "custom_thing"},
-		// Empty input returns empty.
 		{"", ""},
 	}
 	for _, tt := range tests {
@@ -59,67 +58,37 @@ func TestDeepseekToolName(t *testing.T) {
 	}
 }
 
-// fakeDeepseekNativeScript returns a POSIX-sh script that emulates
-// `deepseek app-server --stdio` using the native thread/* protocol.
-// It handles thread/start, thread/message (emitting push events),
-// and shutdown. The "error" variant rejects thread/start for testing
-// failure propagation.
-func fakeDeepseekNativeScript(mode string) string {
+func fakeDeepseekExecScript(mode string) string {
 	switch mode {
 	case "success":
 		return `#!/bin/sh
-# Fake deepseek binary — native protocol
 if [ -n "$DEEPSEEK_ARGS_FILE" ]; then
   for arg in "$@"; do
     printf '%s\n' "$arg" >> "$DEEPSEEK_ARGS_FILE"
   done
 fi
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"thread/start"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"thread_id":"thread-fake-123","status":"started"}}\n' "$id"
-      ;;
-    *'"method":"thread/message"'*)
-      printf '{"type":"response_start","response_id":"thread-fake-123:1"}\n'
-      printf '{"type":"response_delta","response_id":"thread-fake-123:1","delta":"Hello from DeepSeek!"}\n'
-      printf '{"type":"usage_update","usage":{"input_tokens":25,"output_tokens":7,"cached_input_tokens":3}}\n'
-      printf '{"type":"response_end","response_id":"thread-fake-123:1"}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"thread_id":"thread-fake-123","status":"accepted","events":[]}}\n' "$id"
-      ;;
-    *'"method":"shutdown"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
-      exit 0
-      ;;
-  esac
-done
+printf '%s\n' '{"mode":"agent","model":"deepseek-v4-pro","output":"Hello from DeepSeek!","tools":[{"name":"write_file","success":true,"output":"created hello.txt"}],"status":"completed","error":null,"usage":{"input_tokens":25,"output_tokens":7,"cached_input_tokens":3}}'
 `
-	case "thread_start_error":
+	case "oneshot_success":
 		return `#!/bin/sh
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"thread/start"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"config error: no API key"}}\n' "$id"
-      exit 0
-      ;;
-  esac
-done
+printf '%s\n' '{"mode":"one-shot","model":"deepseek-v4-pro","success":true,"output":"Hi there!"}'
+`
+	case "failure":
+		return `#!/bin/sh
+printf '%s\n' '{"mode":"agent","model":"deepseek-v4-pro","output":"","tools":[],"status":"failed","error":"no API key"}'
+exit 1
 `
 	default:
 		return "#!/bin/sh\nexit 1\n"
 	}
 }
 
-// TestDeepseekBackendNativeProtocol verifies the happy path: the
-// backend creates a thread, sends a message, and collects the text
-// output from response_delta push events.
-func TestDeepseekBackendNativeProtocol(t *testing.T) {
+func TestDeepseekBackendExecJSONProtocol(t *testing.T) {
 	t.Parallel()
 
-	fakePath := filepath.Join(t.TempDir(), "deepseek")
-	if err := os.WriteFile(fakePath, []byte(fakeDeepseekNativeScript("success")), 0o755); err != nil {
-		t.Fatalf("write fake deepseek: %v", err)
+	fakePath := filepath.Join(t.TempDir(), "deepseek-tui")
+	if err := os.WriteFile(fakePath, []byte(fakeDeepseekExecScript("success")), 0o755); err != nil {
+		t.Fatalf("write fake deepseek-tui: %v", err)
 	}
 
 	backend, err := New("DeepSeek-TUI", Config{ExecutablePath: fakePath, Logger: slog.Default()})
@@ -130,16 +99,15 @@ func TestDeepseekBackendNativeProtocol(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := backend.Execute(ctx, "say hello", ExecOptions{
-		Timeout: 5 * time.Second,
-	})
+	session, err := backend.Execute(ctx, "say hello", ExecOptions{Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 
-	// Collect messages.
 	var messages []Message
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		for msg := range session.Messages {
 			messages = append(messages, msg)
 		}
@@ -153,29 +121,35 @@ func TestDeepseekBackendNativeProtocol(t *testing.T) {
 		if result.Status != "completed" {
 			t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
 		}
-		if result.SessionID != "thread-fake-123" {
-			t.Errorf("expected session_id=thread-fake-123, got %q", result.SessionID)
+		if result.Output != "Hello from DeepSeek!" {
+			t.Errorf("output = %q, want Hello from DeepSeek!", result.Output)
 		}
-		if !strings.Contains(result.Output, "Hello from DeepSeek!") {
-			t.Errorf("expected output to contain 'Hello from DeepSeek!', got %q", result.Output)
-		}
-		usage := result.Usage["unknown"]
+		usage := result.Usage["deepseek-v4-pro"]
 		if usage.InputTokens != 25 || usage.OutputTokens != 7 || usage.CacheReadTokens != 3 {
 			t.Errorf("usage = %+v, want input=25 output=7 cache_read=3", usage)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
 	}
+	<-done
+
+	if len(messages) < 3 {
+		t.Fatalf("messages = %+v, want tool use/result and final text", messages)
+	}
+	if messages[0].Type != MessageToolUse || messages[0].Tool != "write_file" {
+		t.Fatalf("first message = %+v, want write_file tool use", messages[0])
+	}
+	if messages[len(messages)-1].Type != MessageText || messages[len(messages)-1].Content != "Hello from DeepSeek!" {
+		t.Fatalf("last message = %+v, want final text", messages[len(messages)-1])
+	}
 }
 
-// TestDeepseekBackendThreadStartFailure verifies that a thread/start
-// error is properly propagated as a failed task result.
-func TestDeepseekBackendThreadStartFailure(t *testing.T) {
+func TestDeepseekBackendOneShotSuccessJSON(t *testing.T) {
 	t.Parallel()
 
-	fakePath := filepath.Join(t.TempDir(), "deepseek")
-	if err := os.WriteFile(fakePath, []byte(fakeDeepseekNativeScript("thread_start_error")), 0o755); err != nil {
-		t.Fatalf("write fake deepseek: %v", err)
+	fakePath := filepath.Join(t.TempDir(), "deepseek-tui")
+	if err := os.WriteFile(fakePath, []byte(fakeDeepseekExecScript("oneshot_success")), 0o755); err != nil {
+		t.Fatalf("write fake deepseek-tui: %v", err)
 	}
 
 	backend, err := New("DeepSeek-TUI", Config{ExecutablePath: fakePath, Logger: slog.Default()})
@@ -185,10 +159,7 @@ func TestDeepseekBackendThreadStartFailure(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
-		Timeout: 5 * time.Second,
-	})
+	session, err := backend.Execute(ctx, "say hello", ExecOptions{Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -198,15 +169,43 @@ func TestDeepseekBackendThreadStartFailure(t *testing.T) {
 	}()
 
 	select {
-	case result, ok := <-session.Result:
-		if !ok {
-			t.Fatal("result channel closed without a value")
+	case result := <-session.Result:
+		if result.Status != "completed" || result.Output != "Hi there!" {
+			t.Fatalf("result = %+v, want completed Hi there!", result)
 		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestDeepseekBackendExecFailure(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "deepseek-tui")
+	if err := os.WriteFile(fakePath, []byte(fakeDeepseekExecScript("failure")), 0o755); err != nil {
+		t.Fatalf("write fake deepseek-tui: %v", err)
+	}
+
+	backend, err := New("DeepSeek-TUI", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new deepseek backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result := <-session.Result:
 		if result.Status != "failed" {
 			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
-		}
-		if !strings.Contains(result.Error, "thread/start") {
-			t.Errorf("expected error to mention thread/start, got %q", result.Error)
 		}
 		if !strings.Contains(result.Error, "no API key") {
 			t.Errorf("expected error to surface upstream message, got %q", result.Error)
@@ -216,16 +215,18 @@ func TestDeepseekBackendThreadStartFailure(t *testing.T) {
 	}
 }
 
-// TestDeepseekBackendInvokesAppServerStdio pins the argv: the
-// daemon must pass `app-server --stdio` to launch the native protocol.
-func TestDeepseekBackendInvokesAppServerStdio(t *testing.T) {
+func TestDeepseekBackendInvokesCurrentExecJSONCommand(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
 	argsFile := filepath.Join(tempDir, "argv.txt")
-	fakePath := filepath.Join(tempDir, "deepseek")
-	if err := os.WriteFile(fakePath, []byte(fakeDeepseekNativeScript("success")), 0o755); err != nil {
-		t.Fatalf("write fake deepseek: %v", err)
+	workDir := filepath.Join(tempDir, "project")
+	if err := os.Mkdir(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workDir: %v", err)
+	}
+	fakePath := filepath.Join(tempDir, "deepseek-tui")
+	if err := os.WriteFile(fakePath, []byte(fakeDeepseekExecScript("success")), 0o755); err != nil {
+		t.Fatalf("write fake deepseek-tui: %v", err)
 	}
 
 	backend, err := New("DeepSeek-TUI", Config{
@@ -239,9 +240,11 @@ func TestDeepseekBackendInvokesAppServerStdio(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
 	session, err := backend.Execute(ctx, "say hello", ExecOptions{
-		Timeout: 5 * time.Second,
+		Cwd:        workDir,
+		Model:      "deepseek-v4-flash",
+		Timeout:    5 * time.Second,
+		CustomArgs: []string{"app-server", "--stdio", "--custom-ok"},
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -256,32 +259,21 @@ func TestDeepseekBackendInvokesAppServerStdio(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read args file: %v", err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("expected at least 2 args (app-server --stdio), got %d: %q", len(lines), lines)
+	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	wantPrefix := []string{"--workspace", workDir, "exec", "--json", "--auto", "--model", "deepseek-v4-flash"}
+	if len(args) < len(wantPrefix)+2 {
+		t.Fatalf("args too short: %q", args)
 	}
-	if lines[0] != "app-server" {
-		t.Errorf("expected first arg to be app-server, got %q (full: %q)", lines[0], lines)
+	if !slices.Equal(args[:len(wantPrefix)], wantPrefix) {
+		t.Fatalf("args prefix = %q, want %q", args[:len(wantPrefix)], wantPrefix)
 	}
-	if lines[1] != "--stdio" {
-		t.Errorf("expected second arg to be --stdio, got %q (full: %q)", lines[1], lines)
+	if slices.Contains(args, "app-server") || slices.Contains(args, "--stdio") {
+		t.Fatalf("legacy app-server args leaked into command: %q", args)
 	}
-}
-
-func TestExtractDeepseekThreadID(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{`{"thread_id":"thread-abc-123","status":"started"}`, "thread-abc-123"},
-		{`{"status":"started"}`, ""},
-		{`{}`, ""},
+	if !slices.Contains(args, "--custom-ok") {
+		t.Fatalf("allowed custom arg missing from command: %q", args)
 	}
-	for _, tt := range tests {
-		got := extractDeepseekThreadID([]byte(tt.input))
-		if got != tt.want {
-			t.Errorf("extractDeepseekThreadID(%s) = %q, want %q", tt.input, got, tt.want)
-		}
+	if args[len(args)-1] != "say hello" {
+		t.Fatalf("last arg = %q, want prompt", args[len(args)-1])
 	}
 }

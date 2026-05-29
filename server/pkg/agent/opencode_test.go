@@ -624,7 +624,7 @@ func TestOpencodeProcessEventsStepFinishUsageKeepsReasoningInsideOutput(t *testi
 		`{"type":"step_finish","sessionID":"ses_usage","part":{"tokens":{"input":50,"output":10,"reasoning":3,"cache":{"read":2,"write":4}}}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch, ExecOptions{})
 	close(ch)
 
 	if result.usage.InputTokens != 14635 {

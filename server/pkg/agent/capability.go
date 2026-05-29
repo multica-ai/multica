@@ -78,7 +78,6 @@ var capabilityRegistry = map[string]Capability{
 		StructuredOutput: true,
 	},
 	"DeepSeek-TUI": {
-		ResumeSession:    true,
 		StructuredOutput: true,
 	},
 }

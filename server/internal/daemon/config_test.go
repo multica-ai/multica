@@ -343,6 +343,75 @@ func TestLoadConfig_AutoUpdateEnv_ForcesOffForCloud(t *testing.T) {
 	}
 }
 
+func TestLoadConfigDeepseekPrefersDeepseekTUI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	binDir := t.TempDir()
+	claudePath := filepath.Join(binDir, "claude")
+	deepseekPath := filepath.Join(binDir, "deepseek")
+	deepseekTUIPath := filepath.Join(binDir, "deepseek-tui")
+	for _, path := range []string{claudePath, deepseekPath, deepseekTUIPath} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write fake binary %s: %v", path, err)
+		}
+	}
+
+	t.Setenv("PATH", binDir)
+	t.Setenv("SHELL", "")
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	entry, ok := cfg.Agents["DeepSeek-TUI"]
+	if !ok {
+		t.Fatalf("DeepSeek-TUI runtime missing from agents: %+v", cfg.Agents)
+	}
+	if entry.Path != "deepseek-tui" {
+		t.Fatalf("DeepSeek-TUI path = %q, want deepseek-tui", entry.Path)
+	}
+}
+
+func TestLoadConfigDeepseekFallsBackToLegacyWrapper(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	binDir := t.TempDir()
+	claudePath := filepath.Join(binDir, "claude")
+	deepseekPath := filepath.Join(binDir, "deepseek")
+	for _, path := range []string{claudePath, deepseekPath} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write fake binary %s: %v", path, err)
+		}
+	}
+
+	t.Setenv("PATH", binDir)
+	t.Setenv("SHELL", "")
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	entry, ok := cfg.Agents["DeepSeek-TUI"]
+	if !ok {
+		t.Fatalf("DeepSeek-TUI runtime missing from agents: %+v", cfg.Agents)
+	}
+	if entry.Path != "deepseek" {
+		t.Fatalf("DeepSeek-TUI path = %q, want deepseek fallback", entry.Path)
+	}
+}
+
 // TestLoadConfig_AutoUpdate_NoFlagWinsOverCloudDefault keeps the legacy CLI
 // flag working: --no-auto-update (translated into overrides.DisableAutoUpdate)
 // forces auto-update off even when the cloud default and env var would enable.

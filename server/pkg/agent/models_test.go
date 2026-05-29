@@ -144,9 +144,9 @@ func TestInferCopilotProvider(t *testing.T) {
 		"raptor-mini":       "",
 		// negative cases: must not be misidentified as OpenAI
 		// reasoning series even though they start with `o`.
-		"opus-fake":         "",
-		"omni":              "",
-		"o":                 "",
+		"opus-fake": "",
+		"omni":      "",
+		"o":         "",
 	}
 	for id, want := range cases {
 		if got := inferCopilotProvider(id); got != want {
@@ -230,6 +230,36 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	}
 	if got == nil {
 		t.Error("expected non-nil slice even when binary is missing")
+	}
+}
+
+func TestParseDeepseekModelsJSONFlatArray(t *testing.T) {
+	raw := []byte(`[
+	  {"id":"deepseek-v4-pro","label":"DeepSeek V4 Pro","provider":"deepseek"},
+	  {"model":"deepseek-v4-flash","name":"DeepSeek V4 Flash"}
+	]`)
+
+	models := parseDeepseekModelsJSON(raw)
+	if len(models) != 2 {
+		t.Fatalf("models = %+v, want 2 entries", models)
+	}
+	if models[0].ID != "deepseek-v4-pro" || !models[0].Default {
+		t.Fatalf("first model = %+v, want deepseek-v4-pro default", models[0])
+	}
+	if models[1].ID != "deepseek-v4-flash" || models[1].Provider != "DeepSeek-TUI" {
+		t.Fatalf("second model = %+v, want fallback provider", models[1])
+	}
+}
+
+func TestParseDeepseekModelsJSONWrappedData(t *testing.T) {
+	raw := []byte(`{"ok":true,"data":{"models":[{"id":"deepseek-v4-pro","provider":"deepseek","default":true}]}}`)
+
+	models := parseDeepseekModelsJSON(raw)
+	if len(models) != 1 {
+		t.Fatalf("models = %+v, want one entry", models)
+	}
+	if models[0].ID != "deepseek-v4-pro" || models[0].Provider != "deepseek" || !models[0].Default {
+		t.Fatalf("model = %+v, want wrapped deepseek-v4-pro default", models[0])
 	}
 }
 
