@@ -357,6 +357,63 @@ func TestListComments_SummaryClipsContent(t *testing.T) {
 	}
 }
 
+// TestListComments_RootsOnlySummaryComposes pins the spec's headline
+// "table of contents" read: --roots-only --summary together must (a) clip each
+// root's content and flag content_truncated, AND (b) still carry the roots-only
+// orientation stats (reply_count over the full subtree, last_activity_at). The
+// summary projection composes with roots_only rather than replacing its stats;
+// a future refactor that moved the clip into a per-mode branch would silently
+// break this composition, so both halves are asserted on the same response.
+func TestListComments_RootsOnlySummaryComposes(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		VALUES ($1, 'member', $2, $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, "roots+summary fixture").Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	insert := func(parent *string, body string, offset time.Duration) string {
+		t.Helper()
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at)
+			VALUES ($1, $2, 'member', $3, $4, 'comment', $5, $6)
+			RETURNING id
+		`, issueID, testWorkspaceID, testUserID, body, parent, base.Add(offset)).Scan(&id); err != nil {
+			t.Fatalf("insert comment: %v", err)
+		}
+		return id
+	}
+	rootID := insert(nil, strings.Repeat("x", 500), 0)
+	insert(&rootID, "a reply", 5*time.Minute) // pushes last_activity past the root's own time
+
+	_, rows := listComments(t, issueID, "roots_only=true&summary=true")
+	eqIDs(t, ids(rows), []string{rootID}, "roots_only+summary returns only the root")
+
+	root := rows[0]
+	// Summary half: the long root content is clipped + flagged.
+	if root.ContentTruncated == nil || !*root.ContentTruncated {
+		t.Fatalf("roots+summary: root should be truncated, got %v", root.ContentTruncated)
+	}
+	if rc := utf8.RuneCountInString(root.Content); rc != summaryContentRunes+1 { // +1 for the ellipsis
+		t.Fatalf("roots+summary: clipped content rune count got=%d want=%d", rc, summaryContentRunes+1)
+	}
+	// Stats half: orientation metadata survives the summary projection. The
+	// reply (1 descendant, +5m) drives both reply_count and last_activity_at.
+	assertRootStat(t, root, "root", 1, base.Add(5*time.Minute))
+}
+
 // TestListComments_ThreadResolvesFromAnyAnchor proves Elon's point 2:
 // regardless of whether the anchor is a root, a direct reply, or a nested
 // reply (parent_id points at another reply), the server walks up to the
