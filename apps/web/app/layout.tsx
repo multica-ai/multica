@@ -109,7 +109,46 @@ const HTML_LANG: Record<SupportedLocale, string> = {
   en: "en",
   "zh-Hans": "zh-CN",
   ko: "ko-KR",
+  ja: "ja-JP",
 };
+
+// Japanese-scoped CJK font override.
+//
+// Japanese Kanji are Han ideographs in the SAME Unicode block as Chinese
+// Hanzi (unlike Korean Hangul, which has its own block). CSS picks the first
+// font in the stack that contains a glyph, and `<html lang>` does NOT change
+// that order — so the "append after Chinese" tactic used for Korean would
+// hand Japanese users Chinese glyph shapes for every shared ideograph
+// (e.g. 直/今/絵 render with the wrong regional forms). The global stack must
+// stay Chinese-first so zh/en users never regress, so we instead scope a
+// Japanese-first CJK chain to `<html lang="ja-*">` only. Inter still leads for
+// Latin so the brand face is unchanged; the Chinese/Korean families remain as
+// a deep fallback for any glyph the Japanese fonts lack.
+const JA_FONT_FAMILY = [
+  inter.style.fontFamily,
+  '"Hiragino Sans"',
+  '"Hiragino Kaku Gothic ProN"',
+  '"Yu Gothic"',
+  '"YuGothic"',
+  '"Meiryo"',
+  '"Noto Sans CJK JP"',
+  '"Noto Sans JP"',
+  "-apple-system",
+  "BlinkMacSystemFont",
+  '"Segoe UI"',
+  '"PingFang SC"',
+  '"Microsoft YaHei"',
+  '"Noto Sans CJK SC"',
+  '"Apple SD Gothic Neo"',
+  '"Malgun Gothic"',
+  '"Noto Sans CJK KR"',
+  "sans-serif",
+].join(", ");
+// `[lang|="ja"]` is the BCP-47 language-range selector: it matches exactly
+// `lang="ja"` or `lang="ja-<region>"` (e.g. ja-JP) and nothing else. A bare
+// prefix match (`[lang^="ja"]`) would also catch unrelated 3-letter subtags
+// like `jam` (Jamaican Creole), so we use `|=` here.
+const JA_FONT_OVERRIDE_CSS = `html[lang|="ja"]{--font-sans:${JA_FONT_FAMILY};}`;
 
 export default async function RootLayout({
   children,
@@ -126,6 +165,7 @@ export default async function RootLayout({
       className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
     >
       <body className="h-full overflow-hidden">
+        <style dangerouslySetInnerHTML={{ __html: JA_FONT_OVERRIDE_CSS }} />
         <ThemeProvider>
           <WebProviders locale={locale} resources={resources}>
             {children}

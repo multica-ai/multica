@@ -34,6 +34,36 @@ const geistMono = Geist_Mono({
   fallback: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
 });
 
+// Japanese-scoped CJK font override. Japanese Kanji share the Han Unicode
+// block with Chinese, so the global Chinese-first stack would render Kanji
+// with Chinese glyph shapes; CSS font-fallback order is not affected by
+// `<html lang>`. Scope a Japanese-first CJK chain to `<html lang="ja">` so
+// Japanese docs render with Japanese glyphs while zh/en keep Chinese-first.
+// Mirrors apps/web/app/layout.tsx. Inter still leads for Latin text.
+const JA_FONT_FAMILY = [
+  inter.style.fontFamily,
+  '"Hiragino Sans"',
+  '"Hiragino Kaku Gothic ProN"',
+  '"Yu Gothic"',
+  '"YuGothic"',
+  '"Meiryo"',
+  '"Noto Sans CJK JP"',
+  '"Noto Sans JP"',
+  "-apple-system",
+  "BlinkMacSystemFont",
+  '"Segoe UI"',
+  '"PingFang SC"',
+  '"Microsoft YaHei"',
+  '"Noto Sans CJK SC"',
+  '"Apple SD Gothic Neo"',
+  '"Malgun Gothic"',
+  '"Noto Sans CJK KR"',
+  "sans-serif",
+].join(", ");
+// `[lang|="ja"]` is the BCP-47 language-range selector — matches exactly
+// `lang="ja"` or `lang="ja-<region>"`, not unrelated subtags like `jam`.
+const JA_FONT_OVERRIDE_CSS = `html[lang|="ja"]{--font-sans:${JA_FONT_FAMILY};}`;
+
 // Editorial serif used for headings and showpiece elements. Italic style is
 // deliberately NOT loaded — italic in CJK is a synthetic slant that breaks
 // glyph design. Emphasis in docs is carried by brand color + weight, never
@@ -93,6 +123,7 @@ export default async function Layout({
       )}
     >
       <body className="font-sans">
+        <style dangerouslySetInnerHTML={{ __html: JA_FONT_OVERRIDE_CSS }} />
         <RootProvider
           i18n={{
             locale: lang,

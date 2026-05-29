@@ -6,5 +6,6 @@ describe("docsHrefForLocale", () => {
     expect(docsHrefForLocale("en")).toBe("/docs");
     expect(docsHrefForLocale("zh-Hans")).toBe("/docs/zh");
     expect(docsHrefForLocale("ko")).toBe("/docs/ko");
+    expect(docsHrefForLocale("ja")).toBe("/docs/ja");
   });
 });
