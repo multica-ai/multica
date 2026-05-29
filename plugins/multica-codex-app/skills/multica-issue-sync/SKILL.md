@@ -18,6 +18,11 @@ Use this skill when the user wants Codex App work recorded in a Multica issue.
   for automatic per-turn conversation sync. `UserPromptSubmit` records the
   prompt, and `Stop` writes the matching assistant reply to the bound localrun
   comment thread.
+- After a session is bound and hooks are trusted, do not also call
+  `conversation_sync` for the same normal chat turn. Use explicit
+  `conversation_sync` only when the user asks to sync manually, hooks are not
+  trusted, or you need to backfill a turn. The helper marks explicit syncs so a
+  later `Stop` hook can skip the same user prompt.
 - Reuse the user's local Multica login state. Never request, store, or print a
   Multica token in the plugin.
 - Prefer issue search and selection. Treat pasted issue identifiers, UUIDs, or
@@ -59,10 +64,12 @@ Use this skill when the user wants Codex App work recorded in a Multica issue.
 4. Use `usage_update` only when cumulative token usage is available.
 5. Use direct Multica attachment flows for relevant files or artifacts until
    `attachment_upload` is added to the MCP server.
-6. Prefer `conversation_sync` for the visible final result. Pass the latest user
-   request as `user_message` and the assistant result as `bot_message`; the
-   helper writes a `user_input` reply for the user text and a separate `final`
-   reply for the bot text in the localrun issue thread.
+6. For normal chat turns after hooks are trusted, let the `Stop` hook sync the
+   visible result. If hooks are unavailable or the user explicitly requests
+   manual sync, use `conversation_sync` with the latest user request as
+   `user_message` and the assistant result as `bot_message`; the helper writes
+   a `user_input` reply for the user text and a separate `final` reply for the
+   bot text in the localrun issue thread.
 7. If `conversation_sync` is unavailable, write separate visible localrun
    messages when possible: `user_input` for the user request and `final` for the
    assistant result. If that path is not available, fall back to

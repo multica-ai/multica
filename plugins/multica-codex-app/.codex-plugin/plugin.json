@@ -1,6 +1,6 @@
 {
   "name": "multica-codex-app",
-  "version": "0.1.0+codex.20260529072503",
+  "version": "0.1.0+codex.20260529075419",
   "description": "Bind Codex App work to Multica issues and sync progress back to Multica.",
   "author": {
     "name": "Multica"

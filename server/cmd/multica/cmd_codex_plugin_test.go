@@ -510,6 +510,90 @@ func TestCodexPluginHooksSyncPromptAndStopToBoundThread(t *testing.T) {
 	}
 }
 
+func TestCodexPluginStopHookSkipsExplicitConversationSync(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	const issueID = "11111111-1111-4111-8111-111111111111"
+
+	var posted []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/OPE-1493":
+			json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "OPE-1493"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
+			json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "OPE-1493"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/local-runs":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":             "binding-1",
+				"issue_id":       issueID,
+				"status":         "running",
+				"top_comment_id": "comment-1",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/local-runs/binding-1/messages":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode posted message: %v", err)
+			}
+			posted = append(posted, body)
+			json.NewEncoder(w).Encode(map[string]any{
+				"task_id": "binding-1",
+				"seq":     len(posted),
+				"type":    body["type"],
+				"content": body["content"],
+			})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	bindCmd := testCodexPluginBindCommand(srv.URL)
+	if err := runCodexPluginBind(bindCmd, []string{"OPE-1493"}); err != nil {
+		t.Fatalf("runCodexPluginBind() error = %v", err)
+	}
+
+	promptCmd := testCodexPluginHookCommand(srv.URL)
+	promptCmd.SetIn(strings.NewReader(`{"hook_event_name":"UserPromptSubmit","session_id":"session-1","turn_id":"turn-1","cwd":"/tmp/project","prompt":"你好","model":"gpt-5.1-codex"}`))
+	if err := runCodexPluginHook(promptCmd, nil); err != nil {
+		t.Fatalf("UserPromptSubmit hook error = %v", err)
+	}
+
+	_, err := codexPluginMCPToolConversationSync(testCodexPluginMCPCommand(srv.URL), map[string]any{
+		"issue_id":     "OPE-1493",
+		"binding_id":   "binding-1",
+		"user_message": "你好",
+		"bot_message":  "你好，我在。当前会话仍绑定在 Multica issue OPE-1782，这条对话也已同步过去。",
+		"source_key":   "session-1:turn:turn-1:conversation",
+	})
+	if err != nil {
+		t.Fatalf("conversation_sync error = %v", err)
+	}
+
+	stopCmd := testCodexPluginHookCommand(srv.URL)
+	var out bytes.Buffer
+	stopCmd.SetOut(&out)
+	stopCmd.SetIn(strings.NewReader(`{"hook_event_name":"Stop","session_id":"session-1","turn_id":"turn-1","cwd":"/tmp/project","last_assistant_message":"你好，我在。当前会话仍绑定在 Multica issue OPE-1782，这条对话也已同步过去。","model":"gpt-5.1-codex"}`))
+	if err := runCodexPluginHook(stopCmd, nil); err != nil {
+		t.Fatalf("Stop hook error = %v", err)
+	}
+
+	if len(posted) != 2 ||
+		posted[0]["type"] != "user_input" ||
+		posted[0]["content"] != "用户：你好" ||
+		posted[1]["type"] != "final" ||
+		posted[1]["content"] != "bot：你好，我在。当前会话仍绑定在 Multica issue OPE-1782，这条对话也已同步过去。" {
+		t.Fatalf("posted = %+v, want only explicit conversation_sync messages", posted)
+	}
+	var hookResp map[string]any
+	if err := json.Unmarshal(out.Bytes(), &hookResp); err != nil {
+		t.Fatalf("decode stop hook output: %v; output=%q", err, out.String())
+	}
+	if hookResp["continue"] != true {
+		t.Fatalf("stop hook output = %+v", hookResp)
+	}
+}
+
 func mcpToolCallLine(id int, name string, args map[string]any) string {
 	raw, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",

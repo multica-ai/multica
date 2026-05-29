@@ -132,8 +132,9 @@ type codexPluginHookInput struct {
 }
 
 type codexPluginHookState struct {
-	Bindings []codexPluginHookBinding `json:"bindings"`
-	Prompts  []codexPluginHookPrompt  `json:"prompts"`
+	Bindings    []codexPluginHookBinding    `json:"bindings"`
+	Prompts     []codexPluginHookPrompt     `json:"prompts"`
+	SyncedTurns []codexPluginHookSyncedTurn `json:"synced_turns,omitempty"`
 }
 
 type codexPluginHookBinding struct {
@@ -156,6 +157,14 @@ type codexPluginHookPrompt struct {
 	Prompt    string `json:"prompt"`
 	Model     string `json:"model,omitempty"`
 	UpdatedAt string `json:"updated_at"`
+	UnixNS    int64  `json:"unix_ns"`
+}
+
+type codexPluginHookSyncedTurn struct {
+	BindingID string `json:"binding_id"`
+	UserHash  string `json:"user_hash"`
+	SourceKey string `json:"source_key,omitempty"`
+	SyncedAt  string `json:"synced_at"`
 	UnixNS    int64  `json:"unix_ns"`
 }
 
@@ -1103,6 +1112,9 @@ func codexPluginMCPToolConversationSync(cmd *cobra.Command, args map[string]any)
 	if err := client.PostJSON(ctx, path, botBody, &botResult); err != nil {
 		return nil, fmt.Errorf("conversation_sync: %w", err)
 	}
+	if err := codexPluginMarkConversationSynced(cmd, bindingID, userMessage, sourceKey); err != nil {
+		return nil, fmt.Errorf("conversation_sync: %w", err)
+	}
 	return codexPluginConversationSyncResponse(userResult, botResult, userContent, botContent), nil
 }
 
@@ -1324,6 +1336,9 @@ func codexPluginSyncStopConversation(cmd *cobra.Command, input codexPluginHookIn
 	if !ok {
 		return nil
 	}
+	if codexPluginPromptAlreadySynced(state.SyncedTurns, binding.BindingID, prompt.Prompt) {
+		return nil
+	}
 	client, _, err := codexPluginClientAndIssue(cmd, binding.IssueID)
 	if err != nil {
 		return err
@@ -1377,7 +1392,72 @@ func codexPluginSyncStopConversation(cmd *cobra.Command, input codexPluginHookIn
 	if err := client.PostJSON(ctx, path, botBody, &botResult); err != nil {
 		return err
 	}
+	if err := codexPluginMarkConversationSynced(cmd, binding.BindingID, prompt.Prompt, sourceKey); err != nil {
+		return err
+	}
 	return nil
+}
+
+func codexPluginMarkConversationSynced(cmd *cobra.Command, bindingID, userMessage, sourceKey string) error {
+	userHash := codexPluginConversationUserHash(userMessage)
+	if strings.TrimSpace(bindingID) == "" || userHash == "" {
+		return nil
+	}
+	state, err := codexPluginReadHookState(cmd)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	synced := codexPluginHookSyncedTurn{
+		BindingID: strings.TrimSpace(bindingID),
+		UserHash:  userHash,
+		SourceKey: strings.TrimSpace(sourceKey),
+		SyncedAt:  now.UTC().Format(time.RFC3339Nano),
+		UnixNS:    now.UnixNano(),
+	}
+	state.SyncedTurns = upsertCodexPluginSyncedTurn(state.SyncedTurns, synced)
+	state.SyncedTurns = trimCodexPluginSyncedTurns(state.SyncedTurns, 200)
+	return codexPluginWriteHookState(cmd, state)
+}
+
+func upsertCodexPluginSyncedTurn(turns []codexPluginHookSyncedTurn, synced codexPluginHookSyncedTurn) []codexPluginHookSyncedTurn {
+	out := make([]codexPluginHookSyncedTurn, 0, len(turns)+1)
+	for _, existing := range turns {
+		if existing.BindingID == synced.BindingID && existing.UserHash == synced.UserHash {
+			continue
+		}
+		out = append(out, existing)
+	}
+	return append([]codexPluginHookSyncedTurn{synced}, out...)
+}
+
+func trimCodexPluginSyncedTurns(turns []codexPluginHookSyncedTurn, max int) []codexPluginHookSyncedTurn {
+	if len(turns) <= max {
+		return turns
+	}
+	return turns[:max]
+}
+
+func codexPluginPromptAlreadySynced(turns []codexPluginHookSyncedTurn, bindingID, prompt string) bool {
+	userHash := codexPluginConversationUserHash(prompt)
+	if strings.TrimSpace(bindingID) == "" || userHash == "" {
+		return false
+	}
+	for _, turn := range turns {
+		if turn.BindingID == bindingID && turn.UserHash == userHash {
+			return true
+		}
+	}
+	return false
+}
+
+func codexPluginConversationUserHash(message string) string {
+	normalized := strings.TrimSpace(message)
+	if normalized == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(normalized))
+	return fmt.Sprintf("%x", sum[:8])
 }
 
 func findCodexPluginPrompt(prompts []codexPluginHookPrompt, input codexPluginHookInput) (codexPluginHookPrompt, bool) {
