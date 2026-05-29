@@ -708,10 +708,13 @@ export function IssueDetailScreen({ navigation, route }: Props) {
                 pressed && styles.buttonPressed,
               ]}
             >
-              <Text style={[
-                styles.subscribeButtonText,
-                isSubscribed && styles.subscribeButtonTextActive,
-              ]}>
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.subscribeButtonText,
+                  isSubscribed && styles.subscribeButtonTextActive,
+                ]}
+              >
                 {isSubscribed ? t("issues.subscribed") : t("issues.subscribe")}
               </Text>
             </Pressable>
@@ -1062,7 +1065,7 @@ function IssueShortcutButton({
         pressed && styles.buttonPressed,
       ]}
     >
-      <Text style={styles.issueShortcutLabel}>{label}</Text>
+      <Text numberOfLines={1} style={styles.issueShortcutLabel}>{label}</Text>
       <Text style={styles.issueShortcutCount}>{count}</Text>
     </Pressable>
   );
@@ -2020,7 +2023,10 @@ function DropdownItem({
 }) {
   return (
     <Pressable onPress={onPress} style={[styles.dropdownItem, active && styles.dropdownItemActive]}>
-      <Text style={[styles.dropdownItemText, destructive && styles.dropdownItemTextDestructive]}>
+      <Text
+        numberOfLines={1}
+        style={[styles.dropdownItemText, destructive && styles.dropdownItemTextDestructive]}
+      >
         {label}
       </Text>
     </Pressable>
@@ -2541,6 +2547,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   sectionHeaderActionButton: {
+    alignSelf: "flex-start",
     minHeight: 32,
     paddingHorizontal: spacing.sm,
   },
@@ -2675,6 +2682,7 @@ const styles = StyleSheet.create({
   },
   subscribeButton: {
     alignItems: "center",
+    alignSelf: "flex-start",
     backgroundColor: colors.card,
     borderColor: colors.border,
     borderRadius: radii.md,
@@ -2695,18 +2703,21 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 14,
     fontWeight: "600",
+    lineHeight: 18,
   },
   subscribeButtonTextActive: {
     color: colors.primaryForeground,
   },
   issueShortcutButton: {
     alignItems: "center",
+    alignSelf: "flex-start",
     backgroundColor: colors.card,
     borderColor: colors.border,
     borderRadius: radii.md,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     gap: spacing.xs,
+    maxWidth: "100%",
     minHeight: 36,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -2715,11 +2726,14 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 14,
     fontWeight: "600",
+    lineHeight: 18,
+    minWidth: 0,
   },
   issueShortcutCount: {
     color: colors.mutedForeground,
     fontSize: 12,
     fontWeight: "600",
+    lineHeight: 16,
   },
   errorText: {
     color: colors.destructive,
@@ -3177,6 +3191,7 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 14,
     fontWeight: "500",
+    lineHeight: 18,
   },
   dropdownItemTextDestructive: {
     color: colors.destructive,

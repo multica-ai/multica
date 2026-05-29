@@ -26,6 +26,8 @@ export const linking = {
       Squads: "squads",
       Inbox: "inbox",
       InboxDetail: "inbox/:inboxItemId",
+      Wiki: "wiki",
+      WikiDetail: "wiki/:pageId",
       Setting: "setting",
     },
   },

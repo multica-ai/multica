@@ -450,3 +450,204 @@ func TestLoadRuntimeLocalSkillBundle_Cursor(t *testing.T) {
 		t.Fatalf("source_path = %q", bundle.SourcePath)
 	}
 }
+
+func writeTestClaudeCommand(t *testing.T, root, rel, content string) {
+	t.Helper()
+	fullPath := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("mkdir for command: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write command: %v", err)
+	}
+}
+
+func TestListRuntimeLocalSkills_ClaudeCommands(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Create a regular skill AND a command.
+	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Review Helper\ndescription: Review pull requests\n---\n",
+	})
+	cmdRoot := filepath.Join(home, ".claude", "commands")
+	writeTestClaudeCommand(t, cmdRoot, "summarize.md", "---\nname: Summarize\ndescription: Summarize text\n---\n# Summarize\n")
+
+	skills, supported, err := listRuntimeLocalSkills("claude")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("claude should be supported")
+	}
+
+	byKey := make(map[string]runtimeLocalSkillSummary)
+	for _, s := range skills {
+		byKey[s.Key] = s
+	}
+
+	if _, ok := byKey["review-helper"]; !ok {
+		t.Fatal("expected skill key 'review-helper'")
+	}
+	cmd, ok := byKey["commands/summarize.md"]
+	if !ok {
+		t.Fatalf("expected command key 'commands/summarize.md', got keys: %v", keysOf(byKey))
+	}
+	if cmd.Name != "Summarize" {
+		t.Fatalf("command name = %q, want Summarize", cmd.Name)
+	}
+	if cmd.Description != "Summarize text" {
+		t.Fatalf("command description = %q", cmd.Description)
+	}
+	if cmd.FileCount != 1 {
+		t.Fatalf("command file_count = %d, want 1", cmd.FileCount)
+	}
+	if cmd.SourcePath != "~/.claude/commands/summarize.md" {
+		t.Fatalf("command source_path = %q", cmd.SourcePath)
+	}
+}
+
+func TestListRuntimeLocalSkills_ClaudeNestedCommands(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cmdRoot := filepath.Join(home, ".claude", "commands")
+	writeTestClaudeCommand(t, cmdRoot, "top-level.md", "# Top\n")
+	writeTestClaudeCommand(t, cmdRoot, "code/review.md", "---\nname: Code Review\n---\n")
+	writeTestClaudeCommand(t, cmdRoot, "code/refactor.md", "# Refactor\n")
+	// Hidden and non-md files should be ignored.
+	writeTestClaudeCommand(t, cmdRoot, ".hidden.md", "# Hidden\n")
+	writeTestClaudeCommand(t, cmdRoot, "notes.txt", "not markdown")
+
+	// skills dir doesn't exist — only commands should show up.
+	skills, supported, err := listRuntimeLocalSkills("claude")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("claude should be supported")
+	}
+
+	keys := make([]string, 0, len(skills))
+	for _, s := range skills {
+		keys = append(keys, s.Key)
+	}
+	wantKeys := []string{"commands/code/refactor.md", "commands/code/review.md", "commands/top-level.md"}
+	if !reflect.DeepEqual(keys, wantKeys) {
+		t.Fatalf("keys = %v, want %v", keys, wantKeys)
+	}
+
+	// Verify name fallback: top-level.md has no frontmatter name → filename.
+	topKey := skills[0]
+	if topKey.Key == "commands/top-level.md" {
+		if topKey.Name != "top-level" {
+			t.Fatalf("fallback name = %q, want top-level", topKey.Name)
+		}
+	}
+
+	// Verify nested frontmatter name.
+	for _, s := range skills {
+		if s.Key == "commands/code/review.md" && s.Name != "Code Review" {
+			t.Fatalf("nested command name = %q, want Code Review", s.Name)
+		}
+	}
+}
+
+func TestLoadRuntimeLocalSkillBundle_ClaudeCommand(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cmdRoot := filepath.Join(home, ".claude", "commands")
+	writeTestClaudeCommand(t, cmdRoot, "my-cmd.md", "---\nname: My Command\ndescription: Does stuff\n---\n# My Command\nBody here.\n")
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("claude", "commands/my-cmd.md")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported {
+		t.Fatal("claude should be supported")
+	}
+	if bundle.Name != "My Command" {
+		t.Fatalf("name = %q", bundle.Name)
+	}
+	if bundle.Description != "Does stuff" {
+		t.Fatalf("description = %q", bundle.Description)
+	}
+	if bundle.Content != "---\nname: My Command\ndescription: Does stuff\n---\n# My Command\nBody here.\n" {
+		t.Fatalf("content = %q", bundle.Content)
+	}
+	if bundle.SourcePath != "~/.claude/commands/my-cmd.md" {
+		t.Fatalf("source_path = %q", bundle.SourcePath)
+	}
+	if bundle.Provider != "claude" {
+		t.Fatalf("provider = %q", bundle.Provider)
+	}
+	if len(bundle.Files) != 0 {
+		t.Fatalf("expected no files, got %d", len(bundle.Files))
+	}
+}
+
+func TestLoadRuntimeLocalSkillBundle_ClaudeCommandNoFrontmatter(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cmdRoot := filepath.Join(home, ".claude", "commands")
+	writeTestClaudeCommand(t, cmdRoot, "simple.md", "# Simple command\n")
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("claude", "commands/simple.md")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported {
+		t.Fatal("claude should be supported")
+	}
+	if bundle.Name != "simple" {
+		t.Fatalf("name = %q, want simple", bundle.Name)
+	}
+	if bundle.Description != "" {
+		t.Fatalf("expected empty description, got %q", bundle.Description)
+	}
+}
+
+func TestLoadRuntimeLocalSkillBundle_ClaudeCommandNested(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cmdRoot := filepath.Join(home, ".claude", "commands")
+	writeTestClaudeCommand(t, cmdRoot, "code/review.md", "---\nname: Review\n---\n# Review\n")
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("claude", "commands/code/review.md")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported {
+		t.Fatal("claude should be supported")
+	}
+	if bundle.Name != "Review" {
+		t.Fatalf("name = %q", bundle.Name)
+	}
+	if bundle.SourcePath != "~/.claude/commands/code/review.md" {
+		t.Fatalf("source_path = %q", bundle.SourcePath)
+	}
+}
+
+func TestLoadRuntimeLocalSkillBundle_ClaudeCommandNotFound(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	_, supported, err := loadRuntimeLocalSkillBundle("claude", "commands/nonexistent.md")
+	if !supported {
+		t.Fatal("claude should be supported")
+	}
+	if err == nil {
+		t.Fatal("expected error for missing command")
+	}
+}
+
+func keysOf(m map[string]runtimeLocalSkillSummary) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}

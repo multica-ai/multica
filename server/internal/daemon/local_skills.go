@@ -99,6 +99,19 @@ func localSkillRootsForProvider(provider string) ([]string, bool, error) {
 	}
 }
 
+// claudeCommandsRoot returns the ~/.claude/commands directory for the Claude
+// provider. Other providers don't have a commands directory.
+func claudeCommandsRoot(provider string) (string, error) {
+	if provider != "claude" {
+		return "", nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user home: %w", err)
+	}
+	return filepath.Join(home, ".claude", "commands"), nil
+}
+
 func isIgnoredLocalSkillEntry(name string) bool {
 	if name == "" {
 		return true
@@ -286,6 +299,15 @@ func listRuntimeLocalSkills(provider string) ([]runtimeLocalSkillSummary, bool, 
 		enumerateLocalSkills(provider, root, root, 0, visited, seenKeys, &skills)
 	}
 
+	// For Claude, also enumerate ~/.claude/commands/**/*.md
+	if provider == "claude" {
+		if cmdRoot, err := claudeCommandsRoot(provider); err == nil && cmdRoot != "" {
+			if _, statErr := os.Stat(cmdRoot); statErr == nil {
+				enumerateClaudeCommands(cmdRoot, &skills)
+			}
+		}
+	}
+
 	sort.Slice(skills, func(i, j int) bool {
 		return skills[i].Key < skills[j].Key
 	})
@@ -387,6 +409,103 @@ func enumerateLocalSkills(
 	}
 }
 
+// enumerateClaudeCommands walks root/**/*.md and appends a summary for each
+// command file. Keys are prefixed with "commands/" so they don't collide with
+// existing skill directory keys.
+func enumerateClaudeCommands(root string, skills *[]runtimeLocalSkillSummary) {
+	filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if isIgnoredLocalSkillEntry(entry.Name()) {
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(entry.Name()), ".md") {
+			return nil
+		}
+
+		info, err := entry.Info()
+		if err != nil || info.Size() > maxLocalSkillFileSize {
+			return nil
+		}
+
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.Clean(rel)
+		if rel == "." || filepath.IsAbs(rel) || strings.HasPrefix(rel, "..") {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		name, description := parseLocalSkillFrontmatter(string(content))
+		if name == "" {
+			base := filepath.Base(rel)
+			name = strings.TrimSuffix(base, filepath.Ext(base))
+		}
+
+		key := "commands/" + filepath.ToSlash(rel)
+
+		*skills = append(*skills, runtimeLocalSkillSummary{
+			Key:         key,
+			Name:        name,
+			Description: description,
+			SourcePath:  relativizeHomePath(path),
+			Provider:    "claude",
+			FileCount:   1,
+		})
+		return nil
+	})
+}
+
+// loadClaudeCommandBundle reads a single command markdown file under
+// ~/.claude/commands and returns it as a skill bundle (no supporting files).
+func loadClaudeCommandBundle(commandsRoot, relPath string) (*runtimeLocalSkillBundle, error) {
+	fullPath := filepath.Join(commandsRoot, filepath.FromSlash(relPath))
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("claude command not found")
+		}
+		return nil, err
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("claude command path is a directory")
+	}
+	if info.Size() > maxLocalSkillFileSize {
+		return nil, fmt.Errorf("command file exceeds %d bytes", maxLocalSkillFileSize)
+	}
+
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return nil, err
+	}
+
+	name, description := parseLocalSkillFrontmatter(string(content))
+	if name == "" {
+		base := filepath.Base(relPath)
+		name = strings.TrimSuffix(base, filepath.Ext(base))
+	}
+
+	return &runtimeLocalSkillBundle{
+		Name:        name,
+		Description: description,
+		Content:     string(content),
+		SourcePath:  relativizeHomePath(fullPath),
+		Provider:    "claude",
+		Files:       nil,
+	}, nil
+}
+
 func loadLocalSkillBundleFromDir(provider, skillDir string) (*runtimeLocalSkillBundle, error) {
 	content, err := readLocalSkillMainFile(skillDir)
 	if err != nil {
@@ -421,6 +540,21 @@ func loadRuntimeLocalSkillBundle(provider, skillKey string) (*runtimeLocalSkillB
 	key, err := normalizeLocalSkillKey(skillKey)
 	if err != nil {
 		return nil, true, err
+	}
+
+	// Claude commands live under ~/.claude/commands and use the
+	// "commands/<relative-path>" key prefix.
+	if provider == "claude" && strings.HasPrefix(key, "commands/") {
+		cmdRoot, cmdErr := claudeCommandsRoot(provider)
+		if cmdErr != nil {
+			return nil, true, cmdErr
+		}
+		relPath := strings.TrimPrefix(key, "commands/")
+		bundle, loadErr := loadClaudeCommandBundle(cmdRoot, relPath)
+		if loadErr != nil {
+			return nil, true, loadErr
+		}
+		return bundle, true, nil
 	}
 
 	for _, root := range roots {

@@ -1,0 +1,84 @@
+node_modules
+dist
+*.log
+.DS_Store
+.envrc
+
+# build outputs
+.turbo
+.next
+out
+build
+bin
+artifacts/
+dist-electron
+*.tsbuildinfo
+
+# env
+.env*
+!.env.bot
+!.env.example
+!apps/desktop/.env.production
+
+# test coverage
+coverage
+
+# Go
+server/bin/
+server/tmp/
+server/migrate
+server/daemon
+server/multica
+
+# Test artifacts
+test-results/
+apps/web/test-results/
+
+# Mobile (Expo / React Native)
+apps/mobile/.expo/
+apps/mobile/.expo-shared/
+apps/mobile/.metro-cache/
+apps/mobile/web-build/
+apps/mobile/ios/
+apps/mobile/expo-env.d.ts
+apps/mobile/*.apk
+apps/mobile/*.aab
+apps/mobile/*.ipa
+apps/mobile/**/*.jks
+apps/mobile/**/*.p8
+apps/mobile/**/*.p12
+apps/mobile/**/*.key
+apps/mobile/**/*.mobileprovision
+
+# Keep the committed Android native project in EAS uploads.
+!apps/mobile/android/
+!apps/mobile/android/**
+apps/mobile/android/.gradle/
+apps/mobile/android/build/
+apps/mobile/android/app/build/
+apps/mobile/android/app/.cxx/
+
+# context (agent workspace)
+.context
+
+# local settings
+.claude/
+.tool-versions
+.deepseek/
+.codegraph/
+.mcp.json
+
+# feature tracking
+_features/
+
+# runtime
+*.pid
+
+# platform specific
+*.dmg
+*.app
+server/server
+data/
+.kilo
+.idea
+testcase/report/

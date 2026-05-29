@@ -244,7 +244,12 @@ export function AgentsScreen() {
               onPress={() => setOwnerPickerOpen(true)}
               style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
             >
-              <Text numberOfLines={1} style={styles.filterButtonText}>
+              <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.82}
+                numberOfLines={1}
+                style={styles.filterButtonText}
+              >
                 {selectedOwner?.name ?? t("agents.owner")}
               </Text>
               <ChevronDown color={colors.mutedForeground} size={14} />
@@ -262,6 +267,9 @@ export function AgentsScreen() {
             >
               <Archive color={showArchived ? colors.primaryForeground : colors.mutedForeground} size={14} />
               <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.82}
+                numberOfLines={1}
                 style={[
                   styles.filterButtonText,
                   showArchived && styles.filterButtonTextActive,
@@ -564,7 +572,12 @@ function AgentDetailModal({
             />
           ) : null}
           {activeTab === "advanced" ? (
-            <AdvancedTab agent={agent} readOnly={!canEdit || isArchived} onUpdate={onUpdate} />
+            <AdvancedTab
+              agent={agent}
+              canManageEnv={!!currentUserId && agent.owner_id === currentUserId && !isArchived}
+              readOnly={!canEdit || isArchived}
+              onUpdate={onUpdate}
+            />
           ) : null}
         </ScrollView>
       </Screen>
@@ -1004,47 +1017,88 @@ function SettingsTab({
 
 function AdvancedTab({
   agent,
+  canManageEnv,
   readOnly,
   onUpdate,
 }: {
   agent: Agent;
+  canManageEnv: boolean;
   readOnly: boolean;
   onUpdate: (agentId: string, data: UpdateAgentRequest) => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const [envText, setEnvText] = useState(envMapToText(agent.custom_env ?? {}));
+  const [envText, setEnvText] = useState("");
+  const [initialEnvText, setInitialEnvText] = useState("");
+  const [envLoaded, setEnvLoaded] = useState(false);
   const [argsText, setArgsText] = useState((agent.custom_args ?? []).join("\n"));
   const [saving, setSaving] = useState(false);
+  const [revealingEnv, setRevealingEnv] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const envReadOnly = readOnly || agent.custom_env_redacted;
-  const dirty =
-    envText !== envMapToText(agent.custom_env ?? {}) ||
-    argsText !== (agent.custom_args ?? []).join("\n");
+  const envReadOnly = !canManageEnv || !envLoaded;
+  const envDirty = canManageEnv && envLoaded && envText !== initialEnvText;
+  const argsDirty = argsText !== (agent.custom_args ?? []).join("\n");
+  const dirty = envDirty || argsDirty;
+  const envKeyCount = agent.custom_env_key_count ?? 0;
+  const envStatusText =
+    envKeyCount > 0
+      ? t("agents.environment_configured", { count: envKeyCount })
+      : agent.has_custom_env === true
+        ? t("agents.environment_configured_unknown")
+        : t("agents.environment_empty");
 
   useEffect(() => {
-    setEnvText(envMapToText(agent.custom_env ?? {}));
+    setEnvText("");
+    setInitialEnvText("");
+    setEnvLoaded(false);
     setArgsText((agent.custom_args ?? []).join("\n"));
     setError(null);
   }, [agent]);
 
-  async function save() {
-    let customEnv: Record<string, string>;
+  async function revealEnv() {
+    if (!canManageEnv || revealingEnv) return;
+    setRevealingEnv(true);
+    setError(null);
     try {
-      customEnv = parseEnvText(envText);
-    } catch {
-      setError(t("agents.invalid_environment"));
-      return;
+      const response = await api.getAgentEnv(agent.id);
+      const text = envMapToText(response.custom_env ?? {});
+      setEnvText(text);
+      setInitialEnvText(text);
+      setEnvLoaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("agents.unable_to_load_environment"));
+    } finally {
+      setRevealingEnv(false);
+    }
+  }
+
+  async function save() {
+    let customEnv: Record<string, string> | null = null;
+    if (envDirty) {
+      try {
+        customEnv = parseEnvText(envText);
+      } catch {
+        setError(t("agents.invalid_environment"));
+        return;
+      }
     }
     setSaving(true);
     setError(null);
     try {
-      await onUpdate(agent.id, {
-        custom_env: envReadOnly ? undefined : customEnv,
-        custom_args: argsText
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean),
-      });
+      if (customEnv) {
+        const response = await api.updateAgentEnv(agent.id, { custom_env: customEnv });
+        const text = envMapToText(response.custom_env ?? {});
+        setEnvText(text);
+        setInitialEnvText(text);
+        setEnvLoaded(true);
+      }
+      if (argsDirty) {
+        await onUpdate(agent.id, {
+          custom_args: argsText
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean),
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t("agents.unable_to_save_advanced"));
     } finally {
@@ -1063,18 +1117,36 @@ function AdvancedTab({
         </View>
       ) : null}
       <Text style={styles.optionLabel}>{t("agents.environment")}</Text>
-      <TextInput
-        autoCapitalize="none"
-        autoCorrect={false}
-        editable={!envReadOnly}
-        multiline
-        onChangeText={setEnvText}
-        placeholder="ANTHROPIC_API_KEY=..."
-        placeholderTextColor={colors.mutedForeground}
-        style={[styles.textArea, envReadOnly && styles.inputReadOnly]}
-        textAlignVertical="top"
-        value={agent.custom_env_redacted ? t("agents.hidden_values") : envText}
-      />
+      {canManageEnv ? (
+        <>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!envReadOnly}
+            multiline
+            onChangeText={setEnvText}
+            placeholder="ANTHROPIC_API_KEY=..."
+            placeholderTextColor={colors.mutedForeground}
+            style={[styles.textArea, envReadOnly && styles.inputReadOnly]}
+            textAlignVertical="top"
+            value={
+              envLoaded
+                ? envText
+                : t("agents.hidden_values", { count: agent.custom_env_key_count ?? 0 })
+            }
+          />
+          {!envLoaded ? (
+            <Button disabled={revealingEnv} onPress={() => void revealEnv()}>
+              {revealingEnv ? t("agents.loading_environment") : t("agents.reveal_environment")}
+            </Button>
+          ) : null}
+        </>
+      ) : (
+        <View style={styles.infoNotice}>
+          <Text style={styles.infoValue}>{envStatusText}</Text>
+          <Text style={styles.infoNoticeText}>{t("agents.environment_managed_on_web")}</Text>
+        </View>
+      )}
       <Text style={styles.optionLabel}>{t("agents.custom_args")}</Text>
       <TextInput
         autoCapitalize="none"
@@ -1381,7 +1453,12 @@ function SegmentedControl<T extends string>({
               pressed && styles.pressed,
             ]}
           >
-            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+            <Text
+              adjustsFontSizeToFit
+              minimumFontScale={0.82}
+              numberOfLines={1}
+              style={[styles.segmentText, active && styles.segmentTextActive]}
+            >
               {option.label}
             </Text>
           </Pressable>
@@ -1473,8 +1550,24 @@ function PickerTrigger({
       ]}
     >
       <View style={styles.pickerTriggerTextWrap}>
-        <Text numberOfLines={1} style={styles.pickerTriggerLabel}>{label}</Text>
-        {meta ? <Text numberOfLines={1} style={styles.pickerTriggerMeta}>{meta}</Text> : null}
+        <Text
+          adjustsFontSizeToFit
+          minimumFontScale={0.82}
+          numberOfLines={1}
+          style={styles.pickerTriggerLabel}
+        >
+          {label}
+        </Text>
+        {meta ? (
+          <Text
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            numberOfLines={1}
+            style={styles.pickerTriggerMeta}
+          >
+            {meta}
+          </Text>
+        ) : null}
       </View>
       <ChevronDown color={colors.mutedForeground} size={16} />
     </Pressable>
@@ -1507,8 +1600,24 @@ function PickerRow({
       ]}
     >
       <View style={styles.pickerRowText}>
-        <Text numberOfLines={1} style={styles.pickerRowLabel}>{label}</Text>
-        {meta ? <Text numberOfLines={1} style={styles.pickerRowMeta}>{meta}</Text> : null}
+        <Text
+          adjustsFontSizeToFit
+          minimumFontScale={0.82}
+          numberOfLines={1}
+          style={styles.pickerRowLabel}
+        >
+          {label}
+        </Text>
+        {meta ? (
+          <Text
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            numberOfLines={1}
+            style={styles.pickerRowMeta}
+          >
+            {meta}
+          </Text>
+        ) : null}
       </View>
       {selected ? <CheckCircle2 color={colors.success} size={18} /> : null}
     </Pressable>
@@ -1531,7 +1640,14 @@ function RuntimeBadge({ mode, label }: { mode: AgentRuntimeMode; label: string }
   return (
     <View style={styles.metaBadge}>
       <Icon color={colors.mutedForeground} size={13} />
-      <Text numberOfLines={1} style={styles.metaBadgeText}>{label}</Text>
+      <Text
+        adjustsFontSizeToFit
+        minimumFontScale={0.82}
+        numberOfLines={1}
+        style={styles.metaBadgeText}
+      >
+        {label}
+      </Text>
     </View>
   );
 }
@@ -1795,6 +1911,7 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 12,
     fontWeight: "600",
+    lineHeight: 16,
     maxWidth: 80,
   },
   filterButtonTextActive: {
@@ -1922,6 +2039,8 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 11,
     fontWeight: "500",
+    lineHeight: 14,
+    minWidth: 0,
   },
   optionChip: {
     alignItems: "center",
@@ -1975,10 +2094,12 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 14,
     fontWeight: "500",
+    lineHeight: 18,
   },
   pickerRowMeta: {
     color: colors.mutedForeground,
     fontSize: 12,
+    lineHeight: 16,
     marginTop: 2,
   },
   pickerRowSelected: {
@@ -2003,10 +2124,12 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 14,
     fontWeight: "500",
+    lineHeight: 18,
   },
   pickerTriggerMeta: {
     color: colors.mutedForeground,
     fontSize: 12,
+    lineHeight: 16,
     marginTop: 2,
   },
   pickerTriggerTextWrap: {
@@ -2065,6 +2188,9 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 12,
     fontWeight: "600",
+    lineHeight: 16,
+    textAlign: "center",
+    width: "100%",
   },
   segmentTextActive: {
     color: colors.foreground,

@@ -1,0 +1,27 @@
+{
+  "name": "multica-codex-app",
+  "version": "0.1.0+codex.20260529075419",
+  "description": "Bind Codex App work to Multica issues and sync progress back to Multica.",
+  "author": {
+    "name": "Multica"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Multica Codex App",
+    "shortDescription": "Search, bind, and update Multica issues from Codex.",
+    "longDescription": "Use the local Multica helper to bind the current Codex App work to a Multica issue, then sync plans, progress, final answers, attachments, and token usage without asking users to start Codex through the Multica CLI.",
+    "developerName": "Multica",
+    "category": "Productivity",
+    "capabilities": [
+      "Issue Search",
+      "Issue Sync",
+      "Usage Reporting"
+    ],
+    "defaultPrompt": [
+      "Bind this work to a Multica issue.",
+      "Sync my progress to Multica.",
+      "Post the final result to Multica."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

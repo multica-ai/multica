@@ -4,10 +4,15 @@
 // enables symlinks so Metro can follow pnpm's symlinked layout to transitive
 // deps. Hierarchical lookup is left enabled (default) — pnpm needs it.
 
-const { getDefaultConfig } = require("expo/metro-config");
-const { withNativeWind } = require("nativewind/metro");
-const path = require("path");
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+const require = createRequire(import.meta.url);
+const { getDefaultConfig } = require("expo/metro-config");
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const projectRoot = __dirname;
 const monorepoRoot = path.resolve(projectRoot, "../..");
 
@@ -20,4 +25,4 @@ config.resolver.nodeModulesPaths = [
 ];
 config.resolver.unstable_enableSymlinks = true;
 
-module.exports = withNativeWind(config, { input: "./global.css", inlineRem: 16 });
+export default config;
