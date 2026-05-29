@@ -362,6 +362,7 @@ func TestUpdateAgentPersonaSandboxRequiresWorkspaceAdmin(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 
+	// CEREBRO-PATCH(personal-agent-owner-manage): owner of a private agent can update it.
 	// A plain member who owns the private agent CAN update regular fields (MUL-2443).
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
