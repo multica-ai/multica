@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -1228,6 +1229,10 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
+func ptrString(value string) *string {
+	return &value
+}
+
 // --- Gitee test helpers ---
 
 func newGiteeFixtureClient(t *testing.T, handler http.HandlerFunc) (*http.Client, *[]string) {
@@ -1526,6 +1531,51 @@ func TestFetchFromGitee_SendsRequestTokenToAPIAndRawRequests(t *testing.T) {
 		if gotAuth != "token request-token" {
 			t.Fatalf("request %d Authorization = %q, want 'token request-token'", i, gotAuth)
 		}
+	}
+}
+
+func TestFetchFromGitee_UsesContentsAPIForPrivateRepoFileBody(t *testing.T) {
+	var rawSkillRequested bool
+	client, _ := newGiteeFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v5/repos/private/repo":
+			if got := r.Header.Get("Authorization"); got != "token request-token" {
+				t.Fatalf("repo Authorization = %q, want request token", got)
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"default_branch": "master"})
+		case "/api/v5/repos/private/repo/contents/SKILL.md":
+			if got := r.URL.Query().Get("ref"); got != "master" {
+				t.Fatalf("contents ref = %q, want master", got)
+			}
+			if got := r.Header.Get("Authorization"); got != "token request-token" {
+				t.Fatalf("contents Authorization = %q, want request token", got)
+			}
+			writeJSON(w, http.StatusOK, githubContentEntry{
+				Name:     "SKILL.md",
+				Path:     "SKILL.md",
+				Type:     "file",
+				Content:  ptrString(base64.StdEncoding.EncodeToString([]byte("---\nname: private-repo\n---\nbody"))),
+				Encoding: "base64",
+			})
+		case "/api/v5/repos/private/repo/contents":
+			writeJSON(w, http.StatusOK, []githubContentEntry{})
+		case "/private/repo/raw/master/SKILL.md":
+			rawSkillRequested = true
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromGitee(client, "https://gitee.com/private/repo", "request-token")
+	if err != nil {
+		t.Fatalf("fetchFromGitee: %v", err)
+	}
+	if result.name != "private-repo" {
+		t.Fatalf("name = %q, want private-repo", result.name)
+	}
+	if rawSkillRequested {
+		t.Fatal("raw SKILL.md should not be requested when contents API returns file content")
 	}
 }
 

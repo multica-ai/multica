@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -581,11 +582,13 @@ type clawhubFileEntry struct {
 // --- GitHub types (for skills.sh) ---
 
 type githubContentEntry struct {
-	Name        string `json:"name"`
-	Path        string `json:"path"`
-	Type        string `json:"type"` // "file" or "dir"
-	URL         string `json:"url"`
-	DownloadURL string `json:"download_url"`
+	Name        string  `json:"name"`
+	Path        string  `json:"path"`
+	Type        string  `json:"type"` // "file" or "dir"
+	URL         string  `json:"url"`
+	DownloadURL string  `json:"download_url"`
+	Content     *string `json:"content,omitempty"`
+	Encoding    string  `json:"encoding,omitempty"`
 }
 
 type githubRepoInfo struct {
@@ -1768,7 +1771,7 @@ func fetchFromGitee(httpClient *http.Client, rawURL, giteeToken string) (*import
 	if spec.skillDir != "" {
 		skillMdPath = spec.skillDir + "/SKILL.md"
 	}
-	skillMdBody, err := fetchRawGiteeFile(httpClient, buildRawGiteeURL(spec.owner, spec.repo, spec.ref, skillMdPath), giteeToken)
+	skillMdBody, err := fetchGiteeFile(httpClient, spec.owner, spec.repo, spec.ref, skillMdPath, giteeToken)
 	if err != nil {
 		if spec.skillDir == "" {
 			return nil, fmt.Errorf("SKILL.md not found at the root of %s/%s@%s. For multi-skill repositories, point to a specific directory using gitee.com/%s/%s/tree/%s/<skill-dir>",
@@ -1826,8 +1829,7 @@ func fetchFromGitee(httpClient *http.Client, rawURL, giteeToken string) (*import
 		basePath = spec.skillDir + "/"
 	}
 	for _, entry := range allFiles {
-		rawFileURL := buildRawGiteeURL(spec.owner, spec.repo, spec.ref, entry.Path)
-		body, err := fetchRawGiteeFile(httpClient, rawFileURL, giteeToken)
+		body, err := fetchGiteeFile(httpClient, spec.owner, spec.repo, spec.ref, entry.Path, giteeToken)
 		if err != nil {
 			if isCapError(err) {
 				return nil, fmt.Errorf("gitee import: %s: %w", entry.Path, err)
@@ -1875,6 +1877,71 @@ func collectGiteeFiles(httpClient *http.Client, entries []githubContentEntry, ou
 			collectGiteeFiles(httpClient, subEntries, out, owner, repo, ref, giteeToken)
 		}
 	}
+}
+
+func fetchGiteeFile(httpClient *http.Client, owner, repo, ref, repoPath, giteeToken string) ([]byte, error) {
+	body, err := fetchGiteeFileFromContentsAPI(httpClient, owner, repo, ref, repoPath, giteeToken)
+	if err == nil {
+		return body, nil
+	}
+	if isCapError(err) || errors.Is(err, errGiteeAuthRequired) {
+		return nil, err
+	}
+	rawBody, rawErr := fetchRawGiteeFile(httpClient, buildRawGiteeURL(owner, repo, ref, repoPath), giteeToken)
+	if rawErr == nil {
+		return rawBody, nil
+	}
+	return nil, rawErr
+}
+
+func fetchGiteeFileFromContentsAPI(httpClient *http.Client, owner, repo, ref, repoPath, giteeToken string) ([]byte, error) {
+	apiURL := buildGiteeContentsURL(owner, repo, repoPath, ref)
+	resp, err := doGiteeAPIGet(httpClient, apiURL, giteeToken)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return nil, giteeRepoAccessError(owner, repo, resp.StatusCode, giteeToken)
+	default:
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	var entry githubContentEntry
+	if err := json.NewDecoder(resp.Body).Decode(&entry); err != nil {
+		return nil, err
+	}
+	if entry.Content == nil {
+		return nil, fmt.Errorf("gitee contents response for %s has no content", repoPath)
+	}
+
+	content := strings.NewReplacer("\n", "", "\r", "").Replace(*entry.Content)
+	if content == "" {
+		return []byte{}, nil
+	}
+	if entry.Encoding == "" || strings.EqualFold(entry.Encoding, "base64") {
+		body, err := base64.StdEncoding.DecodeString(content)
+		if err == nil {
+			if len(body) > maxImportFileSize {
+				return nil, fmt.Errorf("%w: file exceeds %d byte limit", errImportCapExceeded, maxImportFileSize)
+			}
+			return body, nil
+		}
+		if !strings.EqualFold(entry.Encoding, "base64") {
+			if len(content) > maxImportFileSize {
+				return nil, fmt.Errorf("%w: file exceeds %d byte limit", errImportCapExceeded, maxImportFileSize)
+			}
+			return []byte(content), nil
+		}
+		return nil, err
+	}
+	if len(content) > maxImportFileSize {
+		return nil, fmt.Errorf("%w: file exceeds %d byte limit", errImportCapExceeded, maxImportFileSize)
+	}
+	return []byte(content), nil
 }
 
 // --- Shared helpers ---
