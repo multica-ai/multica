@@ -40,7 +40,10 @@ func CasdoorAuth(jwks *auth.JWKSProvider, resolver SubjectResolver) func(http.Ha
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractCasdoorToken(r)
 			if token == "" {
-				writeUnauthorized(w, "missing authorization")
+				// No Casdoor token present — fall through to the standard
+				// Auth middleware, which handles multica_auth cookies (set by
+				// the Casdoor OAuth callback) and legacy Bearer tokens.
+				next.ServeHTTP(w, r)
 				return
 			}
 
