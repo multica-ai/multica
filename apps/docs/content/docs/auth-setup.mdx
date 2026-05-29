@@ -37,7 +37,7 @@ The SMTP path supports the three relay modes most on-premise mail servers (notab
 |---|---|---|---|
 | Anonymous internal relay | `25` | none — submission is trusted by IP / subnet | none on the wire (internal segment only) |
 | Authenticated submission | `587` | `SMTP_USERNAME` + `SMTP_PASSWORD` | STARTTLS, upgraded automatically |
-| Implicit TLS (SMTPS) | `465` | — | **not supported yet** — use port 25 or 587 |
+| Implicit TLS (SMTPS) | `465` | optional (`SMTP_USERNAME` + `SMTP_PASSWORD`) | TLS handshake on connect — auto-enabled on port `465`, or force on a non-standard port with `SMTP_TLS=implicit` |
 
 **Anonymous Exchange relay on port 25** — the typical "internal SMTP relay" / Exchange anonymous receive connector that accepts mail from a trusted subnet without credentials:
 
@@ -61,7 +61,18 @@ SMTP_TLS_INSECURE=false        # set true only for self-signed / private CA
 RESEND_FROM_EMAIL=noreply@yourdomain.com
 ```
 
-At startup the server prints which provider it picked — for example `EmailService: SMTP relay exchange.internal.example.com:25 from=noreply@example.com` (or `Resend API` / `DEV mode`). The password is never logged. If you don't see the SMTP line after restart, `SMTP_HOST` didn't reach the process — check the container env (`docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP`).
+**Implicit TLS (SMTPS) on port 465** — for providers that only offer SMTPS and don't advertise STARTTLS (e.g. Aliyun / Tencent enterprise mail). Port `465` auto-enables implicit TLS; `SMTP_TLS=implicit` (aliases: `smtps`, `ssl`) forces it on a non-standard SMTPS port:
+
+```bash
+SMTP_HOST=smtp.qiye.aliyun.com
+SMTP_PORT=465                  # implicit TLS auto-enabled on 465
+SMTP_USERNAME=multica@yourdomain.com
+SMTP_PASSWORD=...
+SMTP_TLS=implicit              # optional on 465; required on a non-standard SMTPS port
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+At startup the server prints which provider it picked, including the negotiated TLS mode — for example `EmailService: SMTP relay exchange.internal.example.com:25 (starttls) from=noreply@example.com` or `… smtp.qiye.aliyun.com:465 (implicit-tls) from=…` (or `Resend API` / `DEV mode`). The password is never logged. If you don't see the SMTP line after restart, `SMTP_HOST` didn't reach the process — check the container env (`docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP`).
 
 **What happens if you set neither**: the server doesn't error, but **every email that should have been sent is written to the server's stdout only**. Handy for local development (copy the code from the logs); in production it's a black hole.
 

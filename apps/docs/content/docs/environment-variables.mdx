@@ -49,9 +49,10 @@ Multica supports two delivery backends — [Resend](https://resend.com/) for clo
 | Variable | Default | Description |
 |---|---|---|
 | `SMTP_HOST` | empty | SMTP relay hostname. Setting this activates SMTP mode and overrides Resend |
-| `SMTP_PORT` | `25` | SMTP port. Use `587` for STARTTLS submission; **port 465 (SMTPS / implicit TLS) is not supported** |
+| `SMTP_PORT` | `25` | SMTP port. Use `587` for STARTTLS submission, or `465` for SMTPS (implicit TLS, auto-enabled) |
 | `SMTP_USERNAME` | empty | SMTP username. Leave empty for unauthenticated relay |
 | `SMTP_PASSWORD` | empty | SMTP password |
+| `SMTP_TLS` | `starttls` | TLS mode. `implicit` (aliases `smtps`, `ssl`) forces an immediate TLS handshake on connect (SMTPS); port `465` auto-enables it. Unset / `starttls` upgrades via STARTTLS after connect |
 | `SMTP_TLS_INSECURE` | `false` | Set `true` to skip TLS certificate verification (private CA / self-signed only) |
 
 STARTTLS is upgraded automatically when the server advertises it. The dial timeout is 10s and the whole SMTP session has a 30s deadline, so a black-holed relay can't hang the auth handler.
