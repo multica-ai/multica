@@ -24,13 +24,15 @@ export {
 } from "./user-context";
 
 /**
- * Pick the EN or ZH content for the given user language. Maps any "zh*"
- * prefix to the Chinese variant; everything else falls back to English.
- * Mirrors the server-side `noRuntimeIssueDescription` logic.
+ * Pick persisted onboarding content for the given user language. Maps
+ * supported BCP-47 prefixes to the matching variant; everything else falls
+ * back to English. Mirrors the locale picker used by the frontend i18n layer.
  */
 export function pickContentLang(
   language: string | null | undefined,
-): "en" | "zh" {
-  if (language && language.toLowerCase().startsWith("zh")) return "zh";
+): "en" | "zh" | "ko" {
+  const lower = language?.toLowerCase();
+  if (lower?.startsWith("zh")) return "zh";
+  if (lower?.startsWith("ko")) return "ko";
   return "en";
 }
