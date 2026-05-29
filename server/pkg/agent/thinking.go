@@ -383,8 +383,8 @@ var piThinkingLevels = []ThinkingLevel{
 	},
 }
 
-// piModelThinking is the shared ModelThinking block attached to every Pi
-// model. Pointer is safe to share: callers must not mutate it.
+// piModelThinking is the ModelThinking template for Pi agents. Each model
+// receives its own copy via annotatePiThinking.
 var piModelThinking = &ModelThinking{
 	SupportedLevels: piThinkingLevels,
 	DefaultLevel:    "medium",
@@ -395,7 +395,8 @@ var piModelThinking = &ModelThinking{
 // restrictions — the SDK handles clamping internally.
 func annotatePiThinking(models []Model) {
 	for i := range models {
-		models[i].Thinking = piModelThinking
+		mt := *piModelThinking
+		models[i].Thinking = &mt
 	}
 }
 

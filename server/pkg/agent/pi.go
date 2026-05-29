@@ -524,8 +524,12 @@ func buildPiArgs(prompt, sessionPath string, opts ExecOptions, logger *slog.Logg
 	// Guard: skip --thinking injection when custom_args already carries the
 	// flag (legacy workaround via two-element form ["--thinking","high"]).
 	// Prevents duplicate flags; logs a warning so agents can migrate to
-	// the thinking_level field. Single-element "--thinking=high" form is
-	// not in use per confirmed workaround evidence and is not checked.
+	// the thinking_level field.
+	// Note: the single-element "--thinking=high" form would bypass this guard
+	// (slices.Contains checks for a standalone "--thinking" element only).
+	// This form is not in use per confirmed workaround evidence, so the gap
+	// is accepted. If it is ever used, the conflict guard misses it and a
+	// duplicate --thinking flag reaches Pi.
 	hasCustomThinking := slices.Contains(opts.CustomArgs, "--thinking")
 	if hasCustomThinking && opts.ThinkingLevel != "" {
 		logger.Warn("pi: --thinking already in custom_args; skipping thinking_level injection to avoid duplicate flag — migrate to thinking_level field",

@@ -559,7 +559,7 @@ export interface RuntimeModel {
    * Per-model reasoning/effort catalog discovered by the daemon. Currently
    * populated for claude, codex, and pi runtimes; omitted (or undefined)
    * for every other provider, which the UI treats as "no thinking-level
-   * picker for this model". See MUL-2339, SXSM-77.
+   * picker for this model". See MUL-2339.
    */
   thinking?: RuntimeModelThinking;
 }

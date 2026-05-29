@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -182,15 +183,6 @@ func TestFlushPiTextBufferKeepsUnmatchedToolPrefixes(t *testing.T) {
 	}
 }
 
-func argsContainsFlag(args []string, flag string) bool {
-	for _, a := range args {
-		if a == flag {
-			return true
-		}
-	}
-	return false
-}
-
 func thinkingArgValue(args []string) string {
 	for i, a := range args {
 		if a == "--thinking" && i+1 < len(args) {
@@ -227,7 +219,7 @@ func TestBuildPiArgsThinkingLevel_Empty(t *testing.T) {
 	args := buildPiArgs("prompt", "/tmp/s.jsonl", ExecOptions{
 		ThinkingLevel: "",
 	}, slog.Default())
-	if argsContainsFlag(args, "--thinking") {
+	if slices.Contains(args, "--thinking") {
 		t.Errorf("empty ThinkingLevel must not produce --thinking flag, got: %v", args)
 	}
 }
@@ -241,7 +233,7 @@ func TestBuildPiArgsThinkingLevel_Invalid(t *testing.T) {
 	args := buildPiArgs("prompt", "/tmp/s.jsonl", ExecOptions{
 		ThinkingLevel: "supersonic",
 	}, logger)
-	if argsContainsFlag(args, "--thinking") {
+	if slices.Contains(args, "--thinking") {
 		t.Errorf("invalid ThinkingLevel must not produce --thinking flag, got: %v", args)
 	}
 	if !strings.Contains(logBuf.String(), "unknown thinking_level") {

@@ -52,7 +52,7 @@ const CLAUDE_MODEL: RuntimeModel = {
 };
 
 // Pi model with the full thinking catalog — mirrors what the daemon returns
-// for Pi agents after SXSM-77 annotates every Pi model with all 6 levels.
+// for Pi agents. The daemon annotates every Pi model with all 6 thinking levels.
 const PI_MODEL: RuntimeModel = {
   id: "anthropic/claude-opus-4-6",
   label: "Claude Opus 4.6",
@@ -215,8 +215,8 @@ describe("ThinkingPropRow", () => {
     expect((await screen.findAllByText("Follow CLI config")).length).toBeGreaterThan(0);
   });
 
-  it("shows the thinking row for a Pi agent model (SXSM-77)", async () => {
-    // Pi models carry all 6 thinking levels in their catalog after SXSM-77.
+  it("shows the thinking row for a Pi agent model", async () => {
+    // Pi models carry all 6 thinking levels in their catalog.
     // The row must be visible for Pi agents just as it is for Claude/Codex.
     mockInitiateListModels.mockResolvedValue(listResult([PI_MODEL]));
     renderRow({ model: PI_MODEL.id, value: "" });
@@ -234,7 +234,7 @@ describe("ThinkingPropRow", () => {
     await waitFor(() => expect(screen.queryByText("Thinking")).toBeNull());
   });
 
-  it("renders the xhigh description for Pi agents (SXSM-77)", async () => {
+  it("renders the xhigh description for Pi agents", async () => {
     mockInitiateListModels.mockResolvedValue(listResult([PI_MODEL]));
     renderRow({ model: PI_MODEL.id, value: "xhigh" });
 
