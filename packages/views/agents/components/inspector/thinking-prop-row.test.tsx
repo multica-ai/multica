@@ -68,7 +68,7 @@ const PI_MODEL: RuntimeModel = {
         value: "xhigh",
         label: "Extra high",
         description:
-          'Maximum reasoning. Available on select models only (e.g., OpenAI o-series, Claude Opus 4.6+). Falls back to "high" on unsupported models — no error is raised.',
+          'Maximum reasoning. Available on select models only (e.g., OpenAI o-series, Claude Opus 4.6+). Falls back to "high" on unsupported models.',
       },
     ],
     default_level: "medium",
