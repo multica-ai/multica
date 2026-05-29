@@ -88,5 +88,31 @@ in-cluster service DNS — it never touches the Cloudflare-Access-gated public h
 ### Modes
 
 - `daemon` (this plan): one long-lived daemon pod. Simple, laptop-free.
-- `controller` (Plan D): per-task Job pods spawned by a controller. The clean
+- `controller` (Plan E): per-task Job pods spawned by a controller. The clean
   target architecture. Same image + secrets; different launch mechanism.
+
+### `multica run-task` (Plan D primitive)
+
+Single-task execution mode. Reads a JSON Task payload from `--task-file`,
+runs the agent end-to-end (start → spawn → stream → complete/fail), exits.
+Used by the Plan E controller to drive per-task Job pods. Can also be invoked
+manually for smoke tests against a real Multica deployment.
+
+```bash
+multica run-task \
+  --task-file /etc/task/task.json \
+  --workspaces-root /work
+```
+
+Required env / flags:
+
+- `MULTICA_TOKEN`            — PAT (same one daemon-mode uses)
+- `MULTICA_SERVER_URL`       — backend URL, or `--server-url`
+- `MULTICA_RUNTIME_PROVIDER` — provider key (`claude`, `codex`, …). Auto-detected
+  when exactly one agent CLI is on PATH (the `multica-runtime-claude` image
+  always satisfies that case).
+
+The task payload must include `id`, `workspace_id`, and `runtime_id`. The
+controller (or your manual smoke test) is responsible for first claiming the
+task via `POST /api/daemon/runtimes/{runtimeID}/tasks/claim` and writing the
+returned JSON to `--task-file`. `run-task` itself does not poll or claim.

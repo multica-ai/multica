@@ -14,6 +14,94 @@ import (
 	"github.com/mattn/go-shellwords"
 )
 
+// ProbeAgents detects available agent CLIs on PATH and returns a map keyed by
+// provider name. Reused by both the daemon's LoadConfig and the run-task
+// subcommand (single-task mode), which needs the same probing logic without
+// the rest of LoadConfig's side effects (daemon ID resolution, GC durations,
+// etc.).
+//
+// Returns a non-empty map on success. Returns an error when no agent CLI is
+// found at all — the caller has no useful work it can do in that case.
+//
+// Implementation notes (kept here for the same reasons LoadConfig had them):
+// exec.LookPath is the primary path, but on macOS/Linux a GUI-launched daemon
+// (Electron, Launchpad) does not inherit the user's interactive shell PATH —
+// fnm/nvm/volta multishells, the Anthropic native installer prefix, and
+// per-user npm prefixes all live in dirs only added to PATH by ~/.zshrc /
+// ~/.bashrc. We lazily fall back to the login shell to canonicalise paths
+// the daemon process can't see, but only when a bare command name actually
+// missed LookPath — pinning MULTICA_*_PATH still takes the fast path.
+func ProbeAgents() (map[string]AgentEntry, error) {
+	var (
+		shellResolveOnce sync.Once
+		shellResolved    map[string]string
+	)
+	getShellResolved := func() map[string]string {
+		shellResolveOnce.Do(func() {
+			shellResolved = resolveAgentsViaLoginShell(defaultAgentCommandNames)
+		})
+		return shellResolved
+	}
+	probe := func(envVar, defaultCmd, modelEnv string) (AgentEntry, bool) {
+		cmd := envOrDefault(envVar, defaultCmd)
+		if _, err := exec.LookPath(cmd); err == nil {
+			return AgentEntry{
+				Path:  cmd,
+				Model: strings.TrimSpace(os.Getenv(modelEnv)),
+			}, true
+		}
+		if strings.ContainsAny(cmd, "/\\") {
+			return AgentEntry{}, false
+		}
+		if path, ok := getShellResolved()[cmd]; ok {
+			return AgentEntry{
+				Path:  path,
+				Model: strings.TrimSpace(os.Getenv(modelEnv)),
+			}, true
+		}
+		return AgentEntry{}, false
+	}
+
+	agents := map[string]AgentEntry{}
+	if e, ok := probe("MULTICA_CLAUDE_PATH", "claude", "MULTICA_CLAUDE_MODEL"); ok {
+		agents["claude"] = e
+	}
+	if e, ok := probe("MULTICA_CODEX_PATH", "codex", "MULTICA_CODEX_MODEL"); ok {
+		agents["codex"] = e
+	}
+	if e, ok := probe("MULTICA_OPENCODE_PATH", "opencode", "MULTICA_OPENCODE_MODEL"); ok {
+		agents["opencode"] = e
+	}
+	if e, ok := probe("MULTICA_OPENCLAW_PATH", "openclaw", "MULTICA_OPENCLAW_MODEL"); ok {
+		agents["openclaw"] = e
+	}
+	if e, ok := probe("MULTICA_HERMES_PATH", "hermes", "MULTICA_HERMES_MODEL"); ok {
+		agents["hermes"] = e
+	}
+	if e, ok := probe("MULTICA_GEMINI_PATH", "gemini", "MULTICA_GEMINI_MODEL"); ok {
+		agents["gemini"] = e
+	}
+	if e, ok := probe("MULTICA_PI_PATH", "pi", "MULTICA_PI_MODEL"); ok {
+		agents["pi"] = e
+	}
+	if e, ok := probe("MULTICA_CURSOR_PATH", "cursor-agent", "MULTICA_CURSOR_MODEL"); ok {
+		agents["cursor"] = e
+	}
+	if e, ok := probe("MULTICA_COPILOT_PATH", "copilot", "MULTICA_COPILOT_MODEL"); ok {
+		agents["copilot"] = e
+	}
+	if e, ok := probe("MULTICA_KIMI_PATH", "kimi", "MULTICA_KIMI_MODEL"); ok {
+		agents["kimi"] = e
+	}
+	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
+		agents["kiro"] = e
+	}
+	if len(agents) == 0 {
+		return nil, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+	}
+	return agents, nil
+}
+
 const (
 	DefaultServerURL                      = "ws://localhost:8080/ws"
 	DefaultPollInterval                   = 30 * time.Second
@@ -118,91 +206,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 
-	// Probe available agent CLIs. exec.LookPath is the primary path, but on
-	// macOS/Linux a GUI-launched daemon (Electron, Launchpad) does not
-	// inherit the user's interactive shell PATH — fnm/nvm/volta multishells,
-	// the Anthropic native installer prefix, and per-user npm prefixes all
-	// live in dirs that only get added to PATH by ~/.zshrc or ~/.bashrc.
-	// shellResolvedAgents asks the user's login shell, lazily on first miss,
-	// to resolve every standard agent name to its canonical absolute path,
-	// so we can find binaries the bare daemon process can't see. See
-	// resolveAgentsViaLoginShell for the details and constraints.
-	//
-	// Laziness matters: the happy path (every agent on the daemon's PATH or
-	// pinned to an explicit MULTICA_*_PATH) must not pay the cost of
-	// spawning the user's login shell — that touches their rc files and
-	// adds startup latency that scales with whatever they put in there. We
-	// only fork a shell when a bare command name actually missed LookPath.
-	var (
-		shellResolveOnce sync.Once
-		shellResolved    map[string]string
-	)
-	getShellResolved := func() map[string]string {
-		shellResolveOnce.Do(func() {
-			shellResolved = resolveAgentsViaLoginShell(defaultAgentCommandNames)
-		})
-		return shellResolved
-	}
-	probe := func(envVar, defaultCmd, modelEnv string) (AgentEntry, bool) {
-		cmd := envOrDefault(envVar, defaultCmd)
-		if _, err := exec.LookPath(cmd); err == nil {
-			return AgentEntry{
-				Path:  cmd,
-				Model: strings.TrimSpace(os.Getenv(modelEnv)),
-			}, true
-		}
-		// The shell fallback only rescues bare command names. An operator
-		// who pinned MULTICA_*_PATH to an absolute or relative path that
-		// doesn't exist should hard-miss, not silently get a different
-		// binary.
-		if strings.ContainsAny(cmd, "/\\") {
-			return AgentEntry{}, false
-		}
-		if path, ok := getShellResolved()[cmd]; ok {
-			return AgentEntry{
-				Path:  path,
-				Model: strings.TrimSpace(os.Getenv(modelEnv)),
-			}, true
-		}
-		return AgentEntry{}, false
-	}
-
-	agents := map[string]AgentEntry{}
-	if e, ok := probe("MULTICA_CLAUDE_PATH", "claude", "MULTICA_CLAUDE_MODEL"); ok {
-		agents["claude"] = e
-	}
-	if e, ok := probe("MULTICA_CODEX_PATH", "codex", "MULTICA_CODEX_MODEL"); ok {
-		agents["codex"] = e
-	}
-	if e, ok := probe("MULTICA_OPENCODE_PATH", "opencode", "MULTICA_OPENCODE_MODEL"); ok {
-		agents["opencode"] = e
-	}
-	if e, ok := probe("MULTICA_OPENCLAW_PATH", "openclaw", "MULTICA_OPENCLAW_MODEL"); ok {
-		agents["openclaw"] = e
-	}
-	if e, ok := probe("MULTICA_HERMES_PATH", "hermes", "MULTICA_HERMES_MODEL"); ok {
-		agents["hermes"] = e
-	}
-	if e, ok := probe("MULTICA_GEMINI_PATH", "gemini", "MULTICA_GEMINI_MODEL"); ok {
-		agents["gemini"] = e
-	}
-	if e, ok := probe("MULTICA_PI_PATH", "pi", "MULTICA_PI_MODEL"); ok {
-		agents["pi"] = e
-	}
-	if e, ok := probe("MULTICA_CURSOR_PATH", "cursor-agent", "MULTICA_CURSOR_MODEL"); ok {
-		agents["cursor"] = e
-	}
-	if e, ok := probe("MULTICA_COPILOT_PATH", "copilot", "MULTICA_COPILOT_MODEL"); ok {
-		agents["copilot"] = e
-	}
-	if e, ok := probe("MULTICA_KIMI_PATH", "kimi", "MULTICA_KIMI_MODEL"); ok {
-		agents["kimi"] = e
-	}
-	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
-		agents["kiro"] = e
-	}
-	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+	agents, err := ProbeAgents()
+	if err != nil {
+		return Config{}, err
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")

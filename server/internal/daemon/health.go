@@ -112,14 +112,11 @@ func (d *Daemon) shutdownHandler() http.HandlerFunc {
 	}
 }
 
-// serveHealth runs the health HTTP server on the given listener.
-// Blocks until ctx is cancelled.
-func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", d.healthHandler(startedAt))
-	mux.HandleFunc("/shutdown", d.shutdownHandler())
-
-	mux.HandleFunc("/repo/checkout", func(w http.ResponseWriter, r *http.Request) {
+// repoCheckoutHandler returns the POST /repo/checkout HTTP handler. Extracted
+// so both the long-running daemon (serveHealth) and the one-shot run-task
+// helper server (single_task.go) can register the same behaviour.
+func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -175,7 +172,16 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
-	})
+	}
+}
+
+// serveHealth runs the health HTTP server on the given listener.
+// Blocks until ctx is cancelled.
+func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", d.healthHandler(startedAt))
+	mux.HandleFunc("/shutdown", d.shutdownHandler())
+	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 
 	srv := &http.Server{Handler: mux}
 
