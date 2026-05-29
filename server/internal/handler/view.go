@@ -100,6 +100,18 @@ func validateViewFilters(raw json.RawMessage) ([]byte, error) {
 			if err := json.Unmarshal(val, &branches); err != nil {
 				return nil, errors.New("any_of must be an array of filter objects")
 			}
+			// Branches are flat filter objects; validate their keys too so an
+			// unknown key can't hide inside an OR branch, and reject nesting.
+			for _, branch := range branches {
+				for bkey := range branch {
+					if bkey == "any_of" {
+						return nil, errors.New("any_of branches cannot themselves contain any_of")
+					}
+					if !knownViewFilterKeys[bkey] {
+						return nil, errors.New("unknown filter key in any_of branch: " + bkey)
+					}
+				}
+			}
 		}
 	}
 	return raw, nil

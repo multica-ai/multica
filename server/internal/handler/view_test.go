@@ -219,3 +219,40 @@ func TestReorderViews(t *testing.T) {
 		t.Fatalf("reorder not reflected in list order: v1=%d v2=%d v3=%d", pos[v1.ID], pos[v2.ID], pos[v3.ID])
 	}
 }
+
+// TestCreateViewAnyOfBranchValidation pins that filter-key validation recurses
+// into any_of branches — the validator's contract is "reject unknown keys", so
+// a bogus key hidden inside an OR branch must 400 too, and branches can't nest.
+func TestCreateViewAnyOfBranchValidation(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ts := time.Now().UnixNano()
+
+	// unknown key inside an any_of branch → 400
+	w, _ := createViewAs(t, testUserID, map[string]any{
+		"name": fmt.Sprintf("ao%d", ts), "page": "my_issues",
+		"filters": map[string]any{"any_of": []any{map[string]any{"bogus_key": []string{"x"}}}},
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("any_of bad branch key: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// well-formed any_of branch → 201
+	w, _ = createViewAs(t, testUserID, map[string]any{
+		"name": fmt.Sprintf("ao2%d", ts), "page": "my_issues",
+		"filters": map[string]any{"any_of": []any{map[string]any{"assignee_filters": []string{"member:{me}"}}}},
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("valid any_of: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// a branch may not itself contain any_of (branches are flat) → 400
+	w, _ = createViewAs(t, testUserID, map[string]any{
+		"name": fmt.Sprintf("ao3%d", ts), "page": "my_issues",
+		"filters": map[string]any{"any_of": []any{map[string]any{"any_of": []any{}}}},
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("nested any_of: expected 400, got %d", w.Code)
+	}
+}
