@@ -81,6 +81,24 @@ spec:
             - name: MULTICA_CLAUDE_ARGS
               value: {{ . | quote }}
             {{- end }}
+            {{- $git := .Values.runtime.daemon.git }}
+            {{- if and $git.authorName $git.authorEmail }}
+            - { name: GIT_AUTHOR_NAME,     value: {{ $git.authorName  | quote }} }
+            - { name: GIT_AUTHOR_EMAIL,    value: {{ $git.authorEmail | quote }} }
+            - { name: GIT_COMMITTER_NAME,  value: {{ $git.authorName  | quote }} }
+            - { name: GIT_COMMITTER_EMAIL, value: {{ $git.authorEmail | quote }} }
+            {{- end }}
+            {{- if $git.signing.enabled }}
+            # SSH-sign every commit with the mounted git deploy key. The key
+            # must also be registered as a Signing Key on GitHub for "Verified".
+            - { name: GIT_CONFIG_COUNT,   value: "3" }
+            - { name: GIT_CONFIG_KEY_0,   value: "user.signingkey" }
+            - { name: GIT_CONFIG_VALUE_0, value: "/home/multica/.ssh/id_ed25519" }
+            - { name: GIT_CONFIG_KEY_1,   value: "gpg.format" }
+            - { name: GIT_CONFIG_VALUE_1, value: "ssh" }
+            - { name: GIT_CONFIG_KEY_2,   value: "commit.gpgsign" }
+            - { name: GIT_CONFIG_VALUE_2, value: "true" }
+            {{- end }}
           resources:
             {{- toYaml .Values.runtime.daemon.resources | nindent 12 }}
           volumeMounts:
