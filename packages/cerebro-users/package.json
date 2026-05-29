@@ -12,7 +12,9 @@
     "./views": "./views/index.ts"
   },
   "dependencies": {
+    "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-members": "workspace:*",
+    "@multica/cerebro-tool-policy": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",

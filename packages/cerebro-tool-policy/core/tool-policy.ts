@@ -17,8 +17,8 @@ import { z } from "zod";
 
 /** The per-layer authoring choice for one tool. `inherit` follows the layer below. */
 export type ToolSetting = "inherit" | "allow" | "ask" | "deny";
-/** A rung of the Runtime › Agent › Group › User chain. */
-export type ToolLayer = "runtime" | "agent" | "group" | "user";
+/** A rung of the Workspace › Runtime › Agent › Group › User chain. */
+export type ToolLayer = "workspace" | "runtime" | "agent" | "group" | "user";
 /** The resolved verdict is always concrete — never `inherit`. */
 export type ToolEffectiveSetting = "allow" | "ask" | "deny";
 
@@ -34,6 +34,7 @@ export interface ToolPolicyEffective {
 
 /** Explicit setting at each layer for the queried context; null = no override. */
 export interface ToolPolicyLayers {
+  workspace: ToolSetting | null;
   runtime: ToolSetting | null;
   agent: ToolSetting | null;
   group: ToolSetting | null;
@@ -101,12 +102,13 @@ const toolPolicyRowSchema = z.object({
   source: z.string().default(""),
   layers: z
     .object({
+      workspace: layerSettingSchema,
       runtime: layerSettingSchema,
       agent: layerSettingSchema,
       group: layerSettingSchema,
       user: layerSettingSchema,
     })
-    .default({ runtime: null, agent: null, group: null, user: null }),
+    .default({ workspace: null, runtime: null, agent: null, group: null, user: null }),
   effective: z
     .object({
       setting: effectiveSettingSchema,

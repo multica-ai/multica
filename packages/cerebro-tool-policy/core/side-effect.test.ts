@@ -11,7 +11,7 @@ function row(
     title: opts.title ?? "",
     category: opts.category ?? "",
     source: "scan",
-    layers: { runtime: null, agent: null, group: null, user: null },
+    layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
     effective: {
       setting: opts.effective ?? "allow",
       decided_by: "",

@@ -2,22 +2,25 @@
 --
 -- These queries back the unified tool-policy chain: each row is one layer's
 -- explicit Allow/Ask/Deny/Inherit choice for one tool. ListCerebroToolPolicyForContext
--- gathers the four layers a single resolution needs in one round trip; the
+-- gathers the five layers a single resolution needs in one round trip; the
 -- per-subject / per-tool reads back the authoring tables in the admin UI.
 
 -- name: ListCerebroToolPolicyForContext :many
--- All explicit settings that apply to one tool for one (runtime, agent, user,
--- groups) context. A layer whose subject id is NULL (absent from the request)
--- never matches, so the resolver treats it as Inherit. group_ids may be empty.
+-- All explicit settings that apply to one tool for one (workspace, runtime,
+-- agent, user, groups) context. A layer whose subject id is NULL (absent from
+-- the request) never matches, so the resolver treats it as Inherit. The
+-- workspace root layer is always keyed on the workspace itself, so it enters
+-- every resolution. group_ids may be empty.
 SELECT layer, subject_id, setting
 FROM cerebro_tool_policy
 WHERE workspace_id = sqlc.arg(workspace_id)
   AND tool_key = sqlc.arg(tool_key)
   AND (
-    (layer = 'runtime' AND subject_id = sqlc.arg(runtime_id)) OR
-    (layer = 'agent'   AND subject_id = sqlc.arg(agent_id)) OR
-    (layer = 'user'    AND subject_id = sqlc.arg(user_id)) OR
-    (layer = 'group'   AND subject_id = ANY(sqlc.arg(group_ids)::uuid[]))
+    (layer = 'workspace' AND subject_id = sqlc.arg(workspace_id)) OR
+    (layer = 'runtime'   AND subject_id = sqlc.arg(runtime_id)) OR
+    (layer = 'agent'     AND subject_id = sqlc.arg(agent_id)) OR
+    (layer = 'user'      AND subject_id = sqlc.arg(user_id)) OR
+    (layer = 'group'     AND subject_id = ANY(sqlc.arg(group_ids)::uuid[]))
   );
 
 -- name: UpsertCerebroToolPolicy :one

@@ -230,6 +230,9 @@ importers:
       '@multica/cerebro-tasks':
         specifier: workspace:*
         version: link:../../packages/cerebro-tasks
+      '@multica/cerebro-tool-policy':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-tool-policy
       '@multica/cerebro-ui':
         specifier: workspace:*
         version: link:../../packages/cerebro-ui
@@ -628,6 +631,9 @@ importers:
       '@multica/cerebro-tasks':
         specifier: workspace:*
         version: link:../../packages/cerebro-tasks
+      '@multica/cerebro-tool-policy':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-tool-policy
       '@multica/cerebro-ui':
         specifier: workspace:*
         version: link:../../packages/cerebro-ui
@@ -1710,6 +1716,9 @@ importers:
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
+      '@multica/cerebro-tool-policy':
+        specifier: workspace:*
+        version: link:../cerebro-tool-policy
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -2545,6 +2554,9 @@ importers:
 
   packages/cerebro-tool-policy:
     dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -2631,9 +2643,15 @@ importers:
 
   packages/cerebro-users:
     dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
       '@multica/cerebro-members':
         specifier: workspace:*
         version: link:../cerebro-members
+      '@multica/cerebro-tool-policy':
+        specifier: workspace:*
+        version: link:../cerebro-tool-policy
       '@multica/core':
         specifier: workspace:*
         version: link:../core

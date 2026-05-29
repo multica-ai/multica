@@ -6,15 +6,18 @@
 // runtime grant tables (boolean enabled + user/group access), and the group
 // permission service (capability whitelists). Each computed its own answer and
 // none expressed the product's actual model: every individual CLI tool and
-// every individual MCP action is governed on its own, at four stacked layers,
+// every individual MCP action is governed on its own, at five stacked layers,
 // where each layer can only tighten the one below it.
 //
 // The layers, from base to ceiling, are:
 //
-//	Runtime → Agent → Group → User
+//	Workspace → Runtime → Agent → Group → User
 //
-//	Runtime  (BASE)    The machine's default for every agent on it. Sets the
-//	                   starting point.
+//	Workspace (ROOT)   The workspace-wide default for every runtime in it — the
+//	                   root of the chain, authored under Settings (FIR-2284 Bid
+//	                   5). Sets the starting point below the runtime layer.
+//	Runtime            The machine's default for every agent on it. Tightens
+//	                   under the workspace root.
 //	Agent              Override on the individual agent. Can only tighten what
 //	                   the runtime offers.
 //	Group              Shared rules for a team. Tightens under the user ceiling.
@@ -54,7 +57,10 @@ const (
 type Layer string
 
 const (
-	// LayerRuntime is the base layer — the runtime's default for every agent.
+	// LayerWorkspace is the root layer — the workspace-wide default applied below
+	// every runtime. It is the lowest rung of the chain (FIR-2284 Bid 5).
+	LayerWorkspace Layer = "workspace"
+	// LayerRuntime is the machine layer — the runtime's default for every agent.
 	LayerRuntime Layer = "runtime"
 	// LayerAgent is the per-agent override.
 	LayerAgent Layer = "agent"
@@ -67,7 +73,7 @@ const (
 // chainOrder lists layers from base (index 0) to ceiling (last). Resolution
 // walks this order so that, on ties, a higher layer takes responsibility for
 // the effective value — which is what makes "Capped by user" attributable.
-var chainOrder = []Layer{LayerRuntime, LayerAgent, LayerGroup, LayerUser}
+var chainOrder = []Layer{LayerWorkspace, LayerRuntime, LayerAgent, LayerGroup, LayerUser}
 
 // rank maps a concrete setting to its restrictiveness. Higher is tighter.
 // Inherit (and any unknown value) returns -1 — "no opinion, pass through".
@@ -165,9 +171,11 @@ func Resolve(in Input) Effective {
 			// This layer tightens the running value.
 			resolved = v
 			decidedBy = layer
-			// A layer above the runtime base that pushes the result tighter than
-			// the base offered is "capping" the access.
-			if layer != LayerRuntime && rank(v) > baseRank {
+			// A layer above the base infrastructure (workspace + runtime) that
+			// pushes the result tighter than the base offered is "capping" access.
+			// Workspace and runtime are root defaults — they set the starting
+			// point, they do not "cap".
+			if layer != LayerRuntime && layer != LayerWorkspace && rank(v) > baseRank {
 				cappedBy = layer
 			}
 		case rank(v) == rank(resolved):

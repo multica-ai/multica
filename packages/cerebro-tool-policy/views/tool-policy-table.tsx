@@ -66,11 +66,27 @@ import {
   type ToolSetting,
 } from "../core";
 
+/**
+ * The five surfaces (FIR-2284 Bid 5). Each page renders the same catalog but
+ * authors a different rung of the Workspace › Runtime › Agent › Group › User
+ * chain. `view` decides the editable layer; `subjectId` is the id that layer's
+ * rows key on for this page.
+ */
+export type ToolPolicyView =
+  | "workspace"
+  | "runtime"
+  | "agent"
+  | "group"
+  | "member";
+
 export interface ToolPolicyTableProps {
   wsId: string;
   /** Which page this table is on — decides the editable layer + write subject. */
-  view: "agent" | "runtime";
-  /** The agent id (view="agent") or runtime id (view="runtime") being edited. */
+  view: ToolPolicyView;
+  /**
+   * The id the page's layer keys on: the workspace id (workspace), runtime id
+   * (runtime), agent id (agent), group id (group), or member's USER id (member).
+   */
   subjectId: string;
   /** The runtime the agent runs on — shows the inherited Runtime column (agent view). */
   runtimeId?: string | null;
@@ -78,6 +94,16 @@ export interface ToolPolicyTableProps {
   userId?: string | null;
   groupIds?: string[];
 }
+
+// VIEW_EDIT_LAYER maps each surface to the chain layer it authors. The member
+// page edits the User (ceiling) layer — "member" is the page, "user" is the rung.
+const VIEW_EDIT_LAYER: Record<ToolPolicyView, ToolLayer> = {
+  workspace: "workspace",
+  runtime: "runtime",
+  agent: "agent",
+  group: "group",
+  member: "user",
+};
 
 const SETTING_CHOICES: ToolSetting[] = ["allow", "ask", "deny", "inherit"];
 const SETTING_LABEL: Record<ToolSetting, string> = {
@@ -101,8 +127,9 @@ const VERDICT_ICON: Record<ToolEffectiveSetting, typeof ShieldCheck> = {
   ask: ShieldQuestion,
   deny: ShieldAlert,
 };
-// "Resolved by" layer → human label. "" means the workspace base default decided.
+// "Resolved by" layer → human label. "" means the system base default decided.
 const LAYER_LABEL: Record<string, string> = {
+  workspace: "Workspace",
   runtime: "Runtime",
   agent: "Agent",
   group: "Group",
@@ -118,13 +145,23 @@ export function ToolPolicyTable({
   userId,
   groupIds,
 }: ToolPolicyTableProps) {
-  const ctx = useMemo(
-    () =>
-      view === "agent"
-        ? { agentId: subjectId, runtimeId, userId, groupIds }
-        : { runtimeId: subjectId },
-    [view, subjectId, runtimeId, userId, groupIds],
-  );
+  // Each surface assembles only the chain context it authors. The workspace
+  // root layer is always loaded server-side from wsId, so the workspace view
+  // passes no extra subject and still resolves its own layer's Effective column.
+  const ctx = useMemo(() => {
+    switch (view) {
+      case "agent":
+        return { agentId: subjectId, runtimeId, userId, groupIds };
+      case "runtime":
+        return { runtimeId: subjectId };
+      case "group":
+        return { groupIds: [subjectId] };
+      case "member":
+        return { userId: subjectId };
+      case "workspace":
+        return {};
+    }
+  }, [view, subjectId, runtimeId, userId, groupIds]);
 
   const query = useQuery(toolPolicyTableOptions(wsId, ctx));
   const setPolicy = useSetToolPolicy();
@@ -137,7 +174,7 @@ export function ToolPolicyTable({
   const [showInherited, setShowInherited] = useState(true);
 
   // The layer this page authors, and the subject those writes target.
-  const editLayer: ToolLayer = view === "agent" ? "agent" : "runtime";
+  const editLayer: ToolLayer = VIEW_EDIT_LAYER[view];
 
   const rows = query.data ?? [];
   const facets = useMemo(() => classFacets(rows), [rows]);
