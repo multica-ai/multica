@@ -125,7 +125,7 @@ function getImportDescription(
 }
 
 function buildConflictKey(name: string): string {
-  return name.trim().toLocaleLowerCase();
+  return name.trim();
 }
 
 // ---------------------------------------------------------------------------

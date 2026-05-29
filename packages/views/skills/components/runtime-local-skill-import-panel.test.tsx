@@ -495,4 +495,66 @@ describe("RuntimeLocalSkillImportPanel", () => {
     );
     expect(screen.getByText("Skipped")).toBeInTheDocument();
   });
+
+  it("does not prompt for case-only name differences or send overwrite", async () => {
+    const caseDifferentSkill = {
+      ...MOCK_SKILL_A,
+      name: "review helper",
+    };
+    const caseDifferentImportedSkill = {
+      ...MOCK_IMPORTED_SKILL_A,
+      name: "review helper",
+    };
+    mockRuntimeLocalSkillsOptions.mockReturnValue({
+      queryKey: ["runtimes", "local-skills", "runtime-1"],
+      queryFn: () =>
+        Promise.resolve({
+          supported: true,
+          skills: [caseDifferentSkill],
+        }),
+    });
+    mockSkillListOptions.mockReturnValue({
+      queryKey: ["workspaces", "ws-1", "skills"],
+      queryFn: () => Promise.resolve([MOCK_WORKSPACE_SKILL_A]),
+    });
+    mockResolveRuntimeLocalSkillImport.mockResolvedValueOnce({
+      skill: caseDifferentImportedSkill,
+    });
+
+    renderPanel();
+
+    expect(
+      await screen.findByText("review helper", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+
+    const skillButton = screen.getByRole("button", { name: /review helper/i });
+    fireEvent.click(skillButton);
+
+    const importButton = screen.getByRole("button", {
+      name: /Import to Workspace/i,
+    });
+    await waitFor(
+      () => {
+        expect(importButton).not.toBeDisabled();
+      },
+      { timeout: 5000 },
+    );
+    fireEvent.click(importButton);
+
+    await waitFor(
+      () => {
+        expect(mockResolveRuntimeLocalSkillImport).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 5000 },
+    );
+    expect(screen.queryByText("Skill name conflicts")).not.toBeInTheDocument();
+    expect(mockResolveRuntimeLocalSkillImport).toHaveBeenCalledWith(
+      "runtime-1",
+      {
+        skill_key: "review-helper",
+        name: "review helper",
+        description: "Review pull requests",
+      },
+    );
+  });
 });
