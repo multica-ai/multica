@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -66,7 +68,7 @@ type LocalSkillListStore interface {
 // runtime-local-skill import requests. Kept as a separate interface because the
 // Create signature carries import-specific fields (skill_key, optional rename).
 type LocalSkillImportStore interface {
-	Create(ctx context.Context, runtimeID, creatorID, skillKey string, name, description *string) (*RuntimeLocalSkillImportRequest, error)
+	Create(ctx context.Context, runtimeID, creatorID, skillKey string, name, description *string, overwrite bool) (*RuntimeLocalSkillImportRequest, error)
 	Get(ctx context.Context, id string) (*RuntimeLocalSkillImportRequest, error)
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
 	PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillImportRequest, error)
@@ -148,6 +150,7 @@ type RuntimeLocalSkillImportRequest struct {
 	SkillKey     string                         `json:"skill_key"`
 	Name         *string                        `json:"name,omitempty"`
 	Description  *string                        `json:"description,omitempty"`
+	Overwrite    bool                           `json:"overwrite,omitempty"`
 	Status       RuntimeLocalSkillRequestStatus `json:"status"`
 	Skill        *SkillResponse                 `json:"skill,omitempty"`
 	Error        string                         `json:"error,omitempty"`
@@ -277,7 +280,7 @@ func NewInMemoryLocalSkillImportStore() *InMemoryLocalSkillImportStore {
 	return &InMemoryLocalSkillImportStore{requests: make(map[string]*RuntimeLocalSkillImportRequest)}
 }
 
-func (s *InMemoryLocalSkillImportStore) Create(_ context.Context, runtimeID, creatorID, skillKey string, name, description *string) (*RuntimeLocalSkillImportRequest, error) {
+func (s *InMemoryLocalSkillImportStore) Create(_ context.Context, runtimeID, creatorID, skillKey string, name, description *string, overwrite bool) (*RuntimeLocalSkillImportRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -293,6 +296,7 @@ func (s *InMemoryLocalSkillImportStore) Create(_ context.Context, runtimeID, cre
 		SkillKey:    skillKey,
 		Name:        name,
 		Description: description,
+		Overwrite:   overwrite,
 		Status:      RuntimeLocalSkillPending,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -412,6 +416,7 @@ type CreateRuntimeLocalSkillImportRequest struct {
 	SkillKey    string  `json:"skill_key"`
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
+	Overwrite   bool    `json:"overwrite,omitempty"`
 }
 
 type reportedRuntimeLocalSkill struct {
@@ -549,6 +554,7 @@ func (h *Handler) InitiateImportLocalSkill(w http.ResponseWriter, r *http.Reques
 		strings.TrimSpace(req.SkillKey),
 		cleanOptionalString(req.Name),
 		cleanOptionalString(req.Description),
+		req.Overwrite,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue local skill import: "+err.Error())
@@ -715,7 +721,7 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 		files = append(files, f)
 	}
 
-	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
+	input := skillCreateInput{
 		WorkspaceID: rt.WorkspaceID,
 		CreatorID:   creatorUUID,
 		Name:        name,
@@ -730,7 +736,16 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 			},
 		},
 		Files: files,
-	})
+	}
+
+	overwroteExisting := false
+	resp, err := h.createSkillWithFiles(r.Context(), input)
+	if err != nil {
+		if req.Overwrite && isUniqueViolation(err) {
+			resp, err = h.overwriteRuntimeLocalSkill(r.Context(), input)
+			overwroteExisting = err == nil
+		}
+	}
 	if err != nil {
 		failMsg := err.Error()
 		if isUniqueViolation(err) {
@@ -746,23 +761,110 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp.SkillResponse); err != nil {
-		// We already wrote the Skill to Postgres. If the store-side Complete
-		// fails we can't leave that Skill orphaned: the daemon will retry on
-		// 5xx and re-create it, which blows up on the unique-name constraint
-		// and looks to the user like "import keeps failing". Roll back our
-		// side-effects so the retry lands on a clean slate.
-		slog.Error("local skill import Complete failed — rolling back created skill",
-			"error", err, "request_id", requestID, "skill_id", resp.ID)
-		if delErr := h.Queries.DeleteSkill(r.Context(), db.DeleteSkillParams{
-			ID:          parseUUID(resp.ID),
-			WorkspaceID: rt.WorkspaceID,
-		}); delErr != nil {
-			slog.Warn("orphan skill rollback failed", "error", delErr, "skill_id", resp.ID)
+		if overwroteExisting {
+			// The Skill UUID is intentionally preserved for overwrites. If the
+			// async store update fails, let the daemon retry the same idempotent
+			// update instead of deleting an existing skill that may be attached
+			// to agents.
+			slog.Error("local skill import Complete failed after overwrite",
+				"error", err, "request_id", requestID, "skill_id", resp.ID)
+		} else {
+			// We already wrote the Skill to Postgres. If the store-side Complete
+			// fails we can't leave that Skill orphaned: the daemon will retry on
+			// 5xx and re-create it, which blows up on the unique-name constraint
+			// and looks to the user like "import keeps failing". Roll back our
+			// side-effects so the retry lands on a clean slate.
+			slog.Error("local skill import Complete failed — rolling back created skill",
+				"error", err, "request_id", requestID, "skill_id", resp.ID)
+			if delErr := h.Queries.DeleteSkill(r.Context(), db.DeleteSkillParams{
+				ID:          parseUUID(resp.ID),
+				WorkspaceID: rt.WorkspaceID,
+			}); delErr != nil {
+				slog.Warn("orphan skill rollback failed", "error", delErr, "skill_id", resp.ID)
+			}
 		}
 		writeError(w, http.StatusInternalServerError, "failed to persist import completion")
 		return
 	}
-	h.publish(protocol.EventSkillCreated, uuidToString(rt.WorkspaceID), "member", req.CreatorID, map[string]any{"skill": resp})
+	h.publish(runtimeLocalSkillImportEvent(overwroteExisting), uuidToString(rt.WorkspaceID), "member", req.CreatorID, map[string]any{"skill": resp})
 	slog.Debug("runtime local skill imported", "runtime_id", runtimeID, "request_id", requestID, "skill_id", resp.ID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) overwriteRuntimeLocalSkill(ctx context.Context, input skillCreateInput) (SkillWithFilesResponse, error) {
+	existing, err := h.Queries.GetSkillByWorkspaceAndName(ctx, db.GetSkillByWorkspaceAndNameParams{
+		WorkspaceID: input.WorkspaceID,
+		Name:        input.Name,
+	})
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      input.CreatorID,
+		WorkspaceID: input.WorkspaceID,
+	})
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	if !roleAllowed(member.Role, "owner", "admin") && (!existing.CreatedBy.Valid || existing.CreatedBy != input.CreatorID) {
+		return SkillWithFilesResponse{}, errors.New("only the skill creator can manage this skill")
+	}
+
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := h.Queries.WithTx(tx)
+	config, err := json.Marshal(input.Config)
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	if input.Config == nil {
+		config = []byte("{}")
+	}
+
+	skill, err := qtx.UpdateSkill(ctx, db.UpdateSkillParams{
+		ID:          existing.ID,
+		Name:        pgtype.Text{String: sanitizeNullBytes(input.Name), Valid: true},
+		Description: pgtype.Text{String: sanitizeNullBytes(input.Description), Valid: true},
+		Content:     pgtype.Text{String: sanitizeNullBytes(input.Content), Valid: true},
+		Config:      config,
+	})
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+
+	if err := qtx.DeleteSkillFilesBySkill(ctx, skill.ID); err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	fileResps := make([]SkillFileResponse, 0, len(input.Files))
+	for _, f := range input.Files {
+		sf, err := qtx.UpsertSkillFile(ctx, db.UpsertSkillFileParams{
+			SkillID: skill.ID,
+			Path:    sanitizeNullBytes(f.Path),
+			Content: sanitizeNullBytes(f.Content),
+		})
+		if err != nil {
+			return SkillWithFilesResponse{}, err
+		}
+		fileResps = append(fileResps, skillFileToResponse(sf))
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+
+	return SkillWithFilesResponse{
+		SkillResponse: skillToResponse(skill),
+		Files:         fileResps,
+	}, nil
+}
+
+func runtimeLocalSkillImportEvent(overwroteExisting bool) string {
+	if overwroteExisting {
+		return protocol.EventSkillUpdated
+	}
+	return protocol.EventSkillCreated
 }

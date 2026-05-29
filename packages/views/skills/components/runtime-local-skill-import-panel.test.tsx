@@ -15,6 +15,7 @@ const TEST_RESOURCES = {
 const mockResolveRuntimeLocalSkillImport = vi.hoisted(() => vi.fn());
 const mockRuntimeListOptions = vi.hoisted(() => vi.fn());
 const mockRuntimeLocalSkillsOptions = vi.hoisted(() => vi.fn());
+const mockSkillListOptions = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -38,6 +39,17 @@ vi.mock("@multica/core/runtimes", () => ({
   },
   resolveRuntimeLocalSkillImport: (...args: unknown[]) =>
     mockResolveRuntimeLocalSkillImport(...args),
+}));
+
+vi.mock("@multica/core/workspace/queries", () => ({
+  skillListOptions: (...args: unknown[]) => mockSkillListOptions(...args),
+  skillDetailOptions: (_wsId: string, skillId: string) => ({
+    queryKey: ["workspaces", "ws-1", "skills", skillId],
+  }),
+  workspaceKeys: {
+    skills: (wsId: string) => ["workspaces", wsId, "skills"],
+    agents: (wsId: string) => ["workspaces", wsId, "agents"],
+  },
 }));
 
 vi.mock("sonner", () => ({
@@ -118,6 +130,28 @@ const MOCK_IMPORTED_SKILL_B = {
   updated_at: "2026-04-16T00:00:00Z",
 };
 
+const MOCK_WORKSPACE_SKILL_A = {
+  id: "existing-skill-1",
+  workspace_id: "ws-1",
+  name: "Review Helper",
+  description: "Existing review helper",
+  config: {},
+  created_by: "user-1",
+  created_at: "2026-04-16T00:00:00Z",
+  updated_at: "2026-04-16T00:00:00Z",
+};
+
+const MOCK_WORKSPACE_SKILL_B = {
+  id: "existing-skill-2",
+  workspace_id: "ws-1",
+  name: "Code Gen",
+  description: "Existing code generator",
+  config: {},
+  created_by: "user-1",
+  created_at: "2026-04-16T00:00:00Z",
+  updated_at: "2026-04-16T00:00:00Z",
+};
+
 function renderPanel(props: { onImported?: (skill: unknown) => void; onBulkDone?: () => void } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -146,6 +180,10 @@ describe("RuntimeLocalSkillImportPanel", () => {
           supported: true,
           skills: [MOCK_SKILL_A],
         }),
+    });
+    mockSkillListOptions.mockReturnValue({
+      queryKey: ["workspaces", "ws-1", "skills"],
+      queryFn: () => Promise.resolve([]),
     });
     mockResolveRuntimeLocalSkillImport.mockResolvedValue({
       skill: MOCK_IMPORTED_SKILL_A,
@@ -384,5 +422,77 @@ describe("RuntimeLocalSkillImportPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Done/i }));
     expect(onBulkDone).toHaveBeenCalledTimes(1);
     expect(onImported).not.toHaveBeenCalled();
+  });
+
+  it("prompts before importing conflicting skills and sends overwrite only for checked conflicts", async () => {
+    mockRuntimeLocalSkillsOptions.mockReturnValue({
+      queryKey: ["runtimes", "local-skills", "runtime-1"],
+      queryFn: () =>
+        Promise.resolve({
+          supported: true,
+          skills: [MOCK_SKILL_A, MOCK_SKILL_B],
+        }),
+    });
+    mockSkillListOptions.mockReturnValue({
+      queryKey: ["workspaces", "ws-1", "skills"],
+      queryFn: () =>
+        Promise.resolve([MOCK_WORKSPACE_SKILL_A, MOCK_WORKSPACE_SKILL_B]),
+    });
+    mockResolveRuntimeLocalSkillImport.mockResolvedValueOnce({
+      skill: MOCK_IMPORTED_SKILL_A,
+    });
+
+    renderPanel();
+
+    expect(
+      await screen.findByText("Review Helper", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+
+    const selectAllLabel = screen.getByText(/Select all/i);
+    const selectAllCheckbox = selectAllLabel
+      .closest("label")!
+      .querySelector("input[type='checkbox']")!;
+    fireEvent.click(selectAllCheckbox);
+
+    fireEvent.click(screen.getByRole("button", { name: /Import 2 Skills/i }));
+
+    expect(
+      await screen.findByText("Skill name conflicts", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+
+    const reviewHelperCheckbox = screen
+      .getAllByText("Review Helper")
+      .at(-1)!
+      .closest("label")!
+      .querySelector("[data-slot='checkbox']")!;
+    fireEvent.click(reviewHelperCheckbox);
+
+    fireEvent.click(screen.getByRole("button", { name: /Continue import/i }));
+
+    await waitFor(
+      () => {
+        expect(mockResolveRuntimeLocalSkillImport).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 5000 },
+    );
+    expect(mockResolveRuntimeLocalSkillImport).toHaveBeenCalledWith(
+      "runtime-1",
+      {
+        skill_key: "review-helper",
+        name: "Review Helper",
+        description: "Review pull requests",
+        overwrite: true,
+      },
+    );
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByRole("button", { name: /Done/i }),
+        ).toBeInTheDocument();
+      },
+      { timeout: 10000 },
+    );
+    expect(screen.getByText("Skipped")).toBeInTheDocument();
   });
 });

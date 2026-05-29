@@ -25,11 +25,20 @@ import {
 } from "@multica/core/runtimes";
 import {
   skillDetailOptions,
+  skillListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Progress } from "@multica/ui/components/ui/progress";
@@ -65,6 +74,12 @@ type BulkImportState = {
   results: BulkImportResult[];
 };
 
+type ConflictResolution = {
+  open: boolean;
+  skills: RuntimeLocalSkillSummary[];
+  overwriteKeys: Set<string>;
+};
+
 const INITIAL_BULK_STATE: BulkImportState = {
   phase: "idle",
   total: 0,
@@ -88,6 +103,29 @@ const IMPORT_CONCURRENCY = 10;
 
 function runtimeLabel(runtime: AgentRuntime): string {
   return `${runtime.name} (${runtime.provider})`;
+}
+
+function getImportName(
+  skill: RuntimeLocalSkillSummary,
+  total: number,
+  editName: string,
+): string {
+  return total === 1 ? editName.trim() || skill.name : skill.name;
+}
+
+function getImportDescription(
+  skill: RuntimeLocalSkillSummary,
+  total: number,
+  editDescription: string,
+): string | undefined {
+  if (total === 1) {
+    return editDescription.trim() || skill.description || undefined;
+  }
+  return skill.description || undefined;
+}
+
+function buildConflictKey(name: string): string {
+  return name.trim().toLocaleLowerCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +326,12 @@ export function RuntimeLocalSkillImportPanel({
   const [selectedRuntimeId, setSelectedRuntimeId] = useState<string>("");
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [bulkState, setBulkState] = useState<BulkImportState>(INITIAL_BULK_STATE);
+  const [conflictResolution, setConflictResolution] =
+    useState<ConflictResolution>({
+      open: false,
+      skills: [],
+      overwriteKeys: new Set(),
+    });
   const cancelRef = useRef(false);
   // Single-select inline edit fields (shown when exactly 1 skill is checked)
   const [editName, setEditName] = useState("");
@@ -302,6 +346,7 @@ export function RuntimeLocalSkillImportPanel({
   useEffect(() => {
     setSelectedKeys(new Set());
     setBulkState(INITIAL_BULK_STATE);
+    setConflictResolution({ open: false, skills: [], overwriteKeys: new Set() });
     setEditName("");
     setEditDescription("");
   }, [selectedRuntimeId]);
@@ -313,10 +358,18 @@ export function RuntimeLocalSkillImportPanel({
     ...runtimeLocalSkillsOptions(selectedRuntimeId || null),
     enabled: canBrowseSkills,
   });
+  const workspaceSkillsQuery = useQuery(skillListOptions(wsId));
   const runtimeSkills = useMemo(
     () => skillsQuery.data?.skills ?? [],
     [skillsQuery.data],
   );
+  const workspaceSkillsByName = useMemo(() => {
+    const byName = new Map<string, { name: string; description?: string }>();
+    for (const skill of workspaceSkillsQuery.data ?? []) {
+      byName.set(buildConflictKey(skill.name), skill);
+    }
+    return byName;
+  }, [workspaceSkillsQuery.data]);
 
   // The single selected skill (for inline editing). Only valid when exactly 1.
   const singleSelectedSkill =
@@ -357,30 +410,45 @@ export function RuntimeLocalSkillImportPanel({
 
   // -- Bulk import handler --
 
-  const handleBulkImport = async () => {
-    if (!selectedRuntimeId || selectedKeys.size === 0) return;
+  const runBulkImport = async (
+    skillsToImport: RuntimeLocalSkillSummary[],
+    overwriteKeys: Set<string>,
+    skippedConflicts: RuntimeLocalSkillSummary[],
+  ) => {
+    if (!selectedRuntimeId) return;
 
-    const skillsToImport = runtimeSkills.filter((s) => selectedKeys.has(s.key));
-    const total = skillsToImport.length;
-
+    const requestedTotal = skillsToImport.length + skippedConflicts.length;
     cancelRef.current = false;
-    setBulkState({ phase: "importing", total, completed: 0, results: [] });
 
-    const results: BulkImportResult[] = [];
+    const skippedResults: BulkImportResult[] = skippedConflicts.map((skill) => ({
+      key: skill.key,
+      name: getImportName(skill, requestedTotal, editName),
+      status: "skipped",
+      error: t(($) => $.runtime_import.conflict_skipped),
+    }));
+    setBulkState({
+      phase: "importing",
+      total: requestedTotal,
+      completed: skippedResults.length,
+      results: skippedResults,
+    });
+
+    const results: BulkImportResult[] = [...skippedResults];
 
     const importOne = async (skill: RuntimeLocalSkillSummary) => {
       // Single-select: use the user-edited name/description
-      const importName =
-        total === 1 ? editName.trim() || skill.name : skill.name;
-      const importDescription =
-        total === 1
-          ? editDescription.trim() || skill.description || undefined
-          : skill.description || undefined;
+      const importName = getImportName(skill, requestedTotal, editName);
+      const importDescription = getImportDescription(
+        skill,
+        requestedTotal,
+        editDescription,
+      );
       try {
         const result = await resolveRuntimeLocalSkillImport(selectedRuntimeId, {
           skill_key: skill.key,
           name: importName,
           description: importDescription,
+          overwrite: overwriteKeys.has(skill.key) || undefined,
         });
         results.push({
           key: skill.key,
@@ -393,7 +461,7 @@ export function RuntimeLocalSkillImportPanel({
         const isSkipped = isNameConflictError(msg);
         results.push({
           key: skill.key,
-          name: skill.name,
+          name: importName,
           status: isSkipped ? "skipped" : "failed",
           error: msg || t(($) => $.runtime_import.toast_import_failed),
         });
@@ -445,12 +513,69 @@ export function RuntimeLocalSkillImportPanel({
     }));
   };
 
+  const handleBulkImport = async () => {
+    if (!selectedRuntimeId || selectedKeys.size === 0) return;
+
+    const skillsToImport = runtimeSkills.filter((s) => selectedKeys.has(s.key));
+    const total = skillsToImport.length;
+    const conflicts = skillsToImport.filter((skill) =>
+      workspaceSkillsByName.has(
+        buildConflictKey(getImportName(skill, total, editName)),
+      ),
+    );
+
+    if (conflicts.length > 0) {
+      setConflictResolution({
+        open: true,
+        skills: conflicts,
+        overwriteKeys: new Set(),
+      });
+      return;
+    }
+
+    await runBulkImport(skillsToImport, new Set(), []);
+  };
+
+  const toggleConflictOverwrite = (key: string) => {
+    setConflictResolution((prev) => {
+      const overwriteKeys = new Set(prev.overwriteKeys);
+      if (overwriteKeys.has(key)) overwriteKeys.delete(key);
+      else overwriteKeys.add(key);
+      return { ...prev, overwriteKeys };
+    });
+  };
+
+  const handleConfirmConflicts = async () => {
+    const conflictKeys = new Set(conflictResolution.skills.map((s) => s.key));
+    const selectedSkills = runtimeSkills.filter((s) => selectedKeys.has(s.key));
+    const skillsToImport = selectedSkills.filter(
+      (skill) =>
+        !conflictKeys.has(skill.key) ||
+        conflictResolution.overwriteKeys.has(skill.key),
+    );
+    const skippedConflicts = conflictResolution.skills.filter(
+      (skill) => !conflictResolution.overwriteKeys.has(skill.key),
+    );
+
+    setConflictResolution({ open: false, skills: [], overwriteKeys: new Set() });
+    await runBulkImport(
+      skillsToImport,
+      conflictResolution.overwriteKeys,
+      skippedConflicts,
+    );
+  };
+
+  const handleCancelConflicts = () => {
+    setConflictResolution({ open: false, skills: [], overwriteKeys: new Set() });
+  };
+
   const canImport =
     !!selectedRuntime &&
     selectedRuntime.status === "online" &&
     selectedKeys.size > 0 &&
     // Single-select requires a non-empty name (user may be renaming)
     (selectedKeys.size > 1 || !!editName.trim()) &&
+    !workspaceSkillsQuery.isLoading &&
     !importing;
 
   const handleCancel = () => {
@@ -637,138 +762,224 @@ export function RuntimeLocalSkillImportPanel({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {/* Sticky top: runtime picker + status */}
-      <div
-        aria-disabled={importing || undefined}
-        className={`shrink-0 space-y-2 border-b px-5 py-3 ${
-          importing ? "pointer-events-none opacity-60" : ""
-        }`}
-      >
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">
-            {t(($) => $.runtime_import.runtime_label)}
-          </label>
-          <Select
-            value={selectedRuntimeId}
-            onValueChange={(v) => v && setSelectedRuntimeId(v)}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder={t(($) => $.runtime_import.runtime_placeholder)}>
-                {selectedRuntime ? runtimeLabel(selectedRuntime) : null}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {localRuntimes.map((r) => (
-                <SelectItem key={r.id} value={r.id}>
-                  {runtimeLabel(r)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+    <>
+      <div className="flex min-h-0 flex-1 flex-col">
+        {/* Sticky top: runtime picker + status */}
+        <div
+          aria-disabled={importing || undefined}
+          className={`shrink-0 space-y-2 border-b px-5 py-3 ${
+            importing ? "pointer-events-none opacity-60" : ""
+          }`}
+        >
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-foreground">
+              {t(($) => $.runtime_import.runtime_label)}
+            </label>
+            <Select
+              value={selectedRuntimeId}
+              onValueChange={(v) => v && setSelectedRuntimeId(v)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue
+                  placeholder={t(($) => $.runtime_import.runtime_placeholder)}
+                >
+                  {selectedRuntime ? runtimeLabel(selectedRuntime) : null}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {localRuntimes.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>
+                    {runtimeLabel(r)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {selectedRuntime && (
+            <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
+              <HardDrive className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">
+                {runtimeLabel(selectedRuntime)}
+              </span>
+              <Badge
+                variant={
+                  selectedRuntime.status === "online" ? "secondary" : "outline"
+                }
+              >
+                {selectedRuntime.status}
+              </Badge>
+            </div>
+          )}
         </div>
 
-        {selectedRuntime && (
-          <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
-            <HardDrive className="h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">
-              {runtimeLabel(selectedRuntime)}
-            </span>
-            <Badge
-              variant={
-                selectedRuntime.status === "online" ? "secondary" : "outline"
-              }
-            >
-              {selectedRuntime.status}
-            </Badge>
-          </div>
-        )}
-      </div>
+        {/* Scrollable middle */}
+        <div
+          ref={scrollRef}
+          style={fadeStyle}
+          aria-disabled={importing || undefined}
+          className={`min-h-0 flex-1 overflow-y-auto px-5 py-3 ${
+            importing && bulkState.phase !== "importing"
+              ? "pointer-events-none opacity-60"
+              : ""
+          }`}
+        >
+          {middle}
+          {bulkState.phase === "idle" && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {t(($) => $.runtime_import.ignored_files_hint)}
+            </p>
+          )}
+        </div>
 
-      {/* Scrollable middle */}
-      <div
-        ref={scrollRef}
-        style={fadeStyle}
-        aria-disabled={importing || undefined}
-        className={`min-h-0 flex-1 overflow-y-auto px-5 py-3 ${
-          importing && bulkState.phase !== "importing"
-            ? "pointer-events-none opacity-60"
-            : ""
-        }`}
-      >
-        {middle}
-        {bulkState.phase === "idle" && (
-          <p className="mt-3 text-xs text-muted-foreground">
-            {t(($) => $.runtime_import.ignored_files_hint)}
-          </p>
-        )}
-      </div>
-
-      {/* Sticky bottom: contextual actions per phase */}
-      <div className="flex shrink-0 items-center gap-3 border-t bg-muted/30 px-5 py-3">
-        {bulkState.phase === "done" || bulkState.phase === "cancelled" ? (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {bulkState.phase === "cancelled"
-                ? t(($) => $.runtime_import.bulk_cancelled_hint)
-                : t(($) => $.runtime_import.bulk_complete_hint)}
-            </div>
-            <Button type="button" size="sm" onClick={handleDone}>
-              {t(($) => $.runtime_import.bulk_done_button)}
-            </Button>
-          </>
-        ) : importing ? (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {t(($) => $.runtime_import.bulk_progress, {
-                completed: bulkState.completed,
-                total: bulkState.total,
-              })}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={handleCancel}
-            >
-              {t(($) => $.runtime_import.bulk_cancel_button)}
-            </Button>
-          </>
-        ) : (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {singleSelectedSkill ? (
-                <>
-                  {t(($) => $.runtime_import.ready)}{" "}
-                  <span className="font-medium text-foreground">
-                    {editName.trim() || singleSelectedSkill.name}
-                  </span>{" "}
-                  {t(($) => $.runtime_import.into_workspace)}
-                </>
-              ) : selectedKeys.size > 1 ? (
-                t(($) => $.runtime_import.bulk_ready, {
-                  count: selectedKeys.size,
-                })
-              ) : (
-                t(($) => $.runtime_import.select_skill)
-              )}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleBulkImport}
-              disabled={!canImport}
-            >
-              <Download className="h-3 w-3" />
-              {selectedKeys.size > 1
-                ? t(($) => $.runtime_import.bulk_import_button, {
+        {/* Sticky bottom: contextual actions per phase */}
+        <div className="flex shrink-0 items-center gap-3 border-t bg-muted/30 px-5 py-3">
+          {bulkState.phase === "done" || bulkState.phase === "cancelled" ? (
+            <>
+              <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+                {bulkState.phase === "cancelled"
+                  ? t(($) => $.runtime_import.bulk_cancelled_hint)
+                  : t(($) => $.runtime_import.bulk_complete_hint)}
+              </div>
+              <Button type="button" size="sm" onClick={handleDone}>
+                {t(($) => $.runtime_import.bulk_done_button)}
+              </Button>
+            </>
+          ) : importing ? (
+            <>
+              <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+                {t(($) => $.runtime_import.bulk_progress, {
+                  completed: bulkState.completed,
+                  total: bulkState.total,
+                })}
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleCancel}
+              >
+                {t(($) => $.runtime_import.bulk_cancel_button)}
+              </Button>
+            </>
+          ) : (
+            <>
+              <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+                {singleSelectedSkill ? (
+                  <>
+                    {t(($) => $.runtime_import.ready)}{" "}
+                    <span className="font-medium text-foreground">
+                      {editName.trim() || singleSelectedSkill.name}
+                    </span>{" "}
+                    {t(($) => $.runtime_import.into_workspace)}
+                  </>
+                ) : selectedKeys.size > 1 ? (
+                  t(($) => $.runtime_import.bulk_ready, {
                     count: selectedKeys.size,
                   })
-                : t(($) => $.runtime_import.import_button)}
-            </Button>
-          </>
-        )}
+                ) : (
+                  t(($) => $.runtime_import.select_skill)
+                )}
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleBulkImport}
+                disabled={!canImport}
+              >
+                <Download className="h-3 w-3" />
+                {selectedKeys.size > 1
+                  ? t(($) => $.runtime_import.bulk_import_button, {
+                      count: selectedKeys.size,
+                    })
+                  : t(($) => $.runtime_import.import_button)}
+              </Button>
+            </>
+          )}
+        </div>
       </div>
-    </div>
+
+      <Dialog
+        open={conflictResolution.open}
+        onOpenChange={(open) => {
+          if (!open && !importing) handleCancelConflicts();
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {t(($) => $.runtime_import.conflict_dialog_title)}
+            </DialogTitle>
+            <DialogDescription>
+              {t(($) => $.runtime_import.conflict_dialog_description)}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-72 space-y-2 overflow-y-auto">
+            {conflictResolution.skills.map((skill) => {
+              const importName = getImportName(
+                skill,
+                selectedKeys.size,
+                editName,
+              );
+              const existing = workspaceSkillsByName.get(
+                buildConflictKey(importName),
+              );
+              const checked = conflictResolution.overwriteKeys.has(skill.key);
+
+              return (
+                <label
+                  key={skill.key}
+                  className="flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 transition-colors hover:bg-accent/40"
+                >
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={() => toggleConflictOverwrite(skill.key)}
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium">
+                        {importName}
+                      </span>
+                      <Badge variant={checked ? "secondary" : "outline"}>
+                        {checked
+                          ? t(($) => $.runtime_import.conflict_overwrite_badge)
+                          : t(($) => $.runtime_import.conflict_skip_badge)}
+                      </Badge>
+                    </div>
+                    <div className="grid gap-1 text-xs text-muted-foreground">
+                      <span className="truncate">
+                        {t(($) => $.runtime_import.conflict_local_label)}:{" "}
+                        {skill.description ||
+                          t(($) => $.runtime_import.conflict_no_description)}
+                      </span>
+                      <span className="truncate">
+                        {t(($) => $.runtime_import.conflict_existing_label)}:{" "}
+                        {existing?.description ||
+                          t(($) => $.runtime_import.conflict_no_description)}
+                      </span>
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleCancelConflicts}
+            >
+              {t(($) => $.runtime_import.conflict_cancel_button)}
+            </Button>
+            <Button type="button" onClick={handleConfirmConflicts}>
+              {t(($) => $.runtime_import.conflict_confirm_button)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

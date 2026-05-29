@@ -858,6 +858,7 @@ export interface CreateRuntimeLocalSkillImportRequest {
   skill_key: string;
   name?: string;
   description?: string;
+  overwrite?: boolean;
 }
 
 export interface RuntimeLocalSkillImportRequest {

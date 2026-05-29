@@ -280,7 +280,17 @@
     "bulk_done_button": "完成",
     "bulk_summary_imported": "已导入",
     "bulk_summary_skipped": "已跳过",
-    "bulk_summary_failed": "失败"
+    "bulk_summary_failed": "失败",
+    "conflict_dialog_title": "Skill 名称冲突",
+    "conflict_dialog_description": "这些本地 skill 与工作区中已有 skill 重名。请选择要覆盖的项目，未勾选的项目会跳过。",
+    "conflict_local_label": "本地",
+    "conflict_existing_label": "已有",
+    "conflict_no_description": "无描述",
+    "conflict_overwrite_badge": "覆盖",
+    "conflict_skip_badge": "跳过",
+    "conflict_cancel_button": "取消",
+    "conflict_confirm_button": "继续导入",
+    "conflict_skipped": "已跳过，因为工作区中存在同名 skill。"
   },
   "file_tree": {
     "no_files": "无文件"

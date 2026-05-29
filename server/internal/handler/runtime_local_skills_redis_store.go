@@ -262,7 +262,7 @@ func NewRedisLocalSkillImportStore(rdb *redis.Client) *RedisLocalSkillImportStor
 	return &RedisLocalSkillImportStore{rdb: rdb}
 }
 
-func (s *RedisLocalSkillImportStore) Create(ctx context.Context, runtimeID, creatorID, skillKey string, name, description *string) (*RuntimeLocalSkillImportRequest, error) {
+func (s *RedisLocalSkillImportStore) Create(ctx context.Context, runtimeID, creatorID, skillKey string, name, description *string, overwrite bool) (*RuntimeLocalSkillImportRequest, error) {
 	now := time.Now()
 	req := &RuntimeLocalSkillImportRequest{
 		ID:          randomID(),
@@ -270,6 +270,7 @@ func (s *RedisLocalSkillImportStore) Create(ctx context.Context, runtimeID, crea
 		SkillKey:    skillKey,
 		Name:        name,
 		Description: description,
+		Overwrite:   overwrite,
 		Status:      RuntimeLocalSkillPending,
 		CreatedAt:   now,
 		UpdatedAt:   now,

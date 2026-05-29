@@ -268,7 +268,17 @@
     "bulk_done_button": "Done",
     "bulk_summary_imported": "Imported",
     "bulk_summary_skipped": "Skipped",
-    "bulk_summary_failed": "Failed"
+    "bulk_summary_failed": "Failed",
+    "conflict_dialog_title": "Skill name conflicts",
+    "conflict_dialog_description": "These local skills match existing workspace skills. Choose which ones to overwrite; unchecked skills will be skipped.",
+    "conflict_local_label": "Local",
+    "conflict_existing_label": "Existing",
+    "conflict_no_description": "No description",
+    "conflict_overwrite_badge": "Overwrite",
+    "conflict_skip_badge": "Skip",
+    "conflict_cancel_button": "Cancel",
+    "conflict_confirm_button": "Continue import",
+    "conflict_skipped": "Skipped because an existing skill has the same name."
   },
   "file_tree": {
     "no_files": "No files"

@@ -106,6 +106,29 @@ func countSkillFiles(t *testing.T, skillID string) int {
 	return count
 }
 
+func createRuntimeLocalSkillTestAgent(t *testing.T, name, runtimeID string) string {
+	t.Helper()
+
+	var agentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args
+		)
+		VALUES ($1, $2, '', 'local', '{}'::jsonb, $3, 'private', 1, $4, '', '{}'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, name, runtimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create local skill test agent: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	return agentID
+}
+
 func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 	ctx := context.Background()
 	store := NewInMemoryLocalSkillListStore()
@@ -187,7 +210,7 @@ func TestInMemoryLocalSkillListStore_TimesOutRunningRequests(t *testing.T) {
 func TestInMemoryLocalSkillImportStore_TimesOutRunningRequests(t *testing.T) {
 	ctx := context.Background()
 	store := NewInMemoryLocalSkillImportStore()
-	req, err := store.Create(ctx, "runtime-xyz", "user-1", "review-helper", nil, nil)
+	req, err := store.Create(ctx, "runtime-xyz", "user-1", "review-helper", nil, nil, false)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -237,7 +260,7 @@ func TestGetLocalSkillImportRequest_RequiresRuntimeOwner(t *testing.T) {
 
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
 	adminUserID := createRuntimeLocalSkillTestMember(t, "admin")
-	importReq, err := testHandler.LocalSkillImportStore.Create(context.Background(), runtimeID, testUserID, "review-helper", nil, nil)
+	importReq, err := testHandler.LocalSkillImportStore.Create(context.Background(), runtimeID, testUserID, "review-helper", nil, nil, false)
 	if err != nil {
 		t.Fatalf("create import request: %v", err)
 	}
@@ -369,6 +392,147 @@ func TestRuntimeLocalSkillImportFlow_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestRuntimeLocalSkillImportOverwrite_PreservesSkillIDAndAgentAssociation(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+
+	var existingSkillID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+		VALUES ($1, 'Review Helper', 'Old description', '# Old', '{}'::jsonb, $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&existingSkillID); err != nil {
+		t.Fatalf("create existing skill: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM skill WHERE id = $1`, existingSkillID)
+	})
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO skill_file (skill_id, path, content)
+		VALUES ($1, 'old.md', 'old file')
+	`, existingSkillID); err != nil {
+		t.Fatalf("create existing skill file: %v", err)
+	}
+	agentID := createRuntimeLocalSkillTestAgent(t, "Runtime Local Skill Overwrite Agent", runtimeID)
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO agent_skill (agent_id, skill_id)
+		VALUES ($1, $2)
+	`, agentID, existingSkillID); err != nil {
+		t.Fatalf("attach skill to agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	initReq := withURLParams(
+		newRequestAsUser(testUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills/import", map[string]any{
+			"skill_key": "review-helper",
+			"overwrite": true,
+		}),
+		"runtimeId", runtimeID,
+	)
+	testHandler.InitiateImportLocalSkill(w, initReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("InitiateImportLocalSkill: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var importReq RuntimeLocalSkillImportRequest
+	if err := json.NewDecoder(w.Body).Decode(&importReq); err != nil {
+		t.Fatalf("decode import request: %v", err)
+	}
+	if !importReq.Overwrite {
+		t.Fatalf("expected overwrite request flag")
+	}
+
+	w = httptest.NewRecorder()
+	reportReq := withURLParams(
+		newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/local-skills/import/"+importReq.ID+"/result", map[string]any{
+			"status": "completed",
+			"skill": map[string]any{
+				"name":        "Review Helper",
+				"description": "Updated description",
+				"content":     "# Updated",
+				"source_path": "~/.claude/skills/review-helper",
+				"provider":    "claude",
+				"files": []map[string]any{
+					{
+						"path":    "new.md",
+						"content": "new file",
+					},
+				},
+			},
+		}, testWorkspaceID, "runtime-local-skills-daemon"),
+		"runtimeId", runtimeID,
+		"requestId", importReq.ID,
+	)
+	testHandler.ReportLocalSkillImportResult(w, reportReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ReportLocalSkillImportResult: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	pollReq := withURLParams(
+		newRequestAsUser(testUserID, http.MethodGet, "/api/runtimes/"+runtimeID+"/local-skills/import/"+importReq.ID, nil),
+		"runtimeId", runtimeID,
+		"requestId", importReq.ID,
+	)
+	testHandler.GetLocalSkillImportRequest(w, pollReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetLocalSkillImportRequest: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var completed RuntimeLocalSkillImportRequest
+	if err := json.NewDecoder(w.Body).Decode(&completed); err != nil {
+		t.Fatalf("decode poll response: %v", err)
+	}
+	if completed.Status != RuntimeLocalSkillCompleted {
+		t.Fatalf("expected completed status, got %s", completed.Status)
+	}
+	if completed.Skill == nil {
+		t.Fatal("expected overwritten skill")
+	}
+	if completed.Skill.ID != existingSkillID {
+		t.Fatalf("skill id changed: got %s, want %s", completed.Skill.ID, existingSkillID)
+	}
+	if completed.Skill.Description != "Updated description" {
+		t.Fatalf("description = %q", completed.Skill.Description)
+	}
+	if completed.Skill.Content != "# Updated" {
+		t.Fatalf("content = %q", completed.Skill.Content)
+	}
+	if count := countSkillsByName(t, "Review Helper"); count != 1 {
+		t.Fatalf("expected one skill row, got %d", count)
+	}
+	if count := countSkillFiles(t, existingSkillID); count != 1 {
+		t.Fatalf("expected one replacement file, got %d", count)
+	}
+
+	var fileContent string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT content
+		FROM skill_file
+		WHERE skill_id = $1 AND path = 'new.md'
+	`, existingSkillID).Scan(&fileContent); err != nil {
+		t.Fatalf("load replacement file: %v", err)
+	}
+	if fileContent != "new file" {
+		t.Fatalf("replacement file content = %q", fileContent)
+	}
+
+	var attachedCount int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*)
+		FROM agent_skill
+		WHERE agent_id = $1 AND skill_id = $2
+	`, agentID, existingSkillID).Scan(&attachedCount); err != nil {
+		t.Fatalf("count agent_skill rows: %v", err)
+	}
+	if attachedCount != 1 {
+		t.Fatalf("agent_skill association was not preserved")
+	}
+}
+
 func TestBatchImportViaHeartbeat(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -484,6 +648,7 @@ func TestReportLocalSkillImportResult_IgnoresTimedOutRequests(t *testing.T) {
 		"review-helper",
 		cleanOptionalString(ptr("Timed Out Import")),
 		cleanOptionalString(ptr("Should not be created")),
+		false,
 	)
 	if err != nil {
 		t.Fatalf("create import request: %v", err)
@@ -534,7 +699,7 @@ func TestReportLocalSkillImportResult_RejectsCrossWorkspaceDaemonToken(t *testin
 	}
 
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
-	importReq, err := testHandler.LocalSkillImportStore.Create(context.Background(), runtimeID, testUserID, "review-helper", nil, nil)
+	importReq, err := testHandler.LocalSkillImportStore.Create(context.Background(), runtimeID, testUserID, "review-helper", nil, nil, false)
 	if err != nil {
 		t.Fatalf("create import request: %v", err)
 	}
