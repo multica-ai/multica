@@ -277,16 +277,16 @@ function SortablePinItem({
  */
 function PinRow({
   pin,
-  href,
   pathname,
   onUnpin,
   wsId,
+  wsSlug,
 }: {
   pin: PinnedItem;
-  href: string;
   pathname: string;
   onUnpin: () => void;
   wsId: string;
+  wsSlug: string;
 }) {
   const isIssue = pin.item_type === "issue";
   const issueQuery = useQuery({
@@ -312,6 +312,7 @@ function PinRow({
     if (issueQuery.isError || !issueQuery.data) return null;
     const issue = issueQuery.data;
     const label = issue.identifier ? `${issue.identifier} ${issue.title}` : issue.title;
+    const href = paths.workspace(wsSlug).issueDetail(issue.identifier ?? pin.item_id);
     const iconNode = (
       /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
       <StatusIcon status={issue.status} className="!size-3.5 shrink-0" />
@@ -332,6 +333,7 @@ function PinRow({
   if (projectQuery.isError || !projectQuery.data) return null;
   const project = projectQuery.data;
   const iconNode = <ProjectIcon project={project} size="sm" />;
+  const href = paths.workspace(wsSlug).projectDetail(pin.item_id);
   return (
     <SortablePinItem
       pin={pin}
@@ -691,10 +693,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <PinRow
                               key={pin.id}
                               pin={pin}
-                              href={pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id)}
                               pathname={pathname}
                               onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
                               wsId={wsId ?? ""}
+                              wsSlug={workspace?.slug ?? ""}
                             />
                           ))}
                         </SidebarMenu>
