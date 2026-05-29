@@ -47,3 +47,5 @@ export {
   type InboxActionEntry,
 } from "./action-groups";
 export { useInboxActionGroupLabels } from "./strings";
+// FIR-2474 — pin the open inbox row in place until the message is closed.
+export { sortInboxEntriesPinned, type PinnedSelection } from "./pin-selected";

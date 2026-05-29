@@ -44,6 +44,8 @@ import {
   INBOX_ACTION_GROUP_BY_OPTION,
   bucketizeInboxAction,
   useInboxActionGroupLabels,
+  // CEREBRO-PATCH(inbox-pin-selected): FIR-2474 — anchor the open row until closed
+  sortInboxEntriesPinned,
 } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
 import { useArchiveChannel } from "@multica/cerebro-channels";
@@ -353,6 +355,8 @@ export function InboxPage() {
   const qc = useQueryClient();
 
   const pendingChatIdRef = useRef<string | null>(null);
+  // CEREBRO-PATCH(inbox-pin-selected): FIR-2474 — sort time of the open row, frozen at open
+  const pinnedSelectionRef = useRef<{ key: string; time: number } | null>(null);
 
   // CEREBRO-PATCH(inbox-page-resolved-tracking): Track the last key we actually resolved against the inbox list. Lets the
   // fallback effect distinguish "shared-link to a notification not in our
@@ -809,9 +813,10 @@ export function InboxPage() {
         item,
       });
     }
-    entries.sort((a, b) => b.time - a.time);
-    return entries;
-  }, [chatSessions, items, channels, channelMap]);
+    // CEREBRO-PATCH(inbox-pin-selected): FIR-2474 — keep the open row anchored; re-sorts on close
+    const keyOf = (e: MergedEntry) => (e.kind === "notif" ? e.item.issue_id ?? e.item.id : e.id);
+    return sortInboxEntriesPinned(entries, keyOf, selectedKey, pinnedSelectionRef);
+  }, [chatSessions, items, channels, channelMap, selectedKey]); // CEREBRO-PATCH(inbox-pin-selected): re-pin on selection change
 
   const filteredEntries = useMemo<MergedEntry[]>(
     () => mergedEntries.filter((entry) => matchesView(entry, view)),
