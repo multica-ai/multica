@@ -687,6 +687,23 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// entity-encode Markdown syntax characters (>, ", &, <) and corrupt the
 	// source. See issue #1303 / discussion in MUL-1119, MUL-1125.
 
+	// Collapse parent_id to the thread root before storing so the comment tree
+	// never exceeds depth 1 (the 2-level model the product and UI assume — see
+	// GetThreadRoot). The agent-drift guard above already compared the *raw*
+	// parent_id to the task's trigger comment, so normalization happens only
+	// here, after that check. We also repoint parentComment at the root so the
+	// downstream thread-aware steps (AutoUnresolveThreadOnReply,
+	// isReplyToMemberThread) act on the thread root, not an interior reply.
+	if parentID.Valid {
+		if root, err := h.Queries.GetThreadRoot(r.Context(), db.GetThreadRootParams{
+			CommentID:   parentID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			parentID = root.ID
+			parentComment = &root
+		}
+	}
+
 	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,

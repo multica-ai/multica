@@ -1926,21 +1926,20 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	if err != nil {
 		return
 	}
-	// Resolve thread root: if parentID points to a reply (has its own parent),
-	// use that parent instead so the comment lands in the top-level thread.
-	// rootComment captures the root row so we can auto-unresolve it after the
-	// reply is committed (see AutoUnresolveThreadOnReply).
+	// Resolve thread root: collapse parentID to the top-level thread root so the
+	// comment tree never exceeds depth 1 (the 2-level model the product and UI
+	// assume — see GetThreadRoot). GetThreadRoot walks parent_id all the way to
+	// the root, so this stays correct even if a reply-to-a-reply ever reached the
+	// store. rootComment captures the root row so we can auto-unresolve it after
+	// the reply is committed (see AutoUnresolveThreadOnReply).
 	var rootComment *db.Comment
 	if parentID.Valid {
-		if parent, err := s.Queries.GetComment(ctx, parentID); err == nil {
-			if parent.ParentID.Valid {
-				if root, err := s.Queries.GetComment(ctx, parent.ParentID); err == nil {
-					rootComment = &root
-					parentID = root.ID
-				}
-			} else {
-				rootComment = &parent
-			}
+		if root, err := s.Queries.GetThreadRoot(ctx, db.GetThreadRootParams{
+			CommentID:   parentID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			rootComment = &root
+			parentID = root.ID
 		}
 	}
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.

@@ -1079,3 +1079,66 @@ func TestCountNewCommentsSince_ExcludesAgentOwn(t *testing.T) {
 		t.Fatalf("expected 0 new comments after a future anchor, got %d", got)
 	}
 }
+
+// TestCreateCommentNormalizesParentToThreadRoot pins the write-boundary
+// invariant: a reply created through CreateComment is always stored with its
+// parent_id pointing at the THREAD ROOT, never at an interior reply. This keeps
+// the comment tree at depth 1 (the 2-level model the product/UI assume), so
+// readers can treat a reply's parent_id AS its thread root. We post a reply to a
+// reply and assert the stored parent collapses to the root, not the middle row.
+func TestCreateCommentNormalizesParentToThreadRoot(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("requires DB")
+	}
+	ctx := context.Background()
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		VALUES ($1, 'member', $2, $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, "parent normalization fixture").Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	create := func(parentID, body string) CommentResponse {
+		t.Helper()
+		payload := map[string]any{"content": body}
+		if parentID != "" {
+			payload["parent_id"] = parentID
+		}
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/"+issueID+"/comments", payload)
+		req = withURLParam(req, "id", issueID)
+		testHandler.CreateComment(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment(%q): expected 201, got %d: %s", body, w.Code, w.Body.String())
+		}
+		var resp CommentResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode created comment %q: %v", body, err)
+		}
+		return resp
+	}
+
+	root := create("", "root")
+	if root.ParentID != nil {
+		t.Fatalf("root comment must have nil parent_id, got %v", *root.ParentID)
+	}
+
+	// A direct reply to the root stays parented at the root.
+	reply := create(root.ID, "reply")
+	if reply.ParentID == nil || *reply.ParentID != root.ID {
+		t.Fatalf("direct reply parent_id: want root %s, got %v", root.ID, reply.ParentID)
+	}
+
+	// A reply whose parent is itself a reply must collapse to the thread root,
+	// NOT stay pointed at the interior reply — this is the write-boundary fix.
+	nested := create(reply.ID, "nested")
+	if nested.ParentID == nil || *nested.ParentID != root.ID {
+		t.Fatalf("reply-to-reply parent_id: want collapsed to root %s, got %v (must not be the interior reply %s)", root.ID, nested.ParentID, reply.ID)
+	}
+}
