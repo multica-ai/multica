@@ -295,18 +295,40 @@ export function BoardView({
         const overCol = findColumn(prev, overId, groupIds);
         if (!activeCol || !overCol || activeCol === overCol) return prev;
 
-        if (sortBy !== "position") return prev;
-
         recentlyMovedRef.current = true;
         const oldIds = prev[activeCol]!.filter((id) => id !== activeId);
-        const newIds = [...prev[overCol]!];
-        const overIndex = newIds.indexOf(overId);
-        const insertIndex = overIndex >= 0 ? overIndex : newIds.length;
-        newIds.splice(insertIndex, 0, activeId);
-        return { ...prev, [activeCol]: oldIds, [overCol]: newIds };
+
+        if (sortBy === "position") {
+          // Manual: drop the card at the hovered slot — the user picks the order.
+          const newIds = [...prev[overCol]!];
+          const overIndex = newIds.indexOf(overId);
+          const insertIndex = overIndex >= 0 ? overIndex : newIds.length;
+          newIds.splice(insertIndex, 0, activeId);
+          return { ...prev, [activeCol]: oldIds, [overCol]: newIds };
+        }
+
+        // Non-manual: the cursor can't choose the slot — the sort does. Preview
+        // the card in the target column at its sorted slot so the live drag
+        // mirrors where the optimistic move lands. Without this the card stays
+        // glued to the source column and teleports to its sorted slot on drop.
+        // The card's sort field (priority/date/title) is unchanged by a
+        // cross-column move, so this preview slot is exactly where it settles.
+        const map = issueMapRef.current;
+        const activeIssue = map.get(activeId);
+        if (!activeIssue) return prev;
+        const targetIssues = prev[overCol]!
+          .filter((id) => id !== activeId)
+          .map((id) => map.get(id))
+          .filter((issue): issue is Issue => issue !== undefined);
+        const sortedTarget = sortIssues(
+          [...targetIssues, activeIssue],
+          sortBy,
+          sortDirection,
+        ).map((issue) => issue.id);
+        return { ...prev, [activeCol]: oldIds, [overCol]: sortedTarget };
       });
     },
-    [groupIds, sortBy],
+    [groupIds, sortBy, sortDirection],
   );
 
   const handleDragEnd = useCallback(
@@ -369,10 +391,11 @@ export function BoardView({
           resetColumns();
           return;
         }
-        // No settle gate here: the optimistic cache patch flows straight through
-        // the (now sorted) buildColumns effect, so the card lands in its correct
-        // sorted slot in the target column in one frame — no "stuck in source
-        // column then jump" lag. The settle gate is only needed for manual
+        // No settle gate here. onDragOver already previewed the card in its
+        // sorted slot in the target column, and the optimistic cache patch
+        // rebuilds the same arrangement through the (now sorted) buildColumns
+        // effect — preview and committed state agree in one frame, so there is
+        // no teleport on drop. The settle gate is only needed for manual
         // (position) reorders, which keep a hand-built local order below.
         onMoveIssue(activeId, getMoveUpdates(finalGroup, currentIssue.position));
         return;

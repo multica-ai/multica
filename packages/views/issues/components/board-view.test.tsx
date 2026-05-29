@@ -63,17 +63,21 @@ vi.mock("@multica/core/issues/mutations", () => ({
   useLoadMoreByAssigneeGroup: () => useLoadMoreByStatusMock(),
 }));
 
-// Capture the drag handlers so tests can drive drag-end directly.
+// Capture the drag handlers so tests can drive drag-over / drag-end directly.
 let lastOnDragEnd: ((event: unknown) => void) | null = null;
+let lastOnDragOver: ((event: unknown) => void) | null = null;
 vi.mock("@dnd-kit/core", () => ({
   DndContext: ({
     children,
     onDragEnd,
+    onDragOver,
   }: {
     children: React.ReactNode;
     onDragEnd: (event: unknown) => void;
+    onDragOver: (event: unknown) => void;
   }) => {
     lastOnDragEnd = onDragEnd;
+    lastOnDragOver = onDragOver;
     return children;
   },
   DragOverlay: () => null,
@@ -160,6 +164,7 @@ describe("BoardView non-manual ordering", () => {
     mockViewState.sortBy = "position";
     mockViewState.sortDirection = "asc";
     lastOnDragEnd = null;
+    lastOnDragOver = null;
   });
 
   it("orders cards within a column by the active non-position sort", () => {
@@ -244,6 +249,48 @@ describe("BoardView non-manual ordering", () => {
     const inProgress = within(getByTestId("col-status:in_progress")).getAllByTestId(
       "card",
     );
+    expect(inProgress.map((c) => c.textContent)).toEqual([
+      "stay-urgent",
+      "mover",
+      "stay-low",
+    ]);
+  });
+
+  it("previews a non-manual cross-column drag in the target's sorted slot (no drop)", () => {
+    // The smoothness fix: during the drag (onDragOver, before any drop) the card
+    // must already sit in its sorted slot in the target column. Without this it
+    // stays glued to the source column and teleports on release.
+    mockViewState.sortBy = "priority";
+    const mover = makeIssue({ id: "mover", status: "todo", priority: "high" });
+    const issues = [
+      mover,
+      makeIssue({ id: "stay-urgent", status: "in_progress", priority: "urgent" }),
+      makeIssue({ id: "stay-low", status: "in_progress", priority: "low" }),
+    ];
+
+    const { getByTestId } = renderBoard(
+      <BoardView
+        issues={issues}
+        visibleStatuses={[...VISIBLE]}
+        hiddenStatuses={[]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    // Drag (not drop) "mover" over the in_progress column.
+    act(() => {
+      lastOnDragOver?.({
+        active: { id: "mover" },
+        over: { id: "status:in_progress" },
+      });
+    });
+
+    const todo = within(getByTestId("col-status:todo")).queryAllByTestId("card");
+    expect(todo.map((c) => c.textContent)).toEqual([]);
+    const inProgress = within(
+      getByTestId("col-status:in_progress"),
+    ).getAllByTestId("card");
+    // Sorted by priority: urgent, then the dragged high, then low.
     expect(inProgress.map((c) => c.textContent)).toEqual([
       "stay-urgent",
       "mover",
