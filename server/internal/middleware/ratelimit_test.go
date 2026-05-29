@@ -27,6 +27,65 @@ func TestRateLimit_NilRedis(t *testing.T) {
 	}
 }
 
+func TestRateLimit_InMemoryFallback_BlocksOverLimit(t *testing.T) {
+	// With nil Redis, the in-memory fallback should enforce the limit.
+	mw := RateLimit(nil, 2, time.Minute, nil)
+	handler := mw(okHandler)
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/auth/send-code", nil)
+		req.RemoteAddr = "10.99.0.1:1234"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("request %d: expected 200, got %d", i+1, rec.Code)
+		}
+	}
+
+	// Third request from the same IP should be blocked.
+	req := httptest.NewRequest(http.MethodPost, "/auth/send-code", nil)
+	req.RemoteAddr = "10.99.0.1:1234"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", rec.Code)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("expected Retry-After header on 429")
+	}
+}
+
+func TestRateLimit_InMemoryFallback_DifferentIPsIndependent(t *testing.T) {
+	mw := RateLimit(nil, 1, time.Minute, nil)
+	handler := mw(okHandler)
+
+	// First IP uses up its quota.
+	req := httptest.NewRequest(http.MethodPost, "/auth/send-code", nil)
+	req.RemoteAddr = "10.99.1.1:1000"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for first IP, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/auth/send-code", nil)
+	req.RemoteAddr = "10.99.1.1:1000"
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 for first IP over limit, got %d", rec.Code)
+	}
+
+	// Second IP should still be allowed.
+	req = httptest.NewRequest(http.MethodPost, "/auth/send-code", nil)
+	req.RemoteAddr = "10.99.1.2:2000"
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for second IP, got %d", rec.Code)
+	}
+}
+
 func TestRateLimit_AllowsUnderLimit(t *testing.T) {
 	rdb := newRedisTestClient(t)
 	mw := RateLimit(rdb, 3, time.Minute, nil)
