@@ -3286,7 +3286,7 @@ func TestCreateSkillSkipsSkillMdFile(t *testing.T) {
 		t.Skip("no database available")
 	}
 
-	body, _ := json.Marshal(CreateSkillRequest{
+	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/skills", CreateSkillRequest{
 		Name:    "test-skill-create-skip-skillmd",
 		Content: "# SKILL.md content",
 		Files: []CreateSkillFileRequest{
@@ -3295,13 +3295,11 @@ func TestCreateSkillSkipsSkillMdFile(t *testing.T) {
 			{Path: "helper.go", Content: "package main"},
 		},
 	})
-
-	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/skills", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	testHandler.CreateSkill(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	var resp SkillWithFilesResponse
@@ -3351,19 +3349,17 @@ func TestUpdateSkillSkipsSkillMdFile(t *testing.T) {
 	}
 
 	// Create a skill first
-	body, _ := json.Marshal(CreateSkillRequest{
+	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/skills", CreateSkillRequest{
 		Name:    "test-skill-update-skip-skillmd",
 		Content: "# SKILL.md content",
 		Files: []CreateSkillFileRequest{
 			{Path: "README.md", Content: "readme"},
 		},
 	})
-
-	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/skills", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	testHandler.CreateSkill(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("create skill: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create skill: expected 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	var createResp SkillWithFilesResponse
@@ -3372,7 +3368,7 @@ func TestUpdateSkillSkipsSkillMdFile(t *testing.T) {
 	}
 
 	// Update with SKILL.md in files
-	updateBody, _ := json.Marshal(UpdateSkillRequest{
+	updateReq := newRequest(http.MethodPut, "/api/skills/"+createResp.ID, UpdateSkillRequest{
 		Name:    strPtr("updated-name"),
 		Content: strPtr("updated content"),
 		Files: []CreateSkillFileRequest{
@@ -3381,9 +3377,7 @@ func TestUpdateSkillSkipsSkillMdFile(t *testing.T) {
 			{Path: "new.go", Content: "package main"},
 		},
 	})
-
-	updateReq := newRequest(http.MethodPut, "/api/skills/"+createResp.ID, bytes.NewReader(updateBody))
-	updateReq = withURLParam(updateReq, "skillID", createResp.ID)
+	updateReq = withURLParam(updateReq, "id", createResp.ID)
 	updateRec := httptest.NewRecorder()
 	testHandler.UpdateSkill(updateRec, updateReq)
 
@@ -3441,16 +3435,14 @@ func TestUpsertSkillFileRejectsSkillMd(t *testing.T) {
 	}
 
 	// Create a skill first
-	body, _ := json.Marshal(CreateSkillRequest{
+	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/skills", CreateSkillRequest{
 		Name:    "test-skill-upsert-reject-skillmd",
 		Content: "# SKILL.md content",
 	})
-
-	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/skills", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	testHandler.CreateSkill(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("create skill: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create skill: expected 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	var createResp SkillWithFilesResponse
@@ -3459,13 +3451,11 @@ func TestUpsertSkillFileRejectsSkillMd(t *testing.T) {
 	}
 
 	// Try to upsert SKILL.md
-	upsertBody, _ := json.Marshal(CreateSkillFileRequest{
+	upsertReq := newRequest(http.MethodPut, "/api/skills/"+createResp.ID+"/files", CreateSkillFileRequest{
 		Path:    "SKILL.md",
 		Content: "should be rejected",
 	})
-
-	upsertReq := newRequest(http.MethodPut, "/api/skills/"+createResp.ID+"/files", bytes.NewReader(upsertBody))
-	upsertReq = withURLParam(upsertReq, "skillID", createResp.ID)
+	upsertReq = withURLParam(upsertReq, "id", createResp.ID)
 	upsertRec := httptest.NewRecorder()
 	testHandler.UpsertSkillFile(upsertRec, upsertReq)
 
