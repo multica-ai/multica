@@ -126,7 +126,7 @@ export type HelperInstructionsLang = keyof typeof HELPER_INSTRUCTIONS;
  *      skip-path create-agent-guide issue body (so the user can copy/paste)
  *
  * Both consumers must stay in the same language as the user's locale —
- * hence the bilingual map. Kept short and product-y, no agent jargon.
+ * hence the localized map. Kept short and product-y, no agent jargon.
  */
 export const HELPER_DESCRIPTION = {
   en: "Multica usage assistant. Ask how to use it, help create/view tasks, configure agents, and more.",

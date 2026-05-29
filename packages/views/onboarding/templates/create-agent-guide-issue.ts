@@ -17,7 +17,7 @@ const HELPER_AGENT_NAME = "Multica Helper";
  */
 
 /**
- * Step 2 of the skip-path bundle. Bilingual title.
+ * Step 2 of the skip-path bundle. Localized title for supported locales.
  */
 export const CREATE_AGENT_GUIDE_ISSUE_TITLE = {
   en: "Step 2 — Create your first Multica Agent",

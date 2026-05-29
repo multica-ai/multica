@@ -3,8 +3,8 @@
  *
  * Written to a new issue (assigned to the user themselves) by the welcome
  * hook when the user took the Skip exit on Step 3. Content is the
- * install-runtime tutorial; the Chinese version uses Kimi CLI as the
- * recommended quickest path, the English version uses Codex.
+ * install-runtime tutorial; each supported locale can recommend the
+ * quickest runtime path that best fits that audience.
  *
  * Title is stable — kept identical to the v2 server-side
  * `NoRuntimeIssueTitle` so any existing dedupe code elsewhere keeps
@@ -12,8 +12,8 @@
  */
 
 /**
- * Step 1 of the skip-path bundle. Bilingual so a Chinese user sees a
- * Chinese title on the board.
+ * Step 1 of the skip-path bundle. Localized so users see the title in
+ * their current supported locale on the board.
  *
  * Note: server's deprecation shim (`onboarding_shim.go:noRuntimeIssueTitle`)
  * still uses the bare English string for its title-based dedupe — that

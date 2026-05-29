@@ -280,8 +280,8 @@ function RuntimeWelcome({
   // browser fallback and the user's saved `me.language` preference (via
   // user-locale-sync). Reading me.language directly would miss anonymous
   // new users whose preference field is still null but whose browser is
-  // in Chinese — the agent instructions and seeded issue body should
-  // follow what they're already reading.
+  // already using another supported locale — the agent instructions and
+  // seeded issue body should follow what they're already reading.
   const { t, i18n } = useT("onboarding");
   const navigation = useNavigation();
   const qc = useQueryClient();
@@ -676,7 +676,7 @@ interface SkipWelcomeProps {
  * Skip-path welcome. v3 product decision (see /Users/qingnaiyuan/.claude/plans):
  *
  *   1. Full-screen loading veil while we provision EVERYTHING in a fixed
- *      sequence — create-agent-guide issue → install-runtime issue →
+ *      sequence — install-runtime issue → create-agent-guide issue →
  *      follow-up comment on the install-runtime issue linking to the
  *      create-agent-guide identifier.
  *   2. Only after the whole chain succeeds do we mount the celebration
@@ -697,7 +697,8 @@ interface SkipWelcomeProps {
 function SkipWelcome({ workspaceId, onDismiss }: SkipWelcomeProps) {
   // i18n.language is the LIVE runtime locale (browser fallback + saved
   // me.language). Reading me.language directly would miss new users
-  // whose preference field is still null but who are browsing in Chinese.
+  // whose preference field is still null but who are browsing in another
+  // supported locale.
   const { t, i18n } = useT("onboarding");
   const navigation = useNavigation();
   const qc = useQueryClient();
