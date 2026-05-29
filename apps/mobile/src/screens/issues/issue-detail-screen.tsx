@@ -1,7 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Clipboard,
+  InteractionManager,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -47,9 +49,11 @@ import {
 } from "@multica/core/issues/hooks";
 import {
   useActorName,
+  useWorkspaceList,
   useWorkspaceMentionTargets,
   type WorkspaceMentionTarget,
 } from "@multica/core/workspace/hooks";
+import { setCurrentWorkspace } from "@multica/core/platform";
 import {
   issueToMentionTarget,
   mergeMentionTargets,
@@ -61,14 +65,17 @@ import type {
   IssueStatus,
   TaskMessagePayload,
   TimelineEntry,
+  Workspace,
 } from "@multica/core/types";
 import { Button, EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
 import { MarkdownText } from "../../components/ui/markdown";
+import { parseMobileIssueLink } from "../../components/ui/markdown-utils";
 import { ScreenTitleBar } from "../../components/ui/screen-title-bar";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { uploadMobileAsset, type MobileUploadAsset } from "../../platform/upload";
 import { colors, radii, spacing } from "../../theme/tokens";
+import { MOBILE_ENV } from "../../runtime/env";
 import { ImagePreviewModal } from "./image-preview-modal";
 import {
   createDraftCommentAttachment,
@@ -145,12 +152,13 @@ function useKeyboardHeight(enabled: boolean) {
 }
 
 export function IssueDetailScreen({ navigation, route }: Props) {
-  const { issueId } = route.params;
+  const { commentId, issueId } = route.params;
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const userId = useAuthStore((state) => state.user?.id);
-  const { workspace } = useMobileWorkspace();
+  const { workspace, setWorkspace } = useMobileWorkspace();
   const { getActorName } = useActorName();
+  const { data: workspaces = [] } = useWorkspaceList();
   const mentionTargets = useWorkspaceMentionTargets(workspace.id);
   const { data: issue, isError, isLoading } = useIssueDetail(workspace.id, issueId);
   const { data: allIssues = [] } = useIssueList(workspace.id);
@@ -171,7 +179,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     cancelTask: cancelLiveTask,
   } = useLiveIssueTasks(workspace.id, issueId);
   const { data: taskRuns = [] } = useIssueTaskRuns(workspace.id, issueId);
-  const { data: timelineData } = useIssueTimelineEntries(workspace.id, issueId);
+  const { data: timelineData } = useIssueTimelineEntries(workspace.id, issueId, commentId);
   const timeline = Array.isArray(timelineData) ? timelineData : emptyTimeline;
   const createComment = useCreateComment(issueId);
   const updateComment = useUpdateComment(issueId);
@@ -195,8 +203,10 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const [issueMenuOpen, setIssueMenuOpen] = useState(false);
   const [commentSheetOpen, setCommentSheetOpen] = useState(false);
   const [liveTaskError, setLiveTaskError] = useState<string | null>(null);
+  const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreviewState | null>(null);
   const previewAbortRef = useRef<AbortController | null>(null);
+  const didScrollToCommentRef = useRef<string | null>(null);
 
   useEffect(() => () => {
     previewAbortRef.current?.abort();
@@ -435,9 +445,65 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     void copyCommentContent(content);
   }, [copyCommentContent]);
 
-  const openIssueMention = useCallback((targetIssueId: string) => {
-    navigation.push("IssueDetail", { issueId: targetIssueId });
+  const openIssueDetail = useCallback((targetIssueId: string, targetCommentId?: string) => {
+    navigation.push("IssueDetail", {
+      issueId: targetIssueId,
+      ...(targetCommentId ? { commentId: targetCommentId } : {}),
+    });
   }, [navigation]);
+
+  const openIssueMention = useCallback((targetIssueId: string) => {
+    openIssueDetail(targetIssueId);
+  }, [openIssueDetail]);
+
+  const switchWorkspaceAndOpenIssue = useCallback((
+    targetWorkspace: Workspace,
+    targetIssueId: string,
+    targetCommentId?: string,
+  ) => {
+    setCurrentWorkspace(targetWorkspace.slug, targetWorkspace.id);
+    setWorkspace(targetWorkspace);
+    openIssueDetail(targetIssueId, targetCommentId);
+  }, [openIssueDetail, setWorkspace]);
+
+  const handleMarkdownLinkPress = useCallback((href: string) => {
+    const target = parseMobileIssueLink(href, [
+      MOBILE_ENV.webBaseUrl,
+      MOBILE_ENV.apiBaseUrl,
+    ]);
+    if (!target) return false;
+
+    const targetWorkspace = workspaces.find((item) => item.slug === target.workspaceSlug);
+    if (!targetWorkspace) return false;
+
+    if (targetWorkspace.id === workspace.id) {
+      openIssueDetail(target.issueId, target.commentId);
+      return true;
+    }
+
+    Alert.alert(
+      t("issues.switch_workspace_title"),
+      t("issues.switch_workspace_description", { name: targetWorkspace.name }),
+      [
+        { style: "cancel", text: t("common.cancel") },
+        {
+          text: t("issues.switch_workspace_confirm"),
+          onPress: () => switchWorkspaceAndOpenIssue(
+            targetWorkspace,
+            target.issueId,
+            target.commentId,
+          ),
+        },
+      ],
+    );
+    return true;
+  }, [
+    openIssueDetail,
+    switchWorkspaceAndOpenIssue,
+    t,
+    workspace.id,
+    workspaces,
+  ]);
 
   const startTitleEdit = useCallback(() => {
     if (!issue || updateIssue.isPending) return;
@@ -604,11 +670,13 @@ export function IssueDetailScreen({ navigation, route }: Props) {
           onStartEdit={startCommentEdit}
           onCopyComment={copyCommentByContent}
           onIssueMentionPress={openIssueMention}
+          onLinkPress={handleMarkdownLinkPress}
           resolveActorName={getActorName}
           userId={userId}
           mentionTargets={mentionTargets}
           issueMentionTargets={issueMentionTargets}
           expanded={item.expanded}
+          highlighted={highlightedCommentId === item.entry.id}
           onExpandComment={expandCommentRow}
           variant={item.kind === "root" ? "threadRoot" : "reply"}
           isLastReply={item.kind === "reply" ? item.isLastReply : false}
@@ -620,6 +688,8 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     editingContent,
     expandCommentRow,
     getActorName,
+    handleMarkdownLinkPress,
+    highlightedCommentId,
     mentionTargets,
     issueMentionTargets,
     openAttachmentPreview,
@@ -688,8 +758,9 @@ export function IssueDetailScreen({ navigation, route }: Props) {
             {issue.description ? (
               <MarkdownText
                 content={issue.description}
+                onLinkPress={handleMarkdownLinkPress}
                 onIssueMentionPress={(targetIssueId) => {
-                  navigation.push("IssueDetail", { issueId: targetIssueId });
+                  openIssueDetail(targetIssueId);
                 }}
               />
             ) : (
@@ -792,9 +863,11 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     issueEditError,
     isSubscribed,
     issueId,
+    handleMarkdownLinkPress,
     navigation,
     openAttachmentPreview,
     openDescriptionEditor,
+    openIssueDetail,
     pickDocument,
     pickImage,
     saveTitleEdit,
@@ -820,6 +893,73 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     items.push(...commentRows);
     return items;
   }, [commentError, commentRows, comments.length]);
+
+  const linkedCommentIndex = useMemo(() => {
+    if (!commentId) return -1;
+    return commentItems.findIndex((item) => (
+      item.kind !== "error" &&
+      item.kind !== "footer" &&
+      item.entry.id === commentId
+    ));
+  }, [commentId, commentItems]);
+
+  useEffect(() => {
+    if (!commentId || linkedCommentIndex < 0) return;
+    const scrollKey = `${issueId}:${commentId}`;
+    if (didScrollToCommentRef.current === scrollKey) return;
+
+    didScrollToCommentRef.current = scrollKey;
+
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let frame: ReturnType<typeof requestAnimationFrame> | null = null;
+    let highlightTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const highlightTarget = () => {
+      if (cancelled) return;
+      setHighlightedCommentId(commentId);
+      if (highlightTimer) clearTimeout(highlightTimer);
+      highlightTimer = setTimeout(() => {
+        setHighlightedCommentId((current) => current === commentId ? null : current);
+      }, 2200);
+    };
+    const attemptScroll = (retriesLeft: number) => {
+      frame = requestAnimationFrame(() => {
+        if (cancelled) return;
+        const scrollPromise = listRef.current?.scrollToIndex({
+          animated: true,
+          index: linkedCommentIndex,
+          viewPosition: 0.5,
+        });
+        if (!scrollPromise) {
+          highlightTarget();
+          return;
+        }
+        void scrollPromise
+          .then(highlightTarget)
+          .catch(() => {
+            if (cancelled) return;
+            if (retriesLeft <= 0) {
+              highlightTarget();
+              return;
+            }
+            retryTimer = setTimeout(() => attemptScroll(retriesLeft - 1), 120);
+          });
+      });
+    };
+
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      attemptScroll(2);
+    });
+
+    return () => {
+      cancelled = true;
+      interaction.cancel();
+      if (frame != null) cancelAnimationFrame(frame);
+      if (retryTimer) clearTimeout(retryTimer);
+      if (highlightTimer) clearTimeout(highlightTimer);
+    };
+  }, [commentId, issueId, linkedCommentIndex]);
 
   const openIssueProperties = useCallback(() => {
     setIssueMenuOpen(false);
@@ -1708,6 +1848,7 @@ const TimelineItem = memo(function TimelineItem({
   editingContent,
   entry,
   expanded = false,
+  highlighted = false,
   isLastReply,
   onCancelEdit,
   onChangeEdit,
@@ -1716,6 +1857,7 @@ const TimelineItem = memo(function TimelineItem({
   onExpandComment,
   onOpenAttachment,
   onIssueMentionPress,
+  onLinkPress,
   onReply,
   onSaveEdit,
   onStartEdit,
@@ -1729,6 +1871,7 @@ const TimelineItem = memo(function TimelineItem({
   editingContent?: string;
   entry: TimelineEntry;
   expanded?: boolean;
+  highlighted?: boolean;
   onCancelEdit?: () => void;
   onChangeEdit?: (content: string) => void;
   onCopyComment?: (content: string) => void;
@@ -1736,6 +1879,7 @@ const TimelineItem = memo(function TimelineItem({
   onExpandComment?: (commentId: string) => void;
   onOpenAttachment?: (attachment: Attachment, attachmentGroup: Attachment[]) => void;
   onIssueMentionPress?: (issueId: string) => void;
+  onLinkPress?: (href: string) => boolean;
   onReply?: (commentId: string) => void;
   onSaveEdit?: (commentId: string) => void;
   onStartEdit?: (commentId: string, content: string) => void;
@@ -1901,6 +2045,7 @@ const TimelineItem = memo(function TimelineItem({
         <View style={[styles.commentBodyWrap, isCommentCollapsed && styles.commentBodyCollapsed]}>
           <MarkdownText
             content={renderedCommentContent}
+            onLinkPress={onLinkPress}
             onIssueMentionPress={onIssueMentionPress}
           />
           {isCommentCollapsed ? (
@@ -1944,12 +2089,14 @@ const TimelineItem = memo(function TimelineItem({
         styles.timelineItem,
         variant === "threadRoot" && styles.timelineItemThreadRoot,
         variant === "reply" && styles.timelineItemReply,
+        highlighted && styles.timelineItemHighlighted,
       ]}
     >
       {renderActionsMenuModal()}
       {variant === "reply" ? (
         <View style={[
           styles.replyInner,
+          highlighted && styles.replyInnerHighlighted,
           !isLastReply && styles.replyInnerSeparator,
         ]}>
           {content}
@@ -3092,11 +3239,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
+  timelineItemHighlighted: {
+    backgroundColor: "#fff8e6",
+  },
   replyInner: {
     backgroundColor: colors.muted,
     borderRadius: radii.md,
     gap: spacing.sm,
     padding: spacing.md,
+  },
+  replyInnerHighlighted: {
+    backgroundColor: "#fff8e6",
   },
   replyInnerSeparator: {
     borderBottomColor: colors.border,

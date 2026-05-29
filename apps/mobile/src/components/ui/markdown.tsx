@@ -28,6 +28,7 @@ const safeOpenUrl = (href: string) => {
 type MarkdownTextProps = {
   content: string;
   onIssueMentionPress?: (issueId: string) => void;
+  onLinkPress?: (href: string) => boolean;
 };
 
 type MarkdownImageProps = {
@@ -75,10 +76,11 @@ function MarkdownImage({ alt, style, title, uri }: MarkdownImageProps): ReactNod
 export const MarkdownText = memo(function MarkdownText({
   content,
   onIssueMentionPress,
+  onLinkPress,
 }: MarkdownTextProps) {
   const renderer = useMemo(
-    () => new MulticaMarkdownRenderer(onIssueMentionPress),
-    [onIssueMentionPress],
+    () => new MulticaMarkdownRenderer(onIssueMentionPress, onLinkPress),
+    [onIssueMentionPress, onLinkPress],
   );
   const value = useMemo(() => preprocessMobileMarkdown(content), [content]);
   const elements = useMarkdown(value, {
@@ -96,7 +98,10 @@ export const MarkdownText = memo(function MarkdownText({
 });
 
 class MulticaMarkdownRenderer extends Renderer implements RendererInterface {
-  constructor(private readonly onIssueMentionPress?: (issueId: string) => void) {
+  constructor(
+    private readonly onIssueMentionPress?: (issueId: string) => void,
+    private readonly onLinkPress?: (href: string) => boolean,
+  ) {
     super();
   }
 
@@ -154,7 +159,10 @@ class MulticaMarkdownRenderer extends Renderer implements RendererInterface {
         accessibilityLabel={title || "Link"}
         accessibilityRole={isSafeHttpUrl(href) ? "link" : undefined}
         key={this.getKey()}
-        onPress={isSafeHttpUrl(href) ? () => safeOpenUrl(href) : undefined}
+        onPress={isSafeHttpUrl(href) ? () => {
+          if (this.onLinkPress?.(href)) return;
+          safeOpenUrl(href);
+        } : undefined}
         selectable
         style={textStyle}
       >
