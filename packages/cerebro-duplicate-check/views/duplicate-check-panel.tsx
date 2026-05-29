@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { AlertTriangle, ExternalLink, GitBranch, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, ExternalLink, GitBranch, Loader2, Sparkles, X } from "lucide-react";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { api } from "@multica/core/api";
 import { cn } from "@multica/ui/lib/utils";
@@ -25,12 +25,26 @@ export function DuplicateCheckPanel({
   projectId,
   onOpen,
   onAttachAsSubIssue,
+  variant = "inline",
+  onDismiss,
 }: {
   title: string;
   description?: string;
   projectId?: string;
   onOpen: (match: DuplicateMatch) => void;
   onAttachAsSubIssue: (match: DuplicateMatch) => void;
+  /**
+   * "inline" (default): panel renders in normal document flow with the legacy
+   *   look (mx-5 + muted card). Used in older mounts.
+   * "overlay" (FIR-2536): panel renders as a solid card meant to be absolutely
+   *   positioned by the parent over the action buttons. Skips the loading-row
+   *   UI so the buttons stay visible until there's actually something to act
+   *   on, and exposes a dismiss affordance so the user can hide matches and
+   *   submit anyway.
+   */
+  variant?: "inline" | "overlay";
+  /** Called when the user clicks the dismiss (X) button (overlay variant). */
+  onDismiss?: () => void;
 }) {
   const flagOn = useFeatureFlag("cerebro_duplicate_check_on_create");
   const query = useDuplicateCheck({
@@ -54,18 +68,23 @@ export function DuplicateCheckPanel({
 
   if (!flagOn) return null;
 
-  // Loading hint: as soon as the query is active (debounced title is long
-  // enough), show a thin "Tjekker for lignende issues..." row so the user
-  // knows the panel is working in the background. Without it the panel just
-  // pops in silently and people don't know what triggered it.
-  const showLoading = matches.length === 0 && (query.isFetching || query.isLoading);
+  const isOverlay = variant === "overlay";
+  // Inline variant keeps the original loading hint; overlay variant hides
+  // loading so the user can still see + use the buttons while we check.
+  const showLoading = !isOverlay && matches.length === 0 && (query.isFetching || query.isLoading);
   if (matches.length === 0 && !showLoading) return null;
 
   return (
     <div
       data-testid="cerebro-duplicate-check-panel"
       data-loading={showLoading ? "true" : "false"}
-      className="mx-5 mb-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm"
+      data-variant={variant}
+      className={cn(
+        "text-sm",
+        isOverlay
+          ? "rounded-t-lg border-t border-x border-border bg-popover px-3 py-2 shadow-lg"
+          : "mx-5 mb-2 rounded-lg border border-border bg-muted/40 px-3 py-2",
+      )}
     >
       <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         {showLoading ? (
@@ -73,7 +92,19 @@ export function DuplicateCheckPanel({
         ) : (
           <Sparkles className="h-3.5 w-3.5" />
         )}
-        {showLoading ? "Tjekker for lignende issues…" : "Findes det her allerede?"}
+        <span className="flex-1">
+          {showLoading ? "Tjekker for lignende issues…" : "Findes det her allerede?"}
+        </span>
+        {isOverlay && onDismiss && (
+          <button
+            type="button"
+            onClick={onDismiss}
+            aria-label="Skjul lignende issues"
+            className="rounded-sm p-0.5 text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors cursor-pointer"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
       <ul className="flex flex-col gap-1.5">
         {matches.map((m) => (

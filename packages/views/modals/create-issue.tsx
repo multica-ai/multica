@@ -141,6 +141,12 @@ export function ManualCreatePanel({
     enabled: !!parentIssueId,
   });
 
+  // CEREBRO-PATCH(create-issue-duplicate-dismiss-state): FIR-2536.
+  // Local dismiss for the overlay duplicate-check panel — flips true when the
+  // user clicks the X, hides the panel for the rest of this modal session so
+  // the action buttons become reachable again.
+  const [duplicateDismissed, setDuplicateDismissed] = useState(false);
+
   // File upload — collect attachment IDs so we can link them after issue creation.
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
   const { uploadWithToast } = useFileUpload(api);
@@ -403,13 +409,17 @@ export function ManualCreatePanel({
               {descDragOver && <FileDropOverlay />}
             </div>
 
-            {/* CEREBRO-PATCH(create-issue-duplicate-check-mount): FIR-2504. */}
-            <DuplicateCheckPanel title={title} description={draft.description} projectId={projectId}
-              onOpen={(m) => { router.push(p.issueDetail(m.id)); onClose(); }}
-              onAttachAsSubIssue={(m) => setParentIssueId(m.id)} />
+            {/* CEREBRO-PATCH(create-issue-duplicate-check-mount-overlay): FIR-2536.
+                Mount moved from inline-after-description to an overlay over
+                the footer (see footer block below) to free up vertical space
+                for the description editor on mobile. */}
 
             {/* Property toolbar */}
-            <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
+            {/* CEREBRO-PATCH(create-issue-mobile-selectors-swipe): FIR-2536.
+                Mobile shows the selectors as a single horizontally-scrollable
+                row so the description gets more vertical breathing room;
+                desktop keeps the original wrapping flow. */}
+            <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 md:flex-wrap max-md:flex-nowrap max-md:overflow-x-auto max-md:[&>*]:shrink-0 max-md:[scrollbar-width:none] max-md:[-ms-overflow-style:none] max-md:[&::-webkit-scrollbar]:hidden">
               {/* Status */}
               <StatusPicker
                 status={status}
@@ -599,17 +609,19 @@ export function ManualCreatePanel({
               }}
             />
 
-            {/* Footer */}
-            <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-h-7 items-center gap-2">
+            {/* CEREBRO-PATCH(create-issue-mobile-footer-layout): FIR-2536.
+                Compact single-row footer with attach + switch + a {create /
+                create-another} stack on the right. The whole block is wrapped
+                in `relative` so the duplicate-check overlay anchors to it. */}
+            <div className="relative shrink-0">
+              <div className="flex items-center gap-2 border-t px-4 py-3">
                 {/* CEREBRO-PATCH(file-upload-button-api): new onAttach/onEmbed
                     prop API on FileUploadButton (popup picker). */}
                 <FileUploadButton
                   onAttach={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f))}
                   onEmbed={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f, { embedImage: true }))}
                 />
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
+                <div className="flex-1" />
                 <button
                   type="button"
                   onClick={switchToAgent}
@@ -617,20 +629,39 @@ export function ManualCreatePanel({
                   className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer"
                 >
                   <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
-                  {t(($) => $.create_issue.switch_to_agent)}
+                  <span className="hidden sm:inline">{t(($) => $.create_issue.switch_to_agent)}</span>
                 </button>
-                <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-                  <Switch
-                    size="sm"
-                    checked={keepOpen}
-                    onCheckedChange={setKeepOpen}
-                  />
-                  {t(($) => $.create_issue.create_another)}
-                </label>
-                <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
-                  {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
-                </Button>
+                <div className="flex shrink-0 flex-col items-end gap-0.5">
+                  <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
+                    {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
+                  </Button>
+                  <label className="flex items-center gap-1 text-[10px] leading-tight text-muted-foreground cursor-pointer select-none">
+                    <Switch size="sm" checked={keepOpen} onCheckedChange={setKeepOpen} />
+                    {t(($) => $.create_issue.create_another)}
+                  </label>
+                </div>
               </div>
+
+              {/* CEREBRO-PATCH(create-issue-duplicate-check-overlay-mount): FIR-2536.
+                  Duplicate-check panel as overlay over the footer. Anchors to
+                  the bottom of the relative wrapper, grows upward as needed
+                  (capped at 60vh w/ scroll). Hidden once the user dismisses. */}
+              {!duplicateDismissed && (
+                <div className="absolute inset-x-0 bottom-full z-10 max-h-[60vh] overflow-y-auto">
+                  <DuplicateCheckPanel
+                    title={title}
+                    description={draft.description}
+                    projectId={projectId}
+                    variant="overlay"
+                    onDismiss={() => setDuplicateDismissed(true)}
+                    onOpen={(m) => { router.push(p.issueDetail(m.id)); onClose(); }}
+                    onAttachAsSubIssue={(m) => {
+                      setParentIssueId(m.id);
+                      setDuplicateDismissed(true);
+                    }}
+                  />
+                </div>
+              )}
             </div>
           </>
         )}
