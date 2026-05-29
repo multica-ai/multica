@@ -15,9 +15,9 @@ Use this skill when the user wants Codex App work recorded in a Multica issue.
   sync, conversation-thread comments, direct comments, and usage. The plugin starts them with
   `multica codex-plugin mcp`.
 - After `session_bind`, plugin-bundled Codex lifecycle hooks are responsible
-  for automatic per-turn conversation sync. `UserPromptSubmit` records the
-  prompt, and `Stop` writes the matching assistant reply to the bound localrun
-  comment thread.
+  for automatic per-turn conversation sync. `UserPromptSubmit` writes the
+  prompt to the bound localrun comment thread immediately, and `Stop` writes
+  the matching assistant reply after the turn finishes.
 - After a session is bound and hooks are trusted, do not also call
   `conversation_sync` for the same normal chat turn. Use explicit
   `conversation_sync` only when the user asks to sync manually, hooks are not
@@ -40,15 +40,14 @@ Use this skill when the user wants Codex App work recorded in a Multica issue.
   Without trusted hooks, only explicit tool calls such as `conversation_sync`
   can write to the issue.
 - The final visible conversation turn should normally be split into two
-  localrun thread replies:
+  localrun thread replies. Roles are represented by localrun message types, so
+  do not add `user` / `bot` labels to the visible comment body:
 
   ```text
-  用户：<user request>
+  <user request>
 
-  bot：<assistant result>
+  <assistant result>
   ```
-
-  Use the user's actual language for the labels when appropriate.
 - Do not fabricate token usage. If usage is unavailable, say that usage is
   unavailable or partial.
 - Report usage only as cumulative totals. The first helper implementation
@@ -64,12 +63,13 @@ Use this skill when the user wants Codex App work recorded in a Multica issue.
 4. Use `usage_update` only when cumulative token usage is available.
 5. Use direct Multica attachment flows for relevant files or artifacts until
    `attachment_upload` is added to the MCP server.
-6. For normal chat turns after hooks are trusted, let the `Stop` hook sync the
-   visible result. If hooks are unavailable or the user explicitly requests
-   manual sync, use `conversation_sync` with the latest user request as
-   `user_message` and the assistant result as `bot_message`; the helper writes
-   a `user_input` reply for the user text and a separate `final` reply for the
-   bot text in the localrun issue thread.
+6. For normal chat turns after hooks are trusted, let `UserPromptSubmit` sync
+   the visible user request and `Stop` sync the visible result. If hooks are
+   unavailable or the user explicitly requests manual sync, use
+   `conversation_sync` with the latest user request as `user_message` and the
+   assistant result as `bot_message`; the helper writes a `user_input` reply
+   for the user text and a separate `final` reply for the bot text in the
+   localrun issue thread.
 7. If `conversation_sync` is unavailable, write separate visible localrun
    messages when possible: `user_input` for the user request and `final` for the
    assistant result. If that path is not available, fall back to

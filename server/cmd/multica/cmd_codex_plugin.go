@@ -161,11 +161,13 @@ type codexPluginHookPrompt struct {
 }
 
 type codexPluginHookSyncedTurn struct {
-	BindingID string `json:"binding_id"`
-	UserHash  string `json:"user_hash"`
-	SourceKey string `json:"source_key,omitempty"`
-	SyncedAt  string `json:"synced_at"`
-	UnixNS    int64  `json:"unix_ns"`
+	BindingID  string `json:"binding_id"`
+	UserHash   string `json:"user_hash"`
+	SourceKey  string `json:"source_key,omitempty"`
+	UserSynced bool   `json:"user_synced,omitempty"`
+	BotSynced  bool   `json:"bot_synced,omitempty"`
+	SyncedAt   string `json:"synced_at"`
+	UnixNS     int64  `json:"unix_ns"`
 }
 
 func init() {
@@ -356,7 +358,7 @@ func runCodexPluginHook(cmd *cobra.Command, _ []string) error {
 
 	switch input.HookEventName {
 	case "UserPromptSubmit":
-		if err := codexPluginStorePrompt(cmd, input); err != nil {
+		if err := codexPluginSyncUserPrompt(cmd, input); err != nil {
 			fmt.Fprintln(os.Stderr, "multica codex plugin prompt sync:", err)
 		}
 		return nil
@@ -678,8 +680,8 @@ func buildCodexPluginSchema() codexPluginSchema {
 				Input: map[string]string{
 					"binding_id":   "binding UUID",
 					"issue_id":     "Multica issue UUID",
-					"user_message": "user prompt or request text to include after 用户：",
-					"bot_message":  "assistant result text to include after bot：",
+					"user_message": "user prompt or request text to write as the user comment body",
+					"bot_message":  "assistant result text to write as the assistant comment body",
 					"occurred_at":  "RFC3339 timestamp",
 					"source":       "source name, default codex_app_plugin",
 					"source_key":   "stable key for idempotent final conversation write",
@@ -1066,8 +1068,6 @@ func codexPluginMCPToolConversationSync(cmd *cobra.Command, args map[string]any)
 	if sourceKey == "" {
 		return nil, fmt.Errorf("source_key is required")
 	}
-	userLabel := firstNonEmpty(mcpString(args, "user_label"), "用户")
-	botLabel := firstNonEmpty(mcpString(args, "bot_label"), "bot")
 	source := firstNonEmpty(mcpString(args, "source"), codexPluginDefaultSource)
 	occurredAt := mcpString(args, "occurred_at")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1075,7 +1075,7 @@ func codexPluginMCPToolConversationSync(cmd *cobra.Command, args map[string]any)
 	_ = issueRef
 	path := "/api/local-runs/" + url.PathEscape(bindingID) + "/messages"
 
-	userContent := formatCodexConversationPart(userLabel, userMessage)
+	userContent := codexPluginConversationContent(userMessage)
 	userBody := map[string]any{
 		"type":       "user_input",
 		"content":    userContent,
@@ -1086,7 +1086,6 @@ func codexPluginMCPToolConversationSync(cmd *cobra.Command, args map[string]any)
 			"event_type":  "user_input",
 			"occurred_at": occurredAt,
 			"visibility":  "issue_comment",
-			"user_label":  userLabel,
 		},
 	}
 	var userResult map[string]any
@@ -1094,7 +1093,7 @@ func codexPluginMCPToolConversationSync(cmd *cobra.Command, args map[string]any)
 		return nil, fmt.Errorf("conversation_sync: %w", err)
 	}
 
-	botContent := formatCodexConversationPart(botLabel, botMessage)
+	botContent := codexPluginConversationContent(botMessage)
 	botBody := map[string]any{
 		"type":       "final",
 		"content":    botContent,
@@ -1105,7 +1104,6 @@ func codexPluginMCPToolConversationSync(cmd *cobra.Command, args map[string]any)
 			"event_type":  "final",
 			"occurred_at": occurredAt,
 			"visibility":  "issue_comment",
-			"bot_label":   botLabel,
 		},
 	}
 	var botResult map[string]any
@@ -1302,6 +1300,47 @@ func codexPluginStorePrompt(cmd *cobra.Command, input codexPluginHookInput) erro
 	return codexPluginWriteHookState(cmd, state)
 }
 
+func codexPluginSyncUserPrompt(cmd *cobra.Command, input codexPluginHookInput) error {
+	if strings.TrimSpace(input.Prompt) == "" {
+		return nil
+	}
+	if err := codexPluginStorePrompt(cmd, input); err != nil {
+		return err
+	}
+	state, err := codexPluginReadHookState(cmd)
+	if err != nil {
+		return err
+	}
+	prompt, ok := findCodexPluginPrompt(state.Prompts, input)
+	if !ok || strings.TrimSpace(prompt.Prompt) == "" {
+		return nil
+	}
+	binding, ok := findCodexPluginBinding(state.Bindings, input, prompt)
+	if !ok {
+		return nil
+	}
+	if codexPluginPromptPartAlreadySynced(state.SyncedTurns, binding.BindingID, prompt.Prompt, "user") {
+		return nil
+	}
+	client, _, err := codexPluginClientAndIssue(cmd, binding.IssueID)
+	if err != nil {
+		return err
+	}
+	sourceKey := codexPluginHookConversationSourceKey(input, prompt, binding)
+	source := firstNonEmpty(binding.Source, codexPluginDefaultSource)
+	occurredAt := time.Now().UTC().Format(time.RFC3339Nano)
+	turnID := firstNonEmpty(input.TurnID, prompt.TurnID)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	path := "/api/local-runs/" + url.PathEscape(binding.BindingID) + "/messages"
+	userBody := codexPluginConversationUserMessageBody(source, sourceKey, occurredAt, prompt.Prompt, input.SessionID, turnID, input.Model)
+	var userResult map[string]any
+	if err := client.PostJSON(ctx, path, userBody, &userResult); err != nil {
+		return err
+	}
+	return codexPluginMarkConversationPartSynced(cmd, binding.BindingID, prompt.Prompt, sourceKey, "user")
+}
+
 func upsertCodexPluginPrompt(prompts []codexPluginHookPrompt, prompt codexPluginHookPrompt) []codexPluginHookPrompt {
 	out := make([]codexPluginHookPrompt, 0, len(prompts)+1)
 	for _, existing := range prompts {
@@ -1351,9 +1390,32 @@ func codexPluginSyncStopConversation(cmd *cobra.Command, input codexPluginHookIn
 	defer cancel()
 	path := "/api/local-runs/" + url.PathEscape(binding.BindingID) + "/messages"
 
-	userBody := map[string]any{
+	if !codexPluginPromptPartAlreadySynced(state.SyncedTurns, binding.BindingID, prompt.Prompt, "user") {
+		userBody := codexPluginConversationUserMessageBody(source, sourceKey, occurredAt, prompt.Prompt, input.SessionID, turnID, input.Model)
+		var userResult map[string]any
+		if err := client.PostJSON(ctx, path, userBody, &userResult); err != nil {
+			return err
+		}
+		if err := codexPluginMarkConversationPartSynced(cmd, binding.BindingID, prompt.Prompt, sourceKey, "user"); err != nil {
+			return err
+		}
+	}
+
+	botBody := codexPluginConversationBotMessageBody(source, sourceKey, occurredAt, input.LastAssistantMessage, input.SessionID, turnID, input.Model)
+	var botResult map[string]any
+	if err := client.PostJSON(ctx, path, botBody, &botResult); err != nil {
+		return err
+	}
+	if err := codexPluginMarkConversationPartSynced(cmd, binding.BindingID, prompt.Prompt, sourceKey, "bot"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func codexPluginConversationUserMessageBody(source, sourceKey, occurredAt, prompt, sessionID, turnID, model string) map[string]any {
+	return map[string]any{
 		"type":       "user_input",
-		"content":    formatCodexConversationPart("用户", prompt.Prompt),
+		"content":    codexPluginConversationContent(prompt),
 		"source":     source,
 		"source_key": sourceKey + ":user",
 		"input": map[string]any{
@@ -1361,20 +1423,17 @@ func codexPluginSyncStopConversation(cmd *cobra.Command, input codexPluginHookIn
 			"event_type":  "user_input",
 			"occurred_at": occurredAt,
 			"visibility":  "issue_comment",
-			"user_label":  "用户",
-			"session_id":  input.SessionID,
+			"session_id":  sessionID,
 			"turn_id":     turnID,
-			"model":       input.Model,
+			"model":       model,
 		},
 	}
-	var userResult map[string]any
-	if err := client.PostJSON(ctx, path, userBody, &userResult); err != nil {
-		return err
-	}
+}
 
-	botBody := map[string]any{
+func codexPluginConversationBotMessageBody(source, sourceKey, occurredAt, botMessage, sessionID, turnID, model string) map[string]any {
+	return map[string]any{
 		"type":       "final",
-		"content":    formatCodexConversationPart("bot", input.LastAssistantMessage),
+		"content":    codexPluginConversationContent(botMessage),
 		"source":     source,
 		"source_key": sourceKey + ":bot",
 		"input": map[string]any{
@@ -1382,23 +1441,29 @@ func codexPluginSyncStopConversation(cmd *cobra.Command, input codexPluginHookIn
 			"event_type":  "final",
 			"occurred_at": occurredAt,
 			"visibility":  "issue_comment",
-			"bot_label":   "bot",
-			"session_id":  input.SessionID,
+			"session_id":  sessionID,
 			"turn_id":     turnID,
-			"model":       input.Model,
+			"model":       model,
 		},
 	}
-	var botResult map[string]any
-	if err := client.PostJSON(ctx, path, botBody, &botResult); err != nil {
-		return err
-	}
-	if err := codexPluginMarkConversationSynced(cmd, binding.BindingID, prompt.Prompt, sourceKey); err != nil {
-		return err
-	}
-	return nil
 }
 
 func codexPluginMarkConversationSynced(cmd *cobra.Command, bindingID, userMessage, sourceKey string) error {
+	return codexPluginMarkConversationPartsSynced(cmd, bindingID, userMessage, sourceKey, true, true)
+}
+
+func codexPluginMarkConversationPartSynced(cmd *cobra.Command, bindingID, userMessage, sourceKey, part string) error {
+	switch part {
+	case "user":
+		return codexPluginMarkConversationPartsSynced(cmd, bindingID, userMessage, sourceKey, true, false)
+	case "bot":
+		return codexPluginMarkConversationPartsSynced(cmd, bindingID, userMessage, sourceKey, false, true)
+	default:
+		return nil
+	}
+}
+
+func codexPluginMarkConversationPartsSynced(cmd *cobra.Command, bindingID, userMessage, sourceKey string, userSynced, botSynced bool) error {
 	userHash := codexPluginConversationUserHash(userMessage)
 	if strings.TrimSpace(bindingID) == "" || userHash == "" {
 		return nil
@@ -1409,11 +1474,13 @@ func codexPluginMarkConversationSynced(cmd *cobra.Command, bindingID, userMessag
 	}
 	now := time.Now()
 	synced := codexPluginHookSyncedTurn{
-		BindingID: strings.TrimSpace(bindingID),
-		UserHash:  userHash,
-		SourceKey: strings.TrimSpace(sourceKey),
-		SyncedAt:  now.UTC().Format(time.RFC3339Nano),
-		UnixNS:    now.UnixNano(),
+		BindingID:  strings.TrimSpace(bindingID),
+		UserHash:   userHash,
+		SourceKey:  strings.TrimSpace(sourceKey),
+		UserSynced: userSynced,
+		BotSynced:  botSynced,
+		SyncedAt:   now.UTC().Format(time.RFC3339Nano),
+		UnixNS:     now.UnixNano(),
 	}
 	state.SyncedTurns = upsertCodexPluginSyncedTurn(state.SyncedTurns, synced)
 	state.SyncedTurns = trimCodexPluginSyncedTurns(state.SyncedTurns, 200)
@@ -1424,6 +1491,11 @@ func upsertCodexPluginSyncedTurn(turns []codexPluginHookSyncedTurn, synced codex
 	out := make([]codexPluginHookSyncedTurn, 0, len(turns)+1)
 	for _, existing := range turns {
 		if existing.BindingID == synced.BindingID && existing.UserHash == synced.UserHash {
+			if synced.SourceKey == "" {
+				synced.SourceKey = existing.SourceKey
+			}
+			synced.UserSynced = synced.UserSynced || existing.UserSynced
+			synced.BotSynced = synced.BotSynced || existing.BotSynced
 			continue
 		}
 		out = append(out, existing)
@@ -1439,13 +1511,25 @@ func trimCodexPluginSyncedTurns(turns []codexPluginHookSyncedTurn, max int) []co
 }
 
 func codexPluginPromptAlreadySynced(turns []codexPluginHookSyncedTurn, bindingID, prompt string) bool {
+	return codexPluginPromptPartAlreadySynced(turns, bindingID, prompt, "user") &&
+		codexPluginPromptPartAlreadySynced(turns, bindingID, prompt, "bot")
+}
+
+func codexPluginPromptPartAlreadySynced(turns []codexPluginHookSyncedTurn, bindingID, prompt, part string) bool {
 	userHash := codexPluginConversationUserHash(prompt)
 	if strings.TrimSpace(bindingID) == "" || userHash == "" {
 		return false
 	}
 	for _, turn := range turns {
 		if turn.BindingID == bindingID && turn.UserHash == userHash {
-			return true
+			switch part {
+			case "user":
+				return turn.UserSynced || (!turn.UserSynced && !turn.BotSynced)
+			case "bot":
+				return turn.BotSynced || (!turn.UserSynced && !turn.BotSynced)
+			default:
+				return turn.UserSynced && turn.BotSynced
+			}
 		}
 	}
 	return false
@@ -1566,20 +1650,8 @@ func codexPluginMCPInputSchema(tool codexPluginToolSchema) map[string]any {
 	}
 }
 
-func formatCodexConversationComment(userLabel, userMessage, botLabel, botMessage string) string {
-	return formatCodexConversationPart(userLabel, userMessage) + "\n" + formatCodexConversationPart(botLabel, botMessage)
-}
-
-func formatCodexConversationPart(label, message string) string {
-	label = strings.TrimSpace(label)
-	message = strings.TrimSpace(message)
-	if label == "" {
-		label = "bot"
-	}
-	if !strings.Contains(message, "\n") {
-		return label + "：" + message
-	}
-	return label + "：\n" + message
+func codexPluginConversationContent(message string) string {
+	return strings.TrimSpace(message)
 }
 
 func codexPluginMCPJSONType(name string) any {

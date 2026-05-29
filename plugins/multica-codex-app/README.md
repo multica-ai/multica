@@ -7,8 +7,8 @@ conversation context back to Multica through the local `multica` CLI helper.
 
 - `.codex-plugin/plugin.json` - Codex plugin manifest.
 - `.mcp.json` - MCP server config that starts `multica codex-plugin mcp`.
-- `hooks/hooks.json` - Codex lifecycle hooks that record each user prompt and
-  sync the matching assistant reply after each turn stops.
+- `hooks/hooks.json` - Codex lifecycle hooks that sync each user prompt when
+  it is submitted and sync the matching assistant reply after each turn stops.
 - `skills/multica-issue-sync/SKILL.md` - workflow rules for issue search,
   binding, localrun thread sync, conversation comments, and usage
   reporting.
@@ -61,12 +61,13 @@ printf '%s\n' \
 4. Use `usage_update` only when cumulative token usage is actually available.
 5. Prefer `conversation_sync` for the visible result. It accepts
    `user_message` and `bot_message`, then writes them as two issue thread
-   replies:
+   replies. Comment roles are carried by the localrun message type, so the
+   visible comment body is the original text without a `user` / `bot` prefix:
 
    ```text
-   用户：hello
+   hello
 
-   bot：hello
+   hello
    ```
 
 6. If `conversation_sync` is unavailable, write separate `user_input` and
@@ -82,20 +83,23 @@ printf '%s\n' \
 
 The plugin now bundles Codex lifecycle hooks:
 
-- `UserPromptSubmit` stores the latest user prompt for the current Codex turn.
-- `Stop` reads `last_assistant_message` and writes two localrun messages to the
-  bound issue thread:
+- `UserPromptSubmit` writes the submitted user prompt to the bound issue
+  thread immediately, without waiting for the agent turn to finish.
+- `Stop` reads `last_assistant_message` and writes the matching assistant reply
+  to the same issue thread. The visible comments contain only the original
+  prompt and reply text:
 
   ```text
-  用户：<user prompt>
+  <user prompt>
 
-  bot：<assistant reply>
+  <assistant reply>
   ```
 
-This is what makes follow-up messages like `HI` sync after the issue has been
-bound. Codex requires plugin-bundled hooks to be reviewed and trusted before
-they run; until the user trusts the hooks, only explicit MCP tool calls from the
-skill workflow will sync.
+The two replies are idempotent and tracked separately, so a retried
+`UserPromptSubmit` hook does not duplicate the user prompt, and a later `Stop`
+hook only fills in the assistant reply. Codex requires plugin-bundled hooks to
+be reviewed and trusted before they run; until the user trusts the hooks, only
+explicit MCP tool calls from the skill workflow will sync.
 
 ## Idempotency
 
