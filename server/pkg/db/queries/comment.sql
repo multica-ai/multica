@@ -304,6 +304,9 @@ WHERE issue_id = $1 AND workspace_id = $2;
 -- prompt, so @anchor_id itself is excluded from the count. Feeds the daemon
 -- claim response without shipping comment bodies.
 WITH RECURSIVE root_of AS (
+    -- Scope is enforced on both the anchor seed and recursive walk-up; keep
+    -- these predicates together so future parent/thread changes cannot cross
+    -- issue or workspace boundaries.
     SELECT c.id, c.parent_id
     FROM comment c
     WHERE c.id = @anchor_id AND c.issue_id = @issue_id AND c.workspace_id = @workspace_id
@@ -311,6 +314,7 @@ WITH RECURSIVE root_of AS (
     SELECT p.id, p.parent_id
     FROM comment p
     JOIN root_of r ON p.id = r.parent_id
+    WHERE p.issue_id = @issue_id AND p.workspace_id = @workspace_id
 ),
 thread_root AS (
     SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1

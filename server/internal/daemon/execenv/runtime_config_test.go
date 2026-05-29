@@ -179,6 +179,12 @@ func TestCommentTriggeredBriefCarriesNewCommentsHint(t *testing.T) {
 	if !strings.Contains(out, "--thread reply-abc --since "+since+" --output json") {
 		t.Errorf("comment brief must point at the thread-scoped --since catch-up read, got:\n%s", out)
 	}
+	if !strings.Contains(out, "raw thread delta") {
+		t.Errorf("comment brief must not imply the CLI output exactly matches the count, got:\n%s", out)
+	}
+	if strings.Contains(out, "resumed session is missing older thread context") {
+		t.Errorf("comment brief warm fallback wording must not assume a resumed session, got:\n%s", out)
+	}
 	// Warm path also keeps a bounded full-thread pointer for the triggering
 	// thread's pre-anchor history that --since cannot cover.
 	if !strings.Contains(out, "--thread reply-abc --tail 30 --output json") {

@@ -322,6 +322,12 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread trigger-1 --since "+since+" --output json") {
 		t.Errorf("hint must point at the thread-scoped --since catch-up read, got:\n%s", out)
 	}
+	if !strings.Contains(out, "raw thread delta") {
+		t.Errorf("hint must not imply the CLI output exactly matches the count, got:\n%s", out)
+	}
+	if strings.Contains(out, "resumed session is missing older thread context") {
+		t.Errorf("warm delta fallback wording must not assume a resumed session, got:\n%s", out)
+	}
 	// Warm path also keeps a bounded full-thread pointer: thread-scoped --since
 	// can still miss the triggering thread's pre-anchor history.
 	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread trigger-1 --tail 30 --output json") {

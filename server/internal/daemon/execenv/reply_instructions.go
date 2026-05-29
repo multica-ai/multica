@@ -23,17 +23,18 @@ func BuildNewCommentsHint(issueID, triggerCommentID, newCommentsSince string, ne
 	}
 	hint := fmt.Sprintf(
 		"%d other new comment(s) in this thread since your last run. "+
-			"The triggering comment is already included above. Catch up on the thread delta: "+
+			"The triggering comment is already included above. "+
+			"To inspect the raw thread delta (which may include the injected trigger and agent-authored rows), run: "+
 			"`multica issue comment list %s --thread %s --since %s --output json`.\n\n",
 		newCommentCount, issueID, triggerCommentID, newCommentsSince,
 	)
 	// --thread + --since is still only a delta: it covers new rows in the
 	// triggering thread, not older pre-anchor context. Keep a bounded fallback
-	// for a missing or non-resumed session.
+	// when the older conversation context is missing.
 	hint += fmt.Sprintf(
-		"If the resumed session is missing older thread context, pull the triggering conversation: "+
+		"If older thread context before %s is missing, pull the triggering conversation: "+
 			"`multica issue comment list %s --thread %s --tail 30 --output json`.\n\n",
-		issueID, triggerCommentID,
+		newCommentsSince, issueID, triggerCommentID,
 	)
 	return hint
 }
