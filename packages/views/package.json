@@ -76,7 +76,6 @@
     "@multica/ui": "workspace:*",
     "@multica/cerebro-agent-tools": "workspace:*",
     "@multica/cerebro-channels": "workspace:*",
-    "_comment_cerebro_duplicate_check": "CEREBRO-PATCH(cerebro-duplicate-check-dep): FIR-2504 — mounts the DuplicateCheckPanel inside the create-issue modal",
     "@multica/cerebro-duplicate-check": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-groups": "workspace:*",
