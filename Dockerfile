@@ -5,8 +5,13 @@ RUN apk add --no-cache git
 
 WORKDIR /src
 
-# Cache dependencies
+# Cache dependencies. The cerebro fork's server/go.mod has replace() directives
+# pointing at ../packages/cerebro-persona-sdk and ../packages/cerebro-pdf-text,
+# so those local modules must exist before `go mod download` can resolve the
+# module graph (otherwise: "replacement directory ... does not exist").
 COPY server/go.mod server/go.sum ./server/
+COPY packages/cerebro-persona-sdk ./packages/cerebro-persona-sdk
+COPY packages/cerebro-pdf-text ./packages/cerebro-pdf-text
 RUN cd server && go mod download
 
 # Copy server source
