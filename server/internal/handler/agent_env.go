@@ -59,7 +59,8 @@ type UpdateAgentEnvRequest struct {
 //     impersonation/lateral-movement risk that motivated MUL-2600: an
 //     agent running in the workspace cannot use its host's owner
 //     credentials to reveal another agent's secrets.
-//  2. The member must be a workspace owner or admin.
+//  2. The member must pass canViewAgentEnv: either the agent's owner,
+//     or a workspace owner/admin for legacy ownerless agents.
 //
 // Returns the loaded agent and the authenticated member on success.
 // All non-2xx branches write their own response and return ok=false.
@@ -83,8 +84,13 @@ func (h *Handler) authorizeAgentEnv(w http.ResponseWriter, r *http.Request) (db.
 		return db.Agent{}, db.Member{}, false
 	}
 
-	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "agent not found", "owner", "admin")
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "agent not found")
 	if !ok {
+		return db.Agent{}, db.Member{}, false
+	}
+
+	if !canViewAgentEnv(agent, userID, member.Role) {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
 		return db.Agent{}, db.Member{}, false
 	}
 
