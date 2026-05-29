@@ -46,6 +46,8 @@ import {
   useInboxActionGroupLabels,
   // CEREBRO-PATCH(inbox-pin-selected): FIR-2474 — anchor the open row until closed
   sortInboxEntriesPinned,
+  pinnedBucketizer, // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — freeze open row's group
+  type PinnedGroup, // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — frozen-group ref type
 } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
 import { useArchiveChannel } from "@multica/cerebro-channels";
@@ -357,6 +359,8 @@ export function InboxPage() {
   const pendingChatIdRef = useRef<string | null>(null);
   // CEREBRO-PATCH(inbox-pin-selected): FIR-2474 — sort time of the open row, frozen at open
   const pinnedSelectionRef = useRef<{ key: string; time: number } | null>(null);
+  // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — open row's group, frozen at open
+  const pinnedGroupRef = useRef<PinnedGroup | null>(null);
 
   // CEREBRO-PATCH(inbox-page-resolved-tracking): Track the last key we actually resolved against the inbox list. Lets the
   // fallback effect distinguish "shared-link to a notification not in our
@@ -1046,9 +1050,13 @@ export function InboxPage() {
 
   const groupedEntries = useMemo<Group[] | null>(() => {
     if (groupBy.primary === "none") return null;
+    // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — freeze the open row's bucket until closed
+    const keyOf = (e: MergedEntry) => (e.kind === "notif" ? e.item.issue_id ?? e.item.id : e.id);
+    const selectedEntry = filteredEntries.find((e) => keyOf(e) === selectedKey);
+    const bucketizePinned = pinnedBucketizer(bucketize, keyOf, selectedKey, selectedEntry, [groupBy.primary, groupBy.secondary], pinnedGroupRef);
     const primaryMap = new Map<string, Group>();
     for (const entry of filteredEntries) {
-      const p = bucketize(groupBy.primary, entry);
+      const p = bucketizePinned(groupBy.primary, entry);
       let pg = primaryMap.get(p.key);
       if (!pg) {
         pg = { ...p, entries: [], children: groupBy.secondary !== "none" ? [] : undefined };
@@ -1061,7 +1069,7 @@ export function InboxPage() {
       for (const pg of primaryMap.values()) {
         const subMap = new Map<string, Group>();
         for (const entry of pg.entries) {
-          const s = bucketize(groupBy.secondary, entry);
+          const s = bucketizePinned(groupBy.secondary, entry); // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — frozen group for open row
           let sg = subMap.get(s.key);
           if (!sg) {
             sg = { ...s, entries: [] };
@@ -1078,7 +1086,7 @@ export function InboxPage() {
     const top = Array.from(primaryMap.values());
     sortGroups(top);
     return top;
-  }, [filteredEntries, groupBy, bucketize]);
+  }, [filteredEntries, groupBy, bucketize, selectedKey]); // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — re-pin group on selection change
 
   const renderGroup = (
     group: Group,

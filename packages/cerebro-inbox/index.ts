@@ -49,3 +49,4 @@ export {
 export { useInboxActionGroupLabels } from "./strings";
 // FIR-2474 — pin the open inbox row in place until the message is closed.
 export { sortInboxEntriesPinned, type PinnedSelection } from "./pin-selected";
+export { pinnedBucketizer, type PinnedGroup, type InboxBucket } from "./pin-selected-group";
