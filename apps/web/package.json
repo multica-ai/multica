@@ -31,6 +31,7 @@
     "@multica/cerebro-credentials": "workspace:*",
     "@multica/cerebro-dashboard": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/cerebro-firtal-welcome": "workspace:*",
     "@multica/cerebro-inbox": "workspace:*",
     "@multica/cerebro-members": "workspace:*",
     "@multica/cerebro-notifications": "workspace:*",

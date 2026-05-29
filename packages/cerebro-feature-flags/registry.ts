@@ -41,7 +41,9 @@ export type CerebroFlagKey =
   // FIR-2385: private agents visible-but-locked + tag → run-request to owner.
   | "cerebro_private_agent_requests"
   // FIR-2412: notify the assignee when an issue's start/due date arrives.
-  | "cerebro_date_reminders";
+  | "cerebro_date_reminders"
+  // FIR-2490: Firtal-branded welcome page for new members (replaces upstream onboarding).
+  | "cerebro_firtal_welcome";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -95,6 +97,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-2412: on by default — the assignee gets an inbox + push reminder when
   // a start/due date arrives. Off hides the settings rows and the UI control.
   cerebro_date_reminders: true,
+  // FIR-2490: OFF by default — opt-in per workspace. When on, new members are
+  // routed to a Firtal-branded welcome page (desktop install guide with hard
+  // gate, PWA install guide, members docs, bug-melding link to the Multica
+  // support workspace) instead of upstream `/onboarding`.
+  cerebro_firtal_welcome: false,
 };
 
 export interface CerebroFlagDefinition {
@@ -300,5 +307,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Start / due date reminders",
     description:
       "Notify the assignee when an issue's start or due date arrives (the day-of, in their timezone). Delivery follows each user's per-channel notification preferences (inbox / mobile push / desktop). Off hides the settings rows. FIR-2412.",
+  },
+  {
+    key: "cerebro_firtal_welcome",
+    label: "Firtal-branded welcome page",
+    description:
+      "Replace the upstream onboarding flow with a Firtal-branded welcome page for new members: desktop install guide (with hard-gate modal), PWA install guide (iOS Safari + Android Chrome), members documentation link, and a bug-melding button that opens the Multica support workspace at multica.firtal.com. Each member is shown the page once — completion is tracked client-side. FIR-2490.",
   },
 ];
