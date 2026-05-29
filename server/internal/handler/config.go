@@ -70,7 +70,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 func daemonSetupURLsFromEnv() (string, string) {
 	serverURL := normalizePublicURL(os.Getenv("MULTICA_PUBLIC_URL"))
 	appURL := normalizePublicURL(os.Getenv("MULTICA_APP_URL"))
-	if appURL == "" && serverURL != "" {
+	if appURL == "" {
 		appURL = normalizePublicURL(os.Getenv("FRONTEND_ORIGIN"))
 	}
 	if appURL == "" {
@@ -98,9 +98,27 @@ func isOfficialCloudDaemonConfig(serverURL, appURL string) bool {
 }
 
 func urlHostEquals(raw, want string) bool {
-	u, err := url.Parse(raw)
-	if err != nil {
+	host := canonicalURLHost(raw)
+	if host == "" {
 		return false
 	}
-	return strings.EqualFold(u.Hostname(), want)
+	want = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(want)), ".")
+	return host == want
+}
+
+func canonicalURLHost(raw string) string {
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	host := u.Hostname()
+	if host == "" && !strings.Contains(raw, "://") {
+		u, err = url.Parse("https://" + raw)
+		if err != nil {
+			return ""
+		}
+		host = u.Hostname()
+	}
+	return strings.TrimSuffix(strings.ToLower(host), ".")
 }

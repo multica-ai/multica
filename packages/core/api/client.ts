@@ -137,6 +137,7 @@ import {
   DashboardUsageDailyListSchema,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
+  EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
@@ -150,6 +151,8 @@ import {
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
+  AppConfigSchema,
+  type AppConfigResponse,
   GroupedIssuesResponseSchema,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
@@ -1359,20 +1362,11 @@ export class ApiClient {
   }
 
   // App Config
-  async getConfig(): Promise<{
-    cdn_domain: string;
-    allow_signup: boolean;
-    google_client_id?: string;
-    posthog_key?: string;
-    posthog_host?: string;
-    analytics_environment?: string;
-    daemon_server_url?: string;
-    daemon_app_url?: string;
-    // Self-host gate (#3433). Optional because older servers omit the field
-    // entirely; consumers must default to false.
-    workspace_creation_disabled?: boolean;
-  }> {
-    return this.fetch("/api/config");
+  async getConfig(): Promise<AppConfigResponse> {
+    const raw = await this.fetch<unknown>("/api/config");
+    return parseWithFallback<AppConfigResponse>(raw, AppConfigSchema, EMPTY_APP_CONFIG, {
+      endpoint: "GET /api/config",
+    });
   }
 
   // Workspaces
