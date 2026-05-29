@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, PauseCircle, Radio } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import { useWSEvent } from "@multica/core/realtime";
@@ -10,7 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useTimeAgo, useT } from "../../i18n";
+import { useTimeAgo } from "../../i18n";
 import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
 import { TaskTraceOutput } from "./task-trace-output";
 
@@ -138,165 +138,132 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
     setSelectorOpen(false);
   }, []);
 
-  // Items shown in the collapsed panel: all active runs, or fallback to latest recent.
-  const collapsedItems = useMemo(
-    () => activeTasks.length > 0 ? activeTasks : recentTasks.slice(0, 1),
-    [activeTasks, recentTasks],
+  const persistentTasks = useMemo(
+    () => {
+      if (activeTasks.length > 0) return activeTasks;
+      return selectedTask ? [selectedTask] : recentTasks.slice(0, 1);
+    },
+    [activeTasks, recentTasks, selectedTask],
+  );
+
+  const visibleTaskIds = useMemo(
+    () => new Set(persistentTasks.map((task) => task.id)),
+    [persistentTasks],
+  );
+
+  const hiddenRecentTasks = useMemo(
+    () => recentTasks.filter((task) => !visibleTaskIds.has(task.id)).slice(0, 20),
+    [recentTasks, visibleTaskIds],
+  );
+
+  const hiddenRunCount = hiddenRecentTasks.length;
+  const primaryTask = persistentTasks[0] ?? null;
+
+  const runToggleButton = (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        setSelectorOpen((v) => !v);
+      }}
+      className={cn(
+        "flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[11px] transition-colors",
+        selectorOpen
+          ? "bg-accent/70 text-foreground"
+          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+      )}
+    >
+      {selectorOpen ? "Collapse" : "Runs"}
+      <ChevronDown
+        className={cn(
+          "h-3 w-3 transition-transform",
+          selectorOpen && "rotate-180",
+        )}
+      />
+      {!selectorOpen && hiddenRunCount > 0 && (
+        <span className="font-mono text-[10px] text-muted-foreground/70">{hiddenRunCount}</span>
+      )}
+    </button>
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      {/* Run Selector Panel */}
-      <div
-        ref={selectorRef}
-        className="shrink-0 rounded-md border bg-muted/30"
-      >
-        {/* Panel header */}
-        <div className="flex items-center justify-between border-b px-2.5 py-1.5">
-          <span className="text-[11px] font-medium text-foreground/80">
-            {selectorOpen ? "All Runs" : activeTasks.length > 0 ? `Active Runs` : "Runs"}
-          </span>
-          <div className="flex items-center gap-1.5">
-            {!selectorOpen && activeTasks.length > 0 && (
-              <span className="flex items-center gap-1 text-[10px] text-info">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-info opacity-75" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-info" />
-                </span>
-                {activeTasks.length}
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => setSelectorOpen((v) => !v)}
-              className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              {selectorOpen ? "Collapse" : "All runs"}
-              <ChevronDown
-                className={cn(
-                  "h-3 w-3 transition-transform",
-                  selectorOpen && "rotate-180",
-                )}
-              />
-            </button>
-          </div>
-        </div>
-
-        {!selectorOpen ? (
-          /* Collapsed: show all active runs directly (or latest recent if none active) */
-          <div className="max-h-40 overflow-y-auto">
-            {collapsedItems.map((task) => (
-              <PanelRunRow
-                key={task.id}
-                task={task}
-                selected={task.id === selectedId}
-                timeAgo={timeAgo}
-                onSelect={handleSelect}
-              />
-            ))}
-            {collapsedItems.length === 0 && (
-              <div className="px-2.5 py-3 text-center text-xs text-muted-foreground">
-                No runs yet
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      {/* Run selector — lightweight, no panel wrapper or title bar */}
+      <div ref={selectorRef} className="shrink-0">
+        {primaryTask ? (
+          <>
+            <PanelRunRow
+              task={primaryTask}
+              selected={primaryTask.id === selectedTask?.id}
+              paused={primaryTask.id === selectedTask?.id ? paused : false}
+              timeAgo={timeAgo}
+              onSelect={handleSelect}
+              trailingAction={runToggleButton}
+              pinned
+            />
+            {persistentTasks.length > 1 && (
+              <div className="mt-0.5 space-y-0.5">
+                {persistentTasks.slice(1).map((task) => (
+                  <PanelRunRow
+                    key={task.id}
+                    task={task}
+                    selected={task.id === selectedTask?.id}
+                    paused={task.id === selectedTask?.id ? paused : false}
+                    timeAgo={timeAgo}
+                    onSelect={handleSelect}
+                  />
+                ))}
               </div>
             )}
-          </div>
+          </>
         ) : (
-          /* Expanded: full grouped list with Active + Recent */
-          <div className="max-h-56 overflow-y-auto">
-            {activeTasks.length > 0 && (
-              <>
-                <div className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  Active
-                </div>
-                {activeTasks.map((task) => (
-                  <PanelRunRow
-                    key={task.id}
-                    task={task}
-                    selected={task.id === selectedId}
-                    timeAgo={timeAgo}
-                    onSelect={handleSelectAndClose}
-                  />
-                ))}
-              </>
-            )}
-            {recentTasks.length > 0 && (
-              <>
-                {activeTasks.length > 0 && <div className="border-t" />}
-                <div className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <div className="flex items-center justify-between gap-2 rounded-md px-2 py-2 text-xs text-muted-foreground">
+            No runs yet
+            {runToggleButton}
+          </div>
+        )}
+
+        {selectorOpen && (
+          <div className="mt-1 max-h-56 overflow-y-auto pl-2">
+            {hiddenRecentTasks.length > 0 && (
+              <div className="space-y-0.5">
+                <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
                   Recent
                 </div>
-                {recentTasks.slice(0, 20).map((task) => (
+                {hiddenRecentTasks.map((task) => (
                   <PanelRunRow
                     key={task.id}
                     task={task}
-                    selected={task.id === selectedId}
+                    selected={task.id === selectedTask?.id}
+                    paused={false}
                     timeAgo={timeAgo}
                     onSelect={handleSelectAndClose}
                   />
                 ))}
-              </>
+              </div>
             )}
-            {activeTasks.length === 0 && recentTasks.length === 0 && (
-              <div className="px-2.5 py-3 text-center text-xs text-muted-foreground">
-                No runs yet
+
+            {hiddenRunCount === 0 && (
+              <div className="px-2 py-2 text-xs text-muted-foreground/70">
+                No other runs.
               </div>
             )}
           </div>
         )}
       </div>
 
-      {/* Stream Viewer Panel */}
-      <div className="min-h-0 flex-1 rounded-md border bg-muted/30">
-        {/* Panel header */}
-        <div className="flex items-center gap-1.5 border-b px-2.5 py-1.5">
-          {!selectedTask ? (
-            <span className="text-[11px] font-medium text-foreground/80">Stream</span>
-          ) : (
-            <>
-              {paused ? (
-                <span className="flex items-center gap-1 text-[11px] font-medium text-indigo-500">
-                  <PauseCircle className="h-3 w-3" />
-                  paused
-                </span>
-              ) : isLive ? (
-                <span className="flex items-center gap-1 text-[11px] font-medium text-info">
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-info opacity-75" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-info" />
-                  </span>
-                  live
-                </span>
-              ) : (
-                <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
-                  <Radio className="h-3 w-3" />
-                  recent
-                </span>
-              )}
-              {selectedTask.agent_id && (
-                <AgentName agentId={selectedTask.agent_id} />
-              )}
-            </>
-          )}
-        </div>
-
-        <div className="h-[calc(100%-29px)] min-h-0">
-          {!selectedTask ? (
-            <div className="flex h-full items-center justify-center px-3 py-4 text-xs text-muted-foreground">
-              No local agent stream yet.
-            </div>
-          ) : (
-            <TaskTraceOutput task={selectedTask} defaultOpen fill />
-          )}
-        </div>
+      {/* Stream viewer — original trace container, no extra title panel */}
+      <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-background">
+        {!selectedTask ? (
+          <div className="flex h-full items-center justify-center px-3 py-4 text-xs text-muted-foreground">
+            No local agent stream yet.
+          </div>
+        ) : (
+          <TaskTraceOutput key={selectedTask.id} task={selectedTask} defaultOpen fill />
+        )}
       </div>
     </div>
   );
-}
-
-function AgentName({ agentId }: { agentId: string }) {
-  const { getAgentName } = useActorName();
-  const name = getAgentName(agentId);
-  return <span className="truncate text-muted-foreground">{name}</span>;
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -308,31 +275,31 @@ const STATUS_TONE: Record<string, string> = {
   cancelled: "text-muted-foreground",
 };
 
-function StatusDot({ status, paused }: { status: string; paused: boolean }) {
-  if (paused) {
-    return <PauseCircle className="h-3.5 w-3.5 shrink-0 text-indigo-500" />;
-  }
-  if (ACTIVE_STATUSES.has(status)) {
-    return (
-      <span className="relative flex h-2.5 w-2.5 shrink-0">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-info opacity-75" />
-        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-info" />
-      </span>
-    );
-  }
-  return <Radio className="h-3 w-3 shrink-0 text-muted-foreground/60" />;
-}
+const ROW_ACCENT_TONE: Record<string, string> = {
+  queued: "border-l-warning/80",
+  dispatched: "border-l-warning/80",
+  running: "border-l-info/80",
+  completed: "border-l-success/80",
+  failed: "border-l-destructive/80",
+  cancelled: "border-l-muted-foreground/50",
+};
 
 function PanelRunRow({
   task,
   selected,
+  paused,
   timeAgo,
   onSelect,
+  trailingAction,
+  pinned = false,
 }: {
   task: AgentTask;
   selected: boolean;
+  paused: boolean;
   timeAgo: (d: string) => string;
   onSelect: (id: string) => void;
+  trailingAction?: ReactNode;
+  pinned?: boolean;
 }) {
   const trigger = useTriggerText(task);
   const time = activeTimeText(task, timeAgo);
@@ -341,32 +308,34 @@ function PanelRunRow({
   const isActive = ACTIVE_STATUSES.has(task.status);
 
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(task.id)}
+    <div
       className={cn(
-        "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors",
-        selected
-          ? "bg-accent/70"
-          : isActive
-            ? "hover:bg-info/5"
-            : "hover:bg-accent/40",
+        "group flex w-full items-center gap-2 rounded border-l-2 px-1 py-1.5 text-left text-xs transition-colors",
+        paused ? "border-l-indigo-500/80" : ROW_ACCENT_TONE[task.status] ?? "border-l-muted-foreground/50",
+        selected ? "bg-accent/45" : pinned && "bg-accent/30",
+        !selected && "hover:bg-accent/40",
       )}
     >
-      {task.agent_id ? (
-        <ActorAvatar actorType="agent" actorId={task.agent_id} size={18} />
-      ) : (
-        <span className="inline-block h-[18px] w-[18px] shrink-0 rounded-full bg-muted" />
-      )}
-      <StatusDot status={task.status} paused={false} />
-      <span className={cn("min-w-0 flex-1 truncate", isActive ? "text-foreground/90" : "text-muted-foreground")}>
-        {trigger}
-      </span>
-      <span className="shrink-0 whitespace-nowrap">
-        <span className={tone}>{statusLabel}</span>
-        <span className="text-muted-foreground/60"> · {time}</span>
-      </span>
-    </button>
+      <button
+        type="button"
+        onClick={() => onSelect(task.id)}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none"
+      >
+        {task.agent_id ? (
+          <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} />
+        ) : (
+          <span className="inline-block h-5 w-5 shrink-0 rounded-full bg-muted" />
+        )}
+        <span className={cn("min-w-0 flex-1 truncate", isActive ? "text-foreground/90" : "text-muted-foreground")}>
+          {trigger}
+        </span>
+        <span className="shrink-0 whitespace-nowrap">
+          <span className={paused ? "text-indigo-500" : tone}>{paused ? "paused" : statusLabel}</span>
+          <span className="text-muted-foreground/60"> · {time}</span>
+        </span>
+      </button>
+      {trailingAction}
+    </div>
   );
 }
 
@@ -389,7 +358,6 @@ function statusText(status: AgentTask["status"]): string {
 }
 
 function useTriggerText(task: AgentTask): string {
-  const { t } = useT("issues");
   const { getMemberName } = useActorName();
   const isRetry = !!task.parent_task_id;
   const retryPrefix = isRetry ? "Retry" : "";
