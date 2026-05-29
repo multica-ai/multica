@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -519,6 +520,27 @@ func buildPiArgs(prompt, sessionPath string, opts ExecOptions, logger *slog.Logg
 	if opts.SystemPrompt != "" {
 		args = append(args, "--append-system-prompt", opts.SystemPrompt)
 	}
+
+	// Guard: skip --thinking injection when custom_args already carries the
+	// flag (legacy workaround via two-element form ["--thinking","high"]).
+	// Prevents duplicate flags; logs a warning so agents can migrate to
+	// the thinking_level field. Single-element "--thinking=high" form is
+	// not in use per confirmed workaround evidence and is not checked.
+	hasCustomThinking := slices.Contains(opts.CustomArgs, "--thinking")
+	if hasCustomThinking && opts.ThinkingLevel != "" {
+		logger.Warn("pi: --thinking already in custom_args; skipping thinking_level injection to avoid duplicate flag — migrate to thinking_level field",
+			"thinking_level", opts.ThinkingLevel,
+		)
+	} else if opts.ThinkingLevel != "" {
+		if piValidThinkingLevels[opts.ThinkingLevel] {
+			args = append(args, "--thinking", opts.ThinkingLevel)
+		} else {
+			logger.Error("pi: unknown thinking_level, omitting --thinking arg",
+				"thinking_level", opts.ThinkingLevel,
+			)
+		}
+	}
+
 	args = append(args, filterCustomArgs(opts.CustomArgs, piBlockedArgs, logger)...)
 	args = append(args, prompt)
 	return args

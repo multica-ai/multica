@@ -11,13 +11,13 @@ import (
 )
 
 // thinking.go discovers per-model reasoning/effort catalogs for the
-// claude and codex backends so the daemon can advertise them to the
+// claude, codex, and pi backends so the daemon can advertise them to the
 // UI without hard-coding (and getting wrong) what's installed locally.
 //
 // MUL-2339: we deliberately do not flatten Claude's `low|medium|high|
-// xhigh|max` and Codex's `none|minimal|low|medium|high|xhigh` onto a
-// shared enum — what users pick must round-trip exactly through each
-// CLI's own value vocabulary.
+// xhigh|max`, Codex's `none|minimal|low|medium|high|xhigh`, and Pi's
+// `off|minimal|low|medium|high|xhigh` onto a shared enum — what users
+// pick must round-trip exactly through each CLI's own value vocabulary.
 
 // ── Cache ────────────────────────────────────────────────────────────
 //
@@ -356,6 +356,60 @@ func parseCodexDebugModels(raw []byte) map[string]*ModelThinking {
 	return out
 }
 
+// piThinkingLevels is the ordered catalog for Pi reasoning levels.
+// Pi exposes --thinking <level> at the CLI layer. All six levels are
+// accepted by every Pi model (the SDK clamps unsupported levels itself
+// at run time; the daemon does not need to map levels per-model). The
+// catalog is therefore model-independent: every entry returned by
+// discoverPiModels gets the same full level set.
+//
+// Default level is "medium" — confirmed from Pi's dist/core/defaults.js.
+//
+// xhigh behaviour is provider-gated inside Pi: it passes through to the
+// upstream model, which clamps to "high" if the model does not natively
+// support extended reasoning (e.g. most Anthropic models except
+// Opus 4.6+). The daemon does not convert; Pi handles it silently.
+// Values are the literal tokens Pi's --thinking flag accepts.
+var piThinkingLevels = []ThinkingLevel{
+	{Value: "off", Label: "Off"},
+	{Value: "minimal", Label: "Minimal"},
+	{Value: "low", Label: "Low"},
+	{Value: "medium", Label: "Medium"},
+	{Value: "high", Label: "High"},
+	{
+		Value: "xhigh",
+		Label: "Extra high",
+		Description: "Maximum reasoning. Available on select models only (e.g., OpenAI o-series, Claude Opus 4.6+). Falls back to \"high\" on unsupported models — no error is raised.",
+	},
+}
+
+// piModelThinking is the shared ModelThinking block attached to every Pi
+// model. Pointer is safe to share: callers must not mutate it.
+var piModelThinking = &ModelThinking{
+	SupportedLevels: piThinkingLevels,
+	DefaultLevel:    "medium",
+}
+
+// annotatePiThinking sets the Thinking field on every model in the slice
+// to the Pi-wide catalog. Pi does not have per-model thinking
+// restrictions — the SDK handles clamping internally.
+func annotatePiThinking(models []Model) {
+	for i := range models {
+		models[i].Thinking = piModelThinking
+	}
+}
+
+// piValidThinkingLevels is the accept-set used by buildPiArgs for the
+// inline guard (defence-in-depth: the daemon also calls ValidateThinkingLevel
+// before dispatch, but that can fail open when pi CLI is not found).
+var piValidThinkingLevels = func() map[string]bool {
+	set := make(map[string]bool, len(piThinkingLevels))
+	for _, l := range piThinkingLevels {
+		set[l.Value] = true
+	}
+	return set
+}()
+
 // ── Shared validation ────────────────────────────────────────────────
 
 // ValidateThinkingLevel reports whether `value` is in the supported
@@ -440,6 +494,14 @@ var providerThinkingEnums = map[string]map[string]bool{
 	},
 	"codex": {
 		"none":    true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+	},
+	"pi": {
+		"off":     true,
 		"minimal": true,
 		"low":     true,
 		"medium":  true,
