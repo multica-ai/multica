@@ -37,7 +37,7 @@ Listed roughly from most to least common. Pick whichever ones you already have c
 
 ### Claude Code (Anthropic)
 
-The most complete integration. Session resumption works, MCP works, and it's the **only one of the 11 that actually consumes the `mcp_config` field** on agents (see the [matrix](/providers#mcp-configuration-only-claude-code-actually-reads-it)).
+The most complete integration. Session resumption works, MCP works, and it's one of two tools that actually consume the `mcp_config` field on agents (the other is OpenCode — see the [matrix](/providers#mcp-configuration-provider-specific-support)).
 
 | | |
 |---|---|
@@ -89,7 +89,7 @@ Supports the Gemini 2.5 and 3 series. No session resumption, no MCP — suitable
 
 ### OpenCode (SST)
 
-Open-source CLI agent. Dynamically discovers available models from its own configuration file — good fit for users who want to bring their own model catalog.
+Open-source CLI agent. Dynamically discovers available models from its own configuration file — good fit for users who want to bring their own model catalog. Consumes the agent's `mcp_config` field (one of two tools that does, alongside Claude Code).
 
 | | |
 |---|---|

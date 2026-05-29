@@ -22,7 +22,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | **Hermes** | Nous Research | ✅ | ❌ | `.agent_context/skills/` (fallback) | Dynamic discovery |
 | **Kimi** | Moonshot | ✅ | ❌ | `.kimi/skills/` | Dynamic discovery |
 | **Kiro CLI** | Amazon | ✅ | ❌ | `.kiro/skills/` | Dynamic discovery |
-| **OpenCode** | SST | ✅ | ❌ | `.opencode/skills/` | Dynamic discovery |
+| **OpenCode** | SST | ✅ | ✅ | `.opencode/skills/` | Dynamic discovery |
 | **OpenClaw** | Open source | ✅ | ❌ | `.agent_context/skills/` (fallback) | Bound to the agent, can't be switched per task |
 | **Pi** | Inflection AI | ✅ (session is a file path) | ❌ | `.pi/skills/` | Dynamic discovery |
 
@@ -34,7 +34,7 @@ From Google. CLI binary name is `agy`. Pairs with Google's Antigravity service a
 
 ### Claude Code
 
-From Anthropic. **First choice for new users** — the most complete feature set: session resumption actually works, it's the **only one of the 11 that truly reads MCP configuration**, and it supports fine-tuning flags like `--max-turns` and `--append-system-prompt`. Requires an Anthropic API key.
+From Anthropic. **First choice for new users** — the most complete feature set: session resumption actually works, it **reads MCP configuration** (one of only two tools that does, alongside OpenCode), and it supports fine-tuning flags like `--max-turns` and `--append-system-prompt`. Requires an Anthropic API key.
 
 ### Codex
 
@@ -66,7 +66,7 @@ From Amazon. Uses ACP over stdio via `kiro-cli acp`. Session resumption works th
 
 ### OpenCode
 
-From SST, open source. Dynamically discovers available models (scans the CLI's configuration file). Session resumption works. **Suitable for tinkerers who want to customize their model catalog.**
+From SST, open source. Dynamically discovers available models (scans the CLI's configuration file). Session resumption works, and it consumes the agent's `mcp_config` field — Multica injects it inline through the `OPENCODE_CONFIG_CONTENT` environment variable, so the agent's MCP servers reach OpenCode without writing anything into the task workdir's `opencode.json` (the agent or the user keep ownership of that file). **Suitable for tinkerers who want to customize their model catalog.**
 
 ### OpenClaw
 
@@ -88,12 +88,14 @@ The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continu
 
 **For your decision**: if your workflow needs agents to preserve context across tasks (failure retries, manual reruns, conversational iteration), pick only from the ✅ row.
 
-## MCP configuration: only Claude Code actually reads it
+## MCP configuration: provider-specific support
 
-**Of the 12 tools, only Claude Code actually consumes `mcp_config`**. The other 11 accept the field but **completely ignore it** — no error, no warning, the config just has no effect.
+**Of the 12 tools, only Claude Code and OpenCode actually consume `mcp_config`**. The other 10 accept the field but **completely ignore it** — no error, no warning, the config just has no effect.
+
+Claude Code receives it through `--mcp-config` paired with `--strict-mcp-config` — the latter intentionally **disables** any merge with the user's Claude global config, so the agent's `mcp_config` is the only MCP server set Claude Code sees. OpenCode receives it inline via the `OPENCODE_CONFIG_CONTENT` environment variable, which **deep-merges** with the user's OpenCode global config (`~/.config/opencode/opencode.json` etc.). Neither path rewrites the project's `opencode.json` or any other user-owned file on disk.
 
 <Callout type="warning">
-If you set `mcp_config` in an agent configuration but pick a tool other than Claude Code, your MCP servers have **no effect** on that agent. MCP integration currently covers Claude Code only.
+If you set `mcp_config` in an agent configuration but pick a tool other than Claude Code or OpenCode, your MCP servers have **no effect** on that agent. MCP integration is provider-specific and only the tools marked ✅ in the matrix consume it.
 </Callout>
 
 ## Where skill files go

@@ -37,7 +37,7 @@ multica daemon restart
 
 ### Claude Code（Anthropic）
 
-集成最完整的一款。会话续接好用，MCP 好用，而且 **12 款里只有它真正会读 agent 配置里的 `mcp_config` 字段**（见[矩阵](/zh/providers)）。
+集成最完整的一款。会话续接好用，MCP 好用，是真正会读 agent 配置里 `mcp_config` 字段的两款工具之一（另一款是 OpenCode，见[矩阵](/zh/providers)）。
 
 | | |
 |---|---|
@@ -89,7 +89,7 @@ Cursor 编辑器的 CLI 对应物。**会话续接是坏的** —— Cursor CLI 
 
 ### OpenCode（SST）
 
-开源 CLI agent。会从自己的配置文件里动态发现可用模型 —— 适合想自己掌控模型清单的用户。
+开源 CLI agent。会从自己的配置文件里动态发现可用模型 —— 适合想自己掌控模型清单的用户。会消费 agent 配置里的 `mcp_config` 字段（12 款里和 Claude Code 一起的两款之一）。
 
 | | |
 |---|---|
