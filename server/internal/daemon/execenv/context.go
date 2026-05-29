@@ -365,7 +365,14 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *si
 		// it would mean the skill's bundled files list two entries
 		// at the same path — that's an upstream data bug, not a
 		// user-content collision, and we surface it.
+		//
+		// One common data bug is storing SKILL.md as both the primary
+		// content (skill.Content) and as a supporting file. Skip the
+		// duplicate so the agent still gets every unique file.
 		for _, f := range skill.Files {
+			if strings.EqualFold(f.Path, "SKILL.md") {
+				continue
+			}
 			fpath := filepath.Join(dir, f.Path)
 			if err := recordMkdirAll(filepath.Dir(fpath), 0o755, manifest); err != nil {
 				return err
