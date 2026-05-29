@@ -40,15 +40,14 @@ Use this skill when the user wants Codex App work recorded in a Multica issue.
   Without trusted hooks, only explicit tool calls such as `conversation_sync`
   can write to the issue.
 - The final visible conversation turn should normally be split into two
-  localrun thread replies:
+  localrun thread replies. Roles are represented by localrun message types, so
+  do not add `user` / `bot` labels to the visible comment body:
 
   ```text
-  用户：<user request>
+  <user request>
 
-  bot：<assistant result>
+  <assistant result>
   ```
-
-  Use the user's actual language for the labels when appropriate.
 - Do not fabricate token usage. If usage is unavailable, say that usage is
   unavailable or partial.
 - Report usage only as cumulative totals. The first helper implementation

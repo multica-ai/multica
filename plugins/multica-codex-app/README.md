@@ -61,12 +61,13 @@ printf '%s\n' \
 4. Use `usage_update` only when cumulative token usage is actually available.
 5. Prefer `conversation_sync` for the visible result. It accepts
    `user_message` and `bot_message`, then writes them as two issue thread
-   replies:
+   replies. Comment roles are carried by the localrun message type, so the
+   visible comment body is the original text without a `user` / `bot` prefix:
 
    ```text
-   用户：hello
+   hello
 
-   bot：hello
+   hello
    ```
 
 6. If `conversation_sync` is unavailable, write separate `user_input` and
@@ -85,12 +86,13 @@ The plugin now bundles Codex lifecycle hooks:
 - `UserPromptSubmit` writes the submitted user prompt to the bound issue
   thread immediately, without waiting for the agent turn to finish.
 - `Stop` reads `last_assistant_message` and writes the matching assistant reply
-  to the same issue thread:
+  to the same issue thread. The visible comments contain only the original
+  prompt and reply text:
 
   ```text
-  用户：<user prompt>
+  <user prompt>
 
-  bot：<assistant reply>
+  <assistant reply>
   ```
 
 The two replies are idempotent and tracked separately, so a retried

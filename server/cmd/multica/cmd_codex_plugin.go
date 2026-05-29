@@ -680,8 +680,8 @@ func buildCodexPluginSchema() codexPluginSchema {
 				Input: map[string]string{
 					"binding_id":   "binding UUID",
 					"issue_id":     "Multica issue UUID",
-					"user_message": "user prompt or request text to include after 用户：",
-					"bot_message":  "assistant result text to include after bot：",
+					"user_message": "user prompt or request text to write as the user comment body",
+					"bot_message":  "assistant result text to write as the assistant comment body",
 					"occurred_at":  "RFC3339 timestamp",
 					"source":       "source name, default codex_app_plugin",
 					"source_key":   "stable key for idempotent final conversation write",
@@ -1068,8 +1068,6 @@ func codexPluginMCPToolConversationSync(cmd *cobra.Command, args map[string]any)
 	if sourceKey == "" {
 		return nil, fmt.Errorf("source_key is required")
 	}
-	userLabel := firstNonEmpty(mcpString(args, "user_label"), "用户")
-	botLabel := firstNonEmpty(mcpString(args, "bot_label"), "bot")
 	source := firstNonEmpty(mcpString(args, "source"), codexPluginDefaultSource)
 	occurredAt := mcpString(args, "occurred_at")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1077,7 +1075,7 @@ func codexPluginMCPToolConversationSync(cmd *cobra.Command, args map[string]any)
 	_ = issueRef
 	path := "/api/local-runs/" + url.PathEscape(bindingID) + "/messages"
 
-	userContent := formatCodexConversationPart(userLabel, userMessage)
+	userContent := codexPluginConversationContent(userMessage)
 	userBody := map[string]any{
 		"type":       "user_input",
 		"content":    userContent,
@@ -1088,7 +1086,6 @@ func codexPluginMCPToolConversationSync(cmd *cobra.Command, args map[string]any)
 			"event_type":  "user_input",
 			"occurred_at": occurredAt,
 			"visibility":  "issue_comment",
-			"user_label":  userLabel,
 		},
 	}
 	var userResult map[string]any
@@ -1096,7 +1093,7 @@ func codexPluginMCPToolConversationSync(cmd *cobra.Command, args map[string]any)
 		return nil, fmt.Errorf("conversation_sync: %w", err)
 	}
 
-	botContent := formatCodexConversationPart(botLabel, botMessage)
+	botContent := codexPluginConversationContent(botMessage)
 	botBody := map[string]any{
 		"type":       "final",
 		"content":    botContent,
@@ -1107,7 +1104,6 @@ func codexPluginMCPToolConversationSync(cmd *cobra.Command, args map[string]any)
 			"event_type":  "final",
 			"occurred_at": occurredAt,
 			"visibility":  "issue_comment",
-			"bot_label":   botLabel,
 		},
 	}
 	var botResult map[string]any
@@ -1419,7 +1415,7 @@ func codexPluginSyncStopConversation(cmd *cobra.Command, input codexPluginHookIn
 func codexPluginConversationUserMessageBody(source, sourceKey, occurredAt, prompt, sessionID, turnID, model string) map[string]any {
 	return map[string]any{
 		"type":       "user_input",
-		"content":    formatCodexConversationPart("用户", prompt),
+		"content":    codexPluginConversationContent(prompt),
 		"source":     source,
 		"source_key": sourceKey + ":user",
 		"input": map[string]any{
@@ -1427,7 +1423,6 @@ func codexPluginConversationUserMessageBody(source, sourceKey, occurredAt, promp
 			"event_type":  "user_input",
 			"occurred_at": occurredAt,
 			"visibility":  "issue_comment",
-			"user_label":  "用户",
 			"session_id":  sessionID,
 			"turn_id":     turnID,
 			"model":       model,
@@ -1438,7 +1433,7 @@ func codexPluginConversationUserMessageBody(source, sourceKey, occurredAt, promp
 func codexPluginConversationBotMessageBody(source, sourceKey, occurredAt, botMessage, sessionID, turnID, model string) map[string]any {
 	return map[string]any{
 		"type":       "final",
-		"content":    formatCodexConversationPart("bot", botMessage),
+		"content":    codexPluginConversationContent(botMessage),
 		"source":     source,
 		"source_key": sourceKey + ":bot",
 		"input": map[string]any{
@@ -1446,7 +1441,6 @@ func codexPluginConversationBotMessageBody(source, sourceKey, occurredAt, botMes
 			"event_type":  "final",
 			"occurred_at": occurredAt,
 			"visibility":  "issue_comment",
-			"bot_label":   "bot",
 			"session_id":  sessionID,
 			"turn_id":     turnID,
 			"model":       model,
@@ -1656,20 +1650,8 @@ func codexPluginMCPInputSchema(tool codexPluginToolSchema) map[string]any {
 	}
 }
 
-func formatCodexConversationComment(userLabel, userMessage, botLabel, botMessage string) string {
-	return formatCodexConversationPart(userLabel, userMessage) + "\n" + formatCodexConversationPart(botLabel, botMessage)
-}
-
-func formatCodexConversationPart(label, message string) string {
-	label = strings.TrimSpace(label)
-	message = strings.TrimSpace(message)
-	if label == "" {
-		label = "bot"
-	}
-	if !strings.Contains(message, "\n") {
-		return label + "：" + message
-	}
-	return label + "：\n" + message
+func codexPluginConversationContent(message string) string {
+	return strings.TrimSpace(message)
 }
 
 func codexPluginMCPJSONType(name string) any {

@@ -406,7 +406,7 @@ func TestRunCodexPluginMCPServerEndToEndSyncDedupe(t *testing.T) {
 	if envelopes[4].Data["deduped"] != false {
 		t.Fatalf("first usage envelope = %+v", envelopes[4])
 	}
-	if envelopes[5].Data["user_content"] != "用户：hello" || envelopes[5].Data["bot_content"] != "bot：hello" {
+	if envelopes[5].Data["user_content"] != "hello" || envelopes[5].Data["bot_content"] != "hello" {
 		t.Fatalf("conversation envelope = %+v", envelopes[5])
 	}
 	sessionTotal, _ := envelopes[6].Data["session_total"].(map[string]any)
@@ -424,10 +424,10 @@ func TestRunCodexPluginMCPServerEndToEndSyncDedupe(t *testing.T) {
 	}
 	if len(conversationBodies) != 2 ||
 		conversationBodies[0]["type"] != "user_input" ||
-		conversationBodies[0]["content"] != "用户：hello" ||
+		conversationBodies[0]["content"] != "hello" ||
 		conversationBodies[0]["source_key"] != "thread-1:conversation:1:user" ||
 		conversationBodies[1]["type"] != "final" ||
-		conversationBodies[1]["content"] != "bot：hello" ||
+		conversationBodies[1]["content"] != "hello" ||
 		conversationBodies[1]["source_key"] != "thread-1:conversation:1:bot" {
 		t.Fatalf("conversationBodies = %+v", conversationBodies)
 	}
@@ -494,7 +494,7 @@ func TestCodexPluginHooksSyncPromptAndStopToBoundThread(t *testing.T) {
 	}
 	if len(posted) != 1 ||
 		posted[0]["type"] != "user_input" ||
-		posted[0]["content"] != "用户：HI" ||
+		posted[0]["content"] != "HI" ||
 		posted[0]["source_key"] != "session-1:turn:turn-1:conversation:user" {
 		t.Fatalf("posted prompt hook body = %+v", posted)
 	}
@@ -517,7 +517,7 @@ func TestCodexPluginHooksSyncPromptAndStopToBoundThread(t *testing.T) {
 
 	if len(posted) != 2 ||
 		posted[1]["type"] != "final" ||
-		posted[1]["content"] != "bot：hi，有什么要继续处理的？" {
+		posted[1]["content"] != "hi，有什么要继续处理的？" {
 		t.Fatalf("posted hook sync body = %+v", posted)
 	}
 	if posted[1]["source_key"] != "session-1:turn:turn-1:conversation:bot" {
@@ -593,7 +593,7 @@ func TestCodexPluginStopHookSkipsExplicitConversationSync(t *testing.T) {
 	}
 	if len(posted) != 1 ||
 		posted[0]["type"] != "user_input" ||
-		posted[0]["content"] != "用户：你好" {
+		posted[0]["content"] != "你好" {
 		t.Fatalf("posted prompt hook body = %+v", posted)
 	}
 
@@ -618,9 +618,9 @@ func TestCodexPluginStopHookSkipsExplicitConversationSync(t *testing.T) {
 
 	if len(posted) != 2 ||
 		posted[0]["type"] != "user_input" ||
-		posted[0]["content"] != "用户：你好" ||
+		posted[0]["content"] != "你好" ||
 		posted[1]["type"] != "final" ||
-		posted[1]["content"] != "bot：你好，我在。当前会话仍绑定在 Multica issue OPE-1782，这条对话也已同步过去。" {
+		posted[1]["content"] != "你好，我在。当前会话仍绑定在 Multica issue OPE-1782，这条对话也已同步过去。" {
 		t.Fatalf("posted = %+v, want only explicit conversation_sync messages", posted)
 	}
 	var hookResp map[string]any
