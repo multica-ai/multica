@@ -43,7 +43,7 @@ import { WorkspaceContext } from "./workspace-context";
 
 export type RootStackParamList = {
   Main: undefined;
-  IssueDetail: { issueId: string };
+  IssueDetail: { commentId?: string; issueId: string };
   IssueProperties: { issueId: string };
   IssueTimeline: { issueId: string };
   IssueTaskRuns: { issueId: string };
