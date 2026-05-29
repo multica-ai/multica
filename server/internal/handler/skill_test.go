@@ -2,6 +2,8 @@ package handler
 
 import (
 	"bytes"
+	"encoding/base64"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -1227,6 +1229,10 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
+func ptrString(value string) *string {
+	return &value
+}
+
 // --- Gitee test helpers ---
 
 func newGiteeFixtureClient(t *testing.T, handler http.HandlerFunc) (*http.Client, *[]string) {
@@ -1285,6 +1291,32 @@ func TestDetectImportSource_RecognizesGiteeWithoutScheme(t *testing.T) {
 	}
 }
 
+func TestDetectImportSource_RecognizesGiteeSSHURL(t *testing.T) {
+	src, normalized, err := detectImportSource("git@gitee.com:acme/skill.git")
+	if err != nil {
+		t.Fatalf("detectImportSource: %v", err)
+	}
+	if src != sourceGitee {
+		t.Fatalf("source = %v, want sourceGitee", src)
+	}
+	if normalized != "https://gitee.com/acme/skill" {
+		t.Fatalf("normalized = %q, want https://gitee.com/acme/skill", normalized)
+	}
+}
+
+func TestDetectImportSource_RecognizesGitHubSSHURL(t *testing.T) {
+	src, normalized, err := detectImportSource("git@github.com:acme/skill.git")
+	if err != nil {
+		t.Fatalf("detectImportSource: %v", err)
+	}
+	if src != sourceGitHub {
+		t.Fatalf("source = %v, want sourceGitHub", src)
+	}
+	if normalized != "https://github.com/acme/skill" {
+		t.Fatalf("normalized = %q, want https://github.com/acme/skill", normalized)
+	}
+}
+
 func TestFetchFromGitee_TreeURLImportsSkillDirectory(t *testing.T) {
 	client, requests := newGiteeFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
 		host := r.Header.Get("X-Test-Original-Host")
@@ -1319,7 +1351,7 @@ func TestFetchFromGitee_TreeURLImportsSkillDirectory(t *testing.T) {
 		}
 	})
 
-	result, err := fetchFromGitee(client, "https://gitee.com/acme/skills/tree/main/my-skill")
+	result, err := fetchFromGitee(client, "https://gitee.com/acme/skills/tree/main/my-skill", "")
 	if err != nil {
 		t.Fatalf("fetchFromGitee: %v", err)
 	}
@@ -1365,7 +1397,7 @@ func TestFetchFromGitee_RepoRootResolvesDefaultBranch(t *testing.T) {
 		}
 	})
 
-	result, err := fetchFromGitee(client, "https://gitee.com/alice/single-skill")
+	result, err := fetchFromGitee(client, "https://gitee.com/alice/single-skill", "")
 	if err != nil {
 		t.Fatalf("fetchFromGitee: %v", err)
 	}
@@ -1392,7 +1424,7 @@ func TestFetchFromGitee_MissingSKILLmdReturnsActionableError(t *testing.T) {
 		}
 	})
 
-	_, err := fetchFromGitee(client, "https://gitee.com/bob/no-skill")
+	_, err := fetchFromGitee(client, "https://gitee.com/bob/no-skill", "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -1423,7 +1455,7 @@ func TestFetchFromGitee_BlobURLImportsSpecificSkill(t *testing.T) {
 		}
 	})
 
-	result, err := fetchFromGitee(client, "https://gitee.com/acme/skills/blob/main/tools/pptx/SKILL.md")
+	result, err := fetchFromGitee(client, "https://gitee.com/acme/skills/blob/main/tools/pptx/SKILL.md", "")
 	if err != nil {
 		t.Fatalf("fetchFromGitee: %v", err)
 	}
@@ -1436,11 +1468,11 @@ func TestFetchFromGitee_BlobURLImportsSpecificSkill(t *testing.T) {
 	}
 }
 
-func TestFetchFromGitee_SendsAuthHeaderWhenTokenSet(t *testing.T) {
-	var gotAuth string
+func TestFetchFromGitee_SendsEnvAuthHeaderWhenTokenSet(t *testing.T) {
+	var authHeaders []string
 	client, _ := newGiteeFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		authHeaders = append(authHeaders, r.Header.Get("Authorization"))
 		if r.URL.Path == "/api/v5/repos/x/y" {
-			gotAuth = r.Header.Get("Authorization")
 			writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
 			return
 		}
@@ -1456,12 +1488,134 @@ func TestFetchFromGitee_SendsAuthHeaderWhenTokenSet(t *testing.T) {
 	})
 
 	t.Setenv("GITEE_TOKEN", "test-token-123")
-	_, err := fetchFromGitee(client, "https://gitee.com/x/y")
+	_, err := fetchFromGitee(client, "https://gitee.com/x/y", "")
 	if err != nil {
 		t.Fatalf("fetchFromGitee: %v", err)
 	}
-	if gotAuth != "token test-token-123" {
-		t.Fatalf("Authorization = %q, want 'token test-token-123'", gotAuth)
+	for i, gotAuth := range authHeaders {
+		if gotAuth != "token test-token-123" {
+			t.Fatalf("request %d Authorization = %q, want 'token test-token-123'", i, gotAuth)
+		}
+	}
+}
+
+func TestFetchFromGitee_SendsRequestTokenToAPIAndRawRequests(t *testing.T) {
+	var authHeaders []string
+	client, _ := newGiteeFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		authHeaders = append(authHeaders, r.Header.Get("Authorization"))
+		switch r.URL.Path {
+		case "/api/v5/repos/x/y":
+			writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+		case "/x/y/raw/main/SKILL.md":
+			w.Write([]byte("---\nname: y\n---\nbody"))
+		case "/api/v5/repos/x/y/contents":
+			writeJSON(w, http.StatusOK, []githubContentEntry{
+				{Name: "helper.md", Path: "helper.md", Type: "file"},
+			})
+		case "/x/y/raw/main/helper.md":
+			w.Write([]byte("helper"))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	t.Setenv("GITEE_TOKEN", "env-token")
+	result, err := fetchFromGitee(client, "https://gitee.com/x/y", "request-token")
+	if err != nil {
+		t.Fatalf("fetchFromGitee: %v", err)
+	}
+	if got := importedFilePaths(result.files); !equalStrings(got, []string{"helper.md"}) {
+		t.Fatalf("files = %v, want [helper.md]", got)
+	}
+	for i, gotAuth := range authHeaders {
+		if gotAuth != "token request-token" {
+			t.Fatalf("request %d Authorization = %q, want 'token request-token'", i, gotAuth)
+		}
+	}
+}
+
+func TestFetchFromGitee_UsesContentsAPIForPrivateRepoFileBody(t *testing.T) {
+	var rawSkillRequested bool
+	client, _ := newGiteeFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v5/repos/private/repo":
+			if got := r.Header.Get("Authorization"); got != "token request-token" {
+				t.Fatalf("repo Authorization = %q, want request token", got)
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"default_branch": "master"})
+		case "/api/v5/repos/private/repo/contents/SKILL.md":
+			if got := r.URL.Query().Get("ref"); got != "master" {
+				t.Fatalf("contents ref = %q, want master", got)
+			}
+			if got := r.Header.Get("Authorization"); got != "token request-token" {
+				t.Fatalf("contents Authorization = %q, want request token", got)
+			}
+			writeJSON(w, http.StatusOK, githubContentEntry{
+				Name:     "SKILL.md",
+				Path:     "SKILL.md",
+				Type:     "file",
+				Content:  ptrString(base64.StdEncoding.EncodeToString([]byte("---\nname: private-repo\n---\nbody"))),
+				Encoding: "base64",
+			})
+		case "/api/v5/repos/private/repo/contents":
+			writeJSON(w, http.StatusOK, []githubContentEntry{})
+		case "/private/repo/raw/master/SKILL.md":
+			rawSkillRequested = true
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromGitee(client, "https://gitee.com/private/repo", "request-token")
+	if err != nil {
+		t.Fatalf("fetchFromGitee: %v", err)
+	}
+	if result.name != "private-repo" {
+		t.Fatalf("name = %q, want private-repo", result.name)
+	}
+	if rawSkillRequested {
+		t.Fatal("raw SKILL.md should not be requested when contents API returns file content")
+	}
+}
+
+func TestFetchFromGitee_PrivateRepoWithoutTokenReturnsActionableError(t *testing.T) {
+	client, _ := newGiteeFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v5/repos/private/repo" {
+			http.NotFound(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	_, err := fetchFromGitee(client, "https://gitee.com/private/repo", "")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, errGiteeAuthRequired) {
+		t.Fatalf("error = %v, want errGiteeAuthRequired", err)
+	}
+	if !strings.Contains(err.Error(), "Gitee 个人访问令牌") {
+		t.Fatalf("error = %v, want token guidance", err)
+	}
+}
+
+func TestFetchFromGitee_PrivateRepoTreeURLWithoutTokenReturnsActionableError(t *testing.T) {
+	client, _ := newGiteeFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v5/repos/private/repo/commits/main", "/api/v5/repos/private/repo":
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := fetchFromGitee(client, "https://gitee.com/private/repo/tree/main/skill", "")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, errGiteeAuthRequired) {
+		t.Fatalf("error = %v, want errGiteeAuthRequired", err)
 	}
 }
 
@@ -1485,7 +1639,7 @@ func TestFetchFromGitee_DefaultBranchFallsBackToMaster(t *testing.T) {
 		}
 	})
 
-	result, err := fetchFromGitee(client, "https://gitee.com/alice/repo")
+	result, err := fetchFromGitee(client, "https://gitee.com/alice/repo", "")
 	if err != nil {
 		t.Fatalf("fetchFromGitee: %v", err)
 	}
