@@ -123,6 +123,18 @@ runtime:
       requests: { cpu: 500m, memory: 1Gi }
       limits:   { cpu: 2,    memory: 4Gi }
 
+  controller:
+    replicaCount: 1
+    image: { name: multica-controller, tag: "" }   # "" → falls back to image.tag
+    pollInterval: 3s
+    heartbeatInterval: 15s
+    workdir:
+      storageClass: ""
+      size: 5Gi
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { cpu: 500m, memory: 256Mi }
+
 # ── Bootstrap helpers (Plan E fills this) ──────────────────
 bootstrap:
   enabled: false

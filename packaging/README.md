@@ -116,3 +116,67 @@ The task payload must include `id`, `workspace_id`, and `runtime_id`. The
 controller (or your manual smoke test) is responsible for first claiming the
 task via `POST /api/daemon/runtimes/{runtimeID}/tasks/claim` and writing the
 returned JSON to `--task-file`. `run-task` itself does not poll or claim.
+
+## Controller mode (Plan E)
+
+Per-task Job pods spawned by the `multica-k8s-controller`. Set
+`runtime.mode=controller` in your override values; the chart deploys the
+controller Deployment, RBAC, and a ConfigMap with the per-workspace runtime
+declarations. The controller polls for tasks every 3s, creates a Job pod per
+claim, mounts a per-issue PVC for workdir continuity, and posts `FailTask`
+for any Job that dies without the worker reporting.
+
+### Switching from daemon-mode
+
+1. Bump `image.tag` to a tag whose runtime image includes `multica run-task`
+   (Plan D).
+2. Set `runtime.mode: controller`.
+3. Provide a writable storage class for workdir PVCs:
+   ```yaml
+   runtime:
+     controller:
+       workdir:
+         storageClass: synology-nfs-csi   # any RWO class your cluster offers
+         size: 5Gi
+   ```
+4. `helm upgrade --install`.
+5. The daemon Deployment is removed; the controller takes over registration
+   under the same device name.
+
+If you had an agent bound to the daemon's runtime row, you'll need a one-time
+repoint to the new controller-served row (the daemon and controller use
+different `daemon_id`s, so the server treats them as separate runtimes):
+
+```sql
+UPDATE agent SET runtime_id = '<new-controller-runtime-id>' WHERE id = '<agent-id>';
+```
+
+Inspect with: `SELECT id, name, status, daemon_id FROM agent_runtime WHERE workspace_id = '<ws>';`
+
+### Per-issue PVCs
+
+PVC name: `wd-{ws8}-{ag8}-{scope8}` (RWO). `scope` is the issue short id when
+present; for chat tasks it falls back to `c{chat-session-short}`; for
+autopilot to `a{run-short}`; otherwise to `t{task-short}` (per-task workdir).
+Created lazily on the first task; reused on follow-up tasks; deleted
+manually for now (auto-GC on issue close lands in a later plan).
+
+### RBAC
+
+The controller's ServiceAccount has a namespaced Role limited to: Jobs and
+PVCs (CRUD), ConfigMaps (CRUD), Pods/Pods-logs (read), Events (create). Scoped
+to the install namespace only.
+
+### PodSecurity
+
+Both the controller Deployment and the spawned worker Job pods are compatible
+with the `restricted` Pod Security Standard: `runAsNonRoot`, drop ALL caps,
+`allowPrivilegeEscalation: false`, and the RuntimeDefault seccomp profile.
+
+### Multica CLI version reporting
+
+The controller embeds `main.version` via `-ldflags` at build time and reports
+it as the daemon `cli_version` so Multica's CLI-version gate
+(`MIN_QUICK_CREATE_CLI_VERSION` in `server/pkg/agent`) accepts it. If the
+binary was built without a real version (the bare `go build` default of
+`dev`), the register payload falls back to `v0.3.5` to stay past the gate.

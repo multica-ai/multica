@@ -1,0 +1,68 @@
+{{- if and .Values.runtime.enabled (eq .Values.runtime.mode "controller") }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multica-controller
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "controller" "ctx" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.runtime.controller.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "multica.componentSelector" (dict "name" "controller" "ctx" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "multica.componentLabels" (dict "name" "controller" "ctx" .) | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/runtime/controller-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: multica-controller
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecret }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controller
+          image: {{ include "multica.controllerImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+          env:
+            - name: MULTICA_SERVER_URL
+              value: {{ .Values.runtime.serverUrl | quote }}
+            - name: MULTICA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.runtime.tokenSecretName }}
+                  key: token
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CONTROLLER_CONFIG_DIR
+              value: /etc/controller
+            - name: DEVICE_NAME
+              value: multica-cluster
+          resources:
+            {{- toYaml .Values.runtime.controller.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/controller, readOnly: true }
+      volumes:
+        - name: config
+          configMap:
+            name: multica-controller-config
+{{- end }}

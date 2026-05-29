@@ -62,3 +62,13 @@ Resolve the runtime (agent) image reference.
 {{- $tag := default .Values.image.tag $img.tag -}}
 {{- printf "%s/%s:%s" .Values.image.registry $img.name $tag -}}
 {{- end }}
+
+{{/*
+Resolve the controller image reference.
+  {{ include "multica.controllerImage" . }}
+*/}}
+{{- define "multica.controllerImage" -}}
+{{- $img := .Values.runtime.controller.image -}}
+{{- $tag := default .Values.image.tag $img.tag -}}
+{{- printf "%s/%s:%s" .Values.image.registry $img.name $tag -}}
+{{- end }}

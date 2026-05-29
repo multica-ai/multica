@@ -1,0 +1,21 @@
+{{- if and .Values.runtime.enabled (eq .Values.runtime.mode "controller") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multica-controller-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "controller" "ctx" .) | nindent 4 }}
+data:
+  runtime.yaml: |
+    workspaces:
+{{- range $w := default (list (dict "id" .Values.runtime.workspaceId)) (default list .Values.runtime.workspaces) }}
+      - id: {{ required "runtime.workspaceId or runtime.workspaces[].id required" $w.id | quote }}
+        provider: {{ default "claude" $w.provider }}
+        agentName: {{ default "multica-cluster" $w.agentName }}
+        runtimeImage: {{ default (include "multica.runtimeImage" $) $w.runtimeImage | quote }}
+        pvcSize: {{ default $.Values.runtime.controller.workdir.size "5Gi" | quote }}
+        storageClass: {{ default $.Values.runtime.controller.workdir.storageClass "" | quote }}
+{{- end }}
+    imagePullSecret: {{ .Values.image.pullSecret | quote }}
+{{- end }}
