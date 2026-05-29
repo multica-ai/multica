@@ -644,7 +644,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !roleAllowed(member.Role, "owner", "admin") {
+	// CEREBRO-PATCH(create-agent-group-capability): MUL-2443 — when the cerebro group-capability seam is wired, the gate at the top of CreateAgent is the only role check, so a group member with create_agent passes. Without the seam (upstream-only fixtures) keep the owner/admin requirement so MUL-2062 stays closed.
+	if h.GroupPermissions == nil && !roleAllowed(member.Role, "owner", "admin") {
 		writeError(w, http.StatusForbidden, "only workspace owners and admins can create agents")
 		return
 	}
