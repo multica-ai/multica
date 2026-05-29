@@ -174,6 +174,10 @@
         "title": "从 URL 导入",
         "desc": "通过 URL 拉取已发布的 skill，文件由服务端拉取。"
       },
+      "local": {
+        "title": "上传本地目录",
+        "desc": "从这台机器选择文件夹并导入其中的 skill 文件。"
+      },
       "runtime": {
         "title": "从运行时复制",
         "desc": "扫描本地运行时，把它磁盘上的 skill 提升到工作区。"
@@ -184,6 +188,8 @@
       "manual_desc": "从空白 SKILL.md 开始，自己写指令。",
       "url_title": "从 URL 导入",
       "url_desc": "从 ClawHub 或 Skills.sh 拉取已发布的 skill。",
+      "local_title": "上传本地目录",
+      "local_desc": "从磁盘导入 SKILL.md 目录、Claude commands 或 Codex 文件。",
       "runtime_title": "从运行时复制",
       "runtime_desc": "把本地运行时里已经装好的 skill 提升过来。"
     },
@@ -216,6 +222,28 @@
       "fallback_error": "导入失败",
       "cancel": "取消",
       "toast_imported": "已导入 skill"
+    },
+    "local": {
+      "select_directory": "选择目录",
+      "supported_hint": "支持 SKILL.md 目录、.claude/commands/*.md、AGENTS.md 和 codex.md。",
+      "detected_count_one": "检测到 {{count}} 个 skill",
+      "detected_count_other": "检测到 {{count}} 个 skill",
+      "choose_another": "重新选择",
+      "file_count_one": "{{count}} 个文件",
+      "file_count_other": "{{count}} 个文件",
+      "import_button_one": "导入 {{count}} 个 skill",
+      "import_button_other": "导入 {{count}} 个 skill",
+      "importing": "导入中...",
+      "import_complete": "导入完成",
+      "import_summary": "已导入 {{created}} 个，跳过 {{skipped}} 个。",
+      "skipped_names": "已跳过重复项：{{names}}",
+      "no_skills_error": "未找到 skill 文件。支持：.claude/commands/*.md、AGENTS.md、codex.md，或包含 SKILL.md 的目录。",
+      "parse_failed": "解析目录失败",
+      "import_failed": "导入 skill 失败",
+      "toast_imported_one": "已导入 {{count}} 个 skill",
+      "toast_imported_other": "已导入 {{count}} 个 skill",
+      "cancel": "取消",
+      "done": "完成"
     }
   },
   "runtime_import": {
