@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	cerebropermissions "github.com/multica-ai/multica/server/internal/cerebro/permissions" // CEREBRO-PATCH(daemon-repo-grants): FIR-2512 repo-capability resolver
 	cerebropersona "github.com/multica-ai/multica/server/internal/cerebro/persona"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -2727,5 +2728,103 @@ func (h *Handler) GetTaskGCCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":       task.Status,
 		"completed_at": task.CompletedAt.Time,
+	})
+}
+
+// CEREBRO-PATCH(daemon-repo-grants): FIR-2512 — repo capability check for grants-based access control.
+
+// daemonRepoCheckRequest is the body of POST /api/daemon/workspaces/{id}/repo/check.
+type daemonRepoCheckRequest struct {
+	URL        string `json:"url"`
+	Capability string `json:"capability"`
+	AgentID    string `json:"agent_id,omitempty"`
+	ProjectID  string `json:"project_id,omitempty"`
+}
+
+// CheckDaemonRepoCapability evaluates whether a repo capability is granted for
+// an agent (optionally in a project context) by running the full grants
+// resolver. Called by the daemon before allowing multica repo checkout/push/read
+// when the repo_grants_enabled workspace setting is on.
+//
+// POST /api/daemon/workspaces/{workspaceId}/repo/check
+func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Request) {
+	workspaceID := strings.TrimSpace(chi.URLParam(r, "workspaceId"))
+	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+		return
+	}
+
+	var req daemonRepoCheckRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.URL == "" {
+		writeError(w, http.StatusBadRequest, "url is required")
+		return
+	}
+	if req.Capability == "" {
+		writeError(w, http.StatusBadRequest, "capability is required")
+		return
+	}
+
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	// Build actor: an agent subject when agent_id is set, otherwise
+	// workspace_default grants are the only thing evaluated.
+	//
+	// Scope note (FIR-2512): for an autonomous daemon repo-checkout only the
+	// Workspace, Project and Agent layers of the chain are populated here. The
+	// Group and Role layers are intentionally NOT loaded: groups in this model
+	// hold user members (cerebro_group_member), not agents, and a daemon
+	// checkout has no human in the loop — so a group-scoped grant could only
+	// apply via owner-substitution, the same unresolved decision the autopilot
+	// path defers (see autopilot_cerebro.go, JEH-721). Wiring group/role for
+	// autonomous checkout is tracked as the Spor 4 follow-up rather than guessed
+	// at inside this security path. Project isolation (the headline of this PR)
+	// does not depend on it.
+	actor := cerebropermissions.Actor{Type: "agent"}
+
+	if req.AgentID != "" {
+		agentUUID, err := util.ParseUUID(req.AgentID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid agent_id")
+			return
+		}
+		actor.ID = agentUUID
+	}
+
+	// Project scope (FIR-2512): if the task runs in a project, include it so
+	// project-scoped grants are evaluated as part of the chain.
+	if req.ProjectID != "" {
+		projectUUID, err := util.ParseUUID(req.ProjectID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid project_id")
+			return
+		}
+		actor.ProjectIDs = []pgtype.UUID{projectUUID}
+	}
+
+	// The agent is both the actor and the agent in this context (direct-agent
+	// call, no human member in the loop).
+	decision, err := cerebropermissions.New(h.CerebroQueries).Can(r.Context(), cerebropermissions.Request{
+		WorkspaceID: wsUUID,
+		Actor:       actor,
+		Agent:       actor.ID,
+		Capability:  req.Capability,
+		Resource:    req.URL,
+	})
+	if err != nil {
+		slog.Error("repo capability check failed", "workspace_id", workspaceID, "url", req.URL, "error", err)
+		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"allowed":  decision.Allowed(),
+		"decision": string(decision.Kind),
+		"reason":   decision.Reason,
 	})
 }

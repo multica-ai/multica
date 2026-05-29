@@ -597,6 +597,10 @@
       "gate": "daemon_auth"
     },
     {
+      "id": "POST /api/daemon/workspaces/{workspaceId}/repo/check",
+      "gate": "daemon_auth"
+    },
+    {
       "id": "POST /api/feedback",
       "gate": "self_only"
     },
@@ -1871,6 +1875,10 @@
     {
       "id": "project update",
       "gate": "via:PUT /api/projects/{id}/"
+    },
+    {
+      "id": "repo check",
+      "exempt": "read-only — pre-flight capability query, wraps daemon_auth-gated POST /api/daemon/workspaces/{workspaceId}/repo/check"
     },
     {
       "id": "repo checkout",

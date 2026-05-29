@@ -466,6 +466,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/heartbeat", h.DaemonHeartbeat)
 		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
+		r.Post("/workspaces/{workspaceId}/repo/check", h.CheckDaemonRepoCapability) // CEREBRO-PATCH(daemon-repo-grants): FIR-2512
 		r.Get("/workspaces/{workspaceId}/agents/persona", h.ListWorkspacePersonaAgents)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
