@@ -116,3 +116,37 @@ func (r *SingleTaskRunner) SeedRuntime(runtimeID, provider string) {
 	r.runtimeIndex[runtimeID] = Runtime{ID: runtimeID, Provider: provider}
 	r.mu.Unlock()
 }
+
+// RunOneTask runs exactly one task end-to-end (start → run → report) and
+// returns once handleTask has reported the final disposition. The error
+// return is reserved for setup failures (missing IDs, missing runtime
+// seeding); per-task failures during execution are reported to the server
+// via FailTask and return nil here.
+//
+// Concurrency: single-task — the daemon's slot pool is bypassed (slot=0).
+func (r *SingleTaskRunner) RunOneTask(ctx context.Context, task Task) error {
+	if task.ID == "" {
+		return fmt.Errorf("task.ID required")
+	}
+	if task.WorkspaceID == "" {
+		return fmt.Errorf("task.WorkspaceID required")
+	}
+	if task.RuntimeID == "" {
+		return fmt.Errorf("task.RuntimeID required")
+	}
+
+	// handleTask looks up the provider via runtimeIndex[task.RuntimeID]. The
+	// regular daemon's registration loop populates this; single-task mode
+	// requires the caller to call SeedRuntime(task.RuntimeID, provider) first,
+	// because the task payload itself does not carry the provider (AgentData
+	// has no Provider field — provider lives on the Runtime row).
+	r.mu.Lock()
+	_, ok := r.runtimeIndex[task.RuntimeID]
+	r.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("runtime %q not seeded; call SeedRuntime(runtimeID, provider) before RunOneTask", task.RuntimeID)
+	}
+
+	r.handleTask(ctx, task, 0)
+	return nil
+}
