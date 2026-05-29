@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -22,7 +24,10 @@ import (
 // casdoorOAuthMaxBody is the maximum bytes read from Casdoor API responses.
 const casdoorOAuthMaxBody = 1 << 20 // 1 MB
 
-// casdoorStateCookieName holds the OAuth state parameter for CSRF protection.
+// casdoorStateCookieName is kept as a fallback for CSRF protection, but the
+// primary verification uses HMAC-signed state embedded in the redirect URL.
+// This avoids Chrome dropping the Set-Cookie during the cross-origin redirect
+// chain (localhost:3000 → 127.0.0.1:8000 Casdoor → localhost:3000 callback).
 const casdoorStateCookieName = "casdoor_oauth_state"
 
 // casdoorTokenResponse is the JSON response from Casdoor's token endpoint.
@@ -47,9 +52,38 @@ type casdoorUserInfo struct {
 	Picture           string `json:"picture"`
 }
 
+// generateSignedState creates a CSRF state parameter signed with HMAC-SHA256.
+// Format: "<nonce_hex>.<signature_hex>". The signature prevents tampering
+// without needing a cookie (which Chrome may drop during cross-origin
+// redirect chains like localhost → 127.0.0.1 Casdoor → localhost callback).
+func generateSignedState() (string, error) {
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	nonceHex := hex.EncodeToString(nonce)
+	mac := hmac.New(sha256.New, []byte(auth.JWTSecret()))
+	mac.Write([]byte(nonceHex))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	return nonceHex + "." + sig, nil
+}
+
+// validateSignedState verifies the HMAC signature of a state parameter.
+func validateSignedState(state string) bool {
+	parts := strings.SplitN(state, ".", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(auth.JWTSecret()))
+	mac.Write([]byte(parts[0]))
+	expected := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(parts[1]), []byte(expected))
+}
+
 // CasdoorLogin initiates the Casdoor OAuth2 authorization code flow.
-// It generates a random state parameter for CSRF protection, stores it in a
-// short-lived cookie, and redirects the user to Casdoor's authorize endpoint.
+// It generates an HMAC-signed state parameter for CSRF protection and
+// redirects the user to Casdoor's authorize endpoint. A cookie is also set
+// as a fallback for browsers that preserve it through the redirect chain.
 func (h *Handler) CasdoorLogin(w http.ResponseWriter, r *http.Request) {
 	cfg := h.cfg
 
@@ -58,16 +92,15 @@ func (h *Handler) CasdoorLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate random state for CSRF protection.
-	stateBytes := make([]byte, 16)
-	if _, err := rand.Read(stateBytes); err != nil {
+	// Generate HMAC-signed state for CSRF protection.
+	state, err := generateSignedState()
+	if err != nil {
 		slog.Error("casdoor: failed to generate state", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to generate state")
 		return
 	}
-	state := hex.EncodeToString(stateBytes)
 
-	// Set state cookie (short-lived, HttpOnly, SameSite=Lax).
+	// Also set state cookie as fallback (some browsers preserve it).
 	http.SetCookie(w, &http.Cookie{
 		Name:     casdoorStateCookieName,
 		Value:    state,
@@ -122,17 +155,23 @@ func (h *Handler) CasdoorCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate state parameter (CSRF protection).
-	stateCookie, err := r.Cookie(casdoorStateCookieName)
-	if err != nil || stateCookie.Value == "" {
-		writeError(w, http.StatusBadRequest, "missing or expired state cookie")
-		return
-	}
+	// Primary: verify HMAC signature (works even when Chrome drops the cookie
+	// during the cross-origin redirect chain).
+	// Fallback: compare against cookie value for backward compatibility.
 	stateParam := r.URL.Query().Get("state")
-	if stateParam == "" || stateParam != stateCookie.Value {
-		writeError(w, http.StatusBadRequest, "invalid state parameter")
+	if stateParam == "" {
+		writeError(w, http.StatusBadRequest, "missing state parameter")
 		return
 	}
-	// Clear the state cookie.
+	if !validateSignedState(stateParam) {
+		// Fallback: check cookie (set by login endpoint).
+		stateCookie, cookieErr := r.Cookie(casdoorStateCookieName)
+		if cookieErr != nil || stateCookie.Value != stateParam {
+			writeError(w, http.StatusBadRequest, "invalid state parameter")
+			return
+		}
+	}
+	// Clear the state cookie if present.
 	http.SetCookie(w, &http.Cookie{
 		Name:     casdoorStateCookieName,
 		Value:    "",

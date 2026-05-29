@@ -11,7 +11,7 @@ import {
   CardFooter,
 } from "@multica/ui/components/ui/card";
 import { Input } from "@multica/ui/components/ui/input";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { Label } from "@multica/ui/components/ui/label";
 import {
   InputOTP,
@@ -309,16 +309,12 @@ export function LoginPage({
             </CardDescription>
           </CardHeader>
           <CardFooter>
-            <Button
-              type="button"
-              className="w-full"
-              size="lg"
-              onClick={() => {
-                window.location.href = casdoorLoginUrl;
-              }}
+            <a
+              href={casdoorLoginUrl}
+              className={`${buttonVariants({ size: "lg" })} w-full`}
             >
               Sign in with SSO
-            </Button>
+            </a>
           </CardFooter>
         </Card>
       </div>
