@@ -1,4 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const existingDocs = vi.hoisted(() => new Set<string>());
+
+vi.mock("node:fs", () => ({
+  existsSync: vi.fn((path: string) => {
+    const normalized = path.replaceAll("\\", "/");
+    return [...existingDocs].some((suffix) => normalized.endsWith(suffix));
+  }),
+}));
 
 const pages = new Map<string, { url: string }>([
   ["en:", { url: "/" }],
@@ -16,6 +25,14 @@ vi.mock("@/lib/source", () => ({
     }),
   },
 }));
+
+beforeEach(() => {
+  existingDocs.clear();
+  existingDocs.add("index.mdx");
+  existingDocs.add("index.zh.mdx");
+  existingDocs.add("agents.mdx");
+  existingDocs.add("agents.zh.mdx");
+});
 
 describe("docsAlternates", () => {
   it("omits Korean hreflang when the page only renders via English fallback", async () => {

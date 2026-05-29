@@ -1,3 +1,8 @@
+import {
+  matchLocale,
+  type SupportedLocale,
+} from "@multica/core/i18n";
+
 export {
   HELPER_INSTRUCTIONS,
   HELPER_DESCRIPTION,
@@ -23,6 +28,14 @@ export {
   type QuestionnaireRaw,
 } from "./user-context";
 
+type ContentLang = "en" | "zh" | "ko";
+
+const CONTENT_LANG_BY_LOCALE: Record<SupportedLocale, ContentLang> = {
+  en: "en",
+  "zh-Hans": "zh",
+  ko: "ko",
+};
+
 /**
  * Pick persisted onboarding content for the given user language. Maps
  * supported BCP-47 prefixes to the matching variant; everything else falls
@@ -30,9 +43,6 @@ export {
  */
 export function pickContentLang(
   language: string | null | undefined,
-): "en" | "zh" | "ko" {
-  const lower = language?.toLowerCase();
-  if (lower?.startsWith("zh")) return "zh";
-  if (lower?.startsWith("ko")) return "ko";
-  return "en";
+): ContentLang {
+  return CONTENT_LANG_BY_LOCALE[matchLocale(language ? [language] : [])];
 }
