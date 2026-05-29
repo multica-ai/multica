@@ -181,3 +181,112 @@ func TestFlushPiTextBufferKeepsUnmatchedToolPrefixes(t *testing.T) {
 		}
 	}
 }
+
+func argsContainsFlag(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
+func thinkingArgValue(args []string) string {
+	for i, a := range args {
+		if a == "--thinking" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// TestBuildPiArgsThinkingLevel_AllLevels verifies that each valid Pi thinking
+// level produces exactly one "--thinking <level>" pair in the argv.
+func TestBuildPiArgsThinkingLevel_AllLevels(t *testing.T) {
+	t.Parallel()
+	levels := []string{"off", "minimal", "low", "medium", "high", "xhigh"}
+	for _, level := range levels {
+		level := level
+		t.Run(level, func(t *testing.T) {
+			t.Parallel()
+			args := buildPiArgs("prompt", "/tmp/s.jsonl", ExecOptions{
+				ThinkingLevel: level,
+			}, slog.Default())
+			got := thinkingArgValue(args)
+			if got != level {
+				t.Errorf("expected --thinking %q, got %q in args %v", level, got, args)
+			}
+		})
+	}
+}
+
+// TestBuildPiArgsThinkingLevel_Empty verifies that an empty thinking_level
+// produces no --thinking flag (Pi SDK default applies).
+func TestBuildPiArgsThinkingLevel_Empty(t *testing.T) {
+	args := buildPiArgs("prompt", "/tmp/s.jsonl", ExecOptions{
+		ThinkingLevel: "",
+	}, slog.Default())
+	if argsContainsFlag(args, "--thinking") {
+		t.Errorf("empty ThinkingLevel must not produce --thinking flag, got: %v", args)
+	}
+}
+
+// TestBuildPiArgsThinkingLevel_Invalid verifies that an unknown level is
+// omitted and does not appear in the argv (daemon already validated, but
+// buildPiArgs defends in depth).
+func TestBuildPiArgsThinkingLevel_Invalid(t *testing.T) {
+	var logBuf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelError}))
+	args := buildPiArgs("prompt", "/tmp/s.jsonl", ExecOptions{
+		ThinkingLevel: "supersonic",
+	}, logger)
+	if argsContainsFlag(args, "--thinking") {
+		t.Errorf("invalid ThinkingLevel must not produce --thinking flag, got: %v", args)
+	}
+	if !strings.Contains(logBuf.String(), "unknown thinking_level") {
+		t.Errorf("expected error log for unknown thinking_level, got: %q", logBuf.String())
+	}
+}
+
+// TestBuildPiArgsThinkingLevel_CustomArgsConflict verifies that when
+// custom_args already carries --thinking (legacy workaround), thinking_level
+// injection is skipped to avoid duplicate flags.
+func TestBuildPiArgsThinkingLevel_CustomArgsConflict(t *testing.T) {
+	var logBuf strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	args := buildPiArgs("prompt", "/tmp/s.jsonl", ExecOptions{
+		ThinkingLevel: "medium",
+		CustomArgs:    []string{"--thinking", "high"},
+	}, logger)
+
+	// Count --thinking occurrences — must be exactly one (from custom_args).
+	count := 0
+	for _, a := range args {
+		if a == "--thinking" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 --thinking flag (from custom_args), got %d in: %v", count, args)
+	}
+	// The value passed in custom_args must be preserved.
+	if thinkingArgValue(args) != "high" {
+		t.Errorf("custom_args --thinking value should be 'high', got %q in: %v", thinkingArgValue(args), args)
+	}
+	if !strings.Contains(logBuf.String(), "custom_args") {
+		t.Errorf("expected warning log about custom_args conflict, got: %q", logBuf.String())
+	}
+}
+
+// TestBuildPiArgsThinkingLevel_NoCustomArgsConflict verifies that when
+// custom_args does NOT carry --thinking, thinking_level injection proceeds
+// normally and produces the --thinking flag.
+func TestBuildPiArgsThinkingLevel_NoCustomArgsConflict(t *testing.T) {
+	args := buildPiArgs("prompt", "/tmp/s.jsonl", ExecOptions{
+		ThinkingLevel: "high",
+		CustomArgs:    []string{"--tools", "read,bash"},
+	}, slog.Default())
+	if thinkingArgValue(args) != "high" {
+		t.Errorf("expected --thinking high, got %q in: %v", thinkingArgValue(args), args)
+	}
+}
