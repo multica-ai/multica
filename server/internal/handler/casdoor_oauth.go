@@ -261,8 +261,16 @@ func (h *Handler) CasdoorCallback(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("casdoor: user logged in", "user_id", uuidToString(user.ID), "email", userInfo.Email)
 
-	// Redirect to frontend.
-	http.Redirect(w, r, "/", http.StatusFound)
+	// Redirect to frontend. Use the origin derived from the configured
+	// redirect URI so the browser lands on the frontend (e.g. localhost:3000)
+	// rather than the backend port when Casdoor admin still points at 8080.
+	frontendOrigin := "/"
+	if cfg.CasdoorRedirectURI != "" {
+		if u, err := url.Parse(cfg.CasdoorRedirectURI); err == nil {
+			frontendOrigin = u.Scheme + "://" + u.Host + "/"
+		}
+	}
+	http.Redirect(w, r, frontendOrigin, http.StatusFound)
 }
 
 // exchangeCasdoorCode exchanges an authorization code for an access token.
