@@ -43,7 +43,9 @@ export type CerebroFlagKey =
   // FIR-2412: notify the assignee when an issue's start/due date arrives.
   | "cerebro_date_reminders"
   // FIR-2490: Firtal-branded welcome page for new members (replaces upstream onboarding).
-  | "cerebro_firtal_welcome";
+  | "cerebro_firtal_welcome"
+  // FIR-2504: show similar open issues + LLM verdict when creating an issue.
+  | "cerebro_duplicate_check_on_create";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -102,6 +104,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // gate, PWA install guide, members docs, bug-melding link to the Multica
   // support workspace) instead of upstream `/onboarding`.
   cerebro_firtal_welcome: false,
+  // FIR-2504: surface similar open issues + Haiku verdict in the create-issue
+  // modal so users can open an existing sag or attach as a sub-issue instead
+  // of duplicating. Defaults ON so the feature lands behind the standard
+  // workspace/user override (Off restores upstream create flow).
+  cerebro_duplicate_check_on_create: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -313,5 +320,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Firtal-branded welcome page",
     description:
       "Replace the upstream onboarding flow with a Firtal-branded welcome page for new members: desktop install guide (with hard-gate modal), PWA install guide (iOS Safari + Android Chrome), members documentation link, and a bug-melding button that opens the Multica support workspace at multica.firtal.com. Each member is shown the page once — completion is tracked client-side. FIR-2490.",
+  },
+  {
+    key: "cerebro_duplicate_check_on_create",
+    label: "Find similar at create",
+    description:
+      "When composing a new issue, show up to 3 similar open issues with an LLM-judged verdict (duplicate / related) so the user can open the existing sag or create the new one as a sub-issue. Off restores the upstream create flow. Requires the Firtal AI Gateway credentials. FIR-2504.",
   },
 ];

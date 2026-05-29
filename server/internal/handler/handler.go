@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/duplicatecheck"
 	cerebroinfisical "github.com/multica-ai/multica/server/internal/cerebro/infisical"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -163,6 +164,10 @@ type Handler struct {
 	capabilityRegister CapabilityRegisterService
 	// CEREBRO-PATCH(handler-cloud-runtime-tool-scan): FIR-2284 server-side scan for cloud runtimes.
 	cloudRuntimeToolScanner CloudRuntimeToolScanner
+	// CEREBRO-PATCH(handler-duplicate-check): FIR-2504 inject a custom judge
+	// (test fake or workspace-aware gateway) into CheckSimilarIssues; nil
+	// means the default env-resolved gateway is used.
+	DuplicateCheckJudger *duplicatecheck.Judger
 }
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime

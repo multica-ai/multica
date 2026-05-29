@@ -49,6 +49,8 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { PillButton } from "../common/pill-button";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
+// CEREBRO-PATCH(create-issue-duplicate-check-import): FIR-2504.
+import { DuplicateCheckPanel } from "@multica/cerebro-duplicate-check/views";
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -400,6 +402,11 @@ export function ManualCreatePanel({
               />
               {descDragOver && <FileDropOverlay />}
             </div>
+
+            {/* CEREBRO-PATCH(create-issue-duplicate-check-mount): FIR-2504. */}
+            <DuplicateCheckPanel title={title} description={draft.description} projectId={projectId}
+              onOpen={(m) => { router.push(p.issueDetail(m.id)); onClose(); }}
+              onAttachAsSubIssue={(m) => setParentIssueId(m.id)} />
 
             {/* Property toolbar */}
             <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">

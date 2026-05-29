@@ -1246,6 +1246,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard overview endpoint
 			r.Get("/api/cerebro/dashboard", cerebroDashboardHandler.Overview)
+			// CEREBRO-PATCH(cerebro-duplicate-check-route): FIR-2504 "find similar at create" endpoint + adoption-event sink.
+			r.Post("/api/cerebro/issues/check-similar", h.CheckSimilarIssues)
+			r.Post("/api/cerebro/issues/check-similar/event", h.DupCheckEvent)
 			// CEREBRO-PATCH(references-routes): JEH-837 reference-by-id mutations + reverse-lookup.
 			r.Route("/api/cerebro/references", func(r chi.Router) {
 				r.Get("/", cerebroReferencesHandler.ListByObject)
