@@ -389,6 +389,14 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/cerebro/issues/check-similar",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/issues/check-similar/event",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/cerebro/issues/{id}/share-tokens",
       "gate": "workspace_member"
     },
