@@ -170,6 +170,22 @@ func (e *FirtalGatewayExecutor) syncRuntimes(ctx context.Context) {
 			continue
 		}
 		if registered.Inserted {
+			// The DB default for agent_runtime.visibility is 'private' (see
+			// migration 083), which on the runtimes page hides the Firtal
+			// Gateway runtime from every workspace member except owners/admins
+			// and locks agent binding to the same set. The gateway is a
+			// shared, server-managed runtime with no human owner, so we flip
+			// freshly-inserted rows to 'public' so any workspace member can
+			// see it and bind agents to it. We only do this on insert — a
+			// later manual toggle in the UI survives across server restarts
+			// because UpsertAgentRuntime's ON CONFLICT branch never touches
+			// visibility.
+			if _, err := e.queries.UpdateAgentRuntimeVisibility(ctx, db.UpdateAgentRuntimeVisibilityParams{
+				ID:         registered.ID,
+				Visibility: "public",
+			}); err != nil {
+				e.logger.Warn("firtal gateway runtime visibility set failed", "workspace_id", util.UUIDToString(workspaceID), "runtime_id", util.UUIDToString(registered.ID), "error", err)
+			}
 			e.publishRuntimeRegistered(util.UUIDToString(workspaceID), util.UUIDToString(registered.ID))
 		}
 	}
