@@ -32,11 +32,23 @@ func shortID(s string) string {
 	return s[:8]
 }
 
-// pvcName is deterministic so a follow-up task on the same (ws, agent, issue)
-// reuses the same PVC.
+// pvcName is deterministic so a follow-up task on the same (ws, agent, scope)
+// reuses the same PVC. Scope = issue when present; otherwise chat session,
+// autopilot run, or the task id as a last resort (per-task workdir).
 func pvcName(r Registered, t daemon.Task) string {
+	scope := shortID(t.IssueID)
+	switch {
+	case t.IssueID != "":
+		scope = shortID(t.IssueID)
+	case t.ChatSessionID != "":
+		scope = "c" + shortID(t.ChatSessionID)
+	case t.AutopilotRunID != "":
+		scope = "a" + shortID(t.AutopilotRunID)
+	default:
+		scope = "t" + shortID(t.ID)
+	}
 	return fmt.Sprintf("wd-%s-%s-%s",
-		shortID(r.WorkspaceID), shortID(t.AgentID), shortID(t.IssueID))
+		shortID(r.WorkspaceID), shortID(t.AgentID), scope)
 }
 
 // EnsurePVC creates a per-issue workdir PVC if missing, returns its name.
@@ -108,6 +120,14 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 	uid := int64(1001)
 	gid := int64(1001)
 	mode := int32(0o400)
+	allowPrivEsc := false
+	seccompRuntimeDefault := corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}
+	containerSC := &corev1.SecurityContext{
+		AllowPrivilegeEscalation: &allowPrivEsc,
+		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+		SeccompProfile:           &seccompRuntimeDefault,
+		RunAsNonRoot:             &nonRoot,
+	}
 	postStart := []string{
 		"sh", "-c",
 		"cp /home/multica/.ssh-src/id_ed25519 /home/multica/.ssh/id_ed25519 2>/dev/null; chmod 600 /home/multica/.ssh/id_ed25519 2>/dev/null; true",
@@ -124,7 +144,11 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 					RestartPolicy:    corev1.RestartPolicyNever,
 					ImagePullSecrets: []corev1.LocalObjectReference{{Name: imagePullSecret}},
 					SecurityContext: &corev1.PodSecurityContext{
-						RunAsNonRoot: &nonRoot, RunAsUser: &uid, RunAsGroup: &gid, FSGroup: &gid,
+						RunAsNonRoot:   &nonRoot,
+						RunAsUser:      &uid,
+						RunAsGroup:     &gid,
+						FSGroup:        &gid,
+						SeccompProfile: &seccompRuntimeDefault,
 					},
 					InitContainers: []corev1.Container{{
 						Name: "claude-auth", Image: r.Image,
@@ -133,6 +157,7 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 							{Name: "claude-oauth-secret", MountPath: "/secret", ReadOnly: true},
 							{Name: "claude-home", MountPath: "/home/multica/.claude"},
 						},
+						SecurityContext: containerSC,
 					}},
 					Containers: []corev1.Container{{
 						Name:    "runtask",
@@ -149,7 +174,8 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 							{Name: "git-ssh", MountPath: "/home/multica/.ssh-src", ReadOnly: true},
 							{Name: "work", MountPath: "/work"},
 						},
-						Lifecycle: &corev1.Lifecycle{PostStart: &corev1.LifecycleHandler{Exec: &corev1.ExecAction{Command: postStart}}},
+						Lifecycle:       &corev1.Lifecycle{PostStart: &corev1.LifecycleHandler{Exec: &corev1.ExecAction{Command: postStart}}},
+						SecurityContext: containerSC,
 					}},
 					Volumes: []corev1.Volume{
 						{Name: "payload", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: cmName}}}},

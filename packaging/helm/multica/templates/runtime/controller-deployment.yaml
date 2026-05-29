@@ -27,10 +27,20 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: controller
           image: {{ include "multica.controllerImage" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
           env:
             - name: MULTICA_SERVER_URL
               value: {{ .Values.runtime.serverUrl | quote }}
