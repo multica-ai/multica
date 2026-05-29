@@ -190,6 +190,83 @@ func TestListRuntimeLocalSkills_CodexUsesSharedCODEXHOME(t *testing.T) {
 	}
 }
 
+func TestListRuntimeLocalSkills_CopilotUsesConfiguredAndSharedRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".copilot", "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Copilot Review\n---\n# Copilot Review\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "lark-doc", map[string]string{
+		"SKILL.md": "---\nname: Lark Doc\n---\n# Lark Doc\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("copilot")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("copilot should be supported")
+	}
+
+	keys := make([]string, 0, len(skills))
+	for _, s := range skills {
+		keys = append(keys, s.Key)
+	}
+	wantKeys := []string{"lark-doc", "review-helper"}
+	if !reflect.DeepEqual(keys, wantKeys) {
+		t.Fatalf("keys = %v, want %v", keys, wantKeys)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("copilot", "lark-doc")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported {
+		t.Fatal("copilot should be supported")
+	}
+	if bundle.SourcePath != "~/.agents/skills/lark-doc" {
+		t.Fatalf("source_path = %q", bundle.SourcePath)
+	}
+}
+
+func TestLoadRuntimeLocalSkillBundle_SkipsInvalidEarlierRootCandidate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := os.MkdirAll(filepath.Join(home, ".copilot", "skills", "lark-doc"), 0o755); err != nil {
+		t.Fatalf("mkdir invalid candidate: %v", err)
+	}
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "lark-doc", map[string]string{
+		"SKILL.md": "---\nname: Lark Doc\n---\n# Lark Doc\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("copilot")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("copilot should be supported")
+	}
+	if len(skills) != 1 || skills[0].SourcePath != "~/.agents/skills/lark-doc" {
+		t.Fatalf("skills = %+v, want shared lark-doc only", skills)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("copilot", "lark-doc")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported {
+		t.Fatal("copilot should be supported")
+	}
+	if bundle.Name != "Lark Doc" {
+		t.Fatalf("name = %q, want Lark Doc", bundle.Name)
+	}
+	if bundle.SourcePath != "~/.agents/skills/lark-doc" {
+		t.Fatalf("source_path = %q", bundle.SourcePath)
+	}
+}
+
 // opencode (and possibly future providers) lay skills out one level deep,
 // e.g. ~/.config/opencode/skills/release/reporter/SKILL.md.
 // loadRuntimeLocalSkillBundle already accepts that nested key, so the list
@@ -236,6 +313,52 @@ func TestListRuntimeLocalSkills_DescendsIntoNestedSkillDirs(t *testing.T) {
 	wantKeys := []string{"release/reporter", "top"}
 	if !reflect.DeepEqual(keys, wantKeys) {
 		t.Fatalf("keys = %v, want %v", keys, wantKeys)
+	}
+}
+
+func TestListRuntimeLocalSkills_OpenCodeUsesLegacyAndSharedRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".opencode", "skills"), "native-helper", map[string]string{
+		"SKILL.md": "---\nname: Native Helper\n---\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".config", "opencode", "skills"), "release/reporter", map[string]string{
+		"SKILL.md": "---\nname: Release Reporter\n---\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Review Helper\n---\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "lark-doc", map[string]string{
+		"SKILL.md": "---\nname: Lark Doc\n---\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("opencode")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("opencode should be supported")
+	}
+
+	keys := make([]string, 0, len(skills))
+	for _, s := range skills {
+		keys = append(keys, s.Key)
+	}
+	wantKeys := []string{"lark-doc", "native-helper", "release/reporter", "review-helper"}
+	if !reflect.DeepEqual(keys, wantKeys) {
+		t.Fatalf("keys = %v, want %v", keys, wantKeys)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("opencode", "review-helper")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported {
+		t.Fatal("opencode should be supported")
+	}
+	if bundle.SourcePath != "~/.claude/skills/review-helper" {
+		t.Fatalf("source_path = %q", bundle.SourcePath)
 	}
 }
 

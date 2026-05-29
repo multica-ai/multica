@@ -38,7 +38,7 @@ type runtimeLocalSkillBundle struct {
 	Files       []SkillFileData `json:"files,omitempty"`
 }
 
-// localSkillRootForProvider tracks the user-level skill locations exposed by
+// localSkillRootsForProvider tracks the user-level skill locations exposed by
 // each runtime/provider. Keep these in sync with upstream docs / conventions:
 //   - GitHub Copilot: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills
 //   - OpenCode: https://opencode.ai/docs/skills
@@ -51,39 +51,51 @@ type runtimeLocalSkillBundle struct {
 // Longer-term this mapping would be better colocated with the provider
 // definitions under server/pkg/agent so adding a new runtime can't silently
 // miss the local-skills surface.
-func localSkillRootForProvider(provider string) (string, bool, error) {
+func localSkillRootsForProvider(provider string) ([]string, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", false, fmt.Errorf("resolve user home: %w", err)
+		return nil, false, fmt.Errorf("resolve user home: %w", err)
 	}
 
 	switch provider {
 	case "claude":
-		return filepath.Join(home, ".claude", "skills"), true, nil
+		return []string{filepath.Join(home, ".claude", "skills")}, true, nil
 	case "codebuddy":
 		// CodeBuddy follows Claude Code's conventions and reads user-level
 		// skills from ~/.codebuddy/skills/. Verified with a 2.98.1 install.
-		return filepath.Join(home, ".codebuddy", "skills"), true, nil
+		return []string{filepath.Join(home, ".codebuddy", "skills")}, true, nil
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 		if codexHome == "" {
 			codexHome = filepath.Join(home, ".codex")
 		}
-		return filepath.Join(codexHome, "skills"), true, nil
+		return []string{filepath.Join(codexHome, "skills")}, true, nil
 	case "copilot":
-		return filepath.Join(home, ".copilot", "skills"), true, nil
+		return []string{
+			filepath.Join(home, ".copilot", "skills"),
+			filepath.Join(home, ".agents", "skills"),
+		}, true, nil
 	case "opencode":
-		return filepath.Join(home, ".config", "opencode", "skills"), true, nil
+		return []string{
+			filepath.Join(home, ".opencode", "skills"),
+			filepath.Join(home, ".config", "opencode", "skills"),
+			filepath.Join(home, ".claude", "skills"),
+			filepath.Join(home, ".agents", "skills"),
+		}, true, nil
 	case "openclaw":
-		return filepath.Join(home, ".openclaw", "skills"), true, nil
+		return []string{filepath.Join(home, ".openclaw", "skills")}, true, nil
 	case "pi":
-		return filepath.Join(home, ".pi", "agent", "skills"), true, nil
+		return []string{filepath.Join(home, ".pi", "agent", "skills")}, true, nil
 	case "cursor":
-		return filepath.Join(home, ".cursor", "skills"), true, nil
+		return []string{filepath.Join(home, ".cursor", "skills")}, true, nil
 	case "kiro":
-		return filepath.Join(home, ".kiro", "skills"), true, nil
+		return []string{filepath.Join(home, ".kiro", "skills")}, true, nil
+	case "kimi":
+		return []string{filepath.Join(home, ".kimi", "skills")}, true, nil
+	case "DeepSeek-TUI":
+		return []string{filepath.Join(home, ".deepseek", "skills")}, true, nil
 	default:
-		return "", false, nil
+		return nil, false, nil
 	}
 }
 
@@ -257,20 +269,18 @@ func collectLocalSkillFiles(skillDir string, includeContent bool) ([]SkillFileDa
 }
 
 func listRuntimeLocalSkills(provider string) ([]runtimeLocalSkillSummary, bool, error) {
-	root, supported, err := localSkillRootForProvider(provider)
+	roots, supported, err := localSkillRootsForProvider(provider)
 	if err != nil || !supported {
 		return nil, supported, err
 	}
 
-	if _, err := os.Stat(root); err != nil {
-		if os.IsNotExist(err) {
-			// Root doesn't exist — but commands dir might.
-			if provider == "claude" {
-				return listClaudeCommandsOnly()
+	for _, root := range roots {
+		if _, err := os.Stat(root); err != nil {
+			if os.IsNotExist(err) {
+				continue
 			}
-			return []runtimeLocalSkillSummary{}, true, nil
+			return nil, true, err
 		}
-		return nil, true, err
 	}
 
 	// Walk the runtime root with two extensions over filepath.WalkDir:
@@ -284,7 +294,10 @@ func listRuntimeLocalSkills(provider string) ([]runtimeLocalSkillSummary, bool, 
 	//     must surface those nested skills too.
 	skills := make([]runtimeLocalSkillSummary, 0)
 	visited := make(map[string]bool)
-	enumerateLocalSkills(provider, root, root, 0, visited, &skills)
+	seenKeys := make(map[string]bool)
+	for _, root := range roots {
+		enumerateLocalSkills(provider, root, root, 0, visited, seenKeys, &skills)
+	}
 
 	// For Claude, also enumerate ~/.claude/commands/**/*.md
 	if provider == "claude" {
@@ -295,27 +308,6 @@ func listRuntimeLocalSkills(provider string) ([]runtimeLocalSkillSummary, bool, 
 		}
 	}
 
-	sort.Slice(skills, func(i, j int) bool {
-		return skills[i].Key < skills[j].Key
-	})
-	return skills, true, nil
-}
-
-// listClaudeCommandsOnly is a helper for when the skills root doesn't exist but
-// commands might still be available.
-func listClaudeCommandsOnly() ([]runtimeLocalSkillSummary, bool, error) {
-	cmdRoot, err := claudeCommandsRoot("claude")
-	if err != nil {
-		return nil, true, err
-	}
-	if _, statErr := os.Stat(cmdRoot); statErr != nil {
-		if os.IsNotExist(statErr) {
-			return []runtimeLocalSkillSummary{}, true, nil
-		}
-		return nil, true, statErr
-	}
-	skills := make([]runtimeLocalSkillSummary, 0)
-	enumerateClaudeCommands(cmdRoot, &skills)
 	sort.Slice(skills, func(i, j int) bool {
 		return skills[i].Key < skills[j].Key
 	})
@@ -336,6 +328,7 @@ func enumerateLocalSkills(
 	provider, walkRoot, currentDir string,
 	depth int,
 	visited map[string]bool,
+	seenKeys map[string]bool,
 	skills *[]runtimeLocalSkillSummary,
 ) {
 	if depth > maxLocalSkillDirDepth {
@@ -376,6 +369,9 @@ func enumerateLocalSkills(
 			if err != nil {
 				continue
 			}
+			if seenKeys[key] {
+				continue
+			}
 
 			content, err := readLocalSkillMainFile(path)
 			if err != nil {
@@ -390,6 +386,7 @@ func enumerateLocalSkills(
 			if err != nil {
 				continue
 			}
+			seenKeys[key] = true
 
 			*skills = append(*skills, runtimeLocalSkillSummary{
 				Key:         key,
@@ -408,7 +405,7 @@ func enumerateLocalSkills(
 		}
 
 		// No SKILL.md here — descend looking for nested skills.
-		enumerateLocalSkills(provider, walkRoot, path, depth+1, visited, skills)
+		enumerateLocalSkills(provider, walkRoot, path, depth+1, visited, seenKeys, skills)
 	}
 }
 
@@ -509,8 +506,33 @@ func loadClaudeCommandBundle(commandsRoot, relPath string) (*runtimeLocalSkillBu
 	}, nil
 }
 
+func loadLocalSkillBundleFromDir(provider, skillDir string) (*runtimeLocalSkillBundle, error) {
+	content, err := readLocalSkillMainFile(skillDir)
+	if err != nil {
+		return nil, err
+	}
+	name, description := parseLocalSkillFrontmatter(content)
+	if name == "" {
+		name = filepath.Base(skillDir)
+	}
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		return nil, err
+	}
+
+	return &runtimeLocalSkillBundle{
+		Name:        name,
+		Description: description,
+		Content:     content,
+		SourcePath:  relativizeHomePath(skillDir),
+		Provider:    provider,
+		Files:       files,
+	}, nil
+}
+
 func loadRuntimeLocalSkillBundle(provider, skillKey string) (*runtimeLocalSkillBundle, bool, error) {
-	root, supported, err := localSkillRootForProvider(provider)
+	roots, supported, err := localSkillRootsForProvider(provider)
 	if err != nil || !supported {
 		return nil, supported, err
 	}
@@ -535,38 +557,25 @@ func loadRuntimeLocalSkillBundle(provider, skillKey string) (*runtimeLocalSkillB
 		return bundle, true, nil
 	}
 
-	skillDir := filepath.Join(root, filepath.FromSlash(key))
-	info, err := os.Stat(skillDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, true, fmt.Errorf("local skill not found")
+	for _, root := range roots {
+		skillDir := filepath.Join(root, filepath.FromSlash(key))
+		info, err := os.Stat(skillDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, true, err
 		}
-		return nil, true, err
-	}
-	if !info.IsDir() {
-		return nil, true, fmt.Errorf("local skill is not a directory")
+		if !info.IsDir() {
+			continue
+		}
+
+		bundle, err := loadLocalSkillBundleFromDir(provider, skillDir)
+		if err != nil {
+			continue
+		}
+		return bundle, true, nil
 	}
 
-	content, err := readLocalSkillMainFile(skillDir)
-	if err != nil {
-		return nil, true, err
-	}
-	name, description := parseLocalSkillFrontmatter(content)
-	if name == "" {
-		name = filepath.Base(skillDir)
-	}
-
-	files, err := collectLocalSkillFiles(skillDir, true)
-	if err != nil {
-		return nil, true, err
-	}
-
-	return &runtimeLocalSkillBundle{
-		Name:        name,
-		Description: description,
-		Content:     content,
-		SourcePath:  relativizeHomePath(skillDir),
-		Provider:    provider,
-		Files:       files,
-	}, true, nil
+	return nil, true, fmt.Errorf("local skill not found")
 }
