@@ -153,3 +153,20 @@
      needs and scroll horizontally instead. */
   white-space: nowrap;
 }
+
+/* CEREBRO-PATCH(editor-longword-wrap): a long unbreakable string (URL, token,
+   hash) in a paragraph, list item, heading, blockquote or link has no natural
+   break opportunity, so without this it pushes the editor — and the whole
+   create-issue dialog — wider than the viewport (FIR-2487). overflow-wrap:
+   anywhere lets the browser break such a string at any point, but only when it
+   would otherwise overflow; normal text still breaks at spaces. Tables and code
+   blocks keep their own scroll behaviour (rules above), so they're untouched. */
+.rich-text-editor p,
+.rich-text-editor li,
+.rich-text-editor h1,
+.rich-text-editor h2,
+.rich-text-editor h3,
+.rich-text-editor blockquote,
+.rich-text-editor a {
+  overflow-wrap: anywhere;
+}

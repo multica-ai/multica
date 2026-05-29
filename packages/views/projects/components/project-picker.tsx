@@ -10,10 +10,12 @@
 // cerebro-access/project-picker.tsx as the canonical fork).
 import { Check, FolderKanban, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { projectListOptions } from "@multica/core/projects/queries";
+// CEREBRO-PATCH(project-picker-nesting-import): tree query instead of the flat
+// list so the picker can show sub-projects (FIR-2487).
+import { projectTreeOptions } from "@multica/core/projects/nesting";
 import { getProjectColor } from "@multica/core/projects/config";
 import { useWorkspaceId } from "@multica/core/hooks";
-import type { UpdateIssueRequest } from "@multica/core/types";
+import type { ProjectTreeItem, UpdateIssueRequest } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import {
   DropdownMenu,
@@ -43,7 +45,20 @@ export function ProjectPicker({
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
-  const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  // CEREBRO-PATCH(project-picker-nesting): render the project tree so
+  // sub-projects appear nested under their parent (FIR-2487). The tree query
+  // is backward-safe — a workspace with no nesting yields a flat list of roots,
+  // identical to the previous flat picker. Flatten in parent-then-children
+  // order, carrying the nesting level so each row can be indented.
+  const { data: tree = [] } = useQuery(projectTreeOptions(wsId));
+  const projects: Array<ProjectTreeItem & { level: number }> = [];
+  const flatten = (nodes: ProjectTreeItem[], level: number) => {
+    for (const node of nodes) {
+      projects.push({ ...node, level });
+      if (node.children?.length) flatten(node.children, level + 1);
+    }
+  };
+  flatten(tree, 0);
   const current = projects.find((p) => p.id === projectId);
 
   return (
@@ -65,7 +80,13 @@ export function ProjectPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align} className="w-52">
         {projects.map((proj) => (
-          <DropdownMenuItem key={proj.id} onClick={() => onUpdate({ project_id: proj.id })}>
+          <DropdownMenuItem
+            key={proj.id}
+            onClick={() => onUpdate({ project_id: proj.id })}
+            // CEREBRO-PATCH(project-picker-nesting-indent): indent sub-projects
+            // 14px per level so the hierarchy reads at a glance (FIR-2487).
+            style={proj.level > 0 ? { paddingLeft: 8 + proj.level * 14 } : undefined}
+          >
             {proj.icon ? (
               <span className="mr-1">{proj.icon}</span>
             ) : (
