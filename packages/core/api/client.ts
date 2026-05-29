@@ -236,6 +236,9 @@ import {
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
 } from "./schemas";
+// CEREBRO-PATCH(api-client-active-terminal-session): inline zod schema for active terminal session lookup.
+import { z } from "zod";
+const ActiveTerminalSessionSchema = z.object({ session_id: z.string(), attach_path: z.string(), created_at: z.string() }).loose();
 
 /** Identifies the calling client to the server.
  *  Sent on every HTTP request as X-Client-Platform / X-Client-Version /
@@ -2194,6 +2197,12 @@ export class ApiClient {
   terminalAttachUrl(attachPath: string): string {
     const base = this.baseUrl.replace(/^http/, "ws");
     return `${base}${attachPath}`;
+  }
+  // CEREBRO-PATCH(api-client-active-terminal-session): runtime-keyed lookup of a daemon-published terminal session.
+  async getActiveTerminalSession(runtimeId: string): Promise<{ session_id: string; attach_path: string; created_at: string } | null> {
+    const raw = await this.fetch<unknown>(`/api/cerebro/terminal/runtimes/${runtimeId}/session`);
+    if (raw === undefined) return null; // 204 No Content path
+    return parseWithFallback(raw, ActiveTerminalSessionSchema, null, { endpoint: "GET /api/cerebro/terminal/runtimes/:id/session" });
   }
 
   async updateRuntimeSandbox(

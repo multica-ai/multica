@@ -42,18 +42,25 @@ func (r fakeRow) Scan(dst ...any) error {
 	return nil
 }
 
-// fakeDB lets us stub the two read queries the handler runs.
-// It returns one of `runtimeRow` (workspace_id, mode), `membershipRow` (bool),
-// or `updateRow` (workspace_id) depending on the SQL prefix.
+// fakeDB lets us stub the read queries the handler runs.
+// Selects the correct stub row by matching against distinctive SQL keywords.
 type fakeDB struct {
-	runtimeWS   string
-	runtimeMode string
-	membership  bool
-	missing     bool
+	runtimeWS       string
+	runtimeMode     string
+	runtimeProvider string
+	membership      bool
+	missing         bool
 }
 
 func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	switch {
+	// Order matters: the provider query also matches "FROM agent_runtime\nWHERE id",
+	// so check the more-specific SELECT first.
+	case strings.Contains(sql, "SELECT provider"):
+		if f.missing {
+			return fakeRow{err: pgx.ErrNoRows}
+		}
+		return fakeRow{vals: []any{f.runtimeProvider, f.runtimeWS}}
 	case strings.Contains(sql, "FROM agent_runtime\nWHERE id"):
 		if f.missing {
 			return fakeRow{err: pgx.ErrNoRows}
@@ -93,7 +100,114 @@ func newTestServer(t *testing.T, db *fakeDB) *httptest.Server {
 	r.Delete("/api/cerebro/terminal/sessions/{sessionId}", h.DeleteSession)
 	r.Get("/api/cerebro/terminal/runtimes/{runtimeId}/presentation-mode", h.GetPresentationMode)
 	r.Put("/api/cerebro/terminal/runtimes/{runtimeId}/presentation-mode", h.SetPresentationMode)
+	r.Get("/api/cerebro/terminal/runtimes/{runtimeId}/session", h.GetActiveSession)
 	return httptest.NewServer(r)
+}
+
+// TestHTTPGetActiveSession_NoneReturns204 proves the active-session
+// endpoint reports "no live terminal" with 204 rather than 404 / 500 when
+// no adopted session exists for the runtime. The frontend uses this on
+// every mount to decide whether to render an attach button.
+func TestHTTPGetActiveSession_NoneReturns204(t *testing.T) {
+	srv := newTestServer(t, &fakeDB{
+		runtimeWS:   "11111111-1111-1111-1111-111111111111",
+		runtimeMode: "interactive",
+		membership:  true,
+	})
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/cerebro/terminal/runtimes/22222222-2222-2222-2222-222222222222/session")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
+	}
+}
+
+// TestHTTPGetActiveSession_AdoptedReturnsAttachPath proves the endpoint
+// surfaces an adopted broker session so the frontend can connect a
+// browser WS to the existing daemon-fed stream.
+func TestHTTPGetActiveSession_AdoptedReturnsAttachPath(t *testing.T) {
+	db := &fakeDB{
+		runtimeWS:   "11111111-1111-1111-1111-111111111111",
+		runtimeMode: "interactive",
+		membership:  true,
+	}
+	srv := newTestServer(t, db)
+	defer srv.Close()
+
+	// Reach into the broker the test server is using via a fresh handler.
+	// We don't expose Broker from newTestServer; instead, register an
+	// adopted session via the same broker the handler holds.
+	h := &Handler{Broker: NewBroker(), DB: db, CheckOrigin: func(*http.Request) bool { return true }}
+	runtimeID := "22222222-2222-2222-2222-222222222222"
+	if _, err := h.Broker.Adopt(AdoptOptions{RuntimeID: runtimeID, TaskID: "t1"}); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			req.Header.Set("X-User-ID", "00000000-0000-0000-0000-000000000001")
+			next.ServeHTTP(w, req)
+		})
+	})
+	r.Get("/api/cerebro/terminal/runtimes/{runtimeId}/session", h.GetActiveSession)
+	srv2 := httptest.NewServer(r)
+	defer srv2.Close()
+
+	resp, err := http.Get(srv2.URL + "/api/cerebro/terminal/runtimes/" + runtimeID + "/session")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var got struct {
+		SessionID  string `json:"session_id"`
+		AttachPath string `json:"attach_path"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.SessionID == "" {
+		t.Errorf("expected session_id, got %+v", got)
+	}
+	if !strings.HasPrefix(got.AttachPath, "/api/cerebro/terminal/sessions/") || !strings.HasSuffix(got.AttachPath, "/ws") {
+		t.Errorf("unexpected attach_path %q", got.AttachPath)
+	}
+}
+
+// TestHTTPSetPresentationMode_RejectsCloudRuntime proves cloud-runtime
+// providers cannot be flipped into interactive mode in v1 — the broker
+// has no way to mirror their server-side execution.
+func TestHTTPSetPresentationMode_RejectsCloudRuntime(t *testing.T) {
+	srv := newTestServer(t, &fakeDB{
+		runtimeWS:       "11111111-1111-1111-1111-111111111111",
+		runtimeMode:     "headless",
+		runtimeProvider: "firtal-gateway",
+		membership:      true,
+	})
+	defer srv.Close()
+
+	body, _ := json.Marshal(map[string]string{"presentation_mode": "interactive"})
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/api/cerebro/terminal/runtimes/77777777-7777-7777-7777-777777777777/presentation-mode", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for cloud runtime, got %d", resp.StatusCode)
+	}
+	bodyBytes := make([]byte, 1024)
+	n, _ := resp.Body.Read(bodyBytes)
+	if !strings.Contains(string(bodyBytes[:n]), "cloud_runtime_not_supported") {
+		t.Errorf("expected cloud_runtime_not_supported error, got %s", string(bodyBytes[:n]))
+	}
 }
 
 // TestHTTPCreateThenWSAttach_Roundtrip exercises the full server path:

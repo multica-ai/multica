@@ -256,6 +256,105 @@ test.describe("cerebro interactive terminal", () => {
     expect(createRes.status).toBe(409);
   });
 
+  test("GET runtimes/{id}/session returns 204 then 200 once a session exists", async () => {
+    const { runtimeId: rid, workspaceSlug, token } = await seedInteractiveRuntime();
+    runtimeId = rid;
+
+    // 1. No session yet — GET returns 204 No Content.
+    const empty = await fetch(
+      `${API_BASE}/api/cerebro/terminal/runtimes/${rid}/session`,
+      { headers: workspaceHeaders(workspaceSlug, token) },
+    );
+    expect(empty.status).toBe(204);
+
+    // 2. Create a session (any path — POST /sessions works). The broker
+    //    tracks every open session by runtime_id, regardless of whether it
+    //    was internally spawned (Create) or externally adopted (Adopt).
+    const createRes = await fetch(`${API_BASE}/api/cerebro/terminal/sessions`, {
+      method: "POST",
+      headers: workspaceHeaders(workspaceSlug, token),
+      body: JSON.stringify({
+        runtime_id: rid,
+        command: ["sh", "-c", "sleep 5"],
+      }),
+    });
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as {
+      id: string;
+      attach_path: string;
+    };
+
+    // 3. GET now returns 200 with the same session.
+    const live = await fetch(
+      `${API_BASE}/api/cerebro/terminal/runtimes/${rid}/session`,
+      { headers: workspaceHeaders(workspaceSlug, token) },
+    );
+    expect(live.status).toBe(200);
+    const body = (await live.json()) as {
+      session_id: string;
+      attach_path: string;
+      created_at: string;
+    };
+    expect(body.session_id).toBe(created.id);
+    expect(body.attach_path).toBe(created.attach_path);
+    expect(typeof body.created_at).toBe("string");
+
+    // 4. Delete the session — GET reverts to 204.
+    await fetch(`${API_BASE}/api/cerebro/terminal/sessions/${created.id}`, {
+      method: "DELETE",
+      headers: workspaceHeaders(workspaceSlug, token),
+    });
+    const after = await fetch(
+      `${API_BASE}/api/cerebro/terminal/runtimes/${rid}/session`,
+      { headers: workspaceHeaders(workspaceSlug, token) },
+    );
+    expect(after.status).toBe(204);
+  });
+
+  test("PUT presentation-mode rejects interactive for cloud runtimes", async () => {
+    const api = new TestApiClient();
+    await api.login(DEFAULT_E2E_EMAIL, DEFAULT_E2E_NAME);
+    const workspace = await api.ensureWorkspace(
+      "E2E Terminal Workspace",
+      DEFAULT_E2E_WORKSPACE,
+    );
+    const token = api.getToken();
+    if (!token) throw new Error("login did not return a token");
+
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    let cloudRuntimeId: string | null = null;
+    try {
+      // Seed a runtime with the firtal-gateway cloud provider.
+      const tag = `term-e2e-cloud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO agent_runtime
+           (workspace_id, daemon_id, name, runtime_mode, provider, status, presentation_mode)
+         VALUES ($1, $2, $3, 'cloud', 'firtal-gateway', 'online', 'headless')
+         RETURNING id`,
+        [workspace.id, tag, `Cloud E2E runtime ${tag}`],
+      );
+      cloudRuntimeId = inserted.rows[0]!.id;
+
+      const setRes = await fetch(
+        `${API_BASE}/api/cerebro/terminal/runtimes/${cloudRuntimeId}/presentation-mode`,
+        {
+          method: "PUT",
+          headers: workspaceHeaders(workspace.slug, token),
+          body: JSON.stringify({ presentation_mode: "interactive" }),
+        },
+      );
+      expect(setRes.status).toBe(400);
+      const body = (await setRes.json()) as { error?: string };
+      expect(body.error).toBe("cloud_runtime_not_supported");
+    } finally {
+      if (cloudRuntimeId) {
+        await client.query("DELETE FROM agent_runtime WHERE id = $1", [cloudRuntimeId]);
+      }
+      await client.end();
+    }
+  });
+
   test("GET/PUT presentation-mode round-trips against real DB", async () => {
     const { runtimeId: rid, workspaceSlug, token } = await seedInteractiveRuntime();
     runtimeId = rid;

@@ -397,7 +397,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler
 	cerebroShareTokenHandler := cerebrosharetoken.NewHandler(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-terminal-routes): interactive terminal handler instance
-	cerebroTerminalHandler := cerebroterminal.New(cerebroterminal.NewBroker(), pool)
+	cerebroTerminalBroker := cerebroterminal.NewBroker()
+	cerebroTerminalHandler := cerebroterminal.New(cerebroTerminalBroker, pool)
+	// CEREBRO-PATCH(cerebro-terminal-bridge): connect daemonws hub to terminal broker so daemons can mirror agent stdout into adopted broker sessions.
+	cerebroTerminalBridge := cerebroterminal.NewDaemonBridge(cerebroTerminalBroker, daemonHub, cerebroQueries)
+	daemonHub.SetMessageHandler(cerebroTerminalBridge.HandleMessage)
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).WithService(opts.WorkflowService)
 	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 v2b — pass upstream queries so per-issue custom status mirrors onto the upstream issue row, and pass the pool so the two writes commit atomically (Mia review).
@@ -1420,6 +1424,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/sessions/{sessionId}/ws", cerebroTerminalHandler.AttachWS)
 				r.Get("/runtimes/{runtimeId}/presentation-mode", cerebroTerminalHandler.GetPresentationMode)
 				r.Put("/runtimes/{runtimeId}/presentation-mode", cerebroTerminalHandler.SetPresentationMode)
+				// CEREBRO-PATCH(cerebro-terminal-active-session): GET endpoint for runtime-keyed session lookup
+				r.Get("/runtimes/{runtimeId}/session", cerebroTerminalHandler.GetActiveSession)
 			})
 			// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST surface (PR 2/3).
 			r.Route("/api/cerebro/workflows", func(r chi.Router) {

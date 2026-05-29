@@ -115,6 +115,9 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	writes := make(chan []byte, writeBufSize)
 	writerDone := make(chan struct{})
 	go d.runWSWriter(conn, writes, writerDone)
+	// CEREBRO-PATCH(daemon-ws-write-accessor): publish the writes channel so cerebro_terminal.go can enqueue term frames; cleared on disconnect.
+	d.wsWrites.Store(&writes)
+	defer d.wsWrites.Store(nil)
 
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	hbDone := make(chan struct{})

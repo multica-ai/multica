@@ -10,9 +10,12 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/runtime"
 )
 
 // PoolQuerier is the subset of pgxpool.Pool the handler needs. Tests can
@@ -85,6 +88,15 @@ type createSessionResponse struct {
 
 type listSessionsResponse struct {
 	Sessions []sessionSummary `json:"sessions"`
+}
+
+// activeSessionResponse describes the live session (if any) attached to a
+// runtime. The active-session endpoint returns this on 200, or 204 with no
+// body when no session exists.
+type activeSessionResponse struct {
+	SessionID  string `json:"session_id"`
+	AttachPath string `json:"attach_path"`
+	CreatedAt  string `json:"created_at"`
 }
 
 type sessionSummary struct {
@@ -292,9 +304,11 @@ func servePump(ctx context.Context, conn *websocket.Conn, s *Session, sub *Subsc
 		case chunk, ok := <-sub.C:
 			if !ok {
 				// session terminated; send exit and stop.
-				frame := map[string]any{"type": "exit", "code": 0}
+				frame := map[string]any{"type": "exit", "code": s.ExitCode()}
 				if err := s.ExitErr(); err != nil {
-					frame["code"] = -1
+					if s.ExitCode() == 0 {
+						frame["code"] = -1
+					}
 					frame["error"] = err.Error()
 				}
 				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
@@ -322,6 +336,11 @@ SELECT workspace_id::text, presentation_mode
 FROM agent_runtime
 WHERE id = $1::uuid`
 
+	readRuntimeProviderSQL = `
+SELECT provider, workspace_id::text
+FROM agent_runtime
+WHERE id = $1::uuid`
+
 	updatePresentationModeSQL = `
 UPDATE agent_runtime
 SET presentation_mode = $2, updated_at = now()
@@ -338,6 +357,12 @@ SELECT EXISTS (
 func (h *Handler) readRuntime(ctx context.Context, runtimeID string) (workspaceID, mode string, err error) {
 	row := h.DB.QueryRow(ctx, readRuntimeSQL, runtimeID)
 	err = row.Scan(&workspaceID, &mode)
+	return
+}
+
+func (h *Handler) readRuntimeProvider(ctx context.Context, runtimeID string) (provider, workspaceID string, err error) {
+	row := h.DB.QueryRow(ctx, readRuntimeProviderSQL, runtimeID)
+	err = row.Scan(&provider, &workspaceID)
 	return
 }
 
@@ -376,6 +401,26 @@ func (h *Handler) SetPresentationMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// v1 of the interactive terminal mirrors local daemon stdout into the
+	// broker — cloud-runtime providers (managed HTTPS gateway) don't run a
+	// local stream we can tee, so the toggle is gated to daemon runtimes.
+	// Headless is always allowed (it's the default + the disable path).
+	if body.PresentationMode == "interactive" {
+		provider, _, err := h.readRuntimeProvider(r.Context(), runtimeID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeJSONError(w, http.StatusNotFound, "runtime not found")
+				return
+			}
+			writeJSONError(w, http.StatusInternalServerError, "lookup failed")
+			return
+		}
+		if isCloudRuntimeProvider(provider) {
+			writeJSONError(w, http.StatusBadRequest, "cloud_runtime_not_supported")
+			return
+		}
+	}
+
 	var wsID string
 	row := h.DB.QueryRow(r.Context(), updatePresentationModeSQL, runtimeID, body.PresentationMode)
 	if err := row.Scan(&wsID); err != nil {
@@ -394,6 +439,74 @@ func (h *Handler) SetPresentationMode(w http.ResponseWriter, r *http.Request) {
 		"runtime_id":        runtimeID,
 		"presentation_mode": body.PresentationMode,
 	})
+}
+
+// GetActiveSession returns the live broker session for a runtime, if one
+// exists. The frontend polls or fetches this on mount to discover whether
+// an interactive agent is already streaming, so it can attach without
+// having to start a session it doesn't own (v1 daemon-side adopted
+// sessions are the canonical source). Returns 204 No Content when no live
+// session exists.
+func (h *Handler) GetActiveSession(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeJSONError(w, http.StatusUnauthorized, "missing user")
+		return
+	}
+	runtimeID := chi.URLParam(r, "runtimeId")
+	if !validUUID(runtimeID) {
+		writeJSONError(w, http.StatusBadRequest, "runtimeId must be a UUID")
+		return
+	}
+	wsID, _, err := h.readRuntime(r.Context(), runtimeID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSONError(w, http.StatusNotFound, "runtime not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "lookup failed")
+		return
+	}
+	if !h.userInWorkspace(r.Context(), userID, wsID) {
+		writeJSONError(w, http.StatusForbidden, "no workspace access")
+		return
+	}
+
+	s := h.Broker.GetByRuntime(runtimeID)
+	if s == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, http.StatusOK, activeSessionResponse{
+		SessionID:  s.ID,
+		AttachPath: "/api/cerebro/terminal/sessions/" + s.ID + "/ws",
+		CreatedAt:  s.CreatedAt.Format(time.RFC3339Nano),
+	})
+}
+
+// isCloudRuntimeProvider reports whether a provider is a server-side
+// managed runtime (today: firtal-gateway). v1 of the interactive terminal
+// cannot mirror their output — they execute model calls server-side over
+// HTTPS rather than streaming through a local daemon.
+func isCloudRuntimeProvider(provider string) bool {
+	switch provider {
+	case runtime.FirtalGatewayProvider:
+		return true
+	default:
+		return false
+	}
+}
+
+// validUUID is a cheap parser-only check; the actual access control happens
+// via the workspace-membership query below. Existing handlers that hand
+// the raw string into `$1::uuid` would error at the DB layer on bad input;
+// validating here just produces a clearer 400.
+func validUUID(s string) bool {
+	if s == "" {
+		return false
+	}
+	_, err := uuid.Parse(s)
+	return err == nil
 }
 
 // GetPresentationMode lets the UI fetch the current value without
