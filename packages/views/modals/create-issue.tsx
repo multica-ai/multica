@@ -667,8 +667,11 @@ export function manualDialogContentClass(
       : !backlogHintIssueId
         ? "!max-w-2xl !w-full !h-[34rem] !-translate-y-1/2"
         : "",
+    // CEREBRO-PATCH(create-issue-modal-mobile-keyboard-follow): FIR-2504.
+    // `var(--cerebro-vvh,100dvh)` reads the visualViewport-tracked height set
+    // by the shell when keyboard is open; falls back to 100dvh otherwise.
     !backlogHintIssueId &&
-      "max-md:!inset-0 max-md:!top-0 max-md:!left-0 max-md:!right-0 max-md:!bottom-0 max-md:!max-w-none max-md:!w-full max-md:!h-[100dvh] max-md:!translate-x-0 max-md:!translate-y-0 max-md:!rounded-none",
+      "max-md:!inset-0 max-md:!top-0 max-md:!left-0 max-md:!right-0 max-md:!bottom-0 max-md:!max-w-none max-md:!w-full max-md:!h-[var(--cerebro-vvh,100dvh)] max-md:!translate-x-0 max-md:!translate-y-0 max-md:!rounded-none",
   );
 }
 
