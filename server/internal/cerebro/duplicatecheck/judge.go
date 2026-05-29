@@ -70,9 +70,14 @@ type Candidate struct {
 }
 
 // Draft is the new-issue text the user is composing.
+//
+// UserLabel is the calling member's UUID (or email, or "system") used to tag
+// the gateway call for BigQuery cost-tracking via x-bq-label-user. It is NOT
+// sent to the LLM — the `json:"-"` tag keeps it out of the wire prompt.
 type Draft struct {
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
+	UserLabel   string `json:"-"`
 }
 
 // JudgedCandidate is the verdict for a single candidate. Reason is one short
@@ -178,6 +183,13 @@ func (j *Judger) Judge(parent context.Context, draft Draft, candidates []Candida
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-trace-name", "cerebro-duplicate-check")
 	req.Header.Set("x-tags", "multica,duplicate-check")
+	// BigQuery cost-tracking labels (deploy-labels-check skill). Every gateway
+	// call must carry app + function + user so the api_call_logs table can
+	// split spend per feature and per caller. Sanitised to [a-z0-9_-]/63 by
+	// the registry, so we send the raw form and let the registry trim.
+	req.Header.Set("x-bq-label-app", "multica")
+	req.Header.Set("x-bq-label-function", "duplicate-check")
+	req.Header.Set("x-bq-label-user", sanitizeLabelValue(draft.UserLabel))
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -253,6 +265,35 @@ func buildPrompt(draft Draft, candidates []Candidate) string {
 	}
 	b.WriteString(`\nReturn JSON with one verdict per candidate using the id values above.`)
 	return b.String()
+}
+
+// sanitizeLabelValue makes a BigQuery-label-safe string. The registry's
+// label-handler accepts [a-z0-9_-] up to 63 chars; we pre-sanitise the
+// user field so an email like "jeh@firtal.com" lands as "jeh-firtal-com"
+// rather than being silently rejected. Empty values become "system" so
+// every gateway call carries the three required labels.
+func sanitizeLabelValue(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "system"
+	}
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+		if b.Len() >= 63 {
+			break
+		}
+	}
+	out := b.String()
+	if out == "" {
+		return "system"
+	}
+	return out
 }
 
 func truncate(s string, max int) string {

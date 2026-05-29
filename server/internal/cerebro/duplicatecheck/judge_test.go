@@ -120,6 +120,52 @@ func TestJudgeContentAsBlocks(t *testing.T) {
 	}
 }
 
+// TestJudgeSendsBigQueryLabels verifies the three cost-tracking labels
+// (deploy-labels-check skill) land on every gateway call, with the user
+// label sanitised and an empty UserLabel falling back to "system".
+func TestJudgeSendsBigQueryLabels(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		userLabel string
+		wantUser  string
+	}{
+		{name: "with user uuid", userLabel: "43501ed6-0b4d-489b-b05e-e5d07e665d91", wantUser: "43501ed6-0b4d-489b-b05e-e5d07e665d91"},
+		{name: "with email", userLabel: "jeh@firtal.com", wantUser: "jeh-firtal-com"},
+		{name: "empty falls back to system", userLabel: "", wantUser: "system"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotApp, gotFunction, gotUser string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotApp = r.Header.Get("x-bq-label-app")
+				gotFunction = r.Header.Get("x-bq-label-function")
+				gotUser = r.Header.Get("x-bq-label-user")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"verdicts\":[]}"}}]}`))
+			}))
+			defer srv.Close()
+
+			j := &Judger{
+				Config: GatewayConfig{BaseURL: srv.URL, APIKey: "k"},
+				Client: srv.Client(),
+			}
+			j.Judge(context.Background(),
+				Draft{Title: "t", UserLabel: tc.userLabel},
+				[]Candidate{{ID: "c1", Title: "y"}},
+			)
+
+			if gotApp != "multica" {
+				t.Errorf("x-bq-label-app = %q, want multica", gotApp)
+			}
+			if gotFunction != "duplicate-check" {
+				t.Errorf("x-bq-label-function = %q, want duplicate-check", gotFunction)
+			}
+			if gotUser != tc.wantUser {
+				t.Errorf("x-bq-label-user = %q, want %q", gotUser, tc.wantUser)
+			}
+		})
+	}
+}
+
 func TestNormalizeVerdictAcceptsDanish(t *testing.T) {
 	cases := map[string]Verdict{
 		"duplicate":  VerdictDuplicate,

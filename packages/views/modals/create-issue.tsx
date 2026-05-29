@@ -640,7 +640,18 @@ export function ManualCreatePanel({
 
 /** className for DialogContent in manual mode — depends on isExpanded and the
  *  backlog-hint sub-state. Exported so the shell (which now owns the
- *  DialogContent) can apply the same visual treatment without duplicating it. */
+ *  DialogContent) can apply the same visual treatment without duplicating it.
+ *
+ *  CEREBRO-PATCH(create-issue-modal-sizing): FIR-2504. Two sizing tweaks on
+ *  top of the upstream layout:
+ *    - Desktop default height bumped from h-96 (24rem) to h-[34rem] so the
+ *      duplicate-check panel + property toolbar don't crowd the title /
+ *      description area.
+ *    - Mobile (<md) goes full-screen — matches the new-message-modal pattern
+ *      so the create-issue flow doesn't sit in a tiny centred card on phones.
+ *  Both behaviours are suppressed in the backlog-hint sub-state, which is its
+ *  own small confirmation card.
+ */
 export function manualDialogContentClass(
   isExpanded: boolean,
   backlogHintIssueId: string | null,
@@ -654,8 +665,10 @@ export function manualDialogContentClass(
     !backlogHintIssueId && isExpanded
       ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
       : !backlogHintIssueId
-        ? "!max-w-2xl !w-full !h-96 !-translate-y-1/2"
+        ? "!max-w-2xl !w-full !h-[34rem] !-translate-y-1/2"
         : "",
+    !backlogHintIssueId &&
+      "max-md:!inset-0 max-md:!top-0 max-md:!left-0 max-md:!right-0 max-md:!bottom-0 max-md:!max-w-none max-md:!w-full max-md:!h-[100dvh] max-md:!translate-x-0 max-md:!translate-y-0 max-md:!rounded-none",
   );
 }
 

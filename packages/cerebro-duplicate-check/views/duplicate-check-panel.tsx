@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { AlertTriangle, ExternalLink, GitBranch, Sparkles } from "lucide-react";
+import { AlertTriangle, ExternalLink, GitBranch, Loader2, Sparkles } from "lucide-react";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { api } from "@multica/core/api";
 import { cn } from "@multica/ui/lib/utils";
@@ -53,16 +53,27 @@ export function DuplicateCheckPanel({
   }, [flagOn, matches]);
 
   if (!flagOn) return null;
-  if (matches.length === 0) return null;
+
+  // Loading hint: as soon as the query is active (debounced title is long
+  // enough), show a thin "Tjekker for lignende issues..." row so the user
+  // knows the panel is working in the background. Without it the panel just
+  // pops in silently and people don't know what triggered it.
+  const showLoading = matches.length === 0 && (query.isFetching || query.isLoading);
+  if (matches.length === 0 && !showLoading) return null;
 
   return (
     <div
       data-testid="cerebro-duplicate-check-panel"
+      data-loading={showLoading ? "true" : "false"}
       className="mx-5 mb-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm"
     >
       <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <Sparkles className="h-3.5 w-3.5" />
-        Findes det her allerede?
+        {showLoading ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Sparkles className="h-3.5 w-3.5" />
+        )}
+        {showLoading ? "Tjekker for lignende issues…" : "Findes det her allerede?"}
       </div>
       <ul className="flex flex-col gap-1.5">
         {matches.map((m) => (
