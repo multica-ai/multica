@@ -392,6 +392,11 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("# Task Assignment\n\n")
 	fmt.Fprintf(&b, "**Issue ID:** %s\n\n", ctx.IssueID)
+	if strings.TrimSpace(ctx.GoalCondition) != "" {
+		b.WriteString("**Completion goal:** ")
+		b.WriteString(strings.TrimSpace(ctx.GoalCondition))
+		b.WriteString("\n\n")
+	}
 
 	if ctx.TriggerCommentID != "" {
 		b.WriteString("**Trigger:** Comment Reply\n")

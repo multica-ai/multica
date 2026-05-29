@@ -34,6 +34,7 @@ type IssueResponse struct {
 	Identifier    string                  `json:"identifier"`
 	Title         string                  `json:"title"`
 	Description   *string                 `json:"description"`
+	GoalCondition *string                 `json:"goal_condition,omitempty"`
 	Status        string                  `json:"status"`
 	Priority      string                  `json:"priority"`
 	AssigneeType  *string                 `json:"assignee_type"`
@@ -71,6 +72,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		Identifier:    identifier,
 		Title:         i.Title,
 		Description:   textToPtr(i.Description),
+		GoalCondition: textToPtr(i.GoalCondition),
 		Status:        i.Status,
 		Priority:      i.Priority,
 		AssigneeType:  textToPtr(i.AssigneeType),
@@ -98,6 +100,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		Identifier:    identifier,
 		Title:         i.Title,
 		Description:   textToPtr(i.Description),
+		GoalCondition: textToPtr(i.GoalCondition),
 		Status:        i.Status,
 		Priority:      i.Priority,
 		AssigneeType:  textToPtr(i.AssigneeType),
@@ -155,6 +158,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		Identifier:    identifier,
 		Title:         i.Title,
 		Description:   textToPtr(i.Description),
+		GoalCondition: textToPtr(i.GoalCondition),
 		Status:        i.Status,
 		Priority:      i.Priority,
 		AssigneeType:  textToPtr(i.AssigneeType),
@@ -1942,6 +1946,7 @@ func readRuntimeCLIVersion(metadata []byte) string {
 type CreateIssueRequest struct {
 	Title         string   `json:"title"`
 	Description   *string  `json:"description"`
+	GoalCondition *string  `json:"goal_condition"`
 	Status        string   `json:"status"`
 	Priority      string   `json:"priority"`
 	AssigneeType  *string  `json:"assignee_type"`
@@ -2159,6 +2164,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			DueDate:       dueDate,
 			Number:        issueNumber,
 			ProjectID:     projectID,
+			GoalCondition: ptrToText(req.GoalCondition),
 			OriginType:    originType,
 			OriginID:      originID,
 		})
@@ -2179,6 +2185,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			DueDate:       dueDate,
 			Number:        issueNumber,
 			ProjectID:     projectID,
+			GoalCondition: ptrToText(req.GoalCondition),
 		})
 	}
 	if err != nil {
@@ -2273,6 +2280,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 type UpdateIssueRequest struct {
 	Title         *string  `json:"title"`
 	Description   *string  `json:"description"`
+	GoalCondition *string  `json:"goal_condition"`
 	Status        *string  `json:"status"`
 	Priority      *string  `json:"priority"`
 	AssigneeType  *string  `json:"assignee_type"`
@@ -2324,6 +2332,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		DueDate:       prevIssue.DueDate,
 		ParentIssueID: prevIssue.ParentIssueID,
 		ProjectID:     prevIssue.ProjectID,
+		GoalCondition: prevIssue.GoalCondition,
 	}
 
 	// COALESCE fields — only set when explicitly provided
@@ -2341,6 +2350,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Position != nil {
 		params.Position = pgtype.Float8{Float64: *req.Position, Valid: true}
+	}
+	if _, ok := rawFields["goal_condition"]; ok {
+		if req.GoalCondition != nil && strings.TrimSpace(*req.GoalCondition) != "" {
+			params.GoalCondition = pgtype.Text{String: strings.TrimSpace(*req.GoalCondition), Valid: true}
+		} else {
+			params.GoalCondition = pgtype.Text{Valid: false}
+		}
 	}
 	// Nullable fields — only override when explicitly present in JSON
 	if _, ok := rawFields["assignee_type"]; ok {
@@ -2855,6 +2871,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			DueDate:       prevIssue.DueDate,
 			ParentIssueID: prevIssue.ParentIssueID,
 			ProjectID:     prevIssue.ProjectID,
+			GoalCondition: prevIssue.GoalCondition,
 		}
 
 		if req.Updates.Title != nil {

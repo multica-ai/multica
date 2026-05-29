@@ -58,6 +58,7 @@ type PrepareParams struct {
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
 	IssueID                 string
+	GoalCondition           string
 	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
 	NewCommentCount         int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)
 	NewCommentsSince        string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start

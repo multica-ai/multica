@@ -232,6 +232,7 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().Bool("description-stdin", false, "")
 	cmd.Flags().String("description-file", "", "")
+	cmd.Flags().String("goal", "", "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("priority", "", "")
 	cmd.Flags().String("assignee", "", "")
@@ -1965,5 +1966,119 @@ func TestValidIssueStatuses(t *testing.T) {
 	}
 	if len(validIssueStatuses) != len(expected) {
 		t.Errorf("validIssueStatuses has %d entries, expected %d", len(validIssueStatuses), len(expected))
+	}
+}
+
+// newIssueUpdateTestCmd builds a throwaway cobra.Command carrying the subset
+// of `issue update` flags that runIssueUpdate reads. pflag reports any
+// unregistered flag as not-Changed, so a focused test only registers (and
+// Sets) the flags it exercises.
+func newIssueUpdateTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("title", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().Bool("description-stdin", false, "")
+	cmd.Flags().String("description-file", "", "")
+	cmd.Flags().String("goal", "", "")
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+// issueUpdateBodyForFlags resolves MUL-1 then captures the JSON body that
+// runIssueUpdate PUTs, so the goal_condition plumbing (set / clear / omit)
+// can be asserted without a live server.
+func issueUpdateBodyForFlags(t *testing.T, setFlags func(*cobra.Command)) map[string]any {
+	t.Helper()
+	const issueID = "1881a167-4bb6-4602-944b-f40ce4192fe6"
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "MUL-1", "title": "T"})
+		case r.URL.Path == "/api/issues/"+issueID:
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "MUL-1", "title": "T", "status": "todo", "priority": "none"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUpdateTestCmd()
+	setFlags(cmd)
+	if err := runIssueUpdate(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueUpdate: %v", err)
+	}
+	return body
+}
+
+func TestRunIssueCreateSendsGoalSeparateFromDescription(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "title": "T", "status": "todo", "priority": "none"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Has a goal")
+	_ = cmd.Flags().Set("description", "Do the work described here")
+	_ = cmd.Flags().Set("goal", "Open PR, checks pass, no deploy")
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+	if got := body["goal_condition"]; got != "Open PR, checks pass, no deploy" {
+		t.Fatalf("goal_condition = %#v, want the --goal value", got)
+	}
+	if got := body["description"]; got != "Do the work described here" {
+		t.Fatalf("description = %#v, want the --description value (goal must be a separate field)", got)
+	}
+}
+
+func TestRunIssueUpdateSetsGoal(t *testing.T) {
+	body := issueUpdateBodyForFlags(t, func(cmd *cobra.Command) {
+		_ = cmd.Flags().Set("goal", "Ship the PR")
+	})
+	if got := body["goal_condition"]; got != "Ship the PR" {
+		t.Fatalf("goal_condition = %#v, want \"Ship the PR\"", got)
+	}
+}
+
+func TestRunIssueUpdateClearsGoalWithEmptyString(t *testing.T) {
+	body := issueUpdateBodyForFlags(t, func(cmd *cobra.Command) {
+		_ = cmd.Flags().Set("goal", "")
+	})
+	got, ok := body["goal_condition"]
+	if !ok {
+		t.Fatalf("goal_condition key must be present (empty string) to clear, body=%#v", body)
+	}
+	if got != "" {
+		t.Fatalf("goal_condition = %#v, want empty string to signal clear", got)
+	}
+}
+
+func TestRunIssueUpdateOmitsGoalWhenFlagUnset(t *testing.T) {
+	body := issueUpdateBodyForFlags(t, func(cmd *cobra.Command) {
+		_ = cmd.Flags().Set("title", "Only title changes")
+	})
+	if _, ok := body["goal_condition"]; ok {
+		t.Fatalf("goal_condition must be absent when --goal is not passed, body=%#v", body)
 	}
 }

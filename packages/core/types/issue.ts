@@ -39,6 +39,7 @@ export interface Issue {
   identifier: string;
   title: string;
   description: string | null;
+  goal_condition?: string | null;
   status: IssueStatus;
   priority: IssuePriority;
   assignee_type: IssueAssigneeType | null;
