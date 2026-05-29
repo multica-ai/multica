@@ -357,3 +357,35 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 		t.Errorf("cold start must point at the triggering thread read, got:\n%s", out)
 	}
 }
+
+// TestBuildPromptResumedNoDeltaDoesNotForceThreadRead pins the warm/no-delta
+// path: when a prior provider session is actually being resumed, the triggering
+// comment is already embedded in the per-turn prompt, so the agent should not
+// be told to re-read the triggering thread's latest 30 replies by default.
+func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
+	const issueID = "issue-resumed-1"
+	task := Task{
+		IssueID:               issueID,
+		TriggerCommentID:      "trigger-1",
+		TriggerCommentContent: "hi again",
+		TriggerAuthorType:     "member",
+		PriorSessionID:        "session-123",
+		NewCommentCount:       0,
+		NewCommentsSince:      "",
+	}
+	out := BuildPrompt(task, "claude")
+
+	for _, want := range []string{
+		"triggering comment is already included above",
+		"Do not re-read comment history by default",
+		"Only if the resumed session is missing thread context",
+		"multica issue comment list " + issueID + " --thread trigger-1 --tail 30 --output json",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("resumed/no-delta prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Read the triggering conversation first") {
+		t.Errorf("resumed/no-delta prompt must not use the cold-start forced-read wording, got:\n%s", out)
+	}
+}

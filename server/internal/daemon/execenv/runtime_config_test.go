@@ -211,6 +211,37 @@ func TestCommentTriggeredBriefColdStartThreadRead(t *testing.T) {
 	}
 }
 
+// A resumed comment session with no since-delta should not fall back to the
+// cold-start "read the triggering conversation first" instruction. The trigger
+// body is already embedded in the per-turn prompt and the resumed session should
+// carry prior thread context, so the thread read is only a fallback.
+func TestCommentTriggeredBriefResumedNoDeltaSkipsDefaultThreadRead(t *testing.T) {
+	t.Parallel()
+	const issueID = "55555555-6666-7777-8888-999999999999"
+	ctx := TaskContextForEnv{
+		IssueID:             issueID,
+		TriggerCommentID:    "trigger-1",
+		PriorSessionResumed: true,
+		NewCommentCount:     0,
+		NewCommentsSince:    "",
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	for _, want := range []string{
+		"triggering comment is already included above",
+		"Do not re-read comment history by default",
+		"Only if the resumed session is missing thread context",
+		"multica issue comment list " + issueID + " --thread trigger-1 --tail 30 --output json",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("resumed/no-delta brief missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Read the triggering conversation first") {
+		t.Errorf("resumed/no-delta brief must not use the cold-start forced-read wording, got:\n%s", out)
+	}
+}
+
 // Assignment-triggered briefs are the inverse boundary: when the agent
 // owns the issue lifecycle, the brief AS A WHOLE must still tell it to
 // flip to in_review on completion. The flip lives in the

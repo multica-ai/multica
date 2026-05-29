@@ -15,7 +15,8 @@ import "fmt"
 //
 // Renders nothing on cold start (no prior run → newCommentsSince empty) or when
 // there are no new comments (newCommentCount <= 0) or issueID is empty. In those
-// cases the caller falls back to BuildColdCommentsHint.
+// cases the caller falls back to BuildResumedCommentsHint (when a prior session
+// is active) or BuildColdCommentsHint.
 func BuildNewCommentsHint(issueID, triggerCommentID, newCommentsSince string, newCommentCount int) string {
 	if newCommentCount <= 0 || newCommentsSince == "" || issueID == "" {
 		return ""
@@ -39,6 +40,25 @@ func BuildNewCommentsHint(issueID, triggerCommentID, newCommentsSince string, ne
 		)
 	}
 	return hint
+}
+
+// BuildResumedCommentsHint returns the comment-reading pointer for the WARM
+// no-delta path: the daemon is resuming a prior provider session and the
+// triggering comment body has already been injected into the per-turn prompt.
+// In that shape, reading the triggering thread's last 30 replies is duplicate
+// context by default. Keep the bounded thread read as an explicit fallback for
+// missing context instead of making it the first action.
+func BuildResumedCommentsHint(issueID, triggerCommentID string) string {
+	if issueID == "" || triggerCommentID == "" {
+		return ""
+	}
+	return fmt.Sprintf(
+		"You're resuming the prior session, and the triggering comment is already included above. "+
+			"Do not re-read comment history by default. "+
+			"Only if the resumed session is missing thread context, pull the triggering conversation: "+
+			"`multica issue comment list %s --thread %s --tail 30 --output json`.\n\n",
+		issueID, triggerCommentID,
+	)
 }
 
 // BuildColdCommentsHint returns the comment-reading pointer for the COLD path —

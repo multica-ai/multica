@@ -61,6 +61,7 @@ type TaskContextForEnv struct {
 	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
 	NewCommentCount         int    // comments created since this agent's last run on the issue (excludes its own)
 	NewCommentsSince        string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
+	PriorSessionResumed     bool   // true when the daemon will resume an existing provider session for this task
 	AgentID                 string // unique ID of the dispatched agent
 	AgentName               string
 	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md

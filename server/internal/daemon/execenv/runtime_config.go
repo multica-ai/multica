@@ -576,6 +576,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
 		if hint := BuildNewCommentsHint(ctx.IssueID, ctx.TriggerCommentID, ctx.NewCommentsSince, ctx.NewCommentCount); hint != "" {
 			b.WriteString("3. " + hint)
+		} else if ctx.PriorSessionResumed {
+			b.WriteString("3. " + BuildResumedCommentsHint(ctx.IssueID, ctx.TriggerCommentID))
 		} else if cold := BuildColdCommentsHint(ctx.IssueID, ctx.TriggerCommentID); cold != "" {
 			b.WriteString("3. " + cold)
 		} else {
