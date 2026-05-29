@@ -29,10 +29,11 @@ var rateLimitDetectorRe = regexp.MustCompile(
 //
 //  1. Unix epoch seconds
 //  2. ISO-8601 timestamp
-//  3. Absolute month-day (e.g. "resets May 16 at 3pm (Europe/Copenhagen)")
-//  4. Wall-clock time (same-day/next-day)
-//  5. Relative duration
-//  6. Fallback — text matches a rate-limit-shaped error → now + DefaultBackoff.
+//  3. Absolute month-day with explicit year (Codex: "Try again at May 30th, 2026 10:12 PM")
+//  4. Absolute month-day, year inferred (e.g. "resets May 16 at 3pm (Europe/Copenhagen)")
+//  5. Wall-clock time (same-day/next-day)
+//  6. Relative duration
+//  7. Fallback — text matches a rate-limit-shaped error → now + DefaultBackoff.
 func ParseReset(errText string, now time.Time) (time.Time, bool) {
 	resetAt, hasReset, pauseWorthy := ClassifyReset(errText, now)
 	if !pauseWorthy {
@@ -64,6 +65,9 @@ func ClassifyReset(errText string, now time.Time) (time.Time, bool, bool) {
 		return t, true, true
 	}
 	if t, ok := parseISO8601(errText); ok {
+		return t, true, true
+	}
+	if t, ok := parseAbsoluteDateTime(errText, now); ok {
 		return t, true, true
 	}
 	if t, ok := parseAbsoluteMonthDay(errText, now); ok {
@@ -200,6 +204,100 @@ func parseRelativeDuration(lower string, now time.Time) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return now.Add(d), true
+}
+
+// codexDateTimeRe matches the Codex CLI usage-limit reset string, which carries
+// a full month-name date WITH an explicit year, e.g.
+//
+//	"You've hit your usage limit. Try again at May 30th, 2026 10:12 PM"
+//
+// The year makes this unambiguous, so unlike absMonthDayRe (which infers the
+// year) this branch never has to guess. Connectors are kept flexible to absorb
+// phrasing drift: the prefix may be "try again"/"retry"/"resets"/"available"
+// optionally followed by "at"/"on"; the day may carry an ordinal suffix
+// (30th/1st/2nd/3rd); the year may be followed by a comma and/or an "at"; and
+// an optional trailing timezone (parenthesized IANA name or UTC/GMT) is parsed
+// when present, defaulting to time.Local otherwise (Codex prints reset times in
+// the runtime machine's local zone).
+var codexDateTimeRe = regexp.MustCompile(
+	`(?i)(?:resets?|available|try again|retry)\s+(?:on\s+|at\s+)?` +
+		`(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)` +
+		`\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})` +
+		`,?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?(?::\d{2})?\s*(am|pm)?` +
+		`(?:\s*\(?\s*([A-Za-z][A-Za-z0-9/_.+\-]*)\s*\)?)?`,
+)
+
+// parseAbsoluteDateTime handles the Codex full-date reset string described on
+// codexDateTimeRe. The explicit year is used verbatim — no year inference and
+// no future-rollover guess. A parsed time more than 400 days out is rejected as
+// a misparse.
+func parseAbsoluteDateTime(errText string, now time.Time) (time.Time, bool) {
+	m := codexDateTimeRe.FindStringSubmatch(errText)
+	if m == nil {
+		return time.Time{}, false
+	}
+	month, ok := monthNames[strings.ToLower(m[1])]
+	if !ok {
+		return time.Time{}, false
+	}
+	day, err := strconv.Atoi(m[2])
+	if err != nil || day < 1 || day > 31 {
+		return time.Time{}, false
+	}
+	year, err := strconv.Atoi(m[3])
+	if err != nil || year < 2000 || year > 2100 {
+		return time.Time{}, false
+	}
+	hour, err := strconv.Atoi(m[4])
+	if err != nil || hour < 0 || hour > 23 {
+		return time.Time{}, false
+	}
+	min := 0
+	if m[5] != "" {
+		v, err := strconv.Atoi(m[5])
+		if err != nil || v < 0 || v > 59 {
+			return time.Time{}, false
+		}
+		min = v
+	}
+	switch strings.ToLower(m[6]) {
+	case "pm":
+		if hour < 12 {
+			hour += 12
+		}
+	case "am":
+		if hour == 12 {
+			hour = 0
+		}
+	}
+	if hour > 23 {
+		return time.Time{}, false
+	}
+	loc := locationFromHint(m[7])
+	candidate := time.Date(year, month, day, hour, min, 0, 0, loc)
+	if candidate.Sub(now) > 400*24*time.Hour {
+		return time.Time{}, false
+	}
+	return candidate.UTC(), true
+}
+
+// locationFromHint resolves an optional timezone token to a *time.Location.
+// Tries an IANA name (e.g. "Europe/Copenhagen"), then the UTC/GMT aliases, then
+// falls back to time.Local — matching how parseWallClock / parseAbsoluteMonthDay
+// treat a missing or unrecognised zone.
+func locationFromHint(tz string) *time.Location {
+	tz = strings.TrimSpace(tz)
+	if tz == "" {
+		return time.Local
+	}
+	if loaded, err := time.LoadLocation(tz); err == nil {
+		return loaded
+	}
+	switch strings.ToLower(tz) {
+	case "utc", "gmt":
+		return time.UTC
+	}
+	return time.Local
 }
 
 // absMonthDayRe matches "resets May 16 at 3pm (Europe/Copenhagen)" style reset
