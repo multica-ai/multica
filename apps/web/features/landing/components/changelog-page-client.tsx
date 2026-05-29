@@ -9,23 +9,8 @@ import {
 } from "react";
 import { LandingHeader } from "./landing-header";
 import { LandingFooter } from "./landing-footer";
-import { isZhLocale, useLocale } from "../i18n";
+import { useLocale } from "../i18n";
 import type { Locale } from "../i18n/types";
-
-const MONTHS_EN = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
 
 type ParsedDate = { year: number; month: number; day: number };
 
@@ -38,17 +23,38 @@ function parseDate(dateStr: string): ParsedDate {
   };
 }
 
-function monthYearLabel(year: number, month: number, locale: Locale) {
-  if (!year || !month) return "";
-  if (isZhLocale(locale)) return `${year}\u5e74${month}\u6708`;
-  return `${MONTHS_EN[month - 1]} ${year}`;
+function utcDate(year: number, month: number, day: number) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return date;
 }
 
-function fullDateLabel(dateStr: string, locale: Locale) {
+export function monthYearLabel(year: number, month: number, locale: Locale) {
+  const date = utcDate(year, month, 1);
+  if (!date) return "";
+  return new Intl.DateTimeFormat(locale, {
+    month: "long",
+    timeZone: "UTC",
+    year: "numeric",
+  }).format(date);
+}
+
+export function fullDateLabel(dateStr: string, locale: Locale) {
   const { year, month, day } = parseDate(dateStr);
-  if (!year || !month || !day) return dateStr;
-  if (isZhLocale(locale)) return `${year}\u5e74${month}\u6708${day}\u65e5`;
-  return `${MONTHS_EN[month - 1]} ${day}, ${year}`;
+  const date = utcDate(year, month, day);
+  if (!date) return dateStr;
+  return new Intl.DateTimeFormat(locale, {
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+    year: "numeric",
+  }).format(date);
 }
 
 type Release = {
