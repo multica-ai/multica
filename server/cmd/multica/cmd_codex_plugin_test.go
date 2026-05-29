@@ -440,6 +440,7 @@ func TestCodexPluginHooksSyncPromptAndStopToBoundThread(t *testing.T) {
 	const issueID = "11111111-1111-4111-8111-111111111111"
 
 	var posted []map[string]any
+	messagesBySourceKey := map[string]map[string]any{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/OPE-1493":
@@ -458,13 +459,23 @@ func TestCodexPluginHooksSyncPromptAndStopToBoundThread(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode posted message: %v", err)
 			}
+			if sourceKey, _ := body["source_key"].(string); sourceKey != "" {
+				if existing, ok := messagesBySourceKey[sourceKey]; ok {
+					json.NewEncoder(w).Encode(existing)
+					return
+				}
+			}
 			posted = append(posted, body)
-			json.NewEncoder(w).Encode(map[string]any{
+			resp := map[string]any{
 				"task_id": "binding-1",
 				"seq":     len(posted),
 				"type":    body["type"],
 				"content": body["content"],
-			})
+			}
+			if sourceKey, _ := body["source_key"].(string); sourceKey != "" {
+				messagesBySourceKey[sourceKey] = resp
+			}
+			json.NewEncoder(w).Encode(resp)
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
@@ -481,6 +492,20 @@ func TestCodexPluginHooksSyncPromptAndStopToBoundThread(t *testing.T) {
 	if err := runCodexPluginHook(promptCmd, nil); err != nil {
 		t.Fatalf("UserPromptSubmit hook error = %v", err)
 	}
+	if len(posted) != 1 ||
+		posted[0]["type"] != "user_input" ||
+		posted[0]["content"] != "用户：HI" ||
+		posted[0]["source_key"] != "session-1:turn:turn-1:conversation:user" {
+		t.Fatalf("posted prompt hook body = %+v", posted)
+	}
+	retryPromptCmd := testCodexPluginHookCommand(srv.URL)
+	retryPromptCmd.SetIn(strings.NewReader(`{"hook_event_name":"UserPromptSubmit","session_id":"session-1","turn_id":"turn-1","cwd":"/tmp/project","prompt":"HI","model":"gpt-5.1-codex"}`))
+	if err := runCodexPluginHook(retryPromptCmd, nil); err != nil {
+		t.Fatalf("retry UserPromptSubmit hook error = %v", err)
+	}
+	if len(posted) != 1 {
+		t.Fatalf("retry prompt hook posted duplicate body = %+v", posted)
+	}
 
 	stopCmd := testCodexPluginHookCommand(srv.URL)
 	var out bytes.Buffer
@@ -491,15 +516,12 @@ func TestCodexPluginHooksSyncPromptAndStopToBoundThread(t *testing.T) {
 	}
 
 	if len(posted) != 2 ||
-		posted[0]["type"] != "user_input" ||
-		posted[0]["content"] != "用户：HI" ||
 		posted[1]["type"] != "final" ||
 		posted[1]["content"] != "bot：hi，有什么要继续处理的？" {
 		t.Fatalf("posted hook sync body = %+v", posted)
 	}
-	if posted[0]["source_key"] != "session-1:turn:turn-1:conversation:user" ||
-		posted[1]["source_key"] != "session-1:turn:turn-1:conversation:bot" {
-		t.Fatalf("source keys = %v / %v", posted[0]["source_key"], posted[1]["source_key"])
+	if posted[1]["source_key"] != "session-1:turn:turn-1:conversation:bot" {
+		t.Fatalf("bot source key = %v", posted[1]["source_key"])
 	}
 	var hookResp map[string]any
 	if err := json.Unmarshal(out.Bytes(), &hookResp); err != nil {
@@ -517,6 +539,7 @@ func TestCodexPluginStopHookSkipsExplicitConversationSync(t *testing.T) {
 	const issueID = "11111111-1111-4111-8111-111111111111"
 
 	var posted []map[string]any
+	messagesBySourceKey := map[string]map[string]any{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/OPE-1493":
@@ -535,13 +558,23 @@ func TestCodexPluginStopHookSkipsExplicitConversationSync(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode posted message: %v", err)
 			}
+			if sourceKey, _ := body["source_key"].(string); sourceKey != "" {
+				if existing, ok := messagesBySourceKey[sourceKey]; ok {
+					json.NewEncoder(w).Encode(existing)
+					return
+				}
+			}
 			posted = append(posted, body)
-			json.NewEncoder(w).Encode(map[string]any{
+			resp := map[string]any{
 				"task_id": "binding-1",
 				"seq":     len(posted),
 				"type":    body["type"],
 				"content": body["content"],
-			})
+			}
+			if sourceKey, _ := body["source_key"].(string); sourceKey != "" {
+				messagesBySourceKey[sourceKey] = resp
+			}
+			json.NewEncoder(w).Encode(resp)
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
@@ -557,6 +590,11 @@ func TestCodexPluginStopHookSkipsExplicitConversationSync(t *testing.T) {
 	promptCmd.SetIn(strings.NewReader(`{"hook_event_name":"UserPromptSubmit","session_id":"session-1","turn_id":"turn-1","cwd":"/tmp/project","prompt":"你好","model":"gpt-5.1-codex"}`))
 	if err := runCodexPluginHook(promptCmd, nil); err != nil {
 		t.Fatalf("UserPromptSubmit hook error = %v", err)
+	}
+	if len(posted) != 1 ||
+		posted[0]["type"] != "user_input" ||
+		posted[0]["content"] != "用户：你好" {
+		t.Fatalf("posted prompt hook body = %+v", posted)
 	}
 
 	_, err := codexPluginMCPToolConversationSync(testCodexPluginMCPCommand(srv.URL), map[string]any{
