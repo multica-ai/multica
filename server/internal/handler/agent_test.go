@@ -319,8 +319,8 @@ func TestCreateAgentRejectsPlainMember(t *testing.T) {
 
 // TestUpdateAgentPersonaSandboxRequiresWorkspaceAdmin (E2) verifies that the
 // persona_sandbox field can only be set by a workspace owner/admin. A plain
-// workspace member cannot manage agents at all, even when they created the
-// agent.
+// workspace member who owns a private agent CAN update regular fields on it
+// (MUL-2443), but persona_sandbox stays an owner/admin-only workspace policy.
 func TestUpdateAgentPersonaSandboxRequiresWorkspaceAdmin(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -362,16 +362,23 @@ func TestUpdateAgentPersonaSandboxRequiresWorkspaceAdmin(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 
-	// A plain member who owns the agent cannot update regular fields.
+	// A plain member who owns the private agent CAN update regular fields (MUL-2443).
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
-		"description": "agent owner cannot edit description",
+		"description": "agent owner can edit description",
 	})
 	req.Header.Set("X-User-ID", memberUserID)
 	req = withURLParam(req, "id", agentID)
 	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("agent owner non-sandbox update: expected 403, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("agent owner non-sandbox update: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var ownerResp AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&ownerResp); err != nil {
+		t.Fatalf("decode owner update response: %v", err)
+	}
+	if ownerResp.Description != "agent owner can edit description" {
+		t.Fatalf("expected description updated by owner, got %q", ownerResp.Description)
 	}
 
 	// Agent owner WITHOUT workspace admin role: must NOT be able to set persona_sandbox.

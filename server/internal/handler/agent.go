@@ -890,17 +890,19 @@ func (h *Handler) redactAgentMcpConfigOnMutation(ctx context.Context, agent db.A
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
-// Only workspace owner/admin can manage agents, regardless of whether the
-// requester created the agent. Returns the resolved member so callers can do
-// additional role-scoped checks without re-loading.
+// Workspace owner/admin can manage any agent; the owner of a private (personal)
+// agent can also manage their own agent. Returns the resolved member so callers
+// can do additional role-scoped checks without re-loading.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) (db.Member, bool) {
 	wsID := uuidToString(agent.WorkspaceID)
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
 	if !ok {
 		return db.Member{}, false
 	}
-	if !roleAllowed(member.Role, "owner", "admin") {
-		writeError(w, http.StatusForbidden, "only workspace owners and admins can manage agents")
+	// CEREBRO-PATCH(personal-agent-owner-manage): MUL-2443 — owner can manage own private agent.
+	ownsPrivate := agent.Visibility == "private" && uuidToString(agent.OwnerID) == uuidToString(member.UserID)
+	if !roleAllowed(member.Role, "owner", "admin") && !ownsPrivate {
+		writeError(w, http.StatusForbidden, "only workspace owners/admins or the personal agent owner can manage agents")
 		return db.Member{}, false
 	}
 	return member, true
