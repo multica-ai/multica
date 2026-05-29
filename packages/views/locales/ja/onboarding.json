@@ -358,15 +358,15 @@
     "cli_dialog_connect": "接続して続ける",
     "runtimes_connected_other": "コンピュータ {{count}} 台を接続済み",
     "live_listening": "ライブ · あなたのコンピュータを待っています",
-    "stage_normal_prefix": "上のコマンドを実行してください。",
+    "stage_normal_prefix": "上のコマンドを実行してください。 ",
     "stage_normal_suffix": " のブラウザでのサインインが終わると、コンピュータが自動でここに表示されます(通常 10〜30 秒)。",
-    "stage_midway_prefix": "まだ待っています。",
+    "stage_midway_prefix": "まだ待っています。 ",
     "stage_midway_suffix": " が開いたブラウザタブを完了したか確認してください — コンピュータが接続される前にサインインの承認が必要です。",
-    "stage_slow_prefix": "いつもより時間がかかっています。",
+    "stage_slow_prefix": "いつもより時間がかかっています。 ",
     "stage_slow_suffix": " を実行したターミナルにエラーがないか確認してください。",
     "stage_stalled_prefix": "まだ何も届いていません。ターミナルに不慣れな場合は、",
     "stage_stalled_term": "デスクトップ",
-    "stage_stalled_suffix": " のほうがスムーズです — ワンクリックでこのコンピュータが接続されます。このダイアログを閉じてデスクトップを選ぶか、スキップを押して続けてください。"
+    "stage_stalled_suffix": "のほうがスムーズです — ワンクリックでこのコンピュータが接続されます。このダイアログを閉じてデスクトップを選ぶか、スキップを押して続けてください。"
   },
   "errors": {
     "skip_failed": "オンボーディングを完了できませんでした"
