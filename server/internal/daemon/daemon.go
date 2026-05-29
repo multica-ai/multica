@@ -21,6 +21,7 @@ import (
 	// CEREBRO-PATCH(daemon-settings-refresh-import): keep settings live via cerebro-zone helper.
 	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"
 	"github.com/multica-ai/multica/server/internal/cerebro/daemonsettings"
+	"github.com/multica-ai/multica/server/internal/cerebro/traceupload" // CEREBRO-PATCH(daemon-trace-upload): Fase 2 registry trace sender
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -154,6 +155,8 @@ type Daemon struct {
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
 	runUpdateFn func(targetVersion string) (string, error)
+
+	traceUploader *traceupload.Manager // CEREBRO-PATCH(daemon-trace-upload): Fase 2 registry trace sender; nil when flag off
 }
 
 // New creates a new Daemon instance.
@@ -670,6 +673,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.gcLoop(ctx)
 	go d.autoUpdateLoop(ctx)
 	go d.serveHealth(ctx, healthLn, time.Now())
+	d.startTraceUpload(ctx) // CEREBRO-PATCH(daemon-trace-upload): launch trace uploader + boot-sweep (no-op when flag off)
 	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, health)")
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
@@ -2266,6 +2270,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			taskLog.Warn("report task usage failed", "error", usageErr)
 		}
 	}
+	d.enqueueTraceUpload(task, provider, result) // CEREBRO-PATCH(daemon-trace-upload): queue transcript for registry upload (best-effort, never fails the task)
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
