@@ -59,11 +59,11 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
   };
 }
 
-export function useIssueTimeline(issueId: string, userId?: string) {
+export function useIssueTimeline(wsId: string, issueId: string, userId?: string) {
   const { t } = useT("issues");
   const qc = useQueryClient();
 
-  const query = useQuery(issueTimelineOptions(issueId));
+  const query = useQuery(issueTimelineOptions(wsId, issueId));
   const { data, isLoading: loading } = query;
 
   const timeline = useMemo<TimelineEntry[]>(() => data ?? [], [data]);
@@ -83,8 +83,8 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   // timeline. Cheaper than diffing across a possibly-long disconnect.
   useWSReconnect(
     useCallback(() => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
-    }, [qc, issueId]),
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+    }, [qc, wsId, issueId]),
   );
 
   // --- WS event handlers ---
@@ -95,14 +95,14 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment } = payload as CommentCreatedPayload;
         if (comment.issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
+        qc.setQueryData<TLCache>(issueKeys.timeline(wsId, issueId), (old) => {
           const entry = commentToTimelineEntry(comment);
           if (!old) return [entry];
           if (old.some((e) => e.id === comment.id)) return old;
           return sortTimelineEntriesAsc([...old, entry]);
         });
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -112,13 +112,13 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment } = payload as CommentUpdatedPayload;
         if (comment.issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+        qc.setQueryData<TLCache>(issueKeys.timeline(wsId, issueId), (old) =>
           old?.map((e) =>
             e.id === comment.id ? commentToTimelineEntry(comment) : e,
           ),
         );
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -134,13 +134,13 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment } = payload as CommentResolvedPayload;
         if (comment.issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+        qc.setQueryData<TLCache>(issueKeys.timeline(wsId, issueId), (old) =>
           old?.map((e) =>
             e.id === comment.id ? commentToTimelineEntry(comment) : e,
           ),
         );
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -150,13 +150,13 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment } = payload as CommentUnresolvedPayload;
         if (comment.issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+        qc.setQueryData<TLCache>(issueKeys.timeline(wsId, issueId), (old) =>
           old?.map((e) =>
             e.id === comment.id ? commentToTimelineEntry(comment) : e,
           ),
         );
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -166,7 +166,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment_id, issue_id } = payload as CommentDeletedPayload;
         if (issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
+        qc.setQueryData<TLCache>(issueKeys.timeline(wsId, issueId), (old) => {
           if (!old) return old;
           // Cascade through replies (full timeline now lives in this single
           // cache, so a flat sweep is sufficient).
@@ -188,7 +188,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           return old.filter((e) => !idsToRemove.has(e.id));
         });
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -200,13 +200,13 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         if (p.issue_id !== issueId) return;
         const entry = p.entry;
         if (!entry || !entry.id) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
+        qc.setQueryData<TLCache>(issueKeys.timeline(wsId, issueId), (old) => {
           if (!old) return [entry];
           if (old.some((e) => e.id === entry.id)) return old;
           return sortTimelineEntriesAsc([...old, entry]);
         });
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -216,7 +216,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { reaction, issue_id } = payload as ReactionAddedPayload;
         if (issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+        qc.setQueryData<TLCache>(issueKeys.timeline(wsId, issueId), (old) =>
           old?.map((e) => {
             if (e.id !== reaction.comment_id) return e;
             const existing = e.reactions ?? [];
@@ -225,7 +225,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           }),
         );
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -235,7 +235,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const p = payload as ReactionRemovedPayload;
         if (p.issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+        qc.setQueryData<TLCache>(issueKeys.timeline(wsId, issueId), (old) =>
           old?.map((e) => {
             if (e.id !== p.comment_id) return e;
             return {
@@ -252,7 +252,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           }),
         );
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 

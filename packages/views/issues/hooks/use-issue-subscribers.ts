@@ -11,10 +11,10 @@ import { issueSubscribersOptions, issueKeys } from "@multica/core/issues/queries
 import { useToggleIssueSubscriber } from "@multica/core/issues/mutations";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 
-export function useIssueSubscribers(issueId: string, userId?: string) {
+export function useIssueSubscribers(wsId: string, issueId: string, userId?: string) {
   const qc = useQueryClient();
   const { data: subscribers = [], isLoading: loading } = useQuery(
-    issueSubscribersOptions(issueId),
+    issueSubscribersOptions(wsId, issueId),
   );
 
   const toggleMutation = useToggleIssueSubscriber(issueId);
@@ -22,7 +22,7 @@ export function useIssueSubscribers(issueId: string, userId?: string) {
   // Reconnect recovery
   useWSReconnect(
     useCallback(() => {
-      qc.invalidateQueries({ queryKey: issueKeys.subscribers(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.subscribers(wsId, issueId) });
     }, [qc, issueId]),
   );
 
@@ -35,7 +35,7 @@ export function useIssueSubscribers(issueId: string, userId?: string) {
         const p = payload as SubscriberAddedPayload;
         if (p.issue_id !== issueId) return;
         qc.setQueryData<IssueSubscriber[]>(
-          issueKeys.subscribers(issueId),
+          issueKeys.subscribers(wsId, issueId),
           (old) => {
             if (!old) return old;
             if (
@@ -69,7 +69,7 @@ export function useIssueSubscribers(issueId: string, userId?: string) {
         const p = payload as SubscriberRemovedPayload;
         if (p.issue_id !== issueId) return;
         qc.setQueryData<IssueSubscriber[]>(
-          issueKeys.subscribers(issueId),
+          issueKeys.subscribers(wsId, issueId),
           (old) =>
             old?.filter(
               (s) =>

@@ -6,6 +6,7 @@ import { ChevronRight, Loader2, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
+import { useWorkspaceId } from "@multica/core/hooks";
 import type { AgentTask, TaskFailureReason } from "@multica/core/types";
 import { useTimeAgo } from "../../i18n";
 import {
@@ -68,6 +69,7 @@ const PAST_STATUS_RANK: Record<string, number> = {
 
 export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
   const { t } = useT("issues");
+  const wsId = useWorkspaceId();
   const [open, setOpen] = useState(true);
   const [showPast, setShowPast] = useState(false);
 
@@ -77,7 +79,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
   // needed, and the cache stays fresh even when this component isn't
   // mounted (e.g. user cancels from agent-side, then navigates here).
   const { data: tasks = [] } = useQuery({
-    queryKey: issueKeys.tasks(issueId),
+    queryKey: issueKeys.tasks(wsId, issueId),
     queryFn: () => api.listTasksByIssue(issueId),
     staleTime: 30_000,
     refetchOnWindowFocus: true,

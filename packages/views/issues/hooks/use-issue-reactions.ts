@@ -11,10 +11,10 @@ import { issueReactionsOptions, issueKeys } from "@multica/core/issues/queries";
 import { useToggleIssueReaction, type ToggleIssueReactionVars } from "@multica/core/issues/mutations";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 
-export function useIssueReactions(issueId: string, userId?: string) {
+export function useIssueReactions(wsId: string, issueId: string, userId?: string) {
   const qc = useQueryClient();
   const { data: serverReactions = [], isLoading: loading } = useQuery(
-    issueReactionsOptions(issueId),
+    issueReactionsOptions(wsId, issueId),
   );
 
   const toggleMutation = useToggleIssueReaction(issueId);
@@ -22,7 +22,7 @@ export function useIssueReactions(issueId: string, userId?: string) {
   // Reconnect recovery
   useWSReconnect(
     useCallback(() => {
-      qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.reactions(wsId, issueId) });
     }, [qc, issueId]),
   );
 
@@ -35,7 +35,7 @@ export function useIssueReactions(issueId: string, userId?: string) {
         const { reaction, issue_id } = payload as IssueReactionAddedPayload;
         if (issue_id !== issueId) return;
         qc.setQueryData<IssueReaction[]>(
-          issueKeys.reactions(issueId),
+          issueKeys.reactions(wsId, issueId),
           (old) => {
             if (!old) return old;
             if (old.some((r) => r.id === reaction.id)) return old;
@@ -54,7 +54,7 @@ export function useIssueReactions(issueId: string, userId?: string) {
         const p = payload as IssueReactionRemovedPayload;
         if (p.issue_id !== issueId) return;
         qc.setQueryData<IssueReaction[]>(
-          issueKeys.reactions(issueId),
+          issueKeys.reactions(wsId, issueId),
           (old) =>
             old?.filter(
               (r) =>

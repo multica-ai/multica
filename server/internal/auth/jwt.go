@@ -16,11 +16,19 @@ var (
 	jwtSecretOnce sync.Once
 )
 
+// JWTSecret returns the JWT signing secret. In production (APP_ENV=production)
+// it refuses to start if JWT_SECRET is unset or equals the well-known default,
+// which would allow any attacker to forge valid tokens.
 func JWTSecret() []byte {
 	jwtSecretOnce.Do(func() {
 		secret := os.Getenv("JWT_SECRET")
-		if secret == "" {
-			secret = defaultJWTSecret
+		if secret == "" || secret == defaultJWTSecret {
+			if os.Getenv("APP_ENV") == "production" {
+				panic("JWT_SECRET must be set to a unique value in production; the default is publicly known")
+			}
+			if secret == "" {
+				secret = defaultJWTSecret
+			}
 		}
 		jwtSecret = []byte(secret)
 	})

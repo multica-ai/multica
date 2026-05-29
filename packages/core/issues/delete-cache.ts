@@ -135,12 +135,12 @@ export function invalidateIssueScopedCaches(
   wsId: string,
   issueId: string,
 ) {
-  qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
-  qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });
-  qc.invalidateQueries({ queryKey: issueKeys.subscribers(issueId) });
-  qc.invalidateQueries({ queryKey: issueKeys.usage(issueId) });
-  qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
-  qc.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
+  qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+  qc.invalidateQueries({ queryKey: issueKeys.reactions(wsId, issueId) });
+  qc.invalidateQueries({ queryKey: issueKeys.subscribers(wsId, issueId) });
+  qc.invalidateQueries({ queryKey: issueKeys.usage(wsId, issueId) });
+  qc.invalidateQueries({ queryKey: issueKeys.attachments(wsId, issueId) });
+  qc.invalidateQueries({ queryKey: issueKeys.tasks(wsId, issueId) });
   qc.invalidateQueries({ queryKey: issueKeys.children(wsId, issueId) });
   qc.invalidateQueries({ queryKey: labelKeys.byIssue(wsId, issueId) });
 }
@@ -156,12 +156,12 @@ export function cleanupDeletedIssueCaches(
   invalidateDeletedIssueParentCaches(qc, wsId, metadata);
 
   qc.removeQueries({ queryKey: issueKeys.detail(wsId, issueId) });
-  qc.removeQueries({ queryKey: issueKeys.timeline(issueId) });
-  qc.removeQueries({ queryKey: issueKeys.reactions(issueId) });
-  qc.removeQueries({ queryKey: issueKeys.subscribers(issueId) });
-  qc.removeQueries({ queryKey: issueKeys.usage(issueId) });
-  qc.removeQueries({ queryKey: issueKeys.attachments(issueId) });
-  qc.removeQueries({ queryKey: issueKeys.tasks(issueId) });
+  qc.removeQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+  qc.removeQueries({ queryKey: issueKeys.reactions(wsId, issueId) });
+  qc.removeQueries({ queryKey: issueKeys.subscribers(wsId, issueId) });
+  qc.removeQueries({ queryKey: issueKeys.usage(wsId, issueId) });
+  qc.removeQueries({ queryKey: issueKeys.attachments(wsId, issueId) });
+  qc.removeQueries({ queryKey: issueKeys.tasks(wsId, issueId) });
   qc.removeQueries({ queryKey: issueKeys.children(wsId, issueId) });
   qc.removeQueries({ queryKey: labelKeys.byIssue(wsId, issueId) });
 

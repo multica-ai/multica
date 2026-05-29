@@ -25,6 +25,7 @@ import {
   pruneDeletedIssueFromParentChildrenCaches,
 } from "./delete-cache";
 import { useWorkspaceId } from "../hooks";
+import { getCurrentWsId } from "../platform";
 import { useRecentIssuesStore } from "./stores";
 import type { GroupedIssuesResponse, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
 import type {
@@ -288,7 +289,8 @@ export function useUpdateIssue() {
       // to resolve text-preview Eye gates, and unlike other mutations this
       // payload mutates the attachment join table.
       if (vars.attachment_ids?.length) {
-        qc.invalidateQueries({ queryKey: issueKeys.attachments(vars.id) });
+        const attWsId = getCurrentWsId();
+        if (attWsId) qc.invalidateQueries({ queryKey: issueKeys.attachments(attWsId, vars.id) });
       }
       // Invalidate old parent's children cache
       if (ctx?.parentId) {
@@ -601,7 +603,9 @@ export function useCreateComment(issueId: string) {
       // Dedupe by id: the `comment:created` WS event may have already added
       // this entry from the broadcast path before this onSuccess fires. Skip
       // the append if the entry is already in the cache.
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+      const tlWsId = getCurrentWsId();
+      if (!tlWsId) return;
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(tlWsId, issueId), (old) => {
         if (!old) return [entry];
         if (old.some((e) => e.id === entry.id)) return old;
         return sortTimelineEntriesAsc([...old, entry]);
@@ -623,10 +627,12 @@ export function useUpdateComment(issueId: string) {
     mutationFn: ({ commentId, content, attachmentIds }: { commentId: string; content: string; attachmentIds: string[] }) =>
       api.updateComment(commentId, content, attachmentIds),
     onMutate: async ({ commentId, content, attachmentIds }) => {
-      await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
+      const wsId = getCurrentWsId();
+      if (!wsId) return {};
+      await qc.cancelQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(wsId, issueId));
       const kept = new Set(attachmentIds);
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(wsId, issueId), (old) =>
         old?.map((e) =>
           e.id === commentId
             ? { ...e, content, attachments: e.attachments?.filter((a) => kept.has(a.id)) }
@@ -637,11 +643,13 @@ export function useUpdateComment(issueId: string) {
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev !== undefined) {
-        qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+        const wsId = getCurrentWsId();
+        if (wsId) qc.setQueryData(issueKeys.timeline(wsId, issueId), ctx.prev);
       }
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
   });
 }
@@ -651,8 +659,10 @@ export function useDeleteComment(issueId: string) {
   return useMutation({
     mutationFn: (commentId: string) => api.deleteComment(commentId),
     onMutate: async (commentId) => {
-      await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
+      const wsId = getCurrentWsId();
+      if (!wsId) return {};
+      await qc.cancelQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(wsId, issueId));
 
       // Cascade: collect all descendants of the deleted comment.
       const toRemove = new Set<string>([commentId]);
@@ -673,18 +683,20 @@ export function useDeleteComment(issueId: string) {
         }
       }
 
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(wsId, issueId), (old) =>
         old?.filter((e) => !toRemove.has(e.id)),
       );
       return { prev };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev !== undefined) {
-        qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+        const wsId = getCurrentWsId();
+        if (wsId) qc.setQueryData(issueKeys.timeline(wsId, issueId), ctx.prev);
       }
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
   });
 }
@@ -695,9 +707,11 @@ export function useResolveComment(issueId: string) {
     mutationFn: ({ commentId, resolved }: { commentId: string; resolved: boolean }) =>
       resolved ? api.resolveComment(commentId) : api.unresolveComment(commentId),
     onMutate: async ({ commentId, resolved }) => {
-      await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
+      const wsId = getCurrentWsId();
+      if (!wsId) return {};
+      await qc.cancelQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(wsId, issueId));
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(wsId, issueId), (old) =>
         old?.map((e) =>
           e.id === commentId
             ? {
@@ -713,11 +727,13 @@ export function useResolveComment(issueId: string) {
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev !== undefined) {
-        qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+        const wsId = getCurrentWsId();
+        if (wsId) qc.setQueryData(issueKeys.timeline(wsId, issueId), ctx.prev);
       }
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
   });
 }
@@ -738,7 +754,8 @@ export function useToggleCommentReaction(issueId: string) {
       return api.addReaction(commentId, emoji);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
   });
 }
@@ -762,7 +779,8 @@ export function useToggleIssueReaction(issueId: string) {
       return api.addIssueReaction(issueId, emoji);
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: issueKeys.reactions(wsId, issueId) });
     },
   });
 }
@@ -790,14 +808,16 @@ export function useToggleIssueSubscriber(issueId: string) {
       }
     },
     onMutate: async ({ userId, userType, subscribed }) => {
-      await qc.cancelQueries({ queryKey: issueKeys.subscribers(issueId) });
+      const wsId = getCurrentWsId();
+      if (!wsId) return {};
+      await qc.cancelQueries({ queryKey: issueKeys.subscribers(wsId, issueId) });
       const prev = qc.getQueryData<IssueSubscriber[]>(
-        issueKeys.subscribers(issueId),
+        issueKeys.subscribers(wsId, issueId),
       );
 
       if (subscribed) {
         qc.setQueryData<IssueSubscriber[]>(
-          issueKeys.subscribers(issueId),
+          issueKeys.subscribers(wsId, issueId),
           (old) =>
             old?.filter(
               (s) => !(s.user_id === userId && s.user_type === userType),
@@ -812,7 +832,7 @@ export function useToggleIssueSubscriber(issueId: string) {
           created_at: new Date().toISOString(),
         };
         qc.setQueryData<IssueSubscriber[]>(
-          issueKeys.subscribers(issueId),
+          issueKeys.subscribers(wsId, issueId),
           (old) => {
             if (
               old?.some(
@@ -827,11 +847,14 @@ export function useToggleIssueSubscriber(issueId: string) {
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev)
-        qc.setQueryData(issueKeys.subscribers(issueId), ctx.prev);
+      if (ctx?.prev) {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.setQueryData(issueKeys.subscribers(wsId, issueId), ctx.prev);
+      }
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.subscribers(issueId) });
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: issueKeys.subscribers(wsId, issueId) });
     },
   });
 }

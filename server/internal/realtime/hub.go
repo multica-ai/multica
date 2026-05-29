@@ -772,6 +772,7 @@ func (c *Client) readPump() {
 		c.conn.Close()
 	}()
 
+	c.conn.SetReadLimit(4096)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -843,24 +844,34 @@ func (c *Client) handleSubscribe(scope, id string) {
 		c.hub.subscribe(c, scope, id)
 	case ScopeTask, ScopeChat:
 		auth := c.hub.authorizer
-		if auth != nil {
-			ok, err := auth.AuthorizeScope(context.Background(), c.userID, c.workspaceID, scope, id)
-			if err != nil || !ok {
-				M.SubscribeDeniedTotal(scope).Add(1)
-				reason := "forbidden"
-				if err != nil {
-					reason = "lookup_failed"
-				}
-				c.sendJSON(map[string]any{
-					"type": "subscribe_error",
-					"payload": map[string]string{
-						"scope": scope,
-						"id":    id,
-						"error": reason,
-					},
-				})
-				return
+		if auth == nil {
+			M.SubscribeDeniedTotal(scope).Add(1)
+			c.sendJSON(map[string]any{
+				"type": "subscribe_error",
+				"payload": map[string]string{
+					"scope": scope,
+					"id":    id,
+					"error": "forbidden",
+				},
+			})
+			return
+		}
+		ok, err := auth.AuthorizeScope(context.Background(), c.userID, c.workspaceID, scope, id)
+		if err != nil || !ok {
+			M.SubscribeDeniedTotal(scope).Add(1)
+			reason := "forbidden"
+			if err != nil {
+				reason = "lookup_failed"
 			}
+			c.sendJSON(map[string]any{
+				"type": "subscribe_error",
+				"payload": map[string]string{
+					"scope": scope,
+					"id":    id,
+					"error": reason,
+				},
+			})
+			return
 		}
 		c.hub.subscribe(c, scope, id)
 	default:
