@@ -513,12 +513,18 @@ func (q *Queries) ListRecentThreadCommentsForIssue(ctx context.Context, arg List
 }
 
 const listRootCommentsForIssue = `-- name: ListRootCommentsForIssue :many
-WITH RECURSIVE membership(id, root_id, comment_created_at) AS (
-    SELECT c.id, c.id AS root_id, c.created_at
+WITH RECURSIVE selected_roots AS (
+    SELECT c.id, c.created_at
     FROM comment c
     WHERE c.issue_id = $1
       AND c.workspace_id = $2
       AND c.parent_id IS NULL
+    ORDER BY c.created_at ASC, c.id ASC
+    LIMIT $3
+),
+membership(id, root_id, comment_created_at) AS (
+    SELECT sr.id, sr.id AS root_id, sr.created_at
+    FROM selected_roots sr
     UNION ALL
     SELECT c.id, m.root_id, c.created_at
     FROM comment c
@@ -538,11 +544,10 @@ SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
        ts.reply_count AS reply_count,
        ts.last_activity_at AS last_activity_at
-FROM comment c
-JOIN thread_stats ts ON ts.root_id = c.id
-WHERE c.issue_id = $1 AND c.workspace_id = $2 AND c.parent_id IS NULL
+FROM selected_roots sr
+JOIN comment c ON c.id = sr.id
+JOIN thread_stats ts ON ts.root_id = sr.id
 ORDER BY c.created_at ASC, c.id ASC
-LIMIT $3
 `
 
 type ListRootCommentsForIssueParams struct {
@@ -576,10 +581,13 @@ type ListRootCommentsForIssueRow struct {
 // discussion but also triage which thread to drill into (biggest / most
 // recently active) before fetching any specific reply thread.
 //
-// The recursive `membership` CTE labels every comment with its thread root by
-// walking down from each root, so the counts stay correct even if the schema
-// ever allows reply-of-reply (the write path collapses to root today, but does
-// not enforce it). Mirrors ListRecentThreadCommentsForIssue's stats CTE.
+// `selected_roots` picks the roots we will actually return first (the chrono
+// page of size @row_limit), so the recursive `membership` walk only expands
+// those threads' subtrees instead of every thread in the issue. membership
+// labels each comment with its thread root by walking down from the selected
+// roots, so the counts stay correct even if the schema ever allows
+// reply-of-reply (the write path collapses to root today, but does not enforce
+// it). Mirrors ListRecentThreadCommentsForIssue's stats CTE.
 func (q *Queries) ListRootCommentsForIssue(ctx context.Context, arg ListRootCommentsForIssueParams) ([]ListRootCommentsForIssueRow, error) {
 	rows, err := q.db.Query(ctx, listRootCommentsForIssue, arg.IssueID, arg.WorkspaceID, arg.RowLimit)
 	if err != nil {
@@ -617,12 +625,19 @@ func (q *Queries) ListRootCommentsForIssue(ctx context.Context, arg ListRootComm
 }
 
 const listRootCommentsSinceForIssue = `-- name: ListRootCommentsSinceForIssue :many
-WITH RECURSIVE membership(id, root_id, comment_created_at) AS (
-    SELECT c.id, c.id AS root_id, c.created_at
+WITH RECURSIVE selected_roots AS (
+    SELECT c.id, c.created_at
     FROM comment c
     WHERE c.issue_id = $1
       AND c.workspace_id = $2
       AND c.parent_id IS NULL
+      AND c.created_at > $3
+    ORDER BY c.created_at ASC, c.id ASC
+    LIMIT $4
+),
+membership(id, root_id, comment_created_at) AS (
+    SELECT sr.id, sr.id AS root_id, sr.created_at
+    FROM selected_roots sr
     UNION ALL
     SELECT c.id, m.root_id, c.created_at
     FROM comment c
@@ -642,12 +657,10 @@ SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
        ts.reply_count AS reply_count,
        ts.last_activity_at AS last_activity_at
-FROM comment c
-JOIN thread_stats ts ON ts.root_id = c.id
-WHERE c.issue_id = $1 AND c.workspace_id = $2
-  AND c.parent_id IS NULL AND c.created_at > $3
+FROM selected_roots sr
+JOIN comment c ON c.id = sr.id
+JOIN thread_stats ts ON ts.root_id = sr.id
 ORDER BY c.created_at ASC, c.id ASC
-LIMIT $4
 `
 
 type ListRootCommentsSinceForIssueParams struct {
@@ -678,8 +691,10 @@ type ListRootCommentsSinceForIssueRow struct {
 // Top-level comments created strictly after @since, each annotated with the
 // same reply_count / last_activity_at stats as ListRootCommentsForIssue. The
 // @since filter narrows which roots are returned; the stats are still computed
-// over each thread's full subtree (so a freshly created root with no replies
-// reports reply_count 0 and last_activity_at = its own created_at).
+// over each selected thread's full subtree (so a freshly created root with no
+// replies reports reply_count 0 and last_activity_at = its own created_at).
+// selected_roots applies the @since + @row_limit cut up front so the recursive
+// membership walk only touches the subtrees of the roots we actually return.
 func (q *Queries) ListRootCommentsSinceForIssue(ctx context.Context, arg ListRootCommentsSinceForIssueParams) ([]ListRootCommentsSinceForIssueRow, error) {
 	rows, err := q.db.Query(ctx, listRootCommentsSinceForIssue,
 		arg.IssueID,

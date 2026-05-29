@@ -320,6 +320,8 @@ func TestListComments_SummaryClipsContent(t *testing.T) {
 	}
 	longID := insert(strings.Repeat("x", 500), 0)
 	shortID := insert("short", time.Minute)
+	// Multi-byte body: clipping must land on a rune boundary, never mid-rune.
+	cjkID := insert(strings.Repeat("你", 300), 2*time.Minute)
 
 	// Baseline: no summary → full content, content_truncated omitted.
 	_, full := listComments(t, issueID, "")
@@ -354,6 +356,19 @@ func TestListComments_SummaryClipsContent(t *testing.T) {
 	}
 	if short.Content != "short" {
 		t.Fatalf("summary: short content got=%q want=short", short.Content)
+	}
+	cjk := byID[cjkID]
+	if cjk.ContentTruncated == nil || !*cjk.ContentTruncated {
+		t.Fatalf("summary: cjk comment should be truncated, got %v", cjk.ContentTruncated)
+	}
+	if !utf8.ValidString(cjk.Content) {
+		t.Fatalf("summary: cjk content was clipped mid-rune (invalid UTF-8): %q", cjk.Content)
+	}
+	if rc := utf8.RuneCountInString(cjk.Content); rc != summaryContentRunes+1 { // 200 CJK runes + ellipsis
+		t.Fatalf("summary: cjk content rune count got=%d want=%d", rc, summaryContentRunes+1)
+	}
+	if !strings.HasSuffix(cjk.Content, "你…") {
+		t.Fatalf("summary: cjk content should be whole 你-runes then ellipsis, got %q", cjk.Content)
 	}
 }
 

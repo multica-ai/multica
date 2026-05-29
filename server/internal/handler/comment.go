@@ -81,12 +81,19 @@ const summaryContentRunes = 200
 // summarizeContent clips content to summaryContentRunes for the summary
 // projection. Returns the (possibly clipped) content and whether it was
 // truncated. An ellipsis marks a clip so the reader knows more text exists.
+//
+// It scans by rune and stops at the (budget+1)th rune rather than allocating a
+// full []rune for the whole body — so a pathologically long comment costs only
+// the budget, not its full length, under summary mode.
 func summarizeContent(content string) (string, bool) {
-	runes := []rune(content)
-	if len(runes) <= summaryContentRunes {
-		return content, false
+	count := 0
+	for byteOffset := range content { // range over a string yields rune start offsets
+		if count == summaryContentRunes {
+			return content[:byteOffset] + "…", true
+		}
+		count++
 	}
-	return string(runes[:summaryContentRunes]) + "…", true
+	return content, false
 }
 
 // commentHardCap bounds the comments returned per issue. Sized as a defensive

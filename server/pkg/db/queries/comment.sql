@@ -23,16 +23,25 @@ LIMIT $4;
 -- discussion but also triage which thread to drill into (biggest / most
 -- recently active) before fetching any specific reply thread.
 --
--- The recursive `membership` CTE labels every comment with its thread root by
--- walking down from each root, so the counts stay correct even if the schema
--- ever allows reply-of-reply (the write path collapses to root today, but does
--- not enforce it). Mirrors ListRecentThreadCommentsForIssue's stats CTE.
-WITH RECURSIVE membership(id, root_id, comment_created_at) AS (
-    SELECT c.id, c.id AS root_id, c.created_at
+-- `selected_roots` picks the roots we will actually return first (the chrono
+-- page of size @row_limit), so the recursive `membership` walk only expands
+-- those threads' subtrees instead of every thread in the issue. membership
+-- labels each comment with its thread root by walking down from the selected
+-- roots, so the counts stay correct even if the schema ever allows
+-- reply-of-reply (the write path collapses to root today, but does not enforce
+-- it). Mirrors ListRecentThreadCommentsForIssue's stats CTE.
+WITH RECURSIVE selected_roots AS (
+    SELECT c.id, c.created_at
     FROM comment c
     WHERE c.issue_id = @issue_id
       AND c.workspace_id = @workspace_id
       AND c.parent_id IS NULL
+    ORDER BY c.created_at ASC, c.id ASC
+    LIMIT @row_limit
+),
+membership(id, root_id, comment_created_at) AS (
+    SELECT sr.id, sr.id AS root_id, sr.created_at
+    FROM selected_roots sr
     UNION ALL
     SELECT c.id, m.root_id, c.created_at
     FROM comment c
@@ -52,24 +61,32 @@ SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
        ts.reply_count AS reply_count,
        ts.last_activity_at AS last_activity_at
-FROM comment c
-JOIN thread_stats ts ON ts.root_id = c.id
-WHERE c.issue_id = @issue_id AND c.workspace_id = @workspace_id AND c.parent_id IS NULL
-ORDER BY c.created_at ASC, c.id ASC
-LIMIT @row_limit;
+FROM selected_roots sr
+JOIN comment c ON c.id = sr.id
+JOIN thread_stats ts ON ts.root_id = sr.id
+ORDER BY c.created_at ASC, c.id ASC;
 
 -- name: ListRootCommentsSinceForIssue :many
 -- Top-level comments created strictly after @since, each annotated with the
 -- same reply_count / last_activity_at stats as ListRootCommentsForIssue. The
 -- @since filter narrows which roots are returned; the stats are still computed
--- over each thread's full subtree (so a freshly created root with no replies
--- reports reply_count 0 and last_activity_at = its own created_at).
-WITH RECURSIVE membership(id, root_id, comment_created_at) AS (
-    SELECT c.id, c.id AS root_id, c.created_at
+-- over each selected thread's full subtree (so a freshly created root with no
+-- replies reports reply_count 0 and last_activity_at = its own created_at).
+-- selected_roots applies the @since + @row_limit cut up front so the recursive
+-- membership walk only touches the subtrees of the roots we actually return.
+WITH RECURSIVE selected_roots AS (
+    SELECT c.id, c.created_at
     FROM comment c
     WHERE c.issue_id = @issue_id
       AND c.workspace_id = @workspace_id
       AND c.parent_id IS NULL
+      AND c.created_at > @since
+    ORDER BY c.created_at ASC, c.id ASC
+    LIMIT @row_limit
+),
+membership(id, root_id, comment_created_at) AS (
+    SELECT sr.id, sr.id AS root_id, sr.created_at
+    FROM selected_roots sr
     UNION ALL
     SELECT c.id, m.root_id, c.created_at
     FROM comment c
@@ -89,12 +106,10 @@ SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
        ts.reply_count AS reply_count,
        ts.last_activity_at AS last_activity_at
-FROM comment c
-JOIN thread_stats ts ON ts.root_id = c.id
-WHERE c.issue_id = @issue_id AND c.workspace_id = @workspace_id
-  AND c.parent_id IS NULL AND c.created_at > @since
-ORDER BY c.created_at ASC, c.id ASC
-LIMIT @row_limit;
+FROM selected_roots sr
+JOIN comment c ON c.id = sr.id
+JOIN thread_stats ts ON ts.root_id = sr.id
+ORDER BY c.created_at ASC, c.id ASC;
 
 -- name: ListThreadCommentsForIssue :many
 -- Returns the root of the thread containing @anchor_id plus every descendant
