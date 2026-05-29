@@ -13,7 +13,8 @@
    fallback face to prevent FOUT layout shift); desktop uses fontsource's "Inter Variable".
    Both resolve to Inter glyphs, so rendering is identical in practice.
    Per-character fallback: Latin chars render with Inter, CJK chars render with
-   the platform-native Chinese/Korean fallback when needed.
+   the platform-native Chinese/Korean fallback when needed. Chinese fonts must stay
+   before Korean fonts so zh users do not receive Korean Hanja glyph shapes.
 
    Mono font has no explicit CJK fallback: CJK chars in code blocks are inherently
    non-aligned with a mono grid (Chinese is proportional), so listing CJK fonts
@@ -21,9 +22,9 @@
    the rare mixed case correctly. */
 :root {
   --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont,
-               "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic",
-               "PingFang SC", "Microsoft YaHei", "Noto Sans CJK KR",
-               "Noto Sans CJK SC", sans-serif;
+               "Segoe UI", "PingFang SC", "Microsoft YaHei",
+               "Noto Sans CJK SC", "Apple SD Gothic Neo", "Malgun Gothic",
+               "Noto Sans CJK KR", sans-serif;
   --font-serif: "Source Serif 4 Variable", "Source Serif 4", "Iowan Old Style",
                 "Apple Garamond", Baskerville, "Times New Roman", serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,

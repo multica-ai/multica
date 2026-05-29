@@ -15,8 +15,9 @@ import "./globals.css";
 // differs by design: next/font produces `__Inter_xxx` (with a synthetic size-adjusted
 // fallback face to prevent FOUT layout shift); desktop uses fontsource's "Inter Variable".
 // Both resolve to Inter glyphs, so rendering is identical in practice.
-// Per-character fallback: Latin chars render with Inter, CJK chars render with
-// the platform-native Chinese/Korean fallback when needed.
+// Per-character fallback: Latin chars render with Inter, CJK chars render with the
+// platform-native Chinese/Korean fallback when needed. Chinese fonts must stay before
+// Korean fonts so zh users do not receive Korean Hanja glyph shapes.
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-sans",
@@ -24,12 +25,12 @@ const inter = Inter({
     "-apple-system",
     "BlinkMacSystemFont",
     "Segoe UI",
-    "Apple SD Gothic Neo",
-    "Malgun Gothic",
     "PingFang SC",
     "Microsoft YaHei",
-    "Noto Sans CJK KR",
     "Noto Sans CJK SC",
+    "Apple SD Gothic Neo",
+    "Malgun Gothic",
+    "Noto Sans CJK KR",
     "sans-serif",
   ],
 });
