@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { ChevronDown, MessageSquare } from "lucide-react";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import { useWSEvent } from "@multica/core/realtime";
@@ -10,22 +10,20 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useTimeAgo } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
 import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
+import { sortTaskRunsByCreatedAtAsc } from "../utils/task-runs";
 import { TaskTraceOutput } from "./task-trace-output";
 
 interface AgentStreamSidebarProps {
   issueId: string;
+  onHighlightComment?: (commentId: string) => void;
 }
 
 const ACTIVE_STATUSES = new Set(["queued", "dispatched", "running"]);
 
-function taskTime(task: AgentTask): number {
-  const value = task.completed_at ?? task.started_at ?? task.dispatched_at ?? task.created_at;
-  return value ? Date.parse(value) || 0 : 0;
-}
-
-export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
+export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamSidebarProps) {
+  const { t } = useT("issues");
   const timeAgo = useTimeAgo();
 
   const { data: tasks = [] } = useQuery({
@@ -35,25 +33,24 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
     refetchOnWindowFocus: false,
   });
 
-  const activeTasks = useMemo(
-    () =>
-      [...tasks]
-        .filter((t) => ACTIVE_STATUSES.has(t.status))
-        .sort((a, b) => taskTime(b) - taskTime(a)),
+  const chronologicalTasks = useMemo(
+    () => sortTaskRunsByCreatedAtAsc(tasks),
     [tasks],
+  );
+
+  const activeTasks = useMemo(
+    () => chronologicalTasks.filter((t) => ACTIVE_STATUSES.has(t.status)),
+    [chronologicalTasks],
   );
 
   const recentTasks = useMemo(
-    () =>
-      [...tasks]
-        .filter((t) => !ACTIVE_STATUSES.has(t.status))
-        .sort((a, b) => taskTime(b) - taskTime(a)),
-    [tasks],
+    () => chronologicalTasks.filter((t) => !ACTIVE_STATUSES.has(t.status)),
+    [chronologicalTasks],
   );
 
   const allSorted = useMemo(
-    () => [...activeTasks, ...recentTasks],
-    [activeTasks, recentTasks],
+    () => chronologicalTasks,
+    [chronologicalTasks],
   );
 
   // Selection logic: pick a sensible default, then keep the current active run focused.
@@ -173,7 +170,7 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
           : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
       )}
     >
-      {selectorOpen ? "Collapse" : "Runs"}
+      {selectorOpen ? t(($) => $.agent_stream.collapse) : t(($) => $.agent_stream.runs)}
       <ChevronDown
         className={cn(
           "h-3 w-3 transition-transform",
@@ -198,6 +195,7 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
               paused={primaryTask.id === selectedTask?.id ? paused : false}
               timeAgo={timeAgo}
               onSelect={handleSelect}
+              onHighlightComment={onHighlightComment}
               trailingAction={runToggleButton}
               pinned
             />
@@ -211,6 +209,7 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
                     paused={task.id === selectedTask?.id ? paused : false}
                     timeAgo={timeAgo}
                     onSelect={handleSelect}
+                    onHighlightComment={onHighlightComment}
                   />
                 ))}
               </div>
@@ -218,7 +217,7 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
           </>
         ) : (
           <div className="flex items-center justify-between gap-2 rounded-md px-2 py-2 text-xs text-muted-foreground">
-            No runs yet
+            {t(($) => $.agent_stream.no_runs)}
             {runToggleButton}
           </div>
         )}
@@ -228,7 +227,7 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
             {hiddenRecentTasks.length > 0 && (
               <div className="space-y-0.5">
                 <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
-                  Recent
+                  {t(($) => $.agent_stream.other_runs)}
                 </div>
                 {hiddenRecentTasks.map((task) => (
                   <PanelRunRow
@@ -238,6 +237,7 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
                     paused={false}
                     timeAgo={timeAgo}
                     onSelect={handleSelectAndClose}
+                    onHighlightComment={onHighlightComment}
                   />
                 ))}
               </div>
@@ -245,7 +245,7 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
 
             {hiddenRunCount === 0 && (
               <div className="px-2 py-2 text-xs text-muted-foreground/70">
-                No other runs.
+                {t(($) => $.agent_stream.no_other_runs)}
               </div>
             )}
           </div>
@@ -256,7 +256,7 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
       <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-background">
         {!selectedTask ? (
           <div className="flex h-full items-center justify-center px-3 py-4 text-xs text-muted-foreground">
-            No local agent stream yet.
+            {t(($) => $.agent_stream.no_local_stream)}
           </div>
         ) : (
           <TaskTraceOutput key={selectedTask.id} task={selectedTask} defaultOpen fill />
@@ -290,6 +290,7 @@ function PanelRunRow({
   paused,
   timeAgo,
   onSelect,
+  onHighlightComment,
   trailingAction,
   pinned = false,
 }: {
@@ -298,14 +299,24 @@ function PanelRunRow({
   paused: boolean;
   timeAgo: (d: string) => string;
   onSelect: (id: string) => void;
+  onHighlightComment?: (commentId: string) => void;
   trailingAction?: ReactNode;
   pinned?: boolean;
 }) {
   const trigger = useTriggerText(task);
+  const { t } = useT("issues");
   const time = activeTimeText(task, timeAgo);
   const tone = STATUS_TONE[task.status] ?? "text-muted-foreground";
   const statusLabel = statusText(task.status);
   const isActive = ACTIVE_STATUSES.has(task.status);
+  const jumpToCommentLabel = t(($) => $.agent_stream.jump_to_comment);
+  const handleCommentClick =
+    task.trigger_comment_id && onHighlightComment
+      ? (event: ReactMouseEvent<HTMLButtonElement>) => {
+          event.stopPropagation();
+          onHighlightComment(task.trigger_comment_id!);
+        }
+      : undefined;
 
   return (
     <div
@@ -334,6 +345,17 @@ function PanelRunRow({
           <span className="text-muted-foreground/60"> · {time}</span>
         </span>
       </button>
+      {handleCommentClick && (
+        <button
+          type="button"
+          onClick={handleCommentClick}
+          aria-label={jumpToCommentLabel}
+          title={jumpToCommentLabel}
+          className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+        </button>
+      )}
       {trailingAction}
     </div>
   );

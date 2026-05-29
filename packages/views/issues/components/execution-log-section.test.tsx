@@ -79,6 +79,34 @@ beforeEach(() => {
 });
 
 describe("ExecutionLogSection local CLI rows", () => {
+  it("numbers and renders past runs by created_at ascending", async () => {
+    mockApi.listTasksByIssue.mockResolvedValue([
+      makeTask({
+        id: "run-new",
+        created_at: "2026-01-01T00:03:00Z",
+        completed_at: "2026-01-01T00:04:00Z",
+        trigger_summary: "Newest run",
+      }),
+      makeTask({
+        id: "run-old",
+        created_at: "2026-01-01T00:01:00Z",
+        completed_at: "2026-01-01T00:02:00Z",
+        trigger_summary: "Oldest run",
+      }),
+    ]);
+
+    renderSection();
+
+    await waitFor(() => expect(screen.getByText("Execution log")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Show past runs (2)"));
+
+    const labels = screen.getAllByText(/^#\d+$/).map((el) => el.textContent);
+    expect(labels).toEqual(["#1", "#2"]);
+    expect(screen.getByText("Oldest run").compareDocumentPosition(screen.getByText("Newest run"))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
   it("renders CLI name, owner, cwd, transcript, and exit code", async () => {
     mockApi.listTasksByIssue.mockResolvedValue([
       makeTask({
