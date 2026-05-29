@@ -1,4 +1,5 @@
 import type { SupportedLocale } from "@multica/core/i18n";
+export { docsHrefForLocale } from "@/lib/docs-href";
 import { getRequestLocale } from "@/lib/request-locale";
 
 export const getUseCaseLocale = getRequestLocale;
@@ -43,11 +44,3 @@ export const useCaseText: Record<SupportedLocale, UseCaseText> = {
     tableOfContents: "이 페이지에서",
   },
 };
-
-// Secondary CTA points at the docs entry that matches the active locale,
-// mirroring the convention in features/landing/i18n/zh.ts.
-export function docsHrefForLocale(locale: SupportedLocale): string {
-  if (locale === "zh-Hans") return "/docs/zh";
-  if (locale === "ko") return "/docs/ko";
-  return "/docs";
-}
