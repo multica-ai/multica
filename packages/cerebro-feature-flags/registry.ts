@@ -33,6 +33,7 @@ export type CerebroFlagKey =
   | "cerebro_simple_tool_policy"
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
+  | "cerebro_move_comment_to_thread"
   | "cerebro_agent_passes"
   | "cerebro_references"
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
@@ -82,6 +83,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // an accidental prod-behaviour flip.
   cerebro_approvals: true,
   cerebro_move_comment_to_subissue: true,
+  cerebro_move_comment_to_thread: true,
   cerebro_agent_passes: true,
   cerebro_references: true,
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
@@ -261,6 +263,12 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Move comment thread to sub-issue",
     description:
       "Show a 'Move to sub-issue' action on root comments. Lifts the thread (root + replies) into a new sub-issue and leaves a 'Moved to MUL-NN' breadcrumb on the original comment. JEH-1309.",
+  },
+  {
+    key: "cerebro_move_comment_to_thread",
+    label: "Move comments to a new thread",
+    description:
+      "Add a 'Reply in new thread' action on comments. Enters a select mode where you pick comments in the thread and lift them into a new thread on the same issue; each moved comment is left as a breadcrumb linking to the new thread. JEH-2488.",
   },
   {
     key: "cerebro_agent_passes",

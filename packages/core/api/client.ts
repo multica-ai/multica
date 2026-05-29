@@ -32,6 +32,7 @@ import type {
   IssueSubscriber,
   Comment,
   MoveCommentToSubIssueResponse,
+  MoveCommentsToThreadResponse,
   Reaction,
   IssueReaction,
   Workspace,
@@ -1468,6 +1469,14 @@ export class ApiClient {
     return this.fetch(`/api/comments/${commentId}/move-to-subissue`, {
       method: "POST",
       body: JSON.stringify(title ? { title } : {}),
+    });
+  }
+
+  // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 lift picked comments into a new thread.
+  async moveCommentsToNewThread(commentIds: string[]): Promise<MoveCommentsToThreadResponse> {
+    return this.fetch(`/api/comments/move-to-thread`, {
+      method: "POST",
+      body: JSON.stringify({ comment_ids: commentIds }),
     });
   }
 

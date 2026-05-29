@@ -951,6 +951,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Delete("/api/attachments/{id}", h.DeleteAttachment)
 
 			// Comments
+			// CEREBRO-PATCH(comments-move-to-thread): JEH-2488 multi-select → new thread.
+			r.Post("/api/comments/move-to-thread", cerebroCommentsHandler.MoveToThread)
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
 				r.Put("/", h.UpdateComment)
 				r.Delete("/", h.DeleteComment)

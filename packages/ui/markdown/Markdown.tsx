@@ -181,7 +181,8 @@ function createComponents(
     a: ({ href, children }) => {
       // Mention links: mention://member/id, mention://agent/id, mention://issue/id, mention://all/all
       if (href?.startsWith('mention://')) {
-        const mentionMatch = href.match(/^mention:\/\/(member|agent|issue|all)\/(.+)$/)
+        // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 add `comment` mention type for in-issue thread jumps.
+        const mentionMatch = href.match(/^mention:\/\/(member|agent|issue|all|comment)\/(.+)$/)
         if (mentionMatch?.[1] && mentionMatch[2]) {
           const type = mentionMatch[1]
           const id = mentionMatch[2]

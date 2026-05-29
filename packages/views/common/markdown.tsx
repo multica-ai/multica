@@ -9,6 +9,8 @@ import {
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
+// CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 in-issue jump link for moved-comment breadcrumbs.
+import { CommentMentionLink } from "../issues/components/cerebro-comment-mention-link";
 import {
   Attachment as AttachmentRenderer,
   AttachmentDownloadProvider,
@@ -40,6 +42,10 @@ function defaultRenderMention({
 }): React.ReactNode {
   if (type === "issue") {
     return <IssueMentionCard issueId={id} />;
+  }
+  // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 moved-comment breadcrumb → in-issue jump link.
+  if (type === "comment") {
+    return <CommentMentionLink commentId={id} />;
   }
   return null;
 }

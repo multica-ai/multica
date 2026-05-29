@@ -493,6 +493,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/comments/move-to-thread",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/comments/{commentId}/move-to-subissue",
       "gate": "workspace_member"
     },
@@ -1699,6 +1703,10 @@
     {
       "id": "issue comment list",
       "exempt": "read-only — wraps GET /api/issues/{id}/comments"
+    },
+    {
+      "id": "issue comment move",
+      "gate": "via:POST /api/comments/move-to-thread"
     },
     {
       "id": "issue create",

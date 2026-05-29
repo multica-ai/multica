@@ -691,6 +691,18 @@ export function useMoveCommentToSubIssue(issueId: string, wsId: string) {
   });
 }
 
+// CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 move picked comments into a new thread on the same issue.
+export function useMoveCommentsToNewThread(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ commentIds }: { commentIds: string[] }) =>
+      api.moveCommentsToNewThread(commentIds),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+    },
+  });
+}
+
 export function useResolveComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
