@@ -23,7 +23,7 @@ export function useIssueSubscribers(wsId: string, issueId: string, userId?: stri
   useWSReconnect(
     useCallback(() => {
       qc.invalidateQueries({ queryKey: issueKeys.subscribers(wsId, issueId) });
-    }, [qc, issueId]),
+    }, [qc, wsId, issueId]),
   );
 
   // --- WS event handlers ---
@@ -58,7 +58,7 @@ export function useIssueSubscribers(wsId: string, issueId: string, userId?: stri
           },
         );
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -77,7 +77,7 @@ export function useIssueSubscribers(wsId: string, issueId: string, userId?: stri
             ),
         );
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 

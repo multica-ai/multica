@@ -23,7 +23,7 @@ export function useIssueReactions(wsId: string, issueId: string, userId?: string
   useWSReconnect(
     useCallback(() => {
       qc.invalidateQueries({ queryKey: issueKeys.reactions(wsId, issueId) });
-    }, [qc, issueId]),
+    }, [qc, wsId, issueId]),
   );
 
   // --- WS event handlers (update server cache for other users' actions) ---
@@ -43,7 +43,7 @@ export function useIssueReactions(wsId: string, issueId: string, userId?: string
           },
         );
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 
@@ -66,7 +66,7 @@ export function useIssueReactions(wsId: string, issueId: string, userId?: string
             ),
         );
       },
-      [qc, issueId],
+      [qc, wsId, issueId],
     ),
   );
 

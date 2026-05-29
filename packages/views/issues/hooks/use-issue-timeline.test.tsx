@@ -122,7 +122,7 @@ describe("useIssueTimeline", () => {
   // listing the whole mutation object as a dep flips its identity every time
   // — that is the exact regression this test guards against.
   it("submitReply / editComment / deleteComment / toggleReaction keep identity across unrelated re-renders", () => {
-    const { result, rerender } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const { result, rerender } = renderHook(() => useIssueTimeline("ws-1", "issue-1", "user-1"));
 
     const first = {
       submitComment: result.current.submitComment,
@@ -148,13 +148,13 @@ describe("useIssueTimeline", () => {
       { type: "comment", id: "c2", actor_type: "member", actor_id: "u", created_at: "2026-05-06T02:00:00Z" },
       { type: "comment", id: "c3", actor_type: "member", actor_id: "u", created_at: "2026-05-06T03:00:00Z" },
     ];
-    const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const { result } = renderHook(() => useIssueTimeline("ws-1", "issue-1", "user-1"));
     expect(result.current.timeline.map((e) => e.id)).toEqual(["c1", "c2", "c3"]);
   });
 
   it("comment:created appends the new entry to the cache", () => {
     queryState.data = [];
-    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    renderHook(() => useIssueTimeline("ws-1", "issue-1", "user-1"));
     const handler = wsHandlers.get("comment:created");
     act(() => {
       handler!({
@@ -182,7 +182,7 @@ describe("useIssueTimeline", () => {
       { type: "comment", id: "c1", actor_type: "member", actor_id: "u", created_at: "2026-05-06T01:00:00Z" },
       { type: "comment", id: "c3", actor_type: "member", actor_id: "u", created_at: "2026-05-06T03:00:00Z" },
     ];
-    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    renderHook(() => useIssueTimeline("ws-1", "issue-1", "user-1"));
     const handler = wsHandlers.get("comment:created");
     act(() => {
       handler!({
@@ -210,7 +210,7 @@ describe("useIssueTimeline", () => {
       { type: "comment", id: "c2", actor_type: "member", actor_id: "u", created_at: "2026-05-06T02:00:00Z" },
       { type: "comment", id: "c3", actor_type: "member", actor_id: "u", created_at: "2026-05-06T03:00:00Z" },
     ];
-    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    renderHook(() => useIssueTimeline("ws-1", "issue-1", "user-1"));
     const handler = wsHandlers.get("comment:created");
     act(() => {
       handler!({
@@ -235,7 +235,7 @@ describe("useIssueTimeline", () => {
 
   it("ignores WS events for other issues", () => {
     queryState.data = [];
-    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    renderHook(() => useIssueTimeline("ws-1", "issue-1", "user-1"));
     const handler = wsHandlers.get("comment:created");
     act(() => {
       handler!({
@@ -298,7 +298,7 @@ describe("useIssueTimeline", () => {
         resolved_by_id: null,
       },
     ];
-    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    renderHook(() => useIssueTimeline("ws-1", "issue-1", "user-1"));
     const handler = wsHandlers.get("comment:resolved");
     expect(handler).toBeDefined();
     act(() => {
@@ -353,7 +353,7 @@ describe("useIssueTimeline", () => {
         resolved_by_id: "u",
       },
     ];
-    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    renderHook(() => useIssueTimeline("ws-1", "issue-1", "user-1"));
     const handler = wsHandlers.get("comment:unresolved");
     expect(handler).toBeDefined();
     act(() => {
@@ -401,7 +401,7 @@ describe("useIssueTimeline", () => {
         resolved_by_id: null,
       },
     ];
-    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    renderHook(() => useIssueTimeline("ws-1", "issue-1", "user-1"));
     const handler = wsHandlers.get("comment:resolved");
     act(() => {
       handler!({
