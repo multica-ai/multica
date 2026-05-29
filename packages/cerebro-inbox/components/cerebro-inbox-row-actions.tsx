@@ -5,9 +5,9 @@ import {
   useEffect,
   useRef,
   useState,
-  type FormEvent,
   type ReactNode,
 } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Archive,
   ArchiveRestore,
@@ -37,9 +37,9 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
-import { Label } from "@multica/ui/components/ui/label";
 import { Calendar } from "@multica/ui/components/ui/calendar";
 import { TimeInput } from "@multica/ui/components/ui/time-input";
+import { CerebroReminderWheel } from "./cerebro-reminder-wheel";
 import { useMarkInboxRead } from "@multica/core/inbox/mutations";
 import type { InboxItem } from "@multica/core/types";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
@@ -693,12 +693,17 @@ function MobileRowActions({
 }
 
 /**
- * "Remind me" surface. Mobile renders a vaul bottom-sheet (Drawer); desktop
- * renders a centered Dialog — the Drawer's `inset-x-0` bottom variant
- * stretches edge-to-edge on wide screens, which looked broken (FIR-2313).
- * Both share the same body: quick presets + a custom date/time picker built
- * from the shared Calendar + TimeInput, replacing the raw native
- * `datetime-local` input that had no styled picker.
+ * "Remind me" surface, redesigned to match Slack's reminder picker (FIR-2526).
+ * Mobile renders a vaul bottom-sheet (Drawer); desktop renders a centered
+ * Dialog (modal) — the Drawer's `inset-x-0` bottom variant stretches
+ * edge-to-edge on wide screens, which looked broken (FIR-2313).
+ *
+ * Both share the same body: a vertical list of quick presets plus a "Custom
+ * date and time" row that reveals a date/time picker and a single primary
+ * "Set reminder" button. The custom picker differs by platform — a scroll
+ * wheel on mobile (touch-native), the shared Calendar + TimeInput on desktop
+ * (a momentum wheel is a poor fit for a mouse) — but the functions are
+ * identical, per the product decision on this issue.
  */
 function ReminderSheet({
   isMobile,
@@ -717,56 +722,70 @@ function ReminderSheet({
   onOpenChange: (open: boolean) => void;
   onSchedule: (mutedUntil: Date) => void;
 }) {
+  const { i18n } = useTranslation();
   const now = new Date();
-  const reminderOptions = [
-    { label: strings.remind_one_hour, date: addHours(1) },
-    { label: strings.remind_three_hours, date: addHours(3) },
-    { label: strings.remind_tomorrow_morning, date: nextBusinessDayNineAm() },
-    { label: strings.remind_monday, date: nextMondayNineAm() },
+
+  const presets = [
+    { label: strings.remind_thirty_min, date: () => addHours(0.5) },
+    { label: strings.remind_one_hour, date: () => addHours(1) },
+    { label: strings.remind_three_hours, date: () => addHours(3) },
+    { label: strings.remind_monday, date: () => nextMondayNineAm() },
   ];
 
   const planned = fromDateTimeLocalValue(customReminder);
   const canSave = planned !== null && planned.getTime() > now.getTime();
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!planned || planned.getTime() <= Date.now()) return;
-    onSchedule(planned);
-  };
-
   const body = (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2">
-        {reminderOptions.map((option) => (
-          <Button
-            key={option.label}
-            type="button"
-            variant="outline"
-            className="justify-start"
-            onClick={() => onSchedule(option.date)}
-          >
-            {option.label}
-          </Button>
+      {/* Quick presets as a clean vertical list (Slack-style). Each applies
+          immediately on tap — no extra confirmation. */}
+      <ul className="divide-y divide-border">
+        {presets.map((preset) => (
+          <li key={preset.label}>
+            <button
+              type="button"
+              className="w-full py-3 text-left text-base text-foreground/90 hover:text-foreground"
+              onClick={() => onSchedule(preset.date())}
+            >
+              {preset.label}
+            </button>
+          </li>
         ))}
-      </div>
-      <form className="space-y-3" onSubmit={handleSubmit}>
-        <div className="space-y-1.5">
-          <Label>{strings.remind_custom}</Label>
+      </ul>
+
+      {/* Custom date + time, always visible below the presets: a scroll wheel
+          on mobile, the Calendar + TimeInput on desktop. One primary button
+          commits the picked moment. */}
+      <div className="space-y-3 border-t border-border pt-3">
+        <p className="text-sm font-medium text-muted-foreground">
+          {strings.remind_custom_datetime}
+        </p>
+        {isMobile ? (
+          <CerebroReminderWheel
+            value={planned ?? nextBusinessDayNineAm()}
+            todayLabel={strings.remind_today}
+            tomorrowLabel={strings.remind_tomorrow}
+            locale={i18n.language}
+            onChange={(date) => onCustomReminderChange(toDateTimeLocalValue(date))}
+          />
+        ) : (
           <CustomReminderPicker
             value={customReminder}
             min={now}
             onChange={onCustomReminderChange}
           />
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-            {strings.remind_cancel}
-          </Button>
-          <Button type="submit" disabled={!canSave}>
-            {strings.remind_save}
-          </Button>
-        </div>
-      </form>
+        )}
+        <Button
+          type="button"
+          className="w-full"
+          disabled={!canSave}
+          onClick={() => {
+            if (planned && planned.getTime() > Date.now()) onSchedule(planned);
+          }}
+        >
+          {strings.remind_set}
+        </Button>
+      </div>
     </div>
   );
 
