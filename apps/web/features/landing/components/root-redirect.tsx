@@ -5,24 +5,23 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceListOptions } from "@multica/core/workspace";
-import { resolvePostAuthDestination, useHasOnboarded } from "@multica/core/paths";
+import {
+  resolvePostAuthDestination,
+  useHasOnboarded,
+} from "@multica/core/paths";
 import { getPreferredStartPage } from "@multica/cerebro-preferences/views";
 
 /**
- * Client-side fallback redirect for authenticated visitors on the landing page.
+ * Client-side redirect for the root URL. The proxy already handles the
+ * common cases server-side (anon → /login, logged-in-with-cookie → last
+ * workspace). This component only fires for the rare case where the user
+ * is authenticated but has no `last_workspace_slug` cookie yet (first
+ * login since the slug migration, or after the cookie was cleared).
  *
- * The primary path for logged-in users hitting `/` is a server-side redirect
- * in the Next.js proxy/middleware, driven by the `last_workspace_slug` cookie.
- * That cookie is set by the workspace layout on every visit. But on *first
- * login* — before the user has ever visited a workspace — the cookie is
- * absent, so the proxy falls through to the landing page. This component
- * covers that gap: once auth is resolved and the workspace list has loaded,
- * push the user into their workspace (or /onboarding if they have none).
- *
- * Renders nothing. Uses `router.replace` so the landing page never enters
- * browser history for authenticated users.
+ * Renders nothing — uses `router.replace` so the root page never enters
+ * browser history.
  */
-export function RedirectIfAuthenticated() {
+export function RootRedirect() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
@@ -34,8 +33,12 @@ export function RedirectIfAuthenticated() {
   });
 
   useEffect(() => {
-    if (isLoading || !user || !isFetched) return;
-    // CEREBRO-PATCH(jeh-1642-start-page-boot): mobile start page preference
+    if (isLoading) return;
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+    if (!isFetched) return;
     const fallback = resolvePostAuthDestination(list, hasOnboarded);
     const isMobile =
       typeof window !== "undefined" && window.innerWidth < 768;
