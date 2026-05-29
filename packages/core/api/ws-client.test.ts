@@ -151,7 +151,7 @@ describe("WSClient", () => {
         const lastWarn = calls[calls.length - 1];
         if (!lastWarn) throw new Error("no reconnect warn log found");
         const match = (lastWarn[0] as string).match(/reconnecting in (\d+)s/);
-        if (!match) throw new Error("could not parse delay from: " + lastWarn[0]);
+        if (!match?.[1]) throw new Error("could not parse delay from: " + lastWarn[0]);
         return parseInt(match[1], 10);
       };
 
