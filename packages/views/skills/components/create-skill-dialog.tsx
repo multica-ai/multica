@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { type ChangeEvent, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
   ChevronRight,
   Download,
+  FolderOpen,
   HardDrive,
   Loader2,
   Pencil,
@@ -15,7 +16,7 @@ import {
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
-import type { Skill } from "@multica/core/types";
+import type { BatchImportSkillsResponse, CreateSkillRequest, Skill } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { isImeComposing } from "@multica/core/utils";
 import {
@@ -27,6 +28,7 @@ import {
   DialogContent,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
+import { Badge } from "@multica/ui/components/ui/badge";
 import {
   Tooltip,
   TooltipContent,
@@ -41,9 +43,10 @@ import { cn } from "@multica/ui/lib/utils";
 import { openExternal } from "../../platform";
 import { RuntimeLocalSkillImportPanel } from "./runtime-local-skill-import-panel";
 import { useT } from "../../i18n";
+import { parseSkillDirectory } from "../lib/parse-skill-directory";
 import { isNameConflictError } from "../lib/utils";
 
-type Method = "chooser" | "manual" | "url" | "runtime";
+type Method = "chooser" | "manual" | "url" | "local" | "runtime";
 
 function seedAfterCreate(
   qc: ReturnType<typeof useQueryClient>,
@@ -64,10 +67,11 @@ function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
   const methods: {
     key: Method;
     icon: typeof Plus;
-    titleKey: "manual" | "url" | "runtime";
+    titleKey: "manual" | "url" | "local" | "runtime";
   }[] = [
     { key: "manual", icon: Plus, titleKey: "manual" },
     { key: "url", icon: Download, titleKey: "url" },
+    { key: "local", icon: FolderOpen, titleKey: "local" },
     { key: "runtime", icon: HardDrive, titleKey: "runtime" },
   ];
   return (
@@ -235,6 +239,247 @@ function ManualForm({
 }
 
 // ---------------------------------------------------------------------------
+// Local directory import form
+// ---------------------------------------------------------------------------
+
+function LocalDirectoryForm({
+  onCreated,
+  onBulkDone,
+  onCancel,
+}: {
+  onCreated: (skill: Skill) => void;
+  onBulkDone: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useT("skills");
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const fadeStyle = useScrollFade(scrollRef);
+  const [parsedSkills, setParsedSkills] = useState<CreateSkillRequest[]>([]);
+  const [batchResult, setBatchResult] = useState<BatchImportSkillsResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleDirectorySelect = async (e: ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    setLoading(true);
+    setError("");
+    setBatchResult(null);
+    try {
+      const skills = await parseSkillDirectory(fileList);
+      if (skills.length === 0) {
+        setParsedSkills([]);
+        setError(t(($) => $.create.local.no_skills_error));
+        return;
+      }
+      setParsedSkills(skills);
+    } catch (err) {
+      setParsedSkills([]);
+      setError(err instanceof Error ? err.message : t(($) => $.create.local.parse_failed));
+    } finally {
+      setLoading(false);
+      e.target.value = "";
+    }
+  };
+
+  const importParsedSkills = async () => {
+    if (parsedSkills.length === 0) return;
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api.batchImportSkills({ skills: parsedSkills });
+      setBatchResult(result);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) }),
+        qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) }),
+      ]);
+      for (const skill of result.created) {
+        qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, skill);
+      }
+      toast.success(
+        t(($) => $.create.local.toast_imported, {
+          count: result.created.length,
+        }),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(($) => $.create.local.import_failed));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDone = () => {
+    if (batchResult?.created.length === 1) {
+      onCreated(batchResult.created[0]!);
+      return;
+    }
+    onBulkDone();
+  };
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        className="hidden"
+        onChange={handleDirectorySelect}
+        // @ts-expect-error webkitdirectory is Chromium/WebKit directory picker API.
+        webkitdirectory=""
+        directory=""
+      />
+
+      <div
+        ref={scrollRef}
+        style={fadeStyle}
+        className="flex-1 min-h-0 space-y-4 overflow-y-auto px-5 py-4"
+      >
+        {!batchResult && parsedSkills.length === 0 && (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed px-4 py-10 text-center">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => inputRef.current?.click()}
+              disabled={loading}
+            >
+              {loading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <FolderOpen className="h-3.5 w-3.5" />
+              )}
+              {t(($) => $.create.local.select_directory)}
+            </Button>
+            <p className="max-w-xs text-xs text-muted-foreground">
+              {t(($) => $.create.local.supported_hint)}
+            </p>
+          </div>
+        )}
+
+        {!batchResult && parsedSkills.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.create.local.detected_count, {
+                  count: parsedSkills.length,
+                })}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => inputRef.current?.click()}
+                disabled={loading}
+              >
+                {t(($) => $.create.local.choose_another)}
+              </Button>
+            </div>
+            <div className="space-y-1.5">
+              {parsedSkills.map((skill, index) => (
+                <div
+                  key={`${skill.name}-${index}`}
+                  className="flex items-center gap-2 rounded-md border px-3 py-2"
+                >
+                  <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{skill.name}</div>
+                    {skill.description && (
+                      <div className="truncate text-xs text-muted-foreground">
+                        {skill.description}
+                      </div>
+                    )}
+                  </div>
+                  {(skill.files?.length ?? 0) > 0 && (
+                    <Badge variant="outline" className="shrink-0">
+                      {t(($) => $.create.local.file_count, {
+                        count: skill.files?.length ?? 0,
+                      })}
+                    </Badge>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {batchResult && (
+          <div className="space-y-3 rounded-lg border px-4 py-3">
+            <p className="text-sm font-medium">
+              {t(($) => $.create.local.import_complete)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t(($) => $.create.local.import_summary, {
+                created: batchResult.created.length,
+                skipped: batchResult.skipped.length,
+              })}
+            </p>
+            {batchResult.skipped.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.create.local.skipped_names, {
+                  names: batchResult.skipped.join(", "),
+                })}
+              </p>
+            )}
+          </div>
+        )}
+
+        {error && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          >
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center justify-end gap-2 border-t bg-muted/30 px-5 py-3">
+        {batchResult ? (
+          <Button type="button" size="sm" onClick={handleDone}>
+            {t(($) => $.create.local.done)}
+          </Button>
+        ) : (
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onCancel}
+              disabled={loading}
+            >
+              {t(($) => $.create.local.cancel)}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={importParsedSkills}
+              disabled={loading || parsedSkills.length === 0}
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  {t(($) => $.create.local.importing)}
+                </>
+              ) : (
+                <>
+                  <Download className="h-3 w-3" />
+                  {t(($) => $.create.local.import_button, {
+                    count: parsedSkills.length,
+                  })}
+                </>
+              )}
+            </Button>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // URL import form
 // ---------------------------------------------------------------------------
 
@@ -244,8 +489,8 @@ function detectUrlSource(url: string): DetectedSource {
   const u = url.trim().toLowerCase();
   if (u.includes("clawhub.ai")) return "clawhub";
   if (u.includes("skills.sh")) return "skills.sh";
-  if (u.includes("github.com")) return "github";
-  if (u.includes("gitee.com")) return "gitee";
+  if (u.includes("github.com") || u.startsWith("git@github.com:")) return "github";
+  if (u.includes("gitee.com") || u.startsWith("git@gitee.com:")) return "gitee";
   return null;
 }
 
@@ -289,6 +534,7 @@ function UrlForm({
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [url, setUrl] = useState("");
+  const [giteeToken, setGiteeToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const source = detectUrlSource(url);
@@ -301,7 +547,11 @@ function UrlForm({
     setLoading(true);
     setError("");
     try {
-      const skill = await api.importSkill({ url: trimmed });
+      const token = giteeToken.trim();
+      const skill = await api.importSkill({
+        url: trimmed,
+        ...(source === "gitee" && token ? { gitee_token: token } : {}),
+      });
       seedAfterCreate(qc, wsId, skill);
       toast.success(t(($) => $.create.url.toast_imported));
       onCreated(skill);
@@ -346,6 +596,32 @@ function UrlForm({
             }}
           />
         </div>
+
+        {source === "gitee" && (
+          <div className="space-y-1.5">
+            <Label htmlFor="gitee-token" className="text-xs text-muted-foreground">
+              {t(($) => $.create.url.gitee_token_label)}
+            </Label>
+            <Input
+              id="gitee-token"
+              type="password"
+              autoComplete="off"
+              value={giteeToken}
+              onChange={(e) => {
+                setGiteeToken(e.target.value);
+                setError("");
+              }}
+              placeholder={t(($) => $.create.url.gitee_token_placeholder)}
+              className="font-mono text-sm"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submit();
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t(($) => $.create.url.gitee_token_hint)}
+            </p>
+          </div>
+        )}
 
         <div>
           <p className="mb-2 text-xs text-muted-foreground">
@@ -518,6 +794,13 @@ export function CreateSkillDialog({
         {method === "url" && (
           <UrlForm
             onCreated={handleCreated}
+            onCancel={() => setMethod("chooser")}
+          />
+        )}
+        {method === "local" && (
+          <LocalDirectoryForm
+            onCreated={handleCreated}
+            onBulkDone={onClose}
             onCancel={() => setMethod("chooser")}
           />
         )}

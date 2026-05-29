@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -455,7 +456,8 @@ func (h *Handler) DeleteSkill(w http.ResponseWriter, r *http.Request) {
 // --- Skill import ---
 
 type ImportSkillRequest struct {
-	URL string `json:"url"`
+	URL        string `json:"url"`
+	GiteeToken string `json:"gitee_token,omitempty"`
 }
 
 // Per-import bundle limits. These mirror the local-runtime importer so that
@@ -580,11 +582,13 @@ type clawhubFileEntry struct {
 // --- GitHub types (for skills.sh) ---
 
 type githubContentEntry struct {
-	Name        string `json:"name"`
-	Path        string `json:"path"`
-	Type        string `json:"type"` // "file" or "dir"
-	URL         string `json:"url"`
-	DownloadURL string `json:"download_url"`
+	Name        string  `json:"name"`
+	Path        string  `json:"path"`
+	Type        string  `json:"type"` // "file" or "dir"
+	URL         string  `json:"url"`
+	DownloadURL string  `json:"download_url"`
+	Content     *string `json:"content,omitempty"`
+	Encoding    string  `json:"encoding,omitempty"`
 }
 
 type githubRepoInfo struct {
@@ -642,6 +646,13 @@ func detectImportSource(raw string) (importSource, string, error) {
 		return 0, "", fmt.Errorf("empty URL")
 	}
 
+	if sshURL, ok, err := normalizeSSHGitURL(raw); ok {
+		if err != nil {
+			return 0, "", err
+		}
+		raw = sshURL
+	}
+
 	normalized := raw
 	if !strings.HasPrefix(normalized, "http://") && !strings.HasPrefix(normalized, "https://") {
 		normalized = "https://" + normalized
@@ -649,7 +660,7 @@ func detectImportSource(raw string) (importSource, string, error) {
 
 	parsed, err := url.Parse(normalized)
 	if err != nil {
-		return 0, "", fmt.Errorf("invalid URL: %w", err)
+		return 0, "", supportedImportURLFormatError(raw)
 	}
 
 	host := strings.ToLower(parsed.Hostname())
@@ -667,8 +678,39 @@ func detectImportSource(raw string) (importSource, string, error) {
 		if !strings.Contains(raw, "/") || !strings.Contains(raw, ".") {
 			return sourceClawHub, raw, nil
 		}
-		return 0, "", fmt.Errorf("unsupported source: %s (supported: clawhub.ai, skills.sh, github.com, gitee.com)", host)
+		return 0, "", supportedImportURLFormatError(raw)
 	}
+}
+
+func normalizeSSHGitURL(raw string) (string, bool, error) {
+	if !strings.HasPrefix(raw, "git@") {
+		return "", false, nil
+	}
+	afterUser := strings.TrimPrefix(raw, "git@")
+	host, repoPath, ok := strings.Cut(afterUser, ":")
+	if !ok || host == "" || repoPath == "" {
+		return "", true, supportedImportURLFormatError(raw)
+	}
+	host = strings.ToLower(strings.TrimSpace(host))
+	switch host {
+	case "github.com", "gitee.com":
+	default:
+		return "", true, supportedImportURLFormatError(raw)
+	}
+	repoPath = strings.Trim(strings.TrimSpace(repoPath), "/")
+	repoPath = strings.TrimSuffix(repoPath, ".git")
+	parts := strings.Split(repoPath, "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", true, supportedImportURLFormatError(raw)
+	}
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return "https://" + host + "/" + strings.Join(parts, "/"), true, nil
+}
+
+func supportedImportURLFormatError(raw string) error {
+	return fmt.Errorf("invalid URL format %q. Supported formats include https://github.com/owner/repo, https://gitee.com/owner/repo, git@github.com:owner/repo.git, and git@gitee.com:owner/repo.git", raw)
 }
 
 // --- ClawHub import ---
@@ -1528,56 +1570,91 @@ func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, er
 // host, raw URL scheme, and auth differ.
 
 // doGiteeAPIGet performs a GET against a gitee.com/api/v5 URL, attaching the
-// GITEE_TOKEN bearer header when the env var is set.
-func doGiteeAPIGet(httpClient *http.Client, apiURL string) (*http.Response, error) {
+// per-import token when supplied, otherwise falling back to GITEE_TOKEN.
+func doGiteeAPIGet(httpClient *http.Client, apiURL, giteeToken string) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	addGiteeAuthHeader(req)
+	addGiteeAuthHeader(req, giteeToken)
 	return httpClient.Do(req)
 }
 
-func addGiteeAuthHeader(req *http.Request) {
+func addGiteeAuthHeader(req *http.Request, giteeToken string) {
 	if req == nil {
 		return
 	}
-	if token := strings.TrimSpace(os.Getenv("GITEE_TOKEN")); token != "" {
-		req.Header.Set("Authorization", "token " + token)
+	if token := effectiveGiteeToken(giteeToken); token != "" {
+		req.Header.Set("Authorization", "token "+token)
+	}
+}
+
+func effectiveGiteeToken(giteeToken string) string {
+	if token := strings.TrimSpace(giteeToken); token != "" {
+		return token
+	}
+	return strings.TrimSpace(os.Getenv("GITEE_TOKEN"))
+}
+
+var errGiteeAuthRequired = errors.New("该仓库为私有仓库，请提供 Gitee 个人访问令牌后重试")
+
+func giteeRepoAccessError(owner, repo string, statusCode int, giteeToken string) error {
+	repoLabel := fmt.Sprintf("gitee.com/%s/%s", owner, repo)
+	if effectiveGiteeToken(giteeToken) == "" {
+		switch statusCode {
+		case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+			return fmt.Errorf("%w: %s", errGiteeAuthRequired, repoLabel)
+		}
+	}
+	switch statusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("Gitee token does not have access to repository %s", repoLabel)
+	case http.StatusNotFound:
+		return fmt.Errorf("Gitee repository not found: %s", repoLabel)
+	default:
+		return fmt.Errorf("Gitee returned status %d for repository %s", statusCode, repoLabel)
 	}
 }
 
 // fetchGiteeDefaultBranch returns the default branch of a Gitee repository.
 // Falls back to "master" — Gitee's historical default — if the API call fails.
-func fetchGiteeDefaultBranch(httpClient *http.Client, owner, repo string) string {
+func fetchGiteeDefaultBranch(httpClient *http.Client, owner, repo, giteeToken string) (string, error) {
 	apiURL := fmt.Sprintf("https://gitee.com/api/v5/repos/%s/%s",
 		url.PathEscape(owner), url.PathEscape(repo))
-	resp, err := doGiteeAPIGet(httpClient, apiURL)
-	if err != nil || resp.StatusCode != http.StatusOK {
+	resp, err := doGiteeAPIGet(httpClient, apiURL, giteeToken)
+	if err != nil {
+		return "master", nil
+	}
+	if resp.StatusCode != http.StatusOK {
 		if resp != nil {
 			resp.Body.Close()
 		}
-		return "master"
+		switch resp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+			return "", giteeRepoAccessError(owner, repo, resp.StatusCode, giteeToken)
+		default:
+			return "master", nil
+		}
 	}
 	defer resp.Body.Close()
 
 	var info githubRepoInfo // same JSON shape
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil || info.DefaultBranch == "" {
-		return "master"
+		return "master", nil
 	}
-	return info.DefaultBranch
+	return info.DefaultBranch, nil
 }
 
 // giteeRefExists probes whether ref is a valid branch, tag, or commit in the
 // Gitee repository. Uses the commits endpoint analogous to githubRefExists.
-func giteeRefExists(httpClient *http.Client, owner, repo, ref string) (bool, error) {
+func giteeRefExists(httpClient *http.Client, owner, repo, ref, giteeToken string) (bool, error) {
 	apiURL := fmt.Sprintf("https://gitee.com/api/v5/repos/%s/%s/commits/%s",
 		url.PathEscape(owner), url.PathEscape(repo), escapeRefPath(ref))
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
 		return false, err
 	}
-	addGiteeAuthHeader(req)
+	addGiteeAuthHeader(req, giteeToken)
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return false, err
@@ -1588,7 +1665,9 @@ func giteeRefExists(httpClient *http.Client, owner, repo, ref string) (bool, err
 		return true, nil
 	case http.StatusNotFound, http.StatusUnprocessableEntity:
 		return false, nil
-	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return false, giteeRepoAccessError(owner, repo, resp.StatusCode, giteeToken)
+	case http.StatusTooManyRequests:
 		return false, errGitHubAPIBlocked
 	default:
 		return false, fmt.Errorf("gitee API returned status %d for ref %q", resp.StatusCode, ref)
@@ -1596,7 +1675,7 @@ func giteeRefExists(httpClient *http.Client, owner, repo, ref string) (bool, err
 }
 
 // resolveGiteeRefAndPath mirrors resolveGitHubRefAndPath for Gitee repos.
-func resolveGiteeRefAndPath(httpClient *http.Client, spec *githubSpec) error {
+func resolveGiteeRefAndPath(httpClient *http.Client, spec *githubSpec, giteeToken string) error {
 	if len(spec.refSegments) == 0 {
 		return nil
 	}
@@ -1605,7 +1684,7 @@ func resolveGiteeRefAndPath(httpClient *http.Client, spec *githubSpec) error {
 	for n := len(spec.refSegments); n >= 1; n-- {
 		candidate := strings.Join(spec.refSegments[:n], "/")
 		tried = append(tried, candidate)
-		ok, err := giteeRefExists(httpClient, spec.owner, spec.repo, candidate)
+		ok, err := giteeRefExists(httpClient, spec.owner, spec.repo, candidate, giteeToken)
 		if errors.Is(err, errGitHubAPIBlocked) {
 			blocked = true
 			continue
@@ -1627,6 +1706,9 @@ func resolveGiteeRefAndPath(httpClient *http.Client, spec *githubSpec) error {
 		slog.Warn("gitee import: ref resolution blocked by Gitee API; falling back to optimistic single-segment ref. Set GITEE_TOKEN to enable disambiguation of slash-bearing refs.",
 			"owner", spec.owner, "repo", spec.repo, "tried", tried)
 		return nil
+	}
+	if _, err := fetchGiteeDefaultBranch(httpClient, spec.owner, spec.repo, giteeToken); err != nil {
+		return err
 	}
 	return fmt.Errorf("could not resolve ref in gitee.com/%s/%s URL — tried: %s. Make sure the branch, tag, or commit exists",
 		spec.owner, spec.repo, strings.Join(tried, ", "))
@@ -1666,26 +1748,30 @@ func buildGiteeContentsURL(owner, repo, repoPath, ref string) string {
 	return base + "/" + strings.Join(escapedParts, "/") + "?ref=" + url.QueryEscape(ref)
 }
 
-func fetchFromGitee(httpClient *http.Client, rawURL string) (*importedSkill, error) {
+func fetchFromGitee(httpClient *http.Client, rawURL, giteeToken string) (*importedSkill, error) {
 	// parseGitHubURL works because Gitee uses the identical path layout.
 	spec, err := parseGitHubURL(rawURL)
 	if err != nil {
 		return nil, err
 	}
 	if len(spec.refSegments) > 0 {
-		if err := resolveGiteeRefAndPath(httpClient, &spec); err != nil {
+		if err := resolveGiteeRefAndPath(httpClient, &spec, giteeToken); err != nil {
 			return nil, err
 		}
 	}
 	if spec.ref == "" {
-		spec.ref = fetchGiteeDefaultBranch(httpClient, spec.owner, spec.repo)
+		ref, err := fetchGiteeDefaultBranch(httpClient, spec.owner, spec.repo, giteeToken)
+		if err != nil {
+			return nil, err
+		}
+		spec.ref = ref
 	}
 
 	skillMdPath := "SKILL.md"
 	if spec.skillDir != "" {
 		skillMdPath = spec.skillDir + "/SKILL.md"
 	}
-	skillMdBody, err := fetchRawFile(httpClient, buildRawGiteeURL(spec.owner, spec.repo, spec.ref, skillMdPath))
+	skillMdBody, err := fetchGiteeFile(httpClient, spec.owner, spec.repo, spec.ref, skillMdPath, giteeToken)
 	if err != nil {
 		if spec.skillDir == "" {
 			return nil, fmt.Errorf("SKILL.md not found at the root of %s/%s@%s. For multi-skill repositories, point to a specific directory using gitee.com/%s/%s/tree/%s/<skill-dir>",
@@ -1720,7 +1806,7 @@ func fetchFromGitee(httpClient *http.Client, rawURL string) (*importedSkill, err
 
 	// Fetch directory listing for supporting files.
 	apiURL := buildGiteeContentsURL(spec.owner, spec.repo, spec.skillDir, spec.ref)
-	dirResp, err := doGiteeAPIGet(httpClient, apiURL)
+	dirResp, err := doGiteeAPIGet(httpClient, apiURL, giteeToken)
 	if err != nil || dirResp.StatusCode != http.StatusOK {
 		if dirResp != nil {
 			dirResp.Body.Close()
@@ -1736,15 +1822,14 @@ func fetchFromGitee(httpClient *http.Client, rawURL string) (*importedSkill, err
 	}
 
 	var allFiles []githubContentEntry
-	collectGiteeFiles(httpClient, entries, &allFiles, spec.owner, spec.repo, spec.ref)
+	collectGiteeFiles(httpClient, entries, &allFiles, spec.owner, spec.repo, spec.ref, giteeToken)
 
 	basePath := ""
 	if spec.skillDir != "" {
 		basePath = spec.skillDir + "/"
 	}
 	for _, entry := range allFiles {
-		rawFileURL := buildRawGiteeURL(spec.owner, spec.repo, spec.ref, entry.Path)
-		body, err := fetchRawFile(httpClient, rawFileURL)
+		body, err := fetchGiteeFile(httpClient, spec.owner, spec.repo, spec.ref, entry.Path, giteeToken)
 		if err != nil {
 			if isCapError(err) {
 				return nil, fmt.Errorf("gitee import: %s: %w", entry.Path, err)
@@ -1765,7 +1850,7 @@ func fetchFromGitee(httpClient *http.Client, rawURL string) (*importedSkill, err
 // listing. Gitee's contents API has the same shape as GitHub's, but
 // download_url may not always be present for private repos, so we build raw
 // URLs ourselves instead.
-func collectGiteeFiles(httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, owner, repo, ref string) {
+func collectGiteeFiles(httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, owner, repo, ref, giteeToken string) {
 	for _, entry := range entries {
 		switch entry.Type {
 		case "file":
@@ -1774,7 +1859,7 @@ func collectGiteeFiles(httpClient *http.Client, entries []githubContentEntry, ou
 			}
 		case "dir":
 			subURL := buildGiteeContentsURL(owner, repo, entry.Path, ref)
-			subResp, err := doGiteeAPIGet(httpClient, subURL)
+			subResp, err := doGiteeAPIGet(httpClient, subURL, giteeToken)
 			if err != nil || subResp.StatusCode != http.StatusOK {
 				if subResp != nil {
 					subResp.Body.Close()
@@ -1789,9 +1874,74 @@ func collectGiteeFiles(httpClient *http.Client, entries []githubContentEntry, ou
 				continue
 			}
 			subResp.Body.Close()
-			collectGiteeFiles(httpClient, subEntries, out, owner, repo, ref)
+			collectGiteeFiles(httpClient, subEntries, out, owner, repo, ref, giteeToken)
 		}
 	}
+}
+
+func fetchGiteeFile(httpClient *http.Client, owner, repo, ref, repoPath, giteeToken string) ([]byte, error) {
+	body, err := fetchGiteeFileFromContentsAPI(httpClient, owner, repo, ref, repoPath, giteeToken)
+	if err == nil {
+		return body, nil
+	}
+	if isCapError(err) || errors.Is(err, errGiteeAuthRequired) {
+		return nil, err
+	}
+	rawBody, rawErr := fetchRawGiteeFile(httpClient, buildRawGiteeURL(owner, repo, ref, repoPath), giteeToken)
+	if rawErr == nil {
+		return rawBody, nil
+	}
+	return nil, rawErr
+}
+
+func fetchGiteeFileFromContentsAPI(httpClient *http.Client, owner, repo, ref, repoPath, giteeToken string) ([]byte, error) {
+	apiURL := buildGiteeContentsURL(owner, repo, repoPath, ref)
+	resp, err := doGiteeAPIGet(httpClient, apiURL, giteeToken)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return nil, giteeRepoAccessError(owner, repo, resp.StatusCode, giteeToken)
+	default:
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	var entry githubContentEntry
+	if err := json.NewDecoder(resp.Body).Decode(&entry); err != nil {
+		return nil, err
+	}
+	if entry.Content == nil {
+		return nil, fmt.Errorf("gitee contents response for %s has no content", repoPath)
+	}
+
+	content := strings.NewReplacer("\n", "", "\r", "").Replace(*entry.Content)
+	if content == "" {
+		return []byte{}, nil
+	}
+	if entry.Encoding == "" || strings.EqualFold(entry.Encoding, "base64") {
+		body, err := base64.StdEncoding.DecodeString(content)
+		if err == nil {
+			if len(body) > maxImportFileSize {
+				return nil, fmt.Errorf("%w: file exceeds %d byte limit", errImportCapExceeded, maxImportFileSize)
+			}
+			return body, nil
+		}
+		if !strings.EqualFold(entry.Encoding, "base64") {
+			if len(content) > maxImportFileSize {
+				return nil, fmt.Errorf("%w: file exceeds %d byte limit", errImportCapExceeded, maxImportFileSize)
+			}
+			return []byte(content), nil
+		}
+		return nil, err
+	}
+	if len(content) > maxImportFileSize {
+		return nil, fmt.Errorf("%w: file exceeds %d byte limit", errImportCapExceeded, maxImportFileSize)
+	}
+	return []byte(content), nil
 }
 
 // --- Shared helpers ---
@@ -1800,7 +1950,24 @@ func collectGiteeFiles(httpClient *http.Client, entries []githubContentEntry, ou
 // if the response exceeds maxImportFileSize so we never silently truncate a
 // half-downloaded skill file into the workspace.
 func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
-	resp, err := httpClient.Get(fileURL)
+	return fetchRawFileWithHeaders(httpClient, fileURL, nil)
+}
+
+func fetchRawGiteeFile(httpClient *http.Client, fileURL, giteeToken string) ([]byte, error) {
+	return fetchRawFileWithHeaders(httpClient, fileURL, func(req *http.Request) {
+		addGiteeAuthHeader(req, giteeToken)
+	})
+}
+
+func fetchRawFileWithHeaders(httpClient *http.Client, fileURL string, addHeaders func(*http.Request)) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, fileURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if addHeaders != nil {
+		addHeaders(req)
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1903,7 +2070,7 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	case sourceGitHub:
 		imported, err = fetchFromGitHub(httpClient, normalized)
 	case sourceGitee:
-		imported, err = fetchFromGitee(httpClient, normalized)
+		imported, err = fetchFromGitee(httpClient, normalized, req.GiteeToken)
 	}
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())

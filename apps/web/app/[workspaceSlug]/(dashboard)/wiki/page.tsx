@@ -1,1 +1,7 @@
-export { WikiPage as default } from "@multica/views/wiki";
+"use client";
+
+import { WikiPage } from "@multica/views/wiki";
+
+export default function WikiRoutePage() {
+  return <WikiPage />;
+}
