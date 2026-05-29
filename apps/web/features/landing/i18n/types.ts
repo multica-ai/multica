@@ -52,6 +52,7 @@ export type LandingDict = {
     subheading: string;
     cta: string;
     downloadDesktop: string;
+    talkToSales: string;
     worksWith: string;
     imageAlt: string;
   };
@@ -88,6 +89,7 @@ export type LandingDict = {
     cta: string;
     groups: {
       product: FooterGroup;
+      resources: FooterGroup;
       company: FooterGroup;
     };
     copyright: string;

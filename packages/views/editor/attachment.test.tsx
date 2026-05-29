@@ -107,6 +107,7 @@ function makeRecord(overrides: Partial<AttachmentRecord> = {}): AttachmentRecord
     filename: "shot.png",
     url: "https://cdn.example.test/att-1.png",
     download_url: "https://cdn.example.test/att-1.png?Signature=s",
+    content_url: "https://cdn.example.test/att-1.png?Signature=s&inline=1",
     content_type: "image/png",
     size_bytes: 1024,
     created_at: "2026-05-13T00:00:00Z",
