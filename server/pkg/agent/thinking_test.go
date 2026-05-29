@@ -651,7 +651,6 @@ func argIndexOf(slice []string, target string) int {
 	return -1
 }
 
-
 // TestAnnotatePiThinking verifies that every model in the list gets the full
 // Pi thinking catalog attached, with the correct default and xhigh description.
 func TestAnnotatePiThinking(t *testing.T) {
@@ -703,8 +702,8 @@ func TestIsKnownThinkingValue_Pi(t *testing.T) {
 			t.Errorf("IsKnownThinkingValue(\"pi\", %q) = false, want true", v)
 		}
 	}
-	if IsKnownThinkingValue("pi", "") {
-		// empty is always accepted (means "follow runtime default")
+	if !IsKnownThinkingValue("pi", "") {
+		t.Error(`IsKnownThinkingValue("pi", "") = false, want true — empty must be accepted (follow runtime default)`)
 	}
 	if IsKnownThinkingValue("pi", "supersonic") {
 		t.Error("IsKnownThinkingValue(\"pi\", \"supersonic\") = true, want false")

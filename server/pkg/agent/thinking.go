@@ -500,14 +500,7 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"high":    true,
 		"xhigh":   true,
 	},
-	"pi": {
-		"off":     true,
-		"minimal": true,
-		"low":     true,
-		"medium":  true,
-		"high":    true,
-		"xhigh":   true,
-	},
+	"pi": piValidThinkingLevels,
 }
 
 // IsKnownThinkingValue reports whether `value` is a recognised effort

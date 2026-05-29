@@ -223,6 +223,7 @@ func TestBuildPiArgsThinkingLevel_AllLevels(t *testing.T) {
 // TestBuildPiArgsThinkingLevel_Empty verifies that an empty thinking_level
 // produces no --thinking flag (Pi SDK default applies).
 func TestBuildPiArgsThinkingLevel_Empty(t *testing.T) {
+	t.Parallel()
 	args := buildPiArgs("prompt", "/tmp/s.jsonl", ExecOptions{
 		ThinkingLevel: "",
 	}, slog.Default())
