@@ -3412,6 +3412,52 @@ func TestInjectRuntimeConfigCommentTriggerColdStartRead(t *testing.T) {
 	}
 }
 
+// TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead checks the
+// comment-triggered Workflow when the daemon is resuming a prior session and no
+// since-delta hint is present. In that shape, the agent already has session
+// context and the trigger body is injected in the per-turn prompt, so the
+// runtime brief must not force a duplicate thread read.
+func TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead(t *testing.T) {
+	t.Parallel()
+
+	const (
+		issueID   = "issue-resumed-1"
+		triggerID = "trigger-comment-1"
+	)
+	dir := t.TempDir()
+	ctx := TaskContextForEnv{
+		IssueID:             issueID,
+		TriggerCommentID:    triggerID,
+		PriorSessionResumed: true,
+	}
+	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(data)
+
+	for _, want := range []string{
+		"triggering comment is already included above",
+		"No other new comments on this issue since your last run",
+		"Do not re-read comment history by default",
+		"Only if the resumed session is missing thread context",
+		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("comment-triggered resumed Workflow missing %q\n---\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "scoped to the triggering thread") {
+		t.Errorf("resumed Workflow must not claim the delta is thread-scoped\n---\n%s", s)
+	}
+	if strings.Contains(s, "Read the triggering conversation first") {
+		t.Errorf("resumed workflow must not force the cold-start thread read\n---\n%s", s)
+	}
+}
+
 // TestInjectRuntimeConfigAssignmentTriggerMentionsRecent pins that the
 // assignment-triggered Workflow keeps full-history reading as the mandatory
 // default (the agent must still ingest earlier comments — that rule was
@@ -3575,10 +3621,10 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			want: withSection,
 		},
 		{
-			name:                "assignment_triggered",
-			ctx:                 TaskContextForEnv{IssueID: "issue-md-2"},
-			provider:            "claude",
-			filename:            "CLAUDE.md",
+			name:     "assignment_triggered",
+			ctx:      TaskContextForEnv{IssueID: "issue-md-2"},
+			provider: "claude",
+			filename: "CLAUDE.md",
 			workflowStepPresent: []string{
 				"multica issue metadata list issue-md-2 --output json",
 				"See the `## Issue Metadata` section above",

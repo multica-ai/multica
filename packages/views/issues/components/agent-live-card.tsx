@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, Clock, Loader2, Square } from "lucide-react";
+import { Bot, ChevronDown, Clock, Loader2, Square } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import type { TaskMessagePayload } from "@multica/core/types/events";
@@ -16,6 +16,7 @@ import {
 } from "../../common/task-transcript";
 import { useT } from "../../i18n";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
+import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 
 // AgentLiveCard renders a sticky banner at the top of the issue's main
 // column for every active task. Each banner shows "agent X is working",
@@ -54,6 +55,20 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
   const [taskStates, setTaskStates] = useState<Map<string, TaskState>>(new Map());
+  // Cancel confirmation is hoisted here (not per-card) so a single dialog
+  // serves both the inline single banner and the multi-agent popover. A
+  // confirm dialog living inside the popover would be torn down the moment
+  // the popover closed on the dialog's outside-press; lifting it keeps the
+  // confirm flow alive regardless of where Stop was clicked.
+  const [cancelTarget, setCancelTarget] = useState<AgentTask | null>(null);
+  const [cancellingIds, setCancellingIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  // Multi-agent accordion: collapsed by default to a one-line summary,
+  // expands inline within the same full-width content column as the single
+  // banner so all states read at one consistent width. A popover would
+  // force the list into a narrow floating card ≠ the full-width banner.
+  const [expanded, setExpanded] = useState(false);
   const seenSeqs = useRef(new Set<string>());
   const hydratedTaskIds = useRef(new Set<string>());
   const mountedRef = useRef(true);
@@ -209,6 +224,29 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   useWSEvent("task:waiting_local_directory", handleTaskActive);
   useWSEvent("task:running", handleTaskActive);
 
+  // Fire the actual cancel once the user confirms. The banner is dropped
+  // optimistically by handleTaskEnd / reconcile when the task:cancelled
+  // event lands, so `cancellingIds` only needs to gate the button between
+  // confirm and that event.
+  const handleConfirmCancel = useCallback(async () => {
+    const task = cancelTarget;
+    if (!task) return;
+    setCancelTarget(null);
+    setCancellingIds((prev) => new Set(prev).add(task.id));
+    try {
+      await api.cancelTask(issueId, task.id);
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.agent_live.cancel_failed),
+      );
+      setCancellingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
+    }
+  }, [cancelTarget, issueId, t]);
+
   if (taskStates.size === 0) return null;
 
   // Order: running → dispatched → waiting → queued. The most-active task
@@ -229,52 +267,116 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   const entries = Array.from(taskStates.values()).sort(
     (a, b) => statusRank[a.task.status] - statusRank[b.task.status],
   );
-  const [firstEntry, ...restEntries] = entries;
+  const firstEntry = entries[0];
   if (!firstEntry) return null;
 
+  const resolveName = (agentId: string | null) =>
+    agentId ? getActorName("agent", agentId) : t(($) => $.agent_live.fallback_name);
+
+  // One active task → it fills the card as a single row. Multiple → the
+  // card shows a collapsed summary header that expands the rows inline
+  // (one bordered container with divided rows, never N detached boxes).
+  // Active count tops out at ~4-5 in practice, so the expanded list stays
+  // short.
+  const isMulti = entries.length > 1;
+  const agentIds = [
+    ...new Set(
+      entries.map((e) => e.task.agent_id).filter((id): id is string => !!id),
+    ),
+  ];
+  const anyRunning = entries.some((e) => e.task.status === "running");
+
   return (
-    <>
-      {/* Primary agent — sticky at the top of the activity area */}
-      <div className="mt-4 sticky top-4 z-10 rounded-lg bg-background/80 supports-[backdrop-filter]:bg-background/55 backdrop-blur-md">
-        <SingleAgentLiveCard
-          task={firstEntry.task}
-          items={buildTimeline(firstEntry.messages)}
-          issueId={issueId}
-          agentName={firstEntry.task.agent_id ? getActorName("agent", firstEntry.task.agent_id) : t(($) => $.agent_live.fallback_name)}
-        />
+    // Sticky bar at the top of the main content, above the editable title —
+    // answers "is anyone working on this issue right now?" while the comment
+    // thread scrolls under it. One bordered container in every state: the
+    // single row, the collapsed summary, and the expanded list all share it,
+    // so the bar reads at one consistent width.
+    <div className="mt-4 sticky top-4 z-10 rounded-lg bg-background/80 supports-[backdrop-filter]:bg-background/55 backdrop-blur-md">
+      <div className="overflow-hidden rounded-lg border border-info/20 bg-info/5">
+        {isMulti ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-info/10 aria-expanded:bg-info/10 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            >
+              <AgentAvatarStack agentIds={agentIds} size={20} max={4} />
+              <span className="flex min-w-0 items-center gap-1.5 text-xs">
+                {anyRunning ? (
+                  <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
+                ) : (
+                  <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
+                )}
+                <span className="truncate font-medium text-foreground">
+                  {t(($) => $.agent_activity.hover_header, { count: agentIds.length })}
+                </span>
+              </span>
+              <ChevronDown
+                className={`ml-auto h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`}
+              />
+            </button>
+            {expanded && (
+              <div className="divide-y divide-info/15 border-t border-info/15">
+                {entries.map(({ task, messages }) => (
+                  <AgentLiveRow
+                    key={task.id}
+                    task={task}
+                    items={buildTimeline(messages)}
+                    agentName={resolveName(task.agent_id)}
+                    onRequestCancel={() => setCancelTarget(task)}
+                    cancelling={cancellingIds.has(task.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <AgentLiveRow
+            task={firstEntry.task}
+            items={buildTimeline(firstEntry.messages)}
+            agentName={resolveName(firstEntry.task.agent_id)}
+            onRequestCancel={() => setCancelTarget(firstEntry.task)}
+            cancelling={cancellingIds.has(firstEntry.task.id)}
+          />
+        )}
       </div>
-      {/* Additional agents — non-sticky, scroll with the page */}
-      {restEntries.length > 0 && (
-        <div className="mt-1.5 space-y-1.5">
-          {restEntries.map(({ task, messages }) => (
-            <SingleAgentLiveCard
-              key={task.id}
-              task={task}
-              items={buildTimeline(messages)}
-              issueId={issueId}
-              agentName={task.agent_id ? getActorName("agent", task.agent_id) : t(($) => $.agent_live.fallback_name)}
-            />
-          ))}
-        </div>
-      )}
-    </>
+      <TerminateTaskConfirmDialog
+        open={cancelTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setCancelTarget(null);
+        }}
+        onConfirm={() => void handleConfirmCancel()}
+        // Matches the old per-card `!isParked`: a task that's queued or
+        // parked on a directory lock isn't interrupting live work, so the
+        // "this stops running work" note is suppressed for those only.
+        showRunningNote={
+          cancelTarget !== null &&
+          cancelTarget.status !== "queued" &&
+          cancelTarget.status !== "waiting_local_directory"
+        }
+      />
+    </div>
   );
 }
 
-// ─── SingleAgentLiveCard (header-only banner per active task) ──────────────
+// ─── AgentLiveRow (one active task: avatar + status + Logs/Stop) ───────────
 
-interface SingleAgentLiveCardProps {
+interface AgentLiveRowProps {
   task: AgentTask;
   items: TimelineItem[];
-  issueId: string;
   agentName: string;
+  // Cancel is owned by the parent AgentLiveCard (a single confirm dialog
+  // serves both the lone row and the multi-agent list). The row only
+  // requests it and reflects the in-flight state.
+  onRequestCancel: () => void;
+  cancelling: boolean;
 }
 
-function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiveCardProps) {
+function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: AgentLiveRowProps) {
   const { t } = useT("issues");
   const [elapsed, setElapsed] = useState("");
-  const [cancelling, setCancelling] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const isQueued = task.status === "queued";
   // `waiting_local_directory` is the daemon-parked stage of an otherwise-
@@ -282,8 +384,9 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
   // entered the running phase yet because another task on this daemon
   // holds the same local_directory lock.
   const isWaitingLocalDirectory = task.status === "waiting_local_directory";
-  // Treat parked + queued the same visually (non-shimmering, muted accent),
-  // but the label below is distinct so the user sees the specific reason.
+  // Parked vs running is signalled by the icon (Clock vs spinning Loader2)
+  // and the label below — the container chrome is shared, so there's no
+  // per-row background variant.
   const isParked = isQueued || isWaitingLocalDirectory;
 
   // Elapsed time — ticks every second so users see the agent is alive.
@@ -297,87 +400,60 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
     return () => clearInterval(interval);
   }, [task.started_at, task.dispatched_at, task.created_at]);
 
-  const handleCancel = useCallback(async () => {
-    if (cancelling) return;
-    setCancelling(true);
-    try {
-      await api.cancelTask(issueId, task.id);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.agent_live.cancel_failed));
-      setCancelling(false);
-    }
-  }, [task.id, issueId, cancelling, t]);
-
-  const requestCancel = useCallback(() => {
-    if (cancelling) return;
-    setConfirmOpen(true);
-  }, [cancelling]);
-
   const toolCount = items.filter((i) => i.type === "tool_use").length;
 
-  // Queued / waiting tasks render with a non-spinning Clock and dimmer
-  // accent so the banner reads as "waiting" rather than "working" at a
-  // glance.
   return (
-    <div className={isParked ? "rounded-lg border border-border bg-muted/30" : "rounded-lg border border-info/20 bg-info/5"}>
-      <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
-        {task.agent_id ? (
-          <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard showStatusDot />
+    <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
+      {task.agent_id ? (
+        <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard showStatusDot />
+      ) : (
+        <div className="flex items-center justify-center h-5 w-5 rounded-full shrink-0 bg-info/10 text-info">
+          <Bot className="h-3 w-3" />
+        </div>
+      )}
+      <div className="flex items-center gap-1.5 text-xs min-w-0">
+        {isParked ? (
+          <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
         ) : (
-          <div className="flex items-center justify-center h-5 w-5 rounded-full shrink-0 bg-info/10 text-info">
-            <Bot className="h-3 w-3" />
-          </div>
+          <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
         )}
-        <div className="flex items-center gap-1.5 text-xs min-w-0">
-          {isParked ? (
-            <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
-          ) : (
-            <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
-          )}
-          <span className="font-medium text-foreground truncate">
-            {isWaitingLocalDirectory
-              ? t(($) => $.agent_live.is_waiting_local_directory, { name: agentName })
-              : isQueued
-                ? t(($) => $.agent_live.is_queued, { name: agentName })
-                : t(($) => $.agent_live.is_working, { name: agentName })}
-          </span>
-          <span className="text-muted-foreground tabular-nums shrink-0">
-            {isParked
-              ? t(($) => $.agent_live.queued_elapsed_prefix, { elapsed })
-              : elapsed}
-          </span>
-          {!isParked && toolCount > 0 && (
-            <span className="text-muted-foreground shrink-0">{t(($) => $.agent_live.tool_count, { count: toolCount })}</span>
-          )}
-        </div>
-        <div className="ml-auto flex items-center gap-1 shrink-0">
-          {!isParked && (
-            <TranscriptButton
-              task={task}
-              agentName={agentName}
-              items={items}
-              isLive
-              title={t(($) => $.agent_live.transcript_button)}
-            />
-          )}
-          <button
-            type="button"
-            onClick={requestCancel}
-            disabled={cancelling}
-            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
-            title={t(($) => $.agent_live.stop_tooltip)}
-          >
-            {cancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-            <span>{t(($) => $.agent_live.stop_button)}</span>
-          </button>
-        </div>
+        <span className="font-medium text-foreground truncate">
+          {isWaitingLocalDirectory
+            ? t(($) => $.agent_live.is_waiting_local_directory, { name: agentName })
+            : isQueued
+              ? t(($) => $.agent_live.is_queued, { name: agentName })
+              : t(($) => $.agent_live.is_working, { name: agentName })}
+        </span>
+        <span className="text-muted-foreground tabular-nums shrink-0">
+          {isParked
+            ? t(($) => $.agent_live.queued_elapsed_prefix, { elapsed })
+            : elapsed}
+        </span>
+        {!isParked && toolCount > 0 && (
+          <span className="text-muted-foreground shrink-0">{t(($) => $.agent_live.tool_count, { count: toolCount })}</span>
+        )}
       </div>
-      <TerminateTaskConfirmDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        onConfirm={() => void handleCancel()}
-        showRunningNote={!isParked}
-      />
+      <div className="ml-auto flex items-center gap-1 shrink-0">
+        {!isParked && (
+          <TranscriptButton
+            task={task}
+            agentName={agentName}
+            items={items}
+            isLive
+            title={t(($) => $.agent_live.transcript_button)}
+          />
+        )}
+        <button
+          type="button"
+          onClick={onRequestCancel}
+          disabled={cancelling}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+          title={t(($) => $.agent_live.stop_tooltip)}
+        >
+          {cancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+          <span>{t(($) => $.agent_live.stop_button)}</span>
+        </button>
+      </div>
     </div>
   );
 }

@@ -290,7 +290,7 @@
       "save_failed_toast": "保存自定义参数失败"
     },
     "mcp_config": {
-      "intro": "转发给运行时 CLI 的 MCP 服务器配置（Claude 通过 --mcp-config，Codex 通过 $CODEX_HOME/config.toml，OpenClaw 通过每个任务的配置 wrapper）。原样保存，可能包含密钥 —— 只有智能体所有者和工作区管理员可以读取。留空则回退到 CLI 自身的默认设置。OpenClaw 的 HTTP/SSE 条目需要使用 OpenClaw 自己的字段名（例如 \"transport\": \"streamable-http\"），而不是 Claude 的 \"type\"。",
+      "intro": "转发给运行时 CLI 的 MCP 服务器配置（Claude 通过 --mcp-config，Codex 通过 $CODEX_HOME/config.toml，Hermes/Kimi/Kiro 通过 ACP mcpServers，OpenClaw 通过每个任务的配置 wrapper）。原样保存，可能包含密钥 —— 只有智能体所有者和工作区管理员可以读取。留空则回退到 CLI 自身的默认设置。OpenClaw 的 HTTP/SSE 条目需要使用 OpenClaw 自己的字段名（例如 \"transport\": \"streamable-http\"），而不是 Claude 的 \"type\"。",
       "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
       "editor_aria": "MCP 配置 JSON 编辑器",
       "clear_action": "清空",

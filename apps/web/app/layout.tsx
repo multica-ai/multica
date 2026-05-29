@@ -9,16 +9,15 @@ import { RESOURCES } from "@multica/views/locales";
 import { getRequestLocale } from "@/lib/request-locale";
 import "./globals.css";
 
-// Font stack: Inter for Latin UI text + system Chinese fonts for zh content.
+// Font stack: Inter for Latin UI text + system CJK fonts for localized content.
 // Desktop app uses the same stack via apps/desktop/src/renderer/src/globals.css —
 // keep the CJK fallback tail in sync across both files. The Inter primary family
 // differs by design: next/font produces `__Inter_xxx` (with a synthetic size-adjusted
 // fallback face to prevent FOUT layout shift); desktop uses fontsource's "Inter Variable".
 // Both resolve to Inter glyphs, so rendering is identical in practice.
-// Currently covers English + Simplified Chinese. When ja/ko i18n lands, extend
-// the tail with Hiragino Kaku Gothic ProN / Yu Gothic / Apple SD Gothic Neo / Malgun Gothic.
-// Per-character fallback: Latin chars render with Inter, Chinese chars with
-// PingFang SC (macOS) / Microsoft YaHei (Windows) / Noto Sans CJK SC (Linux).
+// Per-character fallback: Latin chars render with Inter, CJK chars render with the
+// platform-native Chinese/Korean fallback when needed. Chinese fonts must stay before
+// Korean fonts so zh users do not receive Korean Hanja glyph shapes.
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-sans",
@@ -29,6 +28,9 @@ const inter = Inter({
     "PingFang SC",
     "Microsoft YaHei",
     "Noto Sans CJK SC",
+    "Apple SD Gothic Neo",
+    "Malgun Gothic",
+    "Noto Sans CJK KR",
     "sans-serif",
   ],
 });
@@ -106,6 +108,7 @@ export const metadata: Metadata = {
 const HTML_LANG: Record<SupportedLocale, string> = {
   en: "en",
   "zh-Hans": "zh-CN",
+  ko: "ko-KR",
 };
 
 export default async function RootLayout({

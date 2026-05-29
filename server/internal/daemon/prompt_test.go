@@ -299,9 +299,9 @@ func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {
 
 // TestBuildPromptNewCommentsHint pins that a comment-triggered task whose agent
 // ran before on this issue (NewCommentsSince set, NewCommentCount > 0) gets the
-// one-line since-delta hint pointing at `--since`, so the agent catches up on
-// exactly the comments that arrived since its last run instead of re-reading
-// everything or walking threads blind.
+// since-delta hint with the ISSUE-WIDE new-comment count, but is steered to read
+// the triggering (parent) thread first rather than blindly pulling every new
+// comment.
 func TestBuildPromptNewCommentsHint(t *testing.T) {
 	const (
 		issueID = "issue-new-1"
@@ -317,17 +317,24 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	}
 	out := BuildPrompt(task, "claude")
 
-	if !strings.Contains(out, "3 new comment(s) since your last run") {
-		t.Errorf("hint must report the new-comment count, got:\n%s", out)
+	// Issue-wide count (reverted from the thread-scoped wording).
+	if !strings.Contains(out, "3 new comment(s) on this issue since your last run") {
+		t.Errorf("hint must report the issue-wide new-comment count, got:\n%s", out)
 	}
+	// Don't-blindly-read-all guidance.
+	if !strings.Contains(out, "blindly") {
+		t.Errorf("hint must discourage blindly reading every new comment, got:\n%s", out)
+	}
+	// Parent thread first: the --thread <trigger> read is the prioritized action.
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread trigger-1 --since "+since+" --output json") {
+		t.Errorf("hint must point at the triggering (parent) thread --since read first, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--tail 30") {
+		t.Errorf("hint must offer the full-thread (--tail 30) option, got:\n%s", out)
+	}
+	// Issue-wide catch-up is demoted to an only-if-needed fallback.
 	if !strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --output json") {
-		t.Errorf("hint must point at the --since catch-up read, got:\n%s", out)
-	}
-	// Warm path also keeps a --thread pointer: --since is a time delta and can
-	// miss the triggering thread's pre-anchor history, so the agent is told it can
-	// pull that thread in full when needed.
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread trigger-1 --tail 30 --output json") {
-		t.Errorf("warm hint must also point at the triggering thread, got:\n%s", out)
+		t.Errorf("hint must keep the issue-wide --since catch-up as a fallback, got:\n%s", out)
 	}
 	// The old cursor-heavy paragraph must be gone.
 	if strings.Contains(out, "Next reply cursor") || strings.Contains(out, "--before-id") {
@@ -355,5 +362,43 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 	}
 	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread trigger-1 --tail 30 --output json") {
 		t.Errorf("cold start must point at the triggering thread read, got:\n%s", out)
+	}
+}
+
+// TestBuildPromptResumedNoDeltaDoesNotForceThreadRead pins the warm/no-delta
+// path: when a prior provider session is actually being resumed, the triggering
+// comment is already embedded in the per-turn prompt, so the agent should not
+// be told to re-read the triggering thread's latest 30 replies by default.
+func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
+	const issueID = "issue-resumed-1"
+	task := Task{
+		IssueID:               issueID,
+		TriggerCommentID:      "trigger-1",
+		TriggerCommentContent: "hi again",
+		TriggerAuthorType:     "member",
+		PriorSessionID:        "session-123",
+		NewCommentCount:       0,
+		NewCommentsSince:      "",
+	}
+	out := BuildPrompt(task, "claude")
+
+	for _, want := range []string{
+		"triggering comment is already included above",
+		"No other new comments on this issue since your last run",
+		"Do not re-read comment history by default",
+		"Only if the resumed session is missing thread context",
+		"multica issue comment list " + issueID + " --thread trigger-1 --tail 30 --output json",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("resumed/no-delta prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	// The stale thread-scoped wording (since-delta used to be thread-scoped)
+	// must not reappear.
+	if strings.Contains(out, "scoped to the triggering thread") {
+		t.Errorf("resumed/no-delta prompt must not claim the delta is thread-scoped, got:\n%s", out)
+	}
+	if strings.Contains(out, "Read the triggering conversation first") {
+		t.Errorf("resumed/no-delta prompt must not use the cold-start forced-read wording, got:\n%s", out)
 	}
 }

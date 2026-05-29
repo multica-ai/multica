@@ -19,6 +19,13 @@ function tokenizeCJK(raw: string): string[] {
 
 export const { GET } = createFromSource(source, {
   localeMap: {
+    ko: {
+      components: {
+        tokenizer: {
+          language: "english",
+        },
+      },
+    },
     zh: {
       components: {
         tokenizer: {
