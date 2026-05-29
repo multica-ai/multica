@@ -1374,6 +1374,35 @@ func TestCountNewCommentsSince_ThreadScopedExcludesAgentOwnAndTrigger(t *testing
 	}
 }
 
+func TestCountOtherNewCommentsSince_ExcludesTriggerThreadAndAgentOwn(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+	agentID := createHandlerTestAgent(t, "other-count-agent", []byte("[]"))
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at)
+		VALUES ($1, $2, 'agent', $3, 'agent reply elsewhere', 'comment', $4, $5)
+	`, fx.IssueID, testWorkspaceID, agentID, fx.Root2, fx.Base.Add(13*time.Minute)); err != nil {
+		t.Fatalf("insert agent comment: %v", err)
+	}
+
+	got, err := testHandler.Queries.CountOtherNewCommentsSince(context.Background(), db.CountOtherNewCommentsSinceParams{
+		AnchorID:    parseUUID(fx.R1b1),
+		IssueID:     parseUUID(fx.IssueID),
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Since:       pgtype.Timestamptz{Time: fx.Base.Add(90 * time.Second), Valid: true},
+		AuthorID:    parseUUID(agentID),
+	})
+	if err != nil {
+		t.Fatalf("count other new since anchor: %v", err)
+	}
+	if got != 3 {
+		t.Fatalf("expected root2/r2a/r2b to count and current thread + agent own to be excluded, got %d", got)
+	}
+}
+
 // TestCreateCommentNormalizesParentToThreadRoot pins the write-boundary
 // invariant: a reply created through CreateComment is always stored with its
 // parent_id pointing at the THREAD ROOT, never at an interior reply. This keeps

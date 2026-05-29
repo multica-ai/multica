@@ -312,6 +312,7 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 		TriggerCommentContent: "please look",
 		TriggerAuthorType:     "member",
 		NewCommentCount:       3,
+		OtherNewCommentCount:  2,
 		NewCommentsSince:      since,
 	}
 	out := BuildPrompt(task, "claude")
@@ -325,6 +326,15 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	if !strings.Contains(out, "raw thread delta") {
 		t.Errorf("hint must not imply the CLI output exactly matches the count, got:\n%s", out)
 	}
+	if !strings.Contains(out, "2 new comment(s) outside this thread since your last run") {
+		t.Errorf("hint must surface cross-thread awareness separately, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Treat this as awareness, not required reading") {
+		t.Errorf("cross-thread hint must not turn into mandatory reading, got:\n%s", out)
+	}
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --recent 20 --since "+since+" --output json") {
+		t.Errorf("cross-thread hint must provide an optional recent activity read, got:\n%s", out)
+	}
 	if strings.Contains(out, "resumed session is missing older thread context") {
 		t.Errorf("warm delta fallback wording must not assume a resumed session, got:\n%s", out)
 	}
@@ -336,6 +346,33 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	// The old cursor-heavy paragraph must be gone.
 	if strings.Contains(out, "Next reply cursor") || strings.Contains(out, "--before-id") {
 		t.Errorf("the old cursor-pagination paragraph must not render, got:\n%s", out)
+	}
+}
+
+func TestBuildPromptOtherNewCommentsHintWithoutThreadDelta(t *testing.T) {
+	const (
+		issueID = "issue-other-1"
+		since   = "2026-05-28T11:00:00Z"
+	)
+	task := Task{
+		IssueID:               issueID,
+		TriggerCommentID:      "trigger-1",
+		TriggerCommentContent: "please look",
+		TriggerAuthorType:     "member",
+		NewCommentCount:       0,
+		OtherNewCommentCount:  5,
+		NewCommentsSince:      since,
+	}
+	out := BuildPrompt(task, "claude")
+
+	if !strings.Contains(out, "No additional comments in this thread since your last run beyond the triggering comment") {
+		t.Errorf("other-only hint must clarify the triggering thread has no extra delta, got:\n%s", out)
+	}
+	if !strings.Contains(out, "5 new comment(s) outside this thread since your last run") {
+		t.Errorf("other-only hint must preserve cross-thread awareness, got:\n%s", out)
+	}
+	if strings.Contains(out, "--thread trigger-1 --since "+since) {
+		t.Errorf("other-only hint must not invent a thread delta read, got:\n%s", out)
 	}
 }
 

@@ -30,39 +30,46 @@ func (q *Queries) CountComments(ctx context.Context, arg CountCommentsParams) (i
 
 const countNewCommentsSince = `-- name: CountNewCommentsSince :one
 WITH RECURSIVE root_of AS (
+    -- Scope is enforced on both the anchor seed and recursive walk-up; keep
+    -- these predicates together so future parent/thread changes cannot cross
+    -- issue or workspace boundaries.
     SELECT c.id, c.parent_id
     FROM comment c
-    WHERE c.id = $1 AND c.issue_id = $2 AND c.workspace_id = $3
+    WHERE c.id = $4 AND c.issue_id = $1 AND c.workspace_id = $2
     UNION ALL
     SELECT p.id, p.parent_id
     FROM comment p
     JOIN root_of r ON p.id = r.parent_id
-    WHERE p.issue_id = $2 AND p.workspace_id = $3
+    WHERE p.issue_id = $1 AND p.workspace_id = $2
 ),
 thread_root AS (
     SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1
 ),
 descendants AS (
-    SELECT c.id, c.created_at, c.author_type, c.author_id
+    SELECT c.id
     FROM comment c
     JOIN thread_root tr ON c.id = tr.id
     UNION
-    SELECT c.id, c.created_at, c.author_type, c.author_id
+    SELECT c.id
     FROM comment c
     JOIN descendants d ON c.parent_id = d.id
-    WHERE c.issue_id = $2 AND c.workspace_id = $3
+    WHERE c.issue_id = $1 AND c.workspace_id = $2
 )
-SELECT count(*) FROM descendants
-WHERE created_at > $4
-  AND id <> $1
-  AND NOT (author_type = 'agent' AND author_id = $5)
+SELECT count(*) FROM comment c
+WHERE c.issue_id = $1
+  AND c.workspace_id = $2
+  AND c.created_at > $3
+  AND c.id <> $4
+  AND EXISTS (SELECT 1 FROM thread_root)
+  AND NOT (c.author_type = 'agent' AND c.author_id = $5)
+  AND EXISTS (SELECT 1 FROM descendants d WHERE d.id = c.id)
 `
 
 type CountNewCommentsSinceParams struct {
-	AnchorID    pgtype.UUID        `json:"anchor_id"`
 	IssueID     pgtype.UUID        `json:"issue_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Since       pgtype.Timestamptz `json:"since"`
+	AnchorID    pgtype.UUID        `json:"anchor_id"`
 	AuthorID    pgtype.UUID        `json:"author_id"`
 }
 
@@ -73,10 +80,73 @@ type CountNewCommentsSinceParams struct {
 // claim response without shipping comment bodies.
 func (q *Queries) CountNewCommentsSince(ctx context.Context, arg CountNewCommentsSinceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countNewCommentsSince,
-		arg.AnchorID,
 		arg.IssueID,
 		arg.WorkspaceID,
 		arg.Since,
+		arg.AnchorID,
+		arg.AuthorID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countOtherNewCommentsSince = `-- name: CountOtherNewCommentsSince :one
+WITH RECURSIVE root_of AS (
+    -- Scope is enforced on both the anchor seed and recursive walk-up; keep
+    -- these predicates together so future parent/thread changes cannot cross
+    -- issue or workspace boundaries.
+    SELECT c.id, c.parent_id
+    FROM comment c
+    WHERE c.id = $4 AND c.issue_id = $1 AND c.workspace_id = $2
+    UNION ALL
+    SELECT p.id, p.parent_id
+    FROM comment p
+    JOIN root_of r ON p.id = r.parent_id
+    WHERE p.issue_id = $1 AND p.workspace_id = $2
+),
+thread_root AS (
+    SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1
+),
+descendants AS (
+    SELECT c.id
+    FROM comment c
+    JOIN thread_root tr ON c.id = tr.id
+    UNION
+    SELECT c.id
+    FROM comment c
+    JOIN descendants d ON c.parent_id = d.id
+    WHERE c.issue_id = $1 AND c.workspace_id = $2
+)
+SELECT count(*) FROM comment c
+WHERE c.issue_id = $1
+  AND c.workspace_id = $2
+  AND c.created_at > $3
+  AND c.id <> $4
+  AND EXISTS (SELECT 1 FROM thread_root)
+  AND NOT (c.author_type = 'agent' AND c.author_id = $5)
+  AND NOT EXISTS (SELECT 1 FROM descendants d WHERE d.id = c.id)
+`
+
+type CountOtherNewCommentsSinceParams struct {
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	AnchorID    pgtype.UUID        `json:"anchor_id"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+}
+
+// Counts comments created after @since on the same issue but outside the
+// thread containing @anchor_id. This is an awareness signal only: it lets the
+// agent know the issue has cross-thread activity without making those comments
+// part of the default read path. Agent-authored rows by @author_id are excluded
+// for the same reason as CountNewCommentsSince.
+func (q *Queries) CountOtherNewCommentsSince(ctx context.Context, arg CountOtherNewCommentsSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOtherNewCommentsSince,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.Since,
+		arg.AnchorID,
 		arg.AuthorID,
 	)
 	var count int64

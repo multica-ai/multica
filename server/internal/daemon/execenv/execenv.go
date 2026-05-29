@@ -60,6 +60,7 @@ type TaskContextForEnv struct {
 	IssueID                 string
 	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
 	NewCommentCount         int    // non-injected comments in the trigger thread since this agent's last run (excludes its own)
+	OtherNewCommentCount    int    // non-agent comments outside the trigger thread since this agent's last run; awareness only
 	NewCommentsSince        string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	PriorSessionResumed     bool   // true when the daemon will resume an existing provider session for this task
 	AgentID                 string // unique ID of the dispatched agent

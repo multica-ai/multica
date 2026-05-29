@@ -56,6 +56,7 @@ type Task struct {
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind for the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
 	NewCommentCount         int                   `json:"new_comment_count,omitempty"`         // non-injected comments in the trigger thread since this agent's last run (excludes its own); 0/omitted for old daemons or cold start
+	OtherNewCommentCount    int                   `json:"other_new_comment_count,omitempty"`   // non-agent comments outside the trigger thread since this agent's last run; awareness only
 	NewCommentsSince        string                `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message content for chat tasks

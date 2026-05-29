@@ -1269,15 +1269,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
-				// Count non-injected comments that arrived in the triggering
-				// thread since this agent's last run, so the daemon can tell it up
-				// front instead of forcing an issue-wide catch-up. Anchor = the
-				// prior task's started_at (never completed_at: a long run would
-				// miss comments posted while it ran). Cold start (no prior task) →
-				// no anchor → no hint. Excludes the agent's own comments and the
-				// triggering comment itself because that body is already injected
-				// into the prompt. Best-effort: any DB error or zero count leaves
-				// the hint suppressed.
+				// Count comments that arrived since this agent's last run.
+				// Anchor = the prior task's started_at (never completed_at: a long
+				// run would miss comments posted while it ran). The trigger-thread
+				// count drives the default catch-up path. The other-thread count is
+				// only an awareness signal, so agents do not mistake a quiet
+				// triggering thread for a quiet issue. Both exclude the agent's own
+				// comments, and the trigger itself is excluded because its body is
+				// already injected into the prompt. Best-effort: DB errors leave
+				// individual counts suppressed.
 				if startedAt, err := h.Queries.GetLastTaskStartedAtForIssueAndAgent(r.Context(), db.GetLastTaskStartedAtForIssueAndAgentParams{
 					AgentID: task.AgentID,
 					IssueID: comment.IssueID,
@@ -1290,6 +1290,17 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						AuthorID:    task.AgentID,
 					}); err == nil && cnt > 0 {
 						resp.NewCommentCount = int(cnt)
+					}
+					if cnt, err := h.Queries.CountOtherNewCommentsSince(r.Context(), db.CountOtherNewCommentsSinceParams{
+						AnchorID:    task.TriggerCommentID,
+						IssueID:     comment.IssueID,
+						WorkspaceID: comment.WorkspaceID,
+						Since:       startedAt,
+						AuthorID:    task.AgentID,
+					}); err == nil && cnt > 0 {
+						resp.OtherNewCommentCount = int(cnt)
+					}
+					if resp.NewCommentCount > 0 || resp.OtherNewCommentCount > 0 {
 						resp.NewCommentsSince = startedAt.Time.UTC().Format(time.RFC3339)
 					}
 				}

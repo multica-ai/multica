@@ -166,10 +166,11 @@ func TestCommentTriggeredBriefCarriesNewCommentsHint(t *testing.T) {
 		since   = "2026-05-28T11:00:00Z"
 	)
 	ctx := TaskContextForEnv{
-		IssueID:          issueID,
-		TriggerCommentID: "reply-abc",
-		NewCommentCount:  4,
-		NewCommentsSince: since,
+		IssueID:              issueID,
+		TriggerCommentID:     "reply-abc",
+		NewCommentCount:      4,
+		OtherNewCommentCount: 3,
+		NewCommentsSince:     since,
 	}
 	out := buildMetaSkillContent("claude", ctx)
 
@@ -181,6 +182,15 @@ func TestCommentTriggeredBriefCarriesNewCommentsHint(t *testing.T) {
 	}
 	if !strings.Contains(out, "raw thread delta") {
 		t.Errorf("comment brief must not imply the CLI output exactly matches the count, got:\n%s", out)
+	}
+	if !strings.Contains(out, "3 new comment(s) outside this thread since your last run") {
+		t.Errorf("comment brief must surface cross-thread awareness separately, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Treat this as awareness, not required reading") {
+		t.Errorf("comment brief cross-thread hint must not turn into mandatory reading, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--recent 20 --since "+since+" --output json") {
+		t.Errorf("comment brief must provide an optional recent activity read, got:\n%s", out)
 	}
 	if strings.Contains(out, "resumed session is missing older thread context") {
 		t.Errorf("comment brief warm fallback wording must not assume a resumed session, got:\n%s", out)

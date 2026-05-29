@@ -164,7 +164,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	// comments: the trigger is already injected, so don't force a duplicate
 	// thread read. Cold path: read the triggering thread, not the flat timeline.
 	// Final fallback (no trigger id, shouldn't happen here): plain read.
-	if hint := execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.NewCommentsSince, task.NewCommentCount); hint != "" {
+	if hint := execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.NewCommentsSince, task.NewCommentCount, task.OtherNewCommentCount); hint != "" {
 		b.WriteString(hint)
 	} else if task.PriorSessionID != "" {
 		b.WriteString(execenv.BuildResumedCommentsHint(task.IssueID, task.TriggerCommentID))
