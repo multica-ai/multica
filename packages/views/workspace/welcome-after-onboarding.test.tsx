@@ -67,6 +67,7 @@ vi.mock("@multica/core/paths", async () => {
 
 vi.mock("@multica/core/api", () => ({
   api: {
+    getBaseUrl: () => "http://127.0.0.1:8080",
     listAgents: (...args: unknown[]) => mockListAgents(...args),
     createAgent: (...args: unknown[]) => mockCreateAgent(...args),
     createIssue: (...args: unknown[]) => mockCreateIssue(...args),

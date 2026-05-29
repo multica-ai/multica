@@ -26,7 +26,7 @@ function dropAndShiftIndex(set: Set<number>, removed: number): Set<number> {
 
 function isDirty(local: WorkspaceRepo[], saved: WorkspaceRepo[]): boolean {
   if (local.length !== saved.length) return true;
-  return local.some((r, i) => r.url !== saved[i]?.url);
+  return local.some((r, i) => r.url !== saved[i]?.url || (r.description ?? "") !== (saved[i]?.description ?? ""));
 }
 
 export function RepositoriesTab() {
@@ -79,8 +79,8 @@ export function RepositoriesTab() {
     setEditingIndices(dropAndShiftIndex(editingIndices, index));
   };
 
-  const handleRepoChange = (index: number, value: string) => {
-    setRepos(repos.map((r, i) => (i === index ? { ...r, url: value } : r)));
+  const handleRepoChange = (index: number, field: keyof WorkspaceRepo, value: string) => {
+    setRepos(repos.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
   };
 
   const handleEditRepo = (index: number) => {
@@ -88,13 +88,13 @@ export function RepositoriesTab() {
   };
 
   const handleCancelEdit = (index: number) => {
-    const savedUrl = savedRepos[index]?.url;
-    if (savedUrl === undefined) {
+    const saved = savedRepos[index];
+    if (saved === undefined) {
       // Newly added row that was never persisted — drop it entirely.
       handleRemoveRepo(index);
       return;
     }
-    setRepos(repos.map((r, i) => (i === index ? { ...r, url: savedUrl } : r)));
+    setRepos(repos.map((r, i) => (i === index ? { ...r, url: saved.url, description: saved.description } : r)));
     const next = new Set(editingIndices);
     next.delete(index);
     setEditingIndices(next);
@@ -124,31 +124,48 @@ export function RepositoriesTab() {
               return (
                 <div
                   key={index}
-                  className="group flex items-center gap-2"
+                  className="group flex items-start gap-2"
                 >
                   {isEditing ? (
-                    <Input
-                      type="text"
-                      value={repo.url}
-                      onChange={(e) => handleRepoChange(index, e.target.value)}
-                      disabled={!canManageWorkspace}
-                      placeholder={t(($) => $.repositories.url_placeholder)}
-                      className="flex-1 min-w-0 text-sm"
-                    />
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <Input
+                        type="text"
+                        value={repo.url}
+                        onChange={(e) => handleRepoChange(index, "url", e.target.value)}
+                        disabled={!canManageWorkspace}
+                        placeholder={t(($) => $.repositories.url_placeholder)}
+                        className="text-sm"
+                      />
+                      <Input
+                        type="text"
+                        value={repo.description ?? ""}
+                        onChange={(e) => handleRepoChange(index, "description", e.target.value)}
+                        disabled={!canManageWorkspace}
+                        placeholder={t(($) => $.repositories.description_placeholder)}
+                        className="text-sm"
+                      />
+                    </div>
                   ) : (
-                    <div
-                      className="flex-1 min-w-0 truncate rounded-md border bg-muted/50 px-3 py-2 font-mono text-xs text-muted-foreground"
-                      title={repo.url}
-                    >
-                      {repo.url || t(($) => $.repositories.url_empty)}
+                    <div className="flex-1 min-w-0 rounded-md border bg-muted/50 px-3 py-2">
+                      <div
+                        className="truncate font-mono text-xs text-muted-foreground"
+                        title={repo.url}
+                      >
+                        {repo.url || t(($) => $.repositories.url_empty)}
+                      </div>
+                      {repo.description && (
+                        <div className="mt-0.5 truncate text-xs text-muted-foreground/70" title={repo.description}>
+                          {repo.description}
+                        </div>
+                      )}
                     </div>
                   )}
                   {canManageWorkspace && (
                     <div
                       className={
                         isEditing
-                          ? "flex shrink-0 items-center gap-0.5"
-                          : "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+                          ? "flex shrink-0 items-center gap-0.5 pt-1.5"
+                          : "flex shrink-0 items-center gap-0.5 pt-1.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
                       }
                     >
                       {!isEditing && (

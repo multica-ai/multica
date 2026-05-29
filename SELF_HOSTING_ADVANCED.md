@@ -67,8 +67,20 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 | `ALLOW_SIGNUP` | Set to `false` to disable new user signups on a private instance |
 | `ALLOWED_EMAIL_DOMAINS` | Optional comma-separated allowlist of email domains |
 | `ALLOWED_EMAILS` | Optional comma-separated allowlist of exact email addresses |
+| `DISABLE_WORKSPACE_CREATION` | Set to `true` to make `POST /api/workspaces` return 403 for every caller — users can only join workspaces they were invited to |
 
-Changes take effect after restarting the backend / compose stack. The web UI reads `ALLOW_SIGNUP` from `/api/config` at runtime, so no web rebuild is needed.
+Changes take effect after restarting the backend / compose stack. The web UI reads `ALLOW_SIGNUP` and `DISABLE_WORKSPACE_CREATION` from `/api/config` at runtime, so no web rebuild is needed.
+
+#### Locking down workspace creation
+
+`ALLOW_SIGNUP=false` blocks new accounts from being created, but it does **not** block an already-signed-in user from creating another workspace via `POST /api/workspaces`. On a self-hosted instance where every issue/repo/agent must be visible to the platform admin, set `DISABLE_WORKSPACE_CREATION=true` to close that gap. The recommended bootstrap sequence is:
+
+1. Start the instance with `DISABLE_WORKSPACE_CREATION=false` (the default).
+2. Sign in as the admin and create the shared workspace.
+3. Set `DISABLE_WORKSPACE_CREATION=true` and restart the backend. Optionally set `ALLOW_SIGNUP=false` at the same time if you also want to block new account creation.
+4. Going forward, additional users join via invitation only — the "Create workspace" affordance is hidden in the UI and any direct API call returns 403.
+
+> Note: setting `ALLOW_SIGNUP=false` blocks **all** new account creation, including users who already have a pending invitation. If you need invited users to be able to sign up but not create their own workspaces, keep `ALLOW_SIGNUP=true` (optionally combined with `ALLOWED_EMAIL_DOMAINS` / `ALLOWED_EMAILS`) and only flip `DISABLE_WORKSPACE_CREATION=true`.
 
 ### File Storage (Optional)
 
@@ -165,6 +177,111 @@ The Docker Compose setup runs migrations automatically. If you need to run them 
 # Or from source
 cd server && go run ./cmd/migrate up
 ```
+
+## Usage Dashboard Rollup
+
+The Usage and Runtime dashboards read from `task_usage_hourly`, a derived table populated by `rollup_task_usage_hourly()`. The function is **not** scheduled out of the box on the default self-host stack: the bundled `pgvector/pgvector:pg17` image ships without `pg_cron`, and the backend does not run the rollup in-process either. Until something calls it on a schedule, raw `task_usage` rows will keep arriving while the dashboard stays at zero.
+
+Pick one of the supported paths:
+
+### Option A — External cron / systemd-timer
+
+The simplest path. Schedule `SELECT rollup_task_usage_hourly()` every five minutes from any out-of-band timer (host crontab, systemd timer, sidecar container, Kubernetes CronJob). It is idempotent and watermark-driven — overlapping runs are no-ops on an internal advisory lock, and a missed tick catches up on the next run.
+
+Docker Compose:
+
+```bash
+# /etc/cron.d/multica-rollup
+*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
+  exec -T postgres psql -U multica -d multica \
+  -c "SELECT rollup_task_usage_hourly();" >/dev/null
+```
+
+Kubernetes (one-off `CronJob`):
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: multica-usage-rollup
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: psql
+              image: postgres:17-alpine
+              command:
+                - psql
+                - "$(DATABASE_URL)"
+                - -c
+                - "SELECT rollup_task_usage_hourly();"
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: multica-secrets
+                      key: DATABASE_URL
+```
+
+### Option B — Postgres with `pg_cron`
+
+If you'd rather have Postgres schedule itself, swap the bundled image for one that ships both `pgvector` and `pg_cron` (e.g. `supabase/postgres`, or a custom build of `pgvector/pgvector` with `pg_cron` added). `pg_cron` requires `shared_preload_libraries=pg_cron` in `postgresql.conf`, which only takes effect on Postgres restart — set it before bringing the container up.
+
+Then register the job once:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+SELECT cron.schedule(
+  'rollup_task_usage_hourly',
+  '*/5 * * * *',
+  $$SELECT rollup_task_usage_hourly()$$
+);
+```
+
+`pg_cron.database_name` defaults to `postgres`; if your Multica database has a different name, point `pg_cron` at it via that GUC or run `cron.schedule_in_database(...)` instead.
+
+### Option C — Backfill historical data first
+
+`rollup_task_usage_hourly()` only processes new buckets after it starts running. If you already have `task_usage` rows from before the rollup was scheduled — most commonly when upgrading from `v0.3.4` to `v0.3.5+`, or on a fresh install that has been collecting usage for a while — run `backfill_task_usage_hourly` once to seed historical buckets, then set up Option A or Option B for ongoing rollups.
+
+```bash
+# Docker Compose
+docker compose -f docker-compose.selfhost.yml exec backend \
+  ./backfill_task_usage_hourly --sleep-between-slices=2s
+
+# Kubernetes
+kubectl -n multica exec deploy/multica-backend -- \
+  ./backfill_task_usage_hourly --sleep-between-slices=2s
+```
+
+The command walks `task_usage`'s full time range in monthly slices and calls the same idempotent primitive the cron path uses, so it's safe to re-run, to interrupt with Ctrl-C, and to run concurrently with an already-scheduled rollup. Flags:
+
+| Flag | Description |
+|---|---|
+| `--sleep-between-slices` | Pause between monthly slices to throttle read pressure on busy databases (e.g. `2s`). Recommended on production DBs with years of history. |
+| `--months-back N` | Only backfill the last N months. **Requires `--force-partial`** because the watermark still advances past the skipped older buckets — those are permanently abandoned. |
+| `--dry-run` | Log slices that would be processed without writing anything. |
+
+After backfill completes, the rollup-state watermark is stamped to `now() - 5 minutes`, so the first scheduled tick after backfill does not redo history.
+
+### `v0.3.4 → v0.3.5+` upgrade order
+
+Migration `103` adds a fail-closed guard that refuses to drop the legacy daily rollups until `task_usage_hourly` has caught up. If you run `migrate up` straight through on a database with existing `task_usage` rows, it aborts with:
+
+```text
+ERROR: refusing to drop legacy daily rollups:
+  task_usage_hourly_rollup_state.watermark_at (1970-01-01 ...) trails
+  task_usage latest event (...) by more than 01:00:00 — backfill is
+  incomplete or pg_cron is not running. Run cmd/backfill_task_usage_hourly
+  (and let pg_cron catch up) before re-running migrate
+```
+
+Recovery is straightforward: run `backfill_task_usage_hourly` (Option C above), then re-run `migrate up` (or restart the backend container — migrations run automatically on startup). **Fresh installs are exempt** — the guard short-circuits when `task_usage` is empty, and migrations succeed, but the dashboard will still stay at zero until you set up Option A or Option B.
 
 ## Manual Setup (Without Docker Compose)
 

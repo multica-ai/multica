@@ -296,7 +296,14 @@
       "skills_meta": "reusable playbooks",
       "more_label": "And more",
       "more_meta": "and more"
-    }
+    },
+    "creation_disabled_eyebrow": "Workspace creation is disabled",
+    "creation_disabled_headline": "Ask your administrator for an invitation.",
+    "creation_disabled_lede": "This Multica instance does not allow new workspaces to be created. Once an administrator invites you to a workspace, accept the invitation and refresh to continue.",
+    "creation_disabled_logout": "Log out",
+    "creation_disabled_eyebrow_resume": "Your workspace",
+    "creation_disabled_headline_resume": "Continue with {{name}}.",
+    "creation_disabled_lede_resume": "Workspace creation is disabled on this instance, so you'll continue into your existing workspace."
   },
   "step_runtime": {
     "scanning_headline": "Connecting this computer…",

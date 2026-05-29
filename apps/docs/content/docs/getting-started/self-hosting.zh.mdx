@@ -133,6 +133,18 @@ Alternatively, configure step by step: `multica config set server_url http://loc
 3. Go to **Settings → Agents** and create a new agent
 4. Create an issue and assign it to your agent
 
+## Usage Dashboard Rollup (Required)
+
+Starting with `v0.3.5`, the Usage / Runtime dashboards read from a derived `task_usage_hourly` table populated by `rollup_task_usage_hourly()`. The bundled `pgvector/pgvector:pg17` image does **not** include `pg_cron`, and the backend doesn't run the rollup in-process either — until you schedule it yourself, the dashboard will stay at zero even though `task_usage` is populated.
+
+Pick one supported path before relying on the Usage / Runtime dashboard:
+
+- **External cron / systemd-timer / Kubernetes `CronJob`**: schedule `SELECT rollup_task_usage_hourly()` every 5 minutes. Idempotent, watermark-driven — overlapping or skipped ticks are safe.
+- **Postgres with `pg_cron`**: swap the bundled Postgres image for one that ships `pg_cron`, set `shared_preload_libraries=pg_cron`, then `SELECT cron.schedule('rollup_task_usage_hourly', '*/5 * * * *', 'SELECT rollup_task_usage_hourly()')` once.
+- **Backfill historical data**: required on the `v0.3.4 → v0.3.5+` upgrade path when the database already has `task_usage` rows — migration `103` is fail-closed and will abort `migrate up` with `refusing to drop legacy daily rollups: ...` until the hourly table is seeded. Run `./backfill_task_usage_hourly --sleep-between-slices=2s` inside the backend container, then re-run the upgrade and configure one of the schedules above.
+
+Full reference (Compose + Kubernetes templates, flag descriptions, upgrade order) lives in [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
+
 ## Stopping Services
 
 ```bash

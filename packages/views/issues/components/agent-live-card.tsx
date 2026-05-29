@@ -26,7 +26,7 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 // ExecutionLogSection — this card is just a header-style anchor that
 // answers "is anyone working on this issue right now?" at a glance.
 //
-// We still maintain per-task TimelineItem[] state here so the live
+// We still maintain per-task raw message state here so the live
 // TranscriptButton on the sticky banner can open the dialog with live
 // items already attached (the dialog stays in sync via WS as messages
 // arrive). The right-panel rows use the lazy mode of TranscriptButton
@@ -43,7 +43,7 @@ function formatElapsed(startedAt: string): string {
 
 interface TaskState {
   task: AgentTask;
-  items: TimelineItem[];
+  messages: TaskMessagePayload[];
 }
 
 interface AgentLiveCardProps {
@@ -92,8 +92,8 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
         for (const task of tasks) {
           const existing = prev.get(task.id);
           next.set(task.id, existing
-            ? { task, items: existing.items }
-            : { task, items: [] });
+            ? { task, messages: existing.messages }
+            : { task, messages: [] });
         }
         return next;
       });
@@ -116,16 +116,15 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
         hydratedTaskIds.current.add(task.id);
         api.listTaskMessages(task.id).then((msgs) => {
           if (!mountedRef.current) return;
-          const timeline = buildTimeline(msgs);
           for (const m of msgs) seenSeqs.current.add(`${m.task_id}:${m.seq}`);
           setTaskStates((prev) => {
             const next = new Map(prev);
             const existing = next.get(task.id);
             if (!existing) return prev;
-            const loadedSeqs = new Set(timeline.map((i) => i.seq));
-            const wsOnly = existing.items.filter((i) => !loadedSeqs.has(i.seq));
-            const merged = [...timeline, ...wsOnly].sort((a, b) => a.seq - b.seq);
-            next.set(task.id, { task: existing.task, items: merged });
+            const loadedSeqs = new Set(msgs.map((i) => i.seq));
+            const wsOnly = existing.messages.filter((i) => !loadedSeqs.has(i.seq));
+            const messages = [...msgs, ...wsOnly].sort((a, b) => a.seq - b.seq);
+            next.set(task.id, { task: existing.task, messages });
             return next;
           });
         }).catch((e) => {
@@ -156,21 +155,12 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
       if (seenSeqs.current.has(key)) return;
       seenSeqs.current.add(key);
 
-      const item: TimelineItem = {
-        seq: msg.seq,
-        type: msg.type,
-        tool: msg.tool,
-        content: msg.content,
-        input: msg.input,
-        output: msg.output,
-      };
-
       setTaskStates((prev) => {
         const next = new Map(prev);
         const existing = next.get(msg.task_id);
         if (existing) {
-          const items = [...existing.items, item].sort((a, b) => a.seq - b.seq);
-          next.set(msg.task_id, { ...existing, items });
+          const messages = [...existing.messages, msg].sort((a, b) => a.seq - b.seq);
+          next.set(msg.task_id, { ...existing, messages });
         }
         return next;
       });
@@ -211,21 +201,30 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
 
   useWSEvent("task:queued", handleTaskActive);
   useWSEvent("task:dispatch", handleTaskActive);
+  // The daemon publishes these two transitions while a task moves through
+  // the dispatch → waiting_local_directory → running sequence on a busy
+  // local_directory path. Without subscribing here, the sticky banner
+  // would stay stuck on the optimistic dispatch state instead of flipping
+  // to "waiting" then resuming "is working".
+  useWSEvent("task:waiting_local_directory", handleTaskActive);
+  useWSEvent("task:running", handleTaskActive);
 
   if (taskStates.size === 0) return null;
 
-  // Order: running → dispatched → queued. The most-active task takes the
-  // sticky slot; queued tasks sit below so the "is working" banner isn't
-  // pushed off by a freshly-enqueued sibling. ListActiveTasksByIssue's
-  // server-side ORDER BY is created_at DESC, which doesn't reflect lifecycle
-  // priority, so we re-sort on the client.
+  // Order: running → dispatched → waiting → queued. The most-active task
+  // takes the sticky slot; the parked / queued tasks sit below so the
+  // "is working" banner isn't pushed off by a freshly-enqueued or
+  // path-parked sibling. ListActiveTasksByIssue's server-side ORDER BY is
+  // created_at DESC, which doesn't reflect lifecycle priority, so we
+  // re-sort on the client.
   const statusRank: Record<AgentTask["status"], number> = {
     running: 0,
     dispatched: 1,
-    queued: 2,
-    completed: 3,
-    failed: 3,
-    cancelled: 3,
+    waiting_local_directory: 2,
+    queued: 3,
+    completed: 4,
+    failed: 4,
+    cancelled: 4,
   };
   const entries = Array.from(taskStates.values()).sort(
     (a, b) => statusRank[a.task.status] - statusRank[b.task.status],
@@ -239,7 +238,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
       <div className="mt-4 sticky top-4 z-10 rounded-lg bg-background/80 supports-[backdrop-filter]:bg-background/55 backdrop-blur-md">
         <SingleAgentLiveCard
           task={firstEntry.task}
-          items={firstEntry.items}
+          items={buildTimeline(firstEntry.messages)}
           issueId={issueId}
           agentName={firstEntry.task.agent_id ? getActorName("agent", firstEntry.task.agent_id) : t(($) => $.agent_live.fallback_name)}
         />
@@ -247,11 +246,11 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
       {/* Additional agents — non-sticky, scroll with the page */}
       {restEntries.length > 0 && (
         <div className="mt-1.5 space-y-1.5">
-          {restEntries.map(({ task, items }) => (
+          {restEntries.map(({ task, messages }) => (
             <SingleAgentLiveCard
               key={task.id}
               task={task}
-              items={items}
+              items={buildTimeline(messages)}
               issueId={issueId}
               agentName={task.agent_id ? getActorName("agent", task.agent_id) : t(($) => $.agent_live.fallback_name)}
             />
@@ -278,6 +277,14 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const isQueued = task.status === "queued";
+  // `waiting_local_directory` is the daemon-parked stage of an otherwise-
+  // active task: it's been dispatched (no longer pure-queued) but hasn't
+  // entered the running phase yet because another task on this daemon
+  // holds the same local_directory lock.
+  const isWaitingLocalDirectory = task.status === "waiting_local_directory";
+  // Treat parked + queued the same visually (non-shimmering, muted accent),
+  // but the label below is distinct so the user sees the specific reason.
+  const isParked = isQueued || isWaitingLocalDirectory;
 
   // Elapsed time — ticks every second so users see the agent is alive.
   // For queued tasks neither started_at nor dispatched_at is set yet, so
@@ -308,10 +315,11 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
 
-  // Queued tasks render with a non-spinning Clock and dimmer accent so the
-  // banner reads as "waiting" rather than "working" at a glance.
+  // Queued / waiting tasks render with a non-spinning Clock and dimmer
+  // accent so the banner reads as "waiting" rather than "working" at a
+  // glance.
   return (
-    <div className={isQueued ? "rounded-lg border border-border bg-muted/30" : "rounded-lg border border-info/20 bg-info/5"}>
+    <div className={isParked ? "rounded-lg border border-border bg-muted/30" : "rounded-lg border border-info/20 bg-info/5"}>
       <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
         {task.agent_id ? (
           <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard showStatusDot />
@@ -321,27 +329,29 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
           </div>
         )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
-          {isQueued ? (
+          {isParked ? (
             <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
           ) : (
             <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
           )}
           <span className="font-medium text-foreground truncate">
-            {isQueued
-              ? t(($) => $.agent_live.is_queued, { name: agentName })
-              : t(($) => $.agent_live.is_working, { name: agentName })}
+            {isWaitingLocalDirectory
+              ? t(($) => $.agent_live.is_waiting_local_directory, { name: agentName })
+              : isQueued
+                ? t(($) => $.agent_live.is_queued, { name: agentName })
+                : t(($) => $.agent_live.is_working, { name: agentName })}
           </span>
           <span className="text-muted-foreground tabular-nums shrink-0">
-            {isQueued
+            {isParked
               ? t(($) => $.agent_live.queued_elapsed_prefix, { elapsed })
               : elapsed}
           </span>
-          {!isQueued && toolCount > 0 && (
+          {!isParked && toolCount > 0 && (
             <span className="text-muted-foreground shrink-0">{t(($) => $.agent_live.tool_count, { count: toolCount })}</span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
-          {!isQueued && (
+          {!isParked && (
             <TranscriptButton
               task={task}
               agentName={agentName}
@@ -351,6 +361,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             />
           )}
           <button
+            type="button"
             onClick={requestCancel}
             disabled={cancelling}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
@@ -365,7 +376,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         onConfirm={() => void handleCancel()}
-        showRunningNote={!isQueued}
+        showRunningNote={!isParked}
       />
     </div>
   );

@@ -17,6 +17,7 @@ import {
   Cloud,
   Cpu,
   Filter,
+  Folder,
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
 } from "lucide-react";
@@ -178,6 +179,7 @@ export function AgentTranscriptDialog({
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState("");
   const [copied, setCopied] = useState(false);
+  const [copiedWorkdir, setCopiedWorkdir] = useState(false);
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
   const [selectedTools, setSelectedTools] = useState<Set<string>>(new Set());
@@ -276,6 +278,14 @@ export function AgentTranscriptDialog({
 
   // Copy all events as text. Use the displayed order so users get the same
   // sequence they see on screen — matters when sort is set to newest-first.
+  const handleCopyWorkdir = useCallback(() => {
+    if (!task.relative_work_dir) return;
+    navigator.clipboard.writeText(task.relative_work_dir).then(() => {
+      setCopiedWorkdir(true);
+      setTimeout(() => setCopiedWorkdir(false), 2000);
+    });
+  }, [task.relative_work_dir]);
+
   const handleCopyAll = useCallback(() => {
     const text = displayItems
       .map((item) => {
@@ -413,6 +423,7 @@ export function AgentTranscriptDialog({
                 </DropdownMenu>
               )}
               <button
+                type="button"
                 onClick={handleCopyAll}
                 className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
@@ -420,6 +431,7 @@ export function AgentTranscriptDialog({
                 {copied ? t(($) => $.transcript.copied) : selectedTools.size > 0 ? t(($) => $.transcript.copy_filtered) : t(($) => $.transcript.copy_all)}
               </button>
               <button
+                type="button"
                 onClick={() => onOpenChange(false)}
                 className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
@@ -470,6 +482,31 @@ export function AgentTranscriptDialog({
                 ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })
                 : t(($) => $.transcript.events, { count: items.length })}
             </MetadataChip>
+
+            {/* Working directory — server-derived display path. Falls back to
+                nothing when older backends omit the field rather than rendering
+                `work_dir` raw and leaking the user's home directory. The
+                absolute `task.work_dir` deliberately never reaches the DOM
+                anywhere — only `relative_work_dir` is safe to render / put in
+                title / copy to clipboard, because the server has already
+                stripped $HOME and the username out of it. The button
+                truncates because real workdir paths are routinely long
+                enough to push every other chip off the row. */}
+            {task.relative_work_dir && (
+              <button
+                type="button"
+                onClick={handleCopyWorkdir}
+                title={task.relative_work_dir}
+                className="inline-flex max-w-[16rem] items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {copiedWorkdir ? (
+                  <Check className="h-3 w-3 shrink-0 text-emerald-500" />
+                ) : (
+                  <Folder className="h-3 w-3 shrink-0" />
+                )}
+                <span className="truncate font-mono">{task.relative_work_dir}</span>
+              </button>
+            )}
 
             {/* Created time */}
             {task.created_at && (
@@ -649,6 +686,7 @@ function TimelineBar({
 
         return (
           <button
+            type="button"
             key={seg.startIdx}
             className={cn(
               "h-full transition-all duration-150 hover:opacity-80 relative group",

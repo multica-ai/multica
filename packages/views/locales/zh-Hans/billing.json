@@ -1,0 +1,75 @@
+{
+  "title": "账单（测试页）",
+  "subtitle": "直接透传 multica-cloud 的 /api/v1/billing/*。不是正式 UI——只是把所有端点塞到一个页面方便验证 Stripe 流程。",
+  "endpoints": {
+    "balance": "GET /api/cloud-billing/balance",
+    "transactions": "GET /api/cloud-billing/transactions",
+    "batches": "GET /api/cloud-billing/batches",
+    "topups": "GET /api/cloud-billing/topups",
+    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
+  },
+  "balance": {
+    "title": "余额",
+    "credits_suffix": "credits",
+    "meta": "raw micro: {{micro}} · owner: {{owner}}… · updated {{updated}}"
+  },
+  "buy": {
+    "title": "购买 credits / 管理账单",
+    "no_tiers": "未配置任何价格档位。Cloud 那边应该没有配 Stripe key——checkout 会返回 503。",
+    "tier_money_to_credits": "{{money}} → {{credits}} credits",
+    "tier_bonus": " + 赠送 {{credits}}",
+    "tier_bonus_with_expiry": " + 赠送 {{credits}}（{{expiry}}）",
+    "tier_id": "id: {{id}}",
+    "open_portal": "打开 Stripe Billing Portal",
+    "portal_hint": "对于尚未付款的用户预期返回 400（Stripe 还没建 customer 记录）。",
+    "toast_no_url": "Cloud 没有返回 checkout URL",
+    "toast_checkout_failed": "Checkout 失败",
+    "toast_no_portal_url": "没拿到 portal URL",
+    "toast_portal_failed": "打开 Portal 失败"
+  },
+  "checkout": {
+    "session_label": "Checkout session {{prefix}}…",
+    "loading": "正在加载订单状态…",
+    "fetch_failed": "拉取订单状态失败：{{error}}",
+    "fetch_failed_unknown": "未知错误",
+    "final_status": "最终状态：{{status}}",
+    "polling_status": "正在轮询订单状态…当前：{{status}}",
+    "status_unknown": "unknown",
+    "label_order": "订单",
+    "label_tier": "档位",
+    "label_charged": "已收款",
+    "charged_value": "{{money}} · {{credits}} credits",
+    "charged_with_bonus": "{{money}} · {{credits}} credits + {{bonus}} 赠送",
+    "clear_url": "从 URL 清除"
+  },
+  "transactions": {
+    "title": "流水",
+    "empty": "暂无流水。",
+    "credits_value": "{{value}} credits",
+    "row_meta": "{{date}} · balance after: {{balance}} credits · ref: {{ref}}",
+    "ref_empty": "—"
+  },
+  "batches": {
+    "title": "Credit 批次",
+    "empty": "暂无批次。",
+    "remaining_over_total": "{{remaining}} / {{total}} credits",
+    "id_suffix": "{{id}}…",
+    "consumed": "已消耗：{{value}} credits",
+    "expires_suffix": " · 过期时间 {{value}}",
+    "never_expires_suffix": " · 永不过期"
+  },
+  "topups": {
+    "title": "充值订单",
+    "empty": "暂无充值订单。",
+    "amount_to_credits": "{{money}} → {{credits}} credits",
+    "amount_to_credits_with_bonus": "{{money}} → {{credits}} credits + {{bonus}} 赠送",
+    "row_meta": "{{date}} · stripe: {{checkout}}",
+    "stripe_empty": "—"
+  },
+  "shared": {
+    "request_failed": "请求失败",
+    "refresh": "刷新",
+    "paging": "第 {{page}} / {{totalPages}} 页 · 共 {{total}} 条",
+    "date_dash": "—"
+  }
+}

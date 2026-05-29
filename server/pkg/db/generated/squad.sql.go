@@ -267,6 +267,102 @@ func (q *Queries) ListAllSquads(ctx context.Context, workspaceID pgtype.UUID) ([
 	return items, nil
 }
 
+const listSquadMemberPreviewRows = `-- name: ListSquadMemberPreviewRows :many
+SELECT
+    sm.squad_id,
+    sm.member_type,
+    sm.member_id,
+    sm.role
+FROM squad_member sm
+JOIN squad s ON s.id = sm.squad_id
+WHERE s.workspace_id = $1 AND s.archived_at IS NULL
+ORDER BY
+    sm.squad_id ASC,
+    (sm.member_type = 'agent' AND sm.member_id = s.leader_id) DESC,
+    sm.created_at ASC
+`
+
+type ListSquadMemberPreviewRowsRow struct {
+	SquadID    pgtype.UUID `json:"squad_id"`
+	MemberType string      `json:"member_type"`
+	MemberID   pgtype.UUID `json:"member_id"`
+	Role       string      `json:"role"`
+}
+
+// Static squad membership summary for list/hover previews. This deliberately
+// excludes derived runtime/task status; the squad detail members-status
+// endpoint owns live state.
+func (q *Queries) ListSquadMemberPreviewRows(ctx context.Context, workspaceID pgtype.UUID) ([]ListSquadMemberPreviewRowsRow, error) {
+	rows, err := q.db.Query(ctx, listSquadMemberPreviewRows, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSquadMemberPreviewRowsRow{}
+	for rows.Next() {
+		var i ListSquadMemberPreviewRowsRow
+		if err := rows.Scan(
+			&i.SquadID,
+			&i.MemberType,
+			&i.MemberID,
+			&i.Role,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSquadMemberPreviewRowsBySquad = `-- name: ListSquadMemberPreviewRowsBySquad :many
+SELECT
+    sm.squad_id,
+    sm.member_type,
+    sm.member_id,
+    sm.role
+FROM squad_member sm
+JOIN squad s ON s.id = sm.squad_id
+WHERE sm.squad_id = $1
+ORDER BY
+    (sm.member_type = 'agent' AND sm.member_id = s.leader_id) DESC,
+    sm.created_at ASC
+`
+
+type ListSquadMemberPreviewRowsBySquadRow struct {
+	SquadID    pgtype.UUID `json:"squad_id"`
+	MemberType string      `json:"member_type"`
+	MemberID   pgtype.UUID `json:"member_id"`
+	Role       string      `json:"role"`
+}
+
+func (q *Queries) ListSquadMemberPreviewRowsBySquad(ctx context.Context, squadID pgtype.UUID) ([]ListSquadMemberPreviewRowsBySquadRow, error) {
+	rows, err := q.db.Query(ctx, listSquadMemberPreviewRowsBySquad, squadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSquadMemberPreviewRowsBySquadRow{}
+	for rows.Next() {
+		var i ListSquadMemberPreviewRowsBySquadRow
+		if err := rows.Scan(
+			&i.SquadID,
+			&i.MemberType,
+			&i.MemberID,
+			&i.Role,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSquadMemberStatusRows = `-- name: ListSquadMemberStatusRows :many
 SELECT
     sm.id              AS squad_member_id,
@@ -290,7 +386,7 @@ LEFT JOIN agent_runtime ar
 LEFT JOIN agent_task_queue atq
        ON sm.member_type = 'agent'
       AND atq.agent_id = sm.member_id
-      AND atq.status IN ('dispatched', 'running')
+      AND atq.status IN ('dispatched', 'running', 'waiting_local_directory')
 LEFT JOIN issue i
        ON i.id = atq.issue_id
 WHERE sm.squad_id = $1

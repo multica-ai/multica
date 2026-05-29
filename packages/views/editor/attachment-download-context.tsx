@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, use, useMemo, type ReactNode } from "react";
 import type { Attachment } from "@multica/core/types";
 import { openExternal } from "../platform";
 import { useDownloadAttachment } from "./use-download-attachment";
@@ -71,7 +71,7 @@ export function AttachmentDownloadProvider({ attachments, children }: ProviderPr
  * usable in editor surfaces that haven't been wired up yet.
  */
 export function useAttachmentDownloadResolver(): ResolvedDownload {
-  const ctx = useContext(AttachmentDownloadContext);
+  const ctx = use(AttachmentDownloadContext);
   // Hooks-must-be-unconditional: always create the fallback object, but
   // memoization is unnecessary here because each NodeView render also
   // re-runs the click handler closure.

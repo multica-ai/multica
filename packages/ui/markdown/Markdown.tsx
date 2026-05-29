@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { FileText, Download } from 'lucide-react'
 import { cn } from '@multica/ui/lib/utils'
+import { CODE_LIGATURE_CLASS } from '@multica/ui/lib/code-style'
 import { CodeBlock, InlineCode } from './CodeBlock'
 import { isAllowedFileCardHref, preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
@@ -238,8 +239,12 @@ function createComponents(
     return {
       ...baseComponents,
       // No special code handling - just monospace
-      code: ({ children }) => <code className="font-mono">{children}</code>,
-      pre: ({ children }) => <pre className="font-mono whitespace-pre-wrap my-2">{children}</pre>,
+      code: ({ children }) => <code className={cn('font-mono', CODE_LIGATURE_CLASS)}>{children}</code>,
+      pre: ({ children }) => (
+        <pre className={cn('font-mono whitespace-pre-wrap my-2', CODE_LIGATURE_CLASS)}>
+          {children}
+        </pre>
+      ),
       // Minimal paragraph spacing
       p: ({ children }) => <p className="my-1">{children}</p>,
       // Simple lists

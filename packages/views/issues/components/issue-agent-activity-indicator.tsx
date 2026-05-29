@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   HoverCard,
@@ -46,7 +46,7 @@ interface IssueAgentActivityIndicatorProps {
  * Re-renders on every snapshot invalidation (WS task:* events drive it
  * via use-realtime-sync). 30s staleTime is the offline fallback only.
  */
-export function IssueAgentActivityIndicator({
+export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndicator({
   issueId,
   size = 12,
 }: IssueAgentActivityIndicatorProps) {
@@ -60,7 +60,14 @@ export function IssueAgentActivityIndicator({
     for (const task of snapshot) {
       if (task.issue_id !== issueId) continue;
       if (task.status === "running") running.push(task);
-      else if (task.status === "queued" || task.status === "dispatched")
+      else if (
+        task.status === "queued" ||
+        task.status === "dispatched" ||
+        // waiting_local_directory is the daemon-parked variant of "queued"
+        // — the agent is still actively waiting on a path lock, so it
+        // belongs in the active hover stack rather than dropping out.
+        task.status === "waiting_local_directory"
+      )
         queued.push(task);
       // Terminal statuses are intentionally ignored — they belong on the
       // issue history, not the live indicator.
@@ -113,4 +120,4 @@ export function IssueAgentActivityIndicator({
       </HoverCardContent>
     </HoverCard>
   );
-}
+});

@@ -17,7 +17,7 @@
  * Cache shapes (the design contract here):
  *   - Issue detail:    Issue                                  (keyed by detail(wsId, id))
  *   - Issue timeline:  TimelineEntry[]                        (keyed by timeline(wsId, id))
- *                      ASC oldest-first; new entries append to the end.
+ *                      ASC oldest-first; new entries inserted at sorted position.
  *   - My Issues list:  Issue[]                                (keyed by myList(wsId, scope, filter))
  *                      Multiple list caches per wsId (one per scope/filter combo).
  *                      Patch ALL of them via setQueriesData on myAll(wsId).
@@ -81,7 +81,12 @@ export function appendTimelineEntry(
       if (old.some((e) => e.id === entry.id && e.type === entry.type)) {
         return old;
       }
-      return [...old, entry];
+      const next = [...old, entry];
+      next.sort((a, b) => {
+        if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
+        return a.id < b.id ? -1 : 1;
+      });
+      return next;
     },
   );
 }

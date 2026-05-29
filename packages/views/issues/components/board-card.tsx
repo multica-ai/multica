@@ -98,20 +98,19 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   const showPriority = storeProperties.priority;
   const showDescription = storeProperties.description && issue.description;
-  const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
+  const showAssigneeSection = storeProperties.assignee;
+  const hasAssignee = !!issue.assignee_type && !!issue.assignee_id;
   const showStartDate = storeProperties.startDate && issue.start_date;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showLabels = storeProperties.labels && labels.length > 0;
 
-  // When assignee is the only meta-row property, expand it with name on the left
-  // and a relative "updated" hint on the right — fills the otherwise empty row.
-  const metaIsAssigneeOnly =
-    !!showAssignee && !showStartDate && !showDueDate && !showChildProgress;
+  const showAssigneeName = showAssigneeSection && hasAssignee && !showStartDate && !showDueDate;
+  const showUpdatedHint = showAssigneeName && !showChildProgress;
   const { getActorName } = useActorName();
   const assigneeName =
-    metaIsAssigneeOnly && issue.assignee_type && issue.assignee_id
+    showAssigneeName && issue.assignee_type && issue.assignee_id
       ? getActorName(issue.assignee_type, issue.assignee_id)
       : null;
 
@@ -140,35 +139,37 @@ export const BoardCardContent = memo(function BoardCardContent({
     )
   ) : null;
 
-  // When showing only an avatar (no name), keep natural width; when showing
-  // avatar + name, allow the container to shrink (min-w-0) and cap with a
-  // sensible max so a 30-char agent name can't push the rest of the row off.
+  // The parent row gives this container the leftover space; min-w-0 and
+  // max-w-full make the nested picker trigger respect that limit.
   const assigneeContainerClass = assigneeName
-    ? "inline-flex items-center gap-1.5 min-w-0 max-w-[160px]"
+    ? "flex min-w-0 max-w-full items-center"
     : "inline-flex items-center";
 
-  const assigneeInner = showAssignee ? (
-    <span className="inline-flex items-center gap-1.5 min-w-0">
+  const assigneeInner = hasAssignee ? (
+    <span className="flex min-w-0 max-w-full items-center gap-1.5">
       <ActorAvatar
         actorType={issue.assignee_type!}
         actorId={issue.assignee_id!}
         size={20}
         enableHoverCard
+        className="shrink-0"
       />
       {assigneeName && (
-        <span className="text-xs text-foreground truncate">{assigneeName}</span>
+        <span className="min-w-0 truncate text-xs text-foreground">{assigneeName}</span>
       )}
     </span>
-  ) : null;
+  ) : (
+    <span className="text-xs text-muted-foreground">{t(($) => $.pickers.assignee.trigger_unassigned)}</span>
+  );
 
-  const assigneeNode = showAssignee ? (
+  const assigneeNode = showAssigneeSection ? (
     editable ? (
       <PickerWrapper className={assigneeContainerClass}>
         <AssigneePicker
           assigneeType={issue.assignee_type}
           assigneeId={issue.assignee_id}
           onUpdate={handleUpdate}
-          trigger={assigneeInner!}
+          trigger={assigneeInner}
         />
       </PickerWrapper>
     ) : (
@@ -176,7 +177,8 @@ export const BoardCardContent = memo(function BoardCardContent({
     )
   ) : null;
 
-  const showMetaRow = showAssignee || showStartDate || showDueDate || showChildProgress;
+  const showMetaRow = showAssigneeSection || showStartDate || showDueDate || showChildProgress;
+  const showRightMeta = !!showStartDate || !!showDueDate || !!showChildProgress || showUpdatedHint;
 
   return (
     <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
@@ -221,74 +223,82 @@ export const BoardCardContent = memo(function BoardCardContent({
 
       {/* Meta row: assignee (left), start date, due date, child progress (right) */}
       {showMetaRow && (
-        <div className="mt-2 flex items-center gap-2">
-          {assigneeNode}
-          {showStartDate && (
-            editable ? (
-              <PickerWrapper className="shrink-0">
-                <StartDatePicker
-                  startDate={issue.start_date}
-                  onUpdate={handleUpdate}
-                  trigger={
-                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <CalendarClock className="size-3" />
-                      {formatDate(issue.start_date!)}
-                    </span>
-                  }
-                />
-              </PickerWrapper>
-            ) : (
-              <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-                <CalendarClock className="size-3" />
-                {formatDate(issue.start_date!)}
-              </span>
-            )
-          )}
-          {showDueDate && (
-            editable ? (
-              <PickerWrapper className="shrink-0">
-                <DueDatePicker
-                  dueDate={issue.due_date}
-                  onUpdate={handleUpdate}
-                  trigger={
-                    <span
-                      className={`flex items-center gap-1 text-xs ${
-                        new Date(issue.due_date!) < new Date()
-                          ? "text-destructive"
-                          : "text-muted-foreground"
-                      }`}
-                    >
-                      <CalendarDays className="size-3" />
-                      {formatDate(issue.due_date!)}
-                    </span>
-                  }
-                />
-              </PickerWrapper>
-            ) : (
-              <span
-                className={`flex shrink-0 items-center gap-1 text-xs ${
-                  new Date(issue.due_date!) < new Date()
-                    ? "text-destructive"
-                    : "text-muted-foreground"
-                }`}
-              >
-                <CalendarDays className="size-3" />
-                {formatDate(issue.due_date!)}
-              </span>
-            )
-          )}
-          {showChildProgress && (
-            <div className="ml-auto inline-flex shrink-0 items-center gap-1">
-              <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
-              <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
-                {childProgress!.done}/{childProgress!.total}
-              </span>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          {showAssigneeSection && (
+            <div className="min-w-0 flex-1">
+              {assigneeNode}
             </div>
           )}
-          {metaIsAssigneeOnly && (
-            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-              {t(($) => $.card.updated_ago, { time: timeAgo(issue.updated_at) })}
-            </span>
+          {showRightMeta && (
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              {showStartDate && (
+                editable ? (
+                  <PickerWrapper className="shrink-0">
+                    <StartDatePicker
+                      startDate={issue.start_date}
+                      onUpdate={handleUpdate}
+                      trigger={
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <CalendarClock className="size-3" />
+                          {formatDate(issue.start_date!)}
+                        </span>
+                      }
+                    />
+                  </PickerWrapper>
+                ) : (
+                  <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                    <CalendarClock className="size-3" />
+                    {formatDate(issue.start_date!)}
+                  </span>
+                )
+              )}
+              {showDueDate && (
+                editable ? (
+                  <PickerWrapper className="shrink-0">
+                    <DueDatePicker
+                      dueDate={issue.due_date}
+                      onUpdate={handleUpdate}
+                      trigger={
+                        <span
+                          className={`flex items-center gap-1 text-xs ${
+                            new Date(issue.due_date!) < new Date()
+                              ? "text-destructive"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          <CalendarDays className="size-3" />
+                          {formatDate(issue.due_date!)}
+                        </span>
+                      }
+                    />
+                  </PickerWrapper>
+                ) : (
+                  <span
+                    className={`flex shrink-0 items-center gap-1 text-xs ${
+                      new Date(issue.due_date!) < new Date()
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    <CalendarDays className="size-3" />
+                    {formatDate(issue.due_date!)}
+                  </span>
+                )
+              )}
+              {showChildProgress && (
+                <div className="inline-flex shrink-0 items-center gap-1">
+                  <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
+                  <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                    {childProgress!.done}/{childProgress!.total}
+                  </span>
+                </div>
+              )}
+              {showUpdatedHint && (
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {t(($) => $.card.updated_ago, { time: timeAgo(issue.updated_at) })}
+                </span>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -302,7 +312,7 @@ const animateLayoutChanges: AnimateLayoutChanges = (args) => {
   return defaultAnimateLayoutChanges(args);
 };
 
-export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress }: { issue: Issue; childProgress?: ChildProgress }) {
+export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress, disableSorting }: { issue: Issue; childProgress?: ChildProgress; disableSorting?: boolean }) {
   const p = useWorkspacePaths();
   const {
     attributes,
@@ -315,6 +325,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
     id: issue.id,
     data: { status: issue.status },
     animateLayoutChanges,
+    disabled: disableSorting ? { droppable: true } : undefined,
   });
 
   const style = {

@@ -49,6 +49,7 @@ import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
+import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
@@ -386,6 +387,12 @@ function TimelineSkeleton() {
   );
 }
 
+// When the trailing block is expanded, we still truncate its body to the most
+// recent N entries — a single block of 50 status flips drowns the comment area
+// as badly as N blocks of 1 would. Older entries fold behind a "Show N more
+// activities" line that expands in place.
+const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
+
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
 // priority / assignee churn; the trailing block stays expanded because it
@@ -395,6 +402,9 @@ function ActivityBlock({
   entries,
   expanded,
   onToggle,
+  truncateOlder,
+  showOlder,
+  onToggleShowOlder,
   getActorName,
   t,
   timeAgo,
@@ -402,6 +412,12 @@ function ActivityBlock({
   entries: TimelineEntry[];
   expanded: boolean;
   onToggle: () => void;
+  // Trailing block only: when true, the body shows only the most recent
+  // LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT entries with the older ones folded
+  // behind a "Show N more activities" inline toggle.
+  truncateOlder: boolean;
+  showOlder: boolean;
+  onToggleShowOlder: () => void;
   getActorName: (type: string, id: string) => string;
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
@@ -421,17 +437,42 @@ function ActivityBlock({
       </div>
     );
   }
+  const hiddenOlderCount =
+    truncateOlder && !showOlder && entries.length > LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
+      ? entries.length - LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
+      : 0;
+  const visibleEntries =
+    hiddenOlderCount > 0 ? entries.slice(-LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT) : entries;
+  // Hide the "v N activities" collapse header while we're in the truncated
+  // default state. The "Show N more" link is the only control users need
+  // when they're glancing at recent activity — stacking two chevron rows
+  // looked like nested folds and added visual noise without value. Once the
+  // user explicitly reveals older entries, the header reappears so they can
+  // fold the whole block back to a single count line.
+  const showHeader = hiddenOlderCount === 0;
   return (
     <div className="pb-3 px-4 flex flex-col gap-3">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ChevronDown className="h-3 w-3 shrink-0" />
-        <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
-      </button>
-      {entries.map((entry) => {
+      {showHeader && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronDown className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
+        </button>
+      )}
+      {hiddenOlderCount > 0 && (
+        <button
+          type="button"
+          onClick={onToggleShowOlder}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.show_more_activities, { count: hiddenOlderCount })}</span>
+        </button>
+      )}
+      {visibleEntries.map((entry) => {
         const details = (entry.details ?? {}) as Record<string, string>;
         const isStatusChange = entry.action === "status_changed";
         const isPriorityChange = entry.action === "priority_changed";
@@ -712,6 +753,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // versa). Not persisted, matches the resolved-thread behaviour above.
   const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
   const [collapsedActivityIds, setCollapsedActivityIds] = useState<Set<string>>(() => new Set());
+  // Block IDs where the user has explicitly chosen to also reveal the older
+  // (pre-last-8) entries within the trailing block. Kept independent of the
+  // expanded/collapsed sets so collapsing then re-expanding preserves the
+  // "show all" choice, and so the choice survives the block losing its
+  // trailing position when a new comment lands after it.
+  const [showOlderActivityIds, setShowOlderActivityIds] = useState<Set<string>>(() => new Set());
   const toggleActivityBlock = useCallback((id: string, currentlyExpanded: boolean) => {
     if (currentlyExpanded) {
       setCollapsedActivityIds((prev) => {
@@ -738,6 +785,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         return next;
       });
     }
+  }, []);
+  const showOlderActivities = useCallback((id: string) => {
+    setShowOlderActivityIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
   }, []);
   const didHighlightRef = useRef<string | null>(null);
 
@@ -1234,6 +1289,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {/* Properties */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
@@ -1355,6 +1411,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {parentIssue && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${parentIssueOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setParentIssueOpen(!parentIssueOpen)}
           >
@@ -1380,6 +1437,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {githubSettings.prSidebar && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
           >
@@ -1393,6 +1451,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {/* Details */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setDetailsOpen(!detailsOpen)}
         >
@@ -1422,6 +1481,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {usage && usage.task_count > 0 && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${tokenUsageOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setTokenUsageOpen(!tokenUsageOpen)}
           >
@@ -1527,11 +1587,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       : collapsedActivityIds.has(item.id)
         ? false
         : item.id === lastActivityGroupId;
+    const truncateOlder = item.id === lastActivityGroupId;
+    const showOlder = showOlderActivityIds.has(item.id);
     return (
       <ActivityBlock
         entries={item.entries}
         expanded={expanded}
         onToggle={() => toggleActivityBlock(item.id, expanded)}
+        truncateOlder={truncateOlder}
+        showOlder={showOlder}
+        onToggleShowOlder={() => showOlderActivities(item.id)}
         getActorName={getActorName}
         t={t}
         timeAgo={timeAgo}
@@ -1674,6 +1739,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
         <div
           ref={setScrollContainerEl}
+          data-tab-scroll-root
           className="relative flex-1 overflow-y-auto"
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
@@ -1845,6 +1911,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
                   onClick={handleToggleSubscribe}
                   className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
@@ -1883,6 +1950,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 </Popover>
               </div>
             </div>
+
+            <LocalDirectoryHint projectId={issue?.project_id} />
 
             {/* Agent live output — sticky banner in the activity section,
                 keyed by issue id so switching issues remounts the card and

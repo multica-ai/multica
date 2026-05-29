@@ -39,6 +39,7 @@ import { useDownloadAttachment } from "./use-download-attachment";
 import { AttachmentCard } from "./attachment-card";
 import { HtmlAttachmentPreview } from "./html-attachment-preview";
 import { getPreviewKind, type PreviewKind } from "./utils/preview";
+import "./styles/attachment.css";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -189,6 +190,7 @@ export function Attachment({
           filename={state.filename}
           onPreview={openPreview}
           onDownload={handleDownload}
+          onDelete={editable ? onDelete : undefined}
         />
         {preview.modal}
       </>
@@ -205,6 +207,7 @@ export function Attachment({
         uploading={state.uploading}
         onPreview={openPreview}
         onDownload={handleDownload}
+        onDelete={editable ? onDelete : undefined}
       />
       {preview.modal}
     </>
@@ -216,11 +219,10 @@ export function Attachment({
 // ---------------------------------------------------------------------------
 //
 // DOM and styling are intentionally a direct port of the original
-// extensions/image-view.tsx <figure> structure. All visual styles live in
-// content-editor.css under `.image-figure / .image-content / .image-toolbar`
-// — the unification step de-scoped those rules from `.rich-text-editor` so
-// standalone surfaces (chat messages, AttachmentList) get identical visuals
-// without each component carrying its own Tailwind tax.
+// extensions/image-view.tsx <figure> structure. Shared visual styles live in
+// styles/attachment.css under `.image-figure / .image-content / .image-toolbar`
+// so standalone surfaces (chat messages, AttachmentList) get identical visuals
+// without depending on the editor stylesheet being imported elsewhere.
 
 interface ImageAttachmentViewProps {
   src: string;

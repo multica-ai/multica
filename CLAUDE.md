@@ -203,6 +203,14 @@ Every Go handler in `server/internal/handler/` follows these rules. The conventi
 
 When adding a `Queries.Delete*` or `Queries.Update*` call, ask: "Where did this UUID come from?" If the answer is "raw user input that hasn't been validated," route it through `parseUUIDOrBadRequest` or a loader first.
 
+### Dependency Declaration Rule
+
+Every workspace (`apps/` and `packages/` directories) must explicitly declare all directly imported external packages in its own `package.json`. Relying on pnpm hoist to resolve undeclared imports (phantom deps) is prohibited — it causes production build failures when pnpm creates peer-dep variants.
+
+- Use `"pkg": "catalog:"` to reference the shared version from `pnpm-workspace.yaml`.
+- CI enforces this via `eslint-plugin-import-x/no-extraneous-dependencies`.
+- Exception: `apps/mobile/` uses pinned versions (not `catalog:`) for packages tied to its own React/Expo version.
+
 ### Package Boundary Rules
 
 These are hard constraints. Violating them breaks the cross-platform architecture:
