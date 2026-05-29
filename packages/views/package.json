@@ -82,6 +82,7 @@
     "@multica/cerebro-inbox": "workspace:*",
     "@multica/cerebro-pin-input": "workspace:*",
     "@multica/cerebro-status-models": "workspace:*",
+    "@multica/cerebro-ui": "workspace:*",
     "@tiptap/core": "^3.22.1",
     "@tiptap/extension-code-block-lowlight": "^3.22.1",
     "@tiptap/extension-document": "^3.22.1",

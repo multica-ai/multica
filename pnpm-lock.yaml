@@ -2982,6 +2982,9 @@ importers:
       '@multica/cerebro-status-models':
         specifier: workspace:*
         version: link:../cerebro-status-models
+      '@multica/cerebro-ui':
+        specifier: workspace:*
+        version: link:../cerebro-ui
       '@multica/core':
         specifier: workspace:*
         version: link:../core
