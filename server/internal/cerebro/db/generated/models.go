@@ -83,6 +83,7 @@ type AgentRuntime struct {
 	CliVersion       pgtype.Text        `json:"cli_version"`
 	ToolsConfig      []byte             `json:"tools_config"`
 	SandboxPolicy    []byte             `json:"sandbox_policy"`
+	AutoPauseCount   int32              `json:"auto_pause_count"`
 }
 
 type AgentSkill struct {

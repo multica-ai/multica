@@ -2,13 +2,36 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/account"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
+)
+
+// Auto-pause circuit-breaker tuning (FIR-2476). The pre-FIR-2476 behaviour
+// re-paused a rate-limited runtime for a fixed 5 minutes, bounced on unpause,
+// failed the same way, and re-paused — ~288 cycles a day per runtime, burning
+// credits with no chance of success. Two mechanisms tame that:
+//
+//   - Growing backoff: when the provider error carries no parseable reset time,
+//     the fallback pause doubles each consecutive auto-pause (5m, 10m, 20m, 40m,
+//     80m …) up to autoPauseBackoffCap, instead of a flat 5 minutes. A parseable
+//     reset time always wins over the fallback (unchanged behaviour).
+//   - Circuit breaker: after autoPauseCircuitLimit consecutive auto-pauses with
+//     no intervening success, stop scheduling auto-resume (pause with a NULL
+//     unpause_at so the sweeper never picks it up) and post one comment so a
+//     human can intervene. CompleteTask resets the counter on the next success.
+const (
+	autoPauseBackoffCap   = 2 * time.Hour
+	autoPauseCircuitLimit = 6
 )
 
 // MaybeAutoPauseOnFailure inspects a recently-failed task and pauses the
@@ -23,26 +46,43 @@ import (
 // crash.
 //
 // Idempotent against bursts: when a runtime hits its monthly cap the next
-// dozen queued tasks all fail with the same error in quick succession. The
-// first call pauses; subsequent calls re-pause (refreshing unpause_at +
-// reason) which is a cheap no-op SQL update.
-//
-// Fail-safe loop: ParseRateLimitReset returns a 5-minute fallback when it
-// detects a pause-worthy signal but cannot parse a reset time (e.g. a
-// monthly cap or an expired token). After 5 min the sweeper unpauses, the
-// next queued task attempts and fails the same way, and we re-pause for
-// another 5 min — bouncing until the upstream condition actually clears.
-// The sweeper tick is 30s so worst-case is one wasted dispatch per 5-min
-// window, which is well within acceptable cost.
+// dozen queued tasks all fail with the same error in quick succession. Each
+// in-flight task is suspended (not failed) when the first pause lands, so in
+// the common case only the single triggering task re-enters here and bumps
+// the consecutive-pause counter once per cycle.
 func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTaskQueue) bool {
-	unpauseAt, ok := shouldAutoPause(task, time.Now())
-	if !ok {
+	now := time.Now()
+	resetAt, hasReset, pauseWorthy := classifyAutoPause(task, now)
+	if !pauseWorthy {
 		return false
 	}
-	if _, err := s.PauseRuntime(ctx, task.RuntimeID, handler.RuntimePauseOptions{
-		UnpauseAt: unpauseAt,
-		Reason:    "auto",
-	}); err != nil {
+
+	// Bump the consecutive auto-pause counter first; its value decides the
+	// backoff length and whether the circuit breaker trips. On a counter
+	// read/write error fall back to count=1 (flat default backoff) — never
+	// skip the pause itself, otherwise the storm continues unthrottled.
+	count, err := s.Cerebro.IncrementAutoPauseCount(ctx, task.RuntimeID)
+	if err != nil {
+		slog.Warn("auto-pause on failure: increment counter failed",
+			"runtime_id", util.UUIDToString(task.RuntimeID),
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+		count = 1
+	}
+
+	circuitOpen := count >= autoPauseCircuitLimit
+	unpauseAt := nextUnpauseAt(count, resetAt, hasReset, now)
+
+	opts := handler.RuntimePauseOptions{Reason: "auto"}
+	if !circuitOpen {
+		opts.UnpauseAt = unpauseAt
+	}
+	// circuitOpen leaves UnpauseAt zero → PauseRuntime stores NULL unpause_at,
+	// so the unpause sweeper never auto-resumes. Only a manual unpause (or a
+	// later success that resets the counter) revives it.
+
+	if _, err := s.PauseRuntime(ctx, task.RuntimeID, opts); err != nil {
 		slog.Warn("auto-pause on failure: pause failed",
 			"runtime_id", util.UUIDToString(task.RuntimeID),
 			"task_id", util.UUIDToString(task.ID),
@@ -62,24 +102,151 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 			"error", err,
 		)
 	}
+
+	// Post the circuit-breaker notice exactly once — on the failure whose
+	// increment hit the limit. Bursts can't double-post: the atomic counter
+	// hands a distinct value to each caller, so only one sees == limit.
+	if count == autoPauseCircuitLimit {
+		s.notifyAutoPauseCircuitOpen(ctx, task, count)
+	}
+
 	slog.Info("auto-paused runtime on task failure",
 		"runtime_id", util.UUIDToString(task.RuntimeID),
 		"task_id", util.UUIDToString(task.ID),
-		"unpause_at", unpauseAt.Format(time.RFC3339),
+		"consecutive_pauses", count,
+		"circuit_open", circuitOpen,
+		"unpause_at", unpauseAtLog(unpauseAt, circuitOpen),
 	)
 	return true
 }
 
-// shouldAutoPause is the pure decision half of MaybeAutoPauseOnFailure.
-// Returns (unpauseAt, true) when the task's error text warrants a runtime
-// pause. Split out for unit-testability — the side-effectful PauseRuntime
-// call sits behind a real DB so cannot be exercised in a plain unit test.
-func shouldAutoPause(task db.AgentTaskQueue, now time.Time) (time.Time, bool) {
+// ResetAutoPauseCount clears the consecutive auto-pause counter for a runtime.
+// Called from CompleteTask (via the AutoPauseInvoker seam) when a task finishes
+// successfully — a single success means the runtime is working again, so the
+// next rate-limit pause starts a fresh chain. Best-effort: a failure here only
+// risks an early circuit trip on the next pause storm, not a crash.
+func (s *Service) ResetAutoPauseCount(ctx context.Context, runtimeID pgtype.UUID) {
+	if !runtimeID.Valid {
+		return
+	}
+	if err := s.Cerebro.ResetAutoPauseCount(ctx, runtimeID); err != nil {
+		slog.Warn("reset auto-pause counter failed",
+			"runtime_id", util.UUIDToString(runtimeID),
+			"error", err,
+		)
+	}
+}
+
+// classifyAutoPause is the pure decision half of MaybeAutoPauseOnFailure.
+// Returns (resetAt, hasReset, pauseWorthy):
+//   - pauseWorthy=false → the error does not warrant a runtime pause.
+//   - hasReset=true     → resetAt is a concrete provider reset time to pause until.
+//   - hasReset=false    → pause-worthy but no parseable reset; caller applies
+//     the growing backoff.
+//
+// Split out for unit-testability — the side-effectful PauseRuntime / counter
+// calls sit behind a real DB so cannot be exercised in a plain unit test.
+func classifyAutoPause(task db.AgentTaskQueue, now time.Time) (time.Time, bool, bool) {
 	if !task.RuntimeID.Valid {
-		return time.Time{}, false
+		return time.Time{}, false, false
 	}
 	if !task.Error.Valid || task.Error.String == "" {
-		return time.Time{}, false
+		return time.Time{}, false, false
 	}
-	return account.ParseRateLimitReset(task.Error.String, now)
+	return account.ClassifyRateLimitReset(task.Error.String, now)
+}
+
+// nextUnpauseAt computes the scheduled unpause time for a non-circuit-open
+// pause. A parseable provider reset time always wins; otherwise the fallback
+// grows with the consecutive-pause count.
+func nextUnpauseAt(count int32, resetAt time.Time, hasReset bool, now time.Time) time.Time {
+	if hasReset {
+		return resetAt
+	}
+	return now.Add(growingBackoff(count))
+}
+
+// growingBackoff returns the fallback pause duration for the count-th
+// consecutive auto-pause: DefaultBackoff * 2^(count-1), capped at
+// autoPauseBackoffCap. count is 1-based (the first pause is count==1).
+func growingBackoff(count int32) time.Duration {
+	if count < 1 {
+		count = 1
+	}
+	d := account.DefaultRateLimitBackoff
+	for i := int32(1); i < count; i++ {
+		d *= 2
+		if d >= autoPauseBackoffCap {
+			return autoPauseBackoffCap
+		}
+	}
+	return d
+}
+
+// notifyAutoPauseCircuitOpen posts the single human-facing notice when the
+// circuit breaker trips. Best-effort and deliberately mention-free: an
+// @mention here would re-trigger the agent loop the breaker just stopped.
+// Skipped for tasks with no issue (e.g. chat tasks) — there is nowhere to post.
+func (s *Service) notifyAutoPauseCircuitOpen(ctx context.Context, task db.AgentTaskQueue, count int32) {
+	if !task.IssueID.Valid || !task.AgentID.Valid {
+		return
+	}
+	body := fmt.Sprintf(
+		"⚠️ Auto-genoptagelse er stoppet for denne runtime.\n\n"+
+			"Runtimen er blevet automatisk sat på pause %d gange i træk uden en succesfuld kørsel "+
+			"(typisk \"usage limit\" eller \"runtime paused\"). For ikke at brænde flere kreditter på "+
+			"forsøg der alligevel fejler, genoptager systemet ikke længere automatisk.\n\n"+
+			"Et menneske skal gribe ind: vent til runtimens loft er nulstillet og genoptag den manuelt, "+
+			"eller skift den fejlende konto/nøgle ud. Tælleren nulstilles automatisk ved første succesfulde kørsel.",
+		count,
+	)
+	comment, err := s.Cerebro.CreateAutoPauseAlertComment(ctx, cerebrodb.CreateAutoPauseAlertCommentParams{
+		AuthorID: task.AgentID,
+		Content:  body,
+		IssueID:  task.IssueID,
+	})
+	if err != nil {
+		slog.Warn("auto-pause circuit breaker: post notice failed",
+			"runtime_id", util.UUIDToString(task.RuntimeID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return
+	}
+	s.publishCommentCreated(comment)
+}
+
+// unpauseAtLog renders the unpause_at value for structured logging — "circuit
+// open (manual)" when the breaker tripped, otherwise the RFC3339 timestamp.
+func unpauseAtLog(unpauseAt time.Time, circuitOpen bool) string {
+	if circuitOpen {
+		return "circuit open (manual)"
+	}
+	return unpauseAt.Format(time.RFC3339)
+}
+
+// publishCommentCreated mirrors the upstream broadcastTaskEvent for
+// comment:created so the circuit-breaker notice surfaces in real time
+// (inbox / issue view) the same way an agent comment does.
+func (s *Service) publishCommentCreated(comment cerebrodb.Comment) {
+	if s.Bus == nil {
+		return
+	}
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: util.UUIDToString(comment.WorkspaceID),
+		ActorType:   "agent",
+		ActorID:     util.UUIDToString(comment.AuthorID),
+		Payload: map[string]any{
+			"comment": map[string]any{
+				"id":          util.UUIDToString(comment.ID),
+				"issue_id":    util.UUIDToString(comment.IssueID),
+				"author_type": comment.AuthorType,
+				"author_id":   util.UUIDToString(comment.AuthorID),
+				"content":     comment.Content,
+				"type":        comment.Type,
+				"created_at":  comment.CreatedAt.Time.Format(time.RFC3339),
+			},
+		},
+	})
 }

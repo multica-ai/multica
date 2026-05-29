@@ -34,30 +34,51 @@ var rateLimitDetectorRe = regexp.MustCompile(
 //  5. Relative duration
 //  6. Fallback — text matches a rate-limit-shaped error → now + DefaultBackoff.
 func ParseReset(errText string, now time.Time) (time.Time, bool) {
-	if strings.TrimSpace(errText) == "" {
+	resetAt, hasReset, pauseWorthy := ClassifyReset(errText, now)
+	if !pauseWorthy {
 		return time.Time{}, false
+	}
+	if hasReset {
+		return resetAt, true
+	}
+	return now.Add(DefaultBackoff), true
+}
+
+// ClassifyReset is the three-valued core behind ParseReset. It separates "is
+// this a pause-worthy error?" from "did it carry a parseable reset time?" so
+// callers that apply their own backoff (FIR-2476's growing auto-pause backoff)
+// can tell a concrete provider reset time apart from the no-hint fallback case.
+//
+// Returns:
+//   - (resetAt, true,  true)  — a concrete reset time was parsed; pause until it.
+//   - (zero,    false, true)  — rate-limit-shaped error with no parseable reset
+//     time; the caller decides the backoff (ParseReset uses DefaultBackoff).
+//   - (zero,    false, false) — not a pause-worthy error.
+func ClassifyReset(errText string, now time.Time) (time.Time, bool, bool) {
+	if strings.TrimSpace(errText) == "" {
+		return time.Time{}, false, false
 	}
 	lower := strings.ToLower(errText)
 
 	if t, ok := parseEpochSeconds(lower, now); ok {
-		return t, true
+		return t, true, true
 	}
 	if t, ok := parseISO8601(errText); ok {
-		return t, true
+		return t, true, true
 	}
 	if t, ok := parseAbsoluteMonthDay(errText, now); ok {
-		return t, true
+		return t, true, true
 	}
 	if t, ok := parseWallClock(lower, now); ok {
-		return t, true
+		return t, true, true
 	}
 	if t, ok := parseRelativeDuration(lower, now); ok {
-		return t, true
+		return t, true, true
 	}
 	if rateLimitDetectorRe.MatchString(lower) {
-		return now.Add(DefaultBackoff), true
+		return time.Time{}, false, true
 	}
-	return time.Time{}, false
+	return time.Time{}, false, false
 }
 
 var epochContextRe = regexp.MustCompile(`(?:reset|retry|limit|rate)[^0-9]*\b(1[6-9]\d{8}|2\d{9})\b`)

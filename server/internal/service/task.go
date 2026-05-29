@@ -73,6 +73,9 @@ type TaskWakeupNotifier interface {
 // import cycle (cerebro/runtime → service → would loop back here).
 type AutoPauseInvoker interface {
 	MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTaskQueue) bool
+	// CEREBRO-PATCH(auto-pause-reset): FIR-2476 — clear the consecutive
+	// auto-pause circuit-breaker counter when a task completes successfully.
+	ResetAutoPauseCount(ctx context.Context, runtimeID pgtype.UUID)
 }
 
 // triggerSummaryMaxLen caps the snapshot length so the row stays cheap to
@@ -1403,6 +1406,10 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	// CEREBRO-PATCH(auto-pause-reset): FIR-2476 — a success clears the runtime's auto-pause circuit breaker.
+	if s.AutoPause != nil && task.RuntimeID.Valid {
+		s.AutoPause.ResetAutoPauseCount(ctx, task.RuntimeID)
+	}
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
