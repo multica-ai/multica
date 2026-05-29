@@ -58,6 +58,9 @@ func NewEmailService() *EmailService {
 	if smtpTLSMode == "" && smtpPort == "465" {
 		smtpTLSImplicit = true
 	}
+	if smtpTLSMode != "" && !smtpTLSImplicit && smtpTLSMode != "starttls" {
+		fmt.Printf("EmailService: SMTP_TLS=%q not recognized, falling back to starttls\n", smtpTLSMode)
+	}
 
 	var client *resend.Client
 	if apiKey != "" {
