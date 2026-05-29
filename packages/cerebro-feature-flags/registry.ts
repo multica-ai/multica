@@ -242,7 +242,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     key: "cerebro_tool_policy",
     label: "Unified tool permissions",
     description:
-      "Enable the unified per-tool permission table (Tool · Source · Runtime · This agent · Effective) on agent and runtime pages, backed by the four-layer Runtime › Agent › Group › User chain. GET /api/workspaces/{id}/tool-policy (member) + PUT/DELETE (admin/owner). FIR-2230.",
+      "Enable the capability catalog on agent and runtime pages: one flat, filterable list of every tool (Tool · Class · Side effect · Decision · Resolved by), narrowed by combinable class / side-effect / decision filters + search, with one editable decision pill per row and a mobile card layout. Backed by the four-layer Runtime › Agent › Group › User chain. GET /api/workspaces/{id}/tool-policy (member) + PUT/DELETE (admin/owner). FIR-2284 (redesign of FIR-2230).",
   },
   {
     key: "cerebro_simple_tool_policy",
