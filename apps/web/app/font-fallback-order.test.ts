@@ -3,15 +3,21 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = resolve(process.cwd(), "../..");
+const chineseFonts = ["PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC"];
+const koreanFonts = ["Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR"];
 
 function expectChineseFontsBeforeKoreanFonts(source: string) {
-  const firstChineseFont = source.indexOf("PingFang SC");
-  const lastChineseFont = source.indexOf("Noto Sans CJK SC");
-  const firstKoreanFont = source.indexOf("Apple SD Gothic Neo");
+  const chineseIndexes = chineseFonts.map((font) => source.indexOf(font));
+  const koreanIndexes = koreanFonts.map((font) => source.indexOf(font));
 
-  expect(firstChineseFont).toBeGreaterThanOrEqual(0);
-  expect(lastChineseFont).toBeGreaterThan(firstChineseFont);
-  expect(firstKoreanFont).toBeGreaterThan(lastChineseFont);
+  expect(chineseIndexes).not.toContain(-1);
+  expect(koreanIndexes).not.toContain(-1);
+
+  for (const chineseIndex of chineseIndexes) {
+    for (const koreanIndex of koreanIndexes) {
+      expect(chineseIndex).toBeLessThan(koreanIndex);
+    }
+  }
 }
 
 describe("CJK font fallback order", () => {
