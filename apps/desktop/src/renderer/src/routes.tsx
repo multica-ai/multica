@@ -9,6 +9,7 @@ import {
 } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
+import { ChannelDetailPage } from "./pages/channel-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { AutopilotCreatePage, AutopilotEditPage } from "@multica/cerebro-autopilot-pages";
@@ -183,7 +184,7 @@ export const appRoutes: RouteObject[] = [
           },
           {
             path: "channels/:id",
-            element: <IssueDetailPage />,
+            element: <ChannelDetailPage />,
             handle: { title: "Channel" },
           },
           {

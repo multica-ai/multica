@@ -11,7 +11,9 @@
     "lint": "eslint .",
     "test": "vitest run"
   },
+  "_comment_channels_export": "CEREBRO-PATCH(views-channels-export): FIR-2452 — expose ChannelDetail/NewMessageModal via @multica/views/channels so the standalone /channels/<id> route can render the dedicated chat component instead of IssueDetail.",
   "exports": {
+    "./channels": "./channels/index.ts",
     "./navigation": "./navigation/index.ts",
     "./common/actor-avatar": "./common/actor-avatar.tsx",
     "./common/actor-issues-panel": "./common/actor-issues-panel.tsx",
