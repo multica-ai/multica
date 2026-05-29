@@ -50,6 +50,8 @@ type Pricing struct {
 // the two tables must agree.
 var modelPricing = map[string]Pricing{
 	// Anthropic — Opus 4.5+ generation (lower-tier pricing).
+	// CEREBRO-PATCH(pricing-opus-4-8): FIR-2471 add Opus 4.8 list price — without it Opus 4.8 fell back to Opus 4.1 ($15/$75), a 3× over-charge.
+	"claude-opus-4-8": {InputCentsPerMtok: 500, OutputCentsPerMtok: 2500, CacheReadCentsPerMtok: 50, CacheWriteCentsPerMtok: 625},
 	"claude-opus-4-7": {InputCentsPerMtok: 500, OutputCentsPerMtok: 2500, CacheReadCentsPerMtok: 50, CacheWriteCentsPerMtok: 625},
 	"claude-opus-4-6": {InputCentsPerMtok: 500, OutputCentsPerMtok: 2500, CacheReadCentsPerMtok: 50, CacheWriteCentsPerMtok: 625},
 	"claude-opus-4-5": {InputCentsPerMtok: 500, OutputCentsPerMtok: 2500, CacheReadCentsPerMtok: 50, CacheWriteCentsPerMtok: 625},

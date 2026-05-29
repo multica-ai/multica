@@ -537,6 +537,9 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `pricing-pricing` | server/pkg/pricing/pricing.go | 108 | Pricing additions (token cost calc) |
 | `pricing-pricing-test` | server/pkg/pricing/pricing_test.go | 90 | Pricing additions (token cost calc) |
 | `pricing-anthropic-rates-2026-05` | server/pkg/pricing/pricing.go | 1 | Correct Opus 4.5+ rates to actual Anthropic pricing (was 3× over-charging, JEH-996); add Opus 4 / 4.1 / Sonnet 4 / Haiku 3.5 rows + date-suffix stripping in lookup |
+| `pricing-opus-4-8` | server/pkg/pricing/pricing.go | 1 | FIR-2471 — add Opus 4.8 list price row; without it Opus 4.8 fell back to Opus 4.1 ($15/$75), a 3× over-charge |
+| `pricing-snapshot-export` | server/pkg/pricing/snapshot.go | new file | FIR-2471 — expose the price table + Version via Snapshot() so the registry pricing endpoint can serve cerebro as the single pricing source |
+| `cerebro-pricing-route` | server/cmd/server/router.go | 3 | FIR-2471 — import + handler instance + public key-gated route `GET /api/cerebro/pricing` for the registry's hourly pricing pull |
 | `pricing-test-anthropic-rates-2026-05` | server/pkg/pricing/pricing_test.go | 3 | Expectations updated for corrected Opus 4.5+ rates and the new date-suffix stripping in lookup() (JEH-996) |
 | `privacy-toggle` | packages/views/issues/components/privacy-toggle.tsx | 59 | Privacy/restricted-access UI primitives |
 | `profile-compile` | server/internal/profile/compile.go<br>server/internal/profile/compile_test.go | 372 | Profile-compile server logic |
