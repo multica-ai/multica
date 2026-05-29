@@ -185,6 +185,8 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:restart"),
   getStatus: (): Promise<DaemonStatus> =>
     ipcRenderer.invoke("daemon:get-status"),
+  getHostName: (): Promise<string> =>
+    ipcRenderer.invoke("daemon:get-host-name"),
   onStatusChange: (callback: (status: DaemonStatus) => void) => {
     const handler = (_: unknown, status: DaemonStatus) => callback(status);
     ipcRenderer.on("daemon:status", handler);

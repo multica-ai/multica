@@ -98,22 +98,15 @@ function renderPane(runtimes: AgentRuntime[]) {
 }
 
 describe("AgentOverviewPane MCP tab visibility", () => {
-  it("renders the MCP tab when the agent runs on the Claude runtime", () => {
-    renderPane([makeRuntime("claude")]);
-    expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
-  });
-
-  it("renders the MCP tab when the agent runs on the Codex runtime", () => {
-    // Codex now reads mcp_config too — must not be hidden from the tab strip.
-    renderPane([makeRuntime("codex")]);
-    expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
-  });
-
-  it("renders the MCP tab when the agent runs on the OpenClaw runtime", () => {
-    // OpenClaw materialises mcp_config via the per-task wrapper config
-    // (OPENCLAW_CONFIG_PATH) rather than ExecOptions, but the Tab must still
-    // surface so admins can save the managed set.
-    renderPane([makeRuntime("openclaw")]);
+  it.each([
+    ["Claude", "claude"],
+    ["Codex", "codex"],
+    ["Hermes", "hermes"],
+    ["Kimi", "kimi"],
+    ["Kiro", "kiro"],
+    ["OpenClaw", "openclaw"],
+  ])("renders the MCP tab when the agent runs on the %s runtime", (_label, provider) => {
+    renderPane([makeRuntime(provider)]);
     expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
   });
 

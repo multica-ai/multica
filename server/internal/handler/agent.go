@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -202,6 +203,8 @@ type AgentTaskResponse struct {
 	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
+	NewCommentCount         int                   `json:"new_comment_count,omitempty"`         // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
+	NewCommentsSince        string                `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
 	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `multica attachment download <id>` per entry
@@ -532,20 +535,9 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	// AgentSkillSummary only needs id/name/description, and reading large
 	// SKILL.md bodies just to discard them is the exact regression we fixed
 	// in #2174.
-	skills, err := h.Queries.ListAgentSkillSummaries(r.Context(), agent.ID)
-	if err != nil {
+	if err := h.attachAgentSkills(r.Context(), &resp, agent.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
-	}
-	if len(skills) > 0 {
-		resp.Skills = make([]AgentSkillSummary, len(skills))
-		for i, s := range skills {
-			resp.Skills[i] = AgentSkillSummary{
-				ID:          uuidToString(s.ID),
-				Name:        s.Name,
-				Description: s.Description,
-			}
-		}
 	}
 
 	// mcp_config redaction (custom_env was removed from this response shape
@@ -1081,12 +1073,46 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := agentToResponse(updated)
+	// agentToResponse always initialises Skills as []; junction-table rows
+	// are untouched by the SQL update, so we reload them here to keep the
+	// response (and the broadcast that mirrors it) in sync with reality.
+	// Without this, callers see "skills": [] after every metadata-only
+	// update and assume their bindings were cleared — see #3459.
+	if err := h.attachAgentSkills(r.Context(), &resp, updated.ID); err != nil {
+		slog.Warn("load agent skills after update failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
 	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(updated.WorkspaceID))...)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(updated.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// attachAgentSkills populates resp.Skills from the agent_skill junction
+// table for the given agent. agentToResponse zeros the field; mutation
+// handlers that don't refresh it would otherwise serve a misleading
+// empty array on every successful response (#3459).
+func (h *Handler) attachAgentSkills(ctx context.Context, resp *AgentResponse, agentID pgtype.UUID) error {
+	skills, err := h.Queries.ListAgentSkillSummaries(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	if len(skills) == 0 {
+		return nil
+	}
+	out := make([]AgentSkillSummary, len(skills))
+	for i, s := range skills {
+		out[i] = AgentSkillSummary{
+			ID:          uuidToString(s.ID),
+			Name:        s.Name,
+			Description: s.Description,
+		}
+	}
+	resp.Skills = out
+	return nil
 }
 
 // resolveAgentProvider returns the provider name for the runtime that
@@ -1142,6 +1168,11 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	wsID := uuidToString(archived.WorkspaceID)
 	slog.Info("agent archived", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID)...)
 	resp := agentToResponse(archived)
+	if err := h.attachAgentSkills(r.Context(), &resp, archived.ID); err != nil {
+		slog.Warn("load agent skills after archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentArchived, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
@@ -1172,6 +1203,11 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	wsID := uuidToString(restored.WorkspaceID)
 	slog.Info("agent restored", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID)...)
 	resp := agentToResponse(restored)
+	if err := h.attachAgentSkills(r.Context(), &resp, restored.ID); err != nil {
+		slog.Warn("load agent skills after restore failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})

@@ -1269,6 +1269,30 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
+				// Count comments that arrived issue-wide since this agent's last
+				// run, so the daemon can tell it the full catch-up volume up front
+				// (the prompt then steers it to read the triggering thread first).
+				// Anchor = the prior task's started_at (never completed_at: a long
+				// run would miss comments posted while it ran). Cold start (no prior
+				// task) → no anchor → no hint. Excludes the agent's own comments and
+				// the triggering comment itself because that body is already
+				// injected into the prompt. Best-effort: any DB error or zero count
+				// leaves the hint suppressed.
+				if startedAt, err := h.Queries.GetLastTaskStartedAtForIssueAndAgent(r.Context(), db.GetLastTaskStartedAtForIssueAndAgentParams{
+					AgentID: task.AgentID,
+					IssueID: comment.IssueID,
+				}); err == nil && startedAt.Valid {
+					if cnt, err := h.Queries.CountNewCommentsSince(r.Context(), db.CountNewCommentsSinceParams{
+						AnchorID:    task.TriggerCommentID,
+						IssueID:     comment.IssueID,
+						WorkspaceID: comment.WorkspaceID,
+						Since:       startedAt,
+						AuthorID:    task.AgentID,
+					}); err == nil && cnt > 0 {
+						resp.NewCommentCount = int(cnt)
+						resp.NewCommentsSince = startedAt.Time.UTC().Format(time.RFC3339)
+					}
+				}
 			}
 		}
 
@@ -1278,18 +1302,19 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		// Skip all prior state when the task was flagged as a manual rerun:
 		// the user just judged the prior output bad, so the daemon must start a
 		// fresh agent session in a fresh workdir instead of resuming anything
-		// from the same conversation that produced that output. For
-		// comment-triggered follow-ups, skip only the session resume: resumed
-		// issue conversations often inherit the prior final assistant message
-		// (for example "Done.") and answer a new human comment with that stale
-		// completion marker instead of the comment itself. Keep reusing the
-		// workdir for comment follow-ups so the agent still sees the same checkout.
+		// from the same conversation that produced that output.
 		if !task.ForceFreshSession {
 			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				if !task.TriggerCommentID.Valid && prior.RuntimeID == task.RuntimeID {
+				// Resume the prior session when it ran on the same runtime —
+				// including comment-triggered follow-ups, so the agent keeps the
+				// issue's conversation context across turns. The "Focus on THIS
+				// comment" guard in prompt.go defends against inheriting the prior
+				// turn's "Done." marker, and GetLastTaskSession already excludes
+				// poisoned sessions.
+				if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 				}
 				if prior.WorkDir.Valid {

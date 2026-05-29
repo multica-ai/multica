@@ -3345,14 +3345,14 @@ func TestBuildMetaSkillContentOmitsRequestingUserWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigCommentTriggerThreadFirstReads locks in
-// MUL-2387 + MUL-2421: the runtime config's comment-triggered Workflow
-// section must steer the agent at thread-aware reads first, default the
-// trigger thread to `--thread <id> --tail 30` (bounded), and explain the
-// reply-cursor walk for older replies. `--recent N` stays as the
-// cross-thread fallback. The Available Commands core line also has to
-// surface the `--tail` flag so the agent has a single place to discover it.
-func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
+// TestInjectRuntimeConfigCommentTriggerColdStartRead checks the
+// comment-triggered Workflow on cold start (no prior run): it points the agent
+// at the triggering thread (--thread <trigger> --tail 30) instead of the flat
+// dump and with no since-delta hint, while the Available Commands core line
+// still surfaces the thread/recent/cursor flags so they remain discoverable for
+// CLI use even though the verbose cursor walkthrough was dropped from the
+// workflow steps.
+func TestInjectRuntimeConfigCommentTriggerColdStartRead(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -3373,33 +3373,18 @@ func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
 	}
 	s := string(data)
 
-	// Workflow step 2 must read the trigger's thread with --thread anchored
-	// on the exact trigger comment id from this task, bounded to --tail 30.
+	// Cold start (no prior run) → read the triggering thread, not the flat dump,
+	// and no since-delta hint.
 	for _, want := range []string{
-		"--thread " + triggerID,
-		"--tail 30",
+		"Read the triggering conversation first",
 		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
-		// Reply cursor walks older replies inside the same thread.
-		"Next reply cursor:",
-		"--before-id <reply-id>",
-		// --recent fallback at the documented default N=20 for cross-thread context.
-		"multica issue comment list " + issueID + " --recent 20 --output json",
-		// Cursor walks via the stderr line the CLI emits, not invented flags.
-		"Next thread cursor",
-		"--before",
-		"--before-id",
-		// --since is still available and combinable (now scoped to the
-		// post-MUL-2421 mode names).
-		"--since",
-		"may combine with `--thread --tail` or `--recent`",
-		// Explicit pushback on the legacy full-dump recipe so the model has
-		// no reason to fall back to it on long issues.
-		"Avoid the unfiltered",
-		"wastes context",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("comment-triggered Workflow missing %q\n---\n%s", want, s)
+			t.Errorf("comment-triggered Workflow missing cold-start read %q\n---\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "new comment(s) since your last run") {
+		t.Errorf("cold-start workflow must not render the since-delta hint\n---\n%s", s)
 	}
 
 	// Available Commands core line must surface the new flags (this is the
@@ -3424,6 +3409,52 @@ func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
 	// regression target: it dumps the entire thread on long threads.
 	if strings.Contains(s, "multica issue comment list "+issueID+" --thread "+triggerID+" --output json") {
 		t.Errorf("comment-triggered Workflow regressed to unbounded --thread recipe (no --tail) — long threads will overflow context\n---\n%s", s)
+	}
+}
+
+// TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead checks the
+// comment-triggered Workflow when the daemon is resuming a prior session and no
+// since-delta hint is present. In that shape, the agent already has session
+// context and the trigger body is injected in the per-turn prompt, so the
+// runtime brief must not force a duplicate thread read.
+func TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead(t *testing.T) {
+	t.Parallel()
+
+	const (
+		issueID   = "issue-resumed-1"
+		triggerID = "trigger-comment-1"
+	)
+	dir := t.TempDir()
+	ctx := TaskContextForEnv{
+		IssueID:             issueID,
+		TriggerCommentID:    triggerID,
+		PriorSessionResumed: true,
+	}
+	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(data)
+
+	for _, want := range []string{
+		"triggering comment is already included above",
+		"No other new comments on this issue since your last run",
+		"Do not re-read comment history by default",
+		"Only if the resumed session is missing thread context",
+		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("comment-triggered resumed Workflow missing %q\n---\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "scoped to the triggering thread") {
+		t.Errorf("resumed Workflow must not claim the delta is thread-scoped\n---\n%s", s)
+	}
+	if strings.Contains(s, "Read the triggering conversation first") {
+		t.Errorf("resumed workflow must not force the cold-start thread read\n---\n%s", s)
 	}
 }
 
@@ -3590,10 +3621,10 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			want: withSection,
 		},
 		{
-			name:                "assignment_triggered",
-			ctx:                 TaskContextForEnv{IssueID: "issue-md-2"},
-			provider:            "claude",
-			filename:            "CLAUDE.md",
+			name:     "assignment_triggered",
+			ctx:      TaskContextForEnv{IssueID: "issue-md-2"},
+			provider: "claude",
+			filename: "CLAUDE.md",
 			workflowStepPresent: []string{
 				"multica issue metadata list issue-md-2 --output json",
 				"See the `## Issue Metadata` section above",

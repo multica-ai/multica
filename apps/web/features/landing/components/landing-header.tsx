@@ -6,7 +6,7 @@ import { Menu, X } from "lucide-react";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
-import { isZhLocale, useLocale } from "../i18n";
+import { docsHrefForLocale, useLocale } from "../i18n";
 import { GitHubMark, githubUrl, headerButtonClassName } from "./shared";
 
 export function LandingHeader({
@@ -17,7 +17,7 @@ export function LandingHeader({
   const { t, locale } = useLocale();
   const user = useAuthStore((s) => s.user);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const docsHref = isZhLocale(locale) ? "/docs/zh" : "/docs";
+  const docsHref = docsHrefForLocale(locale);
   const navLinks = [
     { href: "/usecases", label: t.header.useCases },
     { href: docsHref, label: t.header.docs },

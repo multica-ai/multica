@@ -197,6 +197,7 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 func claudeStaticModels() []Model {
 	return []Model{
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},
 		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "anthropic"},
 		{ID: "claude-haiku-4-5-20251001", Label: "Claude Haiku 4.5", Provider: "anthropic"},
 		{ID: "claude-opus-4-6", Label: "Claude Opus 4.6", Provider: "anthropic"},
