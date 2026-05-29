@@ -259,6 +259,13 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	if taskID := os.Getenv("MULTICA_TASK_ID"); taskID != "" {
 		client.TaskID = taskID
 	}
+	// Act-as-member: same env->header plumbing as MULTICA_AGENT_ID above, but a
+	// distinct server path (the member branch of resolveActor, not the agent
+	// branch). The server honors it only for an owner/admin caller whose target
+	// is a workspace member; otherwise it falls back to the token owner.
+	if onBehalfOf := os.Getenv("MULTICA_ON_BEHALF_OF"); onBehalfOf != "" {
+		client.OnBehalfOf = onBehalfOf
+	}
 	return client, nil
 }
 
