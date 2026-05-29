@@ -48,8 +48,16 @@ build_runtime() {
   local base="$registry/multica-runtime-base:$tag"
   local claude="$registry/multica-runtime-claude:$tag"
 
-  echo "==> Building $base"
+  # Embed a real version into the multica binary so the UI's CLI-version
+  # gate (MIN_QUICK_CREATE_CLI_VERSION) accepts it. `git describe` produces
+  # the dev-describe shape (vX.Y.Z-N-g<sha>) the gate exempts.
+  local version="${VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}"
+  local commit="${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+
+  echo "==> Building $base (version=$version commit=$commit)"
   docker build --platform "$platform" \
+    --build-arg VERSION="$version" \
+    --build-arg COMMIT="$commit" \
     -f packaging/docker/runtime/Dockerfile.base \
     -t "$base" .
   if [[ "$push" -eq 1 ]]; then
