@@ -63,7 +63,19 @@ echo "Building Go backend…"
 make build
 
 echo "Running migrations…"
-make migrate-up || echo "WARN: migrate-up failed (may be no-op)"
+# Run migrate directly instead of `make migrate-up`: the make target calls
+# scripts/ensure-postgres.sh which requires Docker (Colima) to be running.
+# On self-hosted runners where Postgres runs natively (not via Docker),
+# the wrapper fails and the migration is silently swallowed by `|| echo`.
+# That left backend in /healthz=503 (migrations:out_of_date) after every
+# deploy that shipped a new migration.
+(
+  set -a
+  # shellcheck source=/dev/null
+  source "$REPO/.env"
+  set +a
+  cd "$REPO/server" && go run ./cmd/migrate up
+) || { echo "ERROR: migrate failed — aborting before restarting services." >&2; exit 1; }
 
 echo "Building Next.js frontend…"
 pnpm --filter @multica/web build
