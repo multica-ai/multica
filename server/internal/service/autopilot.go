@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -162,6 +163,11 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("increment issue counter: %w", err)
 	}
 
+	newPosition, err := issueposition.NextTopPosition(ctx, tx, ap.WorkspaceID, "todo")
+	if err != nil {
+		return fmt.Errorf("get next issue position: %w", err)
+	}
+
 	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 		WorkspaceID:  ap.WorkspaceID,
 		Title:        title,
@@ -178,7 +184,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		CreatorType:   "agent",
 		CreatorID:     leader.ID,
 		ParentIssueID: pgtype.UUID{},
-		Position:      0,
+		Position:      newPosition,
 		StartDate:     pgtype.Timestamptz{},
 		DueDate:       pgtype.Timestamptz{},
 		Number:        issueNumber,

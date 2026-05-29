@@ -562,6 +562,18 @@ func TestHermesModelSelectionSupported(t *testing.T) {
 	}
 }
 
+// TestAntigravityModelSelectionUnsupported pins that the antigravity
+// provider reports model selection as unsupported: `agy` has no
+// `--model` flag and antigravityBackend deliberately drops opts.Model on
+// the floor, so the UI must render a disabled "Managed by runtime"
+// picker rather than an empty dropdown that accepts a silently-ignored
+// custom value.
+func TestAntigravityModelSelectionUnsupported(t *testing.T) {
+	if ModelSelectionSupported("antigravity") {
+		t.Error("antigravity should not be model-selection-supported: agy has no --model flag")
+	}
+}
+
 func TestCachedDiscovery(t *testing.T) {
 	calls := 0
 	fn := func() ([]Model, error) {

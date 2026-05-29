@@ -141,6 +141,16 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Self-host gate (#3433): when the operator has set
+	// DISABLE_WORKSPACE_CREATION=true, no caller — including existing
+	// workspace owners — may create additional workspaces. The frontend
+	// hides every "Create workspace" affordance via /api/config, but the
+	// 403 here is the only authoritative check.
+	if h.cfg.DisableWorkspaceCreation {
+		writeError(w, http.StatusForbidden, "workspace creation is disabled for this instance")
+		return
+	}
+
 	var req CreateWorkspaceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

@@ -1552,6 +1552,8 @@ func newIssueCommentListTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "list"}
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().String("since", "", "")
+	cmd.Flags().Bool("roots-only", false, "")
+	cmd.Flags().Bool("summary", false, "")
 	cmd.Flags().String("thread", "", "")
 	cmd.Flags().Int("recent", 0, "")
 	cmd.Flags().Int("tail", 0, "")
@@ -1561,7 +1563,7 @@ func newIssueCommentListTestCmd() *cobra.Command {
 }
 
 // TestRunIssueCommentListFlagGuards locks the CLI-side flag combination
-// matrix. Two behaviours matter here:
+// matrix. Three behaviours matter here:
 //
 //   - --recent 0 / --recent -3 must error rather than silently fall back to
 //     the default list path. Previously `recent > 0` collapsed "not passed"
@@ -1571,8 +1573,10 @@ func newIssueCommentListTestCmd() *cobra.Command {
 //   - --before / --before-id without --recent must error. Before this fix
 //     the cursor would be sent to the server but ignored because RecentN=0,
 //     so callers asking for "comments before X" got the full timeline.
+//   - --roots-only is mutually exclusive with the thread/recent/pagination
+//     modes; it may only combine with --since.
 //
-// All four cases must fail before any HTTP round-trip — verified by an
+// These cases must fail before any HTTP round-trip — verified by an
 // httptest server that fatals if /api/issues/<key>/comments is hit.
 func TestRunIssueCommentListFlagGuards(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1662,6 +1666,39 @@ func TestRunIssueCommentListFlagGuards(t *testing.T) {
 			},
 			wantMsg: "require --recent",
 		},
+		{
+			name: "roots-only + thread rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("roots-only", "true")
+				_ = c.Flags().Set("thread", "00000000-0000-0000-0000-000000000001")
+			},
+			wantMsg: "--roots-only and --thread are mutually exclusive",
+		},
+		{
+			name: "roots-only + recent rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("roots-only", "true")
+				_ = c.Flags().Set("recent", "3")
+			},
+			wantMsg: "--roots-only and --recent are mutually exclusive",
+		},
+		{
+			name: "roots-only + tail rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("roots-only", "true")
+				_ = c.Flags().Set("tail", "3")
+			},
+			wantMsg: "--roots-only and --tail are mutually exclusive",
+		},
+		{
+			name: "roots-only + before rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("roots-only", "true")
+				_ = c.Flags().Set("before", "2026-01-01T00:00:00Z")
+				_ = c.Flags().Set("before-id", "00000000-0000-0000-0000-000000000001")
+			},
+			wantMsg: "--roots-only does not support --before / --before-id",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1675,6 +1712,99 @@ func TestRunIssueCommentListFlagGuards(t *testing.T) {
 				t.Fatalf("error = %q, want substring %q", err.Error(), tc.wantMsg)
 			}
 		})
+	}
+}
+
+// TestRunIssueCommentList_RootsOnlyPassesThroughWithSince pins the CLI side
+// of #3164: the flag must be forwarded as the server's roots_only query param,
+// and it must still allow the existing --since incremental polling filter.
+func TestRunIssueCommentList_RootsOnlyPassesThroughWithSince(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments") {
+			gotQuery = r.URL.Query()
+			w.Write([]byte("[]"))
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCommentListTestCmd()
+	if err := cmd.Flags().Set("roots-only", "true"); err != nil {
+		t.Fatalf("set roots-only: %v", err)
+	}
+	if err := cmd.Flags().Set("since", "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatalf("set since: %v", err)
+	}
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	if got := gotQuery.Get("roots_only"); got != "true" {
+		t.Errorf("roots_only query = %q, want true", got)
+	}
+	if got := gotQuery.Get("since"); got != "2026-01-01T00:00:00Z" {
+		t.Errorf("since query = %q, want timestamp", got)
+	}
+}
+
+// TestRunIssueCommentList_SummaryPassesThrough pins the CLI side of the summary
+// projection: --summary must forward summary=true, and it must compose with
+// --roots-only (the orientation read it pairs with most often) rather than
+// being rejected as an incompatible combination.
+func TestRunIssueCommentList_SummaryPassesThrough(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments") {
+			gotQuery = r.URL.Query()
+			w.Write([]byte("[]"))
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCommentListTestCmd()
+	if err := cmd.Flags().Set("summary", "true"); err != nil {
+		t.Fatalf("set summary: %v", err)
+	}
+	if err := cmd.Flags().Set("roots-only", "true"); err != nil {
+		t.Fatalf("set roots-only: %v", err)
+	}
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	if got := gotQuery.Get("summary"); got != "true" {
+		t.Errorf("summary query = %q, want true", got)
+	}
+	if got := gotQuery.Get("roots_only"); got != "true" {
+		t.Errorf("roots_only query = %q, want true", got)
 	}
 }
 

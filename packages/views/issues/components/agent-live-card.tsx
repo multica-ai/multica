@@ -26,7 +26,7 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 // ExecutionLogSection — this card is just a header-style anchor that
 // answers "is anyone working on this issue right now?" at a glance.
 //
-// We still maintain per-task TimelineItem[] state here so the live
+// We still maintain per-task raw message state here so the live
 // TranscriptButton on the sticky banner can open the dialog with live
 // items already attached (the dialog stays in sync via WS as messages
 // arrive). The right-panel rows use the lazy mode of TranscriptButton
@@ -43,7 +43,7 @@ function formatElapsed(startedAt: string): string {
 
 interface TaskState {
   task: AgentTask;
-  items: TimelineItem[];
+  messages: TaskMessagePayload[];
 }
 
 interface AgentLiveCardProps {
@@ -92,8 +92,8 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
         for (const task of tasks) {
           const existing = prev.get(task.id);
           next.set(task.id, existing
-            ? { task, items: existing.items }
-            : { task, items: [] });
+            ? { task, messages: existing.messages }
+            : { task, messages: [] });
         }
         return next;
       });
@@ -116,16 +116,15 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
         hydratedTaskIds.current.add(task.id);
         api.listTaskMessages(task.id).then((msgs) => {
           if (!mountedRef.current) return;
-          const timeline = buildTimeline(msgs);
           for (const m of msgs) seenSeqs.current.add(`${m.task_id}:${m.seq}`);
           setTaskStates((prev) => {
             const next = new Map(prev);
             const existing = next.get(task.id);
             if (!existing) return prev;
-            const loadedSeqs = new Set(timeline.map((i) => i.seq));
-            const wsOnly = existing.items.filter((i) => !loadedSeqs.has(i.seq));
-            const merged = [...timeline, ...wsOnly].sort((a, b) => a.seq - b.seq);
-            next.set(task.id, { task: existing.task, items: merged });
+            const loadedSeqs = new Set(msgs.map((i) => i.seq));
+            const wsOnly = existing.messages.filter((i) => !loadedSeqs.has(i.seq));
+            const messages = [...msgs, ...wsOnly].sort((a, b) => a.seq - b.seq);
+            next.set(task.id, { task: existing.task, messages });
             return next;
           });
         }).catch((e) => {
@@ -156,21 +155,12 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
       if (seenSeqs.current.has(key)) return;
       seenSeqs.current.add(key);
 
-      const item: TimelineItem = {
-        seq: msg.seq,
-        type: msg.type,
-        tool: msg.tool,
-        content: msg.content,
-        input: msg.input,
-        output: msg.output,
-      };
-
       setTaskStates((prev) => {
         const next = new Map(prev);
         const existing = next.get(msg.task_id);
         if (existing) {
-          const items = [...existing.items, item].sort((a, b) => a.seq - b.seq);
-          next.set(msg.task_id, { ...existing, items });
+          const messages = [...existing.messages, msg].sort((a, b) => a.seq - b.seq);
+          next.set(msg.task_id, { ...existing, messages });
         }
         return next;
       });
@@ -248,7 +238,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
       <div className="mt-4 sticky top-4 z-10 rounded-lg bg-background/80 supports-[backdrop-filter]:bg-background/55 backdrop-blur-md">
         <SingleAgentLiveCard
           task={firstEntry.task}
-          items={firstEntry.items}
+          items={buildTimeline(firstEntry.messages)}
           issueId={issueId}
           agentName={firstEntry.task.agent_id ? getActorName("agent", firstEntry.task.agent_id) : t(($) => $.agent_live.fallback_name)}
         />
@@ -256,11 +246,11 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
       {/* Additional agents — non-sticky, scroll with the page */}
       {restEntries.length > 0 && (
         <div className="mt-1.5 space-y-1.5">
-          {restEntries.map(({ task, items }) => (
+          {restEntries.map(({ task, messages }) => (
             <SingleAgentLiveCard
               key={task.id}
               task={task}
-              items={items}
+              items={buildTimeline(messages)}
               issueId={issueId}
               agentName={task.agent_id ? getActorName("agent", task.agent_id) : t(($) => $.agent_live.fallback_name)}
             />

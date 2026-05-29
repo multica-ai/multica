@@ -334,10 +334,11 @@ func TestAuth_MCN_ValidTokenSetsUserID(t *testing.T) {
 
 	verifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{FleetBaseURL: srv.URL})
 
-	var gotUser string
+	var gotUser, gotActorSource string
 	mw := Auth(nil, nil, verifier)
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUser = r.Header.Get("X-User-ID")
+		gotActorSource = r.Header.Get("X-Actor-Source")
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -351,6 +352,14 @@ func TestAuth_MCN_ValidTokenSetsUserID(t *testing.T) {
 	}
 	if gotUser != "01972f7e-7e8d-77ef-a13d-1b0ce3e9c001" {
 		t.Errorf("expected owner_id propagated as X-User-ID, got %q", gotUser)
+	}
+	// Pinned per the cloud-billing review: a successful mcn_ verify
+	// MUST stamp X-Actor-Source so account-level guards (e.g.
+	// handler.RequireHumanActor on /api/cloud-billing/*) can tell a
+	// machine credential apart from a human PAT/JWT. Dropping this
+	// stamp would silently let an mcn_ holder reach billing.
+	if gotActorSource != "cloud_pat" {
+		t.Errorf("expected X-Actor-Source=cloud_pat, got %q", gotActorSource)
 	}
 }
 

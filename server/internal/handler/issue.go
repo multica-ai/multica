@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -2133,6 +2134,13 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		originID = oid
 	}
 
+	newPosition, err := issueposition.NextTopPosition(r.Context(), tx, wsUUID, status)
+	if err != nil {
+		slog.Warn("get next issue position failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "status", status)...)
+		writeError(w, http.StatusInternalServerError, "failed to create issue")
+		return
+	}
+
 	var issue db.Issue
 	if originType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(r.Context(), db.CreateIssueWithOriginParams{
@@ -2146,7 +2154,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorType:   creatorType,
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
-			Position:      0,
+			Position:      newPosition,
 			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
@@ -2166,7 +2174,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorType:   creatorType,
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
-			Position:      0,
+			Position:      newPosition,
 			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,

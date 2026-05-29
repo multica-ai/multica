@@ -102,6 +102,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return models, nil
 	case "gemini":
 		return geminiStaticModels(), nil
+	case "antigravity":
+		// Antigravity CLI (`agy`) does not expose a `--model` flag today;
+		// model selection lives in the user's Antigravity settings and is
+		// communicated to the backend internally by the CLI itself. Return
+		// an empty catalog so the daemon's model_list endpoint succeeds
+		// without populating a misleading dropdown.
+		return []Model{}, nil
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
@@ -140,14 +147,20 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 }
 
 // ModelSelectionSupported reports whether setting `agent.model` has
-// any effect for the given provider. Today every provider in the
-// registry honours `opts.Model` end-to-end: Hermes routes it through
-// the ACP `session/set_model` RPC before each prompt, which means
-// the UI's dropdown choice is carried all the way down to the LLM
-// call. The helper is retained so we can add a `return false` branch
-// the next time a provider legitimately ignores model selection.
+// any effect for the given provider. Most providers honour `opts.Model`
+// end-to-end — Hermes routes it through the ACP `session/set_model` RPC
+// before each prompt, Claude / Codex / Cursor / Gemini / Copilot / Kimi /
+// Kiro / OpenCode / OpenClaw / Pi pass it via flag or session config.
+//
+// Antigravity is the lone exception: `agy` has no `--model` flag today,
+// and the backend in antigravity.go deliberately drops opts.Model on the
+// floor. Returning false here makes the UI render a disabled
+// "Managed by runtime" picker instead of an empty dropdown plus a
+// silently-ignored manual-entry field.
 func ModelSelectionSupported(providerType string) bool {
-	_ = providerType
+	if providerType == "antigravity" {
+		return false
+	}
 	return true
 }
 
@@ -184,6 +197,7 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 func claudeStaticModels() []Model {
 	return []Model{
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},
 		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "anthropic"},
 		{ID: "claude-haiku-4-5-20251001", Label: "Claude Haiku 4.5", Provider: "anthropic"},
 		{ID: "claude-opus-4-6", Label: "Claude Opus 4.6", Provider: "anthropic"},

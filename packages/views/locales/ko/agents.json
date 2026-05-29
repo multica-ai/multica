@@ -195,6 +195,7 @@
     "skills": "스킬",
     "environment": "환경",
     "custom_args": "사용자 지정 인자",
+    "mcp_config": "MCP",
     "discard_dialog_title": "저장하지 않은 변경사항을 버릴까요?",
     "discard_dialog_description": "이 탭에 저장하지 않은 변경사항이 있습니다. 지금 나가면 변경사항이 사라집니다.",
     "discard_keep": "계속 편집",
@@ -293,6 +294,18 @@
       "remove_aria": "인자 제거",
       "saved_toast": "사용자 지정 인자를 저장했습니다",
       "save_failed_toast": "사용자 지정 인자를 저장하지 못했습니다"
+    },
+    "mcp_config": {
+      "intro": "런타임 CLI로 전달되는 MCP server configuration입니다(Claude는 --mcp-config, Codex는 $CODEX_HOME/config.toml, OpenClaw는 task별 config wrapper). 그대로 저장되며 secret이 포함될 수 있으므로 에이전트 소유자와 워크스페이스 관리자만 읽을 수 있습니다. 비워두면 CLI 자체 기본값을 사용합니다. OpenClaw HTTP/SSE 항목은 Claude의 \"type\" 대신 OpenClaw의 필드명(예: \"transport\": \"streamable-http\")을 사용하세요.",
+      "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
+      "editor_aria": "MCP config JSON editor",
+      "clear_action": "지우기",
+      "invalid_json": "잘못된 JSON: {{error}}",
+      "invalid_not_object": "MCP config는 JSON object여야 합니다(예: {\"mcpServers\": …}).",
+      "saved_toast": "MCP config를 저장했습니다",
+      "save_failed_toast": "MCP config를 저장하지 못했습니다",
+      "redacted_title": "설정됨 - 현재 보기에서는 숨김",
+      "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다."
     },
     "skills": {
       "intro": "이 에이전트에 할당된 워크스페이스 스킬입니다. 로컬 런타임 스킬은 항상 자동으로 사용할 수 있습니다.",

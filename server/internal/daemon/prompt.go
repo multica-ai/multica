@@ -159,7 +159,16 @@ func buildCommentPrompt(task Task, provider string) string {
 		}
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
-	fmt.Fprintf(&b, "For comment history, read the triggering thread first: `multica issue comment list %s --thread %s --tail 30 --output json` returns the root + the 30 most recent replies in that thread (root is always included, even at `--tail 0`, so you keep the \"what is this about\" context without dragging hundreds of replies into your prompt). If 30 replies aren't enough, walk older replies in the same thread one page at a time by passing the stderr `Next reply cursor: --before <ts> --before-id <reply-id>` line back as `--before <ts> --before-id <reply-id>` on the next call. If you also need cross-thread background, `multica issue comment list %s --recent 20 --output json` pulls the 20 most recently active threads on the issue; under `--recent` the same `--before` / `--before-id` flags walk older *threads* (stderr label: `Next thread cursor`) instead of older replies. Avoid the unfiltered `--output json` form on long-running issues; it dumps the full flat timeline (cap 2000) and wastes context. `--since <RFC3339>` is still available for incremental polling and may combine with `--thread --tail` or `--recent`.\n\n", task.IssueID, task.TriggerCommentID, task.IssueID)
+	// Comment-reading pointer. Warm path (agent ran here before): since-delta.
+	// Cold path (no prior run): read the triggering thread, not the flat timeline.
+	// Final fallback (no trigger id, shouldn't happen on this path): plain read.
+	if hint := execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.NewCommentsSince, task.NewCommentCount); hint != "" {
+		b.WriteString(hint)
+	} else if cold := execenv.BuildColdCommentsHint(task.IssueID, task.TriggerCommentID); cold != "" {
+		b.WriteString(cold)
+	} else {
+		fmt.Fprintf(&b, "Read the discussion: `multica issue comment list %s --output json` (long issue? use `--recent 20`).\n\n", task.IssueID)
+	}
 	b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
 	return b.String()
 }
