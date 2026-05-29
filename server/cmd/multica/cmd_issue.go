@@ -315,7 +315,8 @@ func init() {
 	issueCommentListCmd.Flags().String("thread", "", "Comment UUID — return the thread containing this comment (root + every descendant). May be a root or a reply id.")
 	issueCommentListCmd.Flags().Int("tail", 0, "Only valid with --thread. Cap reply count to the N most recent replies; the thread root is always included (even with --tail 0). Use --before/--before-id to scroll to older replies.")
 	issueCommentListCmd.Flags().Int("recent", 0, "Return the N most recently active threads (root + descendants per thread). Use --before/--before-id from the previous response to scroll to older threads.")
-	issueCommentListCmd.Flags().Bool("roots-only", false, "Only return top-level comments (parent_id is null)")
+	issueCommentListCmd.Flags().Bool("roots-only", false, "Only return top-level comments (parent_id is null). Each root also carries reply_count + last_activity_at so you can triage which thread to open.")
+	issueCommentListCmd.Flags().Bool("summary", false, "Clip each comment's content to a short preview (sets content_truncated) so you can scan a list without pulling full bodies. Composes with any mode.")
 	issueCommentListCmd.Flags().String("before", "", "Cursor (RFC3339Nano timestamp). With --recent: thread cursor (last_activity_at). With --thread + --tail: reply cursor (reply created_at). Read from the X-Multica-Next-Before response header; must be paired with --before-id.")
 	issueCommentListCmd.Flags().String("before-id", "", "Cursor UUID. With --recent: thread root UUID. With --thread + --tail: oldest reply UUID. Read from the X-Multica-Next-Before-Id response header; must be paired with --before.")
 
@@ -942,6 +943,7 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	recent, _ := cmd.Flags().GetInt("recent")
 	tail, _ := cmd.Flags().GetInt("tail")
 	rootsOnly, _ := cmd.Flags().GetBool("roots-only")
+	summary, _ := cmd.Flags().GetBool("summary")
 	// Flags().Changed distinguishes "user did not pass --recent" from
 	// "user explicitly passed --recent 0" (or a negative value). The
 	// GetInt zero-value collapses both cases, which would otherwise
@@ -994,6 +996,9 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	}
 	if rootsOnly {
 		params.Set("roots_only", "true")
+	}
+	if summary {
+		params.Set("summary", "true")
 	}
 	if thread != "" {
 		params.Set("thread", thread)

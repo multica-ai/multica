@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -224,6 +226,134 @@ func TestListComments_RootsOnlyWithSinceReturnsNewTopLevelComments(t *testing.T)
 		if row.ParentID != nil {
 			t.Fatalf("roots_only + since: expected root comment %s to have nil parent_id, got %q", row.ID, *row.ParentID)
 		}
+	}
+}
+
+// TestListComments_RootsOnlyReturnsThreadStats pins the orientation metadata:
+// each root returned by roots_only carries reply_count (recursive descendant
+// count) and last_activity_at (MAX created_at over the subtree), so an agent
+// can triage which thread to open without fetching any replies. The fixture's
+// root1 has a nested reply (r1b1 → r1b → root1), proving the count walks deeper
+// than one level. Stats are roots-only — the default list must not carry them.
+func TestListComments_RootsOnlyReturnsThreadStats(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	_, rows := listComments(t, fx.IssueID, "roots_only=true")
+	eqIDs(t, ids(rows), []string{fx.Root1, fx.Root2}, "roots stats order")
+
+	byID := map[string]CommentResponse{}
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+	// root1: r1a, r1b, r1b1 (nested) → 3 replies; newest activity is r1b1 at +3m.
+	assertRootStat(t, byID[fx.Root1], "root1", 3, fx.Base.Add(3*time.Minute))
+	// root2: r2a, r2b → 2 replies; newest activity is r2b at +12m.
+	assertRootStat(t, byID[fx.Root2], "root2", 2, fx.Base.Add(12*time.Minute))
+
+	// The default (non-roots) list must NOT leak the roots-only stats.
+	_, all := listComments(t, fx.IssueID, "")
+	for _, r := range all {
+		if r.ReplyCount != nil || r.LastActivityAt != nil {
+			t.Fatalf("default list leaked roots-only stats on %s (reply_count=%v last_activity=%v)", r.ID, r.ReplyCount, r.LastActivityAt)
+		}
+	}
+}
+
+func assertRootStat(t *testing.T, c CommentResponse, label string, wantReplies int, wantLastActivity time.Time) {
+	t.Helper()
+	if c.ReplyCount == nil {
+		t.Fatalf("%s: reply_count missing", label)
+	}
+	if *c.ReplyCount != wantReplies {
+		t.Fatalf("%s: reply_count got=%d want=%d", label, *c.ReplyCount, wantReplies)
+	}
+	if c.LastActivityAt == nil {
+		t.Fatalf("%s: last_activity_at missing", label)
+	}
+	got, err := time.Parse(time.RFC3339, *c.LastActivityAt)
+	if err != nil {
+		t.Fatalf("%s: last_activity_at parse %q: %v", label, *c.LastActivityAt, err)
+	}
+	if !got.Equal(wantLastActivity) {
+		t.Fatalf("%s: last_activity_at got=%s want=%s", label, got.UTC(), wantLastActivity.UTC())
+	}
+}
+
+// TestListComments_SummaryClipsContent pins the summary projection: with
+// summary=true a long body is clipped to summaryContentRunes (+ellipsis) and
+// flagged content_truncated=true, a short body is returned verbatim with
+// content_truncated=false, and without summary the field is omitted entirely so
+// the default response shape is unchanged.
+func TestListComments_SummaryClipsContent(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		VALUES ($1, 'member', $2, $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, "summary fixture").Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	insert := func(body string, offset time.Duration) string {
+		t.Helper()
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+			VALUES ($1, $2, 'member', $3, $4, 'comment', $5)
+			RETURNING id
+		`, issueID, testWorkspaceID, testUserID, body, base.Add(offset)).Scan(&id); err != nil {
+			t.Fatalf("insert comment: %v", err)
+		}
+		return id
+	}
+	longID := insert(strings.Repeat("x", 500), 0)
+	shortID := insert("short", time.Minute)
+
+	// Baseline: no summary → full content, content_truncated omitted.
+	_, full := listComments(t, issueID, "")
+	for _, c := range full {
+		if c.ContentTruncated != nil {
+			t.Fatalf("baseline: content_truncated should be nil, got %v on %s", *c.ContentTruncated, c.ID)
+		}
+		if c.ID == longID && utf8.RuneCountInString(c.Content) != 500 {
+			t.Fatalf("baseline: long content len got=%d want=500", utf8.RuneCountInString(c.Content))
+		}
+	}
+
+	// summary=true → long clipped + truncated true; short verbatim + false.
+	_, sum := listComments(t, issueID, "summary=true")
+	byID := map[string]CommentResponse{}
+	for _, c := range sum {
+		byID[c.ID] = c
+	}
+	long := byID[longID]
+	if long.ContentTruncated == nil || !*long.ContentTruncated {
+		t.Fatalf("summary: long comment should be truncated, got %v", long.ContentTruncated)
+	}
+	if rc := utf8.RuneCountInString(long.Content); rc != summaryContentRunes+1 { // +1 for the ellipsis
+		t.Fatalf("summary: long content rune count got=%d want=%d", rc, summaryContentRunes+1)
+	}
+	if !strings.HasSuffix(long.Content, "…") {
+		t.Fatalf("summary: long content should end with ellipsis, got %q", long.Content)
+	}
+	short := byID[shortID]
+	if short.ContentTruncated == nil || *short.ContentTruncated {
+		t.Fatalf("summary: short comment should be untruncated (false), got %v", short.ContentTruncated)
+	}
+	if short.Content != "short" {
+		t.Fatalf("summary: short content got=%q want=short", short.Content)
 	}
 }
 
@@ -606,6 +736,11 @@ func TestListComments_FlagCombinationRules(t *testing.T) {
 		{
 			name:   "non-boolean roots_only rejected",
 			query:  "roots_only=yes",
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "non-boolean summary rejected",
+			query:  "summary=yes",
 			status: http.StatusBadRequest,
 		},
 		{

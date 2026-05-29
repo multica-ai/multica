@@ -1553,6 +1553,7 @@ func newIssueCommentListTestCmd() *cobra.Command {
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().String("since", "", "")
 	cmd.Flags().Bool("roots-only", false, "")
+	cmd.Flags().Bool("summary", false, "")
 	cmd.Flags().String("thread", "", "")
 	cmd.Flags().Int("recent", 0, "")
 	cmd.Flags().Int("tail", 0, "")
@@ -1757,6 +1758,53 @@ func TestRunIssueCommentList_RootsOnlyPassesThroughWithSince(t *testing.T) {
 	}
 	if got := gotQuery.Get("since"); got != "2026-01-01T00:00:00Z" {
 		t.Errorf("since query = %q, want timestamp", got)
+	}
+}
+
+// TestRunIssueCommentList_SummaryPassesThrough pins the CLI side of the summary
+// projection: --summary must forward summary=true, and it must compose with
+// --roots-only (the orientation read it pairs with most often) rather than
+// being rejected as an incompatible combination.
+func TestRunIssueCommentList_SummaryPassesThrough(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments") {
+			gotQuery = r.URL.Query()
+			w.Write([]byte("[]"))
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCommentListTestCmd()
+	if err := cmd.Flags().Set("summary", "true"); err != nil {
+		t.Fatalf("set summary: %v", err)
+	}
+	if err := cmd.Flags().Set("roots-only", "true"); err != nil {
+		t.Fatalf("set roots-only: %v", err)
+	}
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	if got := gotQuery.Get("summary"); got != "true" {
+		t.Errorf("summary query = %q, want true", got)
+	}
+	if got := gotQuery.Get("roots_only"); got != "true" {
+		t.Errorf("roots_only query = %q, want true", got)
 	}
 }
 

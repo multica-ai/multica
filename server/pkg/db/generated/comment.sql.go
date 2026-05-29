@@ -513,30 +513,82 @@ func (q *Queries) ListRecentThreadCommentsForIssue(ctx context.Context, arg List
 }
 
 const listRootCommentsForIssue = `-- name: ListRootCommentsForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2 AND parent_id IS NULL
-ORDER BY created_at ASC, id ASC
+WITH RECURSIVE membership(id, root_id, comment_created_at) AS (
+    SELECT c.id, c.id AS root_id, c.created_at
+    FROM comment c
+    WHERE c.issue_id = $1
+      AND c.workspace_id = $2
+      AND c.parent_id IS NULL
+    UNION ALL
+    SELECT c.id, m.root_id, c.created_at
+    FROM comment c
+    JOIN membership m ON c.parent_id = m.id
+    WHERE c.issue_id = $1
+      AND c.workspace_id = $2
+),
+thread_stats AS (
+    SELECT root_id,
+           (COUNT(*) - 1)::int AS reply_count,
+           MAX(comment_created_at)::timestamptz AS last_activity_at
+    FROM membership
+    GROUP BY root_id
+)
+SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
+       c.created_at, c.updated_at, c.parent_id, c.workspace_id,
+       c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+       ts.reply_count AS reply_count,
+       ts.last_activity_at AS last_activity_at
+FROM comment c
+JOIN thread_stats ts ON ts.root_id = c.id
+WHERE c.issue_id = $1 AND c.workspace_id = $2 AND c.parent_id IS NULL
+ORDER BY c.created_at ASC, c.id ASC
 LIMIT $3
 `
 
 type ListRootCommentsForIssueParams struct {
 	IssueID     pgtype.UUID `json:"issue_id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Limit       int32       `json:"limit"`
+	RowLimit    int32       `json:"row_limit"`
 }
 
-// Top-level comments only, in issue chronological order. This powers
-// `comment list --roots-only` so agents can orient around the global issue
-// discussion before fetching any specific reply thread.
-func (q *Queries) ListRootCommentsForIssue(ctx context.Context, arg ListRootCommentsForIssueParams) ([]Comment, error) {
-	rows, err := q.db.Query(ctx, listRootCommentsForIssue, arg.IssueID, arg.WorkspaceID, arg.Limit)
+type ListRootCommentsForIssueRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	AuthorType     string             `json:"author_type"`
+	AuthorID       pgtype.UUID        `json:"author_id"`
+	Content        string             `json:"content"`
+	Type           string             `json:"type"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ParentID       pgtype.UUID        `json:"parent_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
+	ReplyCount     int32              `json:"reply_count"`
+	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
+}
+
+// Top-level comments only, in issue chronological order, each annotated with
+// per-thread orientation stats: reply_count (number of descendants) and
+// last_activity_at (MAX(created_at) over the whole subtree). This powers
+// `comment list --roots-only` so agents can not only orient around the global
+// discussion but also triage which thread to drill into (biggest / most
+// recently active) before fetching any specific reply thread.
+//
+// The recursive `membership` CTE labels every comment with its thread root by
+// walking down from each root, so the counts stay correct even if the schema
+// ever allows reply-of-reply (the write path collapses to root today, but does
+// not enforce it). Mirrors ListRecentThreadCommentsForIssue's stats CTE.
+func (q *Queries) ListRootCommentsForIssue(ctx context.Context, arg ListRootCommentsForIssueParams) ([]ListRootCommentsForIssueRow, error) {
+	rows, err := q.db.Query(ctx, listRootCommentsForIssue, arg.IssueID, arg.WorkspaceID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Comment{}
+	items := []ListRootCommentsForIssueRow{}
 	for rows.Next() {
-		var i Comment
+		var i ListRootCommentsForIssueRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.IssueID,
@@ -551,6 +603,8 @@ func (q *Queries) ListRootCommentsForIssue(ctx context.Context, arg ListRootComm
 			&i.ResolvedAt,
 			&i.ResolvedByType,
 			&i.ResolvedByID,
+			&i.ReplyCount,
+			&i.LastActivityAt,
 		); err != nil {
 			return nil, err
 		}
@@ -563,35 +617,83 @@ func (q *Queries) ListRootCommentsForIssue(ctx context.Context, arg ListRootComm
 }
 
 const listRootCommentsSinceForIssue = `-- name: ListRootCommentsSinceForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2 AND parent_id IS NULL AND created_at > $3
-ORDER BY created_at ASC, id ASC
+WITH RECURSIVE membership(id, root_id, comment_created_at) AS (
+    SELECT c.id, c.id AS root_id, c.created_at
+    FROM comment c
+    WHERE c.issue_id = $1
+      AND c.workspace_id = $2
+      AND c.parent_id IS NULL
+    UNION ALL
+    SELECT c.id, m.root_id, c.created_at
+    FROM comment c
+    JOIN membership m ON c.parent_id = m.id
+    WHERE c.issue_id = $1
+      AND c.workspace_id = $2
+),
+thread_stats AS (
+    SELECT root_id,
+           (COUNT(*) - 1)::int AS reply_count,
+           MAX(comment_created_at)::timestamptz AS last_activity_at
+    FROM membership
+    GROUP BY root_id
+)
+SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
+       c.created_at, c.updated_at, c.parent_id, c.workspace_id,
+       c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+       ts.reply_count AS reply_count,
+       ts.last_activity_at AS last_activity_at
+FROM comment c
+JOIN thread_stats ts ON ts.root_id = c.id
+WHERE c.issue_id = $1 AND c.workspace_id = $2
+  AND c.parent_id IS NULL AND c.created_at > $3
+ORDER BY c.created_at ASC, c.id ASC
 LIMIT $4
 `
 
 type ListRootCommentsSinceForIssueParams struct {
 	IssueID     pgtype.UUID        `json:"issue_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	Limit       int32              `json:"limit"`
+	Since       pgtype.Timestamptz `json:"since"`
+	RowLimit    int32              `json:"row_limit"`
 }
 
-// Top-level comments created strictly after $3. Same semantics as
-// ListCommentsSinceForIssue, narrowed to thread roots.
-func (q *Queries) ListRootCommentsSinceForIssue(ctx context.Context, arg ListRootCommentsSinceForIssueParams) ([]Comment, error) {
+type ListRootCommentsSinceForIssueRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	AuthorType     string             `json:"author_type"`
+	AuthorID       pgtype.UUID        `json:"author_id"`
+	Content        string             `json:"content"`
+	Type           string             `json:"type"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ParentID       pgtype.UUID        `json:"parent_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
+	ReplyCount     int32              `json:"reply_count"`
+	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
+}
+
+// Top-level comments created strictly after @since, each annotated with the
+// same reply_count / last_activity_at stats as ListRootCommentsForIssue. The
+// @since filter narrows which roots are returned; the stats are still computed
+// over each thread's full subtree (so a freshly created root with no replies
+// reports reply_count 0 and last_activity_at = its own created_at).
+func (q *Queries) ListRootCommentsSinceForIssue(ctx context.Context, arg ListRootCommentsSinceForIssueParams) ([]ListRootCommentsSinceForIssueRow, error) {
 	rows, err := q.db.Query(ctx, listRootCommentsSinceForIssue,
 		arg.IssueID,
 		arg.WorkspaceID,
-		arg.CreatedAt,
-		arg.Limit,
+		arg.Since,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Comment{}
+	items := []ListRootCommentsSinceForIssueRow{}
 	for rows.Next() {
-		var i Comment
+		var i ListRootCommentsSinceForIssueRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.IssueID,
@@ -606,6 +708,8 @@ func (q *Queries) ListRootCommentsSinceForIssue(ctx context.Context, arg ListRoo
 			&i.ResolvedAt,
 			&i.ResolvedByType,
 			&i.ResolvedByID,
+			&i.ReplyCount,
+			&i.LastActivityAt,
 		); err != nil {
 			return nil, err
 		}
