@@ -1,0 +1,48 @@
+{{- if and .Values.runtime.enabled (eq .Values.runtime.mode "controller") .Values.runtime.claudeBroker.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: multica-claude-broker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "claude-broker" "ctx" .) | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: multica-claude-broker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "claude-broker" "ctx" .) | nindent 4 }}
+rules:
+  # The broker reads + updates its own state secret. resourceNames is
+  # restrictive — broker can't touch other Secrets in the namespace.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ .Values.runtime.claudeBroker.secretName | quote }}
+      - {{ .Values.runtime.claudeBroker.bootstrapFromSecret | quote }}
+    verbs: ["get", "update", "create"]
+  # Leader election via coordination.k8s.io/Lease. Lease names aren't known
+  # ahead of time across resync (the elector may delete and recreate), so we
+  # can't pin resourceNames here. Scope is bounded to namespace-level Leases.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: multica-claude-broker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "claude-broker" "ctx" .) | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: multica-claude-broker
+subjects:
+  - kind: ServiceAccount
+    name: multica-claude-broker
+    namespace: {{ .Release.Namespace }}
+{{- end }}
