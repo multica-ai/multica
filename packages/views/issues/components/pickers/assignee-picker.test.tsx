@@ -49,7 +49,7 @@ describe("assignee picker internal filter (SLE-53)", () => {
     // query "public" matches the non-internal agent only
     const result = pickFilteredAgents(agents, "public");
     expect(result).toHaveLength(1);
-    expect(result[0].name).toBe("Public");
+    expect(result[0]!.name).toBe("Public");
   });
 
   it("does not show archived agents regardless of internal flag", () => {
