@@ -180,3 +180,168 @@ it as the daemon `cli_version` so Multica's CLI-version gate
 (`MIN_QUICK_CREATE_CLI_VERSION` in `server/pkg/agent`) accepts it. If the
 binary was built without a real version (the bare `go build` default of
 `dev`), the register payload falls back to `v0.3.5` to stay past the gate.
+
+## Claude OAuth broker (Plan F.2)
+
+The `multica-claude-broker` Deployment is the single in-cluster owner of the
+Anthropic OAuth refresh state. Worker Job pods don't see the refresh_token
+at all — claude calls a tiny `apiKeyHelper` shell script that curls the
+broker's `GET /access_token` for the current bearer.
+
+This eliminates the concurrent-refresh race that previously corrupted the
+shared OAuth grant: multiple worker pods would each rotate the refresh_token
+in parallel; whichever lost the race silently wrote an invalid token back
+to the Secret; the next reuse hit `invalid_grant` and the cluster went dark.
+With the broker, only one process (the leader-elected broker pod) ever
+calls `/v1/oauth/token`, and the rotated value lands in a single Secret
+that's the canonical source of truth.
+
+### Enabling
+
+```yaml
+runtime:
+  claudeBroker:
+    enabled: true
+    image: { name: multica-claude-broker, tag: v0.3.6-mk1 }   # or any tag your registry has
+```
+
+`helm upgrade` deploys the broker (Deployment + Service + RBAC +
+NetworkPolicy + client ConfigMap) and switches the controller to wire
+worker Jobs to use the broker's apiKeyHelper instead of the legacy
+`claude-auth` init container.
+
+### Bootstrap (one-time)
+
+The broker reads `{access_token, refresh_token, expires_at}` from a Secret
+named `multica-claude-oauth-broker`. The first time you enable it, populate
+the Secret from your local Claude Code OAuth grant:
+
+**macOS (Keychain):**
+
+```bash
+ACCESS=$(security find-generic-password -s 'Claude Code-credentials' -w \
+  | jq -r .claudeAiOauth.accessToken)
+REFRESH=$(security find-generic-password -s 'Claude Code-credentials' -w \
+  | jq -r .claudeAiOauth.refreshToken)
+EXP_MS=$(security find-generic-password -s 'Claude Code-credentials' -w \
+  | jq -r .claudeAiOauth.expiresAt)
+EXP_AT=$(date -u -r $((EXP_MS / 1000)) +%FT%TZ)
+
+kubectl -n multica create secret generic multica-claude-oauth-broker \
+  --from-literal=access_token="$ACCESS" \
+  --from-literal=refresh_token="$REFRESH" \
+  --from-literal=expires_at="$EXP_AT"
+```
+
+**Linux (file-based):**
+
+```bash
+ACCESS=$(jq -r .claudeAiOauth.accessToken  ~/.claude/.credentials.json)
+REFRESH=$(jq -r .claudeAiOauth.refreshToken ~/.claude/.credentials.json)
+EXP_MS=$(jq -r .claudeAiOauth.expiresAt    ~/.claude/.credentials.json)
+EXP_AT=$(date -u -d @$((EXP_MS / 1000)) +%FT%TZ)
+
+kubectl -n multica create secret generic multica-claude-oauth-broker \
+  --from-literal=access_token="$ACCESS" \
+  --from-literal=refresh_token="$REFRESH" \
+  --from-literal=expires_at="$EXP_AT"
+```
+
+**Important — single-grant caveat:** Your local CLI and the broker now share
+the same OAuth grant. The first time the broker refreshes, the rotated
+refresh_token is persisted only to the broker's Secret; your local CLI's
+keychain entry becomes stale and will need `claude /login` to refresh.
+For long-term operation, do `claude /login` on a dedicated machine (or in
+a clean profile) and use *that* keychain entry to bootstrap the broker —
+your everyday CLI keeps its own grant.
+
+### Force a refresh
+
+The broker's `/refresh` endpoint is bound to `127.0.0.1:8081` inside the pod
+(not exposed over the cluster). Operator-only — reachable via `kubectl exec`:
+
+```bash
+kubectl -n multica exec deploy/multica-claude-broker -- /bin/sh -c \
+  'wget -qO- --post-data= http://127.0.0.1:8081/refresh' || true
+```
+
+(The broker image is distroless and has no shell or curl; in practice you
+hit the endpoint via `kubectl port-forward` from your workstation:)
+
+```bash
+kubectl -n multica port-forward deploy/multica-claude-broker 18081:8081 &
+curl -sf -X POST http://127.0.0.1:18081/refresh
+```
+
+Each force-refresh consumes one Anthropic rate-limit tick and rotates the
+refresh_token; use it for breakglass scenarios (suspected token corruption,
+verifying the broker after a config change), not as a routine cron.
+
+### Rotating the OAuth grant
+
+If Anthropic ever revokes the grant, or you want to swap to a fresh login:
+
+1. Run `claude /login` locally (or wherever you keep the operator grant).
+2. Re-run the bootstrap commands above to overwrite the Secret.
+3. Bounce the broker:
+
+   ```bash
+   kubectl -n multica delete pod -l app.kubernetes.io/name=multica-claude-broker
+   ```
+
+Total downtime is ~30s. In-flight worker tasks may see one auth failure
+during the window; the controller's failure sweep picks them up and the
+issue is re-claimable.
+
+### Updating embedded OAuth constants
+
+The broker embeds Claude Code's OAuth client_id, endpoint, and version
+header at build time via `go:embed` from
+`server/cmd/multica-claude-broker/oauth-constants.json`. The companion
+extractor (`server/cmd/extract-oauth-constants/`) regenerates this file
+by scanning the Claude Code binary:
+
+```bash
+go run ./server/cmd/extract-oauth-constants \
+  -binary /path/to/claude.exe \
+  -claude-version "$(jq -r .version /path/to/claude-code/package.json)" \
+  -out server/cmd/multica-claude-broker/oauth-constants.json
+```
+
+Constants drift only when Anthropic rotates the OAuth client_id or
+endpoint, which is rare. The companion plan (`2026-05-29-claude-version-
+watcher.md`) automates this via a daily CI job that opens a PR when the
+extracted JSON changes.
+
+### Metrics + alerting
+
+The broker exposes Prometheus metrics on `:9090`:
+
+```
+multica_claude_broker_refresh_total{outcome="ok|error|skipped"}
+multica_claude_broker_refresh_failures_total{reason="permanent|transient|not_leader|other"}
+multica_claude_broker_refresh_duration_seconds        (histogram)
+multica_claude_broker_access_token_expires_at_seconds (gauge — unix time)
+multica_claude_broker_access_token_requests_total{outcome="ok|error|stale"}
+multica_claude_broker_leader                          (1 if this pod holds the refresh lease)
+multica_claude_broker_constants_info{claude_version,extracted_at,version_header}
+```
+
+**Recommended alerts:**
+
+| Alert | Expression | Why |
+|---|---|---|
+| Broker has no leader | `max(multica_claude_broker_leader) == 0 for 5m` | Refresh is blocked; will eventually serve a 503 once cached token expires |
+| Permanent refresh failure | `increase(multica_claude_broker_refresh_failures_total{reason="permanent"}[10m]) > 0` | OAuth grant is dead — needs operator intervention (rotate the grant) |
+| Token nearing expiry | `multica_claude_broker_access_token_expires_at_seconds - time() < 600` | If this fires for more than a minute, refresh isn't running |
+
+### NetworkPolicy
+
+The chart ships a NetworkPolicy that restricts ingress on the admin port
+(`:8080`) to pods labelled
+`app.kubernetes.io/managed-by: multica-k8s-controller` — i.e., the worker
+Job pods spawned by the controller. The metrics port (`:9090`) is
+restricted to whatever scrape source you list in
+`runtime.claudeBroker.networkPolicy.metricsFrom`. The ops port (`:8081`)
+is bound to loopback inside the pod and isn't reachable from the cluster
+network at all.
