@@ -122,6 +122,7 @@ type AgentTaskQueue struct {
 	DelegatingAgentID pgtype.UUID        `json:"delegating_agent_id"`
 	SourceTaskID      pgtype.UUID        `json:"source_task_id"`
 	DelegationSource  pgtype.Text        `json:"delegation_source"`
+	WaitReason        pgtype.Text        `json:"wait_reason"`
 	Title             pgtype.Text        `json:"title"`
 	ModelOverride     pgtype.Text        `json:"model_override"`
 }
@@ -237,6 +238,7 @@ type AutopilotTrigger struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	Provider       string             `json:"provider"`
 	SigningSecret  pgtype.Text        `json:"signing_secret"`
+	EventFilters   []byte             `json:"event_filters"`
 }
 
 type BudgetChangeLog struct {

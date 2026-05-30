@@ -156,6 +156,12 @@ const desktopAPI = {
       ipcRenderer.removeListener(NAVIGATION_GESTURE_CHANNEL, handler);
     };
   },
+  /** Open the OS folder picker and return the chosen absolute path. */
+  pickDirectory: (defaultPath?: string) =>
+    ipcRenderer.invoke("local-directory:pick", defaultPath),
+  /** Validate that a path is an existing readable+writable directory. */
+  validateLocalDirectory: (path: string) =>
+    ipcRenderer.invoke("local-directory:validate", path),
 };
 
 interface DaemonStatus {

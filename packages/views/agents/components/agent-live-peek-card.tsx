@@ -6,6 +6,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
   agentTaskSnapshotOptions,
   useAgentPresenceDetail,
@@ -82,7 +83,7 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
         <ActorAvatarBase
           name={agent.name}
           initials={initials}
-          avatarUrl={agent.avatar_url}
+          avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
           isAgent
           size={40}
           className="rounded-md"

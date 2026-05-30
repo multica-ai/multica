@@ -9,7 +9,7 @@
  * `![]()` URL while rendering a comment and pass the array through so
  * a left/right swipe walks the gallery.
  */
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, use, useState, type ReactNode } from "react";
 import ImageView from "react-native-image-viewing";
 
 interface LightboxApi {
@@ -24,7 +24,7 @@ const LightboxContext = createContext<LightboxApi>({
 });
 
 export function useLightbox(): LightboxApi {
-  return useContext(LightboxContext);
+  return use(LightboxContext);
 }
 
 export function LightboxProvider({ children }: { children: ReactNode }) {

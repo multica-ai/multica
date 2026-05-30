@@ -212,12 +212,13 @@ LIMIT 1;
 -- elapsed = now - task.created_at), so the pill survives refresh / reopen
 -- without "resetting to 0s".
 SELECT id, status, created_at FROM agent_task_queue
-WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
+WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 ORDER BY
   CASE status
     WHEN 'running' THEN 0
     WHEN 'dispatched' THEN 1
     WHEN 'queued' THEN 2
+    WHEN 'waiting_local_directory' THEN 3
   END,
   created_at ASC
 LIMIT 1;
@@ -231,7 +232,7 @@ FROM agent_task_queue atq
 JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE cs.workspace_id = $1
   AND cs.creator_id = $2
-  AND atq.status IN ('queued', 'dispatched', 'running')
+  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 ORDER BY atq.created_at DESC;
 
 -- name: MarkChatSessionRead :exec

@@ -60,7 +60,14 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
     for (const task of snapshot) {
       if (task.issue_id !== issueId) continue;
       if (task.status === "running") running.push(task);
-      else if (task.status === "queued" || task.status === "dispatched")
+      else if (
+        task.status === "queued" ||
+        task.status === "dispatched" ||
+        // waiting_local_directory is the daemon-parked variant of "queued"
+        // — the agent is still actively waiting on a path lock, so it
+        // belongs in the active hover stack rather than dropping out.
+        task.status === "waiting_local_directory"
+      )
         queued.push(task);
       // Terminal statuses are intentionally ignored — they belong on the
       // issue history, not the live indicator.

@@ -249,7 +249,7 @@ function computeFilteredRuntimes(
     filter === "mine" && currentUserId
       ? runtimes.filter((r) => r.owner_id === currentUserId)
       : runtimes;
-  return [...filtered].sort((a, b) => {
+  return filtered.toSorted((a, b) => {
     const aMine = a.owner_id === currentUserId;
     const bMine = b.owner_id === currentUserId;
     if (aMine && !bMine) return -1;

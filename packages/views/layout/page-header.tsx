@@ -3,14 +3,13 @@
 // CEREBRO-PATCH(page-header-cerebro): cerebro modification of upstream file
 
 import { cn } from "@multica/ui/lib/utils";
-import { SidebarTrigger, useSidebar } from "@multica/ui/components/ui/sidebar";
+import { SidebarTrigger, useSidebarSafe } from "@multica/ui/components/ui/sidebar";
 
+// CEREBRO-PATCH(mobile-sidebar-trigger-export): exported with className prop so
+// cerebro pages (notifications, attachments, runtime-setup) can override spacing.
 export function MobileSidebarTrigger({ className }: { className?: string }) {
-  try {
-    useSidebar();
-  } catch {
-    return null;
-  }
+  const sidebar = useSidebarSafe();
+  if (!sidebar) return null;
   return <SidebarTrigger className={cn("mr-2 md:hidden", className)} />;
 }
 

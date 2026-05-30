@@ -94,7 +94,7 @@ INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, 
 VALUES ($1, $2, NULL, 'queued', $3, $4)
 ON CONFLICT (chat_session_id) WHERE status = 'queued' AND chat_session_id IS NOT NULL
 DO UPDATE SET priority = agent_task_queue.priority
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, title, model_override
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, title, model_override
 `
 
 type CreateOrGetQueuedChatTaskParams struct {
@@ -148,6 +148,7 @@ func (q *Queries) CreateOrGetQueuedChatTask(ctx context.Context, arg CreateOrGet
 		&i.DelegatingAgentID,
 		&i.SourceTaskID,
 		&i.DelegationSource,
+		&i.WaitReason,
 		&i.Title,
 		&i.ModelOverride,
 	)
@@ -320,12 +321,13 @@ func (q *Queries) GetLastChatTaskSession(ctx context.Context, chatSessionID pgty
 
 const getPendingChatTask = `-- name: GetPendingChatTask :one
 SELECT id, status, created_at FROM agent_task_queue
-WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
+WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 ORDER BY
   CASE status
     WHEN 'running' THEN 0
     WHEN 'dispatched' THEN 1
     WHEN 'queued' THEN 2
+    WHEN 'waiting_local_directory' THEN 3
   END,
   created_at ASC
 LIMIT 1
@@ -591,7 +593,7 @@ FROM agent_task_queue atq
 JOIN chat_session cs ON cs.id = atq.chat_session_id
 WHERE cs.workspace_id = $1
   AND cs.creator_id = $2
-  AND atq.status IN ('queued', 'dispatched', 'running')
+  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 ORDER BY atq.created_at DESC
 `
 

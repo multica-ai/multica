@@ -285,9 +285,9 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
               onClick={async () => {
                 try {
                   await navigator.clipboard.writeText(webhookUrl);
-                  toast.success(t(($) => $.trigger_row.webhook_copied));
+                  toast.success(t(($) => $.trigger_row.url_copied));
                 } catch {
-                  toast.error(t(($) => $.trigger_row.webhook_copy_failed));
+                  toast.error(t(($) => $.trigger_row.url_copy_failed));
                 }
               }}
             >
@@ -376,7 +376,7 @@ function AddTriggerDialog({
       toast.success(
         kind === "webhook"
           ? t(($) => $.add_trigger_dialog.toast_added_webhook)
-          : t(($) => $.add_trigger_dialog.toast_added),
+          : t(($) => $.add_trigger_dialog.toast_added_schedule),
       );
     } catch {
       toast.error(t(($) => $.add_trigger_dialog.toast_add_failed));

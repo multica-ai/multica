@@ -54,6 +54,15 @@ type CreateProjectResourceRequest struct {
 	Position     *int32          `json:"position"`
 }
 
+// UpdateProjectResourceRequest is the body for PUT /api/projects/{id}/resources/{resourceId}.
+// resource_type cannot change after creation — pick a new type by deleting and
+// re-adding. Every field is optional; omitted fields keep their current value.
+type UpdateProjectResourceRequest struct {
+	ResourceRef json.RawMessage `json:"resource_ref"`
+	Label       *string         `json:"label"`
+	Position    *int32          `json:"position"`
+}
+
 // validateAndNormalizeResourceRef checks the payload for a known resource_type.
 // New types are added here without schema migration; unknown types are rejected
 // at the API boundary so a typo can't slip through and produce a resource the
@@ -65,14 +74,16 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 	switch resourceType {
 	case "github_repo":
 		return validateGithubRepoRef(ref)
+	case "local_directory":
+		return validateLocalDirectoryRef(ref)
 	default:
 		return nil, fmt.Errorf("unknown resource_type %q", resourceType)
 	}
 }
 
 type githubRepoRef struct {
-	URL                string `json:"url"`
-	DefaultBranchHint  string `json:"default_branch_hint,omitempty"`
+	URL               string `json:"url"`
+	DefaultBranchHint string `json:"default_branch_hint,omitempty"`
 }
 
 func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
@@ -93,6 +104,68 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// localDirectoryRef is the JSONB shape stored for resource_type=local_directory.
+// It pins a project to an existing directory on a specific user machine, so
+// agent tasks run in-place rather than in an isolated git worktree. The
+// daemon_id scopes the path to one daemon registration — the same string path
+// on a different machine is a different resource. The optional label is a
+// human-readable hint used by the UI; the row-level project_resource.label
+// column remains the generic column for any resource type.
+type localDirectoryRef struct {
+	LocalPath string `json:"local_path"`
+	DaemonID  string `json:"daemon_id"`
+	Label     string `json:"label,omitempty"`
+}
+
+func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
+	var payload localDirectoryRef
+	if err := json.Unmarshal(ref, &payload); err != nil {
+		return nil, fmt.Errorf("invalid local_directory payload: %w", err)
+	}
+	payload.LocalPath = strings.TrimSpace(payload.LocalPath)
+	if payload.LocalPath == "" {
+		return nil, errors.New("local_directory: local_path is required")
+	}
+	if !isAbsoluteLocalPath(payload.LocalPath) {
+		return nil, errors.New("local_directory: local_path must be an absolute path")
+	}
+	payload.DaemonID = strings.TrimSpace(payload.DaemonID)
+	if payload.DaemonID == "" {
+		return nil, errors.New("local_directory: daemon_id is required")
+	}
+	payload.Label = strings.TrimSpace(payload.Label)
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// isAbsoluteLocalPath checks the path looks absolute on either POSIX or
+// Windows daemons. The server can't know which OS the daemon runs on, so we
+// accept the union: a leading "/" (POSIX), a UNC prefix "\\", or a drive
+// letter like "C:\" or "C:/". The daemon still verifies existence at run
+// time — this is a typo guard, not a filesystem check.
+func isAbsoluteLocalPath(s string) bool {
+	if s == "" {
+		return false
+	}
+	if s[0] == '/' {
+		return true
+	}
+	if strings.HasPrefix(s, `\\`) {
+		return true
+	}
+	if len(s) >= 3 && isDriveLetter(s[0]) && s[1] == ':' && (s[2] == '\\' || s[2] == '/') {
+		return true
+	}
+	return false
+}
+
+func isDriveLetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 // isValidGitRepoURL accepts the three forms a user can paste from GitHub's
@@ -203,6 +276,14 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if conflict, err := h.findLocalDirectoryConflict(r.Context(), project.ID, req.ResourceType, normalizedRef, pgtype.UUID{}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
+		return
+	} else if conflict {
+		writeError(w, http.StatusConflict, "this daemon already has a local_directory attached to the project; remove it before adding another")
+		return
+	}
+
 	var label pgtype.Text
 	if req.Label != nil && strings.TrimSpace(*req.Label) != "" {
 		label = pgtype.Text{String: strings.TrimSpace(*req.Label), Valid: true}
@@ -244,6 +325,164 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 		map[string]any{"resource": resp, "project_id": uuidToString(project.ID)},
 	)
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// UpdateProjectResource edits an existing resource's ref/label/position.
+// resource_type is immutable — re-pointing a resource at a different type is
+// almost always a different conceptual entity, so the caller should delete and
+// re-add instead. Omitted fields keep their current value, including the
+// `label` JSON null vs. missing distinction (missing = keep, explicit "" =
+// clear).
+func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) {
+	project, ok := h.loadProjectForResource(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	resourceUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "resourceId"), "resource id")
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	existing, err := h.Queries.GetProjectResourceInWorkspace(r.Context(), db.GetProjectResourceInWorkspaceParams{
+		ID: resourceUUID, WorkspaceID: project.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "project resource not found")
+		return
+	}
+	if uuidToString(existing.ProjectID) != uuidToString(project.ID) {
+		writeError(w, http.StatusNotFound, "project resource not found")
+		return
+	}
+
+	// Decode into a raw map first so we can tell "field omitted" from
+	// "field present with zero value" — the label clear case in particular
+	// relies on this distinction.
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	nextRef := json.RawMessage(existing.ResourceRef)
+	if rawRef, ok := raw["resource_ref"]; ok {
+		normalized, err := validateAndNormalizeResourceRef(existing.ResourceType, rawRef)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		nextRef = normalized
+	}
+
+	if conflict, err := h.findLocalDirectoryConflict(r.Context(), project.ID, existing.ResourceType, nextRef, existing.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check existing resources")
+		return
+	} else if conflict {
+		writeError(w, http.StatusConflict, "another local_directory on this daemon is already attached to the project")
+		return
+	}
+
+	nextLabel := existing.Label
+	if rawLabel, ok := raw["label"]; ok {
+		var labelStr *string
+		if err := json.Unmarshal(rawLabel, &labelStr); err != nil {
+			writeError(w, http.StatusBadRequest, "label must be a string or null")
+			return
+		}
+		if labelStr == nil || strings.TrimSpace(*labelStr) == "" {
+			nextLabel = pgtype.Text{}
+		} else {
+			nextLabel = pgtype.Text{String: strings.TrimSpace(*labelStr), Valid: true}
+		}
+	}
+
+	nextPosition := existing.Position
+	if rawPos, ok := raw["position"]; ok {
+		var pos *int32
+		if err := json.Unmarshal(rawPos, &pos); err != nil {
+			writeError(w, http.StatusBadRequest, "position must be an integer")
+			return
+		}
+		if pos != nil {
+			nextPosition = *pos
+		}
+	}
+
+	updated, err := h.Queries.UpdateProjectResource(r.Context(), db.UpdateProjectResourceParams{
+		ID:          existing.ID,
+		ResourceRef: nextRef,
+		Label:       nextLabel,
+		Position:    nextPosition,
+	})
+	if err != nil {
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "this resource is already attached to the project")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update project resource")
+		return
+	}
+
+	resp := projectResourceToResponse(updated)
+	h.publish(
+		protocol.EventProjectResourceUpdated,
+		uuidToString(project.WorkspaceID),
+		"member",
+		userID,
+		map[string]any{"resource": resp, "project_id": uuidToString(project.ID)},
+	)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// findLocalDirectoryConflict enforces "at most one local_directory resource
+// per (project, daemon)". The daemon picks the first matching daemon_id row
+// out of a task's resources (findLocalDirectoryAssignment), so letting a
+// project carry two rows for the same daemon would mean the agent silently
+// writes into whichever happens to come back first — a safety hazard for a
+// feature that operates directly on the user's real working directory.
+//
+// The DB-level UNIQUE(project_id, resource_type, resource_ref) constraint
+// alone is not enough here: it only fires on full ref-JSON equality, so a
+// different local_path or even a typoed label on the same daemon would slip
+// through. We do the daemon-scoped check here in application code instead.
+//
+// `excludeID` lets the update path ignore the row being edited.
+func (h *Handler) findLocalDirectoryConflict(ctx context.Context, projectID pgtype.UUID, resourceType string, normalizedRef json.RawMessage, excludeID pgtype.UUID) (bool, error) {
+	if resourceType != "local_directory" {
+		return false, nil
+	}
+	var incoming localDirectoryRef
+	if err := json.Unmarshal(normalizedRef, &incoming); err != nil {
+		return false, err
+	}
+	rows, err := h.Queries.ListProjectResources(ctx, projectID)
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if row.ResourceType != "local_directory" {
+			continue
+		}
+		if excludeID.Valid && uuidToString(row.ID) == uuidToString(excludeID) {
+			continue
+		}
+		var existing localDirectoryRef
+		if err := json.Unmarshal(row.ResourceRef, &existing); err != nil {
+			continue
+		}
+		// Daemon-scoped uniqueness: one local_directory per daemon per
+		// project. Different daemons can each carry one row (one per
+		// user device); the daemon-side resolver routes each daemon to
+		// its own assignment by daemon_id.
+		if existing.DaemonID == incoming.DaemonID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // DeleteProjectResource removes a resource from a project.

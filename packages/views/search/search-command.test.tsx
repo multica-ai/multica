@@ -69,6 +69,7 @@ const {
 
 vi.mock("@multica/core/api", () => ({
   api: {
+    getBaseUrl: () => "http://127.0.0.1:8080",
     searchIssues: mockSearchIssues,
     searchProjects: mockSearchProjects,
     searchChatSessions: mockSearchChatSessions,

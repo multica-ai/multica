@@ -297,6 +297,10 @@ export function ManualCreatePanel({
   // Forward squad picks alongside agent picks so the agent panel honors
   // the actor the user already chose — otherwise a squad selection silently
   // falls back to the persisted actor / first visible agent on flip.
+  // parent_issue_id rides through the same carry channel: the modal opener
+  // (openCreateSubIssue) seeded it on the manual panel, and the agent panel
+  // needs it so the new issue is still created as a sub-issue when the user
+  // flips from "Add sub issue" → "Create with agent".
   const switchToAgent = () => {
     const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
     const prompt = [title.trim(), desc].filter(Boolean).join("\n\n");
@@ -307,6 +311,14 @@ export function ManualCreatePanel({
     // content on every round-trip).
     setDraft({ title: "", description: "" });
     setLastMode("agent");
+    // Prefer the hydrated identifier from `parentIssue`, but fall back to the
+    // identifier the modal opener seeded on `data`. Without the fallback, a
+    // flip that happens before the issue detail query resolves drops the
+    // identifier and the agent chip renders as "Sub-issue of " with an empty
+    // tail. The UUID alone still wires the sub-issue relationship correctly;
+    // this only affects the display affordance.
+    const carryParentIdentifier =
+      parentIssue?.identifier ?? (data?.parent_issue_identifier as string | undefined);
     onSwitchMode?.({
       prompt,
       ...(assigneeId && assigneeType === "agent"
@@ -315,6 +327,8 @@ export function ManualCreatePanel({
           ? { squad_id: assigneeId }
           : {}),
       ...(projectId ? { project_id: projectId } : {}),
+      ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
+      ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
     });
   };
 
@@ -354,6 +368,7 @@ export function ManualCreatePanel({
                   <TooltipTrigger
                     render={
                       <button
+                        type="button"
                         onClick={() => setIsExpanded(!isExpanded)}
                         className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >
@@ -371,6 +386,7 @@ export function ManualCreatePanel({
                   <TooltipTrigger
                     render={
                       <button
+                        type="button"
                         onClick={onClose}
                         className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >

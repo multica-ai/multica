@@ -34,6 +34,7 @@ function SidebarTopBar() {
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
         <button
+          type="button"
           onClick={goBack}
           disabled={!canGoBack}
           aria-label="Go back"
@@ -42,6 +43,7 @@ function SidebarTopBar() {
           <ChevronLeft className="size-4" />
         </button>
         <button
+          type="button"
           onClick={goForward}
           disabled={!canGoForward}
           aria-label="Go forward"

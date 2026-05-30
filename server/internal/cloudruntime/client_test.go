@@ -30,9 +30,6 @@ func TestClientDoForwardsFleetRequest(t *testing.T) {
 		if got := r.Header.Get("X-User-ID"); got != "01972f7e-7e8d-77ef-a13d-1b0ce3e9c001" {
 			t.Fatalf("X-User-ID = %q", got)
 		}
-		if got := r.Header.Get("X-User-PAT"); got != "mul_test_pat" {
-			t.Fatalf("X-User-PAT = %q", got)
-		}
 		if got := r.Header.Get("X-Request-ID"); got != "request-123" {
 			t.Fatalf("X-Request-ID = %q", got)
 		}
@@ -56,7 +53,6 @@ func TestClientDoForwardsFleetRequest(t *testing.T) {
 		Query:     url.Values{"limit": []string{"20"}, "offset": []string{"0"}},
 		Body:      []byte(`{"instance_type":"g5.xlarge"}`),
 		UserID:    "01972f7e-7e8d-77ef-a13d-1b0ce3e9c001",
-		UserPAT:   "mul_test_pat",
 		RequestID: "request-123",
 	})
 	if err != nil {

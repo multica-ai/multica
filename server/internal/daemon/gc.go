@@ -178,6 +178,40 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 		return d.orphanByMTime(taskDir, "no meta")
 	}
 
+	action := d.shouldCleanTaskDirForKind(ctx, taskDir, meta)
+	if !meta.LocalDirectory {
+		return action
+	}
+	// local_directory tasks keep their envRoot indefinitely so the user
+	// can inspect output/ and logs/ for forensic context. The WorkDir is
+	// the user's own path and lives outside taskDir, so the envRoot
+	// itself is just the daemon's logbook for the run — never large, and
+	// safe to keep.
+	//
+	//   gcActionClean   → demote to artifact-pattern cleanup so envRoot
+	//                     (and especially the logbook) survives.
+	//   gcActionOrphan  → skip outright; we don't ever wipe a
+	//                     local_directory envRoot via the mtime path,
+	//                     since the parent issue / chat record going
+	//                     away should not collateral-delete the user's
+	//                     own audit trail.
+	//
+	// gcActionCleanArtifacts and gcActionSkip already obey the
+	// "no full envRoot RemoveAll" rule.
+	switch action {
+	case gcActionClean:
+		return gcActionCleanArtifacts
+	case gcActionOrphan:
+		return gcActionSkip
+	default:
+		return action
+	}
+}
+
+// shouldCleanTaskDirForKind runs the per-Kind dispatch without applying the
+// local_directory override. Split out so shouldCleanTaskDir can intercept
+// the result.
+func (d *Daemon) shouldCleanTaskDirForKind(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
 	switch meta.Kind {
 	case execenv.GCKindIssue:
 		return d.gcDecisionIssue(ctx, taskDir, meta)

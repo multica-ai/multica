@@ -51,6 +51,8 @@ apps/web/test-results/
 
 # context (agent workspace)
 .context
+.agent_context/
+.multica/
 
 # local settings
 .claude/
