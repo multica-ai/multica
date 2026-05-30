@@ -4,7 +4,7 @@ import { Switch } from "@multica/ui/components/ui/switch";
 import { Label } from "@multica/ui/components/ui/label";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { toast } from "sonner";
-import { CEREBRO_FLAGS, type CerebroFlagKey } from "./registry";
+import { CEREBRO_FLAG_GROUPS, flagsForGroup, type CerebroFlagKey } from "./registry";
 import { useFeatureFlag, useFeatureFlagsQuery, useSetFeatureFlagMutation } from "./api";
 
 function FlagRow({ flagKey, label, description }: { flagKey: CerebroFlagKey; label: string; description: string }) {
@@ -61,15 +61,29 @@ export function CerebroFeatureFlagsTab() {
         </p>
       )}
 
-      <div className="space-y-3">
-        {CEREBRO_FLAGS.map((flag) => (
-          <FlagRow
-            key={flag.key}
-            flagKey={flag.key}
-            label={flag.label}
-            description={flag.description}
-          />
-        ))}
+      <div className="space-y-6">
+        {CEREBRO_FLAG_GROUPS.map((group) => {
+          const flags = flagsForGroup(group.key);
+          if (flags.length === 0) return null;
+          return (
+            <div key={group.key} className="space-y-2">
+              <div className="space-y-0.5">
+                <h3 className="text-sm font-semibold">{group.label}</h3>
+                <p className="text-xs text-muted-foreground">{group.description}</p>
+              </div>
+              <div className="space-y-3">
+                {flags.map((flag) => (
+                  <FlagRow
+                    key={flag.key}
+                    flagKey={flag.key}
+                    label={flag.label}
+                    description={flag.description}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </section>
   );

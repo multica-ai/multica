@@ -175,13 +175,15 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
     const waiting = message.responded_at == null;
     return (
       <div className="flex justify-end">
+        {/* CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — min-w-0 lets the flex item shrink below intrinsic content width so the bubble respects max-w-[80%] when a single unbreakable token (long URL) lives inside. */}
         <div
           className={cn(
-            "flex items-end gap-1.5 max-w-[80%]",
+            "flex items-end gap-1.5 max-w-[80%] min-w-0",
             waiting && "opacity-60",
           )}
         >
-          <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm break-words">
+          {/* CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — overflow-wrap:anywhere (not break-word) so a long URL also lowers min-content and breaks inside the bubble instead of forcing horizontal scroll. */}
+          <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm wrap-anywhere">
             {/* User messages are authored as markdown in ContentEditor, so
              * render them through the same pipeline as assistant replies.
              * Neutralise prose's leading/trailing margin so single-line
@@ -246,7 +248,8 @@ function AssistantMessage({
         <TimelineView items={timeline} />
       ) : (
         // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch]">
+        // CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — wrap-anywhere so long URLs in assistant output break instead of forcing horizontal scroll
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch] wrap-anywhere">
           <Markdown>{message.content}</Markdown>
         </div>
       )}
@@ -434,7 +437,8 @@ function TimelineView({
     <>
       {preface.length > 0 && (
         // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch]">
+        // CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — wrap-anywhere so long URLs in assistant output break instead of forcing horizontal scroll
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch] wrap-anywhere">
           <Markdown>{preface.map((t) => t.content ?? "").join("")}</Markdown>
         </div>
       )}
@@ -443,7 +447,8 @@ function TimelineView({
       )}
       {final.length > 0 && (
         // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch]">
+        // CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — wrap-anywhere so long URLs in assistant output break instead of forcing horizontal scroll
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch] wrap-anywhere">
           <Markdown>{final.map((t) => t.content ?? "").join("")}</Markdown>
         </div>
       )}
@@ -495,7 +500,8 @@ function OuterProcessFold({
 function MiddleTextRow({ item }: { item: ChatTimelineItem }) {
   return (
     // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
-    <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-[70ch] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+    // CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — wrap-anywhere so long URLs inside the process-fold also break instead of forcing horizontal scroll
+    <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-[70ch] wrap-anywhere [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <Markdown>{item.content ?? ""}</Markdown>
     </div>
   );
