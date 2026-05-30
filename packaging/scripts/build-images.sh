@@ -42,6 +42,7 @@ declare -A IMAGES=(
   [web]="Dockerfile.web"
   [postgres]="packaging/docker/postgres/Dockerfile"
   [controller]="packaging/docker/controller/Dockerfile"
+  [claude-broker]="packaging/docker/claude-broker/Dockerfile"
 )
 
 build_runtime() {
