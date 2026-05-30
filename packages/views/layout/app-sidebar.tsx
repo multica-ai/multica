@@ -34,7 +34,8 @@ import {
   X,
   Zap,
   Users,
-} from "lucide-react";
+
+  FileText,} from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -115,6 +116,7 @@ type NavKey =
   | "usage"
   | "runtimes"
   | "skills"
+  | "docs"
   | "settings";
 
 // Static schema (key + icon) — labels resolved at render via useT("layout").
@@ -129,6 +131,7 @@ type NavLabelKey =
   | "usage"
   | "runtimes"
   | "skills"
+  | "docs"
   | "settings";
 
 const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
@@ -147,6 +150,7 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "runtimes", labelKey: "runtimes", icon: Monitor },
+  { key: "docs", labelKey: "docs", icon: FileText },
   { key: "skills", labelKey: "skills", icon: BookOpenText },
   { key: "settings", labelKey: "settings", icon: Settings },
 ];

@@ -50,7 +50,8 @@
     "./i18n": "./i18n/index.ts",
     "./attachments": "./attachments/index.ts",
     "./locales": "./locales/index.ts",
-    "./locales/*": "./locales/*"
+    "./locales/*": "./locales/*",
+    "./docs": "./docs/index.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

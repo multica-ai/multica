@@ -16,6 +16,7 @@ export const workspaceKeys = {
   squadMemberStatus: (wsId: string, squadId: string) =>
     ["workspaces", wsId, "squads", squadId, "members-status"] as const,
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
+  docs: (wsId: string) => ["workspaces", wsId, "docs"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
 };
 
@@ -133,4 +134,20 @@ export function assigneeFrequencyOptions(wsId: string) {
     queryKey: workspaceKeys.assigneeFrequency(wsId),
     queryFn: () => api.getAssigneeFrequency(),
   });
+}
+
+export function docListOptions(wsId: string) {
+  return {
+    queryKey: workspaceKeys.docs(wsId),
+    queryFn: () => api.listDocs(),
+    enabled: !!wsId,
+  };
+}
+
+export function docDetailOptions(wsId: string, docId: string) {
+  return {
+    queryKey: [...workspaceKeys.docs(wsId), docId] as const,
+    queryFn: () => api.getDoc(docId),
+    enabled: !!docId,
+  };
 }

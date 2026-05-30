@@ -111,6 +111,9 @@ import type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  Doc,
+  CreateDocRequest,
+  UpdateDocRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -1505,7 +1508,34 @@ export class ApiClient {
     });
   }
 
-  // Personal Access Tokens
+  // Docs
+  async listDocs(): Promise<Doc[]> {
+    return this.fetch("/api/docs");
+  }
+
+  async getDoc(id: string): Promise<Doc> {
+    return this.fetch(`/api/docs/${id}`);
+  }
+
+  async createDoc(data: CreateDocRequest): Promise<Doc> {
+    return this.fetch("/api/docs", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateDoc(id: string, data: UpdateDocRequest): Promise<Doc> {
+    return this.fetch(`/api/docs/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async archiveDoc(id: string): Promise<Doc> {
+    return this.fetch(`/api/docs/${id}`, { method: "DELETE" });
+  }
+
+    // Personal Access Tokens
   async listPersonalAccessTokens(): Promise<PersonalAccessToken[]> {
     return this.fetch("/api/tokens");
   }
