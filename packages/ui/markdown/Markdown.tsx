@@ -192,10 +192,11 @@ function createComponents(
           const id = mentionMatch[2]
 
           if (renderMention) {
-            const label = React.Children.toArray(children)
+            const rawLabel = React.Children.toArray(children)
               .map((child) => (typeof child === 'string' || typeof child === 'number' ? String(child) : ''))
               .join('')
-              .trim() || undefined
+              .trim()
+            const label = (rawLabel.startsWith('@') ? rawLabel.slice(1) : rawLabel) || undefined
             // Let the custom renderer opt out for types it doesn't handle
             // by returning null/undefined — we then fall through to the
             // default styled span so nothing ever disappears silently.
