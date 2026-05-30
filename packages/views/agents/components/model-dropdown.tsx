@@ -18,9 +18,10 @@ import { useT } from "../../i18n";
 // It fetches the supported-model catalog from the selected runtime — the
 // daemon enumerates models on demand via heartbeat piggyback. Providers
 // that don't honour per-agent model selection at runtime (currently
-// hermes) return supported=false, and the dropdown renders disabled
-// with an explanation instead of silently accepting a value the
-// backend would ignore.
+// antigravity — `agy` has no `--model` flag and reads selection from
+// its own settings) return supported=false, and the dropdown renders
+// disabled with an explanation instead of silently accepting a value
+// the backend would ignore.
 export function ModelDropdown({
   runtimeId,
   runtimeOnline,

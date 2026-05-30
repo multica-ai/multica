@@ -1,7 +1,7 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, Codex, Copilot, OpenCode, OpenClaw, Hermes,
-// Gemini, Pi, Cursor, Kimi, Kiro). It mirrors the happy-cli AgentBackend
-// pattern, translated to idiomatic Go.
+// Gemini, Pi, Cursor, Kimi, Kiro, Antigravity). It mirrors the happy-cli
+// AgentBackend pattern, translated to idiomatic Go.
 package agent
 
 // CEREBRO-PATCH(agent-cerebro): cerebro modification of upstream file
@@ -111,7 +111,7 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli)
+	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, agy)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 	// Sandbox, when non-nil and Enabled, wraps the spawned process with
@@ -121,7 +121,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "firtal-gateway".
+// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "antigravity", "firtal-gateway".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -150,11 +150,13 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &kimiBackend{cfg: cfg}, nil
 	case "kiro":
 		return &kiroBackend{cfg: cfg}, nil
+	case "antigravity":
+		return &antigravityBackend{cfg: cfg}, nil
 	// CEREBRO-PATCH(agent-firtal-gateway-runtime): register the managed Data Registry AI Gateway backend.
 	case firtalGatewayProvider:
 		return &firtalGatewayBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, firtal-gateway)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity, firtal-gateway)", agentType)
 	}
 }
 
@@ -173,6 +175,7 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
+	"antigravity":         "agy -p (print mode)",
 	"claude":              "claude (stream-json)",
 	"codex":               "codex app-server",
 	"copilot":             "copilot (json)",
@@ -180,11 +183,11 @@ var launchHeaders = map[string]string{
 	firtalGatewayProvider: "Firtal Data Registry AI Gateway (HTTP)",
 	"gemini":              "gemini (stream-json)",
 	"hermes":              "hermes acp",
+	"kimi":                "kimi acp",
+	"kiro":                "kiro-cli acp",
 	"openclaw":            "openclaw agent (json)",
 	"opencode":            "opencode run (json)",
 	"pi":                  "pi (json mode)",
-	"kimi":                "kimi acp",
-	"kiro":                "kiro-cli acp",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

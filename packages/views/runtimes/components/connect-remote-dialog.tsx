@@ -16,6 +16,8 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
+import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
@@ -142,7 +144,12 @@ function CommandStep({
           className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground"
           aria-hidden
         />
-        <code className="min-w-0 flex-1 break-all whitespace-pre-wrap tabular-nums">
+        <code
+          className={cn(
+            "min-w-0 flex-1 break-all whitespace-pre-wrap tabular-nums",
+            CODE_LIGATURE_CLASS,
+          )}
+        >
           {cmd}
         </code>
         <CopyButton text={cmd} ariaLabel={copyAria} />
@@ -235,7 +242,12 @@ function TroubleshootingDetails() {
             <span>{t(($) => $.connect.trouble_check_status)}</span>
             {/* CLI command — literal shell string, not i18n content. */}
             {/* eslint-disable-next-line i18next/no-literal-string */}
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
+            <code
+              className={cn(
+                "rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground",
+                CODE_LIGATURE_CLASS,
+              )}
+            >
               {"multica daemon status"}
             </code>
           </li>
@@ -243,7 +255,12 @@ function TroubleshootingDetails() {
             <span>{t(($) => $.connect.trouble_view_logs)}</span>
             {/* CLI command — literal shell string, not i18n content. */}
             {/* eslint-disable-next-line i18next/no-literal-string */}
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground">
+            <code
+              className={cn(
+                "rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground",
+                CODE_LIGATURE_CLASS,
+              )}
+            >
               {"multica daemon logs -f"}
             </code>
           </li>

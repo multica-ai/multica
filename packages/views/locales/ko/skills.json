@@ -1,0 +1,248 @@
+{
+  "page": {
+    "title": "스킬",
+    "tagline": "이 워크스페이스의 모든 에이전트가 사용할 수 있는 지침입니다.",
+    "learn_more": "자세히 보기 →",
+    "new_skill": "새 스킬",
+    "search_placeholder": "스킬 검색...",
+    "scopes": {
+      "all": { "label": "전체", "description": "이 워크스페이스의 모든 스킬" },
+      "used": { "label": "사용 중", "description": "하나 이상의 에이전트에 할당된 스킬" },
+      "unused": { "label": "미사용", "description": "어떤 에이전트에도 할당되지 않은 스킬" },
+      "mine": { "label": "내가 만든 스킬", "description": "내가 생성한 스킬" }
+    },
+    "empty": {
+      "title": "아직 스킬이 없습니다",
+      "description": "첫 스킬을 만들거나, URL에서 가져오거나, 연결된 런타임에서 복사하세요. 워크스페이스의 모든 에이전트가 사용할 수 있습니다."
+    },
+    "no_matches": {
+      "title": "일치하는 결과 없음",
+      "with_query": "\"{{query}}\"와 일치하는 스킬이 없습니다{{filterSuffix}}.",
+      "with_query_filter_suffix": " (이 필터 기준)",
+      "filter_only": "이 필터와 일치하는 스킬이 없습니다.",
+      "try_different": " 다른 검색어를 시도해 보세요."
+    },
+    "intro_banner": {
+      "title": "워크스페이스와 공유됩니다.",
+      "body": "누구나 스킬을 만들거나 URL에서 가져오거나 로컬 런타임에서 복사할 수 있으며, 모든 에이전트가 사용할 수 있습니다.",
+      "highlight": "로컬 런타임 스킬은 여기로 복사하기 전까지 비공개로 유지됩니다."
+    },
+    "list_error": {
+      "title": "스킬을 불러오지 못했습니다",
+      "fallback": "스킬 목록을 가져오는 중 문제가 발생했습니다.",
+      "retry": "다시 시도"
+    },
+    "supporting_data_warning": "일부 워크스페이스 데이터를 불러오지 못했습니다. 생성자 표시, 런타임 이름, 수정 권한이 불완전하게 보일 수 있습니다."
+  },
+  "table": {
+    "name": "이름",
+    "used_by": "사용 중",
+    "source": "출처 · 추가한 사람",
+    "updated": "수정일",
+    "no_description": "설명 없음",
+    "lock_tooltip": "읽기 전용 — 생성자 또는 관리자만 수정할 수 있습니다",
+    "unused": "— 미사용",
+    "by_creator": "{{name}}님",
+    "source_manual": "직접 생성",
+    "source_runtime_named": "{{name}}에서 가져옴",
+    "source_runtime_provider": "{{provider}} 런타임에서 가져옴",
+    "source_runtime_unknown": "런타임에서 가져옴",
+    "source_clawhub": "ClawHub에서 가져옴",
+    "source_skills_sh": "Skills.sh에서 가져옴",
+    "source_github": "GitHub에서 가져옴"
+  },
+  "detail": {
+    "all_skills": "모든 스킬",
+    "read_only": "읽기 전용",
+    "delete_aria": "스킬 삭제",
+    "delete_tooltip": "스킬 삭제",
+    "supporting_data_warning": "일부 워크스페이스 데이터를 불러오지 못했습니다. 다음 새로고침 전까지 생성자 표시, 런타임 이름, 수정 권한이 불완전하게 보일 수 있습니다.",
+    "files_label": "파일 · {{count}}",
+    "add_file_aria": "파일 추가",
+    "add_file_tooltip": "파일 추가",
+    "delete_file": "파일 삭제",
+    "name_aria": "스킬 이름",
+    "name_placeholder": "skill-name",
+    "description_label": "설명",
+    "description_placeholder": "에이전트가 이 스킬을 언제 써야 하는지 한 문장으로 설명하세요...",
+    "subline": {
+      "origin_runtime_named": "로컬 런타임 · {{name}}",
+      "origin_runtime_provider": "로컬 런타임 · {{provider}}",
+      "origin_runtime_unknown": "로컬 런타임",
+      "origin_clawhub": "가져옴 · ClawHub",
+      "origin_skills_sh": "가져옴 · Skills.sh",
+      "origin_github": "가져옴 · GitHub",
+      "origin_workspace": "워크스페이스",
+      "updated_label": "{{when}} 수정됨",
+      "by_creator": "{{name}}님"
+    },
+    "conflict_banner": {
+      "title": "다른 사람이 이 스킬을 업데이트했습니다",
+      "body": "내 수정 내용은 보존되어 있습니다. 버리기를 누르면 상대 변경사항을 가져오고, 저장을 누르면 덮어씁니다."
+    },
+    "save_bar": {
+      "unsaved": "저장하지 않은 변경사항 — 저장하면 현재 스킬을 덮어씁니다",
+      "discard": "버리기",
+      "save": "변경사항 저장",
+      "saving": "저장하는 중..."
+    },
+    "sidebar": {
+      "metadata": "메타데이터",
+      "created": "생성일",
+      "updated": "수정일",
+      "created_by": "생성자",
+      "files": "파일",
+      "id": "ID",
+      "origin": "출처",
+      "used_by_one": "에이전트 {{count}}개가 사용 중",
+      "used_by_other": "에이전트 {{count}}개가 사용 중",
+      "permissions": "권한",
+      "permissions_owner": "이 스킬을 수정하고 삭제할 수 있습니다. 변경사항은 다음 에이전트 실행부터 적용됩니다.",
+      "permissions_locked_creator": "생성자({{name}}) 또는 워크스페이스 관리자만 이 스킬을 수정할 수 있습니다.",
+      "permissions_locked": "생성자 또는 워크스페이스 관리자만 이 스킬을 수정할 수 있습니다.",
+      "used_by_empty": "아직 어떤 에이전트에도 할당되지 않았습니다. 에이전트의 스킬 탭에서 할당하세요."
+    },
+    "origin_card": {
+      "imported_runtime": "로컬 런타임에서 가져옴",
+      "imported_clawhub": "ClawHub에서 가져옴",
+      "imported_skills_sh": "Skills.sh에서 가져옴",
+      "imported_github": "GitHub에서 가져옴",
+      "provider": "제공자 · {{provider}}"
+    },
+    "not_found": {
+      "title": "스킬을 찾을 수 없습니다",
+      "fallback": "이 스킬이 삭제되었거나 접근 권한을 잃었을 수 있습니다.",
+      "back": "스킬로 돌아가기"
+    },
+    "toast_saved": "스킬을 저장했습니다",
+    "toast_save_failed": "스킬을 저장하지 못했습니다",
+    "toast_deleted": "스킬을 삭제했습니다",
+    "toast_delete_failed": "스킬을 삭제하지 못했습니다",
+    "delete_dialog": {
+      "title": "스킬을 삭제할까요?",
+      "description_with_agents_one": "\"{{name}}\"을(를) 영구 삭제하고 현재 사용 중인 에이전트 {{count}}개에서 제거합니다.",
+      "description_with_agents_other": "\"{{name}}\"을(를) 영구 삭제하고 현재 사용 중인 에이전트 {{count}}개에서 제거합니다.",
+      "description_no_agents": "\"{{name}}\"을(를) 영구 삭제하고 모든 에이전트에서 제거합니다.",
+      "warning": "이 작업은 되돌릴 수 없습니다.",
+      "cancel": "취소",
+      "confirm": "영구 삭제",
+      "deleting": "삭제하는 중..."
+    },
+    "add_file": {
+      "placeholder": "templates/review.md",
+      "add": "추가",
+      "cancel": "취소",
+      "errors": {
+        "empty": "경로는 비워둘 수 없습니다.",
+        "absolute": "절대 경로는 사용할 수 없습니다.",
+        "double_dot": "경로에 \"..\"을(를) 포함할 수 없습니다.",
+        "reserved": "SKILL.md는 메인 파일용으로 예약되어 있습니다.",
+        "exists": "이 경로에 이미 파일이 있습니다."
+      }
+    }
+  },
+  "create": {
+    "back": "뒤로",
+    "back_aria": "방식 선택으로 돌아가기",
+    "close": "닫기",
+    "close_aria": "닫기",
+    "method": {
+      "chooser": {
+        "title": "새 스킬",
+        "desc": "이 워크스페이스에 스킬을 추가할 방식을 선택하세요."
+      },
+      "manual": {
+        "title": "직접 만들기",
+        "desc": "새 SKILL.md를 처음부터 작성합니다."
+      },
+      "url": {
+        "title": "URL에서 가져오기",
+        "desc": "공개된 스킬을 URL로 가져옵니다. 파일은 서버에서 가져옵니다."
+      },
+      "runtime": {
+        "title": "런타임에서 복사",
+        "desc": "로컬 런타임을 스캔해 디스크에 있는 스킬을 이 워크스페이스로 승격합니다."
+      }
+    },
+    "method_card": {
+      "manual_title": "직접 만들기",
+      "manual_desc": "빈 SKILL.md에서 시작해 직접 지침을 작성합니다.",
+      "url_title": "URL에서 가져오기",
+      "url_desc": "ClawHub 또는 Skills.sh의 공개 스킬을 가져옵니다.",
+      "runtime_title": "런타임에서 복사",
+      "runtime_desc": "로컬 런타임에 이미 설치된 스킬을 워크스페이스로 가져옵니다."
+    },
+    "manual": {
+      "name_label": "이름",
+      "name_placeholder": "예: review-helper",
+      "name_hint": "워크스페이스 안에서 고유해야 합니다.",
+      "description_label": "설명",
+      "description_placeholder": "이 스킬을 에이전트에 언제 할당해야 하는지 한 문장으로 적어 주세요.",
+      "name_conflict_hint": " 다른 이름으로 다시 제출하세요.",
+      "fallback_error": "스킬을 만들지 못했습니다",
+      "cancel": "취소",
+      "submit": "스킬 만들기",
+      "submitting": "만드는 중...",
+      "toast_created": "스킬을 만들었습니다"
+    },
+    "url": {
+      "url_label": "스킬 URL",
+      "supported_sources": "지원 출처",
+      "import": "가져오기",
+      "importing": "가져오는 중...",
+      "importing_clawhub": "ClawHub에서 가져오는 중...",
+      "importing_skills_sh": "Skills.sh에서 가져오는 중...",
+      "importing_github": "GitHub에서 가져오는 중...",
+      "name_conflict_hint": " 가져온 스킬 이름이 이미 있습니다. 다시 시도하기 전에 기존 스킬을 삭제하세요.",
+      "fallback_error": "가져오기 실패",
+      "cancel": "취소",
+      "toast_imported": "스킬을 가져왔습니다"
+    }
+  },
+  "runtime_import": {
+    "runtime_label": "런타임",
+    "runtime_placeholder": "로컬 런타임 선택",
+    "no_local_runtimes_title": "사용 가능한 로컬 런타임이 없습니다",
+    "no_local_runtimes_hint": "로컬 스킬을 탐색하고 가져오려면 로컬 런타임을 연결하세요.",
+    "choose_runtime": "계속하려면 런타임을 선택하세요",
+    "must_be_online": "로컬 스킬을 탐색하려면 런타임이 온라인이어야 합니다.",
+    "load_failed": "런타임의 로컬 스킬을 불러오지 못했습니다",
+    "not_supported": "이 런타임 제공자는 아직 로컬 스킬 목록 조회를 지원하지 않습니다.",
+    "no_skills_title": "로컬 스킬을 찾을 수 없습니다",
+    "no_skills_hint": "이 런타임에는 아직 검색 가능한 로컬 스킬이 없습니다.",
+    "ignored_files_hint": "심볼릭 링크, 읽을 수 없는 파일, 너무 큰 파일과 번들은 가져오기에서 제외됩니다.",
+    "ready": "가져올 준비 완료",
+    "into_workspace": "이 워크스페이스로 가져옵니다.",
+    "select_skill": "계속하려면 스킬을 선택하세요.",
+    "import_button": "워크스페이스로 가져오기",
+    "importing": "가져오는 중...",
+    "skill_files_one": "파일 {{count}}개",
+    "skill_files_other": "파일 {{count}}개",
+    "skill_name_label": "워크스페이스 스킬 이름",
+    "skill_description_label": "설명",
+    "skill_description_placeholder": "선택 사항 — 에이전트가 이 스킬을 언제 써야 하는지 설명하세요.",
+    "toast_imported": "스킬을 가져왔습니다",
+    "toast_import_failed": "스킬을 가져오지 못했습니다",
+    "select_all": "전체 선택({{count}})",
+    "bulk_ready": "스킬 {{count}}개 선택됨",
+    "bulk_import_button": "스킬 {{count}}개 가져오기",
+    "bulk_progress": "가져오는 중 {{completed}} / {{total}}...",
+    "bulk_cancel_button": "취소",
+    "bulk_complete_hint": "가져오기가 완료되었습니다.",
+    "bulk_cancelled_hint": "가져오기가 취소되었습니다.",
+    "bulk_done_button": "완료",
+    "bulk_summary_imported": "가져옴",
+    "bulk_summary_skipped": "건너뜀",
+    "bulk_summary_failed": "실패"
+  },
+  "file_tree": {
+    "no_files": "파일 없음"
+  },
+  "file_viewer": {
+    "edit_tooltip": "수정",
+    "preview_tooltip": "미리보기",
+    "no_content": "*아직 내용이 없습니다*",
+    "markdown_placeholder": "Markdown 내용 작성...",
+    "raw_placeholder": "파일 내용..."
+  }
+}

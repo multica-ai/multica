@@ -3,10 +3,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { LandingHeader } from "@/features/landing/components/landing-header";
 import { LandingFooter } from "@/features/landing/components/landing-footer";
-import {
-  getUseCaseLangForLocale,
-  useCasesSource,
-} from "@/lib/use-cases-source";
+import { getUseCasePagesForLocale } from "@/lib/use-cases-source";
 import { getUseCaseLocale, useCaseText } from "@/lib/use-cases-i18n";
 
 type ExtraFrontmatter = {
@@ -35,8 +32,7 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function UseCasesIndexPage() {
   const locale = await getUseCaseLocale();
   const text = useCaseText[locale];
-  const pages = useCasesSource
-    .getPages(getUseCaseLangForLocale(locale))
+  const pages = getUseCasePagesForLocale(locale)
     .slice()
     .sort((a, b) => {
       // Sort descending by updated_at. Missing dates fall to the bottom by

@@ -26,11 +26,12 @@ import { taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
 import { copyMarkdown } from "../../editor";
 import type { AgentAvailability } from "@multica/core/agents";
-import type { ChatMessage, ChatPendingTask, TaskMessagePayload, TaskFailureReason } from "@multica/core/types";
+import type { ChatMessage, ChatPendingTask, TaskFailureReason } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
 // CEREBRO-PATCH(chat-message-list-cerebro): import from cerebro-chat after Phase 6 relocation
 import { getToolSummary } from "@multica/cerebro-chat/views";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { buildTimeline } from "../../common/task-transcript";
 import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
@@ -89,7 +90,7 @@ export function ChatMessageList({
     ...taskMessagesOptions(pendingTaskId ?? ""),
     enabled: showLiveTimeline,
   });
-  const liveTimeline: ChatTimelineItem[] = (liveTaskMessages ?? []).map(toTimelineItem);
+  const liveTimeline: ChatTimelineItem[] = buildTimeline(liveTaskMessages ?? []);
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
   // CEREBRO-PATCH(chat-message-id-claim): pill stays visible until the row finalizes; the bubble's own timeline already covers the streaming view.
   const showStatusPill = !!pendingTaskId && !pendingAssistantFinalized && !!pendingTask;
@@ -162,17 +163,6 @@ export function ChatMessageSkeleton() {
   );
 }
 
-function toTimelineItem(m: TaskMessagePayload): ChatTimelineItem {
-  return {
-    seq: m.seq,
-    type: m.type,
-    tool: m.tool,
-    content: m.content,
-    input: m.input,
-    output: m.output,
-  };
-}
-
 // ─── Message bubbles ─────────────────────────────────────────────────────
 
 function MessageBubble({ message, isPending }: { message: ChatMessage; isPending: boolean }) {
@@ -233,7 +223,7 @@ function AssistantMessage({
     enabled: !!taskId,
   });
 
-  const timeline: ChatTimelineItem[] = (taskMessages ?? []).map(toTimelineItem);
+  const timeline: ChatTimelineItem[] = buildTimeline(taskMessages ?? []);
 
   // Failure bubble path: when the server's FailTask wrote a failure
   // chat_message (failure_reason set), render a destructive bubble with the

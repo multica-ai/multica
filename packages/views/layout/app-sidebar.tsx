@@ -100,6 +100,7 @@ import { notificationsListOptions } from "@multica/cerebro-notifications/core/qu
 import { useArchiveAllNotifications } from "@multica/cerebro-notifications/core/mutations";
 import { api, ApiError } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
+import { useConfigStore } from "@multica/core/config";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
 import { pinListOptions } from "@multica/core/pins/queries";
 // CEREBRO-PATCH(nested-projects): sidebar renders project hierarchy from fork nesting hooks.
@@ -450,6 +451,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const p = useWorkspacePaths();
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
   const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
+  const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
 
   const wsId = workspace?.id;
   const { data: inboxItems = EMPTY_INBOX } = useQuery({
@@ -661,14 +663,16 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         )}
                       </DropdownMenuItem>
                     ))}
-                    <DropdownMenuItem
-                      onClick={() =>
-                        useModalStore.getState().open("create-workspace")
-                      }
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      {t(($) => $.sidebar.create_workspace)}
-                    </DropdownMenuItem>
+                    {!workspaceCreationDisabled && (
+                      <DropdownMenuItem
+                        onClick={() =>
+                          useModalStore.getState().open("create-workspace")
+                        }
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        {t(($) => $.sidebar.create_workspace)}
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuGroup>
                   {myInvitations.length > 0 && (
                     <>

@@ -1,0 +1,41 @@
+{
+  "nav": {
+    "inbox": "인박스",
+    "my_issues": "내 이슈",
+    "issues": "이슈",
+    "projects": "프로젝트",
+    "autopilots": "오토파일럿",
+    "agents": "에이전트",
+    "squads": "스쿼드",
+    "usage": "사용량",
+    "runtimes": "런타임",
+    "skills": "스킬",
+    "settings": "설정"
+  },
+  "help": {
+    "trigger": "도움말",
+    "docs": "문서",
+    "changelog": "변경 로그",
+    "feedback": "피드백"
+  },
+  "workspace_loader": {
+    "loading_workspace": "워크스페이스 로딩 중...",
+    "loading_named_prefix": "로딩 중"
+  },
+  "sidebar": {
+    "unpin_tooltip": "고정 해제",
+    "workspaces_label": "워크스페이스",
+    "create_workspace": "워크스페이스 만들기",
+    "pending_invitations_label": "대기 중인 초대",
+    "invitation_workspace_fallback": "워크스페이스",
+    "invitation_join": "참가",
+    "invitation_decline": "거절",
+    "log_out": "로그아웃",
+    "new_issue": "새 이슈",
+    "new_issue_shortcut": "C",
+    "pinned_label": "고정됨",
+    "workspace_group": "워크스페이스",
+    "configure_group": "설정",
+    "unread_overflow": "99+"
+  }
+}

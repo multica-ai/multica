@@ -39,6 +39,15 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		return nil, fmt.Errorf("kimi executable not found at %q: %w", execPath, err)
 	}
 
+	// Translate the agent's mcp_config (Claude-style object of objects)
+	// into the array shape ACP `session/new` expects. Fail closed on
+	// malformed JSON so the launch surfaces the real error instead of
+	// silently dropping all MCP servers.
+	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("kimi: invalid mcp_config: %w", err)
+	}
+
 	timeout := opts.Timeout
 	if timeout == 0 {
 		timeout = 20 * time.Minute
@@ -174,7 +183,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		var sessionID string
 
 		// 1. Initialize handshake.
-		_, err := c.request(runCtx, "initialize", map[string]any{
+		initResult, err := c.request(runCtx, "initialize", map[string]any{
 			"protocolVersion": 1,
 			"clientInfo": map[string]any{
 				"name":    "multica-agent-sdk",
@@ -189,6 +198,12 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			return
 		}
 
+		// Drop MCP entries whose remote transport the runtime didn't
+		// advertise. See the matching comment in hermes.go for the why —
+		// shipping an http/sse entry to a stdio-only runtime tanks the
+		// whole session/new.
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "kimi", b.cfg.Logger)
+
 		// 2. Create or resume a session.
 		cwd := opts.Cwd
 		if cwd == "" {
@@ -196,9 +211,14 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		if opts.ResumeSessionID != "" {
+			// Per ACP Session Setup, session/resume accepts mcpServers and
+			// the runtime re-connects them as part of the resume. Without
+			// this, a resumed Kimi task lost access to MCP tools that a
+			// fresh task on the same agent would have.
 			result, err := c.request(runCtx, "session/resume", map[string]any{
-				"cwd":       cwd,
-				"sessionId": opts.ResumeSessionID,
+				"cwd":        cwd,
+				"sessionId":  opts.ResumeSessionID,
+				"mcpServers": mcpServers,
 			})
 			if err != nil {
 				finalStatus = "failed"
@@ -218,7 +238,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,
-				"mcpServers": []any{},
+				"mcpServers": mcpServers,
 			})
 			if err != nil {
 				finalStatus = "failed"

@@ -62,6 +62,8 @@ type Task struct {
 	TriggerCommentContent string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	TriggerAuthorType     string                `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind for the triggering comment
 	TriggerAuthorName     string                `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
+	NewCommentCount       int                   `json:"new_comment_count,omitempty"`       // issue-wide comments since this agent's last run (excludes its own and the injected trigger); 0/omitted for old daemons or cold start
+	NewCommentsSince      string                `json:"new_comments_since,omitempty"`      // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	// CEREBRO-PATCH(daemon-task-issue-snapshot): FIR-2384 — pre-rendered issue + recent thread, set only when the workspace's snapshot_prompt cost saving is "on"; inlined into the start prompt so the agent skips the issue get + comment list reads.
 	IssueSnapshot string `json:"issue_snapshot,omitempty"`
 	// CEREBRO-PATCH(daemon-task-bundle-context-hint): FIR-2384 — set when the workspace's bundled_read cost saving is "on"; the start prompt then points the agent at a single `multica issue context` call instead of separate issue get + comment list reads.

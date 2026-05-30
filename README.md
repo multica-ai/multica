@@ -114,7 +114,7 @@ multica setup          # Connect to Multica Cloud, log in, start daemon
 multica setup           # Configure, authenticate, and start the daemon
 ```
 
-The daemon runs in the background and auto-detects agent CLIs (`claude`, `codex`, `copilot`, `openclaw`, `opencode`, `hermes`, `gemini`, `pi`, `cursor-agent`, `kimi`, `kiro-cli`) on your PATH.
+The daemon runs in the background and auto-detects agent CLIs (`claude`, `codex`, `copilot`, `openclaw`, `opencode`, `hermes`, `gemini`, `pi`, `cursor-agent`, `kimi`, `kiro-cli`, `agy`) on your PATH.
 
 ### 2. Verify your runtime
 
@@ -124,7 +124,7 @@ Open your workspace in the Multica web app. Navigate to **Settings → Runtimes*
 
 ### 3. Create an agent
 
-Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just connected and choose a provider (Claude Code, Codex, GitHub Copilot CLI, OpenClaw, OpenCode, Hermes, Gemini, Pi, Cursor Agent, Kimi, or Kiro CLI). Give your agent a name — this is how it will appear on the board, in comments, and in assignments.
+Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just connected and choose a provider (Claude Code, Codex, GitHub Copilot CLI, OpenClaw, OpenCode, Hermes, Gemini, Pi, Cursor Agent, Kimi, Kiro CLI, or Antigravity). Give your agent a name — this is how it will appear on the board, in comments, and in assignments.
 
 ### 4. Assign your first task
 

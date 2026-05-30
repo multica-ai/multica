@@ -4,11 +4,14 @@
 images:
   backend:
     repository: ghcr.io/multica-ai/multica-backend
-    tag: latest
+    # Empty defaults to Chart.appVersion. Released OCI charts set appVersion to
+    # the Git tag (for example v0.3.5), so installs use matching app images.
+    tag: ""
     pullPolicy: IfNotPresent
   frontend:
     repository: ghcr.io/multica-ai/multica-web
-    tag: latest
+    # Empty defaults to Chart.appVersion. Set explicitly to override.
+    tag: ""
     pullPolicy: IfNotPresent
   postgres:
     repository: pgvector/pgvector
@@ -69,6 +72,10 @@ backend:
     allowSignup: true
     allowedEmails: ""
     allowedEmailDomains: ""
+    # Self-host gate (#3433): set true to make POST /api/workspaces 403 for
+    # every caller. Bootstrap the workspace with this false, then flip to
+    # true so users can only join via invitation.
+    disableWorkspaceCreation: false
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
     s3Bucket: ""

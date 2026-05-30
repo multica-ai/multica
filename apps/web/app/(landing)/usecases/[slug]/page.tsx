@@ -6,10 +6,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { LandingHeader } from "@/features/landing/components/landing-header";
 import { LandingFooter } from "@/features/landing/components/landing-footer";
 import { Screenshot } from "@/features/landing/components/mdx/screenshot";
-import {
-  getUseCaseLangForLocale,
-  useCasesSource,
-} from "@/lib/use-cases-source";
+import { getUseCasePageForLocale } from "@/lib/use-cases-source";
 import {
   docsHrefForLocale,
   getUseCaseLocale,
@@ -26,7 +23,7 @@ export async function generateMetadata(props: {
 }): Promise<Metadata> {
   const { slug } = await props.params;
   const locale = await getUseCaseLocale();
-  const page = useCasesSource.getPage([slug], getUseCaseLangForLocale(locale));
+  const page = getUseCasePageForLocale([slug], locale);
   if (!page) return {};
 
   return {
@@ -211,7 +208,7 @@ export default async function UseCasePage(props: { params: Promise<Params> }) {
   const { slug } = await props.params;
   const locale = await getUseCaseLocale();
   const text = useCaseText[locale];
-  const page = useCasesSource.getPage([slug], getUseCaseLangForLocale(locale));
+  const page = getUseCasePageForLocale([slug], locale);
   if (!page) notFound();
 
   const MDX = page.data.body;

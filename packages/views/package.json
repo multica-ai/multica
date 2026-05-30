@@ -44,6 +44,7 @@
     "./inbox/components/inbox-detail-label": "./inbox/components/inbox-detail-label.tsx",
     "./layout/page-header": "./layout/page-header.tsx",
     "./runtimes": "./runtimes/index.ts",
+    "./billing": "./billing/index.ts",
     "./dashboard": "./dashboard/index.ts",
     "./squads": "./squads/index.ts",
     "./squads/components": "./squads/components/index.ts",
