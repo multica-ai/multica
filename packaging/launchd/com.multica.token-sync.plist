@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.multica.token-sync</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/multica-token-sync</string>
+    <string>--once</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>1800</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__USER_HOME__/Library/Logs/multica-token-sync.log</string>
+  <key>StandardErrorPath</key>
+  <string>__USER_HOME__/Library/Logs/multica-token-sync.log</string>
+</dict>
+</plist>
