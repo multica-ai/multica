@@ -103,6 +103,53 @@ func TestDaemonAuth_MissingAuth(t *testing.T) {
 	}
 }
 
+// TestDaemonAuth_StripsClientSuppliedActorSource mirrors the
+// TestAuth_StripsClientSuppliedActorSource invariant for the daemon
+// auth path: a client supplying X-Actor-Source must NOT leak that
+// header through to the handler. Required for parity between the
+// two middlewares — the regular Auth path strips at the top, and we
+// added the same strip in DaemonAuth so account-level guards (e.g.
+// handler.RequireHumanActor) can trust the header regardless of
+// which auth chain a request arrived on.
+//
+// We exercise an mdt_ token with an attempted forged X-Actor-Source.
+// On the mdt_ path no actor-source stamp is added (daemon tokens
+// aren't a "machine credential" in the billing sense — they're a
+// runtime-bound proof for the daemon API itself), so a clean strip
+// leaves the header empty downstream.
+func TestDaemonAuth_StripsClientSuppliedActorSource(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	cache := auth.NewDaemonTokenCache(rdb)
+
+	const rawToken = "mdt_strip_test"
+	hash := auth.HashToken(rawToken)
+	cache.Set(context.Background(), hash, auth.DaemonTokenIdentity{
+		WorkspaceID: "ws-1",
+		DaemonID:    "daemon-1",
+	}, auth.AuthCacheTTL)
+
+	var gotActorSource string
+	mw := DaemonAuth(nil, nil, cache, nil)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotActorSource = r.Header.Get("X-Actor-Source")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("POST", "/api/daemon/heartbeat", nil)
+	req.Header.Set("Authorization", "Bearer "+rawToken)
+	// Forged value the client tries to smuggle in.
+	req.Header.Set("X-Actor-Source", "cloud_pat")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if gotActorSource != "" {
+		t.Fatalf("X-Actor-Source must be cleared on the mdt_ path, got %q", gotActorSource)
+	}
+}
+
 func TestDaemonAuth_InvalidMDT_NilQueries(t *testing.T) {
 	mw := DaemonAuth(nil, nil, nil, nil) // no caches, no DB
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -153,11 +200,12 @@ func TestDaemonAuth_MCN_ValidTokenSetsUserID(t *testing.T) {
 
 	verifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{FleetBaseURL: srv.URL})
 
-	var gotUser, gotPath string
+	var gotUser, gotPath, gotActorSource string
 	mw := DaemonAuth(nil, nil, nil, verifier)
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUser = r.Header.Get("X-User-ID")
 		gotPath = DaemonAuthPathFromContext(r.Context())
+		gotActorSource = r.Header.Get("X-Actor-Source")
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -174,6 +222,14 @@ func TestDaemonAuth_MCN_ValidTokenSetsUserID(t *testing.T) {
 	}
 	if gotPath != DaemonAuthPathCloudPAT {
 		t.Errorf("expected auth path %q, got %q", DaemonAuthPathCloudPAT, gotPath)
+	}
+	// Mirror the regular Auth middleware's stamp. Daemon routes don't
+	// currently sit behind RequireHumanActor, but we want the two
+	// auth paths to behave identically on this header so an endpoint
+	// that ever moves between them, or shares both, can't be tricked
+	// into thinking an mcn_ caller is human.
+	if gotActorSource != "cloud_pat" {
+		t.Errorf("expected X-Actor-Source=cloud_pat, got %q", gotActorSource)
 	}
 }
 

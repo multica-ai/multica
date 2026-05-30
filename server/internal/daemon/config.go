@@ -244,6 +244,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", ""); ok {
 		agents["antigravity"] = e
 	}
+	// CEREBRO-PATCH(daemon-config-firtal-gateway): FIR-2453 — register the managed Firtal Data Registry gateway runtime when MULTICA_RUNTIME_TYPE=firtal-registry + gateway URL/key are set.
 	if entry, ok, err := firtalGatewayAgentEntry(); err != nil {
 		return Config{}, err
 	} else if ok {

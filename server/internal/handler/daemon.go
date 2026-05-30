@@ -1471,11 +1471,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task, runtimeWorkspaceID)
 
-	// Surface the runtime's per-runtime sandbox override (JEH-418) so the
-	// daemon can honour it on the next buildSandboxConfig without needing a
-	// restart. nil here is meaningful: it tells the daemon to fall back to
-	// its env-var default. We keep going even if the lookup fails — losing
-	// the override defaults to safe-by-default sandboxing.
+	// CEREBRO-PATCH(runtime-sandbox-override-claim): JEH-418 — surface the runtime's
+	// per-runtime sandbox override so the daemon can honour it on the next
+	// buildSandboxConfig without needing a restart. nil here is meaningful: it
+	// tells the daemon to fall back to its env-var default. We keep going even
+	// if the lookup fails — losing the override defaults to safe-by-default sandboxing.
 	if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
 		resp.SandboxEnabled = boolToPtr(rt.SandboxEnabled)
 		if len(rt.SandboxPolicy) > 0 {

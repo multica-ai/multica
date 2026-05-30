@@ -49,11 +49,15 @@ func commentIssueGetStep(issueID string, snapshotInlined, bundleHint bool) strin
 // commentThreadStep returns step 3 (and, when no saving is active, its paging
 // sub-bullets) of the comment-triggered workflow.
 //
-// priorSessionResumed=true switches to the MUL-2785 resumed-comments shape:
-// the triggering comment body is already in the per-turn prompt, so the brief
-// must NOT force a duplicate thread read or claim the since-delta is
-// thread-scoped (that wording is reserved for the cold path).
-func commentThreadStep(issueID, triggerCommentID string, snapshotInlined, bundleHint, priorSessionResumed bool) string {
+// CEREBRO-PATCH(runtime-config-comment-hints): integrate upstream's
+// BuildNewCommentsHint / BuildResumedCommentsHint / BuildColdCommentsHint
+// (MUL-2785/2809/2805) so the brief surface matches the per-turn prompt while
+// the FIR-2384 bundling rules still win when a snapshot or bundle saving is
+// active. Without this integration, the upstream tests
+// TestCommentTriggeredBriefCarriesNewCommentsHint and
+// TestCommentTriggeredBriefResumedNoDeltaSkipsDefaultThreadRead fail because
+// the brief uses the old generic step 3 instead of the situational hint.
+func commentThreadStep(issueID, triggerCommentID string, newCommentCount int, newCommentsSince string, priorSessionResumed, snapshotInlined, bundleHint bool) string {
 	switch {
 	case snapshotInlined:
 		return fmt.Sprintf("3. The triggering thread is in the inlined context above. Only if you need replies older than what is shown, run `multica issue comment list %s --thread %s --tail 30 --output json` and page older replies with the stderr `Next reply cursor: --before <ts> --before-id <reply-id>` line.\n", issueID, triggerCommentID)
@@ -62,6 +66,23 @@ func commentThreadStep(issueID, triggerCommentID string, snapshotInlined, bundle
 	case priorSessionResumed:
 		return fmt.Sprintf("3. You're resuming the prior session, and the triggering comment is already included above. No other new comments on this issue since your last run. Do not re-read comment history by default. Only if the resumed session is missing thread context, pull the triggering conversation: `multica issue comment list %s --thread %s --tail 30 --output json`.\n", issueID, triggerCommentID)
 	}
+	// Pick the comment-reading pointer that matches the run's state. Mirrors
+	// the per-turn prompt path in daemon.buildCommentPrompt so the two
+	// surfaces cannot drift (PR #2816 single-source rule).
+	if hint := BuildNewCommentsHint(issueID, triggerCommentID, newCommentsSince, newCommentCount); hint != "" {
+		return "3. " + hint
+	}
+	if priorSessionResumed {
+		if hint := BuildResumedCommentsHint(issueID, triggerCommentID); hint != "" {
+			return "3. " + hint
+		}
+	}
+	if cold := BuildColdCommentsHint(issueID, triggerCommentID); cold != "" {
+		return "3. " + cold
+	}
+	// Final defensive fallback when there is no triggering comment id (should
+	// not happen on the comment-triggered path, but keep the prior wording so
+	// the brief still emits a usable step 3).
 	var b strings.Builder
 	fmt.Fprintf(&b, "3. Read the triggering conversation first — that is what this comment is actually about. Default to the 30 most recent replies in that thread: `multica issue comment list %s --thread %s --tail 30 --output json` returns the root + the 30 newest replies (root is always included, even at `--tail 0`).\n", issueID, triggerCommentID)
 	b.WriteString("   - If 30 replies aren't enough, walk older replies in the same thread one page at a time using the stderr `Next reply cursor: --before <ts> --before-id <reply-id>` line — pass the same pair back as `--before <ts> --before-id <reply-id>` on the next call. Under `--thread --tail` the cursor walks older *replies*, not older threads.\n")

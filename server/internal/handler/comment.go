@@ -404,14 +404,18 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// Apply the summary projection last so it clips whatever content the
-		// chosen read mode produced, uniformly across every mode.
+		// chosen read mode produced, uniformly across every mode. Content is
+		// *string (CEREBRO-PATCH persona-mask-comment-list): treat nil as ""
+		// so a redacted row stays nil after the projection too.
 		if summary {
-			var orig string
+			var src string
 			if resp[i].Content != nil {
-				orig = *resp[i].Content
+				src = *resp[i].Content
 			}
-			clipped, truncated := summarizeContent(orig)
-			resp[i].Content = &clipped
+			clipped, truncated := summarizeContent(src)
+			if resp[i].Content != nil {
+				resp[i].Content = &clipped
+			}
 			resp[i].ContentTruncated = &truncated
 		}
 	}
@@ -922,6 +926,23 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+
+	// Collapse parent_id to the thread root before storing so the comment tree
+	// never exceeds depth 1 (the 2-level model the product and UI assume — see
+	// GetThreadRoot). The agent-drift guard above already compared the *raw*
+	// parent_id to the task's trigger comment, so normalization happens only
+	// here, after that check. We also repoint parentComment at the root so the
+	// downstream thread-aware steps (AutoUnresolveThreadOnReply,
+	// isReplyToMemberThread) act on the thread root, not an interior reply.
+	if parentID.Valid {
+		if root, err := qtx.GetThreadRoot(r.Context(), db.GetThreadRootParams{
+			CommentID:   parentID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			parentID = root.ID
+			parentComment = &root
+		}
+	}
 
 	comment, err := qtx.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:     issue.ID,

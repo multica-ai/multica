@@ -445,14 +445,6 @@
       "gate": "workspace_admin"
     },
     {
-      "id": "POST /api/cloud-billing/checkout-sessions",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/cloud-billing/portal-sessions",
-      "gate": "self_only"
-    },
-    {
       "id": "POST /api/channels/",
       "gate": "workspace_member"
     },
@@ -483,6 +475,14 @@
     {
       "id": "POST /api/cli-token",
       "gate": "self_only"
+    },
+    {
+      "id": "POST /api/cloud-billing/checkout-sessions",
+      "gate": "human_actor"
+    },
+    {
+      "id": "POST /api/cloud-billing/portal-sessions",
+      "gate": "human_actor"
     },
     {
       "id": "POST /api/cloud-runtime/nodes",
