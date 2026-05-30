@@ -40,9 +40,11 @@ type ScopeAuthorizer interface {
 }
 
 var allowedWSOrigins atomic.Value // holds []string
+var trustedProxies atomic.Value   // holds []string
 
 func init() {
 	allowedWSOrigins.Store(loadAllowedOrigins())
+	trustedProxies.Store(loadTrustedProxies())
 }
 
 func loadAllowedOrigins() []string {
@@ -72,9 +74,50 @@ func loadAllowedOrigins() []string {
 	return origins
 }
 
+func loadTrustedProxies() []string {
+	raw := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES"))
+	if raw == "" {
+		// Default: trust localhost and private networks in development
+		return []string{"127.0.0.1", "::1"}
+	}
+	parts := strings.Split(raw, ",")
+	proxies := make([]string, 0, len(parts))
+	for _, part := range parts {
+		proxy := strings.TrimSpace(part)
+		if proxy != "" {
+			proxies = append(proxies, proxy)
+		}
+	}
+	return proxies
+}
+
 // SetAllowedOrigins overrides the WebSocket origin whitelist.
 func SetAllowedOrigins(origins []string) {
 	allowedWSOrigins.Store(origins)
+}
+
+// SetTrustedProxies overrides the trusted proxy list.
+func SetTrustedProxies(proxies []string) {
+	trustedProxies.Store(proxies)
+}
+
+// isTrustedProxy checks if the remote address is in the trusted proxy list.
+func isTrustedProxy(remoteAddr string) bool {
+	// Extract IP from "IP:port" format
+	host := remoteAddr
+	if idx := strings.LastIndex(remoteAddr, ":"); idx != -1 {
+		host = remoteAddr[:idx]
+	}
+	// Remove IPv6 brackets if present
+	host = strings.Trim(host, "[]")
+
+	proxies := trustedProxies.Load().([]string)
+	for _, trusted := range proxies {
+		if host == trusted {
+			return true
+		}
+	}
+	return false
 }
 
 func checkOrigin(r *http.Request) bool {
@@ -92,13 +135,23 @@ func checkOrigin(r *http.Request) bool {
 	if u, err := url.Parse(origin); err == nil && strings.EqualFold(u.Host, r.Host) {
 		return true
 	}
+	// Reverse-proxy support: when sitting behind a proxy the Host header
+	// contains the internal address. X-Forwarded-Host carries the original
+	// public host seen by the client, so we treat a matching origin as
+	// same-origin in that case too. SECURITY: Only trust X-Forwarded-Host
+	// if the request comes from a trusted proxy to prevent header spoofing.
+	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" && isTrustedProxy(r.RemoteAddr) {
+		if u, err := url.Parse(origin); err == nil && strings.EqualFold(u.Host, fwdHost) {
+			return true
+		}
+	}
 	origins := allowedWSOrigins.Load().([]string)
 	for _, allowed := range origins {
 		if origin == allowed {
 			return true
 		}
 	}
-	slog.Warn("ws: rejected origin", "origin", origin)
+	slog.Warn("ws: rejected origin", "origin", origin, "remote_addr", r.RemoteAddr)
 	return false
 }
 
