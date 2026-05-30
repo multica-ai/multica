@@ -148,7 +148,6 @@ import type {
   CapabilityListResponse,
   CapabilityReportInput,
   CapabilitySubject,
-  SquadMemberStatusListResponse,
   BillingBalance,
   BillingTransactionsPage,
   BillingBatchesPage,

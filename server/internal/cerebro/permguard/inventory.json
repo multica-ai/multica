@@ -477,6 +477,14 @@
       "gate": "self_only"
     },
     {
+      "id": "POST /api/cloud-billing/checkout-sessions",
+      "gate": "human_actor"
+    },
+    {
+      "id": "POST /api/cloud-billing/portal-sessions",
+      "gate": "human_actor"
+    },
+    {
       "id": "POST /api/cloud-runtime/nodes",
       "gate": "workspace_admin"
     },
@@ -903,6 +911,10 @@
     {
       "id": "POST /api/webhooks/github",
       "exempt": "pre-auth signed webhook \u2014 GitHub HMAC signature authorises delivery before any user JWT exists"
+    },
+    {
+      "id": "POST /api/webhooks/stripe",
+      "exempt": "pre-auth signed webhook \u2014 Stripe signs the raw body with a shared secret; verification happens at the multica-cloud upstream proxy, this server only forwards bytes + Stripe-Signature header"
     },
     {
       "id": "POST /api/work-sessions/",

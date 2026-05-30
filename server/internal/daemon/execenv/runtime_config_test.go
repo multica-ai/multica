@@ -1246,9 +1246,12 @@ func TestSnapshotInlinedSuppressesRuntimeReadSteps(t *testing.T) {
 		{
 			name: "comment-triggered",
 			ctx:  TaskContextForEnv{IssueID: issueID, TriggerCommentID: triggerID},
+			// Cold start (no NewCommentsSince / no PriorSessionResumed) now
+			// renders BuildColdCommentsHint — "Read the triggering conversation
+			// first" — which the FIR-2384 snapshot must still suppress.
 			stepInstructions: []string{
 				"1. Run `multica issue get",
-				"3. Read the triggering thread first",
+				"3. Read the triggering conversation first",
 			},
 		},
 		{
@@ -1332,7 +1335,10 @@ func TestBundleContextHintSteersRuntimeReadStepsToIssueContext(t *testing.T) {
 		{
 			name: "comment-triggered",
 			ctx:  TaskContextForEnv{IssueID: issueID, TriggerCommentID: triggerID},
-			gone: []string{"1. Run `multica issue get", "3. Read the triggering thread first"},
+			// Cold start now renders BuildColdCommentsHint — "Read the triggering
+			// conversation first" — which the bundled_read saving must still
+			// replace with the single `multica issue context` call.
+			gone: []string{"1. Run `multica issue get", "3. Read the triggering conversation first"},
 		},
 		{
 			name: "assignment-triggered",
