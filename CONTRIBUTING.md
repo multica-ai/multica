@@ -2,6 +2,8 @@
 
 This guide documents the local development workflow for contributors working on the Multica codebase.
 
+For a step-by-step Chinese guide that covers worktree creation, daily development, verification, and teardown, see [docs/worktree-开发与销毁指南.md](docs/worktree-开发与销毁指南.md).
+
 It covers:
 
 - first-time setup
