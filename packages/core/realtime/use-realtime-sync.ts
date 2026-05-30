@@ -14,6 +14,7 @@ import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
+import { labelKeys } from "../labels/queries";
 import {
   agentTaskSnapshotKeys,
   agentActivityKeys,
@@ -157,12 +158,15 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
   }
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
