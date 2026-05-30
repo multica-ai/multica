@@ -2751,6 +2751,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// fails best-effort.
 	if statusChanged {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		// CEREBRO-PATCH(orchestrate-advance): FIR-2564 — advance sub-issue waves.
+		h.advanceOrchestrationOnChildDone(r.Context(), prevIssue, issue)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

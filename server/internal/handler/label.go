@@ -387,6 +387,9 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 		"issue_id": uuidToString(issue.ID),
 		"labels":   resp,
 	})
+	// CEREBRO-PATCH(orchestrate-label-trigger): FIR-2564 — attaching the
+	// `orchestrate` label auto-runs the sub-issue orchestration engine.
+	h.maybeStartOrchestrationOnLabel(r.Context(), issue, labelID)
 	writeJSON(w, http.StatusOK, map[string]any{"labels": resp})
 }
 
