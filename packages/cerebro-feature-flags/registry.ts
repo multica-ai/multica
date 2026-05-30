@@ -99,11 +99,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-2412: on by default — the assignee gets an inbox + push reminder when
   // a start/due date arrives. Off hides the settings rows and the UI control.
   cerebro_date_reminders: true,
-  // FIR-2490: OFF by default — opt-in per workspace. When on, new members are
-  // routed to a Firtal-branded welcome page (desktop install guide with hard
-  // gate, PWA install guide, members docs, bug-melding link to the Multica
-  // support workspace) instead of upstream `/onboarding`.
-  cerebro_firtal_welcome: false,
+  // FIR-2490: ON by default for the cerebro fork. New members are routed to
+  // the Firtal-branded welcome page (desktop install guide with hard gate, PWA
+  // install guide, members docs, bug-melding link to the Multica support
+  // workspace) instead of upstream `/onboarding`. Per-user override still
+  // lets anyone opt out from the cerebro settings panel.
+  cerebro_firtal_welcome: true,
   // FIR-2504: surface similar open issues + Haiku verdict in the create-issue
   // modal so users can open an existing sag or attach as a sub-issue instead
   // of duplicating. Defaults ON so the feature lands behind the standard
