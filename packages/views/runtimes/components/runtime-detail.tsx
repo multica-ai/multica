@@ -14,10 +14,6 @@ import {
   ChevronRight,
   Cpu,
   Lock,
-  Network,
-  Save,
-  Shield,
-  Terminal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
@@ -33,14 +29,14 @@ import {
 import { deriveRuntimeHealth } from "@multica/core/runtimes";
 // CEREBRO-PATCH(runtime-detail-pause): pause/resume controls live in cerebro-runtime.
 // CEREBRO-PATCH(runtime-detail-tools-card-import): runtime-level unified tools card (JEH-1710). Replaces the prior MCP servers JSON card.
-import { PauseRuntimeButton, PauseBanner, RuntimeToolsCard } from "@multica/cerebro-runtime/views";
+// CEREBRO-PATCH(runtime-detail-sandbox-card-import): FIR-2284 consolidated sandbox surface (extracted to cerebro zone).
+import { PauseRuntimeButton, PauseBanner, RuntimeToolsCard, SandboxCard } from "@multica/cerebro-runtime/views";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
-import { Switch } from "@multica/ui/components/ui/switch";
 import {
   Tooltip,
   TooltipContent,
@@ -237,6 +233,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
             <RuntimeAccountsCard runtime={runtime} />
             <DiagnosticsCard
               runtime={runtime}
+              wsId={wsId}
               cliVersion={cliVersion}
               launchedBy={launchedBy}
               canDelete={!!canDelete}
@@ -501,6 +498,7 @@ function ServingAgentsCard({
 
 function DiagnosticsCard({
   runtime,
+  wsId,
   cliVersion,
   launchedBy,
   canDelete,
@@ -510,6 +508,7 @@ function DiagnosticsCard({
   onDelete,
 }: {
   runtime: AgentRuntime;
+  wsId: string;
   cliVersion: string | null;
   launchedBy: string | null;
   canDelete: boolean;
@@ -521,83 +520,6 @@ function DiagnosticsCard({
   const { t } = useT("runtimes");
   const isLocal = runtime.runtime_mode === "local";
   const selfHealing = isSelfHealingRuntime(runtime);
-
-  // CEREBRO-PATCH(runtime-detail-sandbox-section): admin-only sandbox override
-  // toggle. Rendered for every member for transparency about the current
-  // state, but the toggle is interactive only for owner/admin (matches the
-  // server permission gate).
-  const sandboxOverride = runtime.sandbox_enabled;
-  // For the binary Switch we treat null (no override) as "on" — matches the
-  // daemon-wide darwin default. The "Reset to default" link below shows up
-  // whenever an explicit override is in place, so the inherit state is
-  // recoverable without a tri-state control.
-  const sandboxChecked = sandboxOverride === null ? true : sandboxOverride;
-  const [sandboxError, setSandboxError] = useState<string | null>(null);
-  const policy = runtime.sandbox_policy ?? {};
-  const [networkMode, setNetworkMode] = useState<"default" | "custom">(
-    policy.network_mode ?? "default",
-  );
-  const [allowedHosts, setAllowedHosts] = useState((policy.allowed_hosts ?? []).join("\n"));
-  const [extraWritablePaths, setExtraWritablePaths] = useState(
-    (policy.extra_writable_paths ?? []).join("\n"),
-  );
-  const [deniedPaths, setDeniedPaths] = useState((policy.denied_paths ?? []).join("\n"));
-  const [denyShell, setDenyShell] = useState(Boolean(policy.deny_shell));
-  const [policyError, setPolicyError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const next = runtime.sandbox_policy ?? {};
-    setNetworkMode(next.network_mode ?? "default");
-    setAllowedHosts((next.allowed_hosts ?? []).join("\n"));
-    setExtraWritablePaths((next.extra_writable_paths ?? []).join("\n"));
-    setDeniedPaths((next.denied_paths ?? []).join("\n"));
-    setDenyShell(Boolean(next.deny_shell));
-  }, [runtime.sandbox_policy]);
-
-  const handleSandboxMutate = (next: boolean | null) => {
-    setSandboxError(null);
-    sandboxMutation.mutate(
-      { runtimeId: runtime.id, sandboxEnabled: next },
-      {
-        onError: (e) => {
-          // Server returns a JSON {error: "..."} body. The api client surfaces
-          // it as Error.message — show it verbatim so the user sees the actual
-          // reason (permission, validation, server-side state) instead of a
-          // generic "Failed".
-          const msg = e instanceof Error ? e.message : "Unknown error";
-          setSandboxError(msg);
-        },
-      },
-    );
-  };
-
-  const lines = (value: string) =>
-    value
-      .split(/\r?\n|,/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-  const handlePolicySave = () => {
-    setPolicyError(null);
-    sandboxPolicyMutation.mutate(
-      {
-        runtimeId: runtime.id,
-        sandboxPolicy: {
-          network_mode: networkMode,
-          allowed_hosts: lines(allowedHosts),
-          extra_writable_paths: lines(extraWritablePaths),
-          denied_paths: lines(deniedPaths),
-          deny_shell: denyShell,
-        },
-      },
-      {
-        onError: (e) => {
-          const msg = e instanceof Error ? e.message : "Unknown error";
-          setPolicyError(msg);
-        },
-      },
-    );
-  };
 
   return (
     <div className="rounded-lg border">
@@ -619,163 +541,20 @@ function DiagnosticsCard({
           </div>
         )}
 
-        {/* CEREBRO-PATCH(runtime-detail-sandbox-block): macOS seatbelt sandbox
-            override (local runtimes only). The sandbox is a no-op on Linux
-            cloud runtimes, so showing the control there would just confuse
-            operators. */}
+        {/* CEREBRO-PATCH(runtime-detail-sandbox-card): FIR-2284 Bite 1 — the
+            three scattered sandbox boxes (on/off, profile picker, raw policy
+            editor) are consolidated into one progressive SandboxCard in the
+            cerebro zone. Local runtimes only: the sandbox is a no-op on Linux
+            cloud runtimes, so the card would only confuse operators there. */}
         {isLocal && (
-          <div className={isLocal ? "border-t pt-3" : ""}>
-            <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-              Sandbox
-            </div>
-            <div className="rounded-md border p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <div className="text-xs font-medium">
-                    Run agent CLIs in macOS sandbox
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {sandboxOverride === null
-                      ? "Inheriting the daemon's MULTICA_ENABLE_SANDBOX setting (default on macOS)."
-                      : sandboxOverride
-                        ? "Sandbox is forced on for this runtime."
-                        : "Sandbox is disabled for this runtime — agents run with full host access."}
-                  </p>
-                </div>
-                <Switch
-                  checked={sandboxChecked}
-                  onCheckedChange={(next) => handleSandboxMutate(next)}
-                  disabled={!isAdmin || sandboxMutation.isPending}
-                  aria-label="Sandbox enabled"
-                />
-              </div>
-              {!isAdmin && (
-                <p className="mt-2 text-xs text-muted-foreground italic">
-                  Only workspace owners and admins can change this setting.
-                </p>
-              )}
-              {isAdmin && sandboxOverride !== null && (
-                <button
-                  type="button"
-                  className="mt-2 text-xs text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
-                  onClick={() => handleSandboxMutate(null)}
-                  disabled={sandboxMutation.isPending}
-                >
-                  Reset to default
-                </button>
-              )}
-              {sandboxError && (
-                <div
-                  role="alert"
-                  className="mt-2 rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs"
-                >
-                  <div className="font-medium text-destructive">
-                    Couldn&apos;t update sandbox setting
-                  </div>
-                  <p className="mt-1 text-destructive/90 break-words">
-                    {sandboxError}
-                  </p>
-                  <button
-                    type="button"
-                    className="mt-1.5 text-destructive/80 underline-offset-2 hover:underline"
-                    onClick={() => setSandboxError(null)}
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="mt-3 rounded-md border p-3">
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2 text-xs font-medium">
-                    <Shield className="h-3.5 w-3.5 text-muted-foreground" />
-                    Runtime sandbox policy
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Shell, network and path rules applied when this runtime claims a task.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-8 gap-1.5"
-                  onClick={handlePolicySave}
-                  disabled={!isAdmin || sandboxPolicyMutation.isPending}
-                >
-                  <Save className="h-3.5 w-3.5" />
-                  Save
-                </Button>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="space-y-1.5">
-                  <span className="flex items-center gap-1.5 text-xs font-medium">
-                    <Network className="h-3.5 w-3.5 text-muted-foreground" />
-                    Network mode
-                  </span>
-                  <select
-                    className="h-8 w-full rounded-md border bg-background px-2 text-xs disabled:opacity-60"
-                    value={networkMode}
-                    onChange={(e) => setNetworkMode(e.target.value as "default" | "custom")}
-                    disabled={!isAdmin || sandboxPolicyMutation.isPending}
-                  >
-                    <option value="default">Provider defaults</option>
-                    <option value="custom">Custom host allowlist</option>
-                  </select>
-                </label>
-                <label className="space-y-1.5">
-                  <span className="flex items-center gap-1.5 text-xs font-medium">
-                    <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
-                    Block shell escapes
-                  </span>
-                  <div className="flex h-8 items-center">
-                    <Switch
-                      checked={denyShell}
-                      onCheckedChange={(next) => setDenyShell(Boolean(next))}
-                      disabled={!isAdmin || sandboxPolicyMutation.isPending}
-                      aria-label="Block shell escapes"
-                    />
-                  </div>
-                </label>
-              </div>
-              <div className="mt-3 grid gap-3 md:grid-cols-3">
-                <label className="space-y-1.5">
-                  <span className="text-xs font-medium">Allowed hosts</span>
-                  <textarea
-                    className="min-h-20 w-full resize-y rounded-md border bg-background p-2 font-mono text-xs disabled:opacity-60"
-                    value={allowedHosts}
-                    onChange={(e) => setAllowedHosts(e.target.value)}
-                    disabled={!isAdmin || sandboxPolicyMutation.isPending}
-                    placeholder="proxy.internal:8443"
-                  />
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-xs font-medium">Writable paths</span>
-                  <textarea
-                    className="min-h-20 w-full resize-y rounded-md border bg-background p-2 font-mono text-xs disabled:opacity-60"
-                    value={extraWritablePaths}
-                    onChange={(e) => setExtraWritablePaths(e.target.value)}
-                    disabled={!isAdmin || sandboxPolicyMutation.isPending}
-                    placeholder="/Users/sara/.cache/multica"
-                  />
-                </label>
-                <label className="space-y-1.5">
-                  <span className="text-xs font-medium">Denied paths</span>
-                  <textarea
-                    className="min-h-20 w-full resize-y rounded-md border bg-background p-2 font-mono text-xs disabled:opacity-60"
-                    value={deniedPaths}
-                    onChange={(e) => setDeniedPaths(e.target.value)}
-                    disabled={!isAdmin || sandboxPolicyMutation.isPending}
-                    placeholder="/Users/sara/Documents/private"
-                  />
-                </label>
-              </div>
-              {policyError && (
-                <div role="alert" className="mt-2 rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive">
-                  {policyError}
-                </div>
-              )}
-            </div>
+          <div className="border-t pt-3">
+            <SandboxCard
+              runtime={runtime}
+              wsId={wsId}
+              canEdit={isAdmin}
+              sandboxMutation={sandboxMutation}
+              sandboxPolicyMutation={sandboxPolicyMutation}
+            />
           </div>
         )}
 
