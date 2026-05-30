@@ -1983,11 +1983,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// CEREBRO-PATCH(orphan-task-fail): if none of the issue/chat/autopilot/
-	// quick-create lookups above resolved a workspace, the task is orphaned.
-	// Mark the task failed inline instead of dispatching it tokenless so the
-	// operator can see why, and return null so the daemon polls for the next
-	// valid task. Predates upstream's workspace isolation check below.
-	if resp.WorkspaceID == "" {
+	// quick-create parents are present, the task is orphaned. Mark it failed
+	// inline instead of dispatching it tokenless so the operator can see why,
+	// and return null so the daemon polls for the next valid task. Predates
+	// upstream's workspace isolation check below. Detection keys on parent FK
+	// validity directly because upstream's taskToResponse eagerly stamps the
+	// runtime workspace_id onto resp regardless of parent presence (ON DELETE
+	// SET NULL leaves the task row valid with every parent FK NULL).
+	if !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid && !hasQuickCreate {
 		slog.Warn("task orphaned: no resolvable workspace, failing instead of dispatching tokenless",
 			"task_id", uuidToString(task.ID),
 			"runtime_id", runtimeID,

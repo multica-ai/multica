@@ -914,7 +914,7 @@
     },
     {
       "id": "POST /api/webhooks/stripe",
-      "exempt": "pre-auth signed webhook \u2014 Stripe signs the raw body with a shared secret; verification happens at the multica-cloud upstream proxy, this server only forwards bytes + Stripe-Signature header"
+      "exempt": "pre-auth signed webhook \u2014 Stripe HMAC signature (Stripe-Signature header) authorises delivery; multica-cloud upstream verifies the raw body before processing"
     },
     {
       "id": "POST /api/work-sessions/",
@@ -1063,6 +1063,10 @@
     {
       "id": "PUT /api/cerebro/workflows/{id}",
       "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/workspaces/{id}/auth-settings/",
+      "gate": "workspace_admin"
     },
     {
       "id": "PUT /api/channels/{id}/agents/{agentId}/listen-mode",

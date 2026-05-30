@@ -289,7 +289,17 @@
       "thursday": "목요일",
       "friday": "금요일",
       "saturday": "토요일"
-    }
+    },
+    "cerebro_model": {
+      "_comment": "CEREBRO-PATCH(autopilot-model-i18n-en): JEH-1310 — model picker labels.",
+      "label": "Model override",
+      "agent_default_label": "Agent default",
+      "agent_default_hint": "Use whatever model the assignee agent is configured with",
+      "footnote": "Wins over the agent default for every run of this autopilot. Use to ship cheap pings on Haiku without cloning the agent."
+    },
+    "copy_webhook_url": "Copy webhook URL",
+    "webhook_copied": "Webhook URL copied",
+    "webhook_copy_failed": "Failed to copy webhook URL"
   },
   "trigger_config": {
     "frequencies": {

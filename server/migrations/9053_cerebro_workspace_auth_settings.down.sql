@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS idx_cerebro_workspace_auth_settings_domains;
+DROP TABLE IF EXISTS cerebro_workspace_auth_settings;

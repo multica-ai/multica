@@ -117,9 +117,10 @@ import { collectThreadReplies } from "./thread-utils";
 import { ExecutionLogSection } from "./execution-log-section";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
 import { useDeleteIssue } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
@@ -641,8 +642,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
-  const workspace = useCurrentWorkspace();
   const paths = useWorkspacePaths();
+  const workspace = useCurrentWorkspace();
 
   // Issue navigation — read from TQ list cache
   const wsId = useWorkspaceId();

@@ -583,21 +583,23 @@ describe("IssueDetail (shared)", () => {
   });
 
   it("renders the issue title leaf as a link to the issue detail page", async () => {
-    renderIssueDetail();
+    renderIssueDetail("issue-1", { linkSelfInBreadcrumb: true });
 
-    // The breadcrumb leaf is the whole "identifier + title" string wrapped in a
-    // single link to the issue's own detail route (used to open the full page
-    // from the inline Inbox pane). A bare issue has no ancestor crumbs.
-    const leaf = await screen.findByText("TES-1 Implement authentication");
-    expect(leaf.closest("a")).toHaveAttribute("href", "/test/issues/issue-1");
+    // linkSelfInBreadcrumb wraps the identifier+title leaf in a single link to
+    // the issue's own detail route (used to open the full page from the inline
+    // Inbox pane). Cerebro renders identifier and title as two spans.
+    const identifier = await screen.findByText("TES-1");
+    const link = identifier.closest("a");
+    expect(link).toHaveAttribute("href", "/test/issues/issue-1");
+    expect(link).toHaveTextContent("Implement authentication");
   });
 
   it("omits the project breadcrumb segment when the issue has no project_id", async () => {
     // Default fixture has project_id: null.
     renderIssueDetail();
 
-    // Leaf renders once loaded; a bare issue has no ancestor crumbs at all.
-    await screen.findByText("TES-1 Implement authentication");
+    // Workspace-name crumb renders once loaded; no project segment appears.
+    await screen.findByText("Test WS");
 
     // Project is never fetched and no project crumb appears.
     expect(mockApiObj.getProject).not.toHaveBeenCalled();

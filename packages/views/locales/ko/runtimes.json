@@ -39,20 +39,16 @@
     "section_cloud": "클라우드",
     "this_machine": "이 Mac",
     "local_badge": "로컬 · 이 기기",
-    "runtime_count_one": "런타임 {{count}}개",
     "runtime_count_other": "런타임 {{count}}개",
-    "busy_count_one": "사용 중 {{count}}개",
     "busy_count_other": "사용 중 {{count}}개",
     "no_matches_title": "기기 없음",
     "no_matches_hint": "현재 검색 또는 필터와 일치하는 기기가 없습니다.",
     "select_machine": "기기를 선택해 런타임을 확인하세요.",
     "metrics": {
       "runtimes": "런타임",
-      "runtimes_hint_one": "온라인 {{count}}개",
       "runtimes_hint_other": "온라인 {{count}}개",
       "health": "상태",
       "health_clear": "문제 없음",
-      "health_issues_one": "이슈 {{count}}개",
       "health_issues_other": "이슈 {{count}}개",
       "workload": "작업량",
       "workload_value_idle": "유휴",
@@ -67,6 +63,11 @@
     "online": {
       "label": "온라인",
       "description": "최근 45초 안에 heartbeat를 받았습니다. 작업을 디스패치할 준비가 되었습니다."
+    },
+    "_comment_paused": "CEREBRO-PATCH(i18n-runtime-health-paused): paused label/description for cerebro pause health state",
+    "paused": {
+      "label": "Paused",
+      "description": "Runtime is paused — won't claim or run tasks until resumed."
     },
     "recently_lost": {
       "label": "최근 연결 끊김",
@@ -86,6 +87,8 @@
     "read_only": "읽기 전용",
     "delete_button": "런타임 삭제",
     "delete_disabled_tooltip": "이 런타임은 실행 중인 로컬 데몬이 관리하며 몇 초 안에 다시 등록됩니다. 영구 제거하려면 데몬 프로세스를 중지하세요.",
+    "delete_aria": "Delete runtime",
+    "delete_tooltip": "Delete runtime",
     "last_seen": "마지막 확인 {{when}}",
     "fact_owner": "소유자",
     "fact_device": "기기",
@@ -94,12 +97,12 @@
     "fact_daemon_cli": "데몬 CLI",
     "fact_daemon_id": "데몬 ID",
     "serving_title": "제공 중",
-    "serving_count_one": "에이전트 {{count}}개",
     "serving_count_other": "에이전트 {{count}}개",
     "no_agents": "아직 이 런타임에 연결된 에이전트가 없습니다.",
     "diagnostics_title": "진단",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "공개 범위",
+    "diagnostics_timezone": "Timezone",
     "visibility_label": {
       "private": "비공개",
       "public": "공개"
@@ -110,6 +113,10 @@
     },
     "visibility_toast_updated": "공개 범위를 {{visibility}}(으)로 설정했습니다",
     "visibility_toast_failed": "공개 범위를 업데이트하지 못했습니다",
+    "timezone_browser_suffix": " (browser)",
+    "timezone_hint": "Token-usage charts on this runtime bucket dates by this timezone.",
+    "timezone_toast_updated": "Timezone updated to {{tz}}",
+    "timezone_toast_failed": "Failed to update timezone",
     "delete_dialog": {
       "light": {
         "title": "런타임을 삭제할까요?",
@@ -119,16 +126,13 @@
         "submitting": "삭제하는 중..."
       },
       "cascade": {
-        "title_one": "에이전트 {{count}}개를 보관하고 이 런타임을 삭제할까요?",
         "title_other": "에이전트 {{count}}개를 보관하고 이 런타임을 삭제할까요?",
         "description": "\"{{name}}\"을(를) 삭제합니다. 아래 에이전트는 보관되어 활성 워크플로에서 제거되고, 대기 중이거나 실행 중인 작업은 취소된 뒤 런타임이 삭제됩니다.",
         "warning": "파괴적인 작업입니다. 보관된 에이전트는 활성 워크플로에서 제거되고 대기 중이거나 실행 중인 작업은 취소됩니다.",
         "notice_runtime_has_active_agents": "이 대화상자를 연 뒤 활성 에이전트가 추가되었습니다. 새 계획을 확인한 뒤 승인하세요.",
         "notice_runtime_delete_plan_changed": "대화상자가 열린 동안 활성 에이전트 목록이 바뀌었습니다. 새 계획을 확인한 뒤 승인하세요.",
-        "checkbox_one": "에이전트 {{count}}개가 보관되고 대기 중이거나 실행 중인 작업이 취소된다는 점을 이해했습니다.",
         "checkbox_other": "에이전트 {{count}}개가 보관되고 대기 중이거나 실행 중인 작업이 취소된다는 점을 이해했습니다.",
         "cancel": "취소",
-        "confirm_one": "에이전트 {{count}}개 보관 및 런타임 삭제",
         "confirm_other": "에이전트 {{count}}개 보관 및 런타임 삭제",
         "submitting": "보관하고 삭제하는 중...",
         "self_healing_blocked_toast": "이 런타임은 실행 중인 로컬 데몬이 관리하며 다시 등록됩니다.",
@@ -153,18 +157,14 @@
     },
     "toast_deleted": "런타임을 삭제했습니다",
     "toast_delete_failed": "런타임을 삭제하지 못했습니다",
-    "running_chip_one": "· 실행 중 {{count}}개",
     "running_chip_other": "· 실행 중 {{count}}개",
-    "queued_chip_one": "· 대기 중 {{count}}개",
     "queued_chip_other": "· 대기 중 {{count}}개"
   },
   "detail_page": {
     "not_found_title": "런타임을 찾을 수 없습니다",
     "not_found_hint": "삭제되었거나 접근 권한이 없을 수 있습니다."
   },
-  "running_one": "실행 중 {{count}}개",
   "running_other": "실행 중 {{count}}개",
-  "queued_one": "대기 중 {{count}}개",
   "queued_other": "대기 중 {{count}}개",
   "connect": {
     "title": "컴퓨터 추가",
@@ -188,6 +188,7 @@
     "view_runtime": "런타임 보기",
     "create_agent": "에이전트 만들기"
   },
+  "_comment_cloud_runtime": "CEREBRO-PATCH(cloud-runtime-bootstrap): upstream Cloud Runtime launcher strings.",
   "cloud_runtime": {
     "action": "클라우드 런타임",
     "title": "클라우드 런타임",
@@ -253,17 +254,19 @@
     "tooltip_total": "합계"
   },
   "list": {
+    "_comment_name_col": "CEREBRO-PATCH(runtime-name-own-column): col_name for the separate runtime name column (JEH-1520)",
     "col_runtime": "런타임",
+    "col_name": "Name",
+    "_comment_machine_col": "CEREBRO-PATCH(runtime-machine-own-column): col_machine for the hostname column (JEH-1904)",
+    "col_machine": "Machine",
     "col_health": "상태",
     "col_owner": "소유자",
     "col_agents": "에이전트",
     "col_workload": "작업량",
     "col_cost": "비용 · 7일",
-    "col_cli": "CLI",
+    "_comment_account_col": "CEREBRO-PATCH(runtime-list-account-column): col_account replaces upstream col_cli (FIR-2308)",
+    "col_account": "Account",
     "cost_delta_flat": "변화 없음",
-    "cli_managed_badge": "데스크톱",
-    "cli_update_available_aria": "업데이트 가능",
-    "cli_update_available_tooltip": "업데이트 가능: {{version}}",
     "row_actions_aria": "행 작업",
     "delete_action": "삭제",
     "delete_permission_hint": "런타임 소유자와 워크스페이스 관리자만 이 런타임을 삭제할 수 있습니다",
@@ -271,7 +274,6 @@
   },
   "usage": {
     "period_label": "기간",
-    "dimension_label": "단위",
     "kpi_cost_label": "비용 · {{days}}일",
     "kpi_cost_delta": "이전 대비 {{sign}}{{pct}}%",
     "kpi_cache_label": "캐시 절감 · {{days}}일",
@@ -280,7 +282,7 @@
     "kpi_tokens_hint": "입력 {{input}} · 출력 {{output}}",
     "when_title": "런타임 비용 발생 시점",
     "when_tab_daily": "일별",
-    "when_tab_weekly": "주별",
+    "when_tab_hourly": "Hourly",
     "when_tab_heatmap": "히트맵",
     "daily_metric_cost": "비용",
     "daily_metric_tokens": "토큰",
@@ -294,7 +296,6 @@
     "empty_pricing_missing": "토큰은 기록됐지만 가격 정보가 없습니다:",
     "empty_pricing_hint": "비용 합계에 포함하려면 사용자 지정 단가를 설정하세요.",
     "empty_zero_cost": "토큰은 기록됐지만 비용 계산 결과가 $0입니다.",
-    "unmapped_notice_one": "기본 가격이 등록되지 않은 모델 {{count}}개가 있어 해당 토큰은 비용 합계에서 제외됩니다.",
     "unmapped_notice_other": "기본 가격이 등록되지 않은 모델 {{count}}개가 있어 해당 토큰은 비용 합계에서 제외됩니다.",
     "custom_pricing": {
       "open_button": "사용자 지정 가격 설정",
@@ -314,9 +315,7 @@
     "cost_by_title_model": "모델별 비용",
     "cost_by_tab_agent": "에이전트별",
     "cost_by_tab_model": "모델별",
-    "cost_by_caption_agent_one": "이 런타임의 에이전트 {{count}}개",
     "cost_by_caption_agent_other": "이 런타임의 에이전트 {{count}}개",
-    "cost_by_caption_model_one": "사용된 모델 {{count}}개",
     "cost_by_caption_model_other": "사용된 모델 {{count}}개",
     "daily_breakdown_toggle": "일별 상세 테이블",
     "table_date": "날짜",

@@ -620,7 +620,7 @@ export function useCreateComment(issueId: string) {
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ commentId, content, attachmentIds }: { commentId: string; content: string; attachmentIds?: string[] }) =>
+    mutationFn: ({ commentId, content, attachmentIds }: { commentId: string; content: string; attachmentIds: string[] }) =>
       api.updateComment(commentId, content, attachmentIds),
     onMutate: async ({ commentId, content, attachmentIds }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });

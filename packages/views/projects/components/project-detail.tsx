@@ -27,7 +27,7 @@ import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER, PROJECT_COLORS, getProjectColor } from "@multica/core/projects/config";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
@@ -41,7 +41,7 @@ import { ProjectDocuments } from "@multica/cerebro-artifacts/views/components";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { AppLink, useNavigation } from "../../navigation";
+import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
@@ -76,7 +76,7 @@ import {
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 // CEREBRO-PATCH(nested-projects): toggle direct-only versus descendant-inclusive project scope.
 import { Switch } from "@multica/ui/components/ui/switch";
-import { PageHeader } from "../../layout/page-header";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -416,8 +416,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
-  const workspace = useCurrentWorkspace();
-  const workspaceName = workspace?.name;
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
   const { data: projectTree = [] } = useQuery(projectTreeOptions(wsId));
   const flatProjectTree = useMemo(() => flattenProjectTree(projectTree), [projectTree]);
@@ -829,15 +827,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="content" minSize="50%">
         <div className="flex h-full flex-col">
-          <PageHeader className="gap-2 bg-background text-sm">
-            <div className="flex flex-1 items-center gap-1.5 min-w-0">
-              <AppLink href={wsPaths.projects()} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
-                {workspaceName ?? t(($) => $.detail.breadcrumb_fallback)}
-              </AppLink>
-              <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              <span className="truncate">{project.title}</span>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
+          <BreadcrumbHeader
+            segments={[{ href: wsPaths.projects(), label: t(($) => $.detail.breadcrumb_fallback) }]}
+            leaf={<span className="truncate font-medium text-foreground">{project.title}</span>}
+            actions={
+              <>
               <Button
                 variant="default"
                 size="sm"
@@ -910,8 +904,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 />
                 <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
               </Tooltip>
-            </div>
-          </PageHeader>
+              </>
+            }
+          />
 
           {/* CEREBRO-PATCH(project-detail-tabs): wraps upstream's single issues view in Issues/Documents/Access tab system */}
           <Tabs

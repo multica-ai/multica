@@ -62,7 +62,7 @@ interface SlackMessageViewProps {
   currentUserId?: string;
   activeThreadId?: string | null;
   onOpenThread: (parentId: string) => void;
-  onEdit: (commentId: string, content: string) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
 }
@@ -120,7 +120,7 @@ interface MessageRowProps {
   isThreadOpen: boolean;
   currentUserId?: string;
   onOpenThread: (parentId: string) => void;
-  onEdit: (commentId: string, content: string) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
 }

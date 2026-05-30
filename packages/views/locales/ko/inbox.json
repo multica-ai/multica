@@ -25,10 +25,13 @@
     "empty": "인박스가 비어 있습니다",
     "original_input": "원본 입력",
     "edit_advanced": "고급 양식으로 수정",
-    "archive": "보관"
+    "archive": "보관",
+    "_comment_unarchive": "CEREBRO-PATCH(inbox-unarchive-locale): JEH-1166 — unarchive action from archived view",
+    "unarchive": "Unarchive"
   },
   "types": {
     "issue_assigned": "할당됨",
+    "issue_started": "Started",
     "unassigned": "할당 해제됨",
     "assignee_changed": "담당자 변경됨",
     "status_changed": "상태 변경됨",
@@ -44,7 +47,13 @@
     "agent_completed": "에이전트 완료됨",
     "reaction_added": "반응 추가됨",
     "quick_create_done": "에이전트로 생성됨",
-    "quick_create_failed": "에이전트 생성 실패"
+    "quick_create_failed": "에이전트 생성 실패",
+    "reminder": "Reminder",
+    "_comment_cerebro_patch": "CEREBRO-PATCH(inbox-types-locale-en): FIR-2385 private_agent_run_request label",
+    "private_agent_run_request": "Run request",
+    "_comment_cerebro_patch_date_reminders": "CEREBRO-PATCH(issue-date-reminders): FIR-2412 start/due date reminder labels",
+    "due_date_reminder": "Due date reminder",
+    "start_date_reminder": "Start date reminder"
   },
   "labels": {
     "set_status_to": "상태 변경:",
@@ -59,9 +68,27 @@
     "created_with_agent": "에이전트가 생성: {{identifier}}",
     "failed_with_detail": "실패: {{detail}}"
   },
+  "reminders": {
+    "_comment": "CEREBRO-PATCH(inbox-reminders-locale): labels and validation messages for reminder creation.",
+    "new": "New reminder",
+    "reminder": "Reminder",
+    "planned_for": "Planned for",
+    "tomorrow_9": "Tomorrow 09:00",
+    "next_workday_9": "Next workday 09:00",
+    "cancel": "Cancel",
+    "plan": "Plan reminder",
+    "placeholder": "Approve access to Sliplane",
+    "missing_text": "Write what you want to be reminded about",
+    "future_time": "Pick a future time",
+    "planned": "Reminder planned",
+    "create_failed": "Failed to create reminder",
+    "later": "later"
+  },
   "errors": {
     "mark_read_failed": "읽음 표시를 하지 못했습니다",
     "archive_failed": "보관하지 못했습니다",
+    "_comment_unarchive_failed": "CEREBRO-PATCH(inbox-unarchive-locale): JEH-1166 — error toast for unarchive failure",
+    "unarchive_failed": "Failed to unarchive",
     "mark_done_failed": "완료 표시를 하지 못했습니다",
     "mark_all_read_failed": "모두 읽음으로 표시하지 못했습니다",
     "archive_all_failed": "모두 보관하지 못했습니다",

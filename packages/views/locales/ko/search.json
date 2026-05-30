@@ -2,12 +2,16 @@
   "title": "검색",
   "description": "페이지, 이슈, 프로젝트, 멤버를 검색합니다",
   "placeholder": "명령어를 입력하거나 검색하세요...",
+  "_comment_1326": "CEREBRO-PATCH(search-page-1326): JEH-1326 — open_page key for full search page action",
+  "open_page": "Open page",
+  "_comment_chat_search": "CEREBRO-PATCH(chat-search-cerebro-ui): FIR-902 — chat_sessions group heading for Cmd+K.",
   "groups": {
     "pages": "페이지",
     "commands": "명령어",
     "members": "멤버",
     "projects": "프로젝트",
     "issues": "이슈",
+    "chat_sessions": "Chat Sessions",
     "recent": "최근 항목"
   },
   "pages": {

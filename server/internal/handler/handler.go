@@ -175,6 +175,9 @@ type Handler struct {
 	// (test fake or workspace-aware gateway) into CheckSimilarIssues; nil
 	// means the default env-resolved gateway is used.
 	DuplicateCheckJudger *duplicatecheck.Judger
+	// CEREBRO-PATCH(handler-identity-provisioner): FIR-2523 Google Workspace
+	// auto-membership hook. Wired by the router; nil = no auto-provisioning.
+	IdentityProvisioner IdentityProvisionerInvoker
 }
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime

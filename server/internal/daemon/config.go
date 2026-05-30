@@ -251,7 +251,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		agents["firtal-gateway"] = entry
 	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or agy and ensure it is on PATH, or set MULTICA_RUNTIME_TYPE=%s together with FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL and FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", FirtalRegistryRuntimeType)
+		return Config{}, fmt.Errorf("no agent runtime found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or agy on PATH, or set MULTICA_RUNTIME_TYPE=%s together with FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL and FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", FirtalRegistryRuntimeType)
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")

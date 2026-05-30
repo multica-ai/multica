@@ -3,11 +3,7 @@
     "title": "프로젝트",
     "new_project": "새 프로젝트",
     "empty": "아직 프로젝트가 없습니다",
-    "create_first": "첫 프로젝트 만들기",
-    "view_compact": "간결하게",
-    "view_comfortable": "넓게",
-    "search_placeholder": "프로젝트 검색...",
-    "no_search_results": "검색 결과가 없습니다"
+    "create_first": "첫 프로젝트 만들기"
   },
   "table": {
     "name": "이름",
@@ -61,7 +57,6 @@
     "empty_issues_title": "연결된 이슈가 없습니다",
     "empty_issues_hint": "새 이슈를 만들거나 기존 이슈를 이 프로젝트에 할당하세요.",
     "empty_issues_new_button": "새 이슈",
-    "no_issues_yet": "아직 이슈가 없습니다",
     "toast_link_copied": "링크를 복사했습니다",
     "toast_project_deleted": "프로젝트를 삭제했습니다",
     "toast_move_issue_failed": "이슈를 이동하지 못했습니다"
@@ -112,7 +107,11 @@
   "picker": {
     "no_project": "프로젝트 없음",
     "remove": "프로젝트에서 제거",
-    "empty": "아직 프로젝트가 없습니다"
+    "empty": "아직 프로젝트가 없습니다",
+    "_comment_picker_search": "CEREBRO-PATCH(project-picker-search-and-select): FIR-2536 — search input strings for the project picker popover",
+    "search_placeholder": "Search projects…",
+    "search_aria": "Search projects",
+    "no_results": "No projects match \"{{query}}\""
   },
   "chip": {
     "fallback_label": "프로젝트"

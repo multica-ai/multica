@@ -350,6 +350,7 @@ type GetPendingChatTaskRow struct {
 // created_at is also the anchor for the chat StatusPill timer (it computes
 // elapsed = now - task.created_at), so the pill survives refresh / reopen
 // without "resetting to 0s".
+// CEREBRO-PATCH(chat-pending-priority-order): JEH — keep priority-based ordering (running > dispatched > queued > waiting_local_directory) so the UI follows the mid-stream task rather than the newest queued successor.
 func (q *Queries) GetPendingChatTask(ctx context.Context, chatSessionID pgtype.UUID) (GetPendingChatTaskRow, error) {
 	row := q.db.QueryRow(ctx, getPendingChatTask, chatSessionID)
 	var i GetPendingChatTaskRow

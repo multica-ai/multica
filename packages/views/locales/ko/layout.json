@@ -4,6 +4,7 @@
     "my_issues": "내 이슈",
     "issues": "이슈",
     "projects": "프로젝트",
+    "documents": "Documents",
     "autopilots": "오토파일럿",
     "agents": "에이전트",
     "squads": "스쿼드",
@@ -36,6 +37,10 @@
     "pinned_label": "고정됨",
     "workspace_group": "워크스페이스",
     "configure_group": "설정",
-    "unread_overflow": "99+"
+    "unread_overflow": "99+",
+    "_comment_1296": "CEREBRO-PATCH(i18n-sidebar-1296): JEH-1296 — new_message, notifications, notifications_clear for sidebar restructure",
+    "new_message": "New message",
+    "notifications": "Notifications",
+    "notifications_clear": "Clear"
   }
 }

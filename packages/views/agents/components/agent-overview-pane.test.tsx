@@ -53,6 +53,7 @@ const baseAgent: Agent = {
   max_concurrent_tasks: 1,
   model: "",
   owner_id: "user-1",
+  persona_sandbox: "",
   skills: [],
   created_at: "2026-05-28T00:00:00Z",
   updated_at: "2026-05-28T00:00:00Z",
@@ -75,9 +76,13 @@ function makeRuntime(provider: string): AgentRuntime {
     owner_id: null,
     visibility: "private",
     last_seen_at: null,
+    sandbox_enabled: false,
+    persona_sandbox: "",
+    capabilities: {},
+    timezone: "",
     created_at: "2026-05-28T00:00:00Z",
     updated_at: "2026-05-28T00:00:00Z",
-  };
+  } as AgentRuntime;
 }
 
 function renderPane(runtimes: AgentRuntime[]) {
@@ -90,6 +95,7 @@ function renderPane(runtimes: AgentRuntime[]) {
         <AgentOverviewPane
           agent={baseAgent}
           runtimes={runtimes}
+          canEdit={true}
           onUpdate={vi.fn().mockResolvedValue(undefined)}
         />
       </QueryClientProvider>

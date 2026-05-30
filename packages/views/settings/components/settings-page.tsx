@@ -47,6 +47,8 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { AccountsSettingsTab } from "@multica/cerebro-runtime/views";
 // CEREBRO-PATCH(settings-page-status-models): FIR-1550 workflow v2a status models tab
 import { StatusModelsTab } from "@multica/cerebro-status-models/views";
+// CEREBRO-PATCH(settings-page-google-identity): FIR-2523 Auth & Permissions tab
+import { AuthPermissionsTab } from "@multica/cerebro-identity/views";
 import { useT } from "../../i18n";
 import {
   CerebroMobileTabNav,
@@ -88,6 +90,8 @@ const WORKSPACE_TAB_ICONS = {
 const GROUPS_TAB_VALUE = "groups";
 // CEREBRO-PATCH(settings-page-status-models): FIR-1550 status models tab value
 const STATUS_MODELS_TAB_VALUE = "status-models";
+// CEREBRO-PATCH(settings-page-google-identity): FIR-2523 Auth & Permissions tab value
+const AUTH_PERMISSIONS_TAB_VALUE = "auth-permissions";
 
 const DEFAULT_TAB = "profile";
 const TAB_QUERY_KEY = "tab";
@@ -134,6 +138,8 @@ export function SettingsPage({
   const groupsEnabled = useFeatureFlag("cerebro_groups_enabled");
   // CEREBRO-PATCH(settings-page-status-models): FIR-1550 feature-flagged status models tab
   const statusModelsEnabled = useFeatureFlag("cerebro_workflows");
+  // CEREBRO-PATCH(settings-page-google-identity): FIR-2523 feature-flagged Auth & Permissions tab
+  const googleIdentityEnabled = useFeatureFlag("cerebro_google_identity");
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
   // the default. Whitelisting also blocks junk like ?tab=<script> from
   // surfacing in the DOM via Radix Tabs internals.
@@ -148,6 +154,8 @@ export function SettingsPage({
         ...(groupsEnabled ? [GROUPS_TAB_VALUE] : []),
         // CEREBRO-PATCH(settings-page-status-models): FIR-1550 valid tab
         ...(statusModelsEnabled ? [STATUS_MODELS_TAB_VALUE] : []),
+        // CEREBRO-PATCH(settings-page-google-identity): FIR-2523 valid tab
+        ...(googleIdentityEnabled ? [AUTH_PERMISSIONS_TAB_VALUE] : []),
         // CEREBRO-PATCH(settings-page-accounts-valid): include cerebro Konti tab (JEH-999)
         ACCOUNTS_TAB_VALUE,
         // CEREBRO-PATCH(settings-page-documentation): documentation tab is valid
@@ -155,7 +163,8 @@ export function SettingsPage({
         ...(extraAccountTabs?.map((tab) => tab.value) ?? []),
       ]),
     // CEREBRO-PATCH(settings-page-status-models): FIR-1550 recompute when flag changes
-    [extraAccountTabs, documentationContent, groupsEnabled, statusModelsEnabled],
+    // CEREBRO-PATCH(settings-page-google-identity): FIR-2523 recompute when flag changes
+    [extraAccountTabs, documentationContent, groupsEnabled, statusModelsEnabled, googleIdentityEnabled],
   );
 
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
@@ -209,6 +218,8 @@ export function SettingsPage({
     workspaceItems.push({ value: ACCOUNTS_TAB_VALUE, label: "Konti", icon: KeyRound });
     // CEREBRO-PATCH(settings-page-status-models): FIR-1550 mobile nav entry
     if (statusModelsEnabled) workspaceItems.push({ value: STATUS_MODELS_TAB_VALUE, label: "Statusmodeller", icon: Workflow });
+    // CEREBRO-PATCH(settings-page-google-identity): FIR-2523 mobile nav entry
+    if (googleIdentityEnabled) workspaceItems.push({ value: AUTH_PERMISSIONS_TAB_VALUE, label: "Auth & Permissions", icon: KeyRound });
     const groups: CerebroMobileTabNavGroup[] = [
       {
         label: t(($) => $.page.my_account),
@@ -235,7 +246,8 @@ export function SettingsPage({
 
     return groups;
     // CEREBRO-PATCH(settings-page-status-models): FIR-1550 rebuild mobile nav when flag changes
-  }, [documentationContent, extraAccountTabs, t, workspaceName, groupsEnabled, statusModelsEnabled]);
+    // CEREBRO-PATCH(settings-page-google-identity): FIR-2523 rebuild mobile nav when flag changes
+  }, [documentationContent, extraAccountTabs, t, workspaceName, groupsEnabled, statusModelsEnabled, googleIdentityEnabled]);
 
   return (
     <Tabs
@@ -310,6 +322,13 @@ export function SettingsPage({
               Statusmodeller
             </TabsTrigger>
           )}
+          {/* CEREBRO-PATCH(settings-page-google-identity): FIR-2523 Auth & Permissions trigger */}
+          {googleIdentityEnabled && (
+            <TabsTrigger value={AUTH_PERMISSIONS_TAB_VALUE}>
+              <KeyRound className="h-4 w-4" />
+              Auth & Permissions
+            </TabsTrigger>
+          )}
 
           {/* CEREBRO-PATCH(settings-page-documentation): Resources group with Documentation tab */}
           {documentationContent && (
@@ -355,6 +374,8 @@ export function SettingsPage({
             <TabsContent value={ACCOUNTS_TAB_VALUE}><AccountsSettingsTab /></TabsContent>
             {/* CEREBRO-PATCH(settings-page-status-models): FIR-1550 status models content */}
             {statusModelsEnabled && (<TabsContent value={STATUS_MODELS_TAB_VALUE}><StatusModelsTab /></TabsContent>)}
+            {/* CEREBRO-PATCH(settings-page-google-identity): FIR-2523 Auth & Permissions content */}
+            {googleIdentityEnabled && (<TabsContent value={AUTH_PERMISSIONS_TAB_VALUE}><AuthPermissionsTab /></TabsContent>)}
             {extraAccountTabs?.map((tab) => (
               <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
             ))}

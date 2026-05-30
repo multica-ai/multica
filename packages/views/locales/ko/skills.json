@@ -6,10 +6,22 @@
     "new_skill": "새 스킬",
     "search_placeholder": "스킬 검색...",
     "scopes": {
-      "all": { "label": "전체", "description": "이 워크스페이스의 모든 스킬" },
-      "used": { "label": "사용 중", "description": "하나 이상의 에이전트에 할당된 스킬" },
-      "unused": { "label": "미사용", "description": "어떤 에이전트에도 할당되지 않은 스킬" },
-      "mine": { "label": "내가 만든 스킬", "description": "내가 생성한 스킬" }
+      "all": {
+        "label": "전체",
+        "description": "이 워크스페이스의 모든 스킬"
+      },
+      "used": {
+        "label": "사용 중",
+        "description": "하나 이상의 에이전트에 할당된 스킬"
+      },
+      "unused": {
+        "label": "미사용",
+        "description": "어떤 에이전트에도 할당되지 않은 스킬"
+      },
+      "mine": {
+        "label": "내가 만든 스킬",
+        "description": "내가 생성한 스킬"
+      }
     },
     "empty": {
       "title": "아직 스킬이 없습니다",
@@ -56,6 +68,11 @@
     "read_only": "읽기 전용",
     "delete_aria": "스킬 삭제",
     "delete_tooltip": "스킬 삭제",
+    "_comment": "CEREBRO-PATCH(skills-mobile-detail-layout): JEH-885 Files/Info trigger labels for mobile sheet drawers",
+    "files_trigger_aria": "Open files",
+    "files_trigger_tooltip": "Files",
+    "info_trigger_aria": "Open skill info",
+    "info_trigger_tooltip": "Info",
     "supporting_data_warning": "일부 워크스페이스 데이터를 불러오지 못했습니다. 다음 새로고침 전까지 생성자 표시, 런타임 이름, 수정 권한이 불완전하게 보일 수 있습니다.",
     "files_label": "파일 · {{count}}",
     "add_file_aria": "파일 추가",
@@ -94,7 +111,6 @@
       "files": "파일",
       "id": "ID",
       "origin": "출처",
-      "used_by_one": "에이전트 {{count}}개가 사용 중",
       "used_by_other": "에이전트 {{count}}개가 사용 중",
       "permissions": "권한",
       "permissions_owner": "이 스킬을 수정하고 삭제할 수 있습니다. 변경사항은 다음 에이전트 실행부터 적용됩니다.",
@@ -120,7 +136,6 @@
     "toast_delete_failed": "스킬을 삭제하지 못했습니다",
     "delete_dialog": {
       "title": "스킬을 삭제할까요?",
-      "description_with_agents_one": "\"{{name}}\"을(를) 영구 삭제하고 현재 사용 중인 에이전트 {{count}}개에서 제거합니다.",
       "description_with_agents_other": "\"{{name}}\"을(를) 영구 삭제하고 현재 사용 중인 에이전트 {{count}}개에서 제거합니다.",
       "description_no_agents": "\"{{name}}\"을(를) 영구 삭제하고 모든 에이전트에서 제거합니다.",
       "warning": "이 작업은 되돌릴 수 없습니다.",
@@ -216,24 +231,12 @@
     "select_skill": "계속하려면 스킬을 선택하세요.",
     "import_button": "워크스페이스로 가져오기",
     "importing": "가져오는 중...",
-    "skill_files_one": "파일 {{count}}개",
     "skill_files_other": "파일 {{count}}개",
     "skill_name_label": "워크스페이스 스킬 이름",
     "skill_description_label": "설명",
     "skill_description_placeholder": "선택 사항 — 에이전트가 이 스킬을 언제 써야 하는지 설명하세요.",
     "toast_imported": "스킬을 가져왔습니다",
-    "toast_import_failed": "스킬을 가져오지 못했습니다",
-    "select_all": "전체 선택({{count}})",
-    "bulk_ready": "스킬 {{count}}개 선택됨",
-    "bulk_import_button": "스킬 {{count}}개 가져오기",
-    "bulk_progress": "가져오는 중 {{completed}} / {{total}}...",
-    "bulk_cancel_button": "취소",
-    "bulk_complete_hint": "가져오기가 완료되었습니다.",
-    "bulk_cancelled_hint": "가져오기가 취소되었습니다.",
-    "bulk_done_button": "완료",
-    "bulk_summary_imported": "가져옴",
-    "bulk_summary_skipped": "건너뜀",
-    "bulk_summary_failed": "실패"
+    "toast_import_failed": "스킬을 가져오지 못했습니다"
   },
   "file_tree": {
     "no_files": "파일 없음"
