@@ -9,6 +9,27 @@ WHERE workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
   AND (sqlc.narg('creator_type')::text IS NULL OR creator_type = sqlc.narg('creator_type'))
   AND (
+      COALESCE(cardinality(sqlc.slice('label_ids')::uuid[]), 0) = 0
+      OR (
+          sqlc.narg('label_match_mode')::text = 'any'
+          AND EXISTS (
+              SELECT 1
+              FROM issue_to_label itl
+              WHERE itl.issue_id = issue.id
+                AND itl.label_id = ANY(sqlc.slice('label_ids')::uuid[])
+          )
+      )
+      OR (
+          sqlc.narg('label_match_mode')::text = 'all'
+          AND (
+              SELECT count(DISTINCT itl.label_id)
+              FROM issue_to_label itl
+              WHERE itl.issue_id = issue.id
+                AND itl.label_id = ANY(sqlc.slice('label_ids')::uuid[])
+          ) = cardinality(sqlc.slice('label_ids')::uuid[])
+      )
+  )
+  AND (
       (
           sqlc.narg('search_text')::text IS NULL
           AND sqlc.narg('search_uuid')::uuid IS NULL
@@ -80,6 +101,27 @@ WHERE workspace_id = $1
   AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
   AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
   AND (sqlc.narg('creator_type')::text IS NULL OR creator_type = sqlc.narg('creator_type'))
+  AND (
+      COALESCE(cardinality(sqlc.slice('label_ids')::uuid[]), 0) = 0
+      OR (
+          sqlc.narg('label_match_mode')::text = 'any'
+          AND EXISTS (
+              SELECT 1
+              FROM issue_to_label itl
+              WHERE itl.issue_id = issue.id
+                AND itl.label_id = ANY(sqlc.slice('label_ids')::uuid[])
+          )
+      )
+      OR (
+          sqlc.narg('label_match_mode')::text = 'all'
+          AND (
+              SELECT count(DISTINCT itl.label_id)
+              FROM issue_to_label itl
+              WHERE itl.issue_id = issue.id
+                AND itl.label_id = ANY(sqlc.slice('label_ids')::uuid[])
+          ) = cardinality(sqlc.slice('label_ids')::uuid[])
+      )
+  )
   AND (
       (
           sqlc.narg('search_text')::text IS NULL

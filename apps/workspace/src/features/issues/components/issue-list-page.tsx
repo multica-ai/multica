@@ -5,6 +5,7 @@ import type { DateRange } from "react-day-picker";
 import {
   CalendarRange,
   ChevronRight,
+  Hash,
   ListTodo,
   Search,
   X,
@@ -19,7 +20,7 @@ import {
   PRIORITY_CONFIG,
   PRIORITY_ORDER,
 } from "@/features/issues/config";
-import { useIssuesListQuery } from "@/features/issues/queries";
+import { useIssuesListQuery, useWorkspaceLabelsQuery } from "@/features/issues/queries";
 import { useIssuesScopeStore } from "@/features/issues/stores/issues-scope-store";
 import { registerViewStoreForWorkspaceSync } from "@/features/issues/stores/view-store";
 import {
@@ -33,6 +34,7 @@ import { IssueTaskStatusSync } from "@/features/issues/components/issue-task-sta
 import { IssuesHeader } from "@/features/issues/components/issues-header";
 import { FlatIssueList } from "@/features/issues/components/flat-issue-list";
 import { BatchActionToolbar } from "@/features/issues/components/batch-action-toolbar";
+import { IssueLabelFilter } from "@/features/issues/components/issue-label-filter";
 import { StatusIcon } from "@/features/issues/components";
 import { PriorityIcon } from "@/features/issues/components/priority-icon";
 import { ProjectPicker } from "@/features/projects/components/project-picker";
@@ -260,11 +262,17 @@ function IssueListFiltersRow({
   const toggleAssigneeFilter = useViewStore((s) => s.toggleAssigneeFilter);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const toggleCreatorFilter = useViewStore((s) => s.toggleCreatorFilter);
+  const labelFilters = useViewStore((s) => s.labelFilters);
+  const labelFilterMode = useViewStore((s) => s.labelFilterMode);
+  const toggleLabelFilter = useViewStore((s) => s.toggleLabelFilter);
+  const setLabelFilterMode = useViewStore((s) => s.setLabelFilterMode);
+  const clearLabelFilters = useViewStore((s) => s.clearLabelFilters);
   const clearViewFilters = useViewStore((s) => s.clearFilters);
 
   // Resolve actor display names
   const members = useWorkspaceStore((s) => s.members);
   const agents = useWorkspaceStore((s) => s.agents);
+  const { data: workspaceLabels = [] } = useWorkspaceLabelsQuery();
 
   const getActorName = (type: "member" | "agent", id: string) => {
     if (type === "member") return members.find((m) => m.user_id === id)?.name ?? id;
@@ -272,7 +280,13 @@ function IssueListFiltersRow({
   };
 
   const activeDateFilterCount = [dueFrom, dueTo, startFrom, startTo, endFrom, endTo].filter(Boolean).length;
-  const hasViewFilters = statusFilters.length > 0 || priorityFilters.length > 0 || assigneeFilters.length > 0 || creatorFilters.length > 0;
+  const labelById = useMemo(() => new Map(workspaceLabels.map((label) => [label.id, label])), [workspaceLabels]);
+  const hasViewFilters =
+    statusFilters.length > 0 ||
+    priorityFilters.length > 0 ||
+    assigneeFilters.length > 0 ||
+    creatorFilters.length > 0 ||
+    labelFilters.length > 0;
   const hasServerFilters = Boolean(searchQuery.trim() || projectId || activeDateFilterCount > 0);
   const hasAnyFilters = hasViewFilters || hasServerFilters;
 
@@ -339,6 +353,14 @@ function IssueListFiltersRow({
               }
             }}
           />
+
+          <IssueLabelFilter
+            selectedIds={labelFilters}
+            mode={labelFilterMode}
+            onToggle={toggleLabelFilter}
+            onModeChange={setLabelFilterMode}
+            onClear={clearLabelFilters}
+          />
         </div>
       </div>
 
@@ -386,6 +408,22 @@ function IssueListFiltersRow({
               onRemove={() => toggleCreatorFilter(filter)}
             />
           ))}
+
+          {labelFilters.map((labelId) => (
+            <FilterChip
+              key={`label-${labelId}`}
+              icon={<Hash className="size-3" />}
+              label={`Label: ${labelById.get(labelId)?.name ?? labelId}`}
+              onRemove={() => toggleLabelFilter(labelId)}
+            />
+          ))}
+
+          {labelFilters.length > 1 && labelFilterMode === "all" && (
+            <FilterChip
+              label="Match all labels"
+              onRemove={() => setLabelFilterMode("any")}
+            />
+          )}
 
           {/* Date chips */}
           {(dueFrom || dueTo) && (
@@ -447,6 +485,8 @@ function IssueListPageContent() {
   const assigneeFilters = useViewStore((state) => state.assigneeFilters);
   const includeNoAssignee = useViewStore((state) => state.includeNoAssignee);
   const creatorFilters = useViewStore((state) => state.creatorFilters);
+  const labelFilters = useViewStore((state) => state.labelFilters);
+  const labelFilterMode = useViewStore((state) => state.labelFilterMode);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -478,6 +518,7 @@ function IssueListPageContent() {
     return {
       ...(debouncedSearch ? { search: debouncedSearch } : {}),
       ...(projectId ? { project_id: projectId } : {}),
+      ...(labelFilters.length > 0 ? { label_ids: [...labelFilters].sort(), label_match_mode: labelFilterMode } : {}),
       ...(dueFrom ? { due_from: dueFrom } : {}),
       ...(dueTo ? { due_to: dueTo } : {}),
       ...(startFrom ? { start_from: startFrom } : {}),
@@ -485,7 +526,7 @@ function IssueListPageContent() {
       ...(endFrom ? { end_from: endFrom } : {}),
       ...(endTo ? { end_to: endTo } : {}),
     };
-  }, [debouncedSearch, projectId, dueFrom, dueTo, startFrom, startTo, endFrom, endTo]);
+  }, [debouncedSearch, projectId, labelFilters, labelFilterMode, dueFrom, dueTo, startFrom, startTo, endFrom, endTo]);
 
   const issuesQuery = useIssuesListQuery(queryParams);
   const allIssues = issuesQuery.data?.issues ?? [];
@@ -532,6 +573,8 @@ function IssueListPageContent() {
     assigneeFilters,
     includeNoAssignee,
     creatorFilters,
+    labelFilters,
+    labelFilterMode,
   ]);
 
   const resetServerFilters = () => {
@@ -547,7 +590,7 @@ function IssueListPageContent() {
   };
 
   const hasServerFilters = Boolean(
-    debouncedSearch || projectId || dueFrom || dueTo || startFrom || startTo || endFrom || endTo,
+    debouncedSearch || projectId || labelFilters.length > 0 || dueFrom || dueTo || startFrom || startTo || endFrom || endTo,
   );
 
   if (issuesQuery.isPending && allIssues.length === 0) {
