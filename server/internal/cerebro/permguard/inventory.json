@@ -1869,6 +1869,18 @@
       "exempt": "local-only \u2014 runs the MCP stdio server in this process"
     },
     {
+      "id": "orchestrate run",
+      "exempt": "local-only \u2014 simulates a plan locally; live agent dispatch is server-side and gated"
+    },
+    {
+      "id": "orchestrate validate",
+      "exempt": "local-only \u2014 reads a plan file and reports validation issues"
+    },
+    {
+      "id": "orchestrate waves",
+      "exempt": "local-only \u2014 reads a plan file and prints the computed execution waves"
+    },
+    {
       "id": "project create",
       "gate": "via:POST /api/projects/"
     },

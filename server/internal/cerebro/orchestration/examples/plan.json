@@ -1,0 +1,11 @@
+{
+  "title": "analyse -> build frontend + API (parallel) -> test -> deploy (exclusive)",
+  "concurrency": 4,
+  "nodes": [
+    { "id": "analyse",        "kind": "agent",   "prompt": "Analyse the request, produce a spec" },
+    { "id": "build-frontend", "kind": "agent",   "prompt": "Build the UI",  "dependsOn": ["analyse"] },
+    { "id": "build-api",      "kind": "agent",   "prompt": "Build the API", "dependsOn": ["analyse"] },
+    { "id": "test",           "kind": "command", "command": "make check",   "dependsOn": ["build-frontend", "build-api"] },
+    { "id": "deploy",         "kind": "command", "command": "deploy.sh",    "dependsOn": ["test"], "write": true }
+  ]
+}
