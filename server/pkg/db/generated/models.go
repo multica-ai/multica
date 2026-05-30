@@ -727,6 +727,15 @@ type CerebroWorkflowRun struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroWorkspaceAuthSetting struct {
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	GoogleSignupDomains []string           `json:"google_signup_domains"`
+	DefaultRole         string             `json:"default_role"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	UpdatedByUserID     pgtype.UUID        `json:"updated_by_user_id"`
+}
+
 type CerebroWorkspaceDefaultGroup struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	GroupID     pgtype.UUID        `json:"group_id"`

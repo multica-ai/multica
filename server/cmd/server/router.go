@@ -47,6 +47,8 @@ import (
 	cerebrosandboxprofile "github.com/multica-ai/multica/server/internal/cerebro/sandboxprofile"
 	// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject CRUD + assignment handler import
 	cerebroroles "github.com/multica-ai/multica/server/internal/cerebro/roles"
+	// CEREBRO-PATCH(cerebro-identity-routes): FIR-2523 Google Workspace identity-source handler import
+	cerebroidentity "github.com/multica-ai/multica/server/internal/cerebro/identity"
 	// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox handler import
 	cerebroapprovals "github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 permission model handler import
@@ -291,6 +293,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant control plane handler + JEH-1212 upstream queries for subject validation
 	cerebroGrantsHandler := cerebrogrants.NewHandler(cerebrogrants.New(cerebroQueries, queries, pool, bus)) // CEREBRO-PATCH(cerebro-grants-routes): JEH-1213
 	cerebroRolesHandler := cerebroroles.New(cerebroQueries, queries, bus)                                   // CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject handler
+	// CEREBRO-PATCH(cerebro-identity-handler): FIR-2523 Google Workspace identity-source handler + provisioner seam.
+	cerebroIdentityService := cerebroidentity.New(cerebroQueries, queries)
+	cerebroIdentityHandler := cerebroidentity.NewHandler(cerebroIdentityService)
+	h.IdentityProvisioner = cerebroIdentityService
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler (data layer the permission screen reads from).
 	cerebroToolPolicyHandler := cerebrotoolpolicy.NewHandler(cerebrotoolpolicy.NewStore(pool))
 	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler.
@@ -846,6 +852,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/{id}", cerebroRolesHandler.Delete)
 					r.Post("/{id}/assignments", cerebroRolesHandler.Assign)
 					r.Delete("/{id}/assignments/{subjectType}/{subjectId}", cerebroRolesHandler.Unassign)
+				})
+			})
+
+			// CEREBRO-PATCH(cerebro-identity-routes): FIR-2523 Google Workspace identity-source settings endpoints.
+			r.Route("/api/cerebro/workspaces/{id}/auth-settings", func(r chi.Router) {
+				r.Get("/", cerebroIdentityHandler.Get)
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+					r.Put("/", cerebroIdentityHandler.Update)
 				})
 			})
 

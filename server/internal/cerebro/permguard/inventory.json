@@ -1065,6 +1065,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/cerebro/workspaces/{id}/auth-settings/",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "PUT /api/channels/{id}/agents/{agentId}/listen-mode",
       "gate": "workspace_member"
     },

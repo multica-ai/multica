@@ -45,7 +45,9 @@ export type CerebroFlagKey =
   // FIR-2490: Firtal-branded welcome page for new members (replaces upstream onboarding).
   | "cerebro_firtal_welcome"
   // FIR-2504: show similar open issues + LLM verdict when creating an issue.
-  | "cerebro_duplicate_check_on_create";
+  | "cerebro_duplicate_check_on_create"
+  // FIR-2523: Auth & Permissions settings tab + Google Workspace auto-membership hook.
+  | "cerebro_google_identity";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -110,6 +112,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // of duplicating. Defaults ON so the feature lands behind the standard
   // workspace/user override (Off restores upstream create flow).
   cerebro_duplicate_check_on_create: true,
+  // FIR-2523: Auth & Permissions tab + Google Workspace auto-membership.
+  // Defaults OFF: the table + hook still exist but the settings UI stays
+  // hidden until a workspace owner explicitly opts in.
+  cerebro_google_identity: false,
 };
 
 /**
@@ -425,6 +431,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "When composing a new issue, show up to 3 similar open issues with an LLM-judged verdict (duplicate / related) so the user can open the existing sag or create the new one as a sub-issue. Off restores the upstream create flow. Requires the Firtal AI Gateway credentials. FIR-2504.",
+  },
+  {
+    key: "cerebro_google_identity",
+    label: "Google Workspace identity",
+    group: "permissions",
+    description:
+      "Adds an Auth & Permissions tab to workspace settings: owner/admin can list email domains that auto-provision into this workspace on first Google login, and pick the default role new members get. Off hides the tab and disables the auto-membership hook. FIR-2523.",
   },
 ];
 

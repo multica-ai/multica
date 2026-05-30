@@ -1146,6 +1146,25 @@ export class ApiClient {
     return this.fetch<T>(`/api/cerebro/references?${params.toString()}`);
   }
 
+  // CEREBRO-PATCH(cerebro-identity-client): FIR-2523 — workspace Google
+  // identity settings. Body is `unknown` so the cerebro-identity package owns
+  // the Zod schema (lenient parsing per API Response Compatibility rules).
+  async getCerebroAuthSettings<T = unknown>(workspaceId: string): Promise<T> {
+    return this.fetch<T>(
+      `/api/cerebro/workspaces/${encodeURIComponent(workspaceId)}/auth-settings`,
+    );
+  }
+
+  async updateCerebroAuthSettings<T = unknown>(
+    workspaceId: string,
+    payload: { google_signup_domains: string[]; default_role: string },
+  ): Promise<T> {
+    return this.fetch<T>(
+      `/api/cerebro/workspaces/${encodeURIComponent(workspaceId)}/auth-settings`,
+      { method: "PUT", body: JSON.stringify(payload) },
+    );
+  }
+
   // CEREBRO-PATCH(cerebro-duplicate-check-client): FIR-2504 — ask the server
   // for the top similar open issues + LLM verdict when composing a new issue.
   // Body is `unknown` so the cerebro-duplicate-check package owns the schema.
