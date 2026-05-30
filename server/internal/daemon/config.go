@@ -405,7 +405,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		BackoffFactor: DefaultRateLimitBackoffFactor,
 	}
 
-	// Auto-update config: default -> env override -> CLI override.
+	// Auto-update config: default -> manifest-url inference -> env override -> CLI override.
 	//
 	// Default is opt-in on Multica Cloud (api.multica.ai) and opt-out for
 	// self-hosted instances. Self-host operators frequently run a fork with
@@ -413,8 +413,18 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// GitHub release would clobber that work; they also commonly stay on an
 	// older server build, which a fresh CLI may no longer talk to. Keeping
 	// auto-update off by default for self-host avoids both footguns (MUL-2381).
-	// Operators on either side can flip the default with MULTICA_DAEMON_AUTO_UPDATE.
+	//
+	// However, when update_manifest_url is explicitly configured (via env or
+	// CLI config), the operator has set up a dedicated update source for their
+	// fork builds — the MUL-2381 concern (clobbering fork work with upstream
+	// releases) does not apply. In that case we default to enabled (OPE-1936).
+	//
+	// Operators on either side can still flip the default with
+	// MULTICA_DAEMON_AUTO_UPDATE.
 	autoUpdateEnabled := isOfficialCloudServer(serverBaseURL)
+	if !autoUpdateEnabled && hasExplicitUpdateManifestURL(profile, configPath) {
+		autoUpdateEnabled = true
+	}
 	if v := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_AUTO_UPDATE")); v != "" {
 		switch strings.ToLower(v) {
 		case "false", "0", "no", "off":
@@ -488,6 +498,23 @@ func isOfficialCloudServer(baseURL string) bool {
 		return false
 	}
 	return strings.EqualFold(u.Hostname(), officialCloudHost)
+}
+
+// hasExplicitUpdateManifestURL reports whether the operator has configured an
+// explicit update_manifest_url — either via MULTICA_UPDATE_MANIFEST_URL env var
+// or the "update_manifest_url" field in the CLI config file. When set, the
+// daemon has a dedicated update source for fork builds, so the MUL-2381 concern
+// (clobbering fork work with upstream GitHub releases) does not apply and
+// auto-update can safely default to enabled.
+func hasExplicitUpdateManifestURL(profile, configPath string) bool {
+	if v := strings.TrimSpace(os.Getenv("MULTICA_UPDATE_MANIFEST_URL")); v != "" {
+		return true
+	}
+	cfg, err := cli.LoadCLIConfigForInstance(profile, configPath)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(cfg.UpdateManifestURL) != ""
 }
 
 // NormalizeServerBaseURL converts a WebSocket or HTTP URL to a base HTTP URL.
