@@ -56,6 +56,13 @@ build_runtime() {
   local version="${VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}"
   local commit="${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 
+  # Pin the claude-code version from packaging/claude-code-version. The
+  # watcher workflow (.github/workflows/claude-version-watch.yml) bumps
+  # this file via PR when a new release lands on npm.
+  local claude_code_version
+  claude_code_version="$(tr -d '[:space:]' < "$ROOT/packaging/claude-code-version")"
+  [ -n "$claude_code_version" ] || { echo "packaging/claude-code-version is empty" >&2; exit 1; }
+
   echo "==> Building $base (version=$version commit=$commit)"
   docker build --platform "$platform" \
     --build-arg VERSION="$version" \
@@ -67,9 +74,10 @@ build_runtime() {
     docker push "$base"
   fi
 
-  echo "==> Building $claude (FROM $base)"
+  echo "==> Building $claude (FROM $base, claude-code=$claude_code_version)"
   docker build --platform "$platform" \
     --build-arg BASE_IMAGE="$base" \
+    --build-arg CLAUDE_CODE_VERSION="$claude_code_version" \
     -f packaging/docker/runtime/Dockerfile.claude \
     -t "$claude" .
   if [[ "$push" -eq 1 ]]; then
