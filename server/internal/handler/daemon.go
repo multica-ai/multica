@@ -1558,6 +1558,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+			resp.IssueKind = issue.Kind // CEREBRO-PATCH(agent-task-issue-kind): surface issue.kind so trace upload labels channel/dm runs (FIR-2438)
 			// CEREBRO-PATCH(persona-spawn-subject): JEH-1080 — resolve the spawning user + groups for the persona-hook facts.
 			sub := cerebropersona.ResolveSpawnSubject(r.Context(), h.GroupPermissions, issue)
 			resp.PersonaSpawnUserID = sub.UserID
@@ -1647,6 +1648,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
 				resp.TriggerCommentContent = comment.Content
 				resp.TriggerAuthorType = comment.AuthorType
+				resp.TriggerUserID = uuidToString(comment.AuthorID) // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggerer for the trace user-label (FIR-2438)
 				switch comment.AuthorType {
 				case "agent":
 					if comment.AuthorID.Valid {

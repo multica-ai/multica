@@ -62,6 +62,8 @@ type Task struct {
 	TriggerCommentContent string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	TriggerAuthorType     string                `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind for the triggering comment
 	TriggerAuthorName     string                `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
+	TriggerUserID         string                `json:"trigger_user_id,omitempty"`         // CEREBRO-PATCH(daemon-task-trigger-user-id): UUID of the triggering comment author — trace user-label (FIR-2438)
+	IssueKind             string                `json:"issue_kind,omitempty"`              // CEREBRO-PATCH(daemon-task-issue-kind): issue.kind ('channel'/'dm'/'') — lets trace upload label the surface (FIR-2438)
 	// CEREBRO-PATCH(daemon-task-issue-snapshot): FIR-2384 — pre-rendered issue + recent thread, set only when the workspace's snapshot_prompt cost saving is "on"; inlined into the start prompt so the agent skips the issue get + comment list reads.
 	IssueSnapshot string `json:"issue_snapshot,omitempty"`
 	// CEREBRO-PATCH(daemon-task-bundle-context-hint): FIR-2384 — set when the workspace's bundled_read cost saving is "on"; the start prompt then points the agent at a single `multica issue context` call instead of separate issue get + comment list reads.

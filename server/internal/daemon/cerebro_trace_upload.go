@@ -57,6 +57,13 @@ func (d *Daemon) enqueueTraceUpload(task Task, provider string, result TaskResul
 		// The daemon's nearest signal is the triggering comment's author type;
 		// empty for runs with no triggering comment (the registry stores null).
 		CreatedByType: task.TriggerAuthorType,
+		// Origin labels (FIR-2438 v1.1): where the run was triggered + who
+		// triggered it. surface is derived from the task's own fields; the
+		// triggerer's display name is the nearest identity the daemon holds
+		// (its UUID is not on the daemon Task struct — a separate follow-up).
+		Surface:         traceSurface(task), // CEREBRO-PATCH(daemon-trace-upload-channel-label): label channel/dm + trigger user id (FIR-2438)
+		TriggerUserID:   task.TriggerUserID,
+		TriggerUserName: traceTriggerUserName(task),
 	}
 	if task.Agent != nil {
 		sidecar.AgentName = task.Agent.Name
@@ -76,4 +83,39 @@ func (d *Daemon) enqueueTraceUpload(task Task, provider string, result TaskResul
 	if err := d.traceUploader.Enqueue(sidecar, path); err != nil {
 		d.logger.Warn("trace upload: enqueue failed, skipping", "task", shortID(task.ID), "error", err)
 	}
+}
+
+// traceSurface classifies where a run was triggered from the task's own fields.
+// Order matters: chat and autopilot are unambiguous; channels (issues with
+// kind 'channel'/'dm') are distinguished from ordinary issues so the trace can
+// be sliced by surface (Jesper 30/5: "channel er issues med kind = channel").
+// An ordinary issue task is "issue" when a triggering comment exists, else
+// "issue_direct" (a direct assignment). Empty when none apply (registry → null).
+func traceSurface(task Task) string {
+	switch {
+	case task.ChatSessionID != "":
+		return "chat"
+	case task.AutopilotID != "":
+		return "autopilot"
+	case task.IssueKind == "channel":
+		return "channel"
+	case task.IssueKind == "dm":
+		return "dm"
+	case task.IssueID != "" && task.TriggerCommentID != "":
+		return "issue"
+	case task.IssueID != "":
+		return "issue_direct"
+	default:
+		return ""
+	}
+}
+
+// traceTriggerUserName is the display name of whoever triggered the run: the
+// triggering comment's author for issue tasks, else the requesting user (chat /
+// direct). Empty when neither is set.
+func traceTriggerUserName(task Task) string {
+	if task.TriggerAuthorName != "" {
+		return task.TriggerAuthorName
+	}
+	return task.RequestingUserName
 }
