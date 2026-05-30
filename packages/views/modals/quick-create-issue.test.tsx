@@ -79,6 +79,19 @@ vi.mock("@multica/core/hooks", () => ({
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ name: "Test Workspace" }),
+  useWorkspacePaths: () => ({ issueDetail: (id: string) => `/test/issues/${id}` }),
+}));
+
+// FIR-2550: duplicate-check overlay now mounts inside AgentCreatePanel.
+// Stub the panel so the existing tests don't need the real flag/feature
+// plumbing — they cover the agent-create flow itself, not the panel. The
+// panel's own behavior is exercised in cerebro-duplicate-check/views/*.
+vi.mock("@multica/cerebro-duplicate-check/views", () => ({
+  DuplicateCheckPanel: () => null,
+}));
+
+vi.mock("../navigation", () => ({
+  useNavigation: () => ({ push: vi.fn() }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({

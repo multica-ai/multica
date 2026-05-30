@@ -48,6 +48,14 @@ import {
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
+// CEREBRO-PATCH(quick-create-duplicate-check-imports): FIR-2550. Mount the
+// same duplicate-check overlay the manual flow uses, gated on the same
+// cerebro_duplicate_check_on_create flag, so the agent flow can't enqueue a
+// dubletter through the back door.
+import { DuplicateCheckPanel } from "@multica/cerebro-duplicate-check/views";
+import type { DuplicateMatch } from "@multica/cerebro-duplicate-check/core";
+import { useNavigation } from "../navigation";
+import { useWorkspacePaths } from "@multica/core/paths";
 
 type ActorSelection =
   | { type: "agent"; id: string }
@@ -248,6 +256,45 @@ export function AgentCreatePanel({
   const [sentCount, setSentCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
+  // CEREBRO-PATCH(quick-create-duplicate-check-state): FIR-2550. Mirror the
+  // manual flow: a dismiss flag the user flips with X, a match list the
+  // panel reports up so we can disable Submit while strong matches are
+  // visible (the AC: "stærke matches → opretter kun efter bekræftelse").
+  const [duplicateDismissed, setDuplicateDismissed] = useState(false);
+  const [duplicateMatches, setDuplicateMatches] = useState<DuplicateMatch[]>([]);
+  const router = useNavigation();
+  const p = useWorkspacePaths();
+
+  // Derive a (title, description) pair from the raw markdown prompt. The
+  // duplicate-check gateway expects a title + optional description; the agent
+  // flow has neither field — only a freeform prompt. First non-empty line
+  // (capped) becomes the title, the rest becomes the description, so the
+  // gateway candidate-finder gets the same shape of input the manual flow
+  // sends and the cached query key stays stable across renders.
+  const derivedTitle = useMemo(() => {
+    const trimmed = promptDraft.trim();
+    if (!trimmed) return "";
+    const firstLine = (trimmed.split("\n", 1)[0] ?? "").trim();
+    return firstLine.slice(0, 200);
+  }, [promptDraft]);
+  const derivedDescription = useMemo(() => {
+    const trimmed = promptDraft.trim();
+    const newlineIdx = trimmed.indexOf("\n");
+    if (newlineIdx < 0) return undefined;
+    const rest = trimmed.slice(newlineIdx + 1).trim();
+    return rest || undefined;
+  }, [promptDraft]);
+
+  const handleMatchesChange = useCallback((m: DuplicateMatch[]) => {
+    setDuplicateMatches(m);
+  }, []);
+
+  // Blocking matches = the panel is showing actionable cards AND the user
+  // hasn't dismissed them. While this is true, Submit is disabled and we
+  // early-return out of the submit handler.
+  const hasBlockingMatches =
+    !duplicateDismissed && duplicateMatches.length > 0;
+
   // Image paste/drop support: route uploads through the same helper Advanced
   // uses, so users can paste screenshots straight into the prompt and the
   // agent receives them as embedded markdown image URLs in the prompt.
@@ -271,6 +318,10 @@ export function AgentCreatePanel({
   const submit = async () => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
     if (!md || !actor || submitting || versionBlocked || uploading) return;
+    // CEREBRO-PATCH(quick-create-duplicate-check-block): FIR-2550. Strong
+    // matches block the submit until the user explicitly Opens one, picks
+    // "Skjul" (X) to mean "this is something new", or types past the match.
+    if (hasBlockingMatches) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -297,6 +348,9 @@ export function AgentCreatePanel({
         setJustSent(true);
         setTimeout(() => setJustSent(false), 1500);
         requestAnimationFrame(() => editorRef.current?.focus());
+        // FIR-2550: a new draft starts fresh — re-enable duplicate-check.
+        setDuplicateDismissed(false);
+        setDuplicateMatches([]);
       } else {
         onClose();
       }
@@ -473,8 +527,30 @@ export function AgentCreatePanel({
           />
         </div>
 
+        {/* CEREBRO-PATCH(quick-create-duplicate-check-overlay-mount): FIR-2550.
+            Same overlay the manual create-issue modal uses — anchored above
+            the footer so the duplicate-check panel grows upward over the
+            action buttons. Hidden once the user dismisses, and the panel
+            already gates itself on cerebro_duplicate_check_on_create. */}
+        <div className="relative shrink-0">
+          {!duplicateDismissed && (
+            <div className="absolute inset-x-0 bottom-full z-10 max-h-[60vh] overflow-y-auto">
+              <DuplicateCheckPanel
+                title={derivedTitle}
+                description={derivedDescription}
+                projectId={projectId ?? undefined}
+                variant="overlay"
+                onDismiss={() => setDuplicateDismissed(true)}
+                onOpen={(m) => {
+                  router.push(p.issueDetail(m.id));
+                  onClose();
+                }}
+                onMatchesChange={handleMatchesChange}
+              />
+            </div>
+          )}
         {/* Footer */}
-        <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-h-7 items-center gap-2">
             {/* CEREBRO-PATCH(file-upload-button-api): new onAttach/onEmbed
                 prop API on FileUploadButton (popup picker). */}
@@ -511,11 +587,13 @@ export function AgentCreatePanel({
             <Button
               size="sm"
               onClick={submit}
-              disabled={!hasContent || !actor || submitting || versionBlocked || uploading}
+              disabled={!hasContent || !actor || submitting || versionBlocked || uploading || hasBlockingMatches}
               title={
                 versionBlocked
                   ? t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })
-                  : undefined
+                  : hasBlockingMatches
+                    ? "Bekræft først om det er en af de lignende issues herover, eller skjul listen for at oprette alligevel."
+                    : undefined
               }
               className={justSent ? "min-w-28 !bg-emerald-600 !text-white" : "min-w-28"}
             >
@@ -524,6 +602,7 @@ export function AgentCreatePanel({
               ) : `${t(($) => $.create_issue.agent.submit)} (${formatShortcut(modKey, enterKey)})`}
             </Button>
           </div>
+        </div>
         </div>
     </>
   );

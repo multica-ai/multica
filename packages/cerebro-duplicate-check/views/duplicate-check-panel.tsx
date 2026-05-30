@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { AlertTriangle, ExternalLink, GitBranch, Loader2, Sparkles, X } from "lucide-react";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { api } from "@multica/core/api";
 import { cn } from "@multica/ui/lib/utils";
 import { useDuplicateCheck } from "../core/queries";
 import type { DuplicateMatch } from "../core/types";
+
+// Stable empty array so onMatchesChange consumers (FIR-2550) don't get a
+// fresh reference on every render and end up in a setState→re-render loop.
+const EMPTY_MATCHES: DuplicateMatch[] = [];
 
 /**
  * DuplicateCheckPanel — "Findes det her allerede?" panel inside the
@@ -27,12 +31,18 @@ export function DuplicateCheckPanel({
   onAttachAsSubIssue,
   variant = "inline",
   onDismiss,
+  onMatchesChange,
 }: {
   title: string;
   description?: string;
   projectId?: string;
   onOpen: (match: DuplicateMatch) => void;
-  onAttachAsSubIssue: (match: DuplicateMatch) => void;
+  /**
+   * Optional. When omitted the "Opret som under-issue" action is hidden — used
+   * by the agent-create flow (FIR-2550) where the modal closes immediately
+   * after submit, so there's no place to thread a parent through.
+   */
+  onAttachAsSubIssue?: (match: DuplicateMatch) => void;
   /**
    * "inline" (default): panel renders in normal document flow with the legacy
    *   look (mx-5 + muted card). Used in older mounts.
@@ -45,6 +55,13 @@ export function DuplicateCheckPanel({
   variant?: "inline" | "overlay";
   /** Called when the user clicks the dismiss (X) button (overlay variant). */
   onDismiss?: () => void;
+  /**
+   * Optional. Fired whenever the actionable match list changes — used by the
+   * agent-create flow (FIR-2550) to disable the Submit button while strong
+   * matches are visible, so the user must explicitly Open, Dismiss, or choose
+   * "create new" before the issue is enqueued.
+   */
+  onMatchesChange?: (matches: DuplicateMatch[]) => void;
 }) {
   const flagOn = useFeatureFlag("cerebro_duplicate_check_on_create");
   const query = useDuplicateCheck({
@@ -54,7 +71,7 @@ export function DuplicateCheckPanel({
     enabled: flagOn,
   });
 
-  const matches = query.data ?? [];
+  const matches = useMemo(() => query.data ?? EMPTY_MATCHES, [query.data]);
   const shownKeyRef = useRef<string | null>(null);
   // Adoption telemetry (FIR-2504): fire `dismissed` for any previously-shown
   // match set the user moved past without acting on. Server-side `shown` is
@@ -65,6 +82,13 @@ export function DuplicateCheckPanel({
     const key = matches.map((m) => m.id).join(",");
     shownKeyRef.current = key;
   }, [flagOn, matches]);
+  // FIR-2550: notify the parent of the current match set so the agent-create
+  // modal can gate its Submit button on "no strong matches visible". Fires
+  // even when the flag is off (callers want to see the empty list and unblock
+  // submit) — bail out of the panel render path further down, not here.
+  useEffect(() => {
+    onMatchesChange?.(matches);
+  }, [matches, onMatchesChange]);
 
   if (!flagOn) return null;
 
@@ -120,15 +144,19 @@ export function DuplicateCheckPanel({
               });
               onOpen(m);
             }}
-            onAttachAsSubIssue={() => {
-              void api.recordCerebroDuplicateCheckEvent({
-                action: "attached",
-                match_id: m.id,
-                verdict: m.verdict,
-                match_count: matches.length,
-              });
-              onAttachAsSubIssue(m);
-            }}
+            onAttachAsSubIssue={
+              onAttachAsSubIssue
+                ? () => {
+                    void api.recordCerebroDuplicateCheckEvent({
+                      action: "attached",
+                      match_id: m.id,
+                      verdict: m.verdict,
+                      match_count: matches.length,
+                    });
+                    onAttachAsSubIssue(m);
+                  }
+                : undefined
+            }
           />
         ))}
       </ul>
@@ -143,7 +171,8 @@ function MatchRow({
 }: {
   match: DuplicateMatch;
   onOpen: () => void;
-  onAttachAsSubIssue: () => void;
+  /** Optional — when omitted the "Opret som under-issue" action is hidden. */
+  onAttachAsSubIssue?: () => void;
 }) {
   const isDuplicate = match.verdict === "duplicate";
   return (
@@ -192,17 +221,21 @@ function MatchRow({
           <ExternalLink className="h-3 w-3" />
           Åbn eksisterende
         </button>
-        <span aria-hidden className="text-muted-foreground">
-          ·
-        </span>
-        <button
-          type="button"
-          onClick={onAttachAsSubIssue}
-          className="inline-flex items-center gap-1 text-foreground underline-offset-2 hover:underline"
-        >
-          <GitBranch className="h-3 w-3" />
-          Opret som under-issue
-        </button>
+        {onAttachAsSubIssue && (
+          <>
+            <span aria-hidden className="text-muted-foreground">
+              ·
+            </span>
+            <button
+              type="button"
+              onClick={onAttachAsSubIssue}
+              className="inline-flex items-center gap-1 text-foreground underline-offset-2 hover:underline"
+            >
+              <GitBranch className="h-3 w-3" />
+              Opret som under-issue
+            </button>
+          </>
+        )}
       </div>
     </li>
   );
