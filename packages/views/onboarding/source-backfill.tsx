@@ -316,7 +316,7 @@ export function SourceBackfillView({
               className="mr-auto text-xs text-muted-foreground"
             >
               {canSubmit
-                ? t(($) => $.step_question.hint_continue)
+                ? t(($) => $.source_backfill.hint_ready)
                 : t(($) => $.step_question.hint_pick)}
             </span>
             <div className="flex items-center gap-2">
