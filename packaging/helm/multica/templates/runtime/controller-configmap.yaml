@@ -18,4 +18,12 @@ data:
         storageClass: {{ default $.Values.runtime.controller.workdir.storageClass "" | quote }}
 {{- end }}
     imagePullSecret: {{ .Values.image.pullSecret | quote }}
+    {{- if .Values.runtime.claudeBroker.enabled }}
+    # When the broker is enabled, the controller wires worker Jobs to use
+    # apiKeyHelper instead of the legacy claude-oauth-secret expansion.
+    claudeBroker:
+      enabled: true
+      clientConfigMap: multica-claude-broker-client
+      apiKeyHelperTTLMs: {{ .Values.runtime.claudeBroker.apiKeyHelperTTLMs }}
+    {{- end }}
 {{- end }}

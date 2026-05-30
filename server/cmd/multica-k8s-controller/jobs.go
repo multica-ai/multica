@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/multica-ai/multica/server/internal/daemon"
 
@@ -95,9 +96,16 @@ func EnsurePVC(ctx context.Context, k kubernetes.Interface, namespace string, r 
 }
 
 // DispatchJob writes the Task payload to a ConfigMap and creates the worker Job
-// that mounts the payload + workdir PVC + the three worker Secrets, and runs
+// that mounts the payload + workdir PVC + the worker Secrets, and runs
 // `multica run-task`. Returns the Job name.
-func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, r Registered, t daemon.Task, imagePullSecret, pvc string) (string, error) {
+//
+// When cb.Enabled is true, the Job is wired to use the in-cluster
+// multica-claude-broker via an apiKeyHelper script (mounted from the broker's
+// client ConfigMap) instead of the legacy claude-auth init container that
+// expanded a refresh_token tarball into ~/.claude/. The two modes are
+// mutually exclusive — when broker mode is on, claude-oauth-secret is not
+// mounted at all (worker pods never see the refresh_token).
+func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, r Registered, t daemon.Task, imagePullSecret, pvc string, cb ClaudeBrokerOptions) (string, error) {
 	payload, err := json.Marshal(t)
 	if err != nil {
 		return "", fmt.Errorf("marshal task: %w", err)
@@ -132,6 +140,75 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 		"sh", "-c",
 		"cp /home/multica/.ssh-src/id_ed25519 /home/multica/.ssh/id_ed25519 2>/dev/null; chmod 600 /home/multica/.ssh/id_ed25519 2>/dev/null; true",
 	}
+
+	// Volumes always present.
+	volumes := []corev1.Volume{
+		{Name: "payload", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: cmName}}}},
+		{Name: "claude-home", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		{Name: "git-ssh", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "multica-git-ssh", DefaultMode: &mode}}},
+		{Name: "work", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: pvc}}},
+	}
+
+	// runtask container template — claude-home + base mounts always present;
+	// broker mode adds CLAUDE_CODE_API_KEY_HELPER_TTL_MS env + helper script
+	// mount + a settings.json subpath into ~/.claude.
+	runtaskEnv := []corev1.EnvVar{
+		{Name: "MULTICA_SERVER_URL", Value: "http://multica-backend." + namespace + ".svc:8080"},
+		{Name: "MULTICA_TOKEN", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "multica-token"}, Key: "token"}}},
+		{Name: "HOME", Value: "/home/multica"},
+	}
+	runtaskMounts := []corev1.VolumeMount{
+		{Name: "payload", MountPath: "/etc/task"},
+		{Name: "claude-home", MountPath: "/home/multica/.claude"},
+		{Name: "git-ssh", MountPath: "/home/multica/.ssh-src", ReadOnly: true},
+		{Name: "work", MountPath: "/work"},
+	}
+
+	// initContainers default to the legacy claude-auth path; broker mode
+	// drops them entirely (the broker owns auth, worker pods have no
+	// refresh_token to expand).
+	var initContainers []corev1.Container
+
+	if cb.Enabled {
+		// Broker mode: mount the apiKeyHelper script and settings.json from
+		// the broker's client CM. exec bit is needed so claude can run the
+		// helper directly.
+		execMode := int32(0o755)
+		volumes = append(volumes,
+			corev1.Volume{Name: "claude-broker-client", VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: cb.ClientCMName},
+					DefaultMode:          &execMode,
+				},
+			}},
+		)
+		runtaskMounts = append(runtaskMounts,
+			corev1.VolumeMount{Name: "claude-broker-client", MountPath: "/etc/claude-broker", ReadOnly: true},
+			// settings.json drops into ~/.claude via subPath — keeps the rest
+			// of ~/.claude as a writable EmptyDir for per-task state.
+			corev1.VolumeMount{Name: "claude-broker-client", MountPath: "/home/multica/.claude/settings.json", SubPath: "settings.json", ReadOnly: true},
+		)
+		runtaskEnv = append(runtaskEnv, corev1.EnvVar{
+			Name:  "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+			Value: strconv.Itoa(cb.HelperTTLMs),
+		})
+	} else {
+		// Legacy mode: mount the OAuth tarball Secret and expand it via the
+		// claude-auth init container into ~/.claude/.
+		volumes = append(volumes,
+			corev1.Volume{Name: "claude-oauth-secret", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "multica-claude-oauth"}}},
+		)
+		initContainers = []corev1.Container{{
+			Name: "claude-auth", Image: r.Image,
+			Command: []string{"sh", "-c", "tar xzf /secret/claude-auth.tgz -C /home/multica/.claude --strip-components=1"},
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: "claude-oauth-secret", MountPath: "/secret", ReadOnly: true},
+				{Name: "claude-home", MountPath: "/home/multica/.claude"},
+			},
+			SecurityContext: containerSC,
+		}}
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: jobName, Namespace: namespace, Labels: jobLabels(r, t),
@@ -150,40 +227,17 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 						FSGroup:        &gid,
 						SeccompProfile: &seccompRuntimeDefault,
 					},
-					InitContainers: []corev1.Container{{
-						Name: "claude-auth", Image: r.Image,
-						Command: []string{"sh", "-c", "tar xzf /secret/claude-auth.tgz -C /home/multica/.claude --strip-components=1"},
-						VolumeMounts: []corev1.VolumeMount{
-							{Name: "claude-oauth-secret", MountPath: "/secret", ReadOnly: true},
-							{Name: "claude-home", MountPath: "/home/multica/.claude"},
-						},
-						SecurityContext: containerSC,
-					}},
+					InitContainers: initContainers,
 					Containers: []corev1.Container{{
-						Name:    "runtask",
-						Image:   r.Image,
-						Command: []string{"multica", "run-task", "--task-file", "/etc/task/task.json", "--workspaces-root", "/work"},
-						Env: []corev1.EnvVar{
-							{Name: "MULTICA_SERVER_URL", Value: "http://multica-backend." + namespace + ".svc:8080"},
-							{Name: "MULTICA_TOKEN", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "multica-token"}, Key: "token"}}},
-							{Name: "HOME", Value: "/home/multica"},
-						},
-						VolumeMounts: []corev1.VolumeMount{
-							{Name: "payload", MountPath: "/etc/task"},
-							{Name: "claude-home", MountPath: "/home/multica/.claude"},
-							{Name: "git-ssh", MountPath: "/home/multica/.ssh-src", ReadOnly: true},
-							{Name: "work", MountPath: "/work"},
-						},
+						Name:            "runtask",
+						Image:           r.Image,
+						Command:         []string{"multica", "run-task", "--task-file", "/etc/task/task.json", "--workspaces-root", "/work"},
+						Env:             runtaskEnv,
+						VolumeMounts:    runtaskMounts,
 						Lifecycle:       &corev1.Lifecycle{PostStart: &corev1.LifecycleHandler{Exec: &corev1.ExecAction{Command: postStart}}},
 						SecurityContext: containerSC,
 					}},
-					Volumes: []corev1.Volume{
-						{Name: "payload", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: cmName}}}},
-						{Name: "claude-oauth-secret", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "multica-claude-oauth"}}},
-						{Name: "claude-home", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-						{Name: "git-ssh", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "multica-git-ssh", DefaultMode: &mode}}},
-						{Name: "work", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: pvc}}},
-					},
+					Volumes: volumes,
 				},
 			},
 		},

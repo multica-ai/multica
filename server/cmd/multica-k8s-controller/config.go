@@ -19,8 +19,9 @@ type Config struct {
 	Token         string
 	Namespace     string
 
-	Workspaces      []WorkspaceConfig `yaml:"workspaces"`
-	ImagePullSecret string            `yaml:"imagePullSecret"`
+	Workspaces      []WorkspaceConfig    `yaml:"workspaces"`
+	ImagePullSecret string               `yaml:"imagePullSecret"`
+	ClaudeBroker    ClaudeBrokerOptions  `yaml:"claudeBroker"`
 
 	PollInterval      time.Duration
 	HeartbeatInterval time.Duration
@@ -37,6 +38,17 @@ type WorkspaceConfig struct {
 	RuntimeImage string `yaml:"runtimeImage"`
 	PVCSize      string `yaml:"pvcSize"`
 	StorageClass string `yaml:"storageClass"`
+}
+
+// ClaudeBrokerOptions controls how worker Jobs are configured to fetch
+// Anthropic bearers. When Enabled, DispatchJob omits the claude-auth init
+// container + claude-oauth-secret volume entirely and instead mounts the
+// broker's apiKeyHelper ConfigMap; claude calls the helper to get a fresh
+// access_token whenever it needs one.
+type ClaudeBrokerOptions struct {
+	Enabled      bool   `yaml:"enabled"`
+	ClientCMName string `yaml:"clientConfigMap"`     // default "multica-claude-broker-client"
+	HelperTTLMs  int    `yaml:"apiKeyHelperTTLMs"`   // default 60000
 }
 
 func LoadConfig() (*Config, error) {
@@ -94,6 +106,17 @@ func LoadConfig() (*Config, error) {
 	}
 	if cfg.ImagePullSecret == "" {
 		cfg.ImagePullSecret = "ghcr-pull"
+	}
+
+	// ClaudeBroker defaults — applied only when broker mode is enabled, so a
+	// chart that doesn't set claudeBroker.enabled = true gets the legacy path.
+	if cfg.ClaudeBroker.Enabled {
+		if cfg.ClaudeBroker.ClientCMName == "" {
+			cfg.ClaudeBroker.ClientCMName = "multica-claude-broker-client"
+		}
+		if cfg.ClaudeBroker.HelperTTLMs == 0 {
+			cfg.ClaudeBroker.HelperTTLMs = 60000
+		}
 	}
 
 	return cfg, nil
