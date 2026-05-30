@@ -17,3 +17,11 @@ const DefaultRateLimitBackoff = cerebratelimit.DefaultBackoff
 func ParseRateLimitReset(errText string, now time.Time) (time.Time, bool) {
 	return cerebratelimit.ParseReset(errText, now)
 }
+
+// ClassifyRateLimitReset is the three-valued variant: (resetAt, hasReset,
+// pauseWorthy). Used by the auto-pause circuit breaker to tell a concrete
+// provider reset time apart from the no-hint fallback so it can apply a
+// growing backoff in the fallback case. Delegates to cerebratelimit.ClassifyReset.
+func ClassifyRateLimitReset(errText string, now time.Time) (time.Time, bool, bool) {
+	return cerebratelimit.ClassifyReset(errText, now)
+}

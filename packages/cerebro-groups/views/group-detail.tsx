@@ -20,6 +20,7 @@ import {
   Trash2,
   UserPlus,
   Users,
+  Wrench,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -59,6 +60,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { ToolPolicyTable } from "@multica/cerebro-tool-policy/views";
 import {
   useDeleteCerebroGroup,
   useUpdateCerebroGroup,
@@ -104,6 +106,10 @@ export interface GroupDetailViewProps {
 
 export function GroupDetailView({ groupId, onBack }: GroupDetailViewProps) {
   const enabled = useFeatureFlag("cerebro_groups_enabled");
+  // FIR-2284 Bid 5: the per-tool permission table on the Group surface — the
+  // Group rung of the Workspace › Runtime › Agent › Group › User chain. Behind
+  // the same flag as the agent/runtime tables; off by default.
+  const toolPolicyEnabled = useFeatureFlag("cerebro_tool_policy");
   const wsId = useWorkspaceId();
   const user = useAuthStore((s) => s.user);
   const setHideFloatingChat = useChatStore((s) => s.setHideFloatingChat);
@@ -169,6 +175,21 @@ export function GroupDetailView({ groupId, onBack }: GroupDetailViewProps) {
         <RuntimesSection groupId={groupId} isAdmin={isAdmin} />
 
         <CapabilitiesSection groupId={groupId} isAdmin={isAdmin} />
+
+        {toolPolicyEnabled && (
+          <section
+            className="rounded-md border border-border"
+            data-testid="group-permissions-section"
+          >
+            <header className="flex items-center gap-2 border-b border-border px-4 py-3 text-sm font-medium">
+              <Wrench className="size-4 text-muted-foreground" />
+              <span>Permissions</span>
+            </header>
+            <div className="p-4">
+              <ToolPolicyTable wsId={wsId} view="group" subjectId={groupId} />
+            </div>
+          </section>
+        )}
       </div>
     </GroupDetailShell>
   );

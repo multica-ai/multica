@@ -95,7 +95,7 @@ import { DependenciesSection } from "./dependencies-section";
 import { AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker, PriorityPicker, StartDatePicker, StatusPicker } from "./pickers";
 // CEREBRO-PATCH(issue-detail-status-model): FIR-1550 provide the issue's project status-model presentation to status surfaces
 import { CerebroStatusModelProvider } from "@multica/cerebro-status-models/views";
-import { useMoveCommentToSubIssue, useUpdateIssue } from "@multica/core/issues/mutations";
+import { useMoveCommentToSubIssue, useMoveCommentsToNewThread, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
@@ -849,6 +849,15 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     },
     [moveCommentToSubIssue, t],
   );
+  // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 move picked comments to a new thread on this issue.
+  const { mutateAsync: moveCommentsToNewThread } = useMoveCommentsToNewThread(id);
+  const handleMoveCommentsToNewThread = useCallback(
+    async (commentIds: string[]) => {
+      await moveCommentsToNewThread({ commentIds });
+      toast.success(t(($) => $.comment.move_thread.success_toast));
+    },
+    [moveCommentsToNewThread, t],
+  );
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
@@ -1051,6 +1060,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const channelsEnabled = useFeatureFlag("cerebro_channels");
   // CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 gate the thread lift UI.
   const moveCommentToSubIssueEnabled = useFeatureFlag("cerebro_move_comment_to_subissue");
+  // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 gate the new-thread action.
+  const moveCommentToThreadEnabled = useFeatureFlag("cerebro_move_comment_to_thread");
   const issueKind = issue?.kind ?? "issue";
   // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — resolve the
   // agent the backend trigger logic will wake when a member posts a
@@ -2378,6 +2389,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                         onResolveToggle={handleResolveToggle}
                         canMoveToSubIssue={moveCommentToSubIssueEnabled && issue?.status !== "cancelled"}
                         onMoveToSubIssue={handleMoveCommentToSubIssue}
+                        canMoveToNewThread={moveCommentToThreadEnabled && issue?.status !== "cancelled"}
+                        onMoveToNewThread={handleMoveCommentsToNewThread}
                         onCollapseResolved={isResolved ? () => toggleResolvedExpand(entry.id, false) : undefined}
                         highlightedCommentId={highlightedId}
                         triggerAgentId={triggerAgentId}

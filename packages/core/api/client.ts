@@ -32,6 +32,7 @@ import type {
   IssueSubscriber,
   Comment,
   MoveCommentToSubIssueResponse,
+  MoveCommentsToThreadResponse,
   Reaction,
   IssueReaction,
   Workspace,
@@ -1120,6 +1121,40 @@ export class ApiClient {
     return this.fetch<T>(`/api/cerebro/references?${params.toString()}`);
   }
 
+  // CEREBRO-PATCH(cerebro-duplicate-check-client): FIR-2504 — ask the server
+  // for the top similar open issues + LLM verdict when composing a new issue.
+  // Body is `unknown` so the cerebro-duplicate-check package owns the schema.
+  async checkSimilarCerebroIssues<T = unknown>(payload: {
+    title: string;
+    description?: string;
+    project_id?: string;
+  }): Promise<T> {
+    return this.fetch<T>(`/api/cerebro/issues/check-similar`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // CEREBRO-PATCH(cerebro-duplicate-check-client): FIR-2504 — fire-and-forget
+  // adoption event from the create-issue panel (opened existing / attached as
+  // sub-issue / dismissed / created_anyway). Returns 204; the panel ignores
+  // the response so a slow log write never blocks issue creation.
+  async recordCerebroDuplicateCheckEvent(payload: {
+    action: "opened" | "attached" | "dismissed" | "created_anyway";
+    match_id?: string;
+    verdict?: string;
+    match_count?: number;
+  }): Promise<void> {
+    try {
+      await this.fetch<unknown>(`/api/cerebro/issues/check-similar/event`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      // Best-effort telemetry — never surface a failure to the user.
+    }
+  }
+
   // CEREBRO-PATCH(cerebro-persona-grants-client): JEH-1180 Persona grant
   // control plane UI. Endpoints mirror the JEH-1179 description:
   //   GET    /api/workspaces/{id}/grants[?subject_type=…&subject_id=…&resource_type=…&status=…&classification=…]
@@ -1483,6 +1518,14 @@ export class ApiClient {
     return this.fetch(`/api/comments/${commentId}/move-to-subissue`, {
       method: "POST",
       body: JSON.stringify(title ? { title } : {}),
+    });
+  }
+
+  // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 lift picked comments into a new thread.
+  async moveCommentsToNewThread(commentIds: string[]): Promise<MoveCommentsToThreadResponse> {
+    return this.fetch(`/api/comments/move-to-thread`, {
+      method: "POST",
+      body: JSON.stringify({ comment_ids: commentIds }),
     });
   }
 

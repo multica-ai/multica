@@ -313,6 +313,17 @@
       "description_other": "This comment and {{count}} replies will become a new sub-issue. The original thread will be replaced with a link.",
       "success_toast": "Moved to {{identifier}}",
       "failed_toast": "Failed to move thread"
+    },
+    "_move_thread": "CEREBRO-PATCH(i18n-comment-move-thread): JEH-2488 move picked comments to a new thread UI",
+    "move_thread": {
+      "action": "Reply in new thread",
+      "breadcrumb": "Moved to new thread",
+      "select_hint": "Pick the comments to move into a new thread",
+      "move_action_one": "Move {{count}} comment to new thread",
+      "move_action_other": "Move {{count}} comments to new thread",
+      "moving_action": "Moving...",
+      "success_toast": "Moved to a new thread",
+      "failed_toast": "Couldn't move the comments"
     }
   },
   "reply": {
@@ -324,9 +335,10 @@
     "unpin_tooltip": "Unpin reply from viewport",
     "pinned_placeholder": "Reply pinned — scroll freely",
     "_reply_target_agent_indicator": "CEREBRO-PATCH(i18n-reply-target-agent-indicator): FIR-2349 reply composer agent trigger target bar",
+    "_reply_target_approval_needed": "CEREBRO-PATCH(i18n-reply-target-approval-needed): FIR-2465 reword trigger badge to surface the required user action",
     "target_label": "Replying to",
-    "target_trigger_inactive": "won't trigger",
-    "target_trigger_title": "{{name}} won't trigger",
+    "target_trigger_inactive": "Approval needed",
+    "target_trigger_title": "{{name}} needs approval",
     "target_trigger_description": "Personal agent. Only the owner can wake it.",
     "target_owner_label": "Owner",
     "target_tag_owner": "Tag owner",

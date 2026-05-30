@@ -596,6 +596,29 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 	return &resp, nil
 }
 
+// CEREBRO-PATCH(daemon-repo-grants): FIR-2512 repo capability check via grants resolver.
+
+// CheckRepoCapability asks the server whether the given agent (optionally in a
+// project context) holds the requested capability for a repo URL.
+// Returns (allowed, reason, error).
+func (c *Client) CheckRepoCapability(ctx context.Context, workspaceID, agentID, projectID, repoURL, capability string) (bool, string, error) {
+	var resp struct {
+		Allowed  bool   `json:"allowed"`
+		Decision string `json:"decision"`
+		Reason   string `json:"reason"`
+	}
+	body := map[string]string{
+		"url":        repoURL,
+		"capability": capability,
+		"agent_id":   agentID,
+		"project_id": projectID,
+	}
+	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/repo/check", workspaceID), body, &resp); err != nil {
+		return false, "", err
+	}
+	return resp.Allowed, resp.Reason, nil
+}
+
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
 	var body io.Reader
 	if reqBody != nil {

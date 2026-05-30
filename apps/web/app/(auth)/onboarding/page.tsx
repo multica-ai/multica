@@ -11,6 +11,12 @@ import {
 } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { CliInstallInstructions, OnboardingFlow } from "@multica/views/onboarding";
+import { useLogout } from "@multica/views/auth";
+import {
+  FirtalWelcomePage,
+  useFirtalWelcomeEnabled,
+  markFirtalWelcomeSeen,
+} from "@multica/cerebro-firtal-welcome";
 
 /**
  * Web shell for the onboarding flow. The route is the platform chrome on
@@ -29,6 +35,8 @@ export default function OnboardingPage() {
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const hasOnboarded = useHasOnboarded();
+  const firtalWelcomeEnabled = useFirtalWelcomeEnabled();
+  const logout = useLogout();
   const { data: workspaces = [], isFetched: workspacesFetched } = useQuery({
     ...workspaceListOptions(),
     enabled: !!user,
@@ -62,6 +70,30 @@ export default function OnboardingPage() {
   }, [isLoading, user, hasOnboarded, workspacesFetched, workspaces, router]);
 
   if (isLoading || !user || hasOnboarded) return null;
+
+  // FIR-2490: cerebro-fork workspaces opt into a Firtal-branded welcome
+  // page that replaces upstream onboarding entirely. Feature-flag-gated, so
+  // upstream `/onboarding` still ships unchanged when the flag is off.
+  if (firtalWelcomeEnabled) {
+    return (
+      <div className="h-full overflow-y-auto bg-background">
+        <FirtalWelcomePage
+          userId={user.id}
+          onLogout={logout}
+          onComplete={() => {
+            completingRef.current = true;
+            markFirtalWelcomeSeen(user.id);
+            const first = workspaces[0];
+            if (first) {
+              router.push(paths.workspace(first.slug).inbox());
+            } else {
+              router.push(paths.root());
+            }
+          }}
+        />
+      </div>
+    );
+  }
 
   // Layout: page owns its own scroll (root layout sets `body {
   // overflow: hidden }` for the app-shell convention). OnboardingFlow

@@ -37,3 +37,10 @@ export interface MoveCommentToSubIssueResponse {
   identifier: string;
   number: number;
 }
+
+// CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 response for moving picked comments to a new thread.
+export interface MoveCommentsToThreadResponse {
+  root_comment_id: string;
+  issue_id: string;
+  moved_count: number;
+}

@@ -5,7 +5,12 @@ import { artifactKeys } from "@multica/cerebro-artifacts/core";
 import { referenceKeys } from "@multica/cerebro-references/core";
 import { channelKeys } from "@multica/core/channels";
 import { chatKeys } from "@multica/core/chat/queries";
-import type { ChatSession } from "@multica/core/types";
+import type {
+  ChatSession,
+  ChatDonePayload,
+  TaskCompletedPayload,
+  TaskFailedPayload,
+} from "@multica/core/types";
 import { registerCerebroGroupHandlers } from "@multica/cerebro-groups";
 
 /**
@@ -139,6 +144,28 @@ export function registerCerebroHandlers(
     invalidateReference,
   );
 
+  // FIR-2467 — live chat session cost chip. The price chip in
+  // ChatSessionHeader reads chatKeys.usage(sessionId), which aggregates
+  // task_usage rows persisted as tasks settle. The upstream
+  // use-realtime-sync already handles chat:done / task:completed /
+  // task:failed for messages + pending, but never invalidates the usage
+  // query — without this the chip is stuck on the value it had when the
+  // session was opened. Mirror the chat_session_id guard the upstream
+  // handlers use so issue-only tasks don't trigger a chat refetch.
+  const invalidateChatUsage = (sessionId: string | undefined) => {
+    if (!sessionId) return;
+    qc.invalidateQueries({ queryKey: chatKeys.usage(sessionId) });
+  };
+  const unsubChatDoneUsage = ws.on("chat:done", (p) => {
+    invalidateChatUsage((p as ChatDonePayload).chat_session_id);
+  });
+  const unsubTaskCompletedUsage = ws.on("task:completed", (p) => {
+    invalidateChatUsage((p as TaskCompletedPayload).chat_session_id);
+  });
+  const unsubTaskFailedUsage = ws.on("task:failed", (p) => {
+    invalidateChatUsage((p as TaskFailedPayload).chat_session_id);
+  });
+
   // JEH-1006 — workspace groups settings list/members invalidation.
   const unsubGroups = registerCerebroGroupHandlers(ws, qc);
 
@@ -152,6 +179,9 @@ export function registerCerebroHandlers(
     unsubReferenceCreated();
     unsubReferenceUpdated();
     unsubReferenceDeleted();
+    unsubChatDoneUsage();
+    unsubTaskCompletedUsage();
+    unsubTaskFailedUsage();
     unsubGroups();
   };
 }

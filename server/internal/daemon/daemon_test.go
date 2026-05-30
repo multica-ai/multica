@@ -1408,7 +1408,7 @@ func TestEnsureRepoReadyCachedRepoStillRefreshesSettings(t *testing.T) {
 		t.Fatalf("precondition: expected co-author hook enabled before checkout")
 	}
 
-	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
+	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo, "", ""); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
 	}
 	if got := refreshCalls.Load(); got != 1 {
@@ -1442,7 +1442,7 @@ func TestEnsureRepoReadyTrimsURL(t *testing.T) {
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
 
 	// URL with trailing whitespace should still resolve to the cached repo.
-	if err := d.ensureRepoReady(context.Background(), "ws-1", "  "+sourceRepo+"  "); err != nil {
+	if err := d.ensureRepoReady(context.Background(), "ws-1", "  "+sourceRepo+"  ", "", ""); err != nil {
 		t.Fatalf("ensureRepoReady with padded URL: %v", err)
 	}
 	// Even on cache hit we refresh settings once so toggle flips feel live.
@@ -1470,7 +1470,7 @@ func TestEnsureRepoReadyRefreshesOnMiss(t *testing.T) {
 	})
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
+	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo, "", ""); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
 	}
 	if got := refreshCalls.Load(); got != 1 {
@@ -1523,7 +1523,7 @@ func TestRegisterTaskReposAllowsProjectOnlyURL(t *testing.T) {
 		t.Fatal("expected project repo to pass workspaceRepoAllowed")
 	}
 
-	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
+	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo, "", ""); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
 	}
 	// ensureRepoReady refreshes settings on every call (RFC MUL-2414 §4.8; PR
@@ -1580,7 +1580,7 @@ func TestEnsureRepoReadyReturnsNotConfigured(t *testing.T) {
 	})
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	err := d.ensureRepoReady(context.Background(), "ws-1", "git@example.com:team/api.git")
+	err := d.ensureRepoReady(context.Background(), "ws-1", "git@example.com:team/api.git", "", "")
 	if !errors.Is(err, ErrRepoNotConfigured) {
 		t.Fatalf("expected ErrRepoNotConfigured, got %v", err)
 	}
@@ -1599,7 +1599,7 @@ func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 	})
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	err := d.ensureRepoReady(context.Background(), "ws-1", missingRepo)
+	err := d.ensureRepoReady(context.Background(), "ws-1", missingRepo, "", "")
 	if err == nil || !strings.Contains(err.Error(), "repo is configured but not synced:") {
 		t.Fatalf("expected sync failure error, got %v", err)
 	}
@@ -1634,7 +1634,7 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errCh <- d.ensureRepoReady(context.Background(), "ws-1", sourceRepo)
+			errCh <- d.ensureRepoReady(context.Background(), "ws-1", sourceRepo, "", "")
 		}()
 	}
 	wg.Wait()
@@ -1649,6 +1649,42 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 	// must serialize them so the server is only called once.
 	if got := refreshCalls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 refresh call, got %d", got)
+	}
+}
+
+// CEREBRO-PATCH(daemon-repo-grants): FIR-2512 — repo grants feature flag tests; also updates ensureRepoReady call sites for the agentID/projectID signature.
+func TestRepoGrantsEnabled(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{workspaces: make(map[string]*workspaceState)}
+
+	// Missing workspace → false.
+	if d.repoGrantsEnabled("ws-x") {
+		t.Fatal("expected false for missing workspace")
+	}
+
+	// Workspace with no settings → false (safe default).
+	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1"}
+	if d.repoGrantsEnabled("ws-1") {
+		t.Fatal("expected false when no settings")
+	}
+
+	// Workspace with repo_grants_enabled=false → false.
+	d.workspaces["ws-2"] = &workspaceState{
+		workspaceID: "ws-2",
+		settings:    json.RawMessage(`{"repo_grants_enabled": false}`),
+	}
+	if d.repoGrantsEnabled("ws-2") {
+		t.Fatal("expected false when explicitly disabled")
+	}
+
+	// Workspace with repo_grants_enabled=true → true.
+	d.workspaces["ws-3"] = &workspaceState{
+		workspaceID: "ws-3",
+		settings:    json.RawMessage(`{"repo_grants_enabled": true}`),
+	}
+	if !d.repoGrantsEnabled("ws-3") {
+		t.Fatal("expected true when explicitly enabled")
 	}
 }
 

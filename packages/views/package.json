@@ -11,7 +11,9 @@
     "lint": "eslint .",
     "test": "vitest run"
   },
+  "_comment_channels_export": "CEREBRO-PATCH(views-channels-export): FIR-2452 — expose ChannelDetail/NewMessageModal via @multica/views/channels so the standalone /channels/<id> route can render the dedicated chat component instead of IssueDetail.",
   "exports": {
+    "./channels": "./channels/index.ts",
     "./navigation": "./navigation/index.ts",
     "./common/actor-avatar": "./common/actor-avatar.tsx",
     "./common/actor-issues-panel": "./common/actor-issues-panel.tsx",
@@ -74,11 +76,13 @@
     "@multica/ui": "workspace:*",
     "@multica/cerebro-agent-tools": "workspace:*",
     "@multica/cerebro-channels": "workspace:*",
+    "@multica/cerebro-duplicate-check": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-groups": "workspace:*",
     "@multica/cerebro-inbox": "workspace:*",
     "@multica/cerebro-pin-input": "workspace:*",
     "@multica/cerebro-status-models": "workspace:*",
+    "@multica/cerebro-ui": "workspace:*",
     "@tiptap/core": "^3.22.1",
     "@tiptap/extension-code-block-lowlight": "^3.22.1",
     "@tiptap/extension-document": "^3.22.1",

@@ -107,7 +107,11 @@
   "picker": {
     "no_project": "No project",
     "remove": "Remove from project",
-    "empty": "No projects yet"
+    "empty": "No projects yet",
+    "_comment_picker_search": "CEREBRO-PATCH(project-picker-search-and-select): FIR-2536 — search input strings for the project picker popover",
+    "search_placeholder": "Search projects…",
+    "search_aria": "Search projects",
+    "no_results": "No projects match \"{{query}}\""
   },
   "chip": {
     "fallback_label": "Project"

@@ -97,7 +97,9 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 	// One row per (tool, matching policy layer). The LEFT JOIN keeps tools with
 	// no settings (NULL layer), and the subject predicates mirror
 	// ListCerebroToolPolicyForContext so an absent (Valid=false) subject id —
-	// which marshals to NULL — never matches and that layer stays Inherit.
+	// which marshals to NULL — never matches and that layer stays Inherit. The
+	// workspace root layer is always keyed on the workspace itself ($1), so it
+	// enters every view's Effective column even when no other subject is in scope.
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.capability_key, c.title, c.category, c.source,
 		       p.layer, p.subject_id, p.setting
@@ -106,10 +108,11 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		  ON p.workspace_id = c.workspace_id
 		 AND p.tool_key = c.capability_key
 		 AND (
-		   (p.layer = 'runtime' AND p.subject_id = $2) OR
-		   (p.layer = 'agent'   AND p.subject_id = $3) OR
-		   (p.layer = 'user'    AND p.subject_id = $4) OR
-		   (p.layer = 'group'   AND p.subject_id = ANY($5::uuid[]))
+		   (p.layer = 'workspace' AND p.subject_id = $1) OR
+		   (p.layer = 'runtime'   AND p.subject_id = $2) OR
+		   (p.layer = 'agent'     AND p.subject_id = $3) OR
+		   (p.layer = 'user'      AND p.subject_id = $4) OR
+		   (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[]))
 		 )
 		WHERE c.workspace_id = $1`+runtimeFilter+`
 		ORDER BY c.category, lower(c.title), c.capability_key

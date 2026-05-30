@@ -149,6 +149,18 @@ describe("canEditAgent", () => {
       true,
     );
   });
+  it("allows owner of a private (personal) agent who is a plain member", () => {
+    const personal = makeAgent({ visibility: "private", owner_id: ALICE });
+    expect(
+      canEditAgent(personal, { userId: ALICE, role: "member" }).allowed,
+    ).toBe(true);
+  });
+  it("denies non-owner member on a private agent", () => {
+    const personal = makeAgent({ visibility: "private", owner_id: ALICE });
+    const d = canEditAgent(personal, { userId: BOB, role: "member" });
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("not_admin_role");
+  });
 });
 
 describe("canAssignAgentToIssue", () => {

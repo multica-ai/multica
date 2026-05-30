@@ -1,29 +1,21 @@
 import type { Metadata } from "next";
-import { MulticaLanding } from "@/features/landing/components/multica-landing";
-import { RedirectIfAuthenticated } from "@/features/landing/components/redirect-if-authenticated";
+import { RootRedirect } from "@/features/landing/components/root-redirect";
 
+// FIR-2490 follow-up: this fork is an internal tool — the root URL is
+// never a marketing page. The proxy redirects anon → /login and known
+// users → their last workspace server-side. RootRedirect only handles
+// the rare case where a user is authenticated but has no
+// last_workspace_slug cookie yet (first login since the migration).
 export const metadata: Metadata = {
   title: {
-    absolute: "Multica — Project Management for Human + Agent Teams",
+    absolute: "Multica",
   },
-  description:
-    "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
-  openGraph: {
-    title: "Multica — Project Management for Human + Agent Teams",
-    description:
-      "Manage your human + agent workforce in one place.",
-    url: "/",
-  },
-  alternates: {
-    canonical: "/",
+  robots: {
+    index: false,
+    follow: false,
   },
 };
 
 export default function LandingPage() {
-  return (
-    <>
-      <RedirectIfAuthenticated />
-      <MulticaLanding />
-    </>
-  );
+  return <RootRedirect />;
 }

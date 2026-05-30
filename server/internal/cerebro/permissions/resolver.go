@@ -44,6 +44,10 @@ const (
 	subjectGroup            = "group"
 	subjectRole             = "role"
 	subjectWorkspaceDefault = "workspace_default"
+	// subjectProject is the project-scope layer (FIR-2512): a grant with
+	// subject_type='project' applies to any agent whose task belongs to that
+	// project. Chain layer between workspace_default and group.
+	subjectProject = "project"
 )
 
 // grantStatusActive — non-revoked grants are evaluated.
@@ -65,10 +69,11 @@ func (d Decision) Allowed() bool { return d.Kind == DecisionAllow }
 // Actor is the autopilot's owner (member), not the agent — autopilot-owner
 // substitution lives at the call site.
 type Actor struct {
-	Type     string // member|agent
-	ID       pgtype.UUID
-	GroupIDs []pgtype.UUID // groups the actor belongs to in this workspace
-	RoleIDs  []pgtype.UUID // roles assigned to the actor
+	Type       string // member|agent
+	ID         pgtype.UUID
+	GroupIDs   []pgtype.UUID // groups the actor belongs to in this workspace
+	RoleIDs    []pgtype.UUID // roles assigned to the actor
+	ProjectIDs []pgtype.UUID // projects the current task belongs to (FIR-2512)
 }
 
 // Request is the input to Resolve / Can.
@@ -124,19 +129,29 @@ func (r *Resolver) Can(ctx context.Context, req Request) (Decision, error) {
 
 // Decide is the pure resolution function. Tests pass synthetic grants directly.
 //
-// Algorithm:
+// Algorithm (specificity-wins, FIR-2512):
 //
 //  1. Drop revoked/expired grants and grants outside the time-window.
-//  2. Keep grants whose subject applies to the actor or agent.
-//  3. Keep grants whose capability and resource patterns match the request.
-//  4. If no grant matches → Deny.
-//  5. If any matching grant has approval_required → NeedsApproval.
-//  6. Otherwise → Allow.
+//  2. Keep grants whose subject applies to the actor or agent AND whose
+//     capability pattern matches the request — independent of the resource.
+//  3. The most-specific override layer present in that set wins
+//     (workspace < project < role < group < actor). Less-specific layers are
+//     SHADOWED, even when they would have matched the resource.
+//  4. Only grants at the winning layer are checked against the resource
+//     pattern. If none match → Deny. If any has approval_required →
+//     NeedsApproval. Otherwise → Allow.
 //
-// Specificity ordering (workspace → runtime → role → group → actor) is not yet
-// modelled in the grant table; today every matching active grant counts as a
-// vote. When the override-lag lands, the most-specific matching grant wins and
-// the others are recorded as "shadowed" in the decision reason.
+// Step 3 is what makes project isolation real. After the Spor 3 migration every
+// current repo becomes a workspace_default allow-grant (to preserve behavior).
+// Once an admin tightens by adding a project-scoped repo grant, that project
+// layer outranks workspace_default and SHADOWS it: a repo outside the project's
+// patterns is denied instead of riding the workspace allow-all. Without this,
+// the workspace_default grant would keep voting "allow" and project isolation —
+// the whole point of the migration — would never take effect.
+//
+// Shadowing is per-capability: a more-specific layer only overrides the layers
+// below it for the capability it actually speaks to. A project that constrains
+// repo.read does not shadow a workspace_default repo.checkout grant.
 func Decide(grants []cerebrodb.CerebroWorkspaceGrant, req Request) Decision {
 	if req.Capability == "" {
 		return Decision{Kind: DecisionDeny, Reason: "capability required"}
@@ -146,17 +161,13 @@ func Decide(grants []cerebrodb.CerebroWorkspaceGrant, req Request) Decision {
 		now = time.Now()
 	}
 
-	var matched []pgtype.UUID
-	anyApproval := false
+	// Pass 1: find the most-specific layer that has a grant applying to this
+	// actor for this capability, ignoring the resource. That layer wins; every
+	// layer below it is shadowed.
+	winningRank := 0
 	winningLayer := "none"
 	for _, g := range grants {
-		if g.Status != grantStatusActive {
-			continue
-		}
-		if g.TimeWindowStart.Valid && now.Before(g.TimeWindowStart.Time) {
-			continue
-		}
-		if g.TimeWindowEnd.Valid && now.After(g.TimeWindowEnd.Time) {
+		if !grantLive(g, now) {
 			continue
 		}
 		if !subjectApplies(g, req.Actor, req.Agent) {
@@ -165,26 +176,65 @@ func Decide(grants []cerebrodb.CerebroWorkspaceGrant, req Request) Decision {
 		if !capabilityMatches(g.Capability, req.Capability) {
 			continue
 		}
+		layer := overrideLayer(g)
+		if rank := overrideLayerRank(layer); rank > winningRank {
+			winningRank = rank
+			winningLayer = layer
+		}
+	}
+
+	if winningRank == 0 {
+		return Decision{Kind: DecisionDeny, Reason: "no matching grant", WinningOverrideLayer: "none"}
+	}
+
+	// Pass 2: only grants at the winning layer decide the verdict, and only now
+	// is the resource pattern checked. A resource that no winning-layer grant
+	// matches is denied — the shadowed lower layers do not get a vote.
+	var matched []pgtype.UUID
+	anyApproval := false
+	for _, g := range grants {
+		if !grantLive(g, now) {
+			continue
+		}
+		if !subjectApplies(g, req.Actor, req.Agent) {
+			continue
+		}
+		if !capabilityMatches(g.Capability, req.Capability) {
+			continue
+		}
+		if overrideLayerRank(overrideLayer(g)) != winningRank {
+			continue
+		}
 		if !resourceMatches(g.ResourcePattern, req.Resource) {
 			continue
 		}
 		matched = append(matched, g.ID)
-		layer := overrideLayer(g)
-		if overrideLayerRank(layer) >= overrideLayerRank(winningLayer) {
-			winningLayer = layer
-		}
 		if g.ApprovalRequired {
 			anyApproval = true
 		}
 	}
 
 	if len(matched) == 0 {
-		return Decision{Kind: DecisionDeny, Reason: "no matching grant", WinningOverrideLayer: "none"}
+		return Decision{Kind: DecisionDeny, Reason: "resource not permitted at " + winningLayer + " layer", WinningOverrideLayer: winningLayer}
 	}
 	if anyApproval {
 		return Decision{Kind: DecisionNeedsApproval, MatchedGrantIDs: matched, Reason: "approval required", WinningOverrideLayer: winningLayer}
 	}
 	return Decision{Kind: DecisionAllow, MatchedGrantIDs: matched, Reason: "grant matched", WinningOverrideLayer: winningLayer}
+}
+
+// grantLive reports whether a grant is active and inside its time-window at now.
+func grantLive(g cerebrodb.CerebroWorkspaceGrant, now time.Time) bool {
+	if g.Status != grantStatusActive {
+		return false
+	}
+	if g.TimeWindowStart.Valid && now.Before(g.TimeWindowStart.Time) {
+		return false
+	}
+	if g.TimeWindowEnd.Valid && now.After(g.TimeWindowEnd.Time) {
+		return false
+	}
+	return true
 }
 
 func (r *Resolver) writeAuditEvent(ctx context.Context, req Request, decision Decision) error {
@@ -222,6 +272,7 @@ func (r *Resolver) writeAuditEvent(ctx context.Context, req Request, decision De
 // actor or the agent they are running through.
 //
 //	workspace_default → always applies
+//	project           → grant.subject_id ∈ actor.ProjectIDs (FIR-2512)
 //	member            → grant.subject_id == actor.ID and actor.Type == member
 //	agent             → grant.subject_id == request.Agent (the agent in use)
 //	group             → grant.subject_id ∈ actor.GroupIDs
@@ -230,6 +281,13 @@ func subjectApplies(g cerebrodb.CerebroWorkspaceGrant, actor Actor, agent pgtype
 	switch g.SubjectType {
 	case subjectWorkspaceDefault:
 		return true
+	case subjectProject:
+		for _, pid := range actor.ProjectIDs {
+			if uuidEqual(g.SubjectID, pid) {
+				return true
+			}
+		}
+		return false
 	case subjectMember:
 		return actor.Type == subjectMember && uuidEqual(g.SubjectID, actor.ID)
 	case subjectAgent:
@@ -261,6 +319,8 @@ func overrideLayer(g cerebrodb.CerebroWorkspaceGrant) string {
 	switch g.SubjectType {
 	case subjectWorkspaceDefault:
 		return "workspace"
+	case subjectProject:
+		return "project"
 	case subjectRole:
 		return "role"
 	case subjectGroup:
@@ -276,12 +336,14 @@ func overrideLayerRank(layer string) int {
 	switch layer {
 	case "workspace":
 		return 1
-	case "role":
+	case "project":
 		return 2
-	case "group":
+	case "role":
 		return 3
-	case "actor":
+	case "group":
 		return 4
+	case "actor":
+		return 5
 	default:
 		return 0
 	}

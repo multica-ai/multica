@@ -37,6 +37,8 @@ describe("paths.workspace() shape", () => {
         "settings",
         // CEREBRO-PATCH(cerebro-paths-permissions): JEH-1180
         "permissions",
+        // CEREBRO-PATCH(firtal-welcome-path): FIR-2490
+        "welcome",
       ]),
     );
   });
@@ -66,6 +68,8 @@ describe("paths.workspace() shape", () => {
       ["settings", "settings"],
       // CEREBRO-PATCH(cerebro-paths-permissions): JEH-1180
       ["permissions", "permissions"],
+      // CEREBRO-PATCH(firtal-welcome-path): FIR-2490
+      ["welcome", "welcome"],
     ];
     const wsAsAny = ws as unknown as Record<string, () => string>;
     for (const [method, segment] of expectedSegments) {

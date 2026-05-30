@@ -47,10 +47,11 @@ func NewHandler(s *Store) *Handler { return &Handler{Store: s} }
 // when that layer carries no explicit setting (Inherit). Keeping them as
 // pointers lets the UI distinguish "no override" from an explicit "inherit".
 type layerSettings struct {
-	Runtime *string `json:"runtime"`
-	Agent   *string `json:"agent"`
-	Group   *string `json:"group"`
-	User    *string `json:"user"`
+	Workspace *string `json:"workspace"`
+	Runtime   *string `json:"runtime"`
+	Agent     *string `json:"agent"`
+	Group     *string `json:"group"`
+	User      *string `json:"user"`
 }
 
 type effectiveResponse struct {
@@ -249,10 +250,11 @@ func toRowResponse(row TableRow) toolPolicyRow {
 		Category: row.Category,
 		Source:   row.Source,
 		Layers: layerSettings{
-			Runtime: settingPtr(row.Layers, LayerRuntime),
-			Agent:   settingPtr(row.Layers, LayerAgent),
-			Group:   settingPtr(row.Layers, LayerGroup),
-			User:    settingPtr(row.Layers, LayerUser),
+			Workspace: settingPtr(row.Layers, LayerWorkspace),
+			Runtime:   settingPtr(row.Layers, LayerRuntime),
+			Agent:     settingPtr(row.Layers, LayerAgent),
+			Group:     settingPtr(row.Layers, LayerGroup),
+			User:      settingPtr(row.Layers, LayerUser),
 		},
 		Effective: effectiveResponse{
 			Setting:   string(row.Effective.Setting),

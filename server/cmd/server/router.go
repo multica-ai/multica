@@ -32,6 +32,8 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 per-workspace saving-mode handler import.
 	cerebrocostoptimization "github.com/multica-ai/multica/server/internal/cerebro/cost_optimization"
+	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 service-to-service pricing pull for the registry's agent-trace costing.
+	cerebropricing "github.com/multica-ai/multica/server/internal/cerebro/pricing"
 	// CEREBRO-PATCH(cerebro-dictation-routes): JEH-729 streaming dictation proxy handler import.
 	cerebrodictation "github.com/multica-ai/multica/server/internal/cerebro/dictation"
 	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
@@ -277,6 +279,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries, bus, h.TaskService)
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler instance
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
+	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 pricing endpoint handler instance (service key from CEREBRO_PRICING_KEY).
+	cerebroPricingHandler := cerebropricing.New(os.Getenv("CEREBRO_PRICING_KEY"))
 	// CEREBRO-PATCH(cerebro-dictation-routes): JEH-729 workspace-scoped WebSocket proxy; inference deploy stays out of this slice.
 	cerebroDictationHandler := cerebrodictation.NewFromEnv(queries, patCache)
 	// CEREBRO-PATCH(cerebro-groups-routes): JEH-721 workspace groups handler
@@ -447,6 +451,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Public API
 	r.Get("/api/config", h.GetConfig)
+	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 service-to-service price-table read for the registry's hourly pricing pull. Outside the user-auth group on purpose — the caller is a backend service that presents CEREBRO_PRICING_KEY as a Bearer token (loopback-only when the key is unset).
+	r.Get("/api/cerebro/pricing", cerebroPricingHandler.Get)
 	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
 
 	// Webhook ingress for autopilots. Outside the authenticated group on
@@ -471,6 +477,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/heartbeat", h.DaemonHeartbeat)
 		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
+		r.Post("/workspaces/{workspaceId}/repo/check", h.CheckDaemonRepoCapability) // CEREBRO-PATCH(daemon-repo-grants): FIR-2512
 		r.Get("/workspaces/{workspaceId}/agents/persona", h.ListWorkspacePersonaAgents)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
@@ -966,6 +973,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Delete("/api/attachments/{id}", h.DeleteAttachment)
 
 			// Comments
+			// CEREBRO-PATCH(comments-move-to-thread): JEH-2488 multi-select → new thread.
+			r.Post("/api/comments/move-to-thread", cerebroCommentsHandler.MoveToThread)
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
 				r.Put("/", h.UpdateComment)
 				r.Delete("/", h.DeleteComment)
@@ -1253,6 +1262,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard overview endpoint
 			r.Get("/api/cerebro/dashboard", cerebroDashboardHandler.Overview)
+			// CEREBRO-PATCH(cerebro-duplicate-check-route): FIR-2504 "find similar at create" endpoint + adoption-event sink.
+			r.Post("/api/cerebro/issues/check-similar", h.CheckSimilarIssues)
+			r.Post("/api/cerebro/issues/check-similar/event", h.DupCheckEvent)
 			// CEREBRO-PATCH(references-routes): JEH-837 reference-by-id mutations + reverse-lookup.
 			r.Route("/api/cerebro/references", func(r chi.Router) {
 				r.Get("/", cerebroReferencesHandler.ListByObject)

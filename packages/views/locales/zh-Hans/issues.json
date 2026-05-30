@@ -308,6 +308,17 @@
       "description_other": "这条评论和 {{count}} 条回复将成为一个新的子 issue。原线程会被替换为链接。",
       "success_toast": "已移到 {{identifier}}",
       "failed_toast": "移动线程失败"
+    },
+    "_move_thread": "CEREBRO-PATCH(i18n-comment-move-thread): JEH-2488 move picked comments to a new thread UI",
+    "move_thread": {
+      "action": "在新线程中回复",
+      "breadcrumb": "已移到新线程",
+      "select_hint": "选择要移到新线程的评论",
+      "move_action_one": "将 {{count}} 条评论移到新线程",
+      "move_action_other": "将 {{count}} 条评论移到新线程",
+      "moving_action": "正在移动...",
+      "success_toast": "已移到新线程",
+      "failed_toast": "移动评论失败"
     }
   },
   "reply": {
@@ -319,9 +330,10 @@
     "unpin_tooltip": "取消固定回复",
     "pinned_placeholder": "回复已固定 — 滚动浏览不受影响",
     "_reply_target_agent_indicator": "CEREBRO-PATCH(i18n-reply-target-agent-indicator): FIR-2349 reply composer agent trigger target bar",
+    "_reply_target_approval_needed": "CEREBRO-PATCH(i18n-reply-target-approval-needed): FIR-2465 reword trigger badge to surface the required user action",
     "target_label": "回复给",
-    "target_trigger_inactive": "不会触发",
-    "target_trigger_title": "{{name}} 不会被触发",
+    "target_trigger_inactive": "需要批准",
+    "target_trigger_title": "{{name}} 需要批准",
     "target_trigger_description": "个人智能体。只有所有者可以唤醒它。",
     "target_owner_label": "所有者",
     "target_tag_owner": "标记所有者",

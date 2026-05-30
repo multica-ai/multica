@@ -9,6 +9,7 @@ import {
 } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
+import { ChannelDetailPage } from "./pages/channel-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { AutopilotCreatePage, AutopilotEditPage } from "@multica/cerebro-autopilot-pages";
@@ -53,6 +54,7 @@ import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags/settings-tabs";
 import { cerebroCostOptimizationTabs } from "@multica/cerebro-cost-optimization/views";
+import { useCerebroToolPolicySettingsTabs } from "@multica/cerebro-tool-policy/views";
 import { IssueListReferenceFilter } from "@multica/cerebro-references/views";
 import { ReferencesByObjectPage } from "@multica/cerebro-references/views/pages";
 
@@ -89,6 +91,9 @@ function PageShell() {
 function SettingsRoute() {
   const { t } = useT("settings");
   const membersTabCerebroExtras = useMembersTabCerebroExtras();
+  // FIR-2284 Bid 5: workspace Permissions tab, present only when the
+  // cerebro_tool_policy flag is on.
+  const toolPolicyTabs = useCerebroToolPolicySettingsTabs();
 
   return (
     <SettingsPage
@@ -108,6 +113,7 @@ function SettingsRoute() {
         agentCapabilitiesSettingsTab,
         ...cerebroCostOptimizationTabs,
         ...cerebroFeatureFlagTabs,
+        ...toolPolicyTabs,
       ]}
       membersTabCerebroExtras={membersTabCerebroExtras}
     />
@@ -183,7 +189,7 @@ export const appRoutes: RouteObject[] = [
           },
           {
             path: "channels/:id",
-            element: <IssueDetailPage />,
+            element: <ChannelDetailPage />,
             handle: { title: "Channel" },
           },
           {

@@ -51,6 +51,9 @@ type repoCheckoutRequest struct {
 	Ref         string `json:"ref,omitempty"`
 	AgentName   string `json:"agent_name"`
 	TaskID      string `json:"task_id"`
+	// CEREBRO-PATCH(daemon-repo-grants): FIR-2512 — used for grants-based repo access check.
+	AgentID   string `json:"agent_id,omitempty"`
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 // healthHandler returns the /health HTTP handler. Extracted from serveHealth
@@ -148,7 +151,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			return
 		}
 
-		if err := d.ensureRepoReady(r.Context(), req.WorkspaceID, req.URL); err != nil {
+		if err := d.ensureRepoReady(r.Context(), req.WorkspaceID, req.URL, req.AgentID, req.ProjectID); err != nil {
 			statusCode := http.StatusInternalServerError
 			if errors.Is(err, ErrRepoNotConfigured) {
 				statusCode = http.StatusBadRequest

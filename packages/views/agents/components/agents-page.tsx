@@ -411,7 +411,9 @@ export function AgentsPage() {
     return sortedAgents.map((agent) => {
       const isOwner =
         !!currentUser?.id && agent.owner_id === currentUser.id;
-      const canManage = isWorkspaceAdmin;
+      // CEREBRO-PATCH(personal-agent-owner-manage): MUL-2443 — owner can manage own private agent.
+      const canManage =
+        isWorkspaceAdmin || (agent.visibility === "private" && isOwner);
       const ownerIdToShow =
         scope === "all" &&
         agent.owner_id &&

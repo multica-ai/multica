@@ -11,6 +11,47 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createAutoPauseAlertComment = `-- name: CreateAutoPauseAlertComment :one
+INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+SELECT i.id, i.workspace_id, 'agent', $1, $2, 'comment'
+FROM issue i
+WHERE i.id = $3
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, classification
+`
+
+type CreateAutoPauseAlertCommentParams struct {
+	AuthorID pgtype.UUID `json:"author_id"`
+	Content  string      `json:"content"`
+	IssueID  pgtype.UUID `json:"issue_id"`
+}
+
+// FIR-2476: posts the single circuit-breaker notice on the issue whose task
+// tripped the breaker, attributed to the task's agent. Derives workspace_id
+// from the issue row so the caller only supplies issue_id, author_id, content.
+// The content is plain text with no @mentions by construction (an agent mention
+// would re-trigger the very loop this breaker stops).
+func (q *Queries) CreateAutoPauseAlertComment(ctx context.Context, arg CreateAutoPauseAlertCommentParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, createAutoPauseAlertComment, arg.AuthorID, arg.Content, arg.IssueID)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.Classification,
+	)
+	return i, err
+}
+
 const createResumeFromPauseTask = `-- name: CreateResumeFromPauseTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
@@ -138,6 +179,27 @@ func (q *Queries) GetAgentRuntimePauseSnapshot(ctx context.Context, id pgtype.UU
 	return i, err
 }
 
+const incrementAutoPauseCount = `-- name: IncrementAutoPauseCount :one
+UPDATE agent_runtime
+SET auto_pause_count = auto_pause_count + 1,
+    updated_at       = now()
+WHERE id = $1
+RETURNING auto_pause_count
+`
+
+// FIR-2476 circuit breaker: bump the consecutive auto-pause counter and return
+// the new value. Called by MaybeAutoPauseOnFailure on every auto-pause. The
+// returned count drives the growing backoff (5m → 10m → 20m …) and, once it
+// crosses the circuit limit, the decision to stop auto-resuming and notify a
+// human. Atomic increment-and-read so a burst of concurrent failures each get
+// a distinct count (only one caller sees the exact trip value).
+func (q *Queries) IncrementAutoPauseCount(ctx context.Context, id pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementAutoPauseCount, id)
+	var auto_pause_count int32
+	err := row.Scan(&auto_pause_count)
+	return auto_pause_count, err
+}
+
 const listResumableTasksForRuntime = `-- name: ListResumableTasksForRuntime :many
 SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.original_user_id, t.delegating_agent_id, t.source_task_id, t.delegation_source, t.wait_reason, t.title, t.model_override FROM agent_task_queue t
 WHERE t.runtime_id = $1
@@ -244,7 +306,7 @@ func (q *Queries) ListResumableTasksForRuntime(ctx context.Context, arg ListResu
 }
 
 const listRuntimesDueForUnpause = `-- name: ListRuntimesDueForUnpause :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
 WHERE paused_at IS NOT NULL
   AND unpause_at IS NOT NULL
   AND unpause_at <= now()
@@ -287,6 +349,7 @@ func (q *Queries) ListRuntimesDueForUnpause(ctx context.Context) ([]AgentRuntime
 			&i.CliVersion,
 			&i.ToolsConfig,
 			&i.SandboxPolicy,
+			&i.AutoPauseCount,
 		); err != nil {
 			return nil, err
 		}
@@ -306,7 +369,7 @@ SET paused_at    = COALESCE(paused_at, now()),
     pause_reason = $3,
     updated_at   = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
 `
 
 type PauseAgentRuntimeParams struct {
@@ -351,6 +414,7 @@ func (q *Queries) PauseAgentRuntime(ctx context.Context, arg PauseAgentRuntimePa
 		&i.CliVersion,
 		&i.ToolsConfig,
 		&i.SandboxPolicy,
+		&i.AutoPauseCount,
 	)
 	return i, err
 }
@@ -373,6 +437,23 @@ WHERE id = $1
 // classified correctly.
 func (q *Queries) ReclassifyAsRateLimit(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, reclassifyAsRateLimit, id)
+	return err
+}
+
+const resetAutoPauseCount = `-- name: ResetAutoPauseCount :exec
+UPDATE agent_runtime
+SET auto_pause_count = 0,
+    updated_at       = now()
+WHERE id = $1
+  AND auto_pause_count > 0
+`
+
+// FIR-2476: clear the consecutive auto-pause counter after a successful task
+// run on the runtime (called from CompleteTask via the AutoPause seam). Guarded
+// on auto_pause_count > 0 so the steady-state success path does a cheap no-op
+// instead of a needless row write on every completion.
+func (q *Queries) ResetAutoPauseCount(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, resetAutoPauseCount, id)
 	return err
 }
 
@@ -452,7 +533,7 @@ SET paused_at    = NULL,
     pause_reason = NULL,
     updated_at   = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
 `
 
 // Clears all pause fields. Idempotent on already-unpaused runtimes.
@@ -485,6 +566,7 @@ func (q *Queries) UnpauseAgentRuntime(ctx context.Context, id pgtype.UUID) (Agen
 		&i.CliVersion,
 		&i.ToolsConfig,
 		&i.SandboxPolicy,
+		&i.AutoPauseCount,
 	)
 	return i, err
 }

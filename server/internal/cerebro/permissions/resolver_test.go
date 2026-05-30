@@ -300,6 +300,124 @@ func TestCan_WritesPermissionAuditEvent(t *testing.T) {
 	}
 }
 
+// FIR-2512: project subject type tests.
+func TestDecide_ProjectGrant(t *testing.T) {
+	projectA := uuid(0xA0)
+	projectB := uuid(0xB0)
+	grants := []cerebrodb.CerebroWorkspaceGrant{
+		grant(subjectProject, projectA, "repo.checkout", "github.com/org/repo"),
+	}
+
+	// Agent running in project A should get access.
+	allowed := Decide(grants, Request{
+		Actor:      Actor{Type: subjectAgent, ID: uuid(1), ProjectIDs: []pgtype.UUID{projectA}},
+		Capability: "repo.checkout",
+		Resource:   "github.com/org/repo",
+	})
+	if !allowed.Allowed() {
+		t.Fatalf("agent in project A should be allowed, got %v (%s)", allowed.Kind, allowed.Reason)
+	}
+	if allowed.WinningOverrideLayer != "project" {
+		t.Fatalf("winning layer should be 'project', got %q", allowed.WinningOverrideLayer)
+	}
+
+	// Agent running in project B should be denied.
+	denied := Decide(grants, Request{
+		Actor:      Actor{Type: subjectAgent, ID: uuid(1), ProjectIDs: []pgtype.UUID{projectB}},
+		Capability: "repo.checkout",
+		Resource:   "github.com/org/repo",
+	})
+	if denied.Allowed() {
+		t.Fatal("agent in project B must NOT be allowed by project A's grant")
+	}
+
+	// Agent with no project ID should be denied.
+	deniedNoProject := Decide(grants, Request{
+		Actor:      Actor{Type: subjectAgent, ID: uuid(1)},
+		Capability: "repo.checkout",
+		Resource:   "github.com/org/repo",
+	})
+	if deniedNoProject.Allowed() {
+		t.Fatal("agent with no project should be denied")
+	}
+}
+
+// TestDecide_ProjectGrantShadowsWorkspaceDefault is the regression test for the
+// hard blocker Sara raised on PR #722: after the Spor 3 migration every repo
+// becomes a workspace_default allow-grant, so without specificity-wins an agent
+// scoped to project A could still ride that allow-all to reach project B's repo.
+// With specificity-wins, a project-scoped grant SHADOWS the workspace_default
+// allow-all and a repo outside the project's pattern is denied.
+func TestDecide_ProjectGrantShadowsWorkspaceDefault(t *testing.T) {
+	projectA := uuid(0xA0)
+	// Migration default: workspace_default allow-all (preserves behavior day one).
+	wsGrant := grant(subjectWorkspaceDefault, pgtype.UUID{}, "repo.checkout", "*")
+	// Admin tightens: project A may only check out its own repo.
+	projGrant := grant(subjectProject, projectA, "repo.checkout", "github.com/org/repoA")
+	grants := []cerebrodb.CerebroWorkspaceGrant{wsGrant, projGrant}
+
+	// Project A → repoA: allowed at the project layer.
+	if d := Decide(grants, Request{
+		Actor:      Actor{Type: subjectAgent, ID: uuid(1), ProjectIDs: []pgtype.UUID{projectA}},
+		Capability: "repo.checkout",
+		Resource:   "github.com/org/repoA",
+	}); !d.Allowed() || d.WinningOverrideLayer != "project" {
+		t.Fatalf("project A → repoA should allow at project layer, got %v (%s) layer=%s", d.Kind, d.Reason, d.WinningOverrideLayer)
+	}
+
+	// Project A → repoB: DENIED. The project grant shadows workspace_default;
+	// repoB is outside project A's pattern. This is the isolation that was missing.
+	if d := Decide(grants, Request{
+		Actor:      Actor{Type: subjectAgent, ID: uuid(1), ProjectIDs: []pgtype.UUID{projectA}},
+		Capability: "repo.checkout",
+		Resource:   "github.com/org/repoB",
+	}); d.Allowed() {
+		t.Fatalf("project A → repoB must be denied (workspace_default shadowed), got allow")
+	}
+
+	// Unscoped agent (no project context): still rides workspace_default allow-all,
+	// so existing behavior is preserved until an admin tightens.
+	if d := Decide(grants, Request{
+		Actor:      Actor{Type: subjectAgent, ID: uuid(1)},
+		Capability: "repo.checkout",
+		Resource:   "github.com/org/repoB",
+	}); !d.Allowed() || d.WinningOverrideLayer != "workspace" {
+		t.Fatalf("unscoped agent should ride workspace_default, got %v (%s) layer=%s", d.Kind, d.Reason, d.WinningOverrideLayer)
+	}
+
+	// A different capability the project does not constrain (repo.read) still
+	// falls through to workspace_default: shadowing is per-capability.
+	readWsGrant := grant(subjectWorkspaceDefault, pgtype.UUID{}, "repo.read", "*")
+	if d := Decide([]cerebrodb.CerebroWorkspaceGrant{readWsGrant, projGrant}, Request{
+		Actor:      Actor{Type: subjectAgent, ID: uuid(1), ProjectIDs: []pgtype.UUID{projectA}},
+		Capability: "repo.read",
+		Resource:   "github.com/org/repoB",
+	}); !d.Allowed() || d.WinningOverrideLayer != "workspace" {
+		t.Fatalf("repo.read should ride workspace_default (project only constrains repo.checkout), got %v (%s) layer=%s", d.Kind, d.Reason, d.WinningOverrideLayer)
+	}
+}
+
+func TestDecide_ProjectOverrideLayerRankBetweenWorkspaceAndGroup(t *testing.T) {
+	project := uuid(0xA0)
+	group := uuid(0xB0)
+	wsGrant := grant(subjectWorkspaceDefault, pgtype.UUID{}, "repo.checkout", "*")
+	projGrant := grant(subjectProject, project, "repo.checkout", "*", withID(uuid(0x01)))
+	grpGrant := grant(subjectGroup, group, "repo.checkout", "*", withID(uuid(0x02)))
+
+	d := Decide([]cerebrodb.CerebroWorkspaceGrant{wsGrant, projGrant, grpGrant}, Request{
+		Actor:      Actor{Type: subjectAgent, ID: uuid(1), GroupIDs: []pgtype.UUID{group}, ProjectIDs: []pgtype.UUID{project}},
+		Capability: "repo.checkout",
+		Resource:   "github.com/org/repo",
+	})
+	if !d.Allowed() {
+		t.Fatalf("should be allowed when all layers match, got %v", d.Kind)
+	}
+	// Group rank (4) is higher than project rank (2); winning layer should be group.
+	if d.WinningOverrideLayer != "group" {
+		t.Fatalf("winning layer should be 'group', got %q", d.WinningOverrideLayer)
+	}
+}
+
 func TestCan_ReturnsAuditWriteError(t *testing.T) {
 	wantErr := errors.New("audit unavailable")
 	store := &fakeStore{

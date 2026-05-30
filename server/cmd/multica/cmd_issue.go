@@ -172,6 +172,18 @@ var issueCommentDeleteCmd = &cobra.Command{
 	RunE:  runIssueCommentDelete,
 }
 
+// CEREBRO-PATCH(comments-move-to-thread-cli): JEH-2488 move picked comments to a new thread.
+var issueCommentMoveCmd = &cobra.Command{
+	Use:   "move <comment-id> [<comment-id>...]",
+	Short: "Move one or more comments into a new thread on the same issue",
+	Long: "Lift the given comments out of their thread into a freshly-created thread on the same issue. " +
+		"The oldest comment becomes the new thread's root; the rest become its replies in chronological order. " +
+		"Each moved comment is left in place as a breadcrumb linking to the new thread. " +
+		"All comments must be on the same issue, and you must be their author or a workspace admin.",
+	Args: cobra.MinimumNArgs(1),
+	RunE: runIssueCommentMove,
+}
+
 // Subscriber subcommands.
 
 var issueSubscriberCmd = &cobra.Command{
@@ -264,6 +276,7 @@ func init() {
 	issueCommentCmd.AddCommand(issueCommentListCmd)
 	issueCommentCmd.AddCommand(issueCommentAddCmd)
 	issueCommentCmd.AddCommand(issueCommentDeleteCmd)
+	issueCommentCmd.AddCommand(issueCommentMoveCmd) // CEREBRO-PATCH(comments-move-to-thread-cli): JEH-2488.
 
 	issueSubscriberCmd.AddCommand(issueSubscriberListCmd)
 	issueSubscriberCmd.AddCommand(issueSubscriberAddCmd)
@@ -1218,6 +1231,31 @@ func runIssueCommentDelete(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Comment %s deleted.\n", args[0])
 	return nil
+}
+
+// CEREBRO-PATCH(comments-move-to-thread-cli): JEH-2488 move picked comments to a new thread.
+func runIssueCommentMove(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	body := map[string]any{"comment_ids": args}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/comments/move-to-thread", body, &result); err != nil {
+		return fmt.Errorf("move comments: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Moved %d comment(s) to a new thread.\n", len(args))
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
 }
 
 // ---------------------------------------------------------------------------

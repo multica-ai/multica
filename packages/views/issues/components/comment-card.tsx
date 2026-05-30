@@ -2,11 +2,13 @@
 
 // CEREBRO-PATCH(comment-card-cerebro): cerebro modification of upstream file
 
-import { CheckCircle2, ChevronRight, Copy, GitFork, MessageCircleQuestion, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
-import { lazy, memo, Suspense, useCallback, useRef, useState } from "react";
+import { CheckCircle2, ChevronRight, Copy, GitFork, MessageCircleQuestion, MessagesSquare, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { lazy, memo, Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
+// CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 select-mode checkboxes for moving comments to a new thread.
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -110,6 +112,14 @@ interface CommentCardProps {
   /** True when the root thread can be lifted into a child issue. */
   canMoveToSubIssue?: boolean;
   onMoveToSubIssue?: (commentId: string) => Promise<void>;
+  /**
+   * CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 — when set, the kebab
+   * menu offers "Reply in new thread", which enters a select mode where the
+   * user picks comments in this thread and lifts them into a new thread on the
+   * same issue. `onMoveToNewThread` receives the picked ids in render order.
+   */
+  canMoveToNewThread?: boolean;
+  onMoveToNewThread?: (commentIds: string[]) => Promise<void>;
   /** Toggle the resolved state on the thread root. Only invoked for root entries. */
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
   /**
@@ -348,6 +358,12 @@ function CommentRow({
   onEdit,
   onDelete,
   onToggleReaction,
+  // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 select-mode + new-thread entry on replies.
+  selectMode = false,
+  selected = false,
+  onToggleSelect,
+  canStartNewThread = false,
+  onStartNewThread,
 }: {
   issueId: string;
   entry: TimelineEntry;
@@ -356,6 +372,11 @@ function CommentRow({
   onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
+  selectMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (commentId: string) => void;
+  canStartNewThread?: boolean;
+  onStartNewThread?: (commentId: string) => void;
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
@@ -375,6 +396,14 @@ function CommentRow({
   return (
     <div className={`py-3${isTemp ? " opacity-60" : ""}`}>
       <div className="flex items-center gap-2.5">
+        {/* CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 reply select checkbox. */}
+        {selectMode && (
+          <Checkbox
+            checked={selected}
+            onCheckedChange={() => onToggleSelect?.(entry.id)}
+            aria-label={t(($) => $.comment.move_thread.action)}
+          />
+        )}
         <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
         <span className="cursor-pointer text-sm font-medium">
           {getActorName(entry.actor_type, entry.actor_id)}
@@ -413,6 +442,16 @@ function CommentRow({
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
+              {/* CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 start a new thread from this reply. */}
+              {canStartNewThread && (isOwn || canModerate) && onStartNewThread && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => onStartNewThread(entry.id)}>
+                    <MessagesSquare className="h-3.5 w-3.5" />
+                    {t(($) => $.comment.move_thread.action)}
+                  </DropdownMenuItem>
+                </>
+              )}
               {(canEditEntry || canDeleteEntry) && (
                 <>
                   <DropdownMenuSeparator />
@@ -533,6 +572,8 @@ function CommentCardImpl({
   onToggleReaction,
   canMoveToSubIssue = false,
   onMoveToSubIssue,
+  canMoveToNewThread = false,
+  onMoveToNewThread,
   onResolveToggle,
   onCollapseResolved,
   highlightedCommentId,
@@ -543,7 +584,11 @@ function CommentCardImpl({
   const { getActorName } = useActorName();
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
-  const open = !isCollapsed;
+  // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 select mode keeps the thread expanded so every comment is pickable.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [movingThread, setMovingThread] = useState(false);
+  const open = !isCollapsed || selectMode;
   const handleOpenChange = useCallback((_open: boolean) => toggleCollapse(issueId, entry.id), [toggleCollapse, issueId, entry.id]);
   const edit = useEditAttachmentState(issueId, entry, onEdit);
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
@@ -583,6 +628,45 @@ function CommentCardImpl({
     }
   }, [entry.id, onMoveToSubIssue, t]);
 
+  // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 select-mode plumbing.
+  // `orderedIds` is the thread in render order (root first, then replies); the
+  // backend re-sorts by created_at, so this is only used to send a tidy order.
+  const orderedIds = useMemo(
+    () => [entry.id, ...allNestedReplies.map((r) => r.id)],
+    [entry.id, allNestedReplies],
+  );
+  const canStartNewThread = canMoveToNewThread && !!onMoveToNewThread;
+  const startNewThread = useCallback((seedId: string) => {
+    setSelectedIds(new Set([seedId]));
+    setSelectMode(true);
+  }, []);
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const cancelSelect = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+  const confirmMoveThread = useCallback(async () => {
+    if (!onMoveToNewThread || selectedIds.size === 0) return;
+    const ids = orderedIds.filter((id) => selectedIds.has(id));
+    setMovingThread(true);
+    try {
+      await onMoveToNewThread(ids);
+      setSelectMode(false);
+      setSelectedIds(new Set());
+    } catch {
+      toast.error(t(($) => $.comment.move_thread.failed_toast));
+    } finally {
+      setMovingThread(false);
+    }
+  }, [onMoveToNewThread, selectedIds, orderedIds, t]);
+
   return (
     <Card
       className={cn(
@@ -614,6 +698,14 @@ function CommentCardImpl({
             <CollapsibleTrigger className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
               <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
             </CollapsibleTrigger>
+            {/* CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 root select checkbox. */}
+            {selectMode && (
+              <Checkbox
+                checked={selectedIds.has(entry.id)}
+                onCheckedChange={() => toggleSelect(entry.id)}
+                aria-label={t(($) => $.comment.move_thread.action)}
+              />
+            )}
             <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
             <span className="shrink-0 cursor-pointer text-sm font-medium">
               {getActorName(entry.actor_type, entry.actor_id)}
@@ -694,6 +786,16 @@ function CommentCardImpl({
                       <DropdownMenuItem onClick={() => setConfirmMove(true)}>
                         <GitFork className="h-3.5 w-3.5" />
                         {t(($) => $.comment.move.action)}
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                  {/* CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 start a new thread from the root. */}
+                  {canStartNewThread && (isOwn || canModerate) && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => startNewThread(entry.id)}>
+                        <MessagesSquare className="h-3.5 w-3.5" />
+                        {t(($) => $.comment.move_thread.action)}
                       </DropdownMenuItem>
                     </>
                   )}
@@ -824,23 +926,56 @@ function CommentCardImpl({
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onToggleReaction={onToggleReaction}
+                selectMode={selectMode}
+                selected={selectedIds.has(reply.id)}
+                onToggleSelect={toggleSelect}
+                canStartNewThread={canStartNewThread}
+                onStartNewThread={startNewThread}
               />
             </div>
           ))}
 
-          {/* Reply input */}
-          <div className="border-t border-border/50 px-3 sm:px-4 py-2.5">
-            <ReplyInput
-              issueId={issueId}
-              placeholder={t(($) => $.reply.placeholder)}
-              size="sm"
-              avatarType="member"
-              avatarId={currentUserId ?? ""}
-              // CEREBRO-PATCH(reply-target-indicator): FIR-2392 show the agent the trigger logic will actually wake (issue assignee / squad leader), not the replied-to comment author.
-              triggerAgentId={triggerAgentId}
-              onSubmit={(content, attachmentIds) => onReply(entry.id, content, attachmentIds)}
-            />
-          </div>
+          {/* Reply input — hidden while picking; the floating action bar takes over. */}
+          {selectMode ? (
+            // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 floating select-action
+            // bar pinned to the viewport, so it stays reachable on long threads instead
+            // of scrolling out of view at the bottom of the thread.
+            <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
+              <div className="pointer-events-auto flex w-full max-w-[min(36rem,calc(100vw-2rem))] flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-popover px-4 py-2.5 text-popover-foreground shadow-lg">
+                <span className="text-xs text-muted-foreground">
+                  {t(($) => $.comment.move_thread.select_hint)}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="ghost" onClick={cancelSelect} disabled={movingThread}>
+                    {t(($) => $.comment.cancel_action)}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    disabled={selectedIds.size === 0 || movingThread}
+                    onClick={confirmMoveThread}
+                  >
+                    {movingThread
+                      ? t(($) => $.comment.move_thread.moving_action)
+                      : t(($) => $.comment.move_thread.move_action, { count: selectedIds.size })}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="border-t border-border/50 px-3 sm:px-4 py-2.5">
+              <ReplyInput
+                issueId={issueId}
+                placeholder={t(($) => $.reply.placeholder)}
+                size="sm"
+                avatarType="member"
+                avatarId={currentUserId ?? ""}
+                // CEREBRO-PATCH(reply-target-indicator): FIR-2392 show the agent the trigger logic will actually wake (issue assignee / squad leader), not the replied-to comment author.
+                triggerAgentId={triggerAgentId}
+                onSubmit={(content, attachmentIds) => onReply(entry.id, content, attachmentIds)}
+              />
+            </div>
+          )}
         </CollapsibleContent>
       </Collapsible>
     </Card>

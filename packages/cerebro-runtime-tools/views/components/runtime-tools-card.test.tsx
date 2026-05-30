@@ -183,7 +183,9 @@ describe("RuntimeToolsCard", () => {
 
     // The FIR-2230 table replaces the legacy enable+grants body on the runtime page.
     expect(await screen.findByTestId("tool-policy-table")).toBeInTheDocument();
-    expect(await screen.findByText("BigQuery query")).toBeInTheDocument();
+    // The title renders in both the desktop table row and the md:hidden mobile
+    // card, so it is present more than once in the DOM by design.
+    expect((await screen.findAllByText("BigQuery query")).length).toBeGreaterThan(0);
   });
 
   it("Scan now triggers a live daemon scan via the scan-now endpoint", async () => {

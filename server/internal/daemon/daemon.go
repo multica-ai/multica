@@ -21,6 +21,7 @@ import (
 	// CEREBRO-PATCH(daemon-settings-refresh-import): keep settings live via cerebro-zone helper.
 	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"
 	"github.com/multica-ai/multica/server/internal/cerebro/daemonsettings"
+	"github.com/multica-ai/multica/server/internal/cerebro/traceupload" // CEREBRO-PATCH(daemon-trace-upload): Fase 2 registry trace sender
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -161,6 +162,8 @@ type Daemon struct {
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
 	runUpdateFn func(targetVersion string) (string, error)
+
+	traceUploader *traceupload.Manager // CEREBRO-PATCH(daemon-trace-upload): Fase 2 registry trace sender; nil when flag off
 }
 
 // New creates a new Daemon instance.
@@ -678,6 +681,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.autoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
 	go d.serveHealth(ctx, healthLn, time.Now())
+	d.startTraceUpload(ctx) // CEREBRO-PATCH(daemon-trace-upload): launch trace uploader + boot-sweep (no-op when flag off)
 	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal, health)")
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
@@ -888,6 +892,26 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 	return *s.CoAuthoredByEnabled
 }
 
+// CEREBRO-PATCH(daemon-repo-grants): FIR-2512 — grants-based repo access check.
+
+// repoGrantsEnabled reports whether the grants-based repo access check is on
+// for the given workspace. Defaults to false (flag-gated until tested).
+func (d *Daemon) repoGrantsEnabled(workspaceID string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok || len(ws.settings) == 0 {
+		return false
+	}
+	var s struct {
+		RepoGrantsEnabled *bool `json:"repo_grants_enabled"`
+	}
+	if err := json.Unmarshal(ws.settings, &s); err != nil {
+		return false
+	}
+	return s.RepoGrantsEnabled != nil && *s.RepoGrantsEnabled
+}
+
 // registerTaskRepos merges task-scoped repos (e.g. project github_repo
 // resources lifted into resp.Repos by the claim handler) into the workspace's
 // allowlist and kicks off a cache sync for any URLs that aren't yet cached.
@@ -1000,7 +1024,7 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	return resp, nil
 }
 
-func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL string) error {
+func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL, agentID, projectID string) error {
 	if d.repoCache == nil {
 		return fmt.Errorf("repo cache not initialized")
 	}
@@ -1042,7 +1066,20 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return fmt.Errorf("refresh workspace repos: %w", err)
 	}
 
-	if !d.workspaceRepoAllowed(workspaceID, repoURL) {
+	// CEREBRO-PATCH(daemon-repo-grants): FIR-2512 — when grants are enabled,
+	// use the server-side grants resolver instead of the flat workspace allowlist.
+	if d.repoGrantsEnabled(workspaceID) {
+		allowed, reason, grantErr := d.client.CheckRepoCapability(ctx, workspaceID, agentID, projectID, repoURL, "repo.checkout")
+		if grantErr != nil {
+			return fmt.Errorf("repo permission check: %w", grantErr)
+		}
+		if !allowed {
+			if reason == "" {
+				reason = "no matching grant"
+			}
+			return fmt.Errorf("%w: %s", ErrRepoNotConfigured, reason)
+		}
+	} else if !d.workspaceRepoAllowed(workspaceID, repoURL) {
 		return ErrRepoNotConfigured
 	}
 
@@ -2371,6 +2408,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			taskLog.Warn("report task usage failed", "error", usageErr)
 		}
 	}
+	d.enqueueTraceUpload(task, provider, result) // CEREBRO-PATCH(daemon-trace-upload): queue transcript for registry upload (best-effort, never fails the task)
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
@@ -2797,6 +2835,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// CEREBRO-PATCH(daemon-current-model-env): expose resolved model to the agent before backend construction (JEH-1310 Phase 2a).
 	if model != "" {
 		agentEnv["MULTICA_CURRENT_MODEL"] = model
+	}
+	// CEREBRO-PATCH(daemon-repo-grants): FIR-2512 — project ID for grants-based repo check.
+	if task.ProjectID != "" {
+		agentEnv["MULTICA_PROJECT_ID"] = task.ProjectID
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID

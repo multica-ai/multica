@@ -389,6 +389,14 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/cerebro/issues/check-similar",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/issues/check-similar/event",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/cerebro/issues/{id}/share-tokens",
       "gate": "workspace_member"
     },
@@ -493,6 +501,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/comments/move-to-thread",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/comments/{commentId}/move-to-subissue",
       "gate": "workspace_member"
     },
@@ -586,6 +598,10 @@
     },
     {
       "id": "POST /api/daemon/tasks/{taskId}/usage",
+      "gate": "daemon_auth"
+    },
+    {
+      "id": "POST /api/daemon/workspaces/{workspaceId}/repo/check",
       "gate": "daemon_auth"
     },
     {
@@ -1713,6 +1729,10 @@
       "exempt": "read-only \u2014 wraps GET /api/issues/{id}/comments"
     },
     {
+      "id": "issue comment move",
+      "gate": "via:POST /api/comments/move-to-thread"
+    },
+    {
       "id": "issue create",
       "gate": "via:POST /api/issues/"
     },
@@ -1873,12 +1893,20 @@
       "gate": "via:PUT /api/projects/{id}/"
     },
     {
+      "id": "repo check",
+      "exempt": "read-only — pre-flight capability query, wraps daemon_auth-gated POST /api/daemon/workspaces/{workspaceId}/repo/check"
+    },
+    {
       "id": "repo checkout",
       "exempt": "local-only \u2014 git clone via daemon into local workdir"
     },
     {
       "id": "runtime activity",
       "exempt": "read-only \u2014 wraps GET /api/runtimes/{runtimeId}/activity"
+    },
+    {
+      "id": "runtime delete",
+      "gate": "via:DELETE /api/runtimes/{runtimeId}"
     },
     {
       "id": "runtime list",

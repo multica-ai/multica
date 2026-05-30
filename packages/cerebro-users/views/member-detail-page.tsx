@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Wallet, Crown, Shield, User as UserIcon, UserMinus } from "lucide-react";
+import { ArrowLeft, Wallet, Crown, Shield, User as UserIcon, UserMinus, Wrench } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { ReactNode } from "react";
@@ -36,6 +36,8 @@ import {
   OwnedResourcesSection,
   OverridesPlaceholder,
 } from "@multica/cerebro-members/views";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { ToolPolicyTable } from "@multica/cerebro-tool-policy/views";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -65,6 +67,10 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
   const user = useAuthStore((s) => s.user);
   const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
+  // FIR-2284 Bid 5: the per-tool permission table on the Member surface — the
+  // User (ceiling) rung of the Workspace › Runtime › Agent › Group › User chain.
+  // When on it fills the reserved Overrides slot; off keeps the placeholder.
+  const toolPolicyEnabled = useFeatureFlag("cerebro_tool_policy");
   const qc = useQueryClient();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const member = members.find((m) => m.id === memberId || m.user_id === memberId);
@@ -275,7 +281,23 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
       <MemberGroupsSection userId={member.user_id} isAdmin={canManage} />
       <EffectiveAccessSection userId={member.user_id} role={member.role} />
       <OwnedResourcesSection userId={member.user_id} isAdmin={canManage} />
-      <OverridesPlaceholder />
+      {toolPolicyEnabled ? (
+        <section
+          className="rounded-md border border-border"
+          data-testid="member-permissions-section"
+        >
+          <header className="flex items-center gap-2 border-b border-border px-4 py-3 text-sm font-medium">
+            <Wrench className="size-4 text-muted-foreground" />
+            <span>Permissions</span>
+          </header>
+          <div className="p-4">
+            {/* The User layer keys on the member's user id, not the membership id. */}
+            <ToolPolicyTable wsId={wsId} view="member" subjectId={member.user_id} />
+          </div>
+        </section>
+      ) : (
+        <OverridesPlaceholder />
+      )}
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium">Tasks</h2>

@@ -73,11 +73,22 @@ export function proxy(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // --- Root path: redirect logged-in users to their last workspace ---
-  if (pathname === "/" && hasSession && lastSlug) {
-    const url = req.nextUrl.clone();
-    url.pathname = startPagePath(lastSlug, req.cookies, req.headers);
-    return NextResponse.redirect(url);
+  // --- Root path: this fork is an internal tool (FIR-2490 follow-up).
+  // Logged-in users with a workspace cookie go to their last workspace;
+  // logged-in users without a cookie fall through to the client page which
+  // discovers a workspace and redirects there. Anonymous visitors go
+  // straight to /login — we never render the upstream marketing landing.
+  if (pathname === "/") {
+    if (hasSession && lastSlug) {
+      const url = req.nextUrl.clone();
+      url.pathname = startPagePath(lastSlug, req.cookies, req.headers);
+      return NextResponse.redirect(url);
+    }
+    if (!hasSession) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/login";
+      return NextResponse.redirect(url);
+    }
   }
 
   // --- Default: forward locale header to RSC, no redirect/rewrite ---

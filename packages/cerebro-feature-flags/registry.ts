@@ -33,6 +33,7 @@ export type CerebroFlagKey =
   | "cerebro_simple_tool_policy"
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
+  | "cerebro_move_comment_to_thread"
   | "cerebro_agent_passes"
   | "cerebro_references"
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
@@ -40,7 +41,11 @@ export type CerebroFlagKey =
   // FIR-2385: private agents visible-but-locked + tag → run-request to owner.
   | "cerebro_private_agent_requests"
   // FIR-2412: notify the assignee when an issue's start/due date arrives.
-  | "cerebro_date_reminders";
+  | "cerebro_date_reminders"
+  // FIR-2490: Firtal-branded welcome page for new members (replaces upstream onboarding).
+  | "cerebro_firtal_welcome"
+  // FIR-2504: show similar open issues + LLM verdict when creating an issue.
+  | "cerebro_duplicate_check_on_create";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -82,6 +87,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // an accidental prod-behaviour flip.
   cerebro_approvals: true,
   cerebro_move_comment_to_subissue: true,
+  cerebro_move_comment_to_thread: true,
   cerebro_agent_passes: true,
   cerebro_references: true,
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
@@ -93,6 +99,16 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-2412: on by default — the assignee gets an inbox + push reminder when
   // a start/due date arrives. Off hides the settings rows and the UI control.
   cerebro_date_reminders: true,
+  // FIR-2490: OFF by default — opt-in per workspace. When on, new members are
+  // routed to a Firtal-branded welcome page (desktop install guide with hard
+  // gate, PWA install guide, members docs, bug-melding link to the Multica
+  // support workspace) instead of upstream `/onboarding`.
+  cerebro_firtal_welcome: false,
+  // FIR-2504: surface similar open issues + Haiku verdict in the create-issue
+  // modal so users can open an existing sag or attach as a sub-issue instead
+  // of duplicating. Defaults ON so the feature lands behind the standard
+  // workspace/user override (Off restores upstream create flow).
+  cerebro_duplicate_check_on_create: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -242,7 +258,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     key: "cerebro_tool_policy",
     label: "Unified tool permissions",
     description:
-      "Enable the unified per-tool permission table (Tool · Source · Runtime · This agent · Effective) on agent and runtime pages, backed by the four-layer Runtime › Agent › Group › User chain. GET /api/workspaces/{id}/tool-policy (member) + PUT/DELETE (admin/owner). FIR-2230.",
+      "Enable the capability catalog on agent and runtime pages: one flat, filterable list of every tool (Tool · Class · Side effect · Decision · Resolved by), narrowed by combinable class / side-effect / decision filters + search, with one editable decision pill per row and a mobile card layout. Backed by the four-layer Runtime › Agent › Group › User chain. GET /api/workspaces/{id}/tool-policy (member) + PUT/DELETE (admin/owner). FIR-2284 (redesign of FIR-2230).",
   },
   {
     key: "cerebro_simple_tool_policy",
@@ -261,6 +277,12 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Move comment thread to sub-issue",
     description:
       "Show a 'Move to sub-issue' action on root comments. Lifts the thread (root + replies) into a new sub-issue and leaves a 'Moved to MUL-NN' breadcrumb on the original comment. JEH-1309.",
+  },
+  {
+    key: "cerebro_move_comment_to_thread",
+    label: "Move comments to a new thread",
+    description:
+      "Add a 'Reply in new thread' action on comments. Enters a select mode where you pick comments in the thread and lift them into a new thread on the same issue; each moved comment is left as a breadcrumb linking to the new thread. JEH-2488.",
   },
   {
     key: "cerebro_agent_passes",
@@ -292,5 +314,17 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Start / due date reminders",
     description:
       "Notify the assignee when an issue's start or due date arrives (the day-of, in their timezone). Delivery follows each user's per-channel notification preferences (inbox / mobile push / desktop). Off hides the settings rows. FIR-2412.",
+  },
+  {
+    key: "cerebro_firtal_welcome",
+    label: "Firtal-branded welcome page",
+    description:
+      "Replace the upstream onboarding flow with a Firtal-branded welcome page for new members: desktop install guide (with hard-gate modal), PWA install guide (iOS Safari + Android Chrome), members documentation link, and a bug-melding button that opens the Multica support workspace at multica.firtal.com. Each member is shown the page once — completion is tracked client-side. FIR-2490.",
+  },
+  {
+    key: "cerebro_duplicate_check_on_create",
+    label: "Find similar at create",
+    description:
+      "When composing a new issue, show up to 3 similar open issues with an LLM-judged verdict (duplicate / related) so the user can open the existing sag or create the new one as a sub-issue. Off restores the upstream create flow. Requires the Firtal AI Gateway credentials. FIR-2504.",
   },
 ];

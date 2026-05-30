@@ -1,5 +1,14 @@
-export { ToolPolicyTable, type ToolPolicyTableProps } from "./tool-policy-table";
+export {
+  ToolPolicyTable,
+  type ToolPolicyTableProps,
+  type ToolPolicyView,
+} from "./tool-policy-table";
 export {
   SimpleToolPolicyTable,
   type SimpleToolPolicyTableProps,
 } from "./simple-tool-policy-table";
+export {
+  WorkspacePermissionsTab,
+  useCerebroToolPolicySettingsTabs,
+  type ExtraSettingsTab,
+} from "./workspace-settings-tab";
