@@ -1550,7 +1550,7 @@ func TestIssueSubscriberMutationBody(t *testing.T) {
 // daemon init path.
 func newIssueCommentListTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "list"}
-	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("output", "table", "")
 	cmd.Flags().String("since", "", "")
 	cmd.Flags().Bool("roots-only", false, "")
 	cmd.Flags().Bool("summary", false, "")
@@ -1924,17 +1924,16 @@ func TestRunIssueCommentList_DoesNotPrintShowingPreamble(t *testing.T) {
 			})
 			return
 		}
+		w.Header().Set("X-Multica-Next-Before", "2026-01-01T00:00:00.000000001Z")
+		w.Header().Set("X-Multica-Next-Before-Id", "00000000-0000-0000-0000-000000000999")
 		w.Write([]byte(`[{"id":"c1"},{"id":"c2"}]`))
 	}))
 	defer srv.Close()
-
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
 	t.Setenv("MULTICA_TOKEN", "test-token")
-
 	stderr := captureStderr(t)
 	defer stderr.restore()
-
 	cmd := newIssueCommentListTestCmd()
 	if err := cmd.Flags().Set("output", "json"); err != nil {
 		t.Fatalf("set output: %v", err)
@@ -1942,11 +1941,15 @@ func TestRunIssueCommentList_DoesNotPrintShowingPreamble(t *testing.T) {
 	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
 		t.Fatalf("runIssueCommentList: %v", err)
 	}
-
-	if got := stderr.read(); strings.Contains(got, "Showing") {
+	got := stderr.read()
+	if strings.Contains(got, "Showing") {
 		t.Errorf("stderr must not contain a 'Showing ...' preamble, got: %q", got)
 	}
+	if strings.Contains(got, "Next") {
+		t.Errorf("stderr must not contain next-cursor lines in json mode, got: %q", got)
+	}
 }
+
 
 func TestValidIssueStatuses(t *testing.T) {
 	expected := map[string]bool{

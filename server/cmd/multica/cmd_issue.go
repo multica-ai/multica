@@ -1030,17 +1030,19 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	// to dig into the raw HTTP response. Label depends on which paging mode
 	// the caller is in — under --recent the cursor is a thread cursor;
 	// under --thread + --tail it is a reply cursor inside that thread.
-	if nb := respHeaders.Get("X-Multica-Next-Before"); nb != "" {
-		if nbid := respHeaders.Get("X-Multica-Next-Before-Id"); nbid != "" {
-			label := "Next thread cursor"
-			if thread != "" && tailSet {
-				label = "Next reply cursor"
+	output, _ := cmd.Flags().GetString("output")
+	if output != "json" {
+		if nb := respHeaders.Get("X-Multica-Next-Before"); nb != "" {
+			if nbid := respHeaders.Get("X-Multica-Next-Before-Id"); nbid != "" {
+				label := "Next thread cursor"
+				if thread != "" && tailSet {
+					label = "Next reply cursor"
+				}
+				fmt.Fprintf(os.Stderr, "%s: --before %s --before-id %s\n", label, nb, nbid)
 			}
-			fmt.Fprintf(os.Stderr, "%s: --before %s --before-id %s\n", label, nb, nbid)
 		}
 	}
 
-	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, comments)
 	}
