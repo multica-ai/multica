@@ -90,6 +90,15 @@ description: 用这个 agent 执行 spec-first 工作流。它会在中等和复
 1. 优先复用仓库已有的设计或 spec 区域
 2. 尽量把设计文档和对应能力放在一起
 
+## worktree 开发规则
+
+如果当前 checkout 是 worktree，且要在本地启动或验证该 worktree：
+
+1. 首次进入该 worktree 时，先执行 `make setup-worktree`
+2. 不要把 `make start-worktree` 或 `make start-air-worktree` 当成初始化命令
+3. 本地验证优先使用 `make check-worktree`
+4. 如果 worktree 环境未初始化完成，先补齐初始化，再继续实现或验证
+
 ## 设计深度要求
 
 对于功能设计、重构设计、缺失功能补设计：
@@ -107,6 +116,7 @@ description: 用这个 agent 执行 spec-first 工作流。它会在中等和复
 2. 设计里已经给出明确推荐方案
 3. `tasks.md` 已经定义好执行切片和验证方式
 4. 需要确认门时，用户已经确认设计阶段输出
+5. 如果实现或验证发生在 worktree 中，worktree 环境已经通过 `make setup-worktree` 初始化完成
 
 ## 回写规则
 

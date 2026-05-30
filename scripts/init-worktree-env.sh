@@ -24,6 +24,8 @@ frontend_port=$((13000 + offset))
 frontend_origin="http://localhost:${frontend_port}"
 
 cat > "$ENV_FILE" <<EOF
+MULTICA_ENV_KIND=worktree
+
 POSTGRES_DB=${postgres_db}
 POSTGRES_USER=multica
 POSTGRES_PASSWORD=multica

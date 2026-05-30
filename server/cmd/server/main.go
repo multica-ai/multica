@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/ntfy"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
+	"github.com/multica-ai/multica/server/internal/worktreeguard"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -43,6 +44,10 @@ func main() {
 
 	if err := pool.Ping(ctx); err != nil {
 		slog.Error("unable to ping database", "error", err)
+		os.Exit(1)
+	}
+	if err := worktreeguard.EnsureReady(ctx, pool); err != nil {
+		slog.Error("worktree database is not ready", "error", err)
 		os.Exit(1)
 	}
 	slog.Info("connected to database")
