@@ -104,6 +104,11 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 			ServerName:         s.smtpHost,
 			InsecureSkipVerify: s.smtpTLSInsecure, //nolint:gosec // opt-in via SMTP_TLS_INSECURE=true
 		}
+		smtpForceTLS12 := strings.TrimSpace(os.Getenv("SMTP_FORCE_TLS12"))
+		if smtpForceTLS12 != "" {
+				tlsCfg.MinVersion = tls.VersionTLS12
+				tlsCfg.MaxVersion = tls.VersionTLS12 //to fix email provider forbidden TSL1.3
+		}
 		if err = c.StartTLS(tlsCfg); err != nil {
 			return fmt.Errorf("smtp starttls: %w", err)
 		}
