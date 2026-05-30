@@ -47,3 +47,4 @@ server/server
 
 .idea
 *.iml
+.github/agents/*.bak
