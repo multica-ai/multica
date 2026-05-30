@@ -38,7 +38,6 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { Calendar } from "@multica/ui/components/ui/calendar";
-import { TimeInput } from "@multica/ui/components/ui/time-input";
 import { CerebroReminderWheel } from "./cerebro-reminder-wheel";
 import { useMarkInboxRead } from "@multica/core/inbox/mutations";
 import type { InboxItem } from "@multica/core/types";
@@ -804,7 +803,7 @@ function ReminderSheet({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{strings.remind_title}</DialogTitle>
         </DialogHeader>
@@ -814,14 +813,23 @@ function ReminderSheet({
   );
 }
 
+/** Hour rows (0–23) for the desktop time column. */
+const PICKER_HOURS = Array.from({ length: 24 }, (_, i) => i);
+/** Minute rows in 5-minute steps (00, 05, … 55) — mirrors time.rdsx.dev. */
+const PICKER_MINUTES = Array.from({ length: 12 }, (_, i) => i * 5);
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
 /**
- * Custom date + time picker for the reminder "Choose time" field. Replaces the
- * native `datetime-local` input with the shared Calendar (date) + TimeInput
- * (HH:MM). The value is kept in `datetime-local` string form so the parent
- * state and submit logic stay unchanged; this component just parses it into a
- * Date to drive the controls and serializes back on every edit.
+ * Custom date + time picker for the desktop reminder "Custom date and time"
+ * field (FIR-2546). Calendar on the left + two scrollable hour/minute columns
+ * on the right, matching the time.rdsx.dev 24-hour picker Jesper asked for —
+ * replaces the old segmented HH:MM TimeInput, which felt buggy with a mouse.
+ *
+ * The value is kept in `datetime-local` string form so the parent state and
+ * submit logic stay unchanged; this component parses it into a Date to drive
+ * the controls and serializes back on every edit.
  */
-function CustomReminderPicker({
+export function CustomReminderPicker({
   value,
   min,
   onChange,
@@ -831,9 +839,7 @@ function CustomReminderPicker({
   min: Date;
   onChange: (value: string) => void;
 }) {
-  const pad = (n: number) => String(n).padStart(2, "0");
   const selected = fromDateTimeLocalValue(value) ?? min;
-  const timeValue = `${pad(selected.getHours())}:${pad(selected.getMinutes())}`;
 
   // Disable calendar days before today so the user can't pick a past date.
   const minDay = new Date(min);
@@ -846,31 +852,122 @@ function CustomReminderPicker({
     onChange(toDateTimeLocalValue(next));
   };
 
-  const handleTimeChange = (time: string) => {
-    const [hh, mm] = time.split(":");
+  const setHour = (hour: number) => {
     const next = new Date(selected);
-    next.setHours(Number(hh), Number(mm), 0, 0);
+    next.setHours(hour, selected.getMinutes(), 0, 0);
     onChange(toDateTimeLocalValue(next));
   };
 
+  const setMinute = (minute: number) => {
+    const next = new Date(selected);
+    next.setHours(selected.getHours(), minute, 0, 0);
+    onChange(toDateTimeLocalValue(next));
+  };
+
+  // Highlight the nearest 5-minute step so a value is always shown selected,
+  // even if the seed time (e.g. a "+30 min" preset) lands off the grid.
+  const selectedMinuteStep = (Math.round(selected.getMinutes() / 5) * 5) % 60;
+
   return (
-    <div className="rounded-lg border">
+    <div className="flex items-stretch overflow-hidden rounded-lg border">
       <Calendar
         mode="single"
         selected={selected}
         onSelect={handleDateSelect}
         disabled={{ before: minDay }}
-        className="mx-auto"
+        className="p-2"
       />
-      <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
-        <span className="text-sm text-muted-foreground">
-          {selected.toLocaleDateString(undefined, {
-            weekday: "short",
-            month: "short",
-            day: "numeric",
-          })}
-        </span>
-        <TimeInput value={timeValue} onChange={handleTimeChange} />
+      {/* The columns carry no in-flow content (their rows are absolutely
+          positioned), so the row's height is set by the calendar alone; the
+          stretched wrapper then caps the columns to that height and they
+          scroll internally — matching the reference layout. `flex-1` lets the
+          wrapper grow to fill the dialog width so the two columns share the
+          space left of the calendar instead of leaving a gap on the right. */}
+      <div className="relative min-w-28 flex-1 border-l">
+        <div className="absolute inset-0 flex">
+          <TimeScrollColumn
+            ariaLabel="Hour"
+            options={PICKER_HOURS}
+            selected={selected.getHours()}
+            onSelect={setHour}
+          />
+          <TimeScrollColumn
+            ariaLabel="Minute"
+            options={PICKER_MINUTES}
+            selected={selectedMinuteStep}
+            onSelect={setMinute}
+            className="border-l"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One vertical, scroll-into-view column of selectable time values (hours or
+ * minutes). Stretches to the calendar's height via the flex row and scrolls
+ * the selected row to the centre whenever the selection changes.
+ */
+function TimeScrollColumn({
+  ariaLabel,
+  options,
+  selected,
+  onSelect,
+  className,
+}: {
+  ariaLabel: string;
+  options: number[];
+  selected: number;
+  onSelect: (value: number) => void;
+  className?: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const selectedRef = useRef<HTMLButtonElement>(null);
+
+  // Centre the selected row on mount and whenever it changes, so the picker
+  // opens already showing the current value instead of the top of the list.
+  useEffect(() => {
+    const container = containerRef.current;
+    const el = selectedRef.current;
+    if (!container || !el) return;
+    container.scrollTop =
+      el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2;
+  }, [selected]);
+
+  return (
+    <div
+      ref={containerRef}
+      role="listbox"
+      aria-label={ariaLabel}
+      className={cn(
+        "h-full min-h-0 flex-1 overflow-y-auto overscroll-contain p-1 [&::-webkit-scrollbar]:hidden",
+        className,
+      )}
+      style={{ scrollbarWidth: "none" }}
+    >
+      <div className="flex flex-col gap-0.5">
+        {options.map((opt) => {
+          const isSelected = opt === selected;
+          return (
+            <button
+              key={opt}
+              ref={isSelected ? selectedRef : undefined}
+              type="button"
+              role="option"
+              aria-selected={isSelected}
+              onClick={() => onSelect(opt)}
+              className={cn(
+                "shrink-0 rounded-md py-1.5 text-center text-sm tabular-nums transition-colors",
+                isSelected
+                  ? "bg-primary text-primary-foreground"
+                  : "text-foreground hover:bg-accent",
+              )}
+            >
+              {pad2(opt)}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
