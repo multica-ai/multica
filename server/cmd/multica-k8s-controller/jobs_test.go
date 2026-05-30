@@ -120,7 +120,7 @@ func TestCreateJob_BrokerMode(t *testing.T) {
 		ID: "task-broker", IssueID: "iss-1", AgentID: "ag-1", WorkspaceID: r.WorkspaceID,
 		RuntimeID: "rt-1",
 	}
-	cb := ClaudeBrokerOptions{Enabled: true, ClientCMName: "multica-claude-broker-client", HelperTTLMs: 60000}
+	cb := ClaudeBrokerOptions{Enabled: true, AccessTokenSecret: "multica-claude-broker-access-token", SecretKey: "access_token"}
 
 	jobName, err := DispatchJob(context.Background(), k, "multica", r, task, "ghcr-pull", "pvc-name", cb)
 	if err != nil {
@@ -140,39 +140,41 @@ func TestCreateJob_BrokerMode(t *testing.T) {
 		t.Errorf("broker mode must not mount the legacy claude-oauth-secret volume")
 	}
 
-	// (b) Broker client CM volume must be present.
-	if !hasVolume(pod.Volumes, "claude-broker-client") {
-		t.Errorf("broker mode missing claude-broker-client volume; volumes=%+v", pod.Volumes)
+	// (b) No legacy apiKeyHelper artifacts — apiKeyHelper is x-api-key auth and
+	//     OAuth tokens get rejected on that path. The fix injects
+	//     CLAUDE_CODE_OAUTH_TOKEN via secretKeyRef instead.
+	if hasVolume(pod.Volumes, "claude-broker-client") {
+		t.Errorf("broker mode must not mount the apiKeyHelper client CM (pivot to env-via-secretKeyRef)")
 	}
 
-	// (c) runtask container must mount /etc/claude-broker and have
-	//     ~/.claude/settings.json subpath-mounted.
+	// (c) runtask env must include CLAUDE_CODE_OAUTH_TOKEN sourced from
+	//     the broker's access-token Secret.
 	runtask := pod.Containers[0]
-	var sawHelperDir, sawSettingsSubPath bool
-	for _, m := range runtask.VolumeMounts {
-		if m.MountPath == "/etc/claude-broker" {
-			sawHelperDir = true
-		}
-		if m.MountPath == "/home/multica/.claude/settings.json" && m.SubPath == "settings.json" {
-			sawSettingsSubPath = true
+	var tokenEnv *corev1.EnvVar
+	for i := range runtask.Env {
+		if runtask.Env[i].Name == "CLAUDE_CODE_OAUTH_TOKEN" {
+			tokenEnv = &runtask.Env[i]
 		}
 	}
-	if !sawHelperDir {
-		t.Errorf("runtask missing /etc/claude-broker mount")
+	if tokenEnv == nil {
+		t.Fatalf("runtask missing CLAUDE_CODE_OAUTH_TOKEN env; env=%+v", runtask.Env)
 	}
-	if !sawSettingsSubPath {
-		t.Errorf("runtask missing settings.json subpath mount")
+	if tokenEnv.ValueFrom == nil || tokenEnv.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN must be sourced from secretKeyRef; got %+v", tokenEnv)
+	}
+	ref := tokenEnv.ValueFrom.SecretKeyRef
+	if ref.Name != "multica-claude-broker-access-token" {
+		t.Errorf("secretKeyRef.name = %q, want multica-claude-broker-access-token", ref.Name)
+	}
+	if ref.Key != "access_token" {
+		t.Errorf("secretKeyRef.key = %q, want access_token", ref.Key)
 	}
 
-	// (d) CLAUDE_CODE_API_KEY_HELPER_TTL_MS env must be set to 60000.
-	var ttlEnv string
+	// (d) The deprecated CLAUDE_CODE_API_KEY_HELPER_TTL_MS env must NOT be set.
 	for _, e := range runtask.Env {
 		if e.Name == "CLAUDE_CODE_API_KEY_HELPER_TTL_MS" {
-			ttlEnv = e.Value
+			t.Errorf("CLAUDE_CODE_API_KEY_HELPER_TTL_MS still set; apiKeyHelper path is deprecated")
 		}
-	}
-	if ttlEnv != "60000" {
-		t.Errorf("CLAUDE_CODE_API_KEY_HELPER_TTL_MS env = %q, want 60000", ttlEnv)
 	}
 }
 

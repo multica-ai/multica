@@ -185,8 +185,11 @@ binary was built without a real version (the bare `go build` default of
 
 The `multica-claude-broker` Deployment is the single in-cluster owner of the
 Anthropic OAuth refresh state. Worker Job pods don't see the refresh_token
-at all — claude calls a tiny `apiKeyHelper` shell script that curls the
-broker's `GET /access_token` for the current bearer.
+at all — they receive only the current access_token, injected into
+`CLAUDE_CODE_OAUTH_TOKEN` via `secretKeyRef` from a Secret the broker
+mirrors on every refresh. (claude treats that env var as a static OAuth
+bearer; it never tries to refresh on its own, so the rotation race can't
+occur.)
 
 This eliminates the concurrent-refresh race that previously corrupted the
 shared OAuth grant: multiple worker pods would each rotate the refresh_token

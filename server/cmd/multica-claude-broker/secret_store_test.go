@@ -21,7 +21,7 @@ func TestSecretStore_LoadStoreRoundtrip(t *testing.T) {
 		},
 	}
 	k := fake.NewSimpleClientset(existing)
-	store := NewSecretStore(k, "multica", "multica-claude-oauth-broker")
+	store := NewSecretStore(k, "multica", "multica-claude-oauth-broker", "multica-claude-broker-access-token")
 
 	state, err := store.Load(context.Background())
 	if err != nil {
@@ -56,7 +56,7 @@ func TestSecretStore_LoadStoreRoundtrip(t *testing.T) {
 
 func TestSecretStore_Load_MissingSecret(t *testing.T) {
 	k := fake.NewSimpleClientset()
-	store := NewSecretStore(k, "multica", "multica-claude-oauth-broker")
+	store := NewSecretStore(k, "multica", "multica-claude-oauth-broker", "multica-claude-broker-access-token")
 	_, err := store.Load(context.Background())
 	if err == nil {
 		t.Fatal("expected error for missing secret")
@@ -69,7 +69,7 @@ func TestSecretStore_Load_MissingRefreshToken(t *testing.T) {
 		Data:       map[string][]byte{"access_token": []byte("A")},
 	}
 	k := fake.NewSimpleClientset(bad)
-	store := NewSecretStore(k, "ns", "s")
+	store := NewSecretStore(k, "ns", "s", "ns-access-token")
 	_, err := store.Load(context.Background())
 	if err == nil {
 		t.Fatal("expected error for missing refresh_token")
@@ -85,16 +85,42 @@ func TestSecretStore_Load_BadExpiresAt(t *testing.T) {
 		},
 	}
 	k := fake.NewSimpleClientset(bad)
-	store := NewSecretStore(k, "ns", "s")
+	store := NewSecretStore(k, "ns", "s", "ns-access-token")
 	_, err := store.Load(context.Background())
 	if err == nil {
 		t.Fatal("expected error for unparseable expires_at")
 	}
 }
 
+func TestSecretStore_MirrorAccessToken_CreatesThenUpdates(t *testing.T) {
+	k := fake.NewSimpleClientset()
+	store := NewSecretStore(k, "ns", "s", "ns-access-token")
+
+	// First call: secret doesn't exist → Create.
+	if err := store.MirrorAccessToken(context.Background(), "TOKEN_1"); err != nil {
+		t.Fatalf("MirrorAccessToken (create): %v", err)
+	}
+	sec, err := k.CoreV1().Secrets("ns").Get(context.Background(), "ns-access-token", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("mirror secret not created: %v", err)
+	}
+	if string(sec.Data["access_token"]) != "TOKEN_1" {
+		t.Errorf("mirror secret content = %q, want TOKEN_1", sec.Data["access_token"])
+	}
+
+	// Second call: secret exists → Update.
+	if err := store.MirrorAccessToken(context.Background(), "TOKEN_2"); err != nil {
+		t.Fatalf("MirrorAccessToken (update): %v", err)
+	}
+	sec, _ = k.CoreV1().Secrets("ns").Get(context.Background(), "ns-access-token", metav1.GetOptions{})
+	if string(sec.Data["access_token"]) != "TOKEN_2" {
+		t.Errorf("mirror secret content after update = %q, want TOKEN_2", sec.Data["access_token"])
+	}
+}
+
 func TestSecretStore_Store_CreatesWhenMissing(t *testing.T) {
 	k := fake.NewSimpleClientset()
-	store := NewSecretStore(k, "ns", "s")
+	store := NewSecretStore(k, "ns", "s", "ns-access-token")
 	state := &TokenState{
 		AccessToken:  "A",
 		RefreshToken: "R",

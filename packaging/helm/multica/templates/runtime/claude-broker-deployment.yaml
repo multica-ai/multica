@@ -55,6 +55,8 @@ spec:
                   fieldPath: metadata.namespace
             - name: BROKER_SECRET_NAME
               value: {{ .Values.runtime.claudeBroker.secretName | quote }}
+            - name: BROKER_ACCESS_TOKEN_SECRET
+              value: {{ .Values.runtime.claudeBroker.accessTokenSecret | quote }}
             - name: BROKER_REFRESH_PAD
               value: {{ .Values.runtime.claudeBroker.refreshPad | quote }}
             - name: BROKER_REFRESH_INTERVAL

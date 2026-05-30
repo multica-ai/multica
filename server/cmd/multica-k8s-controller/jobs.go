@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"github.com/multica-ai/multica/server/internal/daemon"
 
@@ -170,27 +169,21 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 	var initContainers []corev1.Container
 
 	if cb.Enabled {
-		// Broker mode: mount the apiKeyHelper script and settings.json from
-		// the broker's client CM. exec bit is needed so claude can run the
-		// helper directly.
-		execMode := int32(0o755)
-		volumes = append(volumes,
-			corev1.Volume{Name: "claude-broker-client", VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{Name: cb.ClientCMName},
-					DefaultMode:          &execMode,
-				},
-			}},
-		)
-		runtaskMounts = append(runtaskMounts,
-			corev1.VolumeMount{Name: "claude-broker-client", MountPath: "/etc/claude-broker", ReadOnly: true},
-			// settings.json drops into ~/.claude via subPath — keeps the rest
-			// of ~/.claude as a writable EmptyDir for per-task state.
-			corev1.VolumeMount{Name: "claude-broker-client", MountPath: "/home/multica/.claude/settings.json", SubPath: "settings.json", ReadOnly: true},
-		)
+		// Broker mode: inject CLAUDE_CODE_OAUTH_TOKEN from the broker's
+		// access-token Secret. claude treats this env var as a static OAuth
+		// bearer (sends as Authorization: Bearer), bypassing both the
+		// apiKeyHelper (which is x-api-key path) and the refresh logic
+		// (which would re-introduce the rotation race). Access tokens are
+		// good for hours — well beyond worker Job lifetime — and the broker
+		// keeps the Secret freshened by re-writing on every refresh.
 		runtaskEnv = append(runtaskEnv, corev1.EnvVar{
-			Name:  "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
-			Value: strconv.Itoa(cb.HelperTTLMs),
+			Name: "CLAUDE_CODE_OAUTH_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: cb.AccessTokenSecret},
+					Key:                  cb.SecretKey,
+				},
+			},
 		})
 	} else {
 		// Legacy mode: mount the OAuth tarball Secret and expand it via the

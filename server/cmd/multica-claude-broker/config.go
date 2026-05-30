@@ -11,8 +11,9 @@ import (
 // by the Deployment (Helm chart in Task 12) — POD_NAMESPACE comes from the
 // downward API, the rest from values.yaml.
 type Config struct {
-	Namespace  string
-	SecretName string
+	Namespace         string
+	SecretName        string
+	AccessTokenSecret string // write-only mirror for worker pods to read
 
 	// Refresh strategy.
 	RefreshPad      time.Duration // refresh when expires_at - now < RefreshPad
@@ -42,6 +43,10 @@ func LoadConfig() (*Config, error) {
 	cfg.SecretName = strings.TrimSpace(os.Getenv("BROKER_SECRET_NAME"))
 	if cfg.SecretName == "" {
 		cfg.SecretName = "multica-claude-oauth-broker"
+	}
+	cfg.AccessTokenSecret = strings.TrimSpace(os.Getenv("BROKER_ACCESS_TOKEN_SECRET"))
+	if cfg.AccessTokenSecret == "" {
+		cfg.AccessTokenSecret = "multica-claude-broker-access-token"
 	}
 	if v := os.Getenv("BROKER_REFRESH_PAD"); v != "" {
 		d, err := time.ParseDuration(v)

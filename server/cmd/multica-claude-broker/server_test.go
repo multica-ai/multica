@@ -28,7 +28,7 @@ func newTestBroker(t *testing.T, initial *TokenState, isLeader bool, anthropicSr
 		},
 	}
 	k := fake.NewSimpleClientset(sec)
-	store := NewSecretStore(k, "ns", "s")
+	store := NewSecretStore(k, "ns", "s", "ns-access-token")
 	oauth := newClientForTest(anthropicSrv, "client-id-x", "oauth-2025-04-20")
 	refresher := NewRefresher(store, &stubLeader{leader: isLeader}, oauth, 5*time.Minute)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

@@ -30,7 +30,7 @@ func makeRefresher(t *testing.T, initial *TokenState, isLeader bool, srvURL stri
 		},
 	}
 	k := fake.NewSimpleClientset(sec)
-	store := NewSecretStore(k, "ns", "s")
+	store := NewSecretStore(k, "ns", "s", "ns-access-token")
 	oauth := newClientForTest(srvURL, "client-id-x", "oauth-2025-04-20")
 	return NewRefresher(store, &stubLeader{leader: isLeader}, oauth, 5*time.Minute)
 }

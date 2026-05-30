@@ -19,11 +19,14 @@ data:
 {{- end }}
     imagePullSecret: {{ .Values.image.pullSecret | quote }}
     {{- if .Values.runtime.claudeBroker.enabled }}
-    # When the broker is enabled, the controller wires worker Jobs to use
-    # apiKeyHelper instead of the legacy claude-oauth-secret expansion.
+    # When the broker is enabled, the controller wires worker Jobs to inject
+    # CLAUDE_CODE_OAUTH_TOKEN from the broker's access-token Secret via
+    # secretKeyRef. The legacy claude-oauth-secret expansion + apiKeyHelper
+    # ConfigMap paths are dropped — apiKeyHelper is x-api-key auth and
+    # rejected OAuth tokens.
     claudeBroker:
       enabled: true
-      clientConfigMap: multica-claude-broker-client
-      apiKeyHelperTTLMs: {{ .Values.runtime.claudeBroker.apiKeyHelperTTLMs }}
+      accessTokenSecret: {{ .Values.runtime.claudeBroker.accessTokenSecret | quote }}
+      secretKey: access_token
     {{- end }}
 {{- end }}

@@ -53,7 +53,7 @@ func run(logger *slog.Logger) error {
 		"secret", cfg.SecretName,
 	)
 
-	store := NewSecretStore(k, cfg.Namespace, cfg.SecretName)
+	store := NewSecretStore(k, cfg.Namespace, cfg.SecretName, cfg.AccessTokenSecret)
 	leader, err := NewLeaderState(k, cfg.Namespace, cfg.LeaseName, identity)
 	if err != nil {
 		return err

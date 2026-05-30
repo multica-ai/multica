@@ -42,13 +42,16 @@ type WorkspaceConfig struct {
 
 // ClaudeBrokerOptions controls how worker Jobs are configured to fetch
 // Anthropic bearers. When Enabled, DispatchJob omits the claude-auth init
-// container + claude-oauth-secret volume entirely and instead mounts the
-// broker's apiKeyHelper ConfigMap; claude calls the helper to get a fresh
-// access_token whenever it needs one.
+// container + claude-oauth-secret volume entirely and instead injects
+// CLAUDE_CODE_OAUTH_TOKEN via secretKeyRef from a Secret the broker keeps
+// up to date.
+//
+// AccessTokenSecret is the Secret the broker mirrors the current access_token
+// into; SecretKey is the field name within it (default access_token).
 type ClaudeBrokerOptions struct {
-	Enabled      bool   `yaml:"enabled"`
-	ClientCMName string `yaml:"clientConfigMap"`     // default "multica-claude-broker-client"
-	HelperTTLMs  int    `yaml:"apiKeyHelperTTLMs"`   // default 60000
+	Enabled           bool   `yaml:"enabled"`
+	AccessTokenSecret string `yaml:"accessTokenSecret"` // default multica-claude-broker-access-token
+	SecretKey         string `yaml:"secretKey"`         // default access_token
 }
 
 func LoadConfig() (*Config, error) {
@@ -111,11 +114,11 @@ func LoadConfig() (*Config, error) {
 	// ClaudeBroker defaults — applied only when broker mode is enabled, so a
 	// chart that doesn't set claudeBroker.enabled = true gets the legacy path.
 	if cfg.ClaudeBroker.Enabled {
-		if cfg.ClaudeBroker.ClientCMName == "" {
-			cfg.ClaudeBroker.ClientCMName = "multica-claude-broker-client"
+		if cfg.ClaudeBroker.AccessTokenSecret == "" {
+			cfg.ClaudeBroker.AccessTokenSecret = "multica-claude-broker-access-token"
 		}
-		if cfg.ClaudeBroker.HelperTTLMs == 0 {
-			cfg.ClaudeBroker.HelperTTLMs = 60000
+		if cfg.ClaudeBroker.SecretKey == "" {
+			cfg.ClaudeBroker.SecretKey = "access_token"
 		}
 	}
 

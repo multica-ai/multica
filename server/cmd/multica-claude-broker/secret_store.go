@@ -21,13 +21,14 @@ type TokenState struct {
 }
 
 type SecretStore struct {
-	k         kubernetes.Interface
-	namespace string
-	name      string
+	k                 kubernetes.Interface
+	namespace         string
+	name              string
+	accessTokenSecret string // separate, write-only mirror for worker pods to read
 }
 
-func NewSecretStore(k kubernetes.Interface, namespace, name string) *SecretStore {
-	return &SecretStore{k: k, namespace: namespace, name: name}
+func NewSecretStore(k kubernetes.Interface, namespace, name, accessTokenSecret string) *SecretStore {
+	return &SecretStore{k: k, namespace: namespace, name: name, accessTokenSecret: accessTokenSecret}
 }
 
 // Load reads the secret and decodes the three keys into a TokenState. A
@@ -76,6 +77,31 @@ func (s *SecretStore) Store(ctx context.Context, state *TokenState) error {
 	}
 	if err != nil {
 		return fmt.Errorf("store secret: %w", err)
+	}
+	return nil
+}
+
+// MirrorAccessToken writes ONLY the current access_token to a separate secret
+// (named via accessTokenSecret). Worker Job pods inject this into the env as
+// CLAUDE_CODE_OAUTH_TOKEN via secretKeyRef. Workers never see the refresh
+// token — only short-lived access tokens — preserving the broker's
+// "refresh_token lives in exactly one place" invariant.
+//
+// Idempotent — patches Update; falls back to Create on NotFound.
+func (s *SecretStore) MirrorAccessToken(ctx context.Context, accessToken string) error {
+	if s.accessTokenSecret == "" {
+		return fmt.Errorf("MirrorAccessToken: accessTokenSecret name not configured")
+	}
+	patch := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: s.accessTokenSecret, Namespace: s.namespace},
+		Data:       map[string][]byte{"access_token": []byte(accessToken)},
+	}
+	_, err := s.k.CoreV1().Secrets(s.namespace).Update(ctx, patch, metav1.UpdateOptions{})
+	if err != nil && k8serrors.IsNotFound(err) {
+		_, err = s.k.CoreV1().Secrets(s.namespace).Create(ctx, patch, metav1.CreateOptions{})
+	}
+	if err != nil {
+		return fmt.Errorf("mirror access_token: %w", err)
 	}
 	return nil
 }

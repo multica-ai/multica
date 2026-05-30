@@ -15,12 +15,15 @@ metadata:
   labels:
     {{- include "multica.componentLabels" (dict "name" "claude-broker" "ctx" .) | nindent 4 }}
 rules:
-  # The broker reads + updates its own state secret. resourceNames is
-  # restrictive — broker can't touch other Secrets in the namespace.
+  # The broker reads + updates its own state secret AND writes a separate
+  # "mirror" secret containing only the current access_token (workers read
+  # via secretKeyRef). resourceNames is restrictive — broker can't touch
+  # other Secrets in the namespace.
   - apiGroups: [""]
     resources: ["secrets"]
     resourceNames:
       - {{ .Values.runtime.claudeBroker.secretName | quote }}
+      - {{ .Values.runtime.claudeBroker.accessTokenSecret | quote }}
       - {{ .Values.runtime.claudeBroker.bootstrapFromSecret | quote }}
     verbs: ["get", "update", "create"]
   # Leader election via coordination.k8s.io/Lease. Lease names aren't known

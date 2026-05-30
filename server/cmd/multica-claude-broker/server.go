@@ -33,6 +33,11 @@ func NewBroker(refresher *Refresher, store *SecretStore, logger *slog.Logger) *B
 // Reload loads state from the Secret into the cache without touching the
 // refresh leader gate. Called once at startup so the broker can serve
 // /access_token immediately even before leader election settles.
+//
+// Also mirrors the current access_token into the dedicated access-token
+// Secret that worker Job pods read via secretKeyRef. If the mirror Secret
+// is the only consumer (the apiKeyHelper HTTP path is deprecated), missing
+// it at controller-dispatch time would cause worker pods to fail to start.
 func (b *Broker) Reload(ctx context.Context) error {
 	state, err := b.store.Load(ctx)
 	if err != nil {
@@ -40,6 +45,12 @@ func (b *Broker) Reload(ctx context.Context) error {
 	}
 	b.setCached(state)
 	b.ready.Store(true)
+	if err := b.store.MirrorAccessToken(ctx, state.AccessToken); err != nil {
+		// Non-fatal — log but stay up. /access_token still serves; operators
+		// can investigate via the broker logs. If the controller can't bind
+		// the env var, worker pods will fail until this is resolved.
+		b.logger.Warn("mirror access_token on Reload failed", "error", err)
+	}
 	return nil
 }
 
@@ -67,6 +78,9 @@ func (b *Broker) tickRefresh(ctx context.Context) {
 	case err == nil && refreshed:
 		refreshTotal.WithLabelValues(outcomeOk).Inc()
 		b.setCached(state)
+		if err := b.store.MirrorAccessToken(ctx, state.AccessToken); err != nil {
+			b.logger.Warn("mirror access_token after refresh failed", "error", err)
+		}
 		b.logger.Info("refresh ok", "expires_at", state.ExpiresAt)
 	case err == nil && !refreshed:
 		refreshTotal.WithLabelValues(outcomeSkipped).Inc()
@@ -220,6 +234,9 @@ func (b *Broker) refreshHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.setCached(newState)
+	if err := b.store.MirrorAccessToken(r.Context(), newState.AccessToken); err != nil {
+		b.logger.Warn("mirror access_token after manual refresh failed", "error", err)
+	}
 	refreshTotal.WithLabelValues(outcomeOk).Inc()
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintf(w, "refreshed; expires_at=%s\n", newState.ExpiresAt.Format(time.RFC3339))
