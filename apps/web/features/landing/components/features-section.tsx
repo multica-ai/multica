@@ -238,6 +238,7 @@ function TeammatesVisual() {
                 <div className="relative">
                   <PropRow label="Status">
                     <button
+                      type="button"
                       className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors"
                       onClick={() => { setStatusOpen(!statusOpen); setPriorityOpen(false); }}
                     >
@@ -249,6 +250,7 @@ function TeammatesVisual() {
                     <div className="absolute left-0 top-full z-10 mt-1 w-44 overflow-hidden rounded-md border bg-popover shadow-md">
                       {statusCycle.map((s) => (
                         <button
+                          type="button"
                           key={s}
                           className={cn(
                             "flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent transition-colors",
@@ -269,6 +271,7 @@ function TeammatesVisual() {
                 <div className="relative">
                   <PropRow label="Priority">
                     <button
+                      type="button"
                       className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors"
                       onClick={() => { setPriorityOpen(!priorityOpen); setStatusOpen(false); }}
                     >
@@ -280,6 +283,7 @@ function TeammatesVisual() {
                     <div className="absolute left-0 top-full z-10 mt-1 w-44 overflow-hidden rounded-md border bg-popover shadow-md">
                       {priorityCycle.map((p) => (
                         <button
+                          type="button"
                           key={p}
                           className={cn(
                             "flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent transition-colors",
@@ -299,6 +303,7 @@ function TeammatesVisual() {
                 {/* Assignee — clickable to toggle picker */}
                 <PropRow label="Assignee">
                   <button
+                    type="button"
                     className="flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors"
                     onClick={() => { setPickerOpen(!pickerOpen); setStatusOpen(false); setPriorityOpen(false); }}
                   >
@@ -323,6 +328,7 @@ function TeammatesVisual() {
                 </div>
                 <div className="p-1">
                   <button
+                    type="button"
                     className={cn(
                       "flex w-full items-center gap-2 rounded-sm px-2 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors",
                       !assignee.type && "bg-accent",
@@ -340,6 +346,7 @@ function TeammatesVisual() {
                 <div className="p-1 pt-0">
                   {allAssignees.filter((a) => a.type === "member").map((m) => (
                     <button
+                      type="button"
                       key={m.id}
                       className={cn(
                         "flex w-full items-center gap-2 rounded-sm px-2 py-1 text-xs hover:bg-accent transition-colors",
@@ -359,6 +366,7 @@ function TeammatesVisual() {
                 <div className="p-1 pt-0">
                   {allAssignees.filter((a) => a.type === "agent").map((a) => (
                     <button
+                      type="button"
                       key={a.id}
                       className={cn(
                         "flex w-full items-center gap-2 rounded-sm px-2 py-1 text-xs hover:bg-accent transition-colors",
@@ -446,6 +454,7 @@ function AutonomousVisual() {
               if (item.type === "thinking") {
                 return (
                   <button
+                    type="button"
                     key={i}
                     className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs hover:bg-info/5 transition-colors"
                     onClick={() => setExpanded(isExpanded ? null : i)}
@@ -460,6 +469,7 @@ function AutonomousVisual() {
               if (item.type === "tool_use") {
                 return (
                   <button
+                    type="button"
                     key={i}
                     className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs hover:bg-info/5 transition-colors"
                     onClick={() => setExpanded(isExpanded ? null : i)}
@@ -474,6 +484,7 @@ function AutonomousVisual() {
               /* tool_result */
               return (
                 <button
+                  type="button"
                   key={i}
                   className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs hover:bg-accent/50 transition-colors"
                   onClick={() => setExpanded(isExpanded ? null : i)}
@@ -540,13 +551,14 @@ function SkillsVisual() {
         <div className="w-[200px] shrink-0 border-r flex flex-col">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <span className="text-xs font-semibold">Skills</span>
-            <button className="rounded p-0.5 text-muted-foreground hover:bg-accent transition-colors">
+            <button type="button" className="rounded p-0.5 text-muted-foreground hover:bg-accent transition-colors">
               <Sparkles className="h-3.5 w-3.5" />
             </button>
           </div>
           <div className="flex-1 overflow-hidden divide-y">
             {mockSkills.map((skill, i) => (
               <button
+                type="button"
                 key={skill.name}
                 className={cn(
                   "flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors",
@@ -585,6 +597,7 @@ function SkillsVisual() {
               <div className="py-1">
                 {mockFileTree.map((f) => (
                   <button
+                    type="button"
                     key={f.name}
                     className={cn(
                       "flex w-full items-center gap-1.5 py-1 text-xs transition-colors",
@@ -806,6 +819,7 @@ function RuntimesVisual() {
           <div className="flex-1 overflow-hidden">
             {mockRuntimeList.map((rt, i) => (
               <button
+                type="button"
                 key={rt.name}
                 className={cn(
                   "flex w-full items-center gap-2.5 px-3 py-2.5 transition-colors",
@@ -860,6 +874,7 @@ function RuntimesVisual() {
               <div className="flex items-center gap-1">
                 {(["7d", "30d", "90d"] as const).map((range) => (
                   <button
+                    type="button"
                     key={range}
                     onClick={() => setTimeRange(range)}
                     className={cn(
@@ -996,6 +1011,7 @@ export function FeaturesSection() {
             <div className="sticky top-28 flex flex-col gap-0 py-28">
               {features.map((f, i) => (
                 <button
+                  type="button"
                   key={f.label}
                   onClick={() => scrollToPanel(i)}
                   className={cn(

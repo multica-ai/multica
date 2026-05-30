@@ -46,9 +46,9 @@ function workspace(slug: string): Workspace {
   };
 }
 
-import { RedirectIfAuthenticated } from "./redirect-if-authenticated";
+import { RootRedirect } from "./root-redirect";
 
-describe("RedirectIfAuthenticated", () => {
+describe("RootRedirect", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authState.user = {
@@ -61,13 +61,23 @@ describe("RedirectIfAuthenticated", () => {
     window.innerWidth = 1024;
   });
 
+  it("redirects anonymous visitors to /login (FIR-2490: internal-tool root)", async () => {
+    authState.user = null;
+
+    render(<RootRedirect />);
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith("/login");
+    });
+  });
+
   it("uses the desktop start page preference for authenticated root fallback", async () => {
     authState.user = {
       onboarded_at: "2026-01-01T00:00:00Z",
       preferences: { start_page_desktop: "projects" },
     };
 
-    render(<RedirectIfAuthenticated />);
+    render(<RootRedirect />);
 
     await waitFor(() => {
       expect(mockReplace).toHaveBeenCalledWith("/jeh-b0edd870/projects");
@@ -81,7 +91,7 @@ describe("RedirectIfAuthenticated", () => {
       preferences: { start_page_mobile: "my-issues" },
     };
 
-    render(<RedirectIfAuthenticated />);
+    render(<RootRedirect />);
 
     await waitFor(() => {
       expect(mockReplace).toHaveBeenCalledWith("/jeh-b0edd870/my-issues");
@@ -89,7 +99,7 @@ describe("RedirectIfAuthenticated", () => {
   });
 
   it("falls back to issues when no start page preference is set", async () => {
-    render(<RedirectIfAuthenticated />);
+    render(<RootRedirect />);
 
     await waitFor(() => {
       expect(mockReplace).toHaveBeenCalledWith("/jeh-b0edd870/issues");

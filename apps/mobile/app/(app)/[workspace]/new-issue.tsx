@@ -14,7 +14,7 @@
  * — both surfaces produce canonical `[@name](mention://type/id)` markdown
  * recognised by util.ParseMentions on the server.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -93,18 +93,16 @@ export default function NewIssueModal() {
     createIssue,
   ]);
 
-  const headerRight = useMemo(() => {
-    function HeaderRight() {
-      return (
-        <SubmitIssueButton
-          disabled={!canSubmit}
-          loading={isSubmitting}
-          onPress={onSubmit}
-        />
-      );
-    }
-    return HeaderRight;
-  }, [canSubmit, isSubmitting, onSubmit]);
+  const headerRight = useCallback(
+    () => (
+      <SubmitIssueButton
+        disabled={!canSubmit}
+        loading={isSubmitting}
+        onPress={onSubmit}
+      />
+    ),
+    [canSubmit, isSubmitting, onSubmit],
+  );
 
   return (
     <>

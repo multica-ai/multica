@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	cerebropermissions "github.com/multica-ai/multica/server/internal/cerebro/permissions" // CEREBRO-PATCH(daemon-repo-grants): FIR-2512 repo-capability resolver
 	cerebropersona "github.com/multica-ai/multica/server/internal/cerebro/persona"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -1874,6 +1875,66 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
+
+			// Parent-issue resolution for quick-create tasks opened from
+			// "Add sub issue". The handler already verified workspace
+			// membership at submit time; here we re-fetch to pull the
+			// human-readable identifier (e.g. MUL-123) the agent will
+			// reference in the prompt. If the parent was deleted between
+			// submit and claim we surface the UUID anyway — the agent
+			// still passes `--parent <uuid>` and the server-side create
+			// will fail loud, which is a better outcome than silently
+			// dropping the sub-issue intent.
+			if qc.ParentIssueID != "" {
+				resp.ParentIssueID = qc.ParentIssueID
+				if parentUUID, err := util.ParseUUID(qc.ParentIssueID); err == nil {
+					if wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID); wsErr == nil {
+						parent, perr := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+							ID:          parentUUID,
+							WorkspaceID: wsUUID,
+						})
+						if perr == nil && parent.ID.Valid {
+							if ws, werr := h.Queries.GetWorkspace(r.Context(), wsUUID); werr == nil {
+								resp.ParentIssueIdentifier = ws.IssuePrefix + "-" + strconv.Itoa(int(parent.Number))
+							}
+						}
+					}
+				}
+			}
+
+			// Squad-leader briefing injection for quick-create tasks. When
+			// the user picked a squad in the modal, the task runs on the
+			// squad's leader agent (resolved by the handler). Surface the
+			// same Operating Protocol + Roster + user Instructions that
+			// issue-bound squad tasks see, so the leader can decide to
+			// delegate before opening the issue.
+			if resp.Agent != nil && qc.SquadID != "" {
+				wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID)
+				squadUUID, sqErr := util.ParseUUID(qc.SquadID)
+				if wsErr == nil && sqErr == nil {
+					if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+						ID:          squadUUID,
+						WorkspaceID: wsUUID,
+					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+						if strings.TrimSpace(resp.Agent.Instructions) == "" {
+							resp.Agent.Instructions = briefing
+						} else {
+							resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+						}
+						// Surface the squad identity to the daemon so the
+						// quick-create prompt defaults the new issue's
+						// assignee to the squad, not the leader agent.
+						resp.SquadID = uuidToString(squad.ID)
+						resp.SquadName = squad.Name
+						slog.Debug("injected squad leader briefing for quick-create",
+							"squad_id", uuidToString(squad.ID),
+							"squad_name", squad.Name,
+							"leader_agent_id", resp.Agent.ID,
+						)
+					}
+				}
+			}
 		}
 	}
 
@@ -2008,6 +2069,45 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task started", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
+	writeJSON(w, http.StatusOK, taskToResponse(*task))
+}
+
+// TaskWaitLocalDirectoryRequest is the body the daemon POSTs when it parks
+// a freshly-dispatched task on a busy local_directory path.
+type TaskWaitLocalDirectoryRequest struct {
+	// Reason is a short hint surfaced by the UI alongside the status —
+	// typically "<path>" or "<path> (holder: <task short id>)". Small
+	// enough to fit on the issue card. Empty is accepted; the column is
+	// nullable on the server.
+	Reason string `json:"reason"`
+}
+
+// MarkTaskWaitingLocalDirectory transitions a dispatched task to
+// waiting_local_directory. Called by the daemon when, after claiming a task
+// whose project carries a local_directory resource, it discovers another
+// in-flight task already holds the path's mutex.
+func (h *Handler) MarkTaskWaitingLocalDirectory(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+		return
+	}
+
+	var req TaskWaitLocalDirectoryRequest
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+
+	task, err := h.TaskService.MarkTaskWaitingLocalDirectory(r.Context(), parseUUID(taskID), req.Reason)
+	if err != nil {
+		slog.Warn("mark task waiting_local_directory failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	writeJSON(w, http.StatusOK, taskToResponse(*task))
 }
 
@@ -2727,5 +2827,103 @@ func (h *Handler) GetTaskGCCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":       task.Status,
 		"completed_at": task.CompletedAt.Time,
+	})
+}
+
+// CEREBRO-PATCH(daemon-repo-grants): FIR-2512 — repo capability check for grants-based access control.
+
+// daemonRepoCheckRequest is the body of POST /api/daemon/workspaces/{id}/repo/check.
+type daemonRepoCheckRequest struct {
+	URL        string `json:"url"`
+	Capability string `json:"capability"`
+	AgentID    string `json:"agent_id,omitempty"`
+	ProjectID  string `json:"project_id,omitempty"`
+}
+
+// CheckDaemonRepoCapability evaluates whether a repo capability is granted for
+// an agent (optionally in a project context) by running the full grants
+// resolver. Called by the daemon before allowing multica repo checkout/push/read
+// when the repo_grants_enabled workspace setting is on.
+//
+// POST /api/daemon/workspaces/{workspaceId}/repo/check
+func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Request) {
+	workspaceID := strings.TrimSpace(chi.URLParam(r, "workspaceId"))
+	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+		return
+	}
+
+	var req daemonRepoCheckRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.URL == "" {
+		writeError(w, http.StatusBadRequest, "url is required")
+		return
+	}
+	if req.Capability == "" {
+		writeError(w, http.StatusBadRequest, "capability is required")
+		return
+	}
+
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	// Build actor: an agent subject when agent_id is set, otherwise
+	// workspace_default grants are the only thing evaluated.
+	//
+	// Scope note (FIR-2512): for an autonomous daemon repo-checkout only the
+	// Workspace, Project and Agent layers of the chain are populated here. The
+	// Group and Role layers are intentionally NOT loaded: groups in this model
+	// hold user members (cerebro_group_member), not agents, and a daemon
+	// checkout has no human in the loop — so a group-scoped grant could only
+	// apply via owner-substitution, the same unresolved decision the autopilot
+	// path defers (see autopilot_cerebro.go, JEH-721). Wiring group/role for
+	// autonomous checkout is tracked as the Spor 4 follow-up rather than guessed
+	// at inside this security path. Project isolation (the headline of this PR)
+	// does not depend on it.
+	actor := cerebropermissions.Actor{Type: "agent"}
+
+	if req.AgentID != "" {
+		agentUUID, err := util.ParseUUID(req.AgentID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid agent_id")
+			return
+		}
+		actor.ID = agentUUID
+	}
+
+	// Project scope (FIR-2512): if the task runs in a project, include it so
+	// project-scoped grants are evaluated as part of the chain.
+	if req.ProjectID != "" {
+		projectUUID, err := util.ParseUUID(req.ProjectID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid project_id")
+			return
+		}
+		actor.ProjectIDs = []pgtype.UUID{projectUUID}
+	}
+
+	// The agent is both the actor and the agent in this context (direct-agent
+	// call, no human member in the loop).
+	decision, err := cerebropermissions.New(h.CerebroQueries).Can(r.Context(), cerebropermissions.Request{
+		WorkspaceID: wsUUID,
+		Actor:       actor,
+		Agent:       actor.ID,
+		Capability:  req.Capability,
+		Resource:    req.URL,
+	})
+	if err != nil {
+		slog.Error("repo capability check failed", "workspace_id", workspaceID, "url", req.URL, "error", err)
+		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"allowed":  decision.Allowed(),
+		"decision": string(decision.Kind),
+		"reason":   decision.Reason,
 	})
 }

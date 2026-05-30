@@ -9,6 +9,8 @@ import {
 } from "@multica/core/issues/stores/create-mode-store";
 import { AgentCreatePanel } from "./quick-create-issue";
 import { ManualCreatePanel, manualDialogContentClass } from "./create-issue";
+// CEREBRO-PATCH(create-issue-mobile-keyboard-follow-import): FIR-2504.
+import { useMobileViewportHeight } from "@multica/cerebro-duplicate-check/views";
 
 /**
  * Shell that owns the single `<Dialog>` AND `<DialogContent>` for the
@@ -45,6 +47,8 @@ export function CreateIssueDialog({
   const [panelData, setPanelData] = useState(data ?? null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [backlogHintIssueId, setBacklogHintIssueId] = useState<string | null>(null);
+  // CEREBRO-PATCH(create-issue-mobile-keyboard-follow): FIR-2504.
+  const mobileVvh = useMobileViewportHeight();
 
   const switchTo = (next: CreateMode) => (carry?: Record<string, unknown> | null) => {
     setLastMode(next);
@@ -77,6 +81,8 @@ export function CreateIssueDialog({
         finalFocus={false}
         showCloseButton={false}
         className={className}
+        // CEREBRO-PATCH(create-issue-mobile-keyboard-follow-style): FIR-2504.
+        style={mobileVvh != null ? ({ ["--cerebro-vvh" as string]: `${mobileVvh}px` } as React.CSSProperties) : undefined}
       >
         {mode === "agent" ? (
           <AgentCreatePanel

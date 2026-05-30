@@ -57,6 +57,17 @@ func isTaskNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(reqErr.Body), "task not found")
 }
 
+// isUnauthorizedError returns true if the error is a 401 from the server.
+// Used by the token-renewal loop to surface a clear "re-login required"
+// message instead of a generic transport-level retry.
+func isUnauthorizedError(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	return reqErr.StatusCode == http.StatusUnauthorized
+}
+
 // isRuntimeNotFoundError returns true if the error is a 404 with "runtime not
 // found" body. The daemon uses this to detect that the runtime row was deleted
 // server-side (UI Delete, 7-day offline GC) while the daemon was still
@@ -156,6 +167,21 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 
 func (c *Client) StartTask(ctx context.Context, taskID string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/start", taskID), map[string]any{}, nil)
+}
+
+// MarkTaskWaitingLocalDirectory parks a freshly-dispatched task in the
+// waiting_local_directory state on the server. The daemon calls this after
+// it has claimed a task whose project carries a local_directory resource
+// but the path mutex is held by another in-flight task. reason is a short
+// human-readable hint (e.g. "<path>") surfaced by the UI alongside the
+// status. Idempotent on the daemon's side — calling twice with the same
+// reason is a no-op once the row is already waiting_local_directory (the
+// underlying SQL filters on status='dispatched', so the second call is a
+// 400 the daemon swallows and proceeds to wait).
+func (c *Client) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID, reason string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/wait-local-directory", taskID), map[string]any{
+		"reason": reason,
+	}, nil)
 }
 
 func (c *Client) ReportProgress(ctx context.Context, taskID, summary string, step, total int) error {
@@ -410,6 +436,27 @@ type WorkspaceInfo struct {
 	Name string `json:"name"`
 }
 
+// RenewTokenResponse mirrors handler.RenewPATResponse — kept loose (string +
+// bool) because the daemon never parses the timestamp itself; it just logs it
+// for operator visibility.
+type RenewTokenResponse struct {
+	ExpiresAt string `json:"expires_at"`
+	Renewed   bool   `json:"renewed"`
+}
+
+// RenewToken asks the server to extend the daemon's current PAT in place when
+// it's within the server-side renewal window. The server is authoritative on
+// the threshold — the daemon doesn't know the token's expires_at locally —
+// so this is safe to call on any cadence; the only thing extra calls cost is
+// one round trip and one cheap SELECT.
+func (c *Client) RenewToken(ctx context.Context) (*RenewTokenResponse, error) {
+	var resp RenewTokenResponse
+	if err := c.postJSON(ctx, "/api/tokens/current/renew", map[string]any{}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // ListWorkspaces fetches all workspaces the authenticated user belongs to.
 func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	var workspaces []WorkspaceInfo
@@ -547,6 +594,29 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// CEREBRO-PATCH(daemon-repo-grants): FIR-2512 repo capability check via grants resolver.
+
+// CheckRepoCapability asks the server whether the given agent (optionally in a
+// project context) holds the requested capability for a repo URL.
+// Returns (allowed, reason, error).
+func (c *Client) CheckRepoCapability(ctx context.Context, workspaceID, agentID, projectID, repoURL, capability string) (bool, string, error) {
+	var resp struct {
+		Allowed  bool   `json:"allowed"`
+		Decision string `json:"decision"`
+		Reason   string `json:"reason"`
+	}
+	body := map[string]string{
+		"url":        repoURL,
+		"capability": capability,
+		"agent_id":   agentID,
+		"project_id": projectID,
+	}
+	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/repo/check", workspaceID), body, &resp); err != nil {
+		return false, "", err
+	}
+	return resp.Allowed, resp.Reason, nil
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {

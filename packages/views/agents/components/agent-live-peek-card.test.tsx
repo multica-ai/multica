@@ -22,6 +22,12 @@ vi.mock("@multica/core/paths", () => ({
   }),
 }));
 
+vi.mock("@multica/core/api", () => ({
+  api: {
+    getBaseUrl: () => "http://127.0.0.1:8080",
+  },
+}));
+
 // AppLink is just a plain anchor here — wiring the navigation adapter would
 // add nothing to these assertions.
 vi.mock("../../navigation", () => ({

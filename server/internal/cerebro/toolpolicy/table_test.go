@@ -119,6 +119,59 @@ func TestTable_ListsEveryToolWithEffective(t *testing.T) {
 	}
 }
 
+// TestTable_WorkspaceRootLayer is the FIR-2284 Bid 5 check: a setting authored
+// at the workspace root (subject_id = the workspace itself) shows up on the
+// workspace view as its own layer AND flows into every other view as the
+// inherited base default below the rest of the chain.
+func TestTable_WorkspaceRootLayer(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	agent := uuidByte(2)
+	addCap(t, s, "shell_exec", "Run shell command", "Shell", "builtin")
+
+	// Workspace root denies the tool for the whole workspace.
+	if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: "shell_exec", Layer: LayerWorkspace, SubjectID: tpTestWorkspaceID, Setting: SettingDeny}); err != nil {
+		t.Fatalf("set workspace: %v", err)
+	}
+
+	// Workspace view: the row carries the workspace layer and resolves to Deny
+	// decided by workspace, not capped (root default).
+	wsRows, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID})
+	if err != nil {
+		t.Fatalf("workspace table: %v", err)
+	}
+	wsRow, ok := findRow(wsRows, "shell_exec")
+	if !ok {
+		t.Fatal("shell_exec missing from workspace view")
+	}
+	if wsRow.Layers[LayerWorkspace] != SettingDeny {
+		t.Fatalf("workspace layer = %q, want deny", wsRow.Layers[LayerWorkspace])
+	}
+	if wsRow.Effective.Setting != SettingDeny || wsRow.Effective.DecidedBy != LayerWorkspace || wsRow.Effective.CappedBy != "" {
+		t.Fatalf("workspace effective = %q by %q capped %q, want deny/workspace/none", wsRow.Effective.Setting, wsRow.Effective.DecidedBy, wsRow.Effective.CappedBy)
+	}
+
+	// Agent view on the same tool: the workspace root is inherited as the base,
+	// so the effective verdict is still Deny even though the agent set nothing.
+	agentRows, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, AgentID: agent})
+	if err != nil {
+		t.Fatalf("agent table: %v", err)
+	}
+	agentRow, ok := findRow(agentRows, "shell_exec")
+	if !ok {
+		t.Fatal("shell_exec missing from agent view")
+	}
+	if agentRow.Layers[LayerWorkspace] != SettingDeny {
+		t.Fatalf("agent view should inherit workspace layer, got %v", agentRow.Layers)
+	}
+	if agentRow.Effective.Setting != SettingDeny {
+		t.Fatalf("agent effective = %q, want deny inherited from workspace root", agentRow.Effective.Setting)
+	}
+}
+
 // TestTable_RuntimeViewIgnoresOtherSubjects proves a runtime-only view (no agent
 // or user) reflects just the runtime layer — an agent override on the same tool
 // must not bleed into the runtime page.

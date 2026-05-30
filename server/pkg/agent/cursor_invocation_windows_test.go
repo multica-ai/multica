@@ -45,7 +45,6 @@ func TestPlatformCursorInvocation_RewritesCmdLauncherToPowerShellFile(t *testing
 	stubPowerShell(t, fakePS, true)
 
 	args := []string{
-		"chat",
 		"-p", "line1\nline2\nline3",
 		"--output-format", "stream-json",
 		"--yolo",
@@ -84,7 +83,7 @@ func TestPlatformCursorInvocation_SkipsWhenNotCmdOrBat(t *testing.T) {
 	stubPowerShell(t, filepath.Join(dir, "powershell.exe"), true)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if _, _, ok := platformCursorInvocation(exePath, []string{"chat"}, logger); ok {
+	if _, _, ok := platformCursorInvocation(exePath, []string{"-p", "hello"}, logger); ok {
 		t.Fatalf("expected ok=false for non-.cmd/.bat launcher")
 	}
 }
@@ -101,7 +100,7 @@ func TestPlatformCursorInvocation_SkipsWhenPS1Missing(t *testing.T) {
 	stubPowerShell(t, filepath.Join(dir, "powershell.exe"), true)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if _, _, ok := platformCursorInvocation(cmdPath, []string{"chat"}, logger); ok {
+	if _, _, ok := platformCursorInvocation(cmdPath, []string{"-p", "hello"}, logger); ok {
 		t.Fatalf("expected ok=false when cursor-agent.ps1 is missing")
 	}
 }
@@ -119,7 +118,7 @@ func TestPlatformCursorInvocation_SkipsWhenPowerShellMissing(t *testing.T) {
 	stubPowerShell(t, "", false)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if _, _, ok := platformCursorInvocation(cmdPath, []string{"chat"}, logger); ok {
+	if _, _, ok := platformCursorInvocation(cmdPath, []string{"-p", "hello"}, logger); ok {
 		t.Fatalf("expected ok=false when no powershell host is available")
 	}
 }

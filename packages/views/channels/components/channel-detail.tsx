@@ -1,7 +1,7 @@
 // CEREBRO-PATCH(channels-rename-participants): editable channel title + participants side-panel (JEH-700)
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Archive, Hash, MessageSquare, Pin, PinOff } from "lucide-react";
 import { toast } from "sonner";
@@ -42,6 +42,9 @@ import { ParticipantsPanel } from "./participants-panel";
 import { ChannelListenersPanel } from "./channel-listeners-panel";
 // CEREBRO-PATCH(channel-agent-inline-row): JEH-698 inline "agent is working" row mounted between the comment stream and CommentInput.
 import { ChannelAgentInlineRow } from "@multica/cerebro-channels";
+// CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — DM/Channel åbner i bunden + sticky-bottom + "Ny besked"-pille.
+import { useStickyBottom } from "@multica/cerebro-ui/hooks/use-sticky-bottom";
+import { JumpToLatestButton } from "@multica/cerebro-ui/components/jump-to-latest-button";
 
 interface ChannelDetailProps {
   channelId: string;
@@ -140,6 +143,15 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
   const deletePin = useDeletePin();
 
   const [participantsOpen, setParticipantsOpen] = useState(false);
+
+  // CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — pin DM/Channel
+  // scroll to bottom on open; surface "Ny besked"-pille when scrolled up.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const { hasNewBelow, scrollToBottom } = useStickyBottom(scrollRef);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [channelId]);
 
   // CEREBRO-PATCH(channels-thread-fullscreen-mobile): JEH-1045 — on a narrow
   // viewport the side-by-side message + thread layout squeezes both columns
@@ -277,11 +289,18 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
             so the thread panel reclaims the full width. */}
         <div
           className={cn(
-            "flex flex-1 min-h-0 flex-col",
+            // CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — `relative` so JumpToLatestButton docks to the message column.
+            "relative flex flex-1 min-h-0 flex-col",
             threadFullScreen && "hidden",
           )}
         >
-          <div className="flex-1 min-h-0 overflow-y-auto">
+          <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
+            {/* CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — "Ny besked"-pille når man læser ældre beskeder. */}
+            <JumpToLatestButton
+              visible={hasNewBelow}
+              onClick={() => scrollToBottom()}
+              label="Ny besked"
+            />
             {topLevel.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
                 <MessageSquare className="mb-3 size-10 text-muted-foreground/30" />

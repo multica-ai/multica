@@ -48,6 +48,14 @@ import {
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
+// CEREBRO-PATCH(quick-create-duplicate-check-imports): FIR-2550. Mount the
+// same duplicate-check overlay the manual flow uses, gated on the same
+// cerebro_duplicate_check_on_create flag, so the agent flow can't enqueue a
+// dubletter through the back door.
+import { DuplicateCheckPanel } from "@multica/cerebro-duplicate-check/views";
+import type { DuplicateMatch } from "@multica/cerebro-duplicate-check/core";
+import { useNavigation } from "../navigation";
+import { useWorkspacePaths } from "@multica/core/paths";
 
 type ActorSelection =
   | { type: "agent"; id: string }
@@ -201,6 +209,16 @@ export function AgentCreatePanel({
     return seed ?? null;
   });
 
+  // Parent-issue context — seeded by `openCreateSubIssue` when the modal is
+  // opened from the "Add sub issue" entry on an existing issue. We carry it
+  // through (not as an editable form field) so a manual→agent flip preserves
+  // the sub-issue intent; the agent panel never exposes this as a picker.
+  // Identifier is best-effort display context only — the UUID is the
+  // authoritative reference the backend/agent uses for `--parent <uuid>`.
+  const parentIssueId = (data?.parent_issue_id as string | undefined) ?? undefined;
+  const parentIssueIdentifier =
+    (data?.parent_issue_identifier as string | undefined) ?? undefined;
+
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
   // a `projectId` that isn't in the list means the project was deleted in
@@ -248,6 +266,45 @@ export function AgentCreatePanel({
   const [sentCount, setSentCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
+  // CEREBRO-PATCH(quick-create-duplicate-check-state): FIR-2550. Mirror the
+  // manual flow: a dismiss flag the user flips with X, a match list the
+  // panel reports up so we can disable Submit while strong matches are
+  // visible (the AC: "stærke matches → opretter kun efter bekræftelse").
+  const [duplicateDismissed, setDuplicateDismissed] = useState(false);
+  const [duplicateMatches, setDuplicateMatches] = useState<DuplicateMatch[]>([]);
+  const router = useNavigation();
+  const p = useWorkspacePaths();
+
+  // Derive a (title, description) pair from the raw markdown prompt. The
+  // duplicate-check gateway expects a title + optional description; the agent
+  // flow has neither field — only a freeform prompt. First non-empty line
+  // (capped) becomes the title, the rest becomes the description, so the
+  // gateway candidate-finder gets the same shape of input the manual flow
+  // sends and the cached query key stays stable across renders.
+  const derivedTitle = useMemo(() => {
+    const trimmed = promptDraft.trim();
+    if (!trimmed) return "";
+    const firstLine = (trimmed.split("\n", 1)[0] ?? "").trim();
+    return firstLine.slice(0, 200);
+  }, [promptDraft]);
+  const derivedDescription = useMemo(() => {
+    const trimmed = promptDraft.trim();
+    const newlineIdx = trimmed.indexOf("\n");
+    if (newlineIdx < 0) return undefined;
+    const rest = trimmed.slice(newlineIdx + 1).trim();
+    return rest || undefined;
+  }, [promptDraft]);
+
+  const handleMatchesChange = useCallback((m: DuplicateMatch[]) => {
+    setDuplicateMatches(m);
+  }, []);
+
+  // Blocking matches = the panel is showing actionable cards AND the user
+  // hasn't dismissed them. While this is true, Submit is disabled and we
+  // early-return out of the submit handler.
+  const hasBlockingMatches =
+    !duplicateDismissed && duplicateMatches.length > 0;
+
   // Image paste/drop support: route uploads through the same helper Advanced
   // uses, so users can paste screenshots straight into the prompt and the
   // agent receives them as embedded markdown image URLs in the prompt.
@@ -271,6 +328,10 @@ export function AgentCreatePanel({
   const submit = async () => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
     if (!md || !actor || submitting || versionBlocked || uploading) return;
+    // CEREBRO-PATCH(quick-create-duplicate-check-block): FIR-2550. Strong
+    // matches block the submit until the user explicitly Opens one, picks
+    // "Skjul" (X) to mean "this is something new", or types past the match.
+    if (hasBlockingMatches) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -280,6 +341,7 @@ export function AgentCreatePanel({
           : { squad_id: actor.id }),
         prompt: md,
         project_id: projectId ?? undefined,
+        parent_issue_id: parentIssueId,
       });
       setLastActor(actor.type, actor.id);
       setLastProjectId(projectId);
@@ -297,6 +359,9 @@ export function AgentCreatePanel({
         setJustSent(true);
         setTimeout(() => setJustSent(false), 1500);
         requestAnimationFrame(() => editorRef.current?.focus());
+        // FIR-2550: a new draft starts fresh — re-enable duplicate-check.
+        setDuplicateDismissed(false);
+        setDuplicateMatches([]);
       } else {
         onClose();
       }
@@ -354,11 +419,17 @@ export function AgentCreatePanel({
         : {}),
     });
     setLastMode("manual");
-    // Hand the picked project to the manual panel through the same `data`
-    // channel that already carries agent_id / parent_issue_id. The manual
-    // panel reads `data.project_id` on mount; this preserves the user's
-    // selection across the mode flip without piping a third store through.
-    onSwitchMode?.(projectId ? { project_id: projectId } : null);
+    // Hand the picked project and the parent-issue context to the manual
+    // panel through the same `data` channel that already carries agent_id /
+    // parent_issue_id. The manual panel reads these on mount; this preserves
+    // the user's selection (and the sub-issue intent seeded by
+    // openCreateSubIssue) across the mode flip without piping a third store
+    // through.
+    const carry: Record<string, unknown> = {};
+    if (projectId) carry.project_id = projectId;
+    if (parentIssueId) carry.parent_issue_id = parentIssueId;
+    if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
+    onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 
   return (
@@ -463,7 +534,14 @@ export function AgentCreatePanel({
             owns only the project (status / priority / assignee / due-date are
             inferred from the prompt), so it's a single pill. The pick is
             persisted per-workspace via useQuickCreateStore.lastProjectId so
-            users targeting one project skip retyping "in project X". */}
+            users targeting one project skip retyping "in project X".
+            When the modal was opened from "Add sub issue" on an existing
+            issue, a read-only chip on the same row tells the user that the
+            new issue will be filed as a sub-issue of that parent — the agent
+            handles the wiring silently, but surfacing the relationship
+            avoids "where did this end up?" surprise. We deliberately keep
+            it non-editable: changing the parent is a `Set parent` action on
+            the parent itself, not a knob in the quick-create flow. */}
         <div className="flex items-center gap-1.5 px-4 pb-2 shrink-0 flex-wrap">
           <ProjectPicker
             projectId={projectId}
@@ -471,10 +549,45 @@ export function AgentCreatePanel({
             triggerRender={<PillButton />}
             align="start"
           />
+          {parentIssueId && (
+            <span
+              data-testid="agent-sub-issue-chip"
+              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+              title={t(($) => $.create_issue.agent.sub_issue_of, {
+                identifier: parentIssueIdentifier ?? "",
+              })}
+            >
+              {t(($) => $.create_issue.agent.sub_issue_of, {
+                identifier: parentIssueIdentifier ?? "",
+              })}
+            </span>
+          )}
         </div>
 
+        {/* CEREBRO-PATCH(quick-create-duplicate-check-overlay-mount): FIR-2550.
+            Same overlay the manual create-issue modal uses — anchored above
+            the footer so the duplicate-check panel grows upward over the
+            action buttons. Hidden once the user dismisses, and the panel
+            already gates itself on cerebro_duplicate_check_on_create. */}
+        <div className="relative shrink-0">
+          {!duplicateDismissed && (
+            <div className="absolute inset-x-0 bottom-full z-10 max-h-[60vh] overflow-y-auto">
+              <DuplicateCheckPanel
+                title={derivedTitle}
+                description={derivedDescription}
+                projectId={projectId ?? undefined}
+                variant="overlay"
+                onDismiss={() => setDuplicateDismissed(true)}
+                onOpen={(m) => {
+                  router.push(p.issueDetail(m.id));
+                  onClose();
+                }}
+                onMatchesChange={handleMatchesChange}
+              />
+            </div>
+          )}
         {/* Footer */}
-        <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-h-7 items-center gap-2">
             {/* CEREBRO-PATCH(file-upload-button-api): new onAttach/onEmbed
                 prop API on FileUploadButton (popup picker). */}
@@ -511,11 +624,13 @@ export function AgentCreatePanel({
             <Button
               size="sm"
               onClick={submit}
-              disabled={!hasContent || !actor || submitting || versionBlocked || uploading}
+              disabled={!hasContent || !actor || submitting || versionBlocked || uploading || hasBlockingMatches}
               title={
                 versionBlocked
                   ? t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })
-                  : undefined
+                  : hasBlockingMatches
+                    ? "Bekræft først om det er en af de lignende issues herover, eller skjul listen for at oprette alligevel."
+                    : undefined
               }
               className={justSent ? "min-w-28 !bg-emerald-600 !text-white" : "min-w-28"}
             >
@@ -524,6 +639,7 @@ export function AgentCreatePanel({
               ) : `${t(($) => $.create_issue.agent.submit)} (${formatShortcut(modKey, enterKey)})`}
             </Button>
           </div>
+        </div>
         </div>
     </>
   );

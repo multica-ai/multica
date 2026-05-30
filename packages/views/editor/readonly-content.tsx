@@ -370,26 +370,33 @@ const components: Partial<Components> = {
       return <code {...props}>{children}</code>;
     }
 
-    // Block code — highlight with lowlight, output hljs classes
+    // Block code — highlight with lowlight, output hljs classes.
+    // Upstream #3358: when lowlight.highlightAuto returns an empty tree
+    // (unknown language, low confidence), `toHtml(...)` returns "" and the
+    // hljs-classed <code> renders blank. Fall back to plain text when
+    // highlighting yields nothing.
     const code = String(children).replace(/\n$/, "");
     try {
       const tree = lang
         ? lowlight.highlight(lang, code)
         : lowlight.highlightAuto(code);
-      return (
-        <code
-          className={cn("hljs", lang && `language-${lang}`)}
-          dangerouslySetInnerHTML={{ __html: toHtml(tree) }}
-        />
-      );
+      const html = toHtml(tree);
+      if (html) {
+        return (
+          <code
+            className={cn("hljs", lang && `language-${lang}`)}
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        );
+      }
     } catch {
-      // Fallback — render without highlighting
-      return (
-        <code className={className} {...props}>
-          {children}
-        </code>
-      );
+      // fall through to plain render
     }
+    return (
+      <code className={cn("hljs", className)} {...props}>
+        {children}
+      </code>
+    );
   },
 
   // Pre — pass through (CSS handles styling via .rich-text-editor pre)

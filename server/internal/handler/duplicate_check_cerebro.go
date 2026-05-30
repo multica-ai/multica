@@ -140,7 +140,19 @@ func (h *Handler) CheckSimilarIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	judger := h.duplicateCheckJudger()
-	verdicts := judger.Judge(ctx, duplicatecheck.Draft{Title: title, Description: desc}, llmCandidates)
+	// Thread the calling member as the BigQuery x-bq-label-user value so
+	// duplicate-check gateway cost rolls up per caller (deploy-labels-check
+	// skill / FIR-2272). When there's no member in context (rare — admin
+	// tooling, tests) the judger falls back to "system".
+	userLabel := ""
+	if hasMember {
+		userLabel = uuidToString(member.ID)
+	}
+	verdicts := judger.Judge(ctx, duplicatecheck.Draft{
+		Title:       title,
+		Description: desc,
+		UserLabel:   userLabel,
+	}, llmCandidates)
 
 	matches := make([]dupCheckMatch, 0, dupCheckResponseLimit)
 	for _, v := range verdicts {

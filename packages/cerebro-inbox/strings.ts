@@ -29,13 +29,21 @@ type StringTable = {
   mute_tooltip: string;
   unmute_tooltip: string;
   remind_title: string;
+  remind_thirty_min: string;
   remind_one_hour: string;
   remind_three_hours: string;
   remind_tomorrow_morning: string;
   remind_monday: string;
   remind_custom: string;
+  /** Slack-style "Custom date and time" list row that reveals the picker. */
+  remind_custom_datetime: string;
   remind_save: string;
   remind_cancel: string;
+  /** Primary button that commits the custom-picked reminder time. */
+  remind_set: string;
+  /** Wheel-picker day-column labels for the next two days. */
+  remind_today: string;
+  remind_tomorrow: string;
   swipe_archive: string;
   drawer_title: string;
   /** Prefix shown on a row in the Muted filter, e.g. "Muted til 08:00". */
@@ -84,13 +92,18 @@ const en: StringTable = {
   mute_tooltip: "Remind me",
   unmute_tooltip: "Unmute",
   remind_title: "Remind me",
+  remind_thirty_min: "In 30 minutes",
   remind_one_hour: "In 1 hour",
   remind_three_hours: "In 3 hours",
   remind_tomorrow_morning: "Tomorrow morning",
-  remind_monday: "Monday morning",
+  remind_monday: "Monday at 9 AM",
   remind_custom: "Choose time",
+  remind_custom_datetime: "Custom date and time",
   remind_save: "Save",
   remind_cancel: "Cancel",
+  remind_set: "Set reminder",
+  remind_today: "Today",
+  remind_tomorrow: "Tomorrow",
   swipe_archive: "Archive",
   drawer_title: "Actions",
   muted_until_prefix: "Muted until",
@@ -120,13 +133,18 @@ const da: StringTable = {
   mute_tooltip: "Påmind mig",
   unmute_tooltip: "Unmute",
   remind_title: "Påmind mig",
+  remind_thirty_min: "Om 30 minutter",
   remind_one_hour: "Om 1 time",
   remind_three_hours: "Om 3 timer",
   remind_tomorrow_morning: "I morgen tidlig",
-  remind_monday: "Mandag morgen",
+  remind_monday: "Mandag kl. 9",
   remind_custom: "Vælg tidspunkt",
+  remind_custom_datetime: "Vælg dato og tid",
   remind_save: "Gem",
   remind_cancel: "Annuller",
+  remind_set: "Sæt påmindelse",
+  remind_today: "I dag",
+  remind_tomorrow: "I morgen",
   swipe_archive: "Arkivér",
   drawer_title: "Handlinger",
   muted_until_prefix: "Muted til",
@@ -160,13 +178,18 @@ const zhHans: StringTable = {
   mute_tooltip: "提醒我",
   unmute_tooltip: "取消静音",
   remind_title: "提醒我",
+  remind_thirty_min: "30 分钟后",
   remind_one_hour: "1 小时后",
   remind_three_hours: "3 小时后",
   remind_tomorrow_morning: "明早",
-  remind_monday: "周一早上",
+  remind_monday: "周一上午 9 点",
   remind_custom: "选择时间",
+  remind_custom_datetime: "选择日期和时间",
   remind_save: "保存",
   remind_cancel: "取消",
+  remind_set: "设置提醒",
+  remind_today: "今天",
+  remind_tomorrow: "明天",
   swipe_archive: "归档",
   drawer_title: "操作",
   muted_until_prefix: "静音至",

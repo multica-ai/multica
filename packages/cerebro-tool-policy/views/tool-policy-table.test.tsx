@@ -226,4 +226,75 @@ describe("ToolPolicyTable (capability catalog)", () => {
       });
     });
   });
+
+  // FIR-2284 Bid 5 — the three new surfaces author their own chain layer.
+  function renderView(view: "workspace" | "group" | "member", subjectId: string) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <ToolPolicyTable wsId="ws-1" view={view} subjectId={subjectId} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("workspace view writes to the workspace root layer keyed on the workspace", async () => {
+    const user = userEvent.setup();
+    renderView("workspace", "ws-1");
+    const slackRow = await screen.findByTestId("tool-row-slack.post_message");
+    await user.click(within(slackRow).getByLabelText(/^Decision:/));
+    await user.click(within(slackRow).getByRole("menuitem", { name: "Deny" }));
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      expect(JSON.parse((put![1] as RequestInit).body as string)).toMatchObject({
+        layer: "workspace",
+        subject_id: "ws-1",
+        setting: "deny",
+      });
+    });
+  });
+
+  it("group view writes to the group layer and fetches the table for that group", async () => {
+    const user = userEvent.setup();
+    renderView("group", "grp-7");
+    // The table GET carries the group_id for the Effective chain.
+    await waitFor(() => {
+      const get = mockCerebroRequest.mock.calls.find(
+        (c) => (c[1] as RequestInit | undefined)?.method === undefined,
+      );
+      expect(String(get![0])).toContain("group_id=grp-7");
+    });
+    const slackRow = await screen.findByTestId("tool-row-slack.post_message");
+    await user.click(within(slackRow).getByLabelText(/^Decision:/));
+    await user.click(within(slackRow).getByRole("menuitem", { name: "Allow" }));
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      expect(JSON.parse((put![1] as RequestInit).body as string)).toMatchObject({
+        layer: "group",
+        subject_id: "grp-7",
+        setting: "allow",
+      });
+    });
+  });
+
+  it("member view writes to the user (ceiling) layer keyed on the member's user id", async () => {
+    const user = userEvent.setup();
+    renderView("member", "user-42");
+    await waitFor(() => {
+      const get = mockCerebroRequest.mock.calls.find(
+        (c) => (c[1] as RequestInit | undefined)?.method === undefined,
+      );
+      expect(String(get![0])).toContain("user_id=user-42");
+    });
+    const slackRow = await screen.findByTestId("tool-row-slack.post_message");
+    await user.click(within(slackRow).getByLabelText(/^Decision:/));
+    await user.click(within(slackRow).getByRole("menuitem", { name: "Deny" }));
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      expect(JSON.parse((put![1] as RequestInit).body as string)).toMatchObject({
+        layer: "user",
+        subject_id: "user-42",
+        setting: "deny",
+      });
+    });
+  });
 });

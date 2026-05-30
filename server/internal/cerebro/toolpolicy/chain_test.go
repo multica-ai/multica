@@ -39,6 +39,37 @@ func TestResolve_IssueCheck(t *testing.T) {
 	}
 }
 
+// TestResolve_WorkspaceRoot exercises the FIR-2284 Bid 5 workspace root layer.
+// A workspace Deny is the chain's starting point — it decides on its own (no
+// "cap", same as the runtime base), and any layer above may only tighten it,
+// never loosen it.
+func TestResolve_WorkspaceRoot(t *testing.T) {
+	// Workspace Deny with everything above inheriting → Deny, decided by
+	// workspace, and NOT capped (workspace is a root default, not a cap).
+	root := Resolve(Input{Settings: set(LayerWorkspace, SettingDeny)})
+	if root.Setting != SettingDeny {
+		t.Fatalf("expected workspace Deny to stand, got %s", root.Setting)
+	}
+	if root.DecidedBy != LayerWorkspace {
+		t.Fatalf("expected DecidedBy=workspace, got %q", root.DecidedBy)
+	}
+	if root.CappedBy != "" {
+		t.Fatalf("workspace root must not be a cap, got CappedBy=%q", root.CappedBy)
+	}
+
+	// A more permissive runtime below the workspace Deny cannot loosen it.
+	loosen := Resolve(Input{Settings: set(LayerWorkspace, SettingDeny, LayerRuntime, SettingAllow)})
+	if loosen.Setting != SettingDeny {
+		t.Fatalf("runtime Allow must not loosen workspace Deny, got %s", loosen.Setting)
+	}
+
+	// Workspace Ask, then a user Deny above → the user caps it ("Capped by user").
+	capped := Resolve(Input{Settings: set(LayerWorkspace, SettingAsk, LayerUser, SettingDeny)})
+	if capped.Setting != SettingDeny || capped.CappedBy != LayerUser {
+		t.Fatalf("expected Deny capped by user, got %s capped %q", capped.Setting, capped.CappedBy)
+	}
+}
+
 // TestResolve_CeilingCannotBeLoosened proves the ceiling only tightens: a
 // permissive user setting cannot raise an agent's Deny back to Allow.
 func TestResolve_CeilingCannotBeLoosened(t *testing.T) {

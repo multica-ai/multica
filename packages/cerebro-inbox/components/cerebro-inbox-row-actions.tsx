@@ -5,9 +5,9 @@ import {
   useEffect,
   useRef,
   useState,
-  type FormEvent,
   type ReactNode,
 } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Archive,
   ArchiveRestore,
@@ -37,9 +37,8 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
-import { Label } from "@multica/ui/components/ui/label";
 import { Calendar } from "@multica/ui/components/ui/calendar";
-import { TimeInput } from "@multica/ui/components/ui/time-input";
+import { CerebroReminderWheel } from "./cerebro-reminder-wheel";
 import { useMarkInboxRead } from "@multica/core/inbox/mutations";
 import type { InboxItem } from "@multica/core/types";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
@@ -693,12 +692,17 @@ function MobileRowActions({
 }
 
 /**
- * "Remind me" surface. Mobile renders a vaul bottom-sheet (Drawer); desktop
- * renders a centered Dialog — the Drawer's `inset-x-0` bottom variant
- * stretches edge-to-edge on wide screens, which looked broken (FIR-2313).
- * Both share the same body: quick presets + a custom date/time picker built
- * from the shared Calendar + TimeInput, replacing the raw native
- * `datetime-local` input that had no styled picker.
+ * "Remind me" surface, redesigned to match Slack's reminder picker (FIR-2526).
+ * Mobile renders a vaul bottom-sheet (Drawer); desktop renders a centered
+ * Dialog (modal) — the Drawer's `inset-x-0` bottom variant stretches
+ * edge-to-edge on wide screens, which looked broken (FIR-2313).
+ *
+ * Both share the same body: a vertical list of quick presets plus a "Custom
+ * date and time" row that reveals a date/time picker and a single primary
+ * "Set reminder" button. The custom picker differs by platform — a scroll
+ * wheel on mobile (touch-native), the shared Calendar + TimeInput on desktop
+ * (a momentum wheel is a poor fit for a mouse) — but the functions are
+ * identical, per the product decision on this issue.
  */
 function ReminderSheet({
   isMobile,
@@ -717,56 +721,70 @@ function ReminderSheet({
   onOpenChange: (open: boolean) => void;
   onSchedule: (mutedUntil: Date) => void;
 }) {
+  const { i18n } = useTranslation();
   const now = new Date();
-  const reminderOptions = [
-    { label: strings.remind_one_hour, date: addHours(1) },
-    { label: strings.remind_three_hours, date: addHours(3) },
-    { label: strings.remind_tomorrow_morning, date: nextBusinessDayNineAm() },
-    { label: strings.remind_monday, date: nextMondayNineAm() },
+
+  const presets = [
+    { label: strings.remind_thirty_min, date: () => addHours(0.5) },
+    { label: strings.remind_one_hour, date: () => addHours(1) },
+    { label: strings.remind_three_hours, date: () => addHours(3) },
+    { label: strings.remind_monday, date: () => nextMondayNineAm() },
   ];
 
   const planned = fromDateTimeLocalValue(customReminder);
   const canSave = planned !== null && planned.getTime() > now.getTime();
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!planned || planned.getTime() <= Date.now()) return;
-    onSchedule(planned);
-  };
-
   const body = (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2">
-        {reminderOptions.map((option) => (
-          <Button
-            key={option.label}
-            type="button"
-            variant="outline"
-            className="justify-start"
-            onClick={() => onSchedule(option.date)}
-          >
-            {option.label}
-          </Button>
+      {/* Quick presets as a clean vertical list (Slack-style). Each applies
+          immediately on tap — no extra confirmation. */}
+      <ul className="divide-y divide-border">
+        {presets.map((preset) => (
+          <li key={preset.label}>
+            <button
+              type="button"
+              className="w-full py-3 text-left text-base text-foreground/90 hover:text-foreground"
+              onClick={() => onSchedule(preset.date())}
+            >
+              {preset.label}
+            </button>
+          </li>
         ))}
-      </div>
-      <form className="space-y-3" onSubmit={handleSubmit}>
-        <div className="space-y-1.5">
-          <Label>{strings.remind_custom}</Label>
+      </ul>
+
+      {/* Custom date + time, always visible below the presets: a scroll wheel
+          on mobile, the Calendar + TimeInput on desktop. One primary button
+          commits the picked moment. */}
+      <div className="space-y-3 border-t border-border pt-3">
+        <p className="text-sm font-medium text-muted-foreground">
+          {strings.remind_custom_datetime}
+        </p>
+        {isMobile ? (
+          <CerebroReminderWheel
+            value={planned ?? nextBusinessDayNineAm()}
+            todayLabel={strings.remind_today}
+            tomorrowLabel={strings.remind_tomorrow}
+            locale={i18n.language}
+            onChange={(date) => onCustomReminderChange(toDateTimeLocalValue(date))}
+          />
+        ) : (
           <CustomReminderPicker
             value={customReminder}
             min={now}
             onChange={onCustomReminderChange}
           />
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-            {strings.remind_cancel}
-          </Button>
-          <Button type="submit" disabled={!canSave}>
-            {strings.remind_save}
-          </Button>
-        </div>
-      </form>
+        )}
+        <Button
+          type="button"
+          className="w-full"
+          disabled={!canSave}
+          onClick={() => {
+            if (planned && planned.getTime() > Date.now()) onSchedule(planned);
+          }}
+        >
+          {strings.remind_set}
+        </Button>
+      </div>
     </div>
   );
 
@@ -785,7 +803,7 @@ function ReminderSheet({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{strings.remind_title}</DialogTitle>
         </DialogHeader>
@@ -795,14 +813,23 @@ function ReminderSheet({
   );
 }
 
+/** Hour rows (0–23) for the desktop time column. */
+const PICKER_HOURS = Array.from({ length: 24 }, (_, i) => i);
+/** Minute rows in 5-minute steps (00, 05, … 55) — mirrors time.rdsx.dev. */
+const PICKER_MINUTES = Array.from({ length: 12 }, (_, i) => i * 5);
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
 /**
- * Custom date + time picker for the reminder "Choose time" field. Replaces the
- * native `datetime-local` input with the shared Calendar (date) + TimeInput
- * (HH:MM). The value is kept in `datetime-local` string form so the parent
- * state and submit logic stay unchanged; this component just parses it into a
- * Date to drive the controls and serializes back on every edit.
+ * Custom date + time picker for the desktop reminder "Custom date and time"
+ * field (FIR-2546). Calendar on the left + two scrollable hour/minute columns
+ * on the right, matching the time.rdsx.dev 24-hour picker Jesper asked for —
+ * replaces the old segmented HH:MM TimeInput, which felt buggy with a mouse.
+ *
+ * The value is kept in `datetime-local` string form so the parent state and
+ * submit logic stay unchanged; this component parses it into a Date to drive
+ * the controls and serializes back on every edit.
  */
-function CustomReminderPicker({
+export function CustomReminderPicker({
   value,
   min,
   onChange,
@@ -812,9 +839,7 @@ function CustomReminderPicker({
   min: Date;
   onChange: (value: string) => void;
 }) {
-  const pad = (n: number) => String(n).padStart(2, "0");
   const selected = fromDateTimeLocalValue(value) ?? min;
-  const timeValue = `${pad(selected.getHours())}:${pad(selected.getMinutes())}`;
 
   // Disable calendar days before today so the user can't pick a past date.
   const minDay = new Date(min);
@@ -827,31 +852,122 @@ function CustomReminderPicker({
     onChange(toDateTimeLocalValue(next));
   };
 
-  const handleTimeChange = (time: string) => {
-    const [hh, mm] = time.split(":");
+  const setHour = (hour: number) => {
     const next = new Date(selected);
-    next.setHours(Number(hh), Number(mm), 0, 0);
+    next.setHours(hour, selected.getMinutes(), 0, 0);
     onChange(toDateTimeLocalValue(next));
   };
 
+  const setMinute = (minute: number) => {
+    const next = new Date(selected);
+    next.setHours(selected.getHours(), minute, 0, 0);
+    onChange(toDateTimeLocalValue(next));
+  };
+
+  // Highlight the nearest 5-minute step so a value is always shown selected,
+  // even if the seed time (e.g. a "+30 min" preset) lands off the grid.
+  const selectedMinuteStep = (Math.round(selected.getMinutes() / 5) * 5) % 60;
+
   return (
-    <div className="rounded-lg border">
+    <div className="flex items-stretch overflow-hidden rounded-lg border">
       <Calendar
         mode="single"
         selected={selected}
         onSelect={handleDateSelect}
         disabled={{ before: minDay }}
-        className="mx-auto"
+        className="p-2"
       />
-      <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
-        <span className="text-sm text-muted-foreground">
-          {selected.toLocaleDateString(undefined, {
-            weekday: "short",
-            month: "short",
-            day: "numeric",
-          })}
-        </span>
-        <TimeInput value={timeValue} onChange={handleTimeChange} />
+      {/* The columns carry no in-flow content (their rows are absolutely
+          positioned), so the row's height is set by the calendar alone; the
+          stretched wrapper then caps the columns to that height and they
+          scroll internally — matching the reference layout. `flex-1` lets the
+          wrapper grow to fill the dialog width so the two columns share the
+          space left of the calendar instead of leaving a gap on the right. */}
+      <div className="relative min-w-28 flex-1 border-l">
+        <div className="absolute inset-0 flex">
+          <TimeScrollColumn
+            ariaLabel="Hour"
+            options={PICKER_HOURS}
+            selected={selected.getHours()}
+            onSelect={setHour}
+          />
+          <TimeScrollColumn
+            ariaLabel="Minute"
+            options={PICKER_MINUTES}
+            selected={selectedMinuteStep}
+            onSelect={setMinute}
+            className="border-l"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One vertical, scroll-into-view column of selectable time values (hours or
+ * minutes). Stretches to the calendar's height via the flex row and scrolls
+ * the selected row to the centre whenever the selection changes.
+ */
+function TimeScrollColumn({
+  ariaLabel,
+  options,
+  selected,
+  onSelect,
+  className,
+}: {
+  ariaLabel: string;
+  options: number[];
+  selected: number;
+  onSelect: (value: number) => void;
+  className?: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const selectedRef = useRef<HTMLButtonElement>(null);
+
+  // Centre the selected row on mount and whenever it changes, so the picker
+  // opens already showing the current value instead of the top of the list.
+  useEffect(() => {
+    const container = containerRef.current;
+    const el = selectedRef.current;
+    if (!container || !el) return;
+    container.scrollTop =
+      el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2;
+  }, [selected]);
+
+  return (
+    <div
+      ref={containerRef}
+      role="listbox"
+      aria-label={ariaLabel}
+      className={cn(
+        "h-full min-h-0 flex-1 overflow-y-auto overscroll-contain p-1 [&::-webkit-scrollbar]:hidden",
+        className,
+      )}
+      style={{ scrollbarWidth: "none" }}
+    >
+      <div className="flex flex-col gap-0.5">
+        {options.map((opt) => {
+          const isSelected = opt === selected;
+          return (
+            <button
+              key={opt}
+              ref={isSelected ? selectedRef : undefined}
+              type="button"
+              role="option"
+              aria-selected={isSelected}
+              onClick={() => onSelect(opt)}
+              className={cn(
+                "shrink-0 rounded-md py-1.5 text-center text-sm tabular-nums transition-colors",
+                isSelected
+                  ? "bg-primary text-primary-foreground"
+                  : "text-foreground hover:bg-accent",
+              )}
+            >
+              {pad2(opt)}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

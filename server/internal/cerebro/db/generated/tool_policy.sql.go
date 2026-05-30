@@ -42,10 +42,11 @@ FROM cerebro_tool_policy
 WHERE workspace_id = $1
   AND tool_key = $2
   AND (
-    (layer = 'runtime' AND subject_id = $3) OR
-    (layer = 'agent'   AND subject_id = $4) OR
-    (layer = 'user'    AND subject_id = $5) OR
-    (layer = 'group'   AND subject_id = ANY($6::uuid[]))
+    (layer = 'workspace' AND subject_id = $1) OR
+    (layer = 'runtime'   AND subject_id = $3) OR
+    (layer = 'agent'     AND subject_id = $4) OR
+    (layer = 'user'      AND subject_id = $5) OR
+    (layer = 'group'     AND subject_id = ANY($6::uuid[]))
   )
 `
 
@@ -68,11 +69,13 @@ type ListCerebroToolPolicyForContextRow struct {
 //
 // These queries back the unified tool-policy chain: each row is one layer's
 // explicit Allow/Ask/Deny/Inherit choice for one tool. ListCerebroToolPolicyForContext
-// gathers the four layers a single resolution needs in one round trip; the
+// gathers the five layers a single resolution needs in one round trip; the
 // per-subject / per-tool reads back the authoring tables in the admin UI.
-// All explicit settings that apply to one tool for one (runtime, agent, user,
-// groups) context. A layer whose subject id is NULL (absent from the request)
-// never matches, so the resolver treats it as Inherit. group_ids may be empty.
+// All explicit settings that apply to one tool for one (workspace, runtime,
+// agent, user, groups) context. A layer whose subject id is NULL (absent from
+// the request) never matches, so the resolver treats it as Inherit. The
+// workspace root layer is always keyed on the workspace itself, so it enters
+// every resolution. group_ids may be empty.
 func (q *Queries) ListCerebroToolPolicyForContext(ctx context.Context, arg ListCerebroToolPolicyForContextParams) ([]ListCerebroToolPolicyForContextRow, error) {
 	rows, err := q.db.Query(ctx, listCerebroToolPolicyForContext,
 		arg.WorkspaceID,

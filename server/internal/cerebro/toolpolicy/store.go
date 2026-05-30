@@ -49,10 +49,10 @@ var (
 	ErrUnknownSetting = errors.New("toolpolicy: unknown setting")
 )
 
-// validLayer reports whether l is one of the four chain layers.
+// validLayer reports whether l is one of the five chain layers.
 func validLayer(l Layer) bool {
 	switch l {
-	case LayerRuntime, LayerAgent, LayerGroup, LayerUser:
+	case LayerWorkspace, LayerRuntime, LayerAgent, LayerGroup, LayerUser:
 		return true
 	default:
 		return false

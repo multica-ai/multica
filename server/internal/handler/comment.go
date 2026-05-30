@@ -1212,6 +1212,11 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
 
+	oldContent := existing.Content
+
+	// Expand bare issue identifiers (same pipeline as CreateComment).
+	req.Content = mention.ExpandIssueIdentifiers(r.Context(), h.Queries, wsUUID, req.Content)
+
 	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
 		ID:      commentUUID,
 		Content: req.Content,
@@ -1227,11 +1232,13 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// existing attachment links rather than unlinking everything.
 	if replaceAttachments {
 		if err := h.Queries.ReplaceCommentAttachments(r.Context(), db.ReplaceCommentAttachmentsParams{
-			CommentID: comment.ID,
-			IssueID:   existing.IssueID,
-			Column3:   attachmentIDs,
+			CommentID:     comment.ID,
+			IssueID:       existing.IssueID,
+			AttachmentIds: attachmentIDs,
 		}); err != nil {
 			slog.Error("failed to replace comment attachments", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to update attachments")
+			return
 		}
 	}
 
@@ -1247,6 +1254,63 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	slog.Info("comment updated", append(logger.RequestAttrs(r), "comment_id", commentId)...)
 	parentIssue, _ := h.Queries.GetIssue(r.Context(), comment.IssueID)
 	h.publishToAudience(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp}, h.audienceForIssue(r.Context(), parentIssue))
+
+	// Upstream MUL parity (#3337): when an edit changes content, cancel
+	// any previously-triggered tasks for this comment and re-fire the
+	// trigger chain so the agent reads the new text — not the stale one.
+	if oldContent != comment.Content {
+		if err := h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID); err != nil {
+			slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
+		}
+
+		issue, err := h.Queries.GetIssue(r.Context(), existing.IssueID)
+		if err != nil {
+			slog.Warn("load issue for edit post-processing failed", "issue_id", uuidToString(existing.IssueID), "error", err)
+		} else {
+			var parentComment *db.Comment
+			if existing.ParentID.Valid {
+				parent, err := h.Queries.GetComment(r.Context(), existing.ParentID)
+				if err == nil {
+					parentComment = &parent
+				}
+			}
+
+			// Mirror CreateComment's full trigger chain so cerebro patches
+			// (delegation, private-autopilot ownership, channel-listen,
+			// dm-promote-on-mention) apply to edits too. Keep this aligned
+			// with the inline block above; if the trigger flow ever moves to
+			// a helper, route both call sites through it.
+			commentDelegation, delegationErr := h.TaskService.CommentDelegationContext(r.Context(), actorType, actorID, r.Header.Get("X-Task-ID"), "comment")
+			mentionDelegation, mentionDelegationErr := h.TaskService.CommentDelegationContext(r.Context(), actorType, actorID, r.Header.Get("X-Task-ID"), "mention")
+			privateAutopilotOwnerID, privateAutopilotComment := h.privateAutopilotTaskOwner(r.Context(), issue, r.Header.Get("X-Task-ID"), actorType)
+
+			if actorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue, actorType, actorID) &&
+				!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
+				!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
+				if delegationErr != nil {
+					slog.Warn("enqueue agent task on comment-edit blocked by delegation policy", "issue_id", uuidToString(issue.ID), "error", delegationErr)
+				} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation); err != nil {
+					slog.Warn("enqueue agent task on comment-edit failed", "issue_id", uuidToString(issue.ID), "error", err)
+				}
+			}
+
+			if !privateAutopilotComment && h.shouldEnqueueSquadLeaderOnComment(r.Context(), issue, comment.Content, actorType, actorID) {
+				h.enqueueSquadLeaderTask(r.Context(), issue, comment.ID, actorType, actorID, commentTaskDelegation{context: commentDelegation, err: delegationErr})
+			}
+
+			h.enqueueMentionedAgentTasks(r.Context(), r, issue, comment, parentComment, actorType, actorID, mentionDelegation, mentionDelegationErr, privateAutopilotOwnerID)
+
+			if h.ChannelListen != nil {
+				h.ChannelListen.EnqueueChannelListenerTasks(r.Context(), issue, comment, parentComment, actorType, actorID)
+			}
+
+			if !privateAutopilotComment && h.ChannelListen != nil {
+				h.ChannelListen.PromoteDMOnMention(r.Context(), issue, comment, parentComment, workspaceID, actorType, actorID)
+			}
+		}
+	}
+
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

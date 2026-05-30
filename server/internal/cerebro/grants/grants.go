@@ -37,6 +37,18 @@ const (
 	SubjectTypeGroup            = "group"
 	SubjectTypeRole             = "role"
 	SubjectTypeWorkspaceDefault = "workspace_default"
+	// SubjectTypeProject scopes a grant to agents running tasks within a
+	// specific Multica project (FIR-2512). Chain layer: between
+	// workspace_default and group.
+	SubjectTypeProject = "project"
+)
+
+// Repo capability identifiers (FIR-2512). Use these constants when creating or
+// evaluating repo-access grants so call sites stay in sync with the resolver.
+const (
+	CapabilityRepoRead     = "repo.read"     // read / analyse code; no worktree write
+	CapabilityRepoCheckout = "repo.checkout" // create a local worktree (Write·local)
+	CapabilityRepoPush     = "repo.push"     // push changes upstream (Write·external)
 )
 
 var knownSubjectTypes = map[string]struct{}{
@@ -45,6 +57,7 @@ var knownSubjectTypes = map[string]struct{}{
 	SubjectTypeGroup:            {},
 	SubjectTypeRole:             {},
 	SubjectTypeWorkspaceDefault: {},
+	SubjectTypeProject:          {},
 }
 
 // capabilityPattern validates capability identifiers: lowercase letters,

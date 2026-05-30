@@ -323,6 +323,7 @@ function MentionRow({
     const isClosed = item.status === "done" || item.status === "cancelled";
     return (
       <button
+        type="button"
         ref={buttonRef}
         className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
           selected ? "bg-accent" : "hover:bg-accent/50"
@@ -361,6 +362,7 @@ function MentionRow({
   const dimmed = item.restricted || item.wontTrigger;
   return (
     <button
+      type="button"
       ref={buttonRef}
       data-restricted={item.restricted ? "" : undefined}
       data-no-trigger={item.wontTrigger ? "" : undefined}

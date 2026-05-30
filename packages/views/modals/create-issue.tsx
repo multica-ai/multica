@@ -141,6 +141,12 @@ export function ManualCreatePanel({
     enabled: !!parentIssueId,
   });
 
+  // CEREBRO-PATCH(create-issue-duplicate-dismiss-state): FIR-2536.
+  // Local dismiss for the overlay duplicate-check panel — flips true when the
+  // user clicks the X, hides the panel for the rest of this modal session so
+  // the action buttons become reachable again.
+  const [duplicateDismissed, setDuplicateDismissed] = useState(false);
+
   // File upload — collect attachment IDs so we can link them after issue creation.
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
   const { uploadWithToast } = useFileUpload(api);
@@ -291,6 +297,10 @@ export function ManualCreatePanel({
   // Forward squad picks alongside agent picks so the agent panel honors
   // the actor the user already chose — otherwise a squad selection silently
   // falls back to the persisted actor / first visible agent on flip.
+  // parent_issue_id rides through the same carry channel: the modal opener
+  // (openCreateSubIssue) seeded it on the manual panel, and the agent panel
+  // needs it so the new issue is still created as a sub-issue when the user
+  // flips from "Add sub issue" → "Create with agent".
   const switchToAgent = () => {
     const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
     const prompt = [title.trim(), desc].filter(Boolean).join("\n\n");
@@ -301,6 +311,14 @@ export function ManualCreatePanel({
     // content on every round-trip).
     setDraft({ title: "", description: "" });
     setLastMode("agent");
+    // Prefer the hydrated identifier from `parentIssue`, but fall back to the
+    // identifier the modal opener seeded on `data`. Without the fallback, a
+    // flip that happens before the issue detail query resolves drops the
+    // identifier and the agent chip renders as "Sub-issue of " with an empty
+    // tail. The UUID alone still wires the sub-issue relationship correctly;
+    // this only affects the display affordance.
+    const carryParentIdentifier =
+      parentIssue?.identifier ?? (data?.parent_issue_identifier as string | undefined);
     onSwitchMode?.({
       prompt,
       ...(assigneeId && assigneeType === "agent"
@@ -309,6 +327,8 @@ export function ManualCreatePanel({
           ? { squad_id: assigneeId }
           : {}),
       ...(projectId ? { project_id: projectId } : {}),
+      ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
+      ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
     });
   };
 
@@ -348,6 +368,7 @@ export function ManualCreatePanel({
                   <TooltipTrigger
                     render={
                       <button
+                        type="button"
                         onClick={() => setIsExpanded(!isExpanded)}
                         className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >
@@ -365,6 +386,7 @@ export function ManualCreatePanel({
                   <TooltipTrigger
                     render={
                       <button
+                        type="button"
                         onClick={onClose}
                         className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >
@@ -403,13 +425,17 @@ export function ManualCreatePanel({
               {descDragOver && <FileDropOverlay />}
             </div>
 
-            {/* CEREBRO-PATCH(create-issue-duplicate-check-mount): FIR-2504. */}
-            <DuplicateCheckPanel title={title} description={draft.description} projectId={projectId}
-              onOpen={(m) => { router.push(p.issueDetail(m.id)); onClose(); }}
-              onAttachAsSubIssue={(m) => setParentIssueId(m.id)} />
+            {/* CEREBRO-PATCH(create-issue-duplicate-check-mount-overlay): FIR-2536.
+                Mount moved from inline-after-description to an overlay over
+                the footer (see footer block below) to free up vertical space
+                for the description editor on mobile. */}
 
             {/* Property toolbar */}
-            <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
+            {/* CEREBRO-PATCH(create-issue-mobile-selectors-swipe): FIR-2536.
+                Mobile shows the selectors as a single horizontally-scrollable
+                row so the description gets more vertical breathing room;
+                desktop keeps the original wrapping flow. */}
+            <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 md:flex-wrap max-md:flex-nowrap max-md:overflow-x-auto max-md:[&>*]:shrink-0 max-md:[scrollbar-width:none] max-md:[-ms-overflow-style:none] max-md:[&::-webkit-scrollbar]:hidden">
               {/* Status */}
               <StatusPicker
                 status={status}
@@ -599,17 +625,19 @@ export function ManualCreatePanel({
               }}
             />
 
-            {/* Footer */}
-            <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-h-7 items-center gap-2">
+            {/* CEREBRO-PATCH(create-issue-mobile-footer-layout): FIR-2536.
+                Compact single-row footer with attach + switch + a {create /
+                create-another} stack on the right. The whole block is wrapped
+                in `relative` so the duplicate-check overlay anchors to it. */}
+            <div className="relative shrink-0">
+              <div className="flex items-center gap-2 border-t px-4 py-3">
                 {/* CEREBRO-PATCH(file-upload-button-api): new onAttach/onEmbed
                     prop API on FileUploadButton (popup picker). */}
                 <FileUploadButton
                   onAttach={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f))}
                   onEmbed={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f, { embedImage: true }))}
                 />
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
+                <div className="flex-1" />
                 <button
                   type="button"
                   onClick={switchToAgent}
@@ -617,20 +645,39 @@ export function ManualCreatePanel({
                   className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer"
                 >
                   <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
-                  {t(($) => $.create_issue.switch_to_agent)}
+                  <span className="hidden sm:inline">{t(($) => $.create_issue.switch_to_agent)}</span>
                 </button>
-                <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-                  <Switch
-                    size="sm"
-                    checked={keepOpen}
-                    onCheckedChange={setKeepOpen}
-                  />
-                  {t(($) => $.create_issue.create_another)}
-                </label>
-                <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
-                  {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
-                </Button>
+                <div className="flex shrink-0 flex-col items-end gap-0.5">
+                  <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
+                    {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
+                  </Button>
+                  <label className="flex items-center gap-1 text-[10px] leading-tight text-muted-foreground cursor-pointer select-none">
+                    <Switch size="sm" checked={keepOpen} onCheckedChange={setKeepOpen} />
+                    {t(($) => $.create_issue.create_another)}
+                  </label>
+                </div>
               </div>
+
+              {/* CEREBRO-PATCH(create-issue-duplicate-check-overlay-mount): FIR-2536.
+                  Duplicate-check panel as overlay over the footer. Anchors to
+                  the bottom of the relative wrapper, grows upward as needed
+                  (capped at 60vh w/ scroll). Hidden once the user dismisses. */}
+              {!duplicateDismissed && (
+                <div className="absolute inset-x-0 bottom-full z-10 max-h-[60vh] overflow-y-auto">
+                  <DuplicateCheckPanel
+                    title={title}
+                    description={draft.description}
+                    projectId={projectId}
+                    variant="overlay"
+                    onDismiss={() => setDuplicateDismissed(true)}
+                    onOpen={(m) => { router.push(p.issueDetail(m.id)); onClose(); }}
+                    onAttachAsSubIssue={(m) => {
+                      setParentIssueId(m.id);
+                      setDuplicateDismissed(true);
+                    }}
+                  />
+                </div>
+              )}
             </div>
           </>
         )}
@@ -640,7 +687,18 @@ export function ManualCreatePanel({
 
 /** className for DialogContent in manual mode — depends on isExpanded and the
  *  backlog-hint sub-state. Exported so the shell (which now owns the
- *  DialogContent) can apply the same visual treatment without duplicating it. */
+ *  DialogContent) can apply the same visual treatment without duplicating it.
+ *
+ *  CEREBRO-PATCH(create-issue-modal-sizing): FIR-2504. Two sizing tweaks on
+ *  top of the upstream layout:
+ *    - Desktop default height bumped from h-96 (24rem) to h-[34rem] so the
+ *      duplicate-check panel + property toolbar don't crowd the title /
+ *      description area.
+ *    - Mobile (<md) goes full-screen — matches the new-message-modal pattern
+ *      so the create-issue flow doesn't sit in a tiny centred card on phones.
+ *  Both behaviours are suppressed in the backlog-hint sub-state, which is its
+ *  own small confirmation card.
+ */
 export function manualDialogContentClass(
   isExpanded: boolean,
   backlogHintIssueId: string | null,
@@ -654,8 +712,13 @@ export function manualDialogContentClass(
     !backlogHintIssueId && isExpanded
       ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
       : !backlogHintIssueId
-        ? "!max-w-2xl !w-full !h-96 !-translate-y-1/2"
+        ? "!max-w-2xl !w-full !h-[34rem] !-translate-y-1/2"
         : "",
+    // CEREBRO-PATCH(create-issue-modal-mobile-keyboard-follow): FIR-2504.
+    // `var(--cerebro-vvh,100dvh)` reads the visualViewport-tracked height set
+    // by the shell when keyboard is open; falls back to 100dvh otherwise.
+    !backlogHintIssueId &&
+      "max-md:!inset-0 max-md:!top-0 max-md:!left-0 max-md:!right-0 max-md:!bottom-0 max-md:!max-w-none max-md:!w-full max-md:!h-[var(--cerebro-vvh,100dvh)] max-md:!translate-x-0 max-md:!translate-y-0 max-md:!rounded-none",
   );
 }
 

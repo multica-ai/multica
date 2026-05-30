@@ -74,7 +74,7 @@ function Text({
   TextVariantProps & {
     asChild?: boolean;
   }) {
-  const textClass = React.useContext(TextClassContext);
+  const textClass = React.use(TextClassContext);
   const Component = asChild ? Slot : RNText;
   return (
     <Component
