@@ -62,21 +62,23 @@ type effectiveResponse struct {
 }
 
 type toolPolicyRow struct {
-	ToolKey   string            `json:"tool_key"`
-	Title     string            `json:"title"`
-	Category  string            `json:"category"`
-	Source    string            `json:"source"`
-	Layers    layerSettings     `json:"layers"`
-	Effective effectiveResponse `json:"effective"`
+	ToolKey         string            `json:"tool_key"`
+	ResourcePattern string            `json:"resource_pattern"`
+	Title           string            `json:"title"`
+	Category        string            `json:"category"`
+	Source          string            `json:"source"`
+	Layers          layerSettings     `json:"layers"`
+	Effective       effectiveResponse `json:"effective"`
 }
 
 // --- request types ----------------------------------------------------------
 
 type setRequest struct {
-	ToolKey   string `json:"tool_key"`
-	Layer     string `json:"layer"`
-	SubjectID string `json:"subject_id"`
-	Setting   string `json:"setting"`
+	ToolKey         string `json:"tool_key"`
+	Layer           string `json:"layer"`
+	SubjectID       string `json:"subject_id"`
+	ResourcePattern string `json:"resource_pattern"`
+	Setting         string `json:"setting"`
 }
 
 // --- handlers ---------------------------------------------------------------
@@ -169,12 +171,13 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := h.Store.Set(r.Context(), SetParams{
-		WorkspaceID: workspaceID,
-		ToolKey:     req.ToolKey,
-		Layer:       Layer(req.Layer),
-		SubjectID:   subjectID,
-		Setting:     Setting(req.Setting),
-		UpdatedBy:   member.UserID,
+		WorkspaceID:     workspaceID,
+		ToolKey:         req.ToolKey,
+		Layer:           Layer(req.Layer),
+		SubjectID:       subjectID,
+		ResourcePattern: req.ResourcePattern,
+		Setting:         Setting(req.Setting),
+		UpdatedBy:       member.UserID,
 	}); err != nil {
 		if errors.Is(err, ErrUnknownLayer) || errors.Is(err, ErrUnknownSetting) {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -211,7 +214,8 @@ func (h *Handler) Clear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Store.Clear(r.Context(), workspaceID, toolKey, layer, subjectID); err != nil {
+	resourcePattern := q.Get("resource_pattern")
+	if err := h.Store.Clear(r.Context(), workspaceID, toolKey, layer, subjectID, resourcePattern); err != nil {
 		if errors.Is(err, ErrUnknownLayer) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -245,10 +249,11 @@ func (h *Handler) serverError(w http.ResponseWriter, r *http.Request, op string,
 
 func toRowResponse(row TableRow) toolPolicyRow {
 	return toolPolicyRow{
-		ToolKey:  row.ToolKey,
-		Title:    row.Title,
-		Category: row.Category,
-		Source:   row.Source,
+		ToolKey:         row.ToolKey,
+		ResourcePattern: row.ResourcePattern,
+		Title:           row.Title,
+		Category:        row.Category,
+		Source:          row.Source,
 		Layers: layerSettings{
 			Workspace: settingPtr(row.Layers, LayerWorkspace),
 			Runtime:   settingPtr(row.Layers, LayerRuntime),

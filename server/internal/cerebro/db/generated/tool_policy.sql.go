@@ -13,24 +13,26 @@ import (
 
 const deleteCerebroToolPolicy = `-- name: DeleteCerebroToolPolicy :exec
 DELETE FROM cerebro_tool_policy
-WHERE workspace_id = $1 AND tool_key = $2 AND layer = $3 AND subject_id = $4
+WHERE workspace_id = $1 AND tool_key = $2 AND layer = $3 AND subject_id = $4 AND resource_pattern = $5
 `
 
 type DeleteCerebroToolPolicyParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ToolKey     string      `json:"tool_key"`
-	Layer       string      `json:"layer"`
-	SubjectID   pgtype.UUID `json:"subject_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	ToolKey         string      `json:"tool_key"`
+	Layer           string      `json:"layer"`
+	SubjectID       pgtype.UUID `json:"subject_id"`
+	ResourcePattern string      `json:"resource_pattern"`
 }
 
-// Clear the explicit choice for one (tool, layer, subject); the layer falls back
-// to Inherit.
+// Clear the explicit choice for one (tool, layer, subject, resource_pattern);
+// the layer falls back to Inherit for that pattern.
 func (q *Queries) DeleteCerebroToolPolicy(ctx context.Context, arg DeleteCerebroToolPolicyParams) error {
 	_, err := q.db.Exec(ctx, deleteCerebroToolPolicy,
 		arg.WorkspaceID,
 		arg.ToolKey,
 		arg.Layer,
 		arg.SubjectID,
+		arg.ResourcePattern,
 	)
 	return err
 }
@@ -41,22 +43,24 @@ SELECT layer, subject_id, setting
 FROM cerebro_tool_policy
 WHERE workspace_id = $1
   AND tool_key = $2
+  AND resource_pattern = $3
   AND (
     (layer = 'workspace' AND subject_id = $1) OR
-    (layer = 'runtime'   AND subject_id = $3) OR
-    (layer = 'agent'     AND subject_id = $4) OR
-    (layer = 'user'      AND subject_id = $5) OR
-    (layer = 'group'     AND subject_id = ANY($6::uuid[]))
+    (layer = 'runtime'   AND subject_id = $4) OR
+    (layer = 'agent'     AND subject_id = $5) OR
+    (layer = 'user'      AND subject_id = $6) OR
+    (layer = 'group'     AND subject_id = ANY($7::uuid[]))
   )
 `
 
 type ListCerebroToolPolicyForContextParams struct {
-	WorkspaceID pgtype.UUID   `json:"workspace_id"`
-	ToolKey     string        `json:"tool_key"`
-	RuntimeID   pgtype.UUID   `json:"runtime_id"`
-	AgentID     pgtype.UUID   `json:"agent_id"`
-	UserID      pgtype.UUID   `json:"user_id"`
-	GroupIds    []pgtype.UUID `json:"group_ids"`
+	WorkspaceID     pgtype.UUID   `json:"workspace_id"`
+	ToolKey         string        `json:"tool_key"`
+	ResourcePattern string        `json:"resource_pattern"`
+	RuntimeID       pgtype.UUID   `json:"runtime_id"`
+	AgentID         pgtype.UUID   `json:"agent_id"`
+	UserID          pgtype.UUID   `json:"user_id"`
+	GroupIds        []pgtype.UUID `json:"group_ids"`
 }
 
 type ListCerebroToolPolicyForContextRow struct {
@@ -65,21 +69,28 @@ type ListCerebroToolPolicyForContextRow struct {
 	Setting   string      `json:"setting"`
 }
 
-// Cerebro per-tool policy settings (FIR-2230 phase 1, persistence).
+// Cerebro per-tool policy settings (FIR-2230 phase 1, persistence; FIR-2505
+// slice 1 added the resource_pattern dimension).
 //
 // These queries back the unified tool-policy chain: each row is one layer's
-// explicit Allow/Ask/Deny/Inherit choice for one tool. ListCerebroToolPolicyForContext
-// gathers the five layers a single resolution needs in one round trip; the
+// explicit Allow/Ask/Deny/Inherit choice for one tool, optionally narrowed to a
+// specific resource_pattern (e.g. one repo URL). An empty resource_pattern is
+// the capability-wide row that pre-FIR-2505 callers wrote; a non-empty one
+// targets that exact pattern verbatim. ListCerebroToolPolicyForContext gathers
+// the five layers a single resolution needs in one round trip; the
 // per-subject / per-tool reads back the authoring tables in the admin UI.
-// All explicit settings that apply to one tool for one (workspace, runtime,
-// agent, user, groups) context. A layer whose subject id is NULL (absent from
-// the request) never matches, so the resolver treats it as Inherit. The
-// workspace root layer is always keyed on the workspace itself, so it enters
-// every resolution. group_ids may be empty.
+// All explicit settings that apply to one (tool, resource_pattern) for one
+// (workspace, runtime, agent, user, groups) context. An empty resource_pattern
+// argument selects only the capability-wide rows (the legacy shape); a
+// non-empty value selects rows for that exact pattern. A layer whose subject id
+// is NULL (absent from the request) never matches, so the resolver treats it as
+// Inherit. The workspace root layer is always keyed on the workspace itself, so
+// it enters every resolution. group_ids may be empty.
 func (q *Queries) ListCerebroToolPolicyForContext(ctx context.Context, arg ListCerebroToolPolicyForContextParams) ([]ListCerebroToolPolicyForContextRow, error) {
 	rows, err := q.db.Query(ctx, listCerebroToolPolicyForContext,
 		arg.WorkspaceID,
 		arg.ToolKey,
+		arg.ResourcePattern,
 		arg.RuntimeID,
 		arg.AgentID,
 		arg.UserID,
@@ -104,10 +115,10 @@ func (q *Queries) ListCerebroToolPolicyForContext(ctx context.Context, arg ListC
 }
 
 const listCerebroToolPolicyForSubject = `-- name: ListCerebroToolPolicyForSubject :many
-SELECT tool_key, setting, updated_by, updated_at
+SELECT tool_key, resource_pattern, setting, updated_by, updated_at
 FROM cerebro_tool_policy
 WHERE workspace_id = $1 AND layer = $2 AND subject_id = $3
-ORDER BY tool_key ASC
+ORDER BY tool_key ASC, resource_pattern ASC
 `
 
 type ListCerebroToolPolicyForSubjectParams struct {
@@ -117,14 +128,16 @@ type ListCerebroToolPolicyForSubjectParams struct {
 }
 
 type ListCerebroToolPolicyForSubjectRow struct {
-	ToolKey   string             `json:"tool_key"`
-	Setting   string             `json:"setting"`
-	UpdatedBy pgtype.UUID        `json:"updated_by"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ToolKey         string             `json:"tool_key"`
+	ResourcePattern string             `json:"resource_pattern"`
+	Setting         string             `json:"setting"`
+	UpdatedBy       pgtype.UUID        `json:"updated_by"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
-// Every explicit setting for one (layer, subject) across all tools. Drives the
-// "This agent" / "Runtime" column of the admin table.
+// Every explicit setting for one (layer, subject) across all tools and
+// resource patterns. Drives the "This agent" / "Runtime" column of the admin
+// table; the caller groups by (tool_key, resource_pattern) as needed.
 func (q *Queries) ListCerebroToolPolicyForSubject(ctx context.Context, arg ListCerebroToolPolicyForSubjectParams) ([]ListCerebroToolPolicyForSubjectRow, error) {
 	rows, err := q.db.Query(ctx, listCerebroToolPolicyForSubject, arg.WorkspaceID, arg.Layer, arg.SubjectID)
 	if err != nil {
@@ -136,6 +149,7 @@ func (q *Queries) ListCerebroToolPolicyForSubject(ctx context.Context, arg ListC
 		var i ListCerebroToolPolicyForSubjectRow
 		if err := rows.Scan(
 			&i.ToolKey,
+			&i.ResourcePattern,
 			&i.Setting,
 			&i.UpdatedBy,
 			&i.UpdatedAt,
@@ -151,42 +165,59 @@ func (q *Queries) ListCerebroToolPolicyForSubject(ctx context.Context, arg ListC
 }
 
 const upsertCerebroToolPolicy = `-- name: UpsertCerebroToolPolicy :one
-INSERT INTO cerebro_tool_policy (workspace_id, tool_key, layer, subject_id, setting, updated_by)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (workspace_id, tool_key, layer, subject_id) DO UPDATE
+INSERT INTO cerebro_tool_policy (workspace_id, tool_key, layer, subject_id, resource_pattern, setting, updated_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (workspace_id, tool_key, layer, subject_id, resource_pattern) DO UPDATE
 SET setting = EXCLUDED.setting,
     updated_by = EXCLUDED.updated_by,
     updated_at = now()
-RETURNING id, workspace_id, tool_key, layer, subject_id, setting, updated_by, created_at, updated_at
+RETURNING id, workspace_id, tool_key, layer, subject_id, resource_pattern, setting, updated_by, created_at, updated_at
 `
 
 type UpsertCerebroToolPolicyParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ToolKey     string      `json:"tool_key"`
-	Layer       string      `json:"layer"`
-	SubjectID   pgtype.UUID `json:"subject_id"`
-	Setting     string      `json:"setting"`
-	UpdatedBy   pgtype.UUID `json:"updated_by"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	ToolKey         string      `json:"tool_key"`
+	Layer           string      `json:"layer"`
+	SubjectID       pgtype.UUID `json:"subject_id"`
+	ResourcePattern string      `json:"resource_pattern"`
+	Setting         string      `json:"setting"`
+	UpdatedBy       pgtype.UUID `json:"updated_by"`
 }
 
-// Set the explicit choice for one (tool, layer, subject). Re-setting the same
-// triple overwrites the prior choice and records who changed it.
-func (q *Queries) UpsertCerebroToolPolicy(ctx context.Context, arg UpsertCerebroToolPolicyParams) (CerebroToolPolicy, error) {
+type UpsertCerebroToolPolicyRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ToolKey         string             `json:"tool_key"`
+	Layer           string             `json:"layer"`
+	SubjectID       pgtype.UUID        `json:"subject_id"`
+	ResourcePattern string             `json:"resource_pattern"`
+	Setting         string             `json:"setting"`
+	UpdatedBy       pgtype.UUID        `json:"updated_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Set the explicit choice for one (tool, layer, subject, resource_pattern).
+// Re-setting the same quadruple overwrites the prior choice and records who
+// changed it.
+func (q *Queries) UpsertCerebroToolPolicy(ctx context.Context, arg UpsertCerebroToolPolicyParams) (UpsertCerebroToolPolicyRow, error) {
 	row := q.db.QueryRow(ctx, upsertCerebroToolPolicy,
 		arg.WorkspaceID,
 		arg.ToolKey,
 		arg.Layer,
 		arg.SubjectID,
+		arg.ResourcePattern,
 		arg.Setting,
 		arg.UpdatedBy,
 	)
-	var i CerebroToolPolicy
+	var i UpsertCerebroToolPolicyRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
 		&i.ToolKey,
 		&i.Layer,
 		&i.SubjectID,
+		&i.ResourcePattern,
 		&i.Setting,
 		&i.UpdatedBy,
 		&i.CreatedAt,

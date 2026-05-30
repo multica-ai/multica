@@ -350,7 +350,7 @@ func TestStore_ClearReverts(t *testing.T) {
 		t.Fatalf("before clear: setting = %q, want deny", eff.Setting)
 	}
 
-	if err := s.Clear(ctx, tpTestWorkspaceID, tool, LayerUser, user); err != nil {
+	if err := s.Clear(ctx, tpTestWorkspaceID, tool, LayerUser, user, ""); err != nil {
 		t.Fatalf("clear user: %v", err)
 	}
 	eff, err := s.Resolve(ctx, Query{WorkspaceID: tpTestWorkspaceID, ToolKey: tool, AgentID: agent, UserID: user})
@@ -404,7 +404,145 @@ func TestStore_RejectsBadInput(t *testing.T) {
 	if _, err := s.Set(ctx, SetParams{Layer: LayerAgent, Setting: "nonsense"}); err == nil {
 		t.Fatal("Set with unknown setting should error before hitting the DB")
 	}
-	if err := s.Clear(ctx, pgtype.UUID{}, "x", "nonsense", pgtype.UUID{}); err == nil {
+	if err := s.Clear(ctx, pgtype.UUID{}, "x", "nonsense", pgtype.UUID{}, ""); err == nil {
 		t.Fatal("Clear with unknown layer should error before hitting the DB")
+	}
+}
+
+// TestStore_ResourcePatternIsolatesRowsByResource proves the FIR-2505 slice 1
+// dimension: two rows on the same (tool, layer, subject) that disagree on
+// resource_pattern coexist, and Resolve sees only the one whose pattern matches
+// its Query. The capability-wide row (resource_pattern = "") is what every
+// pre-FIR-2505 caller wrote and still resolves on the empty query — that is the
+// backward-compatible default. A per-resource row only enters the resolution
+// when the caller asks for that exact pattern.
+func TestStore_ResourcePatternIsolatesRowsByResource(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	ctx := context.Background()
+
+	const tool = "repo.checkout"
+	const repoA = "github.com/firtal/alpha"
+	const repoB = "github.com/firtal/beta"
+	agent := uuidByte(60)
+
+	// Capability-wide row: agent gets Allow for any repo by default.
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool, Layer: LayerAgent,
+		SubjectID: agent, ResourcePattern: "", Setting: SettingAllow,
+	}); err != nil {
+		t.Fatalf("set capability-wide: %v", err)
+	}
+	// Per-resource override: deny on repoA only.
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool, Layer: LayerAgent,
+		SubjectID: agent, ResourcePattern: repoA, Setting: SettingDeny,
+	}); err != nil {
+		t.Fatalf("set per-resource deny: %v", err)
+	}
+
+	// Resolve with empty pattern: sees the capability-wide row (Allow).
+	eff, err := s.Resolve(ctx, Query{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool, AgentID: agent,
+	})
+	if err != nil {
+		t.Fatalf("resolve capability-wide: %v", err)
+	}
+	if eff.Setting != SettingAllow {
+		t.Fatalf("capability-wide resolve = %q, want allow (row=%+v)", eff.Setting, eff)
+	}
+
+	// Resolve with repoA pattern: sees the per-resource row (Deny).
+	eff, err = s.Resolve(ctx, Query{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool, AgentID: agent,
+		ResourcePattern: repoA,
+	})
+	if err != nil {
+		t.Fatalf("resolve repoA: %v", err)
+	}
+	if eff.Setting != SettingDeny {
+		t.Fatalf("repoA resolve = %q, want deny (per-resource override)", eff.Setting)
+	}
+
+	// Resolve with repoB pattern: no row matches, falls back to Base (Allow).
+	eff, err = s.Resolve(ctx, Query{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool, AgentID: agent,
+		ResourcePattern: repoB,
+	})
+	if err != nil {
+		t.Fatalf("resolve repoB: %v", err)
+	}
+	if eff.Setting != SettingAllow {
+		t.Fatalf("repoB resolve = %q, want allow (no override; base default)", eff.Setting)
+	}
+
+	// Clear the repoA override; capability-wide row stays intact.
+	if err := s.Clear(ctx, tpTestWorkspaceID, tool, LayerAgent, agent, repoA); err != nil {
+		t.Fatalf("clear repoA: %v", err)
+	}
+	eff, err = s.Resolve(ctx, Query{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool, AgentID: agent,
+		ResourcePattern: repoA,
+	})
+	if err != nil {
+		t.Fatalf("resolve repoA after clear: %v", err)
+	}
+	if eff.Setting != SettingAllow {
+		t.Fatalf("repoA resolve after clearing per-resource deny = %q, want allow (fell back to base)", eff.Setting)
+	}
+	// Capability-wide row untouched.
+	eff, err = s.Resolve(ctx, Query{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool, AgentID: agent,
+	})
+	if err != nil {
+		t.Fatalf("resolve capability-wide after clearing repoA: %v", err)
+	}
+	if eff.Setting != SettingAllow {
+		t.Fatalf("capability-wide resolve after clearing repoA = %q, want allow (row untouched)", eff.Setting)
+	}
+}
+
+// TestStore_ListForSubject_CarriesResourcePattern proves ListForSubject returns
+// the resource_pattern alongside each (tool, setting) so the admin table can
+// group by it. The same (tool, layer, subject) can appear twice — once
+// capability-wide and once per-resource — and both must come back.
+func TestStore_ListForSubject_CarriesResourcePattern(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	ctx := context.Background()
+
+	const tool = "repo.checkout"
+	const repoA = "github.com/firtal/alpha"
+	agent := uuidByte(61)
+
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool, Layer: LayerAgent,
+		SubjectID: agent, ResourcePattern: "", Setting: SettingAllow,
+	}); err != nil {
+		t.Fatalf("set capability-wide: %v", err)
+	}
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool, Layer: LayerAgent,
+		SubjectID: agent, ResourcePattern: repoA, Setting: SettingDeny,
+	}); err != nil {
+		t.Fatalf("set per-resource: %v", err)
+	}
+
+	rows, err := s.ListForSubject(ctx, tpTestWorkspaceID, LayerAgent, agent)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2 (capability-wide + per-resource)", len(rows))
+	}
+	got := map[string]Setting{}
+	for _, r := range rows {
+		got[r.ResourcePattern] = r.Setting
+	}
+	if got[""] != SettingAllow {
+		t.Fatalf("capability-wide row = %q, want allow", got[""])
+	}
+	if got[repoA] != SettingDeny {
+		t.Fatalf("per-resource row %q = %q, want deny", repoA, got[repoA])
 	}
 }

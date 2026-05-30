@@ -69,17 +69,21 @@ func validSetting(s Setting) bool {
 	}
 }
 
-// Query identifies the (tool, runtime, agent, user, groups) a caller wants an
-// effective verdict for. Any of RuntimeID/AgentID/UserID may be the zero value
-// (Valid=false) when that layer is not part of the request; that layer is then
-// absent and treated as Inherit. GroupIDs may be empty.
+// Query identifies the (tool, resource_pattern, runtime, agent, user, groups)
+// a caller wants an effective verdict for. Any of RuntimeID/AgentID/UserID may
+// be the zero value (Valid=false) when that layer is not part of the request;
+// that layer is then absent and treated as Inherit. GroupIDs may be empty.
+// ResourcePattern is the per-resource scoping added in FIR-2505 slice 1: an
+// empty string selects the capability-wide rows (the legacy semantics) and a
+// non-empty value selects rows that target that exact pattern verbatim.
 type Query struct {
-	WorkspaceID pgtype.UUID
-	ToolKey     string
-	RuntimeID   pgtype.UUID
-	AgentID     pgtype.UUID
-	UserID      pgtype.UUID
-	GroupIDs    []pgtype.UUID
+	WorkspaceID     pgtype.UUID
+	ToolKey         string
+	ResourcePattern string
+	RuntimeID       pgtype.UUID
+	AgentID         pgtype.UUID
+	UserID          pgtype.UUID
+	GroupIDs        []pgtype.UUID
 	// Base is the workspace/system default applied when even the runtime layer
 	// inherits. Empty defaults to Allow (see Resolve).
 	Base Setting
@@ -105,12 +109,13 @@ func (s *Store) loadInput(ctx context.Context, in Query) (Input, error) {
 		return Input{}, err
 	}
 	rows, err := s.q.ListCerebroToolPolicyForContext(ctx, cerebrodb.ListCerebroToolPolicyForContextParams{
-		WorkspaceID: in.WorkspaceID,
-		ToolKey:     in.ToolKey,
-		RuntimeID:   in.RuntimeID,
-		AgentID:     in.AgentID,
-		UserID:      in.UserID,
-		GroupIds:    groupIDs,
+		WorkspaceID:     in.WorkspaceID,
+		ToolKey:         in.ToolKey,
+		ResourcePattern: in.ResourcePattern,
+		RuntimeID:       in.RuntimeID,
+		AgentID:         in.AgentID,
+		UserID:          in.UserID,
+		GroupIds:        groupIDs,
 	})
 	if err != nil {
 		return Input{}, fmt.Errorf("toolpolicy: load context settings: %w", err)
@@ -163,68 +168,77 @@ func (s *Store) resolveGroupIDs(ctx context.Context, workspaceID, userID pgtype.
 	return ids, nil
 }
 
-// SetParams is the argument bundle for Set.
+// SetParams is the argument bundle for Set. ResourcePattern is the per-resource
+// scope (e.g. one repo URL); leave empty for the capability-wide row that
+// existing pre-FIR-2505 callers wrote.
 type SetParams struct {
-	WorkspaceID pgtype.UUID
-	ToolKey     string
-	Layer       Layer
-	SubjectID   pgtype.UUID
-	Setting     Setting
-	UpdatedBy   pgtype.UUID // optional; the zero value leaves the column NULL
+	WorkspaceID     pgtype.UUID
+	ToolKey         string
+	Layer           Layer
+	SubjectID       pgtype.UUID
+	ResourcePattern string
+	Setting         Setting
+	UpdatedBy       pgtype.UUID // optional; the zero value leaves the column NULL
 }
 
-// Set upserts one layer's explicit choice for one tool. Storing SettingInherit
-// is allowed (it behaves like an absent row but lets the UI render a deliberate
-// "follow the layer below"); use Clear to drop the row entirely.
-func (s *Store) Set(ctx context.Context, p SetParams) (cerebrodb.CerebroToolPolicy, error) {
+// Set upserts one layer's explicit choice for one (tool, resource_pattern).
+// Storing SettingInherit is allowed (it behaves like an absent row but lets the
+// UI render a deliberate "follow the layer below"); use Clear to drop the row
+// entirely.
+func (s *Store) Set(ctx context.Context, p SetParams) (cerebrodb.UpsertCerebroToolPolicyRow, error) {
 	if !validLayer(p.Layer) {
-		return cerebrodb.CerebroToolPolicy{}, fmt.Errorf("%w: %q", ErrUnknownLayer, p.Layer)
+		return cerebrodb.UpsertCerebroToolPolicyRow{}, fmt.Errorf("%w: %q", ErrUnknownLayer, p.Layer)
 	}
 	if !validSetting(p.Setting) {
-		return cerebrodb.CerebroToolPolicy{}, fmt.Errorf("%w: %q", ErrUnknownSetting, p.Setting)
+		return cerebrodb.UpsertCerebroToolPolicyRow{}, fmt.Errorf("%w: %q", ErrUnknownSetting, p.Setting)
 	}
 	row, err := s.q.UpsertCerebroToolPolicy(ctx, cerebrodb.UpsertCerebroToolPolicyParams{
-		WorkspaceID: p.WorkspaceID,
-		ToolKey:     p.ToolKey,
-		Layer:       string(p.Layer),
-		SubjectID:   p.SubjectID,
-		Setting:     string(p.Setting),
-		UpdatedBy:   p.UpdatedBy,
+		WorkspaceID:     p.WorkspaceID,
+		ToolKey:         p.ToolKey,
+		Layer:           string(p.Layer),
+		SubjectID:       p.SubjectID,
+		ResourcePattern: p.ResourcePattern,
+		Setting:         string(p.Setting),
+		UpdatedBy:       p.UpdatedBy,
 	})
 	if err != nil {
-		return cerebrodb.CerebroToolPolicy{}, fmt.Errorf("toolpolicy: set: %w", err)
+		return cerebrodb.UpsertCerebroToolPolicyRow{}, fmt.Errorf("toolpolicy: set: %w", err)
 	}
 	return row, nil
 }
 
-// Clear removes one layer's explicit choice for one tool so the layer reverts to
-// Inherit. Clearing an absent row is a no-op.
-func (s *Store) Clear(ctx context.Context, workspaceID pgtype.UUID, toolKey string, layer Layer, subjectID pgtype.UUID) error {
+// Clear removes one layer's explicit choice for one (tool, resource_pattern)
+// so that layer reverts to Inherit for that pattern. Clearing an absent row is
+// a no-op.
+func (s *Store) Clear(ctx context.Context, workspaceID pgtype.UUID, toolKey string, layer Layer, subjectID pgtype.UUID, resourcePattern string) error {
 	if !validLayer(layer) {
 		return fmt.Errorf("%w: %q", ErrUnknownLayer, layer)
 	}
 	if err := s.q.DeleteCerebroToolPolicy(ctx, cerebrodb.DeleteCerebroToolPolicyParams{
-		WorkspaceID: workspaceID,
-		ToolKey:     toolKey,
-		Layer:       string(layer),
-		SubjectID:   subjectID,
+		WorkspaceID:     workspaceID,
+		ToolKey:         toolKey,
+		Layer:           string(layer),
+		SubjectID:       subjectID,
+		ResourcePattern: resourcePattern,
 	}); err != nil {
 		return fmt.Errorf("toolpolicy: clear: %w", err)
 	}
 	return nil
 }
 
-// SubjectSetting is one (tool, setting) pair a subject holds at one layer, used
-// to render the per-agent / per-runtime column of the admin table.
+// SubjectSetting is one (tool, resource_pattern, setting) triple a subject
+// holds at one layer, used to render the per-agent / per-runtime column of the
+// admin table. ResourcePattern is "" for capability-wide rows.
 type SubjectSetting struct {
-	ToolKey   string
-	Setting   Setting
-	UpdatedBy pgtype.UUID
-	UpdatedAt pgtype.Timestamptz
+	ToolKey         string
+	ResourcePattern string
+	Setting         Setting
+	UpdatedBy       pgtype.UUID
+	UpdatedAt       pgtype.Timestamptz
 }
 
 // ListForSubject returns every explicit setting one subject holds at one layer,
-// across all tools.
+// across all tools and resource patterns.
 func (s *Store) ListForSubject(ctx context.Context, workspaceID pgtype.UUID, layer Layer, subjectID pgtype.UUID) ([]SubjectSetting, error) {
 	if !validLayer(layer) {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownLayer, layer)
@@ -240,10 +254,11 @@ func (s *Store) ListForSubject(ctx context.Context, workspaceID pgtype.UUID, lay
 	out := make([]SubjectSetting, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, SubjectSetting{
-			ToolKey:   r.ToolKey,
-			Setting:   Setting(r.Setting),
-			UpdatedBy: r.UpdatedBy,
-			UpdatedAt: r.UpdatedAt,
+			ToolKey:         r.ToolKey,
+			ResourcePattern: r.ResourcePattern,
+			Setting:         Setting(r.Setting),
+			UpdatedBy:       r.UpdatedBy,
+			UpdatedAt:       r.UpdatedAt,
 		})
 	}
 	return out, nil

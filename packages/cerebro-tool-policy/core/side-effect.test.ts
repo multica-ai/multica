@@ -8,6 +8,7 @@ function row(
 ): ToolPolicyRow {
   return {
     tool_key,
+    resource_pattern: "",
     title: opts.title ?? "",
     category: opts.category ?? "",
     source: "scan",

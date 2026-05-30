@@ -33,6 +33,11 @@ type TableRow struct {
 	// ToolKey is the stable identifier the resolver keys on — a CLI tool name
 	// ("add_comment") or a namespaced MCP action ("bigquery.query").
 	ToolKey string
+	// ResourcePattern is the per-resource scope this row authors (FIR-2505
+	// slice 1). Empty for the capability-wide row pre-FIR-2505 callers wrote;
+	// non-empty when the row targets a specific resource (e.g. a repo URL). The
+	// resolver matches the pattern verbatim.
+	ResourcePattern string
 	// Title and Category are human-readable labels from the capability register,
 	// so the UI never shows a raw key or id.
 	Title    string
@@ -94,12 +99,16 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		 )`
 	}
 
-	// One row per (tool, matching policy layer). The LEFT JOIN keeps tools with
-	// no settings (NULL layer), and the subject predicates mirror
-	// ListCerebroToolPolicyForContext so an absent (Valid=false) subject id —
-	// which marshals to NULL — never matches and that layer stays Inherit. The
-	// workspace root layer is always keyed on the workspace itself ($1), so it
-	// enters every view's Effective column even when no other subject is in scope.
+	// One row per (tool, matching policy layer) for the capability-wide
+	// (resource_pattern = '') view. The LEFT JOIN keeps tools with no settings
+	// (NULL layer), the subject predicates mirror ListCerebroToolPolicyForContext
+	// so an absent (Valid=false) subject id — which marshals to NULL — never
+	// matches and that layer stays Inherit. The workspace root layer is always
+	// keyed on the workspace itself ($1), so it enters every view's Effective
+	// column even when no other subject is in scope. The resource_pattern filter
+	// keeps slice 1 user-visible behaviour identical to pre-FIR-2505: only the
+	// capability-wide rows are collapsed here; per-resource rows are emitted in
+	// slice 2 by a separate read path so the UI can group them under each repo.
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.capability_key, c.title, c.category, c.source,
 		       p.layer, p.subject_id, p.setting
@@ -107,6 +116,7 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		LEFT JOIN cerebro_tool_policy p
 		  ON p.workspace_id = c.workspace_id
 		 AND p.tool_key = c.capability_key
+		 AND p.resource_pattern = ''
 		 AND (
 		   (p.layer = 'workspace' AND p.subject_id = $1) OR
 		   (p.layer = 'runtime'   AND p.subject_id = $2) OR
@@ -174,6 +184,15 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		}
 		a.row.Effective = Resolve(Input{Settings: a.row.Layers, Base: in.Base})
 		out = append(out, a.row)
+	}
+
+	// Append the per-repo rows (one per repo capability per workspace repo). These
+	// are not in the capability register, so the query above never emits them; they
+	// carry a non-empty ResourcePattern and the synthetic "repo" category the admin
+	// screen groups into a collapsible block (FIR-2505 slice 2).
+	out, err = s.appendRepoRows(ctx, in, groupIDs, out)
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }

@@ -28,6 +28,7 @@ import type { ToolPolicyRow } from "../core";
 
 const row = (over: Partial<ToolPolicyRow> = {}): ToolPolicyRow => ({
   tool_key: "read_files",
+  resource_pattern: "",
   title: "Læs filer",
   category: "tools",
   source: "scan",
