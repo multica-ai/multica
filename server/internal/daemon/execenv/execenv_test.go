@@ -512,6 +512,44 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 	}
 }
 
+// TestWriteSkillFilesIgnoresBundledSkillMd verifies that a skill whose bundled
+// supporting files include a redundant SKILL.md entry does not collide with the
+// canonical SKILL.md written from Content. Without the guard this fails with
+// "refuse to overwrite pre-existing path" and bricks startup for every agent
+// that has such a skill.
+func TestWriteSkillFilesIgnoresBundledSkillMd(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "skillmd-collision-test",
+		AgentSkills: []SkillContextForEnv{
+			{
+				Name:    "Example Skill",
+				Content: "canonical body",
+				Files: []SkillFileContextForEnv{
+					{Path: "SKILL.md", Content: "stale duplicate"},
+				},
+			},
+		},
+	}
+
+	if err := writeContextFiles(dir, "claude", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles must tolerate a bundled SKILL.md, got: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".claude", "skills", "example-skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "canonical body") {
+		t.Errorf("SKILL.md must come from Content, got %q", string(skillMd))
+	}
+	if strings.Contains(string(skillMd), "stale duplicate") {
+		t.Error("bundled SKILL.md must be skipped, not overwrite canonical content")
+	}
+}
+
 func TestCleanupPreservesLogs(t *testing.T) {
 	t.Parallel()
 	workspacesRoot := t.TempDir()
