@@ -34,12 +34,14 @@ export interface MarkdownProps extends MarkdownBaseProps {
 function defaultRenderMention({
   type,
   id,
+  label,
 }: {
   type: string;
   id: string;
+  label?: string;
 }): React.ReactNode {
   if (type === "issue") {
-    return <IssueMentionCard issueId={id} />;
+    return <IssueMentionCard issueId={id} fallbackLabel={label} />;
   }
   return null;
 }

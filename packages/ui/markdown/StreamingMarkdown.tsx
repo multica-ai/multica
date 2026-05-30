@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Markdown, type RenderMode } from './Markdown'
+import { Markdown, type MentionRenderProps, type RenderMode } from './Markdown'
 
 export interface StreamingMarkdownProps {
   content: string
@@ -8,7 +8,7 @@ export interface StreamingMarkdownProps {
   className?: string
   onUrlClick?: (url: string) => void
   onFileClick?: (path: string) => void
-  renderMention?: (props: { type: string; id: string }) => React.ReactNode
+  renderMention?: (props: MentionRenderProps) => React.ReactNode
   cdnDomain?: string
 }
 
@@ -145,7 +145,7 @@ const MemoizedBlock = React.memo(
     className?: string
     onUrlClick?: (url: string) => void
     onFileClick?: (path: string) => void
-    renderMention?: (props: { type: string; id: string }) => React.ReactNode
+    renderMention?: (props: MentionRenderProps) => React.ReactNode
     cdnDomain?: string
   }) {
     return (

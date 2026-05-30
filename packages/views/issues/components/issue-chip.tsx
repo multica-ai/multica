@@ -22,6 +22,8 @@ export interface IssueChipProps {
   issueId: string;
   /** Shown when the issue can't be resolved (deleted, other workspace, …). */
   fallbackLabel?: string;
+  /** Disable detail lookup for passive mentions to avoid noisy cross-workspace 404s. */
+  resolveDetail?: boolean;
   /** Extra classes — callers layer interaction hints here
    *  (e.g. `hover:bg-accent cursor-pointer` for navigable variants). */
   className?: string;
@@ -30,7 +32,12 @@ export interface IssueChipProps {
 const BASE_CLASS =
   "issue-mention inline-flex items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-xs max-w-72";
 
-export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps) {
+export function IssueChip({
+  issueId,
+  fallbackLabel,
+  resolveDetail = true,
+  className,
+}: IssueChipProps) {
   const wsId = useWorkspaceId();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
   const listIssue = issues.find((i) => i.id === issueId);
@@ -38,7 +45,7 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
   // Fallback fetch for issues outside the first page of the list (e.g. Done).
   const { data: detailIssue } = useQuery({
     ...issueDetailOptions(wsId, issueId),
-    enabled: !listIssue,
+    enabled: resolveDetail && !listIssue,
   });
 
   const issue = listIssue ?? detailIssue;

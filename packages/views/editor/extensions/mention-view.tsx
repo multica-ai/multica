@@ -64,6 +64,7 @@ function IssueMention({
       <IssueChip
         issueId={issueId}
         fallbackLabel={fallbackLabel}
+        resolveDetail={false}
         className="cursor-pointer hover:bg-accent transition-colors"
       />
     </a>
