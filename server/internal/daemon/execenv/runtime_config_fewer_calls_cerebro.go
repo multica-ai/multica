@@ -48,15 +48,22 @@ func commentIssueGetStep(issueID string, snapshotInlined, bundleHint bool) strin
 
 // commentThreadStep returns step 3 (and, when no saving is active, its paging
 // sub-bullets) of the comment-triggered workflow.
-func commentThreadStep(issueID, triggerCommentID string, snapshotInlined, bundleHint bool) string {
+//
+// priorSessionResumed=true switches to the MUL-2785 resumed-comments shape:
+// the triggering comment body is already in the per-turn prompt, so the brief
+// must NOT force a duplicate thread read or claim the since-delta is
+// thread-scoped (that wording is reserved for the cold path).
+func commentThreadStep(issueID, triggerCommentID string, snapshotInlined, bundleHint, priorSessionResumed bool) string {
 	switch {
 	case snapshotInlined:
 		return fmt.Sprintf("3. The triggering thread is in the inlined context above. Only if you need replies older than what is shown, run `multica issue comment list %s --thread %s --tail 30 --output json` and page older replies with the stderr `Next reply cursor: --before <ts> --before-id <reply-id>` line.\n", issueID, triggerCommentID)
 	case bundleHint:
 		return fmt.Sprintf("3. The triggering thread came back with your `multica issue context` call in step 1 — read it there; do NOT run a separate `multica issue comment list` for it. Only if you need replies older than what it returned, run `multica issue comment list %s --thread %s --tail 30 --output json` and page older replies with the stderr `Next reply cursor: --before <ts> --before-id <reply-id>` line.\n", issueID, triggerCommentID)
+	case priorSessionResumed:
+		return fmt.Sprintf("3. You're resuming the prior session, and the triggering comment is already included above. No other new comments on this issue since your last run. Do not re-read comment history by default. Only if the resumed session is missing thread context, pull the triggering conversation: `multica issue comment list %s --thread %s --tail 30 --output json`.\n", issueID, triggerCommentID)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "3. Read the triggering thread first — that is what this comment is actually about. Default to the 30 most recent replies in that thread: `multica issue comment list %s --thread %s --tail 30 --output json` returns the root + the 30 newest replies (root is always included, even at `--tail 0`).\n", issueID, triggerCommentID)
+	fmt.Fprintf(&b, "3. Read the triggering conversation first — that is what this comment is actually about. Default to the 30 most recent replies in that thread: `multica issue comment list %s --thread %s --tail 30 --output json` returns the root + the 30 newest replies (root is always included, even at `--tail 0`).\n", issueID, triggerCommentID)
 	b.WriteString("   - If 30 replies aren't enough, walk older replies in the same thread one page at a time using the stderr `Next reply cursor: --before <ts> --before-id <reply-id>` line — pass the same pair back as `--before <ts> --before-id <reply-id>` on the next call. Under `--thread --tail` the cursor walks older *replies*, not older threads.\n")
 	fmt.Fprintf(&b, "   - If you also need cross-thread background, pull the most recently active threads on the issue: `multica issue comment list %s --recent 20 --output json`. Under `--recent` the same `--before` / `--before-id` flags walk older *threads* instead of older replies, and the stderr line is `Next thread cursor: --before <ts> --before-id <root-id>`. Pass the pair back to scroll to older threads when 20 still isn't enough.\n", issueID)
 	b.WriteString("   - Avoid the unfiltered `multica issue comment list <issue-id> --output json` form on long-running issues — it dumps the entire flat timeline (cap 2000) and wastes context on chatter unrelated to the trigger. `--since <RFC3339-timestamp>` is still available for incremental polling against a known cursor and may combine with `--thread --tail` or `--recent`.\n")

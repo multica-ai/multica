@@ -11,6 +11,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -199,6 +201,17 @@ type AgentTaskResponse struct {
 	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
 	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
 	WorkDir                 string                `json:"work_dir,omitempty"`                  // local working directory pinned for this task; populated once the daemon reports it
+	// RelativeWorkDir is a privacy-safe display form of WorkDir intended for
+	// the UI. For standard tasks it strips the daemon's workspaces root so
+	// the user sees `<wsUUID>/<taskShort>/workdir`; for local_directory
+	// tasks the absolute path lives outside the envRoot layout, so we strip
+	// recognised home-directory prefixes (`/Users/<name>/`, `/home/<name>/`,
+	// `<drive>:/Users/<name>/`) and otherwise fall back to the basename so
+	// the field never carries the user's home dir or account name. Empty
+	// when WorkDir is empty, or when stripping leaves nothing. See
+	// relativeWorkDir() for the full rules. Older clients can still read
+	// WorkDir directly; newer UIs should prefer RelativeWorkDir.
+	RelativeWorkDir         string                `json:"relative_work_dir,omitempty"`
 	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
 	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
 	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
@@ -208,6 +221,8 @@ type AgentTaskResponse struct {
 	IssueKind               string                `json:"issue_kind,omitempty"`                // CEREBRO-PATCH(agent-task-issue-kind): issue.kind ('channel'/'dm'/'') so trace upload can label the surface (FIR-2438)
 	IssueSnapshot           string                `json:"issue_snapshot,omitempty"`            // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
 	BundleContextHint       bool                  `json:"bundle_context_hint,omitempty"`       // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
+	NewCommentCount         int                   `json:"new_comment_count,omitempty"`         // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
+	NewCommentsSince        string                `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
 	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `multica attachment download <id>` per entry
@@ -295,7 +310,13 @@ type TaskAgentData struct {
 	SandboxAllowlist []string `json:"sandbox_allowlist,omitempty"`
 }
 
-func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
+// taskToResponse maps a queue row to its wire shape. workspaceID is threaded
+// in because the row itself doesn't carry one (workspace lives on the agent
+// / issue / chat session) — we ask the caller to resolve it once and pass it
+// down. It populates WorkspaceID and powers the privacy-safe RelativeWorkDir
+// derivation; pass "" only on daemon-facing paths that genuinely don't have
+// it, in which case RelativeWorkDir falls back to the existing WorkDir.
+func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	var result any
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
@@ -313,6 +334,7 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		AgentID:          uuidToString(t.AgentID),
 		RuntimeID:        uuidToString(t.RuntimeID),
 		IssueID:          uuidToString(t.IssueID),
+		WorkspaceID:      workspaceID,
 		Status:           t.Status,
 		Priority:         t.Priority,
 		DispatchedAt:     timestampToPtr(t.DispatchedAt),
@@ -328,8 +350,9 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 		TriggerSummary:   textToPtr(t.TriggerSummary),
 		// CEREBRO-PATCH(task-title-builder): surface generated title to clients.
-		Title:   textToPtr(t.Title),
-		WorkDir: workDir,
+		Title:           textToPtr(t.Title),
+		WorkDir:         workDir,
+		RelativeWorkDir: relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
 		// Surface task source so the UI can distinguish issue-linked tasks
 		// from chat-spawned or autopilot-spawned ones; all three may arrive
 		// with issue_id = "" once a task has no linked issue.
@@ -339,6 +362,105 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		// CEREBRO-PATCH(agent-task-model-override-field): surface per-task model override (JEH-1310).
 		ModelOverride: t.ModelOverride.String,
 	}
+}
+
+// relativeWorkDir produces a privacy-safe display form of the daemon-reported
+// absolute work_dir. The contract: the returned string must never contain
+// the user's home directory prefix or their account name. The chip is
+// rendered in transcripts that frequently end up in screen shares,
+// screenshots, and recordings, so this function is the only guard.
+//
+//   - For standard tasks (work_dir laid out as `<workspacesRoot>/<wsUUID>/
+//     <taskShort>/workdir` by execenv.Prepare), it strips everything up to and
+//     including the workspaces root, returning `<wsUUID>/<taskShort>/workdir`.
+//   - For local_directory tasks the absolute path lives outside the envRoot
+//     layout. We try to recognise common home-directory prefixes
+//     (`/Users/<name>/`, `/home/<name>/`, `<drive>:/Users/<name>/`) and strip
+//     them, returning the remainder (e.g. `repos/foo`). When the prefix
+//     can't be recognised — unusual home layouts, network mounts, paths
+//     under `/opt`, `/srv`, etc. — we fall back to the basename so we never
+//     accidentally render a path component that happens to be a username.
+//
+// Returns empty when work_dir is empty, or when stripping leaves nothing
+// (i.e. work_dir was exactly the user's home — rendering nothing is
+// preferable to a chip that says `<name>`). shortTaskID() must stay in
+// lock-step with server/internal/daemon/execenv/git.go:shortID — both
+// consume the same task UUID; if that helper changes, this one must too
+// or the envRoot match silently degrades to the local_directory fallback.
+func relativeWorkDir(workDir, workspaceID, taskID string) string {
+	if workDir == "" {
+		return ""
+	}
+	// Normalize Windows separators so the rest of the function only
+	// reasons about forward slashes.
+	normalized := strings.ReplaceAll(workDir, "\\", "/")
+
+	if workspaceID != "" && taskID != "" {
+		envRootSuffix := workspaceID + "/" + shortTaskID(taskID)
+		if idx := strings.Index(normalized, envRootSuffix); idx >= 0 {
+			return normalized[idx:]
+		}
+	}
+
+	if stripped, ok := stripHomePrefix(normalized); ok {
+		return stripped
+	}
+
+	return basename(normalized)
+}
+
+// shortTaskID mirrors execenv.shortID — first 8 hex chars of the UUID
+// with dashes stripped. Kept inline here so the agent handler has zero
+// imports from the daemon package (which would create an unwanted cycle
+// between handler and daemon).
+func shortTaskID(uuid string) string {
+	s := strings.ReplaceAll(uuid, "-", "")
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
+}
+
+// homeDirPattern matches the well-known per-user home layouts on macOS,
+// Linux, and Windows after backslash normalization:
+//
+//	/Users/<name>[/<rest>]
+//	/home/<name>[/<rest>]
+//	<drive>:/Users/<name>[/<rest>]
+//
+// Case-insensitive because macOS and Windows are case-insensitive at the
+// filesystem layer; matching `/users/...` the same as `/Users/...` keeps
+// the strip robust against unusual casings seen on shared drives.
+// Capture group 1 is the optional remainder after the username segment.
+var homeDirPattern = regexp.MustCompile(`(?i)^(?:[A-Za-z]:)?/(?:Users|home)/[^/]+(?:/(.*))?$`)
+
+// stripHomePrefix recognises common home-directory layouts and returns
+// the path remainder after the username segment. Returns (remainder, true)
+// when a known home prefix matched. The remainder may be the empty string
+// (work_dir was exactly the home directory) — the caller treats that as
+// "nothing safe to display".
+func stripHomePrefix(p string) (string, bool) {
+	m := homeDirPattern.FindStringSubmatch(p)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// basename returns the last non-empty segment of a forward-slash path.
+// Used as the ultimate privacy-safe fallback when we can't otherwise
+// recognise the path: a single segment can never expose the home prefix,
+// and the leaf is almost always the most useful piece of context anyway
+// (typically the repo directory name for local_directory tasks).
+func basename(p string) string {
+	p = strings.TrimRight(p, "/")
+	if p == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(p, "/"); idx >= 0 {
+		return p[idx+1:]
+	}
+	return p
 }
 
 // computeTaskKind picks the source-discriminator string the activity UI uses
@@ -495,20 +617,9 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	// AgentSkillSummary only needs id/name/description, and reading large
 	// SKILL.md bodies just to discard them is the exact regression we fixed
 	// in #2174.
-	skills, err := h.Queries.ListAgentSkillSummaries(r.Context(), agent.ID)
-	if err != nil {
+	if err := h.attachAgentSkills(r.Context(), &resp, agent.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
-	}
-	if len(skills) > 0 {
-		resp.Skills = make([]AgentSkillSummary, len(skills))
-		for i, s := range skills {
-			resp.Skills[i] = AgentSkillSummary{
-				ID:          uuidToString(s.ID),
-				Name:        s.Name,
-				Description: s.Description,
-			}
-		}
 	}
 
 	// mcp_config redaction (custom_env was removed from this response shape
@@ -1152,6 +1263,16 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := agentToResponse(updated)
+	// agentToResponse always initialises Skills as []; junction-table rows
+	// are untouched by the SQL update, so we reload them here to keep the
+	// response (and the broadcast that mirrors it) in sync with reality.
+	// Without this, callers see "skills": [] after every metadata-only
+	// update and assume their bindings were cleared — see #3459.
+	if err := h.attachAgentSkills(r.Context(), &resp, updated.ID); err != nil {
+		slog.Warn("load agent skills after update failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
 	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(updated.WorkspaceID))...)
 	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — surface trigger eligibility.
 	userID := requestUserID(r)
@@ -1160,6 +1281,30 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// CEREBRO-PATCH(mcp-config-mutation-redact): FIR-2394 — honor workspace always_redact_env + per-row gate, not just actor=agent.
 	h.redactAgentMcpConfigOnMutation(r.Context(), updated, &resp, actorType, userID, member.Role)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// attachAgentSkills populates resp.Skills from the agent_skill junction
+// table for the given agent. agentToResponse zeros the field; mutation
+// handlers that don't refresh it would otherwise serve a misleading
+// empty array on every successful response (#3459).
+func (h *Handler) attachAgentSkills(ctx context.Context, resp *AgentResponse, agentID pgtype.UUID) error {
+	skills, err := h.Queries.ListAgentSkillSummaries(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	if len(skills) == 0 {
+		return nil
+	}
+	out := make([]AgentSkillSummary, len(skills))
+	for i, s := range skills {
+		out[i] = AgentSkillSummary{
+			ID:          uuidToString(s.ID),
+			Name:        s.Name,
+			Description: s.Description,
+		}
+	}
+	resp.Skills = out
+	return nil
 }
 
 // resolveAgentProvider returns the provider name for the runtime that
@@ -1218,6 +1363,11 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	resp := agentToResponse(archived)
 	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — surface trigger eligibility.
 	resp.CanTrigger = h.cerebroCanTrigger(r.Context(), r, wsID, archived.ID, archived.OwnerID)
+	if err := h.attachAgentSkills(r.Context(), &resp, archived.ID); err != nil {
+		slog.Warn("load agent skills after archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentArchived, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	// CEREBRO-PATCH(mcp-config-mutation-redact): FIR-2394 — honor workspace always_redact_env + per-row gate, not just actor=agent.
@@ -1252,6 +1402,11 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	resp := agentToResponse(restored)
 	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — surface trigger eligibility.
 	resp.CanTrigger = h.cerebroCanTrigger(r.Context(), r, wsID, restored.ID, restored.OwnerID)
+	if err := h.attachAgentSkills(r.Context(), &resp, restored.ID); err != nil {
+		slog.Warn("load agent skills after restore failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
@@ -1320,7 +1475,7 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
-		resp[i] = taskToResponse(t)
+		resp[i] = taskToResponse(t, workspaceID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -1457,7 +1612,7 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 		if _, ok := allowed[uuidToString(t.AgentID)]; !ok {
 			continue
 		}
-		resp = append(resp, taskToResponse(t))
+		resp = append(resp, taskToResponse(t, workspaceID))
 	}
 
 	writeJSON(w, http.StatusOK, resp)

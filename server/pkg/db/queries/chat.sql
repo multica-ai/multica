@@ -213,6 +213,7 @@ LIMIT 1;
 -- without "resetting to 0s".
 SELECT id, status, created_at FROM agent_task_queue
 WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+-- CEREBRO-PATCH(chat-pending-priority-order): JEH — keep priority-based ordering (running > dispatched > queued > waiting_local_directory) so the UI follows the mid-stream task rather than the newest queued successor.
 ORDER BY
   CASE status
     WHEN 'running' THEN 0

@@ -228,8 +228,15 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 
 	// Broadcast an agent:status update so connected clients refresh the
 	// "N variables configured" indicator. Payload is the redacted
-	// AgentResponse — no env values are sent.
+	// AgentResponse — no env values are sent. Skills are reloaded so the
+	// broadcast doesn't tell subscribers the agent has no skills (#3459).
 	resp := agentToResponse(updated)
+	if err := h.attachAgentSkills(r.Context(), &resp, updated.ID); err != nil {
+		slog.Warn("load agent skills after env update failed",
+			append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(updated.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
 	workspaceID := uuidToString(updated.WorkspaceID)
 	h.publish(protocol.EventAgentStatus, workspaceID, "member", uuidToString(member.UserID), map[string]any{"agent": broadcastAgentResponse(resp)})
 

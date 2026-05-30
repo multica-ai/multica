@@ -358,7 +358,7 @@ func TestSnapshotInlinedSuppressesRuntimeReadSteps(t *testing.T) {
 			ctx:  TaskContextForEnv{IssueID: issueID, TriggerCommentID: triggerID},
 			stepInstructions: []string{
 				"1. Run `multica issue get",
-				"3. Read the triggering thread first",
+				"3. Read the triggering conversation first",
 			},
 		},
 		{
@@ -442,7 +442,7 @@ func TestBundleContextHintSteersRuntimeReadStepsToIssueContext(t *testing.T) {
 		{
 			name: "comment-triggered",
 			ctx:  TaskContextForEnv{IssueID: issueID, TriggerCommentID: triggerID},
-			gone: []string{"1. Run `multica issue get", "3. Read the triggering thread first"},
+			gone: []string{"1. Run `multica issue get", "3. Read the triggering conversation first"},
 		},
 		{
 			name: "assignment-triggered",

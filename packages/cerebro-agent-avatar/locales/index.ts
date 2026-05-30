@@ -1,4 +1,5 @@
 import en from "./en.json";
+import ko from "./ko.json";
 import zhHans from "./zh-Hans.json";
 
 // Resource bundle for the cerebro-agent-avatar namespace. Consumed by the
@@ -8,6 +9,7 @@ import zhHans from "./zh-Hans.json";
 // `packages/views/i18n/resources-types.ts`.
 export const CEREBRO_AGENT_AVATAR_RESOURCES = {
   en,
+  ko,
   "zh-Hans": zhHans,
 } as const;
 

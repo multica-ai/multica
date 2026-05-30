@@ -294,7 +294,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   const editComment = useCallback(
     async (commentId: string, content: string, attachmentIds?: string[]) => {
       try {
-        await updateComment({ commentId, content, attachmentIds });
+        await updateComment({ commentId, content, attachmentIds: attachmentIds ?? [] });
       } catch {
         toast.error(t(($) => $.comment.update_failed));
       }

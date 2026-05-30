@@ -62,7 +62,8 @@ export const CHAT_DEFAULT_H = 600;
  */
 export interface ChatTimelineItem {
   seq: number;
-  type: "tool_use" | "tool_result" | "thinking" | "text" | "error";
+  // CEREBRO-PATCH(timeline-activity-types): widen union to include cerebro report_activity kinds (decision/verification/blocker/dependency/note).
+  type: "tool_use" | "tool_result" | "thinking" | "text" | "error" | "decision" | "verification" | "blocker" | "dependency" | "note";
   tool?: string;
   content?: string;
   input?: Record<string, unknown>;

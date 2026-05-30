@@ -445,6 +445,14 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/cloud-billing/checkout-sessions",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/cloud-billing/portal-sessions",
+      "gate": "self_only"
+    },
+    {
       "id": "POST /api/channels/",
       "gate": "workspace_member"
     },
@@ -903,6 +911,10 @@
     {
       "id": "POST /api/webhooks/github",
       "exempt": "pre-auth signed webhook \u2014 GitHub HMAC signature authorises delivery before any user JWT exists"
+    },
+    {
+      "id": "POST /api/webhooks/stripe",
+      "exempt": "pre-auth signed webhook \u2014 Stripe HMAC signature (Stripe-Signature header) authorises delivery; multica-cloud upstream verifies the raw body before processing"
     },
     {
       "id": "POST /api/work-sessions/",

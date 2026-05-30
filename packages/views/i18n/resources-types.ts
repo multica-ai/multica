@@ -26,13 +26,14 @@ import type runtimes from "../locales/en/runtimes.json";
 import type layout from "../locales/en/layout.json";
 import type usage from "../locales/en/usage.json";
 import type squads from "../locales/en/squads.json";
+import type billing from "../locales/en/billing.json";
 
 // Module augmentation enables i18next v26 selector API across the monorepo:
 // `t($ => $.signin.title)` resolves to the value in en/auth.json.
 // Apps don't need to redeclare this — the augmentation is global, pulled
 // into the compilation graph by `use-t.ts`'s side-effect import.
 //
-// Adding a namespace: drop a JSON file under en/ and zh-Hans/, then add
+// Adding a namespace: drop a JSON file under every locale directory, then add
 // the matching `import type` + entry below. Type inference on `t($ => $)`
 // follows automatically.
 //
@@ -66,6 +67,7 @@ declare global {
     layout: typeof layout;
     usage: typeof usage;
     squads: typeof squads;
+    billing: typeof billing;
   }
 }
 

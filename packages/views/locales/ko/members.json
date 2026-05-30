@@ -1,0 +1,21 @@
+{
+  "role": {
+    "owner": "소유자",
+    "admin": "관리자",
+    "member": "멤버"
+  },
+  "card": {
+    "unavailable": "멤버를 사용할 수 없습니다",
+    "agents_section": "에이전트 ({{count}})",
+    "detail_link": "자세히 →",
+    "more_agents_one": "외 에이전트 {{count}}개",
+    "more_agents_other": "외 에이전트 {{count}}개"
+  },
+  "detail": {
+    "workspace_fallback": "워크스페이스",
+    "members_breadcrumb": "멤버",
+    "breadcrumb_fallback": "멤버",
+    "not_found_title": "멤버를 찾을 수 없습니다",
+    "not_found_description": "이 멤버가 워크스페이스를 떠났을 수 있습니다."
+  }
+}

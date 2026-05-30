@@ -48,13 +48,11 @@ jobs:
           git diff --exit-code -- packages/core/paths/reserved-slugs.ts
 
       - name: Build, type check, and test
-        # Match fork's CI: lint is not enforced (codebase has ~73
-        # i18next/no-literal-string violations on main). @multica/mobile is
-        # excluded entirely — its types intentionally drift from the
-        # cerebro-augmented core types until the mobile schemas are aligned
-        # (follow-up issue). Upstream's separate mobile-verify workflow is
-        # not carried in the fork for the same reason; re-add it once mobile
-        # schemas track cerebro core.
+        # CEREBRO-PATCH(ci-no-lint-no-mobile): cerebro fork drops lint enforcement
+        # (codebase has ~73 i18next/no-literal-string violations on main) and the
+        # upstream mobile-verify workflow; @multica/mobile types intentionally
+        # drift from cerebro-augmented core types until the mobile schemas are
+        # aligned (follow-up issue). @multica/docs is no longer present in the fork.
         run: pnpm exec turbo build typecheck test --concurrency=1 --filter='!@multica/mobile'
 
   backend:

@@ -1,0 +1,75 @@
+{
+  "title": "결제(테스트 페이지)",
+  "subtitle": "multica-cloud의 /api/v1/billing/*로 직접 전달합니다. 완성된 UI가 아니라 proxy와 Stripe 흐름을 검증하기 위해 모든 endpoint를 한 페이지에 모아둔 것입니다.",
+  "endpoints": {
+    "balance": "GET /api/cloud-billing/balance",
+    "transactions": "GET /api/cloud-billing/transactions",
+    "batches": "GET /api/cloud-billing/batches",
+    "topups": "GET /api/cloud-billing/topups",
+    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
+  },
+  "balance": {
+    "title": "잔액",
+    "credits_suffix": "credits",
+    "meta": "raw micro: {{micro}} · owner: {{owner}}… · updated {{updated}}"
+  },
+  "buy": {
+    "title": "크레딧 구매 / 결제 관리",
+    "no_tiers": "설정된 가격 tier가 없습니다. Cloud에 Stripe key가 설정되지 않았을 수 있으며 checkout은 503을 반환합니다.",
+    "tier_money_to_credits": "{{money}} → {{credits}} credits",
+    "tier_bonus": " + 보너스 {{credits}}",
+    "tier_bonus_with_expiry": " + 보너스 {{credits}}({{expiry}})",
+    "tier_id": "id: {{id}}",
+    "open_portal": "Stripe Billing Portal 열기",
+    "portal_hint": "아직 결제하지 않은 사용자에게는 400이 예상됩니다(Stripe customer record가 아직 없음).",
+    "toast_no_url": "Cloud가 checkout URL을 반환하지 않았습니다",
+    "toast_checkout_failed": "Checkout 실패",
+    "toast_no_portal_url": "Portal URL이 반환되지 않았습니다",
+    "toast_portal_failed": "Portal 열기 실패"
+  },
+  "checkout": {
+    "session_label": "Checkout session {{prefix}}…",
+    "loading": "주문 상태를 불러오는 중…",
+    "fetch_failed": "상태 조회 실패: {{error}}",
+    "fetch_failed_unknown": "알 수 없는 오류",
+    "final_status": "최종 상태: {{status}}",
+    "polling_status": "상태 확인 중… 현재: {{status}}",
+    "status_unknown": "unknown",
+    "label_order": "주문",
+    "label_tier": "Tier",
+    "label_charged": "결제됨",
+    "charged_value": "{{money}} · {{credits}} credits",
+    "charged_with_bonus": "{{money}} · {{credits}} credits + 보너스 {{bonus}}",
+    "clear_url": "URL에서 지우기"
+  },
+  "transactions": {
+    "title": "거래 내역",
+    "empty": "아직 거래 내역이 없습니다.",
+    "credits_value": "{{value}} credits",
+    "row_meta": "{{date}} · balance after: {{balance}} credits · ref: {{ref}}",
+    "ref_empty": "—"
+  },
+  "batches": {
+    "title": "크레딧 batch",
+    "empty": "아직 batch가 없습니다.",
+    "remaining_over_total": "{{remaining}} / {{total}} credits",
+    "id_suffix": "{{id}}…",
+    "consumed": "사용됨: {{value}} credits",
+    "expires_suffix": " · 만료 {{value}}",
+    "never_expires_suffix": " · 만료 없음"
+  },
+  "topups": {
+    "title": "Topup 주문",
+    "empty": "아직 topup 주문이 없습니다.",
+    "amount_to_credits": "{{money}} → {{credits}} credits",
+    "amount_to_credits_with_bonus": "{{money}} → {{credits}} credits + 보너스 {{bonus}}",
+    "row_meta": "{{date}} · stripe: {{checkout}}",
+    "stripe_empty": "—"
+  },
+  "shared": {
+    "request_failed": "요청 실패",
+    "refresh": "새로고침",
+    "paging": "{{page}} / {{totalPages}} 페이지 · 총 {{total}}개",
+    "date_dash": "—"
+  }
+}
