@@ -312,9 +312,48 @@ go run ./server/cmd/extract-oauth-constants \
 ```
 
 Constants drift only when Anthropic rotates the OAuth client_id or
-endpoint, which is rare. The companion plan (`2026-05-29-claude-version-
-watcher.md`) automates this via a daily CI job that opens a PR when the
-extracted JSON changes.
+endpoint, which is rare. The watcher described below automates this
+via a daily CI job that opens a PR when the extracted JSON changes.
+
+### Claude version watcher
+
+The runtime image's claude version is pinned to a single source of
+truth: the plain-text file `packaging/claude-code-version`. The
+`Dockerfile.claude` build requires a `CLAUDE_CODE_VERSION` build arg
+with no default — an unpinned build fails loudly rather than silently
+resolving to `latest`. `packaging/scripts/build-images.sh` reads the
+pin file and passes it through automatically.
+
+**Daily auto-bump.** `.github/workflows/claude-version-watch.yml` runs
+at 10:00 UTC. It checks `npm view @anthropic-ai/claude-code version`
+against the pin file. If they differ, it installs the new claude into
+a tmp dir, runs `server/cmd/extract-oauth-constants` against the new
+binary, writes the refreshed `oauth-constants.json` plus the new pin,
+and opens a PR titled `chore(claude): bump to <version>`. The job is
+idempotent — a second run while the PR is open is a no-op.
+
+**Manual bump.** Run `scripts/claude-version-bump.sh` locally. It
+performs the same npm + extract + rewrite cycle the workflow does;
+inspect the diff and commit it yourself. `--check-only` reports the
+delta without mutating files. The script is also what the workflow
+shells out to, so any improvement to one improves both.
+
+**Reviewing a watcher PR.** The diff is usually exactly two lines —
+the version string and the `_meta.claude_version`/`extracted_at`
+fields in `oauth-constants.json`. Patch-level bumps with no semantic
+diff in `client_id`, `version_header`, or `scopes` are safe to merge
+once CI is green. **Stop and investigate** if any of those three
+fields change: Anthropic rotated something, and the broker needs to
+keep running against the *previous* values until the new ones are
+verified end-to-end. Build a test image with the PR's constants, run
+it in a non-prod cluster, and watch
+`multica_claude_broker_refresh_failures_total{reason="permanent"}`
+stay at zero through at least one full refresh cycle before merging.
+
+**Disabling temporarily.** `gh workflow disable claude-version-watch.yml`
+on the repo turns off the daily run without deleting the file. Re-enable
+with `gh workflow enable`. To force a one-shot run, use
+`gh workflow run claude-version-watch.yml`.
 
 ### Metrics + alerting
 
