@@ -8,7 +8,7 @@
 // CEREBRO-PATCH(new-message-modal-redesign): JEH-846 mobile — full-screen on
 // <md so the actor list isn't hidden behind the keyboard.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Lock, MessageCircle, Search, Star, Users, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -24,6 +24,8 @@ import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useCreateChannel } from "@multica/core/channels";
 import { useChannelFavoritesStore, actorKey } from "@multica/cerebro-channels";
+// CEREBRO-PATCH(new-message-modal-mobile-keyboard-follow-import): FIR-2547.
+import { useMobileViewportHeight } from "@multica/cerebro-duplicate-check/views";
 import type { Channel } from "@multica/core/types";
 import { canAssignAgent } from "../../issues/components";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -71,6 +73,17 @@ export function NewMessageModal({
   const createChannel = useCreateChannel();
   const favorites = useChannelFavoritesStore((s) => s.favorites);
   const toggleFavorite = useChannelFavoritesStore((s) => s.toggle);
+  // CEREBRO-PATCH(new-message-modal-mobile-keyboard-follow): FIR-2547.
+  const mobileVvh = useMobileViewportHeight();
+  // CEREBRO-PATCH(new-message-modal-mobile-autofocus): FIR-2547 — Base UI's
+  // initial focus management can race autoFocus on mobile; an rAF-deferred
+  // focus wins reliably so the keyboard opens without an extra tap.
+  const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => searchRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [open]);
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
@@ -212,7 +225,11 @@ export function NewMessageModal({
     <Dialog open={open} onOpenChange={(v) => !v && close()}>
       <DialogContent
         showCloseButton={false}
-        className="flex flex-col gap-0 p-0 max-md:inset-0 max-md:top-0 max-md:left-0 max-md:right-0 max-md:bottom-0 max-md:max-w-none max-md:w-full max-md:h-[100dvh] max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none md:max-w-md"
+        // CEREBRO-PATCH(new-message-modal-mobile-keyboard-follow-style): FIR-2547.
+        style={mobileVvh != null ? ({ ["--cerebro-vvh" as string]: `${mobileVvh}px` } as React.CSSProperties) : undefined}
+        // CEREBRO-PATCH(new-message-modal-mobile-keyboard-follow-class): FIR-2547 —
+        // mobile height follows visualViewport so footer stays above keyboard.
+        className="flex flex-col gap-0 p-0 max-md:inset-0 max-md:top-0 max-md:left-0 max-md:right-0 max-md:bottom-0 max-md:max-w-none max-md:w-full max-md:h-[var(--cerebro-vvh,100dvh)] max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none md:max-w-md"
       >
         <DialogTitle className="sr-only">
           {groupMode ? "New group" : "New message"}
@@ -267,6 +284,7 @@ export function NewMessageModal({
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
             <Input
+              ref={searchRef}
               autoFocus
               placeholder="Search…"
               value={filter}
