@@ -384,9 +384,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   useEffect(() => {
     if (!isDraggingRef.current) {
       setLocalPinned(pinnedItems);
-      setLocalPinnedWsId(wsId ?? null);
     }
-  }, [pinnedItems, wsId]);
+  }, [pinnedItems]);
+  useEffect(() => {
+    setLocalPinnedWsId(wsId ?? null);
+  }, [wsId]);
   const visiblePinned = localPinnedWsId === (wsId ?? null) ? localPinned : EMPTY_PINS;
 
   const handleDragStart = useCallback(() => {
