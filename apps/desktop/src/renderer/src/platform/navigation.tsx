@@ -65,6 +65,18 @@ function tryRouteToOverlay(path: string, router?: DataRouter): boolean {
     }
     return true;
   }
+  // Source-attribution backfill prompt for already-onboarded users.
+  // Sibling sub-route of /onboarding; separate overlay state. Query
+  // string ("?next=...") is intentionally dropped here — on desktop the
+  // "next" hop after close is implicit (the active tab is already where
+  // the user wants to land), not URL-encoded.
+  if (path === "/onboarding/source" || path.startsWith("/onboarding/source?")) {
+    overlay.open({ type: "source-backfill" });
+    if (router && router.state.location.pathname !== "/") {
+      router.navigate("/", { replace: true });
+    }
+    return true;
+  }
   if (path === "/invitations") {
     overlay.open({ type: "invitations" });
     if (router && router.state.location.pathname !== "/") {

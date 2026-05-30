@@ -16,7 +16,8 @@ export type WindowOverlay =
   | { type: "new-workspace" }
   | { type: "invite"; invitationId: string }
   | { type: "invitations" }
-  | { type: "onboarding" };
+  | { type: "onboarding" }
+  | { type: "source-backfill" };
 
 interface WindowOverlayStore {
   overlay: WindowOverlay | null;

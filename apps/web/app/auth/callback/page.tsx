@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { needsSourceBackfill } from "@multica/core/onboarding";
 import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
 import {
@@ -101,7 +102,18 @@ function CallbackContent() {
           // 3. Default: hand off to the resolver (onboarding for first-timers,
           //    first workspace for returning users, /workspaces/new for
           //    onboarded users with zero workspaces).
-          router.push(resolvePostAuthDestination(wsList, onboarded));
+          const dest = resolvePostAuthDestination(wsList, onboarded);
+
+          // 4. Source-backfill detour: onboarded users who never recorded
+          //    where they heard about us get one prompt before landing on
+          //    `dest`. Predicate gates the redirect so a user who already
+          //    answered (or hit the dismiss cap on this browser) flows
+          //    straight through.
+          if (needsSourceBackfill(loggedInUser, 0)) {
+            router.push(paths.sourceBackfill(dest));
+            return;
+          }
+          router.push(dest);
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");

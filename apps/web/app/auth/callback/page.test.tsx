@@ -18,13 +18,21 @@ const {
   mockSetQueryData: vi.fn(),
 }));
 
-const makeUser = (overrides: Partial<{ onboarded_at: string | null }> = {}) => ({
+const makeUser = (
+  overrides: Partial<{
+    onboarded_at: string | null;
+    onboarding_questionnaire: Record<string, unknown>;
+  }> = {},
+) => ({
   id: "user-1",
   name: "Test",
   email: "test@multica.ai",
   avatar_url: null,
   onboarded_at: null,
-  onboarding_questionnaire: {},
+  // Default to a non-empty source so the existing tests don't trip the
+  // source-backfill detour. Tests that need the detour pass an empty
+  // questionnaire explicitly.
+  onboarding_questionnaire: { source: ["search"] },
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
   ...overrides,
@@ -180,6 +188,65 @@ describe("CallbackPage", () => {
     render(<CallbackPage />);
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+    });
+  });
+
+  it("detours onboarded users with missing source to /onboarding/source", async () => {
+    mockLoginWithGoogle.mockResolvedValue(
+      makeUser({
+        onboarded_at: "2026-01-01T00:00:00Z",
+        onboarding_questionnaire: {},
+      }),
+    );
+    mockListWorkspaces.mockResolvedValue([
+      {
+        id: "ws-1",
+        name: "Acme",
+        slug: "acme",
+        description: null,
+        context: null,
+        settings: {},
+        repos: [],
+        issue_prefix: "ACME",
+        created_at: "",
+        updated_at: "",
+      },
+    ]);
+    render(<CallbackPage />);
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(
+        paths.sourceBackfill(paths.workspace("acme").issues()),
+      );
+    });
+    // Never bounces straight to the workspace — the backfill page owns
+    // the onward navigation once the user answers or dismisses.
+    expect(mockPush).not.toHaveBeenCalledWith(paths.workspace("acme").issues());
+  });
+
+  it("does not detour onboarded users who explicitly skipped source", async () => {
+    mockLoginWithGoogle.mockResolvedValue(
+      makeUser({
+        onboarded_at: "2026-01-01T00:00:00Z",
+        onboarding_questionnaire: { source: [], source_skipped: true },
+      }),
+    );
+    mockListWorkspaces.mockResolvedValue([
+      {
+        id: "ws-1",
+        name: "Acme",
+        slug: "acme",
+        description: null,
+        context: null,
+        settings: {},
+        repos: [],
+        issue_prefix: "ACME",
+        created_at: "",
+        updated_at: "",
+      },
+    ]);
+    render(<CallbackPage />);
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.workspace("acme").issues());
     });
   });
 });

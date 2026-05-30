@@ -50,6 +50,13 @@ export const paths = {
   invite: (id: string) => `/invite/${encode(id)}`,
   invitations: () => "/invitations",
   onboarding: () => "/onboarding",
+  /** Source-attribution backfill prompt for already-onboarded users
+   *  whose questionnaire never recorded a source. Lives under
+   *  /onboarding (reserved noun) per the global-route convention. */
+  sourceBackfill: (nextUrl?: string) =>
+    nextUrl
+      ? `/onboarding/source?next=${encodeURIComponent(nextUrl)}`
+      : "/onboarding/source",
   authCallback: () => "/auth/callback",
   root: () => "/",
 };

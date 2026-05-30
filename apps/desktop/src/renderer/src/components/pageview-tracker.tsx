@@ -122,5 +122,7 @@ function overlayPath(overlay: WindowOverlay): string {
       return `/invite/${overlay.invitationId}`;
     case "invitations":
       return "/invitations";
+    case "source-backfill":
+      return "/onboarding/source";
   }
 }

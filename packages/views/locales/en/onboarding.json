@@ -40,7 +40,13 @@
     "back": "Back",
     "continue": "Continue",
     "skip": "Skip",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "close": "Close"
+  },
+  "source_backfill": {
+    "eyebrow": "Quick question",
+    "lede": "We noticed you didn't pick this during signup — it helps us understand who finds Multica useful. One question, then you're back to your work.",
+    "submit": "Submit"
   },
   "questions": {
     "eyebrow_about_you": "About you",

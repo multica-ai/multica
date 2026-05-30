@@ -40,7 +40,13 @@
     "back": "返回",
     "continue": "继续",
     "skip": "跳过",
-    "cancel": "取消"
+    "cancel": "取消",
+    "close": "关闭"
+  },
+  "source_backfill": {
+    "eyebrow": "顺便问一句",
+    "lede": "我们注意到你之前没有勾选这一项——花一秒补一下，能帮我们更了解像你一样的用户。完成后立刻回到你正在做的事。",
+    "submit": "提交"
   },
   "questions": {
     "eyebrow_about_you": "关于你",
