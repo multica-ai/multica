@@ -333,7 +333,7 @@ function CommentRow({
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
-  const { getActorName } = useActorName();
+  const { getActorName, getAgentModel } = useActorName();
 
   const edit = useEditAttachmentState(issueId, entry, onEdit);
 
@@ -345,6 +345,7 @@ function CommentRow({
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
+  const agentModel = entry.actor_type === "agent" ? getAgentModel(entry.actor_id) : null;
 
   return (
     <div className="py-3">
@@ -353,6 +354,11 @@ function CommentRow({
         <span className="cursor-pointer text-sm font-medium">
           {getActorName(entry.actor_type, entry.actor_id)}
         </span>
+        {agentModel && (
+          <span className="shrink-0 max-w-40 min-w-0 truncate rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium font-mono text-muted-foreground" title={agentModel}>
+            {agentModel}
+          </span>
+        )}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -505,7 +511,7 @@ function CommentCardImpl({
 }: CommentCardProps) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
-  const { getActorName } = useActorName();
+  const { getActorName, getAgentModel } = useActorName();
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
   const open = !isCollapsed;
@@ -525,6 +531,7 @@ function CommentCardImpl({
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
+  const agentModel = entry.actor_type === "agent" ? getAgentModel(entry.actor_id) : null;
 
   const isHighlighted = highlightedCommentId === entry.id;
 
@@ -555,6 +562,11 @@ function CommentCardImpl({
             <span className="shrink-0 cursor-pointer text-sm font-medium">
               {getActorName(entry.actor_type, entry.actor_id)}
             </span>
+            {agentModel && (
+              <span className="shrink-0 max-w-40 min-w-0 truncate rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium font-mono text-muted-foreground" title={agentModel}>
+                {agentModel}
+              </span>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={
