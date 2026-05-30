@@ -89,6 +89,38 @@ func TestBuildLoginShellResolveScript_ShapeAndContent(t *testing.T) {
 	}
 }
 
+func TestLoadConfigDetectsDroid(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	binDir := t.TempDir()
+	fake := filepath.Join(binDir, "droid")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake droid: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("MULTICA_DROID_MODEL", "gpt-5.5")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	agent, ok := cfg.Agents["droid"]
+	if !ok {
+		t.Fatalf("expected droid agent to be detected, got %#v", cfg.Agents)
+	}
+	if agent.Path != "droid" {
+		t.Fatalf("expected droid path, got %q", agent.Path)
+	}
+	if agent.Model != "gpt-5.5" {
+		t.Fatalf("expected droid model from env, got %q", agent.Model)
+	}
+}
+
 // TestResolveAgentsViaLoginShell_ResolvesViaInteractiveShell verifies the
 // motivating bug scenario: a binary that lives in a directory which is NOT on
 // the daemon's PATH but IS added to PATH by the user's interactive shell rc

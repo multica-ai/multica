@@ -122,6 +122,8 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
 		})
+	case "droid":
+		return droidStaticModels(), nil
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -201,6 +203,12 @@ func codexStaticModels() []Model {
 		{ID: "gpt-5", Label: "GPT-5", Provider: "openai"},
 		{ID: "o3", Label: "o3", Provider: "openai"},
 		{ID: "o3-mini", Label: "o3-mini", Provider: "openai"},
+	}
+}
+
+func droidStaticModels() []Model {
+	return []Model{
+		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "factory", Default: true},
 	}
 }
 

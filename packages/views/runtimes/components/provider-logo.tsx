@@ -177,6 +177,23 @@ function KiroLogo({ className }: { className: string }) {
   );
 }
 
+function DroidLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="6" fill="#111827" />
+      <path
+        d="M6 12c0-3.3 2.7-6 6-6s6 2.7 6 6-2.7 6-6 6-6-2.7-6-6Z"
+        fill="#F8FAFC"
+      />
+      <path
+        d="M9.25 9.5h2.5c1.8 0 3 1.1 3 2.5s-1.2 2.5-3 2.5h-2.5v-5Zm2.35 3.4c.9 0 1.45-.35 1.45-.9s-.55-.9-1.45-.9h-.65v1.8h.65Z"
+        fill="#111827"
+      />
+      <path d="M12 3.5v2.2" stroke="#F8FAFC" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -205,6 +222,8 @@ export function ProviderLogo({
       return <KimiLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
+    case "droid":
+      return <DroidLogo className={className} />;
     case "gemini":
       return <GeminiLogo className={className} />;
     default:

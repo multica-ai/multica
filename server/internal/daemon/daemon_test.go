@@ -190,6 +190,7 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		// can trip upstream provider safety filters on otherwise harmless tasks.
 		{provider: "hermes", want: false},
 		{provider: "kiro", want: true},
+		{provider: "droid", want: true},
 		{provider: "kimi", want: true},
 		{provider: "codex", want: false},
 		{provider: "claude", want: false},

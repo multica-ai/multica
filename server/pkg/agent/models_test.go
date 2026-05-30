@@ -8,7 +8,7 @@ import (
 
 func TestListModelsStaticProviders(t *testing.T) {
 	ctx := context.Background()
-	for _, provider := range []string{"claude", "codex", "gemini", "cursor"} {
+	for _, provider := range []string{"claude", "codex", "droid", "gemini", "cursor"} {
 		got, err := ListModels(ctx, provider, "")
 		if err != nil {
 			t.Fatalf("ListModels(%q) error: %v", provider, err)
@@ -120,6 +120,20 @@ func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 	}
 	if defaults != 1 {
 		t.Errorf("expected exactly one default Codex entry, got %d", defaults)
+	}
+}
+
+func TestDroidStaticModelsExposesDefaultModel(t *testing.T) {
+	models := droidStaticModels()
+	if len(models) == 0 {
+		t.Fatal("expected Droid model catalog to be non-empty")
+	}
+	first := models[0]
+	if first.ID == "" || first.Label == "" {
+		t.Fatalf("expected Droid default model to have ID and label, got %+v", first)
+	}
+	if !first.Default {
+		t.Fatalf("expected first Droid model to be marked default, got %+v", first)
 	}
 }
 
@@ -248,6 +262,7 @@ func TestStaticCatalogsHaveAtMostOneDefault(t *testing.T) {
 	catalogs := map[string][]Model{
 		"claude":  claudeStaticModels(),
 		"codex":   codexStaticModels(),
+		"droid":   droidStaticModels(),
 		"gemini":  geminiStaticModels(),
 		"cursor":  cursorStaticModels(),
 		"copilot": copilotStaticModels(),

@@ -1009,6 +1009,33 @@ func TestWriteContextFilesKiroNativeSkills(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesDroidNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "droid-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "droid", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".factory", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .factory/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for Droid provider")
+	}
+}
+
 func TestInjectRuntimeConfigOpencode(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

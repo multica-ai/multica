@@ -99,6 +99,35 @@ func TestListRuntimeLocalSkills_Kiro(t *testing.T) {
 	}
 }
 
+func TestListRuntimeLocalSkills_Droid(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".factory", "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Droid Review\ndescription: Review code with Droid\n---\n# Droid Review\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("droid")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("droid should be supported")
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	if skills[0].Key != "review-helper" {
+		t.Fatalf("key = %q, want review-helper", skills[0].Key)
+	}
+	if skills[0].Name != "Droid Review" {
+		t.Fatalf("name = %q, want Droid Review", skills[0].Name)
+	}
+	if skills[0].SourcePath != "~/.factory/skills/review-helper" {
+		t.Fatalf("source_path = %q", skills[0].SourcePath)
+	}
+}
+
 // Skill installers (for example lark-cli) place every skill at a shared
 // location like ~/.agents/skills/<name> and symlink each one into the
 // runtime root (~/.claude/skills/<name>). The previous filepath.WalkDir
