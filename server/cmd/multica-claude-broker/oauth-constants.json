@@ -1,0 +1,13 @@
+{
+  "endpoint": "https://platform.claude.com/v1/oauth/token",
+  "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+  "version_header": "oauth-2025-04-20",
+  "scopes": "user:profile user:inference user:sessions:claude_code user:mcp_servers",
+  "_meta": {
+    "extracted_at": "2026-05-30T03:13:54Z",
+    "extracted_from": "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe",
+    "claude_version": "2.1.148",
+    "format": "mach-o",
+    "extractor_rev": "1"
+  }
+}
