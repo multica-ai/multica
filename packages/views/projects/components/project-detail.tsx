@@ -23,6 +23,7 @@ import {
 } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -119,6 +120,8 @@ function ProjectIssuesContent({
   filter,
   sort,
   ganttIssues,
+  agentRunningFilter,
+  runningIssueIds,
 }: {
   projectId: string;
   projectIssues: Issue[];
@@ -129,6 +132,8 @@ function ProjectIssuesContent({
   filter: MyIssuesFilter;
   sort?: IssueSortParam;
   ganttIssues: Issue[];
+  agentRunningFilter: boolean;
+  runningIssueIds: ReadonlySet<string>;
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -141,22 +146,87 @@ function ProjectIssuesContent({
   const labelFilters = useViewStore((s) => s.labelFilters);
 
   const issues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () =>
+      filterIssues(projectIssues, {
+        statusFilters,
+        priorityFilters,
+        assigneeFilters,
+        includeNoAssignee,
+        creatorFilters,
+        projectFilters: [],
+        includeNoProject: false,
+        labelFilters,
+        agentRunningFilter,
+        runningIssueIds,
+      }),
+    [
+      projectIssues,
+      statusFilters,
+      priorityFilters,
+      assigneeFilters,
+      includeNoAssignee,
+      creatorFilters,
+      labelFilters,
+      agentRunningFilter,
+      runningIssueIds,
+    ],
   );
 
   // Status-unfiltered companion for Swimlane.
   const swimlaneIssues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () =>
+      filterIssues(projectIssues, {
+        statusFilters: [],
+        priorityFilters,
+        assigneeFilters,
+        includeNoAssignee,
+        creatorFilters,
+        projectFilters: [],
+        includeNoProject: false,
+        labelFilters,
+        agentRunningFilter,
+        runningIssueIds,
+      }),
+    [
+      projectIssues,
+      priorityFilters,
+      assigneeFilters,
+      includeNoAssignee,
+      creatorFilters,
+      labelFilters,
+      agentRunningFilter,
+      runningIssueIds,
+    ],
   );
 
   // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
   // to wait for every status bucket to paginate in. View-store filters still
   // apply so toggling priority / assignee / label hides the same bars.
   const filteredGanttIssues = useMemo(
-    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () =>
+      filterIssues(ganttIssues, {
+        statusFilters,
+        priorityFilters,
+        assigneeFilters,
+        includeNoAssignee,
+        creatorFilters,
+        projectFilters: [],
+        includeNoProject: false,
+        labelFilters,
+        agentRunningFilter,
+        runningIssueIds,
+      }),
+    [
+      ganttIssues,
+      statusFilters,
+      priorityFilters,
+      assigneeFilters,
+      includeNoAssignee,
+      creatorFilters,
+      labelFilters,
+      agentRunningFilter,
+      runningIssueIds,
+    ],
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
@@ -171,6 +241,43 @@ function ProjectIssuesContent({
     () => BOARD_STATUSES.filter((s) => !visibleStatuses.includes(s)),
     [visibleStatuses],
   );
+
+  const filteredAssigneeGroups = useMemo(() => {
+    if (!assigneeGroups) return undefined;
+
+    return assigneeGroups
+      .map((group) => {
+        const groupIssues = filterIssues(group.issues, {
+          statusFilters,
+          priorityFilters,
+          assigneeFilters,
+          includeNoAssignee,
+          creatorFilters,
+          projectFilters: [],
+          includeNoProject: false,
+          labelFilters,
+          agentRunningFilter,
+          runningIssueIds,
+        });
+
+        return {
+          ...group,
+          issues: groupIssues,
+          total: groupIssues.length,
+        };
+      })
+      .filter((group) => group.issues.length > 0);
+  }, [
+    assigneeGroups,
+    statusFilters,
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    labelFilters,
+    agentRunningFilter,
+    runningIssueIds,
+  ]);
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
@@ -222,7 +329,7 @@ function ProjectIssuesContent({
       {viewMode === "board" && (
         <BoardView
           issues={assigneeGroups ? projectIssues : issues}
-          assigneeGroups={assigneeGroups}
+          assigneeGroups={filteredAssigneeGroups}
           assigneeGroupQueryKey={assigneeGroupQueryKey}
           assigneeGroupFilter={assigneeGroupFilter}
           visibleStatuses={visibleStatuses}
@@ -276,6 +383,18 @@ function ProjectIssuesSurface({
   filter: MyIssuesFilter;
 }) {
   const wsId = useWorkspaceId();
+  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const runningIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const task of snapshot) {
+      if (task.status === "running" && task.issue_id) {
+        ids.add(task.issue_id);
+      }
+    }
+    return ids;
+  }, [snapshot]);
   const viewMode = useViewStore((s) => s.viewMode);
   const grouping = useViewStore((s) => s.grouping);
   const sortBy = useViewStore((s) => s.sortBy);
@@ -360,6 +479,8 @@ function ProjectIssuesSurface({
         filter={filter}
         sort={sort}
         ganttIssues={ganttIssues}
+        agentRunningFilter={agentRunningFilter}
+        runningIssueIds={runningIssueIds}
       />
       <BatchActionToolbar />
     </>
