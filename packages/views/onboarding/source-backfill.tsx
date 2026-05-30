@@ -19,6 +19,7 @@ import {
   type QuestionnaireAnswers,
   type Source,
 } from "@multica/core/onboarding";
+import { mergedQuestionnairePatch } from "./source-backfill-merge";
 import { Button } from "@multica/ui/components/ui/button";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { DragStrip } from "@multica/views/platform";
@@ -187,13 +188,20 @@ export function SourceBackfillView({
     if (!canSubmit) return;
     setBusy(true);
     try {
-      // Only persist source-related slots so this never clobbers a
-      // role / use_case answer the user previously provided.
-      await saveQuestionnaire({
-        source: answers.source,
-        source_other: answers.source_other,
-        source_skipped: false,
-      });
+      // `PATCH /api/me/onboarding` replaces the JSONB wholesale, so we
+      // re-read the stored answers from the auth store and overlay only
+      // the source slots. `useAuthStore.getState()` here, not the hook
+      // — we want the freshest value at click time, and adding the user
+      // object to the deps would re-create `submit` on every refreshMe.
+      const stored =
+        useAuthStore.getState().user?.onboarding_questionnaire ?? null;
+      await saveQuestionnaire(
+        mergedQuestionnairePatch(stored, {
+          source: answers.source,
+          source_other: answers.source_other,
+          source_skipped: false,
+        }),
+      );
       captureEvent("source_backfill_submitted", {
         source: answers.source,
         ...(answers.source_other ? { source_other: answers.source_other } : {}),
@@ -209,11 +217,15 @@ export function SourceBackfillView({
     if (busy) return;
     setBusy(true);
     try {
-      await saveQuestionnaire({
-        source: [],
-        source_other: null,
-        source_skipped: true,
-      });
+      const stored =
+        useAuthStore.getState().user?.onboarding_questionnaire ?? null;
+      await saveQuestionnaire(
+        mergedQuestionnairePatch(stored, {
+          source: [],
+          source_other: null,
+          source_skipped: true,
+        }),
+      );
       captureEvent("source_backfill_skipped");
       onComplete("skipped");
     } catch (err) {

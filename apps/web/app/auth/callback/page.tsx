@@ -8,6 +8,7 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { needsSourceBackfill } from "@multica/core/onboarding";
 import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
+import { readSourceBackfillDismissCount } from "@multica/views/onboarding";
 import {
   Card,
   CardHeader,
@@ -106,10 +107,18 @@ function CallbackContent() {
 
           // 4. Source-backfill detour: onboarded users who never recorded
           //    where they heard about us get one prompt before landing on
-          //    `dest`. Predicate gates the redirect so a user who already
-          //    answered (or hit the dismiss cap on this browser) flows
-          //    straight through.
-          if (needsSourceBackfill(loggedInUser, 0)) {
+          //    `dest`. Predicate consults the per-user dismiss counter
+          //    from the same localStorage bucket the prompt writes to —
+          //    otherwise a user who already hit the close-X cap on this
+          //    browser would still be force-routed through /onboarding/
+          //    source on every login (the route page would then bounce
+          //    them onward once auth/workspace state settles, but only
+          //    after flashing a blank detour and re-firing the
+          //    `source_backfill_shown` event).
+          const dismissCount = readSourceBackfillDismissCount(
+            loggedInUser.id,
+          );
+          if (needsSourceBackfill(loggedInUser, dismissCount)) {
             router.push(paths.sourceBackfill(dest));
             return;
           }

@@ -85,10 +85,35 @@ describe("needsSourceBackfill", () => {
     ).toBe(true);
   });
 
-  it("tolerates malformed source field", () => {
+  it("treats a legacy single-string source as already answered", () => {
+    // Pre-multi-select rows wrote `source` as a bare string. The
+    // backfill flow must NOT re-prompt these users — they did answer.
+    // Mirrors the tolerance in `OnboardingFlow.mergeQuestionnaire`.
     const user = makeUser({
       onboarding_questionnaire: { source: "search" },
     });
+    expect(needsSourceBackfill(user, 0)).toBe(false);
+  });
+
+  it("treats a legacy empty-string source as missing", () => {
+    const user = makeUser({
+      onboarding_questionnaire: { source: "" },
+    });
     expect(needsSourceBackfill(user, 0)).toBe(true);
+  });
+
+  it("treats malformed (number, null) source as missing", () => {
+    expect(
+      needsSourceBackfill(
+        makeUser({ onboarding_questionnaire: { source: 42 } }),
+        0,
+      ),
+    ).toBe(true);
+    expect(
+      needsSourceBackfill(
+        makeUser({ onboarding_questionnaire: { source: null } }),
+        0,
+      ),
+    ).toBe(true);
   });
 });

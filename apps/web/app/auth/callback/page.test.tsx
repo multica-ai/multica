@@ -249,4 +249,41 @@ describe("CallbackPage", () => {
       expect(mockPush).toHaveBeenCalledWith(paths.workspace("acme").issues());
     });
   });
+
+  it("does not detour when the per-user dismiss-count cap was hit on this browser", async () => {
+    // Counter writes from the source-backfill view land in this exact
+    // localStorage key (see packages/views/onboarding/source-backfill-
+    // dismiss.ts). Hitting the cap (3) must short-circuit the redirect
+    // here — otherwise a user who already gave up gets bounced through
+    // a blank /onboarding/source flash on every login.
+    window.localStorage.setItem("multica.source_backfill.dismiss.user-1", "3");
+    mockLoginWithGoogle.mockResolvedValue(
+      makeUser({
+        onboarded_at: "2026-01-01T00:00:00Z",
+        onboarding_questionnaire: {},
+      }),
+    );
+    mockListWorkspaces.mockResolvedValue([
+      {
+        id: "ws-1",
+        name: "Acme",
+        slug: "acme",
+        description: null,
+        context: null,
+        settings: {},
+        repos: [],
+        issue_prefix: "ACME",
+        created_at: "",
+        updated_at: "",
+      },
+    ]);
+    render(<CallbackPage />);
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith(paths.workspace("acme").issues());
+    });
+    expect(mockPush).not.toHaveBeenCalledWith(
+      paths.sourceBackfill(paths.workspace("acme").issues()),
+    );
+    window.localStorage.removeItem("multica.source_backfill.dismiss.user-1");
+  });
 });

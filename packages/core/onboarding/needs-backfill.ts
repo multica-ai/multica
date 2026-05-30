@@ -40,6 +40,12 @@ export function needsSourceBackfill(
     | undefined;
   if (!q) return true;
   if (q.source_skipped === true) return false;
-  const source = Array.isArray(q.source) ? q.source : [];
-  return source.length === 0;
+  // Pre-multi-select rows wrote `source` as a bare string. Treat a
+  // non-empty string the same as a one-element array — the user did
+  // answer. Mirrors `OnboardingFlow.mergeQuestionnaire` (views) and
+  // `stringOrSlice.UnmarshalJSON` (server).
+  const raw: unknown = q.source;
+  if (Array.isArray(raw)) return raw.length === 0;
+  if (typeof raw === "string") return raw.length === 0;
+  return true;
 }

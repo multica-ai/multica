@@ -36,6 +36,18 @@ function readCount(userId: string | null | undefined): number {
   }
 }
 
+/**
+ * Non-hook reader of the same per-user dismiss counter. Use when the
+ * value is needed outside React (e.g. inside a `.then()` callback in
+ * the auth callback page) and the caller doesn't need to subscribe to
+ * cross-tab updates.
+ */
+export function readSourceBackfillDismissCount(
+  userId: string | null | undefined,
+): number {
+  return readCount(userId);
+}
+
 function subscribe(callback: () => void): () => void {
   if (typeof window === "undefined") return () => {};
   // Fires when another tab updates the value. Same-tab updates go
