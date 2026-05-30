@@ -136,12 +136,12 @@ function KpiCard({
       type="button"
       onClick={() => push(href)}
       className={cn(
-        "group block w-full rounded-lg border bg-card text-left text-card-foreground",
+        "group block w-full min-w-0 rounded-lg border bg-card text-left text-card-foreground",
         "transition-colors hover:border-foreground/30 hover:bg-accent/30",
       )}
     >
-      <div className="flex items-center justify-between gap-2 p-3 pb-1">
-        <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="flex min-w-0 items-center justify-between gap-2 p-3 pb-1">
+        <span className="flex min-w-0 items-center gap-1.5 truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           {icon}
           {label}
         </span>
@@ -151,7 +151,7 @@ function KpiCard({
           </span>
         )}
       </div>
-      <div className="flex items-baseline gap-2 px-3 pb-1">
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 px-3 pb-1">
         <span className="text-2xl font-semibold tabular-nums">
           {isLoading || value === null ? (
             <span className="text-muted-foreground">—</span>
@@ -160,10 +160,10 @@ function KpiCard({
           )}
         </span>
         {delta !== null && delta !== 0 && (
-          <DeltaBadge delta={delta} />
+          <DeltaBadge delta={delta} formatter={formatter} />
         )}
       </div>
-      <div className="px-3 pb-3 text-xs text-muted-foreground">
+      <div className="min-w-0 truncate px-3 pb-3 text-xs text-muted-foreground">
         {prior === null ? (
           <>&nbsp;</>
         ) : (
@@ -174,19 +174,25 @@ function KpiCard({
   );
 }
 
-function DeltaBadge({ delta }: { delta: number }) {
+function DeltaBadge({
+  delta,
+  formatter,
+}: {
+  delta: number;
+  formatter: (value: number) => string;
+}) {
   const positive = delta > 0;
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-sm px-1 text-[10px] font-medium tabular-nums",
+        "inline-flex shrink-0 items-center whitespace-nowrap rounded-sm px-1 text-[10px] font-medium tabular-nums",
         positive
           ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
           : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
       )}
     >
-      {positive ? "+" : ""}
-      {delta}
+      {positive ? "+" : "-"}
+      {formatter(Math.abs(delta))}
       {positive ? " ↑" : " ↓"}
     </span>
   );
