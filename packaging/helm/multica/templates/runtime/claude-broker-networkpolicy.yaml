@@ -1,0 +1,36 @@
+{{- if and .Values.runtime.enabled (eq .Values.runtime.mode "controller") .Values.runtime.claudeBroker.enabled .Values.runtime.claudeBroker.networkPolicy.enabled }}
+# Restrict who can call the broker. Without this, any pod in the namespace
+# could `curl http://multica-claude-broker:8080/access_token` and walk
+# away with an Anthropic Max bearer token. We allow:
+#   - admin (:8080): only controller-managed worker Job pods
+#   - metrics (:9090): only the configured scraper namespaces (optional)
+# The ops endpoint (:8081) is bound to 127.0.0.1 by the broker process,
+# so no rule is needed — pod-network traffic literally can't reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: multica-claude-broker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "claude-broker" "ctx" .) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "multica.componentSelector" (dict "name" "claude-broker" "ctx" .) | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    # Admin port (:8080) — worker Job pods managed by the controller.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/managed-by: multica-k8s-controller
+      ports:
+        - { protocol: TCP, port: 8080 }
+    {{- with .Values.runtime.claudeBroker.networkPolicy.metricsFrom }}
+    # Metrics port (:9090) — only the configured scraper(s).
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - { protocol: TCP, port: 9090 }
+    {{- end }}
+{{- end }}

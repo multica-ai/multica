@@ -1,0 +1,76 @@
+{{- if and .Values.runtime.enabled (eq .Values.runtime.mode "controller") .Values.runtime.claudeBroker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multica-claude-broker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "claude-broker" "ctx" .) | nindent 4 }}
+spec:
+  # replicas: 1 + strategy: Recreate enforces a single-writer to the broker's
+  # state Secret. Leader election in the broker itself is defence in depth
+  # against accidental scale-up; the Recreate strategy guarantees there's
+  # never two pods writing concurrently during a rolling update.
+  replicas: {{ .Values.runtime.claudeBroker.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "multica.componentSelector" (dict "name" "claude-broker" "ctx" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "multica.componentLabels" (dict "name" "claude-broker" "ctx" .) | nindent 8 }}
+    spec:
+      serviceAccountName: multica-claude-broker
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecret }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: broker
+          image: {{ include "multica.claudeBrokerImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+          ports:
+            - { name: admin,   containerPort: 8080 }
+            # ops (:8081) is bound to 127.0.0.1 inside the container so it has
+            # no containerPort here — there's no Service or NP rule for it.
+            - { name: metrics, containerPort: 9090 }
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: BROKER_SECRET_NAME
+              value: {{ .Values.runtime.claudeBroker.secretName | quote }}
+            - name: BROKER_REFRESH_PAD
+              value: {{ .Values.runtime.claudeBroker.refreshPad | quote }}
+            - name: BROKER_REFRESH_INTERVAL
+              value: {{ .Values.runtime.claudeBroker.refreshInterval | quote }}
+            - name: BROKER_LEASE_NAME
+              value: {{ .Values.runtime.claudeBroker.leaseName | quote }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            initialDelaySeconds: 1
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            {{- toYaml .Values.runtime.claudeBroker.resources | nindent 12 }}
+{{- end }}
