@@ -86,8 +86,7 @@ import { WorkflowsNavItem } from "@multica/cerebro-workflows/views/workflows-nav
 // CEREBRO-PATCH(cerebro-permissions-sidebar): FIR-2230 phase 7 — removed; the standalone Permissions page was merged into the single Access page (see cerebro-access-sidebar below).
 // CEREBRO-PATCH(cerebro-approvals-sidebar): FIR-2131 sidebar entry for cerebro approval inbox
 import { ApprovalsNavItem } from "@multica/cerebro-approvals/views/approvals-nav-item";
-// CEREBRO-PATCH(cerebro-access-sidebar): FIR-2133 sidebar entry for unified access + audit page
-import { AccessNavItem } from "@multica/cerebro-permissions/views/access-nav-item";
+// CEREBRO-PATCH(cerebro-access-sidebar): FIR-2284 Bite 3 — removed; the old grant-based Access page was retired so per-tool Permissions (Settings) is the single access surface.
 // CEREBRO-PATCH(cerebro-agent-passes-sidebar): JEH-1731 sidebar entry for cerebro agent-passes admin page
 import { AgentPassesNavItem } from "@multica/cerebro-agent-passes/views/agent-passes-nav-item";
 import { useAuthStore } from "@multica/core/auth";
@@ -843,8 +842,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 })}
                 {/* CEREBRO-PATCH(cerebro-approvals-sidebar): FIR-2131 cerebro approval inbox entry in workspace group */}
                 <ApprovalsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
-                {/* CEREBRO-PATCH(cerebro-access-sidebar): FIR-2133 unified access + audit page entry */}
-                <AccessNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-agent-passes-sidebar): JEH-1731 cerebro agent-passes entry in workspace group */}
                 <AgentPassesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* Projects — collapsible nav item with sub-items */}
