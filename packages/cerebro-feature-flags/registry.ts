@@ -113,9 +113,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // workspace/user override (Off restores upstream create flow).
   cerebro_duplicate_check_on_create: true,
   // FIR-2523: Auth & Permissions tab + Google Workspace auto-membership.
-  // Defaults OFF: the table + hook still exist but the settings UI stays
-  // hidden until a workspace owner explicitly opts in.
-  cerebro_google_identity: false,
+  // Default ON for the cerebro fork (Jesper, 2026-05-30): firtal.com auto-
+  // signup is the launch feature, and the table starts empty so a fresh
+  // workspace with no configured domains is still a no-op.
+  cerebro_google_identity: true,
 };
 
 /**
