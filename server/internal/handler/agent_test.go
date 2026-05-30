@@ -1381,26 +1381,6 @@ func TestArchiveRestoreAgent_PreservesSkillsInResponse(t *testing.T) {
 	}
 }
 
-// insertHandlerTestTask creates an in_progress task for the given
-// agent so resolveActor's GetAgentTask lookup succeeds without
-// dragging the full TaskService into the test.
-func insertHandlerTestTask(t *testing.T, agentID string) string {
-	t.Helper()
-	ctx := context.Background()
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
-		VALUES ($1, $2, 'running', 0)
-		RETURNING id
-	`, agentID, handlerTestRuntimeID(t)).Scan(&taskID); err != nil {
-		t.Fatalf("insert test task: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
-	})
-	return taskID
-}
-
 // Defence-in-depth: spot-check that the package compiles a small
 // fmt.Sprintf so accidental imports stay tidy.
 var _ = fmt.Sprintf

@@ -17,6 +17,16 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// commentContent dereferences CommentResponse.Content (which is *string in
+// the fork to support persona-redacted nulls — see comment.go). Returns ""
+// when the pointer is nil so test predicates stay readable.
+func commentContent(c CommentResponse) string {
+	if c.Content == nil {
+		return ""
+	}
+	return *c.Content
+}
+
 // cursorQuery builds a properly URL-encoded query string for the recent +
 // thread-cursor path. RFC3339Nano timestamps contain `:` and may contain `+`,
 // both of which need escaping so they survive `(*url.URL).Query()` parsing on
@@ -329,8 +339,8 @@ func TestListComments_SummaryClipsContent(t *testing.T) {
 		if c.ContentTruncated != nil {
 			t.Fatalf("baseline: content_truncated should be nil, got %v on %s", *c.ContentTruncated, c.ID)
 		}
-		if c.ID == longID && utf8.RuneCountInString(c.Content) != 500 {
-			t.Fatalf("baseline: long content len got=%d want=500", utf8.RuneCountInString(c.Content))
+		if c.ID == longID && utf8.RuneCountInString(commentContent(c)) != 500 {
+			t.Fatalf("baseline: long content len got=%d want=500", utf8.RuneCountInString(commentContent(c)))
 		}
 	}
 
@@ -344,31 +354,31 @@ func TestListComments_SummaryClipsContent(t *testing.T) {
 	if long.ContentTruncated == nil || !*long.ContentTruncated {
 		t.Fatalf("summary: long comment should be truncated, got %v", long.ContentTruncated)
 	}
-	if rc := utf8.RuneCountInString(long.Content); rc != summaryContentRunes+1 { // +1 for the ellipsis
+	if rc := utf8.RuneCountInString(commentContent(long)); rc != summaryContentRunes+1 { // +1 for the ellipsis
 		t.Fatalf("summary: long content rune count got=%d want=%d", rc, summaryContentRunes+1)
 	}
-	if !strings.HasSuffix(long.Content, "…") {
-		t.Fatalf("summary: long content should end with ellipsis, got %q", long.Content)
+	if !strings.HasSuffix(commentContent(long), "…") {
+		t.Fatalf("summary: long content should end with ellipsis, got %q", commentContent(long))
 	}
 	short := byID[shortID]
 	if short.ContentTruncated == nil || *short.ContentTruncated {
 		t.Fatalf("summary: short comment should be untruncated (false), got %v", short.ContentTruncated)
 	}
-	if short.Content != "short" {
-		t.Fatalf("summary: short content got=%q want=short", short.Content)
+	if commentContent(short) != "short" {
+		t.Fatalf("summary: short content got=%q want=short", commentContent(short))
 	}
 	cjk := byID[cjkID]
 	if cjk.ContentTruncated == nil || !*cjk.ContentTruncated {
 		t.Fatalf("summary: cjk comment should be truncated, got %v", cjk.ContentTruncated)
 	}
-	if !utf8.ValidString(cjk.Content) {
-		t.Fatalf("summary: cjk content was clipped mid-rune (invalid UTF-8): %q", cjk.Content)
+	if !utf8.ValidString(commentContent(cjk)) {
+		t.Fatalf("summary: cjk content was clipped mid-rune (invalid UTF-8): %q", commentContent(cjk))
 	}
-	if rc := utf8.RuneCountInString(cjk.Content); rc != summaryContentRunes+1 { // 200 CJK runes + ellipsis
+	if rc := utf8.RuneCountInString(commentContent(cjk)); rc != summaryContentRunes+1 { // 200 CJK runes + ellipsis
 		t.Fatalf("summary: cjk content rune count got=%d want=%d", rc, summaryContentRunes+1)
 	}
-	if !strings.HasSuffix(cjk.Content, "你…") {
-		t.Fatalf("summary: cjk content should be whole 你-runes then ellipsis, got %q", cjk.Content)
+	if !strings.HasSuffix(commentContent(cjk), "你…") {
+		t.Fatalf("summary: cjk content should be whole 你-runes then ellipsis, got %q", commentContent(cjk))
 	}
 }
 
@@ -421,7 +431,7 @@ func TestListComments_RootsOnlySummaryComposes(t *testing.T) {
 	if root.ContentTruncated == nil || !*root.ContentTruncated {
 		t.Fatalf("roots+summary: root should be truncated, got %v", root.ContentTruncated)
 	}
-	if rc := utf8.RuneCountInString(root.Content); rc != summaryContentRunes+1 { // +1 for the ellipsis
+	if rc := utf8.RuneCountInString(commentContent(root)); rc != summaryContentRunes+1 { // +1 for the ellipsis
 		t.Fatalf("roots+summary: clipped content rune count got=%d want=%d", rc, summaryContentRunes+1)
 	}
 	// Stats half: orientation metadata survives the summary projection. The

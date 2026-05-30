@@ -404,10 +404,18 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// Apply the summary projection last so it clips whatever content the
-		// chosen read mode produced, uniformly across every mode.
+		// chosen read mode produced, uniformly across every mode. Content is
+		// *string (CEREBRO-PATCH persona-mask-comment-list): treat nil as ""
+		// so a redacted row stays nil after the projection too.
 		if summary {
-			clipped, truncated := summarizeContent(resp[i].Content)
-			resp[i].Content = clipped
+			var src string
+			if resp[i].Content != nil {
+				src = *resp[i].Content
+			}
+			clipped, truncated := summarizeContent(src)
+			if resp[i].Content != nil {
+				resp[i].Content = &clipped
+			}
 			resp[i].ContentTruncated = &truncated
 		}
 	}
