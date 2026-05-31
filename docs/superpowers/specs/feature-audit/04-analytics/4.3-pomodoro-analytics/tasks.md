@@ -69,9 +69,24 @@
 - 验证方式：
   - 完成 pomodoro 后 summary 更新的联动测试。
 
+### Task 5
+
+- 目标：补番茄统计页面级验证，证明统计入口、summary 刷新和目标缺失提示成立。
+- 文件：
+  - `e2e/pomodoro.spec.ts`
+  - 如统计入口独立，补对应 route helper
+- 改动：
+  - 覆盖统计入口可达、today/week/month summary、完成 pomodoro 后刷新、目标缺失提示。
+  - 若保留 `/pomodoro` 操作页，明确区分操作页与统计页断言。
+- 完成定义：
+  - Playwright 能证明番茄统计读取真实历史/聚合，而不是只看本地组件状态。
+  - 至少一条用例覆盖完成 pomodoro 后 summary 变化，至少一条用例覆盖目标缺失提示或周/月统计。
+- 验证方式：
+  - 运行 `pnpm exec playwright test e2e/pomodoro.spec.ts`
+
 ## 执行顺序说明
 
-- 先补目标契约和统计接口，再做页面；否则完成率口径无法稳定。
+- 先补目标契约和统计接口，再做页面，最后补页面级验证；否则完成率口径无法稳定。
 
 ## 回写要求
 
