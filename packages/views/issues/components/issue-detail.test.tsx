@@ -1572,3 +1572,4 @@ describe("IssueDetail (shared)", () => {
     });
   });
 });
+});

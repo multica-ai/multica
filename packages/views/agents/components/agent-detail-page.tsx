@@ -490,7 +490,7 @@ function DetailHeader({
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.detail.more_duplicate)}
               </DropdownMenuItem>
-
+              {canArchive && (
               <DropdownMenuItem
                 className="text-destructive"
                 onClick={onArchive}
@@ -498,6 +498,7 @@ function DetailHeader({
                 <Trash2 className="h-3.5 w-3.5" />
                 {t(($) => $.detail.more_archive)}
               </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null

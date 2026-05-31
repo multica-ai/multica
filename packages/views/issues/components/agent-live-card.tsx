@@ -378,6 +378,7 @@ interface AgentLiveRowProps {
 function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: AgentLiveRowProps) {
   const { t } = useT("issues");
   const [elapsed, setElapsed] = useState("");
+  const [paused, setPaused] = useState(false);
 
   const isQueued = task.status === "queued";
   // `waiting_local_directory` is the daemon-parked stage of an otherwise-
@@ -401,10 +402,37 @@ function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: A
     return () => clearInterval(interval);
   }, [task.started_at, task.dispatched_at, task.created_at]);
 
+  const refreshPaused = useCallback(() => {
+    api.listTaskInteractions(task.id, "pending")
+      .then((items) => setPaused(items.length > 0))
+      .catch(() => setPaused(false));
+  }, [task.id]);
+
+  useEffect(() => {
+    refreshPaused();
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") refreshPaused();
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [refreshPaused]);
+
+  useWSEvent("interaction:created", useCallback((payload: unknown) => {
+    const p = payload as { task_id?: string };
+    if (p.task_id === task.id) refreshPaused();
+  }, [task.id, refreshPaused]));
+
+  useWSEvent("interaction:resolved", useCallback((payload: unknown) => {
+    const p = payload as { task_id?: string };
+    if (p.task_id === task.id) refreshPaused();
+  }, [task.id, refreshPaused]));
+
   const toolCount = items.filter((i) => i.type === "tool_use").length;
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
+    <div className={cn(
+      "flex items-center gap-2 px-3 py-2 text-muted-foreground",
+      paused && "bg-indigo-500/5",
+    )}>
       {task.agent_id ? (
         <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard showStatusDot />
       ) : (
@@ -413,23 +441,30 @@ function AgentLiveRow({ task, items, agentName, onRequestCancel, cancelling }: A
         </div>
       )}
       <div className="flex items-center gap-1.5 text-xs min-w-0">
-        {isParked ? (
+        {paused ? (
+          <PauseCircle className="h-3 w-3 text-indigo-500 shrink-0" />
+        ) : isParked ? (
           <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
         ) : (
           <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
         )}
         <span className="font-medium text-foreground truncate">
-          {isWaitingLocalDirectory
-            ? t(($) => $.agent_live.is_waiting_local_directory, { name: agentName })
-            : isQueued
-              ? t(($) => $.agent_live.is_queued, { name: agentName })
-              : t(($) => $.agent_live.is_working, { name: agentName })}
+          {paused
+            ? `${agentName} is paused`
+            : isWaitingLocalDirectory
+              ? t(($) => $.agent_live.is_waiting_local_directory, { name: agentName })
+              : isQueued
+                ? t(($) => $.agent_live.is_queued, { name: agentName })
+                : t(($) => $.agent_live.is_working, { name: agentName })}
         </span>
         <span className="text-muted-foreground tabular-nums shrink-0">
-          {isParked
-            ? t(($) => $.agent_live.queued_elapsed_prefix, { elapsed })
-            : elapsed}
+          {paused
+            ? elapsed
+            : isParked
+              ? t(($) => $.agent_live.queued_elapsed_prefix, { elapsed })
+              : elapsed}
         </span>
+        {paused && <span className="text-indigo-600 dark:text-indigo-300 shrink-0">waiting for input</span>}
         {!isParked && toolCount > 0 && (
           <span className="text-muted-foreground shrink-0">{t(($) => $.agent_live.tool_count, { count: toolCount })}</span>
         )}
