@@ -212,6 +212,52 @@ type AutopilotTrigger struct {
 	SigningSecret  pgtype.Text        `json:"signing_secret"`
 }
 
+type Channel struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Slug        string             `json:"slug"`
+	Description string             `json:"description"`
+	AccessMode  string             `json:"access_mode"`
+	IsLocked    bool               `json:"is_locked"`
+	IsArchived  bool               `json:"is_archived"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ChannelMember struct {
+	ChannelID  pgtype.UUID        `json:"channel_id"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	Role       string             `json:"role"`
+	LastReadAt pgtype.Timestamptz `json:"last_read_at"`
+	JoinedAt   pgtype.Timestamptz `json:"joined_at"`
+}
+
+type ChannelMessage struct {
+	ID          pgtype.UUID        `json:"id"`
+	ThreadID    pgtype.UUID        `json:"thread_id"`
+	ChannelID   pgtype.UUID        `json:"channel_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	Content     string             `json:"content"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ChannelThread struct {
+	ID            pgtype.UUID        `json:"id"`
+	ChannelID     pgtype.UUID        `json:"channel_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Title         string             `json:"title"`
+	CreatedBy     pgtype.UUID        `json:"created_by"`
+	MessageCount  int32              `json:"message_count"`
+	LastMessageAt pgtype.Timestamptz `json:"last_message_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ChatMessage struct {
 	ID            pgtype.UUID        `json:"id"`
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
@@ -445,6 +491,8 @@ type Issue struct {
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
 	StartDate          pgtype.Timestamptz `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
+	SourceChannelID    pgtype.UUID        `json:"source_channel_id"`
+	SourceThreadID     pgtype.UUID        `json:"source_thread_id"`
 }
 
 type IssueDependency struct {

@@ -542,6 +542,29 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Channels (lightweight human+agent collaboration — OPE-1943)
+			r.Route("/api/channels", func(r chi.Router) {
+				r.Get("/", h.ListChannels)
+				r.Post("/", h.CreateChannel)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetChannel)
+					r.Patch("/", h.UpdateChannel)
+					r.Delete("/", h.DeleteChannel)
+					r.Post("/read", h.MarkChannelRead)
+					r.Get("/members", h.ListChannelMembers)
+					r.Post("/members", h.AddChannelMember)
+					r.Post("/join", h.JoinChannel)
+					r.Post("/leave", h.LeaveChannel)
+					r.Get("/threads", h.ListChannelThreads)
+					r.Post("/threads", h.CreateChannelThread)
+					r.Route("/threads/{threadId}", func(r chi.Router) {
+						r.Get("/messages", h.ListThreadMessages)
+						r.Post("/messages", h.CreateChannelMessage)
+						r.Delete("/", h.DeleteChannelThread)
+					})
+				})
+			})
+
 			// Squads
 			r.Route("/api/squads", func(r chi.Router) {
 				r.Get("/", h.ListSquads)

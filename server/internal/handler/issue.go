@@ -60,6 +60,11 @@ type IssueResponse struct {
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
 	Labels *[]LabelResponse `json:"labels,omitempty"`
+
+	// SourceChannelID / SourceThreadID reference the channel thread this issue
+	// was produced from (OPE-1943). nil when the issue was created directly.
+	SourceChannelID *string `json:"source_channel_id,omitempty"`
+	SourceThreadID  *string `json:"source_thread_id,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -85,6 +90,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
+		SourceChannelID: uuidToPtr(i.SourceChannelID),
+		SourceThreadID:  uuidToPtr(i.SourceThreadID),
 	}
 }
 
@@ -1808,6 +1815,11 @@ type CreateIssueRequest struct {
 	OriginID   *string `json:"origin_id,omitempty"`
 
 	AllowDuplicate bool `json:"allow_duplicate,omitempty"`
+
+	// SourceThreadID, when set, links the new issue back to the channel thread
+	// it was produced from (OPE-1943 Channel feature). The thread receives a
+	// "created from thread" system message and future status changes reflow back.
+	SourceThreadID *string `json:"source_thread_id,omitempty"`
 }
 
 func duplicateIssueMessage(issue IssueResponse) string {
@@ -2099,6 +2111,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// Link any pre-uploaded attachments to this issue.
 	if len(attachmentIDs) > 0 {
 		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
+	}
+
+	// Link the issue back to its source channel thread (OPE-1943) if produced
+	// from one, and reflow a "created from thread" note into that thread.
+	if req.SourceThreadID != nil && strings.TrimSpace(*req.SourceThreadID) != "" {
+		h.linkIssueToThread(r.Context(), &issue, strings.TrimSpace(*req.SourceThreadID))
 	}
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
@@ -2443,6 +2461,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
 		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
 	statusChanged := req.Status != nil && prevIssue.Status != issue.Status
+	if statusChanged {
+		// Reflow the new status into the issue's source channel thread (OPE-1943).
+		h.reflowIssueStatus(r.Context(), issue)
+	}
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
 	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
 	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
@@ -2992,6 +3014,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
 		statusChanged := req.Updates.Status != nil && prevIssue.Status != issue.Status
 		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
+		if statusChanged {
+			h.reflowIssueStatus(r.Context(), issue)
+		}
 
 		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 			"issue":            resp,

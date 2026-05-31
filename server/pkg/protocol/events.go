@@ -116,6 +116,18 @@ const (
 	EventSquadUpdated = "squad:updated"
 	EventSquadDeleted = "squad:deleted"
 
+	// Channel events (lightweight human+agent collaboration)
+	EventChannelCreated     = "channel:created"
+	EventChannelUpdated     = "channel:updated"
+	EventChannelDeleted     = "channel:deleted"
+	EventChannelMemberAdded = "channel:member_added"
+	EventChannelMemberLeft  = "channel:member_left"
+	EventChannelThreadCreated = "channel_thread:created"
+	EventChannelThreadUpdated = "channel_thread:updated"
+	EventChannelThreadDeleted = "channel_thread:deleted"
+	EventChannelMessageCreated = "channel_message:created"
+	EventChannelMessageDeleted = "channel_message:deleted"
+
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
