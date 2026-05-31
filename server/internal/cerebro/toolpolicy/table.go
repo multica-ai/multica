@@ -44,6 +44,11 @@ type TableRow struct {
 	Category string
 	// Source records how the capability was discovered (e.g. "scan", "report").
 	Source string
+	// ManagedExternally is true for platform capabilities whose enforcement point
+	// is not the tool-policy gate (membership ACL, daemon token, etc.). Always
+	// false for reported runtime tools and repo rows. Shown so the admin sees the
+	// row is informational, not gated (FIR-2594).
+	ManagedExternally bool
 	// Layers holds the explicit setting at each layer for this context. A layer
 	// absent from the map carries no explicit choice (Inherit). LayerGroup, when
 	// present, is the combined value across the context's groups (most permissive
@@ -66,6 +71,12 @@ type TableQuery struct {
 	// Base is the workspace/system default applied when every layer inherits.
 	// Empty defaults to Allow (see Resolve).
 	Base Setting
+	// IncludePlatform appends the code-owned platform-capability catalog
+	// (platformcatalog) to the listing — the Multica platform actions an agent or
+	// user can take, which no runtime reports. Gated by the caller (the handler
+	// checks the cerebro_platform_capabilities flag) so prod sees nothing new
+	// until an admin turns the flag on (FIR-2594).
+	IncludePlatform bool
 }
 
 // Table returns one row per capability (tool) in the workspace, each with the
@@ -193,6 +204,18 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 	out, err = s.appendRepoRows(ctx, in, groupIDs, out)
 	if err != nil {
 		return nil, err
+	}
+
+	// Append the code-owned platform-capability rows (FIR-2594). Like repo rows
+	// these are not in the capability register, so the query above never emits
+	// them; they are capability-wide (empty ResourcePattern) and carry the
+	// "platform" source. Gated by IncludePlatform so an unflagged workspace lists
+	// exactly what it listed before.
+	if in.IncludePlatform {
+		out, err = s.appendPlatformRows(ctx, in, groupIDs, out)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }

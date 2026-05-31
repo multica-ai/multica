@@ -62,13 +62,14 @@ type effectiveResponse struct {
 }
 
 type toolPolicyRow struct {
-	ToolKey         string            `json:"tool_key"`
-	ResourcePattern string            `json:"resource_pattern"`
-	Title           string            `json:"title"`
-	Category        string            `json:"category"`
-	Source          string            `json:"source"`
-	Layers          layerSettings     `json:"layers"`
-	Effective       effectiveResponse `json:"effective"`
+	ToolKey           string            `json:"tool_key"`
+	ResourcePattern   string            `json:"resource_pattern"`
+	Title             string            `json:"title"`
+	Category          string            `json:"category"`
+	Source            string            `json:"source"`
+	ManagedExternally bool              `json:"managed_externally"`
+	Layers            layerSettings     `json:"layers"`
+	Effective         effectiveResponse `json:"effective"`
 }
 
 // --- request types ----------------------------------------------------------
@@ -86,7 +87,7 @@ type setRequest struct {
 // Table — GET /api/workspaces/{id}/tool-policy
 // Query params: runtime_id, agent_id, user_id, group_id (repeatable), base.
 func (h *Handler) Table(w http.ResponseWriter, r *http.Request) {
-	_, workspaceID, ok := h.loadWorkspace(w, r)
+	member, workspaceID, ok := h.loadWorkspace(w, r)
 	if !ok {
 		return
 	}
@@ -120,12 +121,13 @@ func (h *Handler) Table(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.Store.Table(r.Context(), TableQuery{
-		WorkspaceID: workspaceID,
-		RuntimeID:   runtimeID,
-		AgentID:     agentID,
-		UserID:      userID,
-		GroupIDs:    groupIDs,
-		Base:        base,
+		WorkspaceID:     workspaceID,
+		RuntimeID:       runtimeID,
+		AgentID:         agentID,
+		UserID:          userID,
+		GroupIDs:        groupIDs,
+		Base:            base,
+		IncludePlatform: h.Store.PlatformCapabilitiesEnabled(r.Context(), workspaceID, member.UserID),
 	})
 	if err != nil {
 		h.serverError(w, r, "list tool policy table", err)
@@ -249,11 +251,12 @@ func (h *Handler) serverError(w http.ResponseWriter, r *http.Request, op string,
 
 func toRowResponse(row TableRow) toolPolicyRow {
 	return toolPolicyRow{
-		ToolKey:         row.ToolKey,
-		ResourcePattern: row.ResourcePattern,
-		Title:           row.Title,
-		Category:        row.Category,
-		Source:          row.Source,
+		ToolKey:           row.ToolKey,
+		ResourcePattern:   row.ResourcePattern,
+		Title:             row.Title,
+		Category:          row.Category,
+		Source:            row.Source,
+		ManagedExternally: row.ManagedExternally,
 		Layers: layerSettings{
 			Workspace: settingPtr(row.Layers, LayerWorkspace),
 			Runtime:   settingPtr(row.Layers, LayerRuntime),
