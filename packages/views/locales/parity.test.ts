@@ -9,10 +9,12 @@ import { RESOURCES } from "./index";
 // new EN key lands without a translated key, which would silently fall back
 // to the English string in production.
 //
-// i18next plural rule: EN uses `_one` + `_other`; zh only uses `_other`
-// because Chinese has no grammatical number. Normalize both forms to
-// `_other` before comparing so a `{ key_one, key_other }` pair in EN
-// matches a single `{ key_other }` in zh.
+// i18next plural rule: each language carries its own CLDR plural categories.
+// EN uses `_one` + `_other`; zh only `_other` (no grammatical number); ru uses
+// `_one` + `_few` + `_many` + `_other`. Normalize every plural suffix to a
+// single `_count` token before comparing so a `{ key_one, key_other }` pair in
+// EN matches `{ key_other }` in zh and `{ key_one, key_few, key_many, key_other }`
+// in ru — parity stays about the base key existing, not the form count.
 
 // Derive the canonical namespace list from disk so the test fails if a JSON
 // file ships without a matching RESOURCES entry. Without this guard the test
@@ -40,7 +42,7 @@ function flattenKeys(obj: unknown, prefix = ""): string[] {
 }
 
 function normalizePlural(key: string): string {
-  return key.replace(/_(one|other)$/, "_count");
+  return key.replace(/_(zero|one|two|few|many|other)$/, "_count");
 }
 
 function keySet(bundle: Record<string, unknown>): Set<string> {

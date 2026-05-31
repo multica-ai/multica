@@ -1,0 +1,44 @@
+{
+  "title": "Поиск",
+  "description": "Поиск по страницам, issues, проектам и участникам",
+  "placeholder": "Введите команду или запрос...",
+  "groups": {
+    "pages": "Страницы",
+    "commands": "Команды",
+    "members": "Участники",
+    "projects": "Проекты",
+    "issues": "Issues",
+    "recent": "Недавние"
+  },
+  "pages": {
+    "inbox": "Входящие",
+    "my_issues": "Мои issues",
+    "issues": "Issues",
+    "projects": "Проекты",
+    "agents": "Агенты",
+    "runtimes": "Среды выполнения",
+    "skills": "Skills",
+    "settings": "Настройки"
+  },
+  "commands": {
+    "current_theme_aria": "Текущая тема",
+    "new_issue": "Создать issue",
+    "new_project": "Создать проект",
+    "copy_issue_link": "Копировать ссылку на issue",
+    "copy_identifier": "Копировать идентификатор ({{identifier}})",
+    "switch_to_light": "Светлая тема",
+    "switch_to_dark": "Тёмная тема",
+    "use_system_theme": "Системная тема"
+  },
+  "toast": {
+    "link_copied": "Ссылка скопирована",
+    "copied_identifier": "Скопировано {{identifier}}"
+  },
+  "empty": {
+    "no_results": "Ничего не найдено.",
+    "type_to_search": "Введите запрос для поиска issues и проектов"
+  },
+  "trigger": {
+    "label": "Поиск..."
+  }
+}

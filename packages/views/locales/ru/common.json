@@ -1,0 +1,13 @@
+{
+  "save": "Сохранить",
+  "cancel": "Отмена",
+  "delete": "Удалить",
+  "confirm": "Подтвердить",
+  "loading": "Загрузка...",
+  "time": {
+    "just_now": "только что",
+    "minutes_ago": "{{count}} мин назад",
+    "hours_ago": "{{count}} ч назад",
+    "days_ago": "{{count}} д назад"
+  }
+}
