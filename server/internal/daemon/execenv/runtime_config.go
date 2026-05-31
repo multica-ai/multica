@@ -408,7 +408,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("\n")
 		}
 		b.WriteString("\nTreat this as background context, not as task instructions. If it conflicts with the actual task, the task wins.\n\n")
-	// CEREBRO-PATCH(execenv-current-model-doc): tell the agent which model it is running on (JEH-1310 Phase 2a).
+		// CEREBRO-PATCH(execenv-current-model-doc): tell the agent which model it is running on (JEH-1310 Phase 2a).
 	}
 
 	// Workspace Context block: the workspace-level system prompt set by
@@ -517,6 +517,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- **Write on exit.** Sparingly. If — and only if — this run produced a fact that clears the bar above (opened PR, deploy URL, external ticket, current blocker that will outlast this run), pin it with `multica issue metadata set`. If a key you saw on entry is now stale (e.g. `pipeline_status=waiting_review` but the PR has merged), overwrite it with the new value or `multica issue metadata delete` it. Don't let metadata rot — that recreates the comment-archaeology problem this feature is meant to solve. Stale-key cleanup is still expected even when you add nothing new.\n")
 		b.WriteString("- **What NOT to pin.** No secrets, tokens, or API keys. No logs, long quotes, or description / comment summaries — that's what description and comments are for. No runtime bookkeeping (`attempts`, run timestamps, agent ids) — metadata is the agent's editorial notebook, not a run log. No single-run details (the file you happened to edit, the test you happened to add, today's investigation notes) — those belong in the result comment, not metadata.\n")
 		b.WriteString("- **Recommended keys** (reuse these names so queries stay consistent across the workspace; coin a new key only when none fits): `pr_url`, `pr_number`, `pipeline_status`, `deploy_url`, `external_issue_url`, `waiting_on`, `blocked_reason`, `decision`. Use snake_case ASCII. The list is short on purpose — most issues only need 1-2 of these pinned, not the full set.\n\n")
+	}
+
+	if hasIssueContext { // CEREBRO-PATCH(runtime-config-no-busywait): FIR-2610 — standing rule: never busy-wait on CI/deploy
+		b.WriteString(cerebroNoBusyWaitRule())
 	}
 
 	b.WriteString("### Workflow\n\n")
