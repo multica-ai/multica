@@ -1765,18 +1765,21 @@ func (c *FeishuProjectClient) IssueStatusOptions(ctx context.Context, cfg db.Fei
 }
 
 // ListWorkItemFields returns the field definitions of a work-item type so the user
-// can pick which one is the "business line" field. Backed by
-// GET /open_api/{project_key}/work_item/{type}/meta — the same endpoint we already use
-// for status options, just parsed for the full field list.
+// can pick which one to designate as the business-line field or use in a label-sync
+// rule. Backed by POST /open_api/{project_key}/field/all — Meego's
+// /work_item/{type}/meta omits custom radio/plugin fields like "BUG提单助手"
+// (field_c1f194), whereas /field/all is the complete field registry and /meta's
+// output is a strict subset of it. We filter by work_item_scopes so the UI only
+// surfaces fields actually applicable to this work-item type.
 func (c *FeishuProjectClient) ListWorkItemFields(ctx context.Context, cfg db.FeishuProjectIntegration, workItemType string) ([]FeishuProjectFieldMeta, error) {
 	if workItemType == "" {
 		workItemType = "issue"
 	}
-	payload, err := c.openAPI(ctx, cfg, http.MethodGet, fmt.Sprintf("/open_api/%s/work_item/%s/meta", cfg.ProjectKey, workItemType), nil)
+	payload, err := c.openAPI(ctx, cfg, http.MethodPost, fmt.Sprintf("/open_api/%s/field/all", cfg.ProjectKey), map[string]any{})
 	if err != nil {
 		return nil, err
 	}
-	return parseFeishuProjectFieldMetas(payload), nil
+	return parseFeishuProjectFieldMetas(payload, workItemType), nil
 }
 
 // ListFieldOptions returns the option tree of a specific work-item field. Used by the
@@ -2888,19 +2891,28 @@ func feishuProjectIsOwnerField(key, displayName string) bool {
 	return false
 }
 
-// feishuProjectOwnerEmail picks the email of the work-item's assignee/owner. It tries:
-//  1. Stable Meego field_keys (`owner`, `operator`) — the common case.
+// feishuProjectOwnerEmail picks the email of the work-item's assignee/handler. It tries:
+//  1. The stable Meego field_key `operator` — some spaces expose the handler directly
+//     under this key (rare; modern spaces use `issue_operator` + role_owners instead).
 //  2. Custom fields indexed by their Chinese display name — different spaces name the
 //     assignee field differently (经办人 / 处理人 / 负责人 / etc.) and may use a
 //     custom field_key like `field_xxx` so a plain field_key match misses them.
+//
+// IMPORTANT: we do NOT consult `record["owner"]`. In Meego the field_key `owner` is
+// the CREATOR (`创建者`), not the current handler — verified in partopia /field/all where
+// `owner.field_name` is consistently "创建者" / "创建人" across every work_item_type.
+// Treating it as assignee caused issues like partopia#7004726014, where 经办人 was empty
+// in Feishu yet the synced Multica issue was assigned to the creator. When no handler
+// signal exists we want OwnerEmail to be empty so the caller can fall back to the
+// integration-configured fallback agent.
 //
 // At each step the raw value is checked for an embedded email pattern first; if none is
 // found and Meego returned a user_details lookup, we treat the value as a user_key list
 // and resolve against that map.
 func feishuProjectOwnerEmail(record map[string]string, userEmails map[string]string) string {
 	candidates := []string{
-		// Stable field_keys
-		record["owner"], record["operator"],
+		// Stable field_key (assignee, not creator).
+		record["operator"],
 		// Chinese display names (fall back when the field is custom and we matched it
 		// in parseFeishuProjectSearch via field["name"]).
 		record["处理人"], record["经办人"], record["负责人"],
@@ -2970,44 +2982,49 @@ func feishuProjectOpenAPIOwnerFieldValue(value any) string {
 	return strings.Join(values, ", ")
 }
 
-// parseFeishuProjectFieldMetas walks the /work_item/{type}/meta response and surfaces
-// every (field_key, field_name, field_type) triple. Reused by ListWorkItemFields so the
-// settings UI can show a dropdown of fields to designate as the business-line field.
-//
-// The meta document is loosely typed in Meego — fields can appear under "fields", under
-// nested "tab"/"field_list" containers, or as top-level entries. We walk recursively and
-// dedupe by field_key.
-func parseFeishuProjectFieldMetas(payload map[string]any) []FeishuProjectFieldMeta {
+// parseFeishuProjectFieldMetas walks the /field/all response (payload["data"] is a flat
+// list) and returns (field_key, field_name, field_type) triples, deduped by key. If
+// workItemType is non-empty, entries are kept only when their work_item_scopes list
+// contains it — /field/all is project-wide and includes fields scoped to other types
+// (e.g. story-only fields) that the caller doesn't want in this dropdown.
+func parseFeishuProjectFieldMetas(payload map[string]any, workItemType string) []FeishuProjectFieldMeta {
+	data, _ := payload["data"].([]any)
 	seen := map[string]bool{}
-	var out []FeishuProjectFieldMeta
-	var walk func(any)
-	walk = func(v any) {
-		switch x := v.(type) {
-		case map[string]any:
-			if key := strings.TrimSpace(firstNonEmpty(fmt.Sprint(x["field_key"]), fmt.Sprint(x["field_alias"]))); key != "" && key != "<nil>" && !seen[key] {
-				typeStr := firstNonEmpty(fmt.Sprint(x["field_type_key"]), fmt.Sprint(x["field_type"]))
-				if _, isOption := x["option"]; !isOption {
-					_, isOption = x["options"]
-					_ = isOption
-				}
-				out = append(out, FeishuProjectFieldMeta{
-					Key:  key,
-					Name: firstNonEmpty(fmt.Sprint(x["name"]), fmt.Sprint(x["field_name"]), key),
-					Type: typeStr,
-				})
-				seen[key] = true
-			}
-			for _, child := range x {
-				walk(child)
-			}
-		case []any:
-			for _, child := range x {
-				walk(child)
-			}
+	out := make([]FeishuProjectFieldMeta, 0, len(data))
+	want := strings.TrimSpace(workItemType)
+	for _, entry := range data {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		if want != "" && !feishuProjectFieldScopeMatches(m["work_item_scopes"], want) {
+			continue
+		}
+		key := strings.TrimSpace(firstNonEmpty(fmt.Sprint(m["field_key"]), fmt.Sprint(m["field_alias"])))
+		if key == "" || key == "<nil>" || seen[key] {
+			continue
+		}
+		out = append(out, FeishuProjectFieldMeta{
+			Key:  key,
+			Name: firstNonEmpty(fmt.Sprint(m["field_name"]), fmt.Sprint(m["name"]), key),
+			Type: firstNonEmpty(fmt.Sprint(m["field_type_key"]), fmt.Sprint(m["field_type"])),
+		})
+		seen[key] = true
+	}
+	return out
+}
+
+func feishuProjectFieldScopeMatches(scopesAny any, workItemType string) bool {
+	scopes, ok := scopesAny.([]any)
+	if !ok {
+		return false
+	}
+	for _, s := range scopes {
+		if strings.TrimSpace(fmt.Sprint(s)) == workItemType {
+			return true
 		}
 	}
-	walk(payload)
-	return out
+	return false
 }
 
 // parseFeishuProjectBusinessLineTree converts the /business/all response into a 2-level

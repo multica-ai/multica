@@ -1,9 +1,19 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Loader2, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsUpDown, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@multica/ui/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -22,6 +32,7 @@ import type {
   FeishuProjectIntegration,
 } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 // Each user-edited row in the routes table. business_line_id is the lookup key; we keep
 // the parent denormalized so we can save it back to the server without re-fetching the
@@ -191,35 +202,19 @@ export function FeishuProjectRoutingSection({
       {/* Field picker row */}
       <label className="block space-y-1.5 text-xs font-medium">
         {t(($) => $.integrations.feishu_project_business_line_field)}
-        <Select value={fieldKey || ""} onValueChange={handlePickField}>
-          <SelectTrigger className="w-full" disabled={fieldsLoading && !syntheticSavedField}>
-            <span className="flex-1 truncate text-left">
-              {hasFieldKey
-                ? fieldDisplayName
-                : t(($) => $.integrations.feishu_project_business_line_field_placeholder)}
-            </span>
-          </SelectTrigger>
-          <SelectContent align="start">
-            {fields.length === 0 && !syntheticSavedField && (
-              <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                {fieldsLoading
-                  ? t(($) => $.integrations.feishu_project_fields_loading)
-                  : t(($) => $.integrations.feishu_project_fields_empty)}
-              </div>
-            )}
-            {syntheticSavedField && (
-              <SelectItem key={syntheticSavedField.key} value={syntheticSavedField.key}>
-                {syntheticSavedField.name}{" "}
-                <span className="text-muted-foreground">({syntheticSavedField.key})</span>
-              </SelectItem>
-            )}
-            {fields.map((f) => (
-              <SelectItem key={f.key} value={f.key}>
-                {f.name} <span className="text-muted-foreground">({f.key})</span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <FieldPicker
+          fields={fields}
+          syntheticSavedField={syntheticSavedField}
+          fieldKey={fieldKey}
+          fieldDisplayName={fieldDisplayName}
+          fieldsLoading={fieldsLoading}
+          onPick={handlePickField}
+          placeholder={t(($) => $.integrations.feishu_project_business_line_field_placeholder)}
+          searchPlaceholder={t(($) => $.integrations.feishu_project_business_line_field_search_placeholder)}
+          noResultsLabel={t(($) => $.integrations.feishu_project_business_line_field_no_results)}
+          loadingLabel={t(($) => $.integrations.feishu_project_fields_loading)}
+          emptyLabel={t(($) => $.integrations.feishu_project_fields_empty)}
+        />
         <span className="block text-[11px] font-normal text-muted-foreground">
           {t(($) => $.integrations.feishu_project_business_line_field_hint)}
         </span>
@@ -451,5 +446,131 @@ function BizLineTreeRow({ node, parent, expanded, setExpanded, rowsByBizLineId, 
         </>
       )}
     </>
+  );
+}
+
+type FieldOption = { key: string; name: string; type: string };
+
+// Searchable Popover+Command picker. Replaces the plain <Select> we used before — Meego's
+// /field/all returns ~50 fields per work-item type, which made scrolling painful. Matches
+// on field name, field_key, and pinyin (for Chinese field names like "BUG提单助手").
+// Preserves the syntheticSavedField, loading, and empty states the old Select had.
+function FieldPicker({
+  fields,
+  syntheticSavedField,
+  fieldKey,
+  fieldDisplayName,
+  fieldsLoading,
+  onPick,
+  placeholder,
+  searchPlaceholder,
+  noResultsLabel,
+  loadingLabel,
+  emptyLabel,
+}: {
+  fields: FieldOption[];
+  syntheticSavedField: FieldOption | null;
+  fieldKey: string;
+  fieldDisplayName: string;
+  fieldsLoading: boolean;
+  onPick: (value: string | null) => void;
+  placeholder: string;
+  searchPlaceholder: string;
+  noResultsLabel: string;
+  loadingLabel: string;
+  emptyLabel: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const hasFieldKey = fieldKey.trim() !== "";
+  const triggerDisabled = fieldsLoading && !syntheticSavedField;
+
+  const visibleFields = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return fields;
+    return fields.filter(
+      (f) =>
+        f.name.toLowerCase().includes(q) ||
+        f.key.toLowerCase().includes(q) ||
+        matchesPinyin(f.name, q),
+    );
+  }, [fields, query]);
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setQuery("");
+      }}
+    >
+      <PopoverTrigger
+        disabled={triggerDisabled}
+        className="flex h-8 w-full items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent px-2.5 text-sm whitespace-nowrap transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:hover:bg-input/50"
+      >
+        <span className={`min-w-0 flex-1 truncate text-left ${hasFieldKey ? "" : "text-muted-foreground"}`}>
+          {hasFieldKey ? fieldDisplayName : placeholder}
+        </span>
+        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={4} className="w-[var(--anchor-width)] p-0">
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder={searchPlaceholder}
+            value={query}
+            onValueChange={setQuery}
+          />
+          <CommandList className="max-h-64">
+            {fields.length === 0 && !syntheticSavedField ? (
+              <div className="px-2 py-3 text-center text-xs text-muted-foreground">
+                {fieldsLoading ? loadingLabel : emptyLabel}
+              </div>
+            ) : (
+              <>
+                {visibleFields.length === 0 && !syntheticSavedField && (
+                  <CommandEmpty>{noResultsLabel}</CommandEmpty>
+                )}
+                {syntheticSavedField && (
+                  <CommandGroup>
+                    <CommandItem
+                      key={syntheticSavedField.key}
+                      value={syntheticSavedField.key}
+                      onSelect={(value) => {
+                        onPick(value);
+                        setOpen(false);
+                      }}
+                      className="flex items-center gap-2"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{syntheticSavedField.name}</span>
+                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                        {syntheticSavedField.key}
+                      </span>
+                    </CommandItem>
+                  </CommandGroup>
+                )}
+                <CommandGroup>
+                  {visibleFields.map((f) => (
+                    <CommandItem
+                      key={f.key}
+                      value={f.key}
+                      onSelect={(value) => {
+                        onPick(value);
+                        setOpen(false);
+                      }}
+                      className="flex items-center gap-2"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                        {f.key}
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }

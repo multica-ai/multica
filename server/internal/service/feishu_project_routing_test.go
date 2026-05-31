@@ -352,26 +352,35 @@ func TestParseFeishuProjectBusinessLineTree(t *testing.T) {
 	}
 }
 
-func TestParseFeishuProjectFieldMetasDedupes(t *testing.T) {
+func TestParseFeishuProjectFieldMetasDedupesAndScopes(t *testing.T) {
+	// Mirrors the /field/all response: flat list under "data", each entry carries
+	// work_item_scopes. The parser must dedupe by field_key, filter to the requested
+	// scope, and surface custom-field display names (e.g. "BUG提单助手" / field_c1f194,
+	// which /work_item/issue/meta silently drops — the whole reason we switched).
 	payload := map[string]any{
 		"data": []any{
-			map[string]any{"field_key": "business", "name": "业务线", "field_type_key": "_select"},
-			map[string]any{"field_key": "owner", "name": "负责人"},
-			// duplicate — should be skipped
-			map[string]any{"field_key": "business", "name": "业务线 dup"},
+			map[string]any{"field_key": "business", "field_name": "业务线", "field_type_key": "_select", "work_item_scopes": []any{"issue"}},
+			map[string]any{"field_key": "owner", "field_name": "负责人", "work_item_scopes": []any{"issue", "story"}},
+			map[string]any{"field_key": "field_c1f194", "field_name": "BUG提单助手", "field_type_key": "radio", "is_custom_field": true, "work_item_scopes": []any{"issue"}},
+			// Different scope — must be filtered out.
+			map[string]any{"field_key": "story_only", "field_name": "需求字段", "work_item_scopes": []any{"story"}},
+			// Duplicate of "business" — must be skipped.
+			map[string]any{"field_key": "business", "field_name": "业务线 dup", "work_item_scopes": []any{"issue"}},
 		},
 	}
-	fields := parseFeishuProjectFieldMetas(payload)
-	if len(fields) != 2 {
-		t.Fatalf("expected 2 unique fields, got %d (%#v)", len(fields), fields)
-	}
-	// Order isn't important for the assertion below — just that both keys appear once.
+	fields := parseFeishuProjectFieldMetas(payload, "issue")
 	seen := map[string]string{}
 	for _, f := range fields {
 		seen[f.Key] = f.Name
 	}
-	if seen["business"] != "业务线" || seen["owner"] != "负责人" {
-		t.Fatalf("unexpected fields: %#v", seen)
+	if seen["business"] != "业务线" || seen["owner"] != "负责人" || seen["field_c1f194"] != "BUG提单助手" {
+		t.Fatalf("expected issue-scoped fields with first-name wins, got %#v", seen)
+	}
+	if _, leaked := seen["story_only"]; leaked {
+		t.Fatalf("story-only field leaked into issue scope: %#v", seen)
+	}
+	if len(fields) != 3 {
+		t.Fatalf("expected 3 unique fields (business, owner, field_c1f194), got %d (%#v)", len(fields), fields)
 	}
 }
 
@@ -392,19 +401,21 @@ func TestFeishuFieldDisplayNameAcceptsBothShapes(t *testing.T) {
 }
 
 func TestParseFeishuProjectSearchIndexesByDisplayName(t *testing.T) {
-	// Two work items: one with the standard `owner` field_key, one with a custom
-	// `field_xxx` field_key but a "经办人" display name. The owner-email extractor
-	// should resolve both.
+	// Two work items, both modelling realistic Meego shapes for the handler/assignee:
+	// one with a built-in `issue_operator` (displayed as 经办人), one with a custom
+	// `field_xxx` whose display name is 经办人. Both should resolve the user_key to an
+	// email via user_details. We don't include a `field_key: "owner"` case — in Meego
+	// that field is the CREATOR, not the assignee (see feishuProjectOwnerEmail comment).
 	payload := map[string]any{
 		"data": []any{
 			map[string]any{
 				"id":   1,
-				"name": "standard-owner-item",
+				"name": "issue-operator-item",
 				"fields": []any{
 					map[string]any{
-						"field_key":   "owner",
-						"name":        "Owner",
-						"field_value": "user-1",
+						"field_key":   "issue_operator",
+						"name":        "经办人",
+						"field_value": []any{"user-1"},
 					},
 				},
 				"user_details": []any{
@@ -432,10 +443,10 @@ func TestParseFeishuProjectSearchIndexesByDisplayName(t *testing.T) {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
 	if items[0].OwnerEmail != "alice@example.com" {
-		t.Fatalf("standard owner: got %q", items[0].OwnerEmail)
+		t.Fatalf("issue_operator via 经办人 display name: got %q", items[0].OwnerEmail)
 	}
 	if items[1].OwnerEmail != "bob@example.com" {
-		t.Fatalf("custom field via display name 经办人: got %q", items[1].OwnerEmail)
+		t.Fatalf("custom field via 经办人 display name: got %q", items[1].OwnerEmail)
 	}
 }
 
@@ -578,14 +589,18 @@ func TestFeishuProjectOwnerEmailChineseNameFallback(t *testing.T) {
 		t.Fatalf("经办人 + user_keys: got %q", got)
 	}
 
-	// Current handler is not the issue owner. The stable owner field should win.
+	// Meego's `owner` field is the CREATOR, not the assignee — see
+	// feishuProjectOwnerEmail for the field_name="创建者" evidence. When the only
+	// assignee-shaped signal is a Chinese display name (处理人), that's what should
+	// win; the (mis-named) `owner` value must be ignored, and `current_status_operator`
+	// is the wrong workflow-position concept either way.
 	record3 := map[string]string{
 		"current_status_operator": "eve@example.com",
 		"处理人":                     "frank@example.com",
 		"owner":                   "grace@example.com",
 	}
-	if got := feishuProjectOwnerEmail(record3, nil); got != "grace@example.com" {
-		t.Fatalf("expected owner to win, got %q", got)
+	if got := feishuProjectOwnerEmail(record3, nil); got != "frank@example.com" {
+		t.Fatalf("expected 处理人 to win (owner is the creator, must be ignored), got %q", got)
 	}
 
 	record4 := map[string]string{
@@ -594,6 +609,20 @@ func TestFeishuProjectOwnerEmailChineseNameFallback(t *testing.T) {
 	}
 	if got := feishuProjectOwnerEmail(record4, nil); got != "" {
 		t.Fatalf("expected current handler fields to be ignored, got %q", got)
+	}
+
+	// Regression for partopia#7004726014: 经办人 is empty in Feishu (no operator role,
+	// no 处理人/经办人/负责人 fields), but `owner` carries the creator's user_key.
+	// We must NOT use that — the Multica issue should stay unassigned so the
+	// integration's fallback agent (or empty) wins. Before the fix, this resolved
+	// to the creator's email and silently auto-assigned them.
+	record5 := map[string]string{
+		"owner":          "7052790644598751234",
+		"issue_reporter": "7052790644598751234",
+	}
+	creatorEmails := map[string]string{"7052790644598751234": "jinnanxu@lilith.com"}
+	if got := feishuProjectOwnerEmail(record5, creatorEmails); got != "" {
+		t.Fatalf("owner=creator must not leak as assignee, got %q", got)
 	}
 }
 

@@ -338,6 +338,12 @@ func TestFeishuProjectManualQueryWorkItemsUsesThirtyDayUpdatedAtFilter(t *testin
 }
 
 func TestFeishuProjectQueryWorkItemsResolvesOwnerEmailFromUserDetails(t *testing.T) {
+	// End-to-end: the assignee is in `issue_operator` (经办人), resolved through
+	// user_details. The `owner` and `current_status_operator` fields also reference
+	// the same person but must NOT be the source of OwnerEmail — `owner` is the
+	// CREATOR in Meego and `current_status_operator` is a workflow-position concept.
+	// Here all three happen to coincide, which is realistic when an issue's creator
+	// is also assigned to themselves; the point is which field we pull from.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/open_api/authen/plugin_token":
@@ -352,8 +358,9 @@ func TestFeishuProjectQueryWorkItemsResolvesOwnerEmailFromUserDetails(t *testing
 					"name": "test-wenxue",
 					"work_item_status": {"state_key": "OPEN", "name": "新建"},
 					"fields": [
-						{"field_key": "current_status_operator", "field_alias": "current_status_operator", "field_value": ["7052496113189830658"]},
-						{"field_key": "owner", "field_alias": "owner", "field_value": "7052496113189830658"}
+						{"field_key": "current_status_operator", "field_alias": "current_status_operator", "name": "当前负责人", "field_value": ["7052496113189830658"]},
+						{"field_key": "owner", "field_alias": "owner", "name": "创建者", "field_value": "7052496113189830658"},
+						{"field_key": "issue_operator", "field_alias": "issue_operator", "name": "经办人", "field_value": ["7052496113189830658"]}
 					],
 					"user_details": [{
 						"user_key": "7052496113189830658",
@@ -389,7 +396,65 @@ func TestFeishuProjectQueryWorkItemsResolvesOwnerEmailFromUserDetails(t *testing
 		t.Fatalf("len(items) = %d, want 1", len(items))
 	}
 	if items[0].OwnerEmail != "beastpu@lilith.com" {
-		t.Fatalf("OwnerEmail = %q, want beastpu@lilith.com", items[0].OwnerEmail)
+		t.Fatalf("OwnerEmail = %q, want beastpu@lilith.com (resolved from 经办人 via user_details)", items[0].OwnerEmail)
+	}
+}
+
+// Regression for partopia#7004726014: when 经办人 (operator role) is empty, the synced
+// Multica issue must NOT be auto-assigned to the creator. Modelled on the real Meego
+// payload — only `owner` (= creator), `current_status_operator`, and an empty
+// role_owners[operator] are populated; no `issue_operator` / 经办人 / 处理人 / 负责人.
+func TestFeishuProjectQueryWorkItemsLeavesOwnerEmailEmptyWhenOperatorIsBlank(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/work_item/filter":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"err_code": 0,
+				"data": [{
+					"id": 7004726014,
+					"name": "operator-empty-item",
+					"work_item_status": {"state_key": "OPEN", "name": "新建"},
+					"fields": [
+						{"field_key": "owner", "field_alias": "owner", "name": "创建者", "field_value": "7052790644598751234"},
+						{"field_key": "current_status_operator", "field_alias": "current_status_operator", "name": "当前负责人", "field_value": ["7052790644598751234"]},
+						{"field_key": "role_owners", "field_type_key": "role_owners", "field_value": [
+							{"role": "operator", "owners": null},
+							{"role": "reporter", "owners": ["7052790644598751234"]}
+						]}
+					],
+					"user_details": [{
+						"user_key": "7052790644598751234",
+						"email": "jinnanxu@lilith.com",
+						"name_cn": "徐晋楠"
+					}]
+				}],
+				"pagination": {"page_num": 1, "page_size": 100, "total": 1}
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	items, err := client.QueryWorkItems(context.Background(), db.FeishuProjectIntegration{
+		ProjectKey:    "project-key",
+		PluginID:      "plugin-id",
+		PluginSecret:  "plugin-secret",
+		StatusMapping: []byte(`{"OPEN": "todo"}`),
+	}, "issue", false)
+	if err != nil {
+		t.Fatalf("QueryWorkItems: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].OwnerEmail != "" {
+		t.Fatalf("OwnerEmail = %q, want empty (creator must not leak as assignee)", items[0].OwnerEmail)
 	}
 }
 
