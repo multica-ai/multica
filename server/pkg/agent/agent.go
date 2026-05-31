@@ -239,7 +239,7 @@ var launchHeaders = map[string]string{
 	"codex":        "codex app-server",
 	"copilot":      "copilot (json)",
 	"cursor":       "cursor-agent (stream-json)",
-	"DeepSeek-TUI": "deepseek app-server (native)",
+	"DeepSeek-TUI": "deepseek-tui exec --json --auto",
 	"gemini":       "gemini (stream-json)",
 	"hermes":       "hermes acp",
 	"kimi":         "kimi acp",

@@ -160,8 +160,12 @@ function parseSkillMdFormat(files: ParsedFile[]): CreateSkillRequest[] {
     // For root-level SKILL.md, only include files not claimed by other skill dirs
     const filteredFiles = prefix === ""
       ? supportingFiles.filter((f) => {
-          const fDir = getDirectory(f.relativePath);
-          return !skillDirs.has(fDir);
+          for (const skillDir of skillDirs) {
+            if (skillDir !== "" && f.relativePath.startsWith(skillDir + "/")) {
+              return false;
+            }
+          }
+          return true;
         })
       : supportingFiles;
 

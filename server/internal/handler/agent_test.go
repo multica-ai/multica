@@ -330,7 +330,7 @@ func TestCopyAgentCopiesConfigFields(t *testing.T) {
 		t.Fatalf("skills = %#v, want skill %s", resp.Skills, skillID)
 	}
 	if !resp.HasCustomEnv || resp.CustomEnvKeyCount != 2 {
-		t.Fatalf("custom_env values should be preserved when copying own agent, got %#v", resp.CustomEnv)
+		t.Fatalf("custom_env metadata mismatch when copying own agent: has_custom_env=%v custom_env_key_count=%d", resp.HasCustomEnv, resp.CustomEnvKeyCount)
 	}
 	if resp.CustomEnvCopiedPending {
 		t.Fatal("custom_env_copied_pending = true, want false for own agent copy")
@@ -409,7 +409,7 @@ func TestCopyAgentStripsEnvValuesForOtherOwners(t *testing.T) {
 		t.Fatalf("owner_id = %v, want requester %s", resp.OwnerID, testUserID)
 	}
 	if !resp.HasCustomEnv || resp.CustomEnvKeyCount != 2 {
-		t.Fatalf("custom_env values should be stripped when copying another owner's agent, got %#v", resp.CustomEnv)
+		t.Fatalf("custom_env metadata mismatch when copying another owner's agent: has_custom_env=%v custom_env_key_count=%d", resp.HasCustomEnv, resp.CustomEnvKeyCount)
 	}
 	if !resp.CustomEnvCopiedPending {
 		t.Fatal("custom_env_copied_pending = false, want true")
@@ -779,6 +779,134 @@ func TestUpdateAgentEnv_PreservesSentinelValues(t *testing.T) {
 		if strings.Contains(details, leak) {
 			t.Errorf("audit details leaked value %q: %s", leak, details)
 		}
+	}
+}
+
+// TestAgentEnv_MemberOwnerAllowed verifies that a workspace member (non-admin)
+// who is the agent's owner can GET and PUT the agent's env vars (OPE-1927).
+func TestAgentEnv_MemberOwnerAllowed(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	suffix := uuid.NewString()
+
+	// Create a separate user with "member" role.
+	memberEmail := "env-member-owner-" + suffix + "@multica.test"
+	var memberUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Env Member Owner', $1)
+		RETURNING id
+	`, memberEmail).Scan(&memberUserID); err != nil {
+		t.Fatalf("create member user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, memberUserID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, memberUserID); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+
+	// Create an agent owned by the member user.
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4,
+			'', '{"SECRET":"s3cr3t"}'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, "env-member-owner-agent-"+suffix, handlerTestRuntimeID(t), memberUserID).Scan(&agentID); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	// GET /api/agents/{id}/env as the member-owner should succeed.
+	req := newRequest("GET", "/api/agents/"+agentID+"/env", nil)
+	req.Header.Set("X-User-ID", memberUserID)
+	req = withURLParam(req, "id", agentID)
+	w := httptest.NewRecorder()
+	testHandler.GetAgentEnv(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET env as member-owner: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp AgentEnvResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.CustomEnv["SECRET"] != "s3cr3t" {
+		t.Errorf("expected SECRET=s3cr3t, got %v", resp.CustomEnv)
+	}
+
+	// PUT /api/agents/{id}/env as the member-owner should succeed.
+	req = newRequest("PUT", "/api/agents/"+agentID+"/env", map[string]any{
+		"custom_env": map[string]string{"SECRET": "rotated", "NEW_KEY": "v"},
+	})
+	req.Header.Set("X-User-ID", memberUserID)
+	req = withURLParam(req, "id", agentID)
+	w = httptest.NewRecorder()
+	testHandler.UpdateAgentEnv(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT env as member-owner: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestAgentEnv_NonOwnerMemberRejected verifies that a workspace member who
+// is NOT the agent's owner gets 403 (OPE-1927).
+func TestAgentEnv_NonOwnerMemberRejected(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	suffix := uuid.NewString()
+
+	// Create a member who does NOT own the agent.
+	otherEmail := "env-non-owner-" + suffix + "@multica.test"
+	var otherUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Env Non Owner', $1)
+		RETURNING id
+	`, otherEmail).Scan(&otherUserID); err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, otherUserID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, otherUserID); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+
+	// Agent owned by testUserID (workspace owner), not by otherUserID.
+	agentID := createHandlerTestAgent(t, "env-non-owner-agent-"+suffix, nil)
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"K":"v"}' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("seed env: %v", err)
+	}
+
+	// GET as non-owner member should be rejected.
+	req := newRequest("GET", "/api/agents/"+agentID+"/env", nil)
+	req.Header.Set("X-User-ID", otherUserID)
+	req = withURLParam(req, "id", agentID)
+	w := httptest.NewRecorder()
+	testHandler.GetAgentEnv(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("GET env as non-owner member: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

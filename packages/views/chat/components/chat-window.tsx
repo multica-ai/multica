@@ -32,6 +32,7 @@ import { api } from "@multica/core/api";
 import { isAgentSelectable } from "@multica/core/permissions";
 import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
@@ -604,8 +605,14 @@ function AgentDropdown({
   onSelect: (agent: Agent) => void;
 }) {
   const { t } = useT("chat");
-  // Split into the user's own agents and everyone else so the menu groups
-  // them — matches the old AgentSelector layout.
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
   const { mine, others } = useMemo(() => {
     const mine: Agent[] = [];
     const others: Agent[] = [];
@@ -616,12 +623,30 @@ function AgentDropdown({
     return { mine, others };
   }, [agents, userId]);
 
+  const filteredMine = useMemo(() => {
+    if (!query) return mine;
+    const q = query.trim().toLowerCase();
+    return mine.filter(
+      (a) => a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q),
+    );
+  }, [mine, query]);
+
+  const filteredOthers = useMemo(() => {
+    if (!query) return others;
+    const q = query.trim().toLowerCase();
+    return others.filter(
+      (a) => a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q),
+    );
+  }, [others, query]);
+
+  const hasResults = filteredMine.length > 0 || filteredOthers.length > 0;
+
   if (!activeAgent) {
     return <span className="text-xs text-muted-foreground">{t(($) => $.window.no_agents)}</span>;
   }
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={(v) => { setOpen(v); if (!v) setQuery(""); }}>
       <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent">
         <ActorAvatar
           actorType="agent"
@@ -633,11 +658,26 @@ function AgentDropdown({
         <span className="text-xs font-medium max-w-28 truncate">{activeAgent.name}</span>
         <ChevronDown className="size-3 text-muted-foreground shrink-0" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="top" className="max-h-80 w-auto max-w-64">
-        {mine.length > 0 && (
+      <DropdownMenuContent
+        align="start"
+        side="top"
+        className="max-h-80 w-auto max-w-64"
+      >
+        <div className="px-2 py-1.5 border-b">
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key !== "Escape") e.stopPropagation(); }}
+            placeholder={t(($) => $.window.search_placeholder)}
+            className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+          />
+        </div>
+        {filteredMine.length > 0 && (
           <DropdownMenuGroup>
             <DropdownMenuLabel>{t(($) => $.window.my_agents)}</DropdownMenuLabel>
-            {mine.map((agent) => (
+            {filteredMine.map((agent) => (
               <AgentMenuItem
                 key={agent.id}
                 agent={agent}
@@ -647,11 +687,11 @@ function AgentDropdown({
             ))}
           </DropdownMenuGroup>
         )}
-        {mine.length > 0 && others.length > 0 && <DropdownMenuSeparator />}
-        {others.length > 0 && (
+        {filteredMine.length > 0 && filteredOthers.length > 0 && <DropdownMenuSeparator />}
+        {filteredOthers.length > 0 && (
           <DropdownMenuGroup>
             <DropdownMenuLabel>{t(($) => $.window.others)}</DropdownMenuLabel>
-            {others.map((agent) => (
+            {filteredOthers.map((agent) => (
               <AgentMenuItem
                 key={agent.id}
                 agent={agent}
@@ -660,6 +700,11 @@ function AgentDropdown({
               />
             ))}
           </DropdownMenuGroup>
+        )}
+        {!hasResults && (
+          <div className="px-2 py-3 text-center text-sm text-muted-foreground">
+            {t(($) => $.window.no_match)}
+          </div>
         )}
       </DropdownMenuContent>
     </DropdownMenu>

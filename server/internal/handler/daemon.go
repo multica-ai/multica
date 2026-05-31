@@ -2325,7 +2325,7 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 			row := h.DB.QueryRow(r.Context(), `
 				SELECT id, workspace_id, issue_id, owner_id, cli_name, status,
 					started_at, completed_at, exit_code, work_dir, context_dir,
-					comments_mode, top_comment_id, error, created_at, updated_at
+					comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
 				FROM local_cli_run
 				WHERE id = $1 AND workspace_id = $2
 			`, runUUID, wsUUID)

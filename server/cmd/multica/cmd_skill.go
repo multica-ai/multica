@@ -124,6 +124,7 @@ func init() {
 
 	// skill import
 	skillImportCmd.Flags().String("url", "", "URL to import from (required)")
+	skillImportCmd.Flags().String("gitee-token", "", "Gitee personal access token for private Gitee repository imports")
 	skillImportCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// skill files list
@@ -339,6 +340,9 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 
 	body := map[string]any{
 		"url": importURL,
+	}
+	if token, _ := cmd.Flags().GetString("gitee-token"); strings.TrimSpace(token) != "" {
+		body["gitee_token"] = strings.TrimSpace(token)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

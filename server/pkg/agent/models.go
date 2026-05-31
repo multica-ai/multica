@@ -38,6 +38,15 @@ type Model struct {
 	Thinking *ModelThinking `json:"thinking,omitempty"`
 }
 
+type deepseekModelEntry struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Model    string `json:"model"`
+	Label    string `json:"label"`
+	Provider string `json:"provider"`
+	Default  bool   `json:"default"`
+}
+
 // ModelThinking carries the per-model reasoning/effort catalog
 // surfaced by an agent runtime. Values are runtime-native — Codex
 // emits "none|minimal|low|medium|high|xhigh"; Claude emits
@@ -546,134 +555,99 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 	})
 }
 
-// discoverDeepseekModels spins up a throwaway `deepseek app-server
-// --stdio` process and queries the model catalog via the native
-// `app/models` JSON-RPC method. DeepSeek-TUI does NOT speak ACP —
-// it has its own protocol where `app/models` returns a structured
-// list of available models with provider and capability information.
+// discoverDeepseekModels runs the current DeepSeek-TUI model catalog command:
+// `deepseek-tui models --json`. The older `deepseek app-server --stdio`
+// protocol was removed from DeepSeek-TUI 0.8.x, and the deprecated `deepseek`
+// wrapper can now fail before delegating to the real binary.
 //
-// If discovery fails (binary missing, API error), we fall back to a
-// static catalog of DeepSeek's flagship models.
+// If discovery fails (binary missing, API error), fall back to a static catalog
+// of DeepSeek's flagship models so the runtime can still register.
 func discoverDeepseekModels(ctx context.Context, executablePath string) ([]Model, error) {
 	bin := executablePath
 	if bin == "" {
-		bin = "deepseek"
+		bin = "deepseek-tui"
 	}
 
 	discoverCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(discoverCtx, bin, "app-server", "--stdio")
+	cmd := exec.CommandContext(discoverCtx, bin, "models", "--json")
 	cmd.Stderr = io.Discard
 
-	stdin, err := cmd.StdinPipe()
+	out, err := cmd.Output()
 	if err != nil {
 		return deepseekStaticModels(), nil
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
+
+	models := parseDeepseekModelsJSON(out)
+	if len(models) == 0 {
 		return deepseekStaticModels(), nil
 	}
-	if err := cmd.Start(); err != nil {
-		return deepseekStaticModels(), nil
-	}
-	defer func() {
-		stdin.Close()
-		_ = cmd.Wait()
-	}()
+	return models, nil
+}
 
-	// Send app/models request.
-	req, _ := json.Marshal(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "app/models",
-		"params":  map[string]any{},
-	})
-	req = append(req, '\n')
-	if _, err := stdin.Write(req); err != nil {
-		return deepseekStaticModels(), nil
-	}
-
-	// Read lines until we get the JSON-RPC response.
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
-
-	type dsModel struct {
-		ID               string   `json:"id"`
-		Provider         string   `json:"provider"`
-		Aliases          []string `json:"aliases"`
-		SupportsTools    bool     `json:"supports_tools"`
-		SupportsReasoning bool   `json:"supports_reasoning"`
-	}
+func parseDeepseekModelsJSON(raw []byte) []Model {
 	type dsModelsResult struct {
-		OK   bool `json:"ok"`
-		Data struct {
-			Models []dsModel `json:"models"`
+		OK     bool                 `json:"ok"`
+		Models []deepseekModelEntry `json:"models"`
+		Data   struct {
+			Models []deepseekModelEntry `json:"models"`
 		} `json:"data"`
 	}
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+	var wrapped dsModelsResult
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &wrapped); err == nil {
+		if len(wrapped.Models) > 0 {
+			return deepseekModelEntriesToModels(wrapped.Models)
 		}
-
-		var raw map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(line), &raw); err != nil {
-			continue
+		if len(wrapped.Data.Models) > 0 {
+			return deepseekModelEntriesToModels(wrapped.Data.Models)
 		}
-
-		// Skip push events (have "type", no "id").
-		if _, hasType := raw["type"]; hasType {
-			continue
-		}
-		if _, hasID := raw["id"]; !hasID {
-			continue
-		}
-
-		// Parse the result.
-		resultData, ok := raw["result"]
-		if !ok {
-			break
-		}
-
-		var result dsModelsResult
-		if err := json.Unmarshal(resultData, &result); err != nil || !result.OK || len(result.Data.Models) == 0 {
-			break
-		}
-
-		var models []Model
-		for i, m := range result.Data.Models {
-			label := m.ID
-			if m.Provider != "" && !strings.HasPrefix(m.ID, m.Provider+"/") {
-				label = m.ID
-			}
-			models = append(models, Model{
-				ID:       m.ID,
-				Label:    label,
-				Provider: m.Provider,
-				Default:  i == 0,
-			})
-		}
-
-		// Shut down the process.
-		shutdown, _ := json.Marshal(map[string]any{
-			"jsonrpc": "2.0", "id": 2,
-			"method": "shutdown", "params": map[string]any{},
-		})
-		_, _ = stdin.Write(append(shutdown, '\n'))
-
-		return models, nil
 	}
 
-	// Shut down on failure path.
-	shutdown, _ := json.Marshal(map[string]any{
-		"jsonrpc": "2.0", "id": 2,
-		"method": "shutdown", "params": map[string]any{},
-	})
-	_, _ = stdin.Write(append(shutdown, '\n'))
+	var flat []deepseekModelEntry
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &flat); err == nil {
+		return deepseekModelEntriesToModels(flat)
+	}
+	return nil
+}
 
-	return deepseekStaticModels(), nil
+func deepseekModelEntriesToModels(entries []deepseekModelEntry) []Model {
+	models := make([]Model, 0, len(entries))
+	hasDefault := false
+	for _, m := range entries {
+		id := strings.TrimSpace(m.ID)
+		if id == "" {
+			id = strings.TrimSpace(m.Model)
+		}
+		if id == "" {
+			id = strings.TrimSpace(m.Name)
+		}
+		if id == "" {
+			continue
+		}
+		label := strings.TrimSpace(m.Label)
+		if label == "" {
+			label = id
+		}
+		provider := strings.TrimSpace(m.Provider)
+		if provider == "" {
+			provider = "DeepSeek-TUI"
+		}
+		if m.Default {
+			hasDefault = true
+		}
+		models = append(models, Model{
+			ID:       id,
+			Label:    label,
+			Provider: provider,
+			Default:  m.Default,
+		})
+	}
+	if len(models) > 0 && !hasDefault {
+		models[0].Default = true
+	}
+	return models
 }
 
 // deepseekStaticModels is a fallback catalog for DeepSeek models when

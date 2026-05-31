@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "multica codex-plugin hook",
+            "statusMessage": "Recording Multica user prompt"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "multica codex-plugin hook",
+            "statusMessage": "Syncing conversation to Multica"
+          }
+        ]
+      }
+    ]
+  }
+}

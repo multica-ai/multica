@@ -162,6 +162,10 @@
         "title": "Import from URL",
         "desc": "Fetch a published skill by URL. Files are pulled server-side."
       },
+      "local": {
+        "title": "Upload local directory",
+        "desc": "Select a folder from this machine and import its skill files."
+      },
       "runtime": {
         "title": "Copy from runtime",
         "desc": "Scan a local runtime and promote one of its on-disk skills into this workspace."
@@ -172,6 +176,8 @@
       "manual_desc": "Start from a blank SKILL.md and write your own instructions.",
       "url_title": "Import from URL",
       "url_desc": "Pull a published skill from ClawHub or Skills.sh.",
+      "local_title": "Upload local directory",
+      "local_desc": "Import SKILL.md folders, Claude commands, or Codex files from disk.",
       "runtime_title": "Copy from runtime",
       "runtime_desc": "Promote a skill already installed on your local runtime."
     },
@@ -190,6 +196,9 @@
     },
     "url": {
       "url_label": "Skill URL",
+      "gitee_token_label": "Gitee token",
+      "gitee_token_placeholder": "Optional for private Gitee repositories",
+      "gitee_token_hint": "Sent only with this import request. It is not stored.",
       "supported_sources": "Supported sources",
       "import": "Import",
       "importing": "Importing…",
@@ -201,6 +210,28 @@
       "fallback_error": "Import failed",
       "cancel": "Cancel",
       "toast_imported": "Skill imported"
+    },
+    "local": {
+      "select_directory": "Select directory",
+      "supported_hint": "Supports SKILL.md directories, .claude/commands/*.md, AGENTS.md, and codex.md.",
+      "detected_count_one": "{{count}} skill detected",
+      "detected_count_other": "{{count}} skills detected",
+      "choose_another": "Choose another",
+      "file_count_one": "{{count}} file",
+      "file_count_other": "{{count}} files",
+      "import_button_one": "Import {{count}} Skill",
+      "import_button_other": "Import {{count}} Skills",
+      "importing": "Importing…",
+      "import_complete": "Import complete",
+      "import_summary": "{{created}} imported, {{skipped}} skipped.",
+      "skipped_names": "Skipped duplicates: {{names}}",
+      "no_skills_error": "No skill files found. Supported: .claude/commands/*.md, AGENTS.md, codex.md, or directories containing SKILL.md.",
+      "parse_failed": "Failed to parse directory",
+      "import_failed": "Failed to import skills",
+      "toast_imported_one": "{{count}} skill imported",
+      "toast_imported_other": "{{count}} skills imported",
+      "cancel": "Cancel",
+      "done": "Done"
     }
   },
   "runtime_import": {

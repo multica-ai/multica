@@ -66,6 +66,7 @@ apps/mobile/**/*.mobileprovision
 .deepseek/
 .codegraph/
 .mcp.json
+!plugins/multica-codex-app/.mcp.json
 
 # feature tracking
 _features/
@@ -81,3 +82,5 @@ data/
 .kilo
 .idea
 testcase/report/
+.antigravitycli/
+apps/mobile/credentials.json

@@ -61,6 +61,8 @@
     "my_agents": "My agents",
     "others": "Others",
     "no_agents": "No agents",
+    "search_placeholder": "Search agents…",
+    "no_match": "No matching agents",
     "active_group": "Active",
     "archived_group_one": "{{count}} archived chat",
     "archived_group_other": "{{count}} archived chats"

@@ -58,6 +58,8 @@
     "my_agents": "我的智能体",
     "others": "其他",
     "no_agents": "暂无智能体",
+    "search_placeholder": "搜索智能体...",
+    "no_match": "无匹配结果",
     "active_group": "进行中",
     "archived_group_other": "{{count}} 条已归档"
   },

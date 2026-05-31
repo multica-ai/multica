@@ -333,6 +333,15 @@
     "stop_tooltip": "Stop agent",
     "cancel_failed": "Failed to cancel task"
   },
+  "agent_stream": {
+    "runs": "Runs",
+    "collapse": "Collapse",
+    "no_runs": "No runs yet",
+    "other_runs": "Other runs",
+    "no_other_runs": "No other runs.",
+    "no_local_stream": "No local agent stream yet.",
+    "jump_to_comment": "Jump to comment"
+  },
   "execution_log": {
     "section": "Execution log",
     "show_past": "Show past runs ({{count}})",

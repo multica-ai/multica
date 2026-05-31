@@ -530,6 +530,8 @@ type LocalCliRun struct {
 	Error        pgtype.Text        `json:"error"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Source       pgtype.Text        `json:"source"`
+	SourceKey    pgtype.Text        `json:"source_key"`
 }
 
 type LocalCliUsage struct {

@@ -1117,16 +1117,19 @@ export function IssueDetail({
   }, []);
   const didHighlightRef = useRef<string | null>(null);
 
-  // Scroll to and briefly highlight a comment — used by ExecutionLogSection
-  // when clicking a comment-triggered run's trigger text.
+  // Navigate by the canonical trigger_comment_id, then let the deep-link
+  // timeline path fetch the exact target if it is not currently mounted.
   const handleHighlightComment = useCallback((commentId: string) => {
+    // Update URL without triggering a router navigation/data fetch
+    const url = paths.issueDetail(id, { commentId });
+    window.history.replaceState(window.history.state, "", url);
     const el = document.getElementById(`comment-${commentId}`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       setHighlightedId(commentId);
       setTimeout(() => setHighlightedId(null), 2000);
     }
-  }, []);
+  }, [id, paths]);
 
   const [clearHistoryDialogOpen, setClearHistoryDialogOpen] = useState(false);
   const clearHistoryMutation = useClearIssueHistory();
@@ -2340,13 +2343,13 @@ export function IssueDetail({
   };
 
   const sidebarContent = (
-    <Tabs defaultValue="stream" className="flex h-full min-h-0 flex-col">
+    <Tabs defaultValue="runs" className="flex h-full min-h-0 flex-col">
       <TabsList className="mb-3 grid w-full grid-cols-2">
-        <TabsTrigger value="stream">Stream</TabsTrigger>
+        <TabsTrigger value="runs">Runs</TabsTrigger>
         <TabsTrigger value="properties">Properties</TabsTrigger>
       </TabsList>
-      <TabsContent value="stream" keepMounted className="mt-0 min-h-0 flex-1">
-        <AgentStreamSidebar issueId={issue.id} />
+      <TabsContent value="runs" keepMounted className="mt-0 min-h-0 flex-1">
+        <AgentStreamSidebar issueId={issue.id} onHighlightComment={handleHighlightComment} />
       </TabsContent>
       <TabsContent value="properties" keepMounted className="mt-0 min-h-0 flex-1 overflow-y-auto">
         {propertiesContent}
