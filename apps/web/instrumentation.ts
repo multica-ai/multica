@@ -22,7 +22,7 @@ async function sendLog(
       }),
       signal: AbortSignal.timeout(3000),
     });
-  } catch {
+  } catch (_e) {
   }
 }
 
@@ -41,7 +41,7 @@ async function warmup(): Promise<void> {
       await fetch(`${SELF_URL}${path}`, {
         signal: AbortSignal.timeout(10000),
       });
-    } catch {
+    } catch (_e) {
     }
   }
 }
