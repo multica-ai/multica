@@ -284,6 +284,7 @@ func TestBrowserCommandsForOS(t *testing.T) {
 			t.Fatal("browserCommandsForOS() expected error for unsupported platform")
 		}
 	})
+}
 
 // TestValidateLoginTokenPrefix pins the accepted PAT prefix set for
 // `multica login --token`. The original implementation hardcoded `mul_`
