@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -93,10 +94,20 @@ func loadExpectedMigrations() ([]string, error) {
 }
 
 func resolveMigrationsDir() (string, error) {
-	candidates := []string{
+	candidates := make([]string, 0, 4)
+
+	if envDir := os.Getenv("MULTICA_MIGRATIONS_DIR"); envDir != "" {
+		candidates = append(candidates, envDir)
+	}
+
+	if callerPath, ok := callerMigrationsDir(); ok {
+		candidates = append(candidates, callerPath)
+	}
+
+	candidates = append(candidates,
 		"migrations",
 		filepath.Join("server", "migrations"),
-	}
+	)
 
 	for _, candidate := range candidates {
 		info, err := os.Stat(candidate)
@@ -109,4 +120,14 @@ func resolveMigrationsDir() (string, error) {
 	}
 
 	return "", fmt.Errorf("could not locate migrations directory")
+}
+
+func callerMigrationsDir() (string, bool) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", false
+	}
+
+	dir := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "migrations"))
+	return dir, true
 }

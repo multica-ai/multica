@@ -42,6 +42,8 @@ export interface ListIssuesParams {
   creator_id?: string;
   creator_type?: "member" | "agent";
   project_id?: string;
+  label_ids?: string[];
+  label_match_mode?: "any" | "all";
   search?: string;
   due_from?: string;
   due_to?: string;

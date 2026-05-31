@@ -99,6 +99,12 @@ description: 用这个 agent 执行 spec-first 工作流。它会在中等和复
 3. 本地验证优先使用 `make check-worktree`
 4. 如果 worktree 环境未初始化完成，先补齐初始化，再继续实现或验证
 
+如果当前 worktree 需要回收：
+
+1. 先用 `make list-worktree-resources` 确认将要销毁的数据库和端口
+2. 回收当前 worktree 资源时，使用 `make destroy-worktree FORCE=1`
+3. 从其他 checkout 删除整个 worktree 时，使用 `make remove-worktree WORKTREE_PATH=... FORCE=1`
+
 ## 设计深度要求
 
 对于功能设计、重构设计、缺失功能补设计：

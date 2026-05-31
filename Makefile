@@ -1,4 +1,4 @@
-.PHONY: dev daemon cli multica build release-build release-build-multi release-package release-package-multi test migrate-up migrate-down sqlc seed clean setup start start-air stop check worktree-env init-worktree-env setup-main start-main start-air-main stop-main check-main setup-worktree guard-worktree start-worktree start-air-worktree stop-worktree check-worktree db-up db-down
+.PHONY: dev daemon cli multica build release-build release-build-multi release-package release-package-multi test migrate-up migrate-down sqlc seed clean setup start start-air stop check worktree-env init-worktree-env list-worktree-resources destroy-worktree remove-worktree setup-main start-main start-air-main stop-main check-main setup-worktree guard-worktree start-worktree start-air-worktree stop-worktree check-worktree db-up db-down
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -105,6 +105,20 @@ worktree-env:
 init-worktree-env:
 	@bash scripts/init-worktree-env.sh .env.worktree
 
+list-worktree-resources:
+	@bash scripts/list-worktree-resources.sh "$(WORKTREE_ENV_FILE)"
+
+destroy-worktree:
+	@bash scripts/destroy-worktree.sh "$(WORKTREE_ENV_FILE)"
+
+remove-worktree:
+	@if [ -z "$(WORKTREE_PATH)" ]; then \
+		echo "Set WORKTREE_PATH=/absolute/or/relative/path/to/the-worktree you want to remove."; \
+		echo "Example: make remove-worktree WORKTREE_PATH=../multica-feature FORCE=1"; \
+		exit 1; \
+	fi
+	@bash scripts/remove-worktree.sh "$(WORKTREE_PATH)"
+
 setup-main:
 	@$(MAKE) setup ENV_FILE=$(MAIN_ENV_FILE)
 
@@ -129,6 +143,12 @@ setup-worktree:
 	fi
 	@if ! grep -q '^MULTICA_ENV_KIND=worktree$$' "$(WORKTREE_ENV_FILE)" 2>/dev/null; then \
 		printf '\nMULTICA_ENV_KIND=worktree\n' >> "$(WORKTREE_ENV_FILE)"; \
+	fi
+	@if ! grep -q '^WORKTREE_NAME=' "$(WORKTREE_ENV_FILE)" 2>/dev/null; then \
+		printf 'WORKTREE_NAME=%s\n' "$$(basename "$$PWD")" >> "$(WORKTREE_ENV_FILE)"; \
+	fi
+	@if ! grep -q '^WORKTREE_ROOT=' "$(WORKTREE_ENV_FILE)" 2>/dev/null; then \
+		printf 'WORKTREE_ROOT=%s\n' "$$PWD" >> "$(WORKTREE_ENV_FILE)"; \
 	fi
 	@$(MAKE) setup ENV_FILE=$(WORKTREE_ENV_FILE)
 	@bash scripts/check-worktree-ready.sh "$(WORKTREE_ENV_FILE)" setup

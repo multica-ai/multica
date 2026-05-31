@@ -85,6 +85,8 @@ const (
 	issueListViewBacklog  issueListView = "backlog"
 	issueListViewToday    issueListView = "today"
 	issueListViewUpcoming issueListView = "upcoming"
+	labelMatchModeAny     string        = "any"
+	labelMatchModeAll     string        = "all"
 )
 
 func parseIssueListView(value string) (pgtype.Text, error) {
@@ -131,6 +133,47 @@ func parseIssueListDate(value string, fieldName string) (pgtype.Date, error) {
 	}
 
 	return pgtype.Date{Time: parsed, Valid: true}, nil
+}
+
+// parseIssueListLabelMatchMode 统一约束标签筛选模式，避免前后端出现不一致语义。
+func parseIssueListLabelMatchMode(value string) (pgtype.Text, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return pgtype.Text{String: labelMatchModeAny, Valid: true}, nil
+	}
+
+	switch normalized {
+	case labelMatchModeAny, labelMatchModeAll:
+		return pgtype.Text{String: normalized, Valid: true}, nil
+	default:
+		return pgtype.Text{}, fmt.Errorf("invalid label_match_mode, expected one of: any, all")
+	}
+}
+
+// parseIssueListLabelIDs 负责校验并去重标签 id，避免重复参数影响 all 匹配语义。
+func parseIssueListLabelIDs(values []string) ([]pgtype.UUID, error) {
+	parsed := make([]pgtype.UUID, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+
+		parsedID := parseUUID(trimmed)
+		if !parsedID.Valid {
+			return nil, fmt.Errorf("invalid label_ids value: %s", trimmed)
+		}
+
+		seen[trimmed] = struct{}{}
+		parsed = append(parsed, parsedID)
+	}
+
+	return parsed, nil
 }
 
 type agentTriggerSnapshot struct {
@@ -338,6 +381,19 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	labelIDs, err := parseIssueListLabelIDs(r.URL.Query()["label_ids"])
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	labelMatchMode := pgtype.Text{}
+	if len(labelIDs) > 0 {
+		labelMatchMode, err = parseIssueListLabelMatchMode(r.URL.Query().Get("label_match_mode"))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	viewFilter, err := parseIssueListView(r.URL.Query().Get("view"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -345,26 +401,28 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	issues, err := h.Queries.ListIssues(ctx, db.ListIssuesParams{
-		WorkspaceID:  parseUUID(workspaceID),
-		Limit:        int32(limit),
-		Offset:       int32(offset),
-		Status:       statusFilter,
-		Priority:     priorityFilter,
-		AssigneeID:   assigneeFilter,
-		AssigneeType: assigneeTypeFilter,
-		CreatorID:    creatorFilter,
-		ProjectID:    projectFilter,
-		CreatorType:  creatorTypeFilter,
-		SearchText:   searchText,
-		SearchUuid:   searchUUID,
-		SearchNumber: searchNumber,
-		DueFrom:      dueFrom,
-		DueTo:        dueTo,
-		StartFrom:    startFrom,
-		StartTo:      startTo,
-		EndFrom:      endFrom,
-		EndTo:        endTo,
-		View:         viewFilter,
+		WorkspaceID:    parseUUID(workspaceID),
+		Limit:          int32(limit),
+		Offset:         int32(offset),
+		Status:         statusFilter,
+		Priority:       priorityFilter,
+		AssigneeID:     assigneeFilter,
+		AssigneeType:   assigneeTypeFilter,
+		CreatorID:      creatorFilter,
+		ProjectID:      projectFilter,
+		CreatorType:    creatorTypeFilter,
+		SearchText:     searchText,
+		SearchUuid:     searchUUID,
+		SearchNumber:   searchNumber,
+		DueFrom:        dueFrom,
+		DueTo:          dueTo,
+		StartFrom:      startFrom,
+		StartTo:        startTo,
+		EndFrom:        endFrom,
+		EndTo:          endTo,
+		LabelIds:       labelIDs,
+		LabelMatchMode: labelMatchMode,
+		View:           viewFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -372,24 +430,26 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	total, err := h.Queries.CountListedIssues(ctx, db.CountListedIssuesParams{
-		WorkspaceID:  parseUUID(workspaceID),
-		Status:       statusFilter,
-		Priority:     priorityFilter,
-		AssigneeID:   assigneeFilter,
-		AssigneeType: assigneeTypeFilter,
-		CreatorID:    creatorFilter,
-		ProjectID:    projectFilter,
-		CreatorType:  creatorTypeFilter,
-		SearchText:   searchText,
-		SearchUuid:   searchUUID,
-		SearchNumber: searchNumber,
-		DueFrom:      dueFrom,
-		DueTo:        dueTo,
-		StartFrom:    startFrom,
-		StartTo:      startTo,
-		EndFrom:      endFrom,
-		EndTo:        endTo,
-		View:         viewFilter,
+		WorkspaceID:    parseUUID(workspaceID),
+		Status:         statusFilter,
+		Priority:       priorityFilter,
+		AssigneeID:     assigneeFilter,
+		AssigneeType:   assigneeTypeFilter,
+		CreatorID:      creatorFilter,
+		ProjectID:      projectFilter,
+		CreatorType:    creatorTypeFilter,
+		SearchText:     searchText,
+		SearchUuid:     searchUUID,
+		SearchNumber:   searchNumber,
+		DueFrom:        dueFrom,
+		DueTo:          dueTo,
+		StartFrom:      startFrom,
+		StartTo:        startTo,
+		EndFrom:        endFrom,
+		EndTo:          endTo,
+		LabelIds:       labelIDs,
+		LabelMatchMode: labelMatchMode,
+		View:           viewFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count issues")
