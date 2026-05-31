@@ -571,6 +571,83 @@ describe("SearchCommand", () => {
     expect(screen.queryByText("Chat Sessions")).not.toBeInTheDocument();
   });
 
+  // CEREBRO-PATCH(typeahead-comments): FIR-2605 — grouped typeahead tests for Issues / Comments split.
+  it("routes title-matched issues to Issues group and comment-matched issues to Comments group", async () => {
+    const user = userEvent.setup();
+    mockSearchIssues.mockResolvedValue({
+      issues: [
+        { id: "issue-title", identifier: "MUL-10", title: "Auth bug", status: "todo", match_source: "title" },
+        { id: "issue-comment", identifier: "MUL-11", title: "Login page", status: "in_progress", match_source: "comment", matched_snippet: "broken auth flow in comment" },
+      ],
+    });
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "auth");
+
+    await waitFor(() => {
+      expect(screen.getByText("Issues")).toBeInTheDocument();
+      expect(screen.getByText("Comments")).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText((_, el) => el?.textContent === "Auth bug" && el?.tagName === "SPAN"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText((_, el) => el?.textContent === "Login page" && el?.tagName === "SPAN"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText((_, el) => el?.textContent === "broken auth flow in comment" && el?.tagName === "SPAN"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows only Issues group when all matches are title/description matches", async () => {
+    const user = userEvent.setup();
+    mockSearchIssues.mockResolvedValue({
+      issues: [
+        { id: "i1", identifier: "MUL-1", title: "Deploy fix", status: "done", match_source: "title" },
+        { id: "i2", identifier: "MUL-2", title: "Deploy docs", status: "todo", match_source: "description", matched_snippet: "deploy instructions" },
+      ],
+    });
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "deploy");
+
+    await waitFor(() => {
+      expect(screen.getByText("Issues")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Comments")).not.toBeInTheDocument();
+    expect(
+      screen.getByText((_, el) => el?.textContent === "deploy instructions" && el?.tagName === "SPAN"),
+    ).toBeInTheDocument();
+  });
+
+  it("navigates to the parent issue when a comment result is clicked", async () => {
+    const user = userEvent.setup();
+    mockSearchIssues.mockResolvedValue({
+      issues: [
+        { id: "issue-99", identifier: "MUL-99", title: "Original issue", status: "todo", match_source: "comment", matched_snippet: "relevant comment text" },
+      ],
+    });
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "relevant");
+
+    await waitFor(() => {
+      expect(screen.getByText("Comments")).toBeInTheDocument();
+    });
+
+    const item = await screen.findByText(
+      (_, el) => el?.textContent === "Original issue" && el?.tagName === "SPAN",
+    );
+    await user.click(item);
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-99");
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
   it("filters out recent items not present in query cache", () => {
     mockRecentItems.current = [
       { id: "issue-1", visitedAt: 1000 },
