@@ -430,10 +430,6 @@ Lilith ships only the desktop app; the `multica` CLI is bundled inside
 the desktop binary via `apps/desktop/scripts/bundle-cli.mjs`, so it
 follows the same release tag and isn't published separately.
 
-Lilith ships only the desktop app; the `multica` CLI is bundled inside
-the desktop binary via `apps/desktop/scripts/bundle-cli.mjs`, so it
-follows the same release tag and isn't published separately.
-
 1. On `main`, create a semver tag: `git tag v0.x.x` (or `git tag 0.x.x`
    — both shapes are accepted by `.gitlab-ci.yml`,
    `scripts/mirror-to-github.sh`, and the GitHub workflow).
@@ -455,9 +451,6 @@ follows the same release tag and isn't published separately.
    we just upload them. They contain `version`, per-file `sha512`, and
    the installer URL — the running desktop client reads them via
    electron-updater and decides whether to update.
-5. GitLab CI's `notify-release` job (`.gitlab-ci.yml`) posts a Feishu
-   card. (Runs after `mirror-to-github` succeeds so a Feishu card
-   never claims a release that failed to mirror.)
 
 ### One-time GitLab → GitHub mirror setup
 
