@@ -1363,6 +1363,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
           </PropRow>
+          {/* CEREBRO-PATCH(issue-on-behalf-of): MUL-2553 — show the human an agent created this issue for, so it traces back to a member. */}
+          {issue.on_behalf_of ? (
+            <PropRow label="På vegne af" interactive={false}>
+              <ActorAvatar actorType="member" actorId={issue.on_behalf_of.user_id} size={16} />
+              <span className="truncate">{issue.on_behalf_of.name}</span>
+            </PropRow>
+          ) : null}
           {/* CEREBRO-PATCH(issue-privacy-toggle): per-issue visibility when no project parent */}
           {!issue.project_id && (
             <PropRow label="Visibility">

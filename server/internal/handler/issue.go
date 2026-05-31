@@ -70,6 +70,73 @@ type IssueResponse struct {
 	BlockedBy *[]IssueDependencyRef `json:"blocked_by,omitempty"`
 	// CEREBRO-PATCH(issue-custom-status): FIR-1550 v2b — joined sidecar pin so agents see custom_status.label/.description alongside the base status.
 	CustomStatus *IssueCustomStatusPayload `json:"custom_status,omitempty"`
+	// CEREBRO-PATCH(issue-on-behalf-of): MUL-2553 — origin + the human an agent acted for, for the sidebar "På vegne af" row.
+	OriginType *string        `json:"origin_type,omitempty"`
+	OriginID   *string        `json:"origin_id,omitempty"`
+	OnBehalfOf *OnBehalfOfRef `json:"on_behalf_of,omitempty"`
+}
+
+// OnBehalfOfRef identifies the human a system/agent acted for, resolved from an
+// issue's origin (origin_type='agent_task' → agent_task_queue.original_user_id).
+// MUL-2553: lets every agent-created issue trace back to the member behind it.
+type OnBehalfOfRef struct {
+	UserID    string  `json:"user_id"`
+	Name      string  `json:"name"`
+	AvatarURL *string `json:"avatar_url,omitempty"`
+}
+
+// resolveOnBehalfOf returns the human an agent acted for, or nil when the issue
+// has no agent_task origin / the chain can't be resolved.
+func (h *Handler) resolveOnBehalfOf(ctx context.Context, issue db.Issue) *OnBehalfOfRef {
+	if !issue.OriginType.Valid || issue.OriginType.String != "agent_task" || !issue.OriginID.Valid {
+		return nil
+	}
+	task, err := h.Queries.GetAgentTask(ctx, issue.OriginID)
+	if err != nil || !task.OriginalUserID.Valid {
+		return nil
+	}
+	user, err := h.Queries.GetUser(ctx, task.OriginalUserID)
+	if err != nil {
+		return nil
+	}
+	return &OnBehalfOfRef{
+		UserID:    uuidToString(task.OriginalUserID),
+		Name:      user.Name,
+		AvatarURL: textToPtr(user.AvatarUrl),
+	}
+}
+
+// parseOnBehalfOfIDs reads the comma-separated on_behalf_of_ids query param
+// (user UUIDs) used to filter issues by the human their originating agent task
+// acted for. Returns ok=false (after writing 400) on a malformed UUID.
+// CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 list filter param.
+func parseOnBehalfOfIDs(w http.ResponseWriter, r *http.Request) ([]pgtype.UUID, bool) {
+	raw := r.URL.Query().Get("on_behalf_of_ids")
+	if raw == "" {
+		return nil, true
+	}
+	var ids []pgtype.UUID
+	for _, s := range strings.Split(raw, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			id, ok := parseUUIDOrBadRequest(w, s, "on_behalf_of_ids")
+			if !ok {
+				return nil, false
+			}
+			ids = append(ids, id)
+		}
+	}
+	return ids, true
+}
+
+// onBehalfOfWhere returns a WHERE predicate (added via addArg) matching issues
+// whose agent_task origin was started on behalf of one of the given users.
+// CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 shared SQL for both list handlers.
+func onBehalfOfWhere(ids []pgtype.UUID, addArg func(any) string) string {
+	return fmt.Sprintf(`i.origin_type = 'agent_task' AND EXISTS (
+    SELECT 1 FROM agent_task_queue atq
+     WHERE atq.id = i.origin_id
+       AND atq.original_user_id = ANY(%s::uuid[])
+)`, addArg(ids))
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -632,6 +699,11 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 filter by the human an agent acted for.
+	onBehalfOfFilter, ok := parseOnBehalfOfIDs(w, r)
+	if !ok {
+		return
+	}
 	var creatorFilter pgtype.UUID
 	if c := r.URL.Query().Get("creator_id"); c != "" {
 		id, ok := parseUUIDOrBadRequest(w, c, "creator_id")
@@ -833,6 +905,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(assigneeIdsFilter) > 0 {
 		where = append(where, fmt.Sprintf("i.assignee_id = ANY(%s::uuid[])", addArg(assigneeIdsFilter)))
+	}
+	// CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 filter by on-behalf-of member.
+	if len(onBehalfOfFilter) > 0 {
+		where = append(where, onBehalfOfWhere(onBehalfOfFilter, addArg))
 	}
 	if creatorFilter.Valid {
 		where = append(where, fmt.Sprintf("i.creator_id = %s::uuid", addArg(creatorFilter)))
@@ -1167,6 +1243,12 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		if len(ids) > 0 {
 			where = append(where, fmt.Sprintf("i.assignee_id = ANY(%s::uuid[])", addArg(ids)))
 		}
+	}
+	// CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 filter grouped issues by on-behalf-of member.
+	if ids, ok := parseOnBehalfOfIDs(w, r); !ok {
+		return
+	} else if len(ids) > 0 {
+		where = append(where, onBehalfOfWhere(ids, addArg))
 	}
 	if raw := r.URL.Query().Get("creator_id"); raw != "" {
 		id, ok := parseUUIDOrBadRequest(w, raw, "creator_id")
@@ -1531,6 +1613,11 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 
 	// CEREBRO-PATCH(cerebro-issue-custom-status-enricher): FIR-1550 v2b — join sidecar custom_status so agents read the description.
 	resp.CustomStatus = h.cerebroLoadIssueCustomStatus(r.Context(), issue.ID)
+
+	// CEREBRO-PATCH(issue-on-behalf-of): MUL-2553 — surface origin + the human an agent acted for, for the detail sidebar.
+	resp.OriginType = textToPtr(issue.OriginType)
+	resp.OriginID = uuidToPtr(issue.OriginID)
+	resp.OnBehalfOf = h.resolveOnBehalfOf(r.Context(), issue)
 
 	// Fetch issue reactions.
 	reactions, err := h.Queries.ListIssueReactions(r.Context(), issue.ID)

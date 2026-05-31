@@ -336,6 +336,8 @@ function ProjectIssuesSurface({
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 on-behalf-of filter on project pages.
+  const onBehalfOfFilters = useViewStore((s) => s.onBehalfOfFilters);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
   const usesGantt = viewMode === "gantt";
 
@@ -356,8 +358,10 @@ function ProjectIssuesSurface({
       include_no_assignee: includeNoAssignee,
       creator_filters: creatorFilters,
       label_ids: labelFilters,
+      // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 project board on-behalf-of filter.
+      on_behalf_of_ids: onBehalfOfFilters,
     }),
-    [assigneeFilters, creatorFilters, filter, includeNoAssignee, labelFilters, priorityFilters, statusFilters],
+    [assigneeFilters, creatorFilters, filter, includeNoAssignee, labelFilters, onBehalfOfFilters, priorityFilters, statusFilters],
   );
   const assigneeGroupsOptions = myIssueAssigneeGroupsOptions(
     wsId,
@@ -367,7 +371,8 @@ function ProjectIssuesSurface({
     sort,
   );
   const statusIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, scope, filter, undefined, sort),
+    // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 project list on-behalf-of filter.
+    ...myIssueListOptions(wsId, scope, { ...filter, on_behalf_of_ids: onBehalfOfFilters }, undefined, sort),
     enabled: !usesAssigneeBoard && !usesGantt,
   });
   const assigneeGroupsQuery = useQuery({

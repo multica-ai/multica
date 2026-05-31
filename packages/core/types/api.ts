@@ -47,6 +47,8 @@ export interface ListIssuesParams {
   priority?: IssuePriority;
   assignee_id?: string;
   assignee_ids?: string[];
+  // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 filter by on-behalf-of member (user UUIDs).
+  on_behalf_of_ids?: string[];
   creator_id?: string;
   project_id?: string;
   involves_user_id?: string;
@@ -82,6 +84,8 @@ export interface ListGroupedIssuesParams {
   assignee_types?: IssueAssigneeType[];
   assignee_id?: string;
   assignee_ids?: string[];
+  // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 filter grouped issues by on-behalf-of member.
+  on_behalf_of_ids?: string[];
   creator_id?: string;
   project_id?: string;
   involves_user_id?: string;
