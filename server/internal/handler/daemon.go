@@ -21,8 +21,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
-	cerebropermissions "github.com/multica-ai/multica/server/internal/cerebro/permissions" // CEREBRO-PATCH(daemon-repo-grants): FIR-2512 repo-capability resolver
 	cerebropersona "github.com/multica-ai/multica/server/internal/cerebro/persona"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy" // CEREBRO-PATCH(daemon-repo-toolpolicy): FIR-2505 repo-capability resolved via tool-policy chain
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/profile"
@@ -2895,10 +2895,11 @@ type daemonRepoCheckRequest struct {
 	ProjectID  string `json:"project_id,omitempty"`
 }
 
-// CheckDaemonRepoCapability evaluates whether a repo capability is granted for
-// an agent (optionally in a project context) by running the full grants
-// resolver. Called by the daemon before allowing multica repo checkout/push/read
-// when the repo_grants_enabled workspace setting is on.
+// CheckDaemonRepoCapability evaluates whether a repo capability is allowed for an
+// agent by resolving it through the tool-policy chain — the single permission
+// surface repo access lives in (FIR-2505). Called by the daemon before allowing
+// multica repo checkout/push/read when the repo_grants_enabled workspace setting
+// is on.
 //
 // POST /api/daemon/workspaces/{workspaceId}/repo/check
 func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Request) {
@@ -2926,49 +2927,31 @@ func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Build actor: an agent subject when agent_id is set, otherwise
-	// workspace_default grants are the only thing evaluated.
-	//
-	// Scope note (FIR-2512): for an autonomous daemon repo-checkout only the
-	// Workspace, Project and Agent layers of the chain are populated here. The
-	// Group and Role layers are intentionally NOT loaded: groups in this model
-	// hold user members (cerebro_group_member), not agents, and a daemon
-	// checkout has no human in the loop — so a group-scoped grant could only
-	// apply via owner-substitution, the same unresolved decision the autopilot
-	// path defers (see autopilot_cerebro.go, JEH-721). Wiring group/role for
-	// autonomous checkout is tracked as the Spor 4 follow-up rather than guessed
-	// at inside this security path. Project isolation (the headline of this PR)
-	// does not depend on it.
-	actor := cerebropermissions.Actor{Type: "agent"}
-
+	// Resolve through the tool-policy chain. This is an autonomous daemon
+	// checkout — no human in the loop — so only the Workspace-root and Agent
+	// layers carry signal; Runtime, User and Group are absent (Inherit). Project
+	// is deliberately NOT a layer: per the FIR-2505 decision a project is context
+	// (which repos belong to it, resolved at claim time), not a permission level,
+	// so req.ProjectID is not part of this verdict. Base is Allow — a repo with no
+	// explicit policy is reachable, and the admin tightens specific repos in the
+	// tool-policy screen. "Ask" needs a human to approve, which a daemon checkout
+	// has not, so only an explicit Allow passes.
+	agentID := pgtype.UUID{}
 	if req.AgentID != "" {
-		agentUUID, err := util.ParseUUID(req.AgentID)
-		if err != nil {
+		parsed, parseErr := util.ParseUUID(req.AgentID)
+		if parseErr != nil {
 			writeError(w, http.StatusBadRequest, "invalid agent_id")
 			return
 		}
-		actor.ID = agentUUID
+		agentID = parsed
 	}
 
-	// Project scope (FIR-2512): if the task runs in a project, include it so
-	// project-scoped grants are evaluated as part of the chain.
-	if req.ProjectID != "" {
-		projectUUID, err := util.ParseUUID(req.ProjectID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid project_id")
-			return
-		}
-		actor.ProjectIDs = []pgtype.UUID{projectUUID}
-	}
-
-	// The agent is both the actor and the agent in this context (direct-agent
-	// call, no human member in the loop).
-	decision, err := cerebropermissions.New(h.CerebroQueries).Can(r.Context(), cerebropermissions.Request{
-		WorkspaceID: wsUUID,
-		Actor:       actor,
-		Agent:       actor.ID,
-		Capability:  req.Capability,
-		Resource:    req.URL,
+	eff, err := toolpolicy.NewStoreFromQueries(h.CerebroQueries).Resolve(r.Context(), toolpolicy.Query{
+		WorkspaceID:     wsUUID,
+		ToolKey:         req.Capability,
+		ResourcePattern: req.URL,
+		AgentID:         agentID,
+		Base:            toolpolicy.SettingAllow,
 	})
 	if err != nil {
 		slog.Error("repo capability check failed", "workspace_id", workspaceID, "url", req.URL, "error", err)
@@ -2977,8 +2960,8 @@ func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"allowed":  decision.Allowed(),
-		"decision": string(decision.Kind),
-		"reason":   decision.Reason,
+		"allowed":  eff.Setting == toolpolicy.SettingAllow,
+		"decision": string(eff.Setting),
+		"reason":   eff.Reason,
 	})
 }
