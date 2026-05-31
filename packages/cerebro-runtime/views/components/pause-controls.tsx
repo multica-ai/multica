@@ -91,7 +91,7 @@ export function PauseBanner({ runtime }: PauseBannerProps) {
 
   if (!runtime.paused_at) return null;
 
-  const reason = runtime.pause_reason || "manual";
+  const reason = formatPauseReason(runtime.pause_reason);
   const remaining = runtime.unpause_at ? formatRemaining(runtime.unpause_at, now) : null;
 
   return (
@@ -128,4 +128,20 @@ function formatRemaining(until: string, nowMs: number): string {
   const days = Math.floor(hours / 24);
   const remHours = hours % 24;
   return remHours ? `${days}d ${remHours}h` : `${days}d`;
+}
+
+export function formatPauseReason(reason: string | null | undefined): string {
+  switch (reason) {
+    case "rate_limit":
+      return "rate limit or usage limit";
+    case "auto":
+      return "automatic pause";
+    case "manual":
+    case "":
+    case null:
+    case undefined:
+      return "manual pause";
+    default:
+      return reason.replaceAll("_", " ");
+  }
 }
