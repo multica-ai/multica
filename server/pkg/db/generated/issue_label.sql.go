@@ -266,6 +266,67 @@ func (q *Queries) ListLabelsForIssues(ctx context.Context, arg ListLabelsForIssu
 	return items, nil
 }
 
+const listNonTerminalIssuesWithLabelName = `-- name: ListNonTerminalIssuesWithLabelName :many
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.kind, i.start_date, i.metadata, i.is_private, i.classification
+FROM issue i
+JOIN issue_to_label il ON il.issue_id = i.id
+JOIN issue_label l ON l.id = il.label_id
+WHERE LOWER(l.name) = LOWER($1::text)
+  AND i.status NOT IN ('done', 'cancelled')
+ORDER BY i.updated_at ASC
+`
+
+// CEREBRO-PATCH(orchestration-watchdog): FIR-2564 — the orchestration stall
+// watchdog scans every non-terminal issue carrying a label with this name
+// (e.g. `orchestrate`) across all workspaces, to detect stalled waves.
+func (q *Queries) ListNonTerminalIssuesWithLabelName(ctx context.Context, labelName string) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listNonTerminalIssuesWithLabelName, labelName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.Kind,
+			&i.StartDate,
+			&i.Metadata,
+			&i.IsPrivate,
+			&i.Classification,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateLabel = `-- name: UpdateLabel :one
 UPDATE issue_label SET
     name = COALESCE($3, name),

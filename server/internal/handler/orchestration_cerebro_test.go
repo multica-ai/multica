@@ -452,6 +452,75 @@ func TestOrchestrateFullDeliveryEval(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(orchestration-watchdog): FIR-2564 — stall watchdog tests.
+// TestOrchestrationWatchdog_RecoversStalledChild: a started sub-issue whose run
+// hung (in-flight, no active task) is flagged and re-dispatched once; once a run
+// is active again the marker clears and it is not re-dispatched twice.
+func TestOrchestrationWatchdog_RecoversStalledChild(t *testing.T) {
+	fx := newOrchestrationFixture(t)
+	ctx := context.Background()
+
+	if _, err := testHandler.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID: fx.childA.ID, Status: "in_progress", WorkspaceID: fx.parent.WorkspaceID,
+	}); err != nil {
+		t.Fatalf("set in_progress: %v", err)
+	}
+	testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.childA.ID)
+
+	wd := NewOrchestrationWatchdog(testHandler)
+	wd.stallAfter = -time.Hour // any in-flight child counts as stale
+
+	wd.sweepOnce(ctx, time.Now())
+
+	if !testHandler.issueHasLabelNamed(ctx, fx.childA, "orch-stalled") {
+		t.Errorf("stalled child should be flagged orch-stalled")
+	}
+	if got := countPendingTasksForAgent(t, uuidToString(fx.childA.ID), fx.agentID); got != 1 {
+		t.Errorf("stalled child should be re-dispatched once, got %d", got)
+	}
+
+	// A run is active now -> next sweep clears the marker and does not re-dispatch.
+	wd.sweepOnce(ctx, time.Now())
+	if got := countPendingTasksForAgent(t, uuidToString(fx.childA.ID), fx.agentID); got != 1 {
+		t.Errorf("watchdog must not double-redispatch, got %d", got)
+	}
+	if testHandler.issueHasLabelNamed(ctx, fx.childA, "orch-stalled") {
+		t.Errorf("marker should clear once a run is active again")
+	}
+}
+
+// TestOrchestrationWatchdog_EscalatesPersistentStall: a child still stalled
+// after a prior re-dispatch (carries orch-stalled, no active task) is escalated
+// via a comment and NOT re-dispatched again (no infinite loop).
+func TestOrchestrationWatchdog_EscalatesPersistentStall(t *testing.T) {
+	fx := newOrchestrationFixture(t)
+	ctx := context.Background()
+
+	if _, err := testHandler.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID: fx.childA.ID, Status: "in_progress", WorkspaceID: fx.parent.WorkspaceID,
+	}); err != nil {
+		t.Fatalf("set in_progress: %v", err)
+	}
+	testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.childA.ID)
+	stalled := getOrCreateTestLabel(t, fx.labelID, "orch-stalled", "#f59e0b")
+	testHandler.Queries.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+		IssueID: fx.childA.ID, LabelID: stalled.ID, WorkspaceID: fx.parent.WorkspaceID,
+	})
+
+	wd := NewOrchestrationWatchdog(testHandler)
+	wd.stallAfter = -time.Hour
+	before := countSystemCommentsOn(t, uuidToString(fx.parent.ID))
+
+	wd.sweepOnce(ctx, time.Now())
+
+	if got := countPendingTasksForAgent(t, uuidToString(fx.childA.ID), fx.agentID); got != 0 {
+		t.Errorf("persistent stall must not re-dispatch again, got %d", got)
+	}
+	if countSystemCommentsOn(t, uuidToString(fx.parent.ID)) <= before {
+		t.Errorf("persistent stall should post an escalation comment")
+	}
+}
+
 func TestOrchestrateRejectsCycle(t *testing.T) {
 	fx := newOrchestrationFixture(t)
 	ctx := context.Background()

@@ -214,6 +214,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Web Push delivery shares the same connection pool and config as
 	// notification listeners.
 	h := handler.New(queries, pool, hub, bus, emailSvc, pushSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	// CEREBRO-PATCH(orchestration-watchdog): FIR-2564 — periodic stall sweep so a hung agent/CI can't silently freeze an orchestration.
+	go handler.NewOrchestrationWatchdog(h).Run(context.Background())
 	if opts.DaemonWakeup != nil {
 		h.TaskService.Wakeup = opts.DaemonWakeup
 	}
