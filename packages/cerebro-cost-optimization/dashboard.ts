@@ -28,6 +28,20 @@ export interface DashboardMeasured {
   totalSavedCents: number;
 }
 
+/**
+ * The real saving accrued on runs where the saving was applied (mode=on, not
+ * held out). Available even at 100% rollout with no control arm, so it is what
+ * fills the dashboard's measured column when there is no holdout A/B.
+ */
+export interface DashboardApplied {
+  /** Real saving summed in the metric's native unit (tokens, platform calls). */
+  savedUnits: number;
+  /** Same in money where the metric is priced; 0 for unpriced (platform_calls). */
+  savedCents: number;
+  /** Number of applied (treatment) runs behind the figure. */
+  runCount: number;
+}
+
 /** One saving's dashboard row. */
 export interface DashboardSaving {
   savingKey: CostSavingKey;
@@ -35,10 +49,12 @@ export interface DashboardSaving {
   shadowRunCount: number;
   treatmentRunCount: number;
   controlRunCount: number;
-  /** Per-run hypothetical saving summed in the metric's native unit. */
+  /** Hypothetical would-save (shadow + held-out control) in the metric's unit. */
   estimatedSavedUnits: number;
   /** Same in money where the metric is priced; 0 for unpriced (platform_calls). */
   estimatedSavedCents: number;
+  /** Real measured saving on applied runs; null until a treatment run exists. */
+  applied: DashboardApplied | null;
   /** Holdout A/B; null until both a treatment and a control arm have runs. */
   measured: DashboardMeasured | null;
 }
@@ -72,6 +88,16 @@ function parseMeasured(raw: unknown): DashboardMeasured | null {
   };
 }
 
+/** Parse the applied saving block; returns null on any shape it doesn't recognize. */
+function parseApplied(raw: unknown): DashboardApplied | null {
+  if (!isRecord(raw)) return null;
+  return {
+    savedUnits: num(raw.saved_units),
+    savedCents: num(raw.saved_cents),
+    runCount: num(raw.run_count),
+  };
+}
+
 /**
  * Validate the dashboard response. Unknown saving keys (a server newer than this
  * build) are dropped rather than rendered as a blank card; everything else
@@ -92,6 +118,7 @@ export function parseDashboardResponse(raw: unknown): CostOptimizationDashboard 
       controlRunCount: num(entry.control_run_count),
       estimatedSavedUnits: num(entry.estimated_saved_units),
       estimatedSavedCents: num(entry.estimated_saved_cents),
+      applied: parseApplied(entry.applied),
       measured: parseMeasured(entry.measured),
     });
   }
@@ -133,10 +160,37 @@ export function metricUnitLabel(metric: CostSavingMetric, count: number): string
  * "-200 model cost" instead of "-$2.00". Other metrics show dollars only when a
  * positive priced figure exists, else their native units (e.g. tokens).
  */
-export function estimatedValue(saving: DashboardSaving): string {
-  if (saving.metric === "model_cost" || saving.estimatedSavedCents > 0) {
-    return formatUsd(saving.estimatedSavedCents);
+function savingValue(
+  metric: CostSavingMetric,
+  units: number,
+  cents: number,
+): string {
+  if (metric === "model_cost" || cents > 0) {
+    return formatUsd(cents);
   }
-  const unit = metricUnitLabel(saving.metric, saving.estimatedSavedUnits);
-  return `${saving.estimatedSavedUnits.toLocaleString("en-US")} ${unit}`;
+  const unit = metricUnitLabel(metric, units);
+  return `${units.toLocaleString("en-US")} ${unit}`;
+}
+
+export function estimatedValue(saving: DashboardSaving): string {
+  return savingValue(
+    saving.metric,
+    saving.estimatedSavedUnits,
+    saving.estimatedSavedCents,
+  );
+}
+
+/**
+ * The applied (real, measured) saving as a display string, or "—" when no run
+ * has applied the saving yet. Same money-vs-units rule as estimatedValue, so the
+ * dashboard's measured column reads consistently. This is the figure that works
+ * at 100% rollout, where the holdout A/B is unavailable.
+ */
+export function appliedValue(saving: DashboardSaving): string {
+  if (!saving.applied) return "—";
+  return savingValue(
+    saving.metric,
+    saving.applied.savedUnits,
+    saving.applied.savedCents,
+  );
 }

@@ -135,6 +135,95 @@ func TestMeasureRun_PruneToolResultsApproximatesTokens(t *testing.T) {
 	}
 }
 
+// FIR-2572: when the run reports both its total prompt characters and the
+// provider's prompt tokens, the prune saving's baseline tokens must reflect the
+// REAL calibrated chars-per-token ratio for the run — not the chars/4 estimate.
+// This is what makes the 100% (holdout 0) measurement real with no control arm.
+func TestMeasureRun_PruneToolResultsCalibratesFromRealUsage(t *testing.T) {
+	// 20000 prompt chars / 4000 prompt tokens => 5 chars/token for THIS run.
+	// 1000 pruned chars => 1000 * 4000 / 20000 = 200 saved tokens.
+	// The chars/4 fallback would (wrongly) give 250, so 200 proves calibration.
+	facts := CostSavingRunFacts{
+		EffectiveModel:        testCheapModel,
+		ToolResultChars:       4000,
+		PrunedToolResultChars: 1000,
+		PromptInputChars:      20_000,
+		Usage:                 pricing.Usage{InputTokens: 4000},
+	}
+	got := measureRun(map[string]string{savingPruneToolResults: savingModeOn}, facts, "")
+	m, ok := findMeasurement(got, savingPruneToolResults)
+	if !ok {
+		t.Fatalf("prune_tool_results measurement missing: %+v", got)
+	}
+	if !m.Applied {
+		t.Errorf("on (not held out) run must be applied")
+	}
+	const wantTokens = int64(200)
+	if m.Baseline != wantTokens {
+		t.Errorf("calibrated baseline tokens = %d, want %d (chars/4 would be 250)", m.Baseline, wantTokens)
+	}
+	wantCents := pricing.ComputeCents(testCheapModel, pricing.Usage{InputTokens: wantTokens})
+	if m.SavedCents != wantCents {
+		t.Errorf("calibrated saved_cents = %d, want %d", m.SavedCents, wantCents)
+	}
+}
+
+// Cache-read/-write tokens are prompt tokens and must count in the calibration
+// denominator, else a cache-heavy run reports too few tokens per character.
+func TestMeasureRun_PruneCalibrationIncludesCacheTokens(t *testing.T) {
+	// Same effective ratio as above (4000 prompt tokens), but split across cache.
+	facts := CostSavingRunFacts{
+		EffectiveModel:        testCheapModel,
+		ToolResultChars:       4000,
+		PrunedToolResultChars: 1000,
+		PromptInputChars:      20_000,
+		Usage:                 pricing.Usage{InputTokens: 2000, CacheReadTokens: 1000, CacheWriteTokens: 1000},
+	}
+	got := measureRun(map[string]string{savingPruneToolResults: savingModeOn}, facts, "")
+	m, _ := findMeasurement(got, savingPruneToolResults)
+	if m.Baseline != 200 {
+		t.Errorf("calibrated baseline with cache tokens = %d, want 200", m.Baseline)
+	}
+}
+
+// With no calibration data (no prompt chars / no prompt tokens) the saving must
+// fall back to the documented chars/4 estimate.
+func TestMeasureRun_PruneFallsBackToCharsPerTokenWhenUncalibrated(t *testing.T) {
+	facts := CostSavingRunFacts{
+		EffectiveModel:        testCheapModel,
+		ToolResultChars:       4000,
+		PrunedToolResultChars: 1000,
+		// PromptInputChars and Usage left zero => no calibration possible.
+	}
+	got := measureRun(map[string]string{savingPruneToolResults: savingModeOn}, facts, "")
+	m, _ := findMeasurement(got, savingPruneToolResults)
+	if m.Baseline != int64(1000)/approxCharsPerToken {
+		t.Errorf("uncalibrated baseline = %d, want chars/4 = %d", m.Baseline, int64(1000)/approxCharsPerToken)
+	}
+}
+
+// prune_tool_results held out: pruning was deliberately withheld for this run,
+// so the measurement must be the control arm (Applied=false, HeldOut=true) and
+// fall back to the full tool-result surface as the would-save, mirroring the
+// model-routing held-out control.
+func TestMeasureRun_PruneToolResultsHeldOutIsControl(t *testing.T) {
+	got := measureRun(map[string]string{savingPruneToolResults: savingModeOn},
+		CostSavingRunFacts{ToolResultChars: 400, PruneHeldOut: true}, "")
+	m, ok := findMeasurement(got, savingPruneToolResults)
+	if !ok {
+		t.Fatalf("prune_tool_results measurement missing: %+v", got)
+	}
+	if m.Applied {
+		t.Errorf("held-out control must not be applied")
+	}
+	if !m.HeldOut {
+		t.Errorf("held-out control must have HeldOut=true")
+	}
+	if m.Metric != metricContextTokens || m.Baseline != 100 || m.Effective != 0 {
+		t.Errorf("unexpected held-out prune measurement: %+v (want baseline=100)", m)
+	}
+}
+
 func TestEffectiveModelForRun(t *testing.T) {
 	cases := []struct {
 		name      string

@@ -69,6 +69,13 @@ type GatewayCompletion struct {
 	// was ever superseded. This is the *measured* saving, as opposed to
 	// ToolResultChars which is the would-save estimate.
 	PrunedToolResultChars int64
+	// PromptInputChars is the total characters of prompt content actually sent to
+	// the model across every request in the run (the full transcript on each
+	// round, summed). Paired with Usage.InputTokens (+ cache tokens) it yields a
+	// real per-run chars-per-token ratio for THIS model, so prune_tool_results
+	// can report an accurate saved-token count without a holdout control arm
+	// (FIR-2572). 0 when nothing was sent / not instrumented.
+	PromptInputChars int64
 }
 
 type GatewayRequestMeta struct {
