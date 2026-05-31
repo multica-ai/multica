@@ -1138,7 +1138,7 @@ func (h *Handler) handlePRReviewCommentEvent(ctx context.Context, body []byte) {
 	if p.Action != "created" {
 		return
 	}
-	if p.Comment.User.Login == "github-actions" || p.Comment.User.Login == "github-actions[bot]" || p.Comment.User.Type == "Bot" {
+	if isIgnoredWebhookBot(p.Comment.User.Login) {
 		return
 	}
 	h.triggerAgentForPRComment(ctx, p.Installation.ID, p.Repository, p.PullRequest.Number, p.PullRequest.Head.Ref, p.Comment.Body, p.Comment.User.Login)
@@ -1157,7 +1157,7 @@ func (h *Handler) handleIssueCommentEvent(ctx context.Context, body []byte) {
 	if p.Issue.PullRequest == nil {
 		return
 	}
-	if p.Comment.User.Login == "github-actions" || p.Comment.User.Login == "github-actions[bot]" || p.Comment.User.Type == "Bot" {
+	if isIgnoredWebhookBot(p.Comment.User.Login) {
 		return
 	}
 	h.triggerAgentForPRComment(ctx, p.Installation.ID, p.Repository, p.Issue.Number, "", p.Comment.Body, p.Comment.User.Login)
@@ -1251,6 +1251,22 @@ func (h *Handler) triggerAgentForPRComment(ctx context.Context, installationID i
 			)
 		}
 	}
+}
+
+// isIgnoredWebhookBot returns true for bot logins whose PR review comments
+// should NOT trigger agent tasks. We only ignore github-actions and our own
+// app bot — other bots (e.g. Copilot) should still trigger agents.
+func isIgnoredWebhookBot(login string) bool {
+	switch login {
+	case "github-actions", "github-actions[bot]":
+		return true
+	}
+	// Ignore our own GitHub App bot (e.g. "multica-bashpos[bot]")
+	slug := githubAppSlug()
+	if slug != "" && login == slug+"[bot]" {
+		return true
+	}
+	return false
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
