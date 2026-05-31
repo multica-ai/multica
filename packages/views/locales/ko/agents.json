@@ -9,7 +9,8 @@
     "of_total": "{{total}}개 중 {{visible}}개",
     "list_load_failed": "에이전트 목록을 불러오지 못했습니다",
     "list_load_failed_default": "에이전트 목록을 가져오는 중 문제가 발생했습니다.",
-    "try_again": "다시 시도"
+    "try_again": "다시 시도",
+    "ai_draft": "AI 초안"
   },
   "scope": {
     "mine": "내 것",
@@ -365,7 +366,8 @@
       "cancel_failed_toast": "작업을 취소하지 못했습니다",
       "started_prefix": "{{when}} 시작됨",
       "dispatched_prefix": "{{when}} 디스패치됨",
-      "queued_prefix": "{{when}} 대기 시작"
+      "queued_prefix": "{{when}} 대기 시작",
+      "source_ai_task": "AI 작업"
     }
   },
   "char_counter": {
@@ -426,5 +428,18 @@
     "runtime_offline": "데몬 오프라인",
     "runtime_recovery": "데몬 재시작됨",
     "manual": "사용자가 취소함"
+  },
+  "ai_draft": {
+    "title": "AI로 에이전트 초안 만들기",
+    "subtitle": "온라인 에이전트에게 이 워크스페이스에 맞는 팀원을 구성해 달라고 요청하세요.",
+    "host_agent_label": "호스트 에이전트",
+    "host_agent_placeholder": "온라인 에이전트 선택",
+    "no_agents": "사용 가능한 온라인 에이전트가 없습니다. 먼저 런타임 기반 에이전트를 시작하세요.",
+    "prompt_label": "이 에이전트는 무엇을 해야 하나요?",
+    "prompt_placeholder": "예: React 성능, 접근성, 회귀 테스트를 검토하는 프론트엔드 리뷰 에이전트를 만들어 주세요.",
+    "cancel": "취소",
+    "submit": "에이전트 초안 만들기",
+    "toast_queued": "에이전트 초안 작업을 시작했습니다. 결과는 인박스에 도착합니다.",
+    "fallback_error": "에이전트 초안 작업을 시작하지 못했습니다"
   }
 }

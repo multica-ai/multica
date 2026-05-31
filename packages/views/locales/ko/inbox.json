@@ -25,7 +25,11 @@
     "empty": "인박스가 비어 있습니다",
     "original_input": "원본 입력",
     "edit_advanced": "고급 양식으로 수정",
-    "archive": "보관"
+    "archive": "보관",
+    "skill_find_empty": "유효한 추천 결과가 반환되지 않았습니다.",
+    "agent_draft_fallback_name": "새 에이전트",
+    "open_agent": "에이전트 열기",
+    "attached_skills": "연결된 스킬"
   },
   "types": {
     "issue_assigned": "할당됨",
@@ -44,7 +48,11 @@
     "agent_completed": "에이전트 완료됨",
     "reaction_added": "반응 추가됨",
     "quick_create_done": "에이전트로 생성됨",
-    "quick_create_failed": "에이전트 생성 실패"
+    "quick_create_failed": "에이전트 생성 실패",
+    "skill_find_done": "스킬 추천",
+    "skill_find_failed": "스킬 찾기 실패",
+    "agent_draft_done": "에이전트 초안",
+    "agent_draft_failed": "에이전트 초안 실패"
   },
   "labels": {
     "set_status_to": "상태 변경:",
