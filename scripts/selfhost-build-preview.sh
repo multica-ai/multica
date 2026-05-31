@@ -88,11 +88,8 @@ trap cleanup EXIT
 
 cat > "$tmp_override" <<EOF
 services:
-  postgres:
-    profiles: ["selfhost-preview-disabled"]
-
   backend:
-    depends_on: !reset []
+    depends_on: {}
     environment:
       DATABASE_URL: ${database_url}
       FRONTEND_ORIGIN: ${frontend_origin}
@@ -156,7 +153,7 @@ docker compose \
   -f docker-compose.selfhost.yml \
   -f docker-compose.selfhost.build.yml \
   -f "$tmp_override" \
-  up -d --build backend frontend
+  up -d --no-deps --build backend frontend
 
 echo "==> Waiting for backend to be ready..."
 for _ in $(seq 1 60); do
