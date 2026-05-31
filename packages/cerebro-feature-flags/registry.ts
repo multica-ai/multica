@@ -47,9 +47,7 @@ export type CerebroFlagKey =
   // FIR-2504: show similar open issues + LLM verdict when creating an issue.
   | "cerebro_duplicate_check_on_create"
   // FIR-2523: Auth & Permissions settings tab + Google Workspace auto-membership hook.
-  | "cerebro_google_identity"
-  // FIR-2564: label a parent `orchestrate` to auto-drive its sub-issue waves.
-  | "cerebro_orchestrate";
+  | "cerebro_google_identity";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -119,11 +117,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // signup is the launch feature, and the table starts empty so a fresh
   // workspace with no configured domains is still a no-op.
   cerebro_google_identity: true,
-  // FIR-2564: ON by default. Attaching the `orchestrate` label to a parent
-  // issue makes the platform auto-promote its sub-issues wave by wave (the
-  // label is the per-issue opt-in; this flag is the workspace kill-switch).
-  // Off makes the label inert so no auto-start fires.
-  cerebro_orchestrate: true,
 };
 
 /**
@@ -446,13 +439,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Adds an Auth & Permissions tab to workspace settings: owner/admin can list email domains that auto-provision into this workspace on first Google login, and pick the default role new members get. Off hides the tab and disables the auto-membership hook. FIR-2523.",
-  },
-  {
-    key: "cerebro_orchestrate",
-    label: "Sub-issue orchestration",
-    group: "issues",
-    description:
-      "Attaching the `orchestrate` label to a parent issue makes the platform auto-promote its sub-issues wave by wave: each sub-issue starts the moment its `blocks` dependencies are done. The label is the per-issue opt-in; this toggle is the workspace kill-switch. Off makes the label inert. FIR-2564.",
   },
 ];
 

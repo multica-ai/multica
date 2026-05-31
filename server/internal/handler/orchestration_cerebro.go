@@ -11,20 +11,21 @@ package handler
 // every child whose blockers are already terminal; each time a child finishes,
 // we start the children it just unblocked. Jesper works in the UI, not the
 // CLI — setting the label IS the run command, and removing it stops further
-// auto-starts. A workspace-level `cerebro_orchestrate=false` flag override is
-// the kill-switch.
+// auto-starts. The label is the only control: there is no separate workspace
+// toggle (it belongs on the issue, not the workspace).
+//
+// Sub-issues are driven primarily through squads — a squad-assigned sub-issue
+// wakes the squad leader, who delegates within the team. Agent-assigned
+// sub-issues are also supported and wake the agent directly.
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/orchestration"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -32,40 +33,16 @@ import (
 
 const orchestrateLabelName = "orchestrate"
 
-// cerebroOrchestrateEnabled is the workspace-level kill-switch for FIR-2564.
-// Default-on: a missing override row (or any lookup failure) resolves to
-// enabled, matching the registry.ts default. Only an explicit workspace-level
-// override of `false` (user_id = zero UUID) disables the trigger without a
-// redeploy.
-func (h *Handler) cerebroOrchestrateEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
-	if h.CerebroQueries == nil {
-		return true
-	}
-	on, err := h.CerebroQueries.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
-		WorkspaceID: workspaceID,
-		UserID:      pgtype.UUID{Valid: true}, // zero UUID = workspace-level override row
-		FlagKey:     "cerebro_orchestrate",
-	})
-	if errors.Is(err, pgx.ErrNoRows) || err != nil {
-		return true
-	}
-	return on
-}
-
 // maybeStartOrchestrationOnLabel is the entrypoint from AttachLabel. It is a
-// no-op unless the just-attached label is named `orchestrate` and the feature
-// is enabled for the workspace. Best-effort: failures are logged, never
-// surfaced to the label-attach response (the label attach already succeeded).
+// no-op unless the just-attached label is named `orchestrate`. Best-effort:
+// failures are logged, never surfaced to the label-attach response (the label
+// attach already succeeded).
 func (h *Handler) maybeStartOrchestrationOnLabel(ctx context.Context, issue db.Issue, labelID pgtype.UUID) {
 	label, err := h.Queries.GetLabel(ctx, db.GetLabelParams{ID: labelID, WorkspaceID: issue.WorkspaceID})
 	if err != nil {
 		return
 	}
 	if !strings.EqualFold(strings.TrimSpace(label.Name), orchestrateLabelName) {
-		return
-	}
-	if !h.cerebroOrchestrateEnabled(ctx, issue.WorkspaceID) {
-		slog.Info("orchestration: skipped, disabled for workspace", "issue_id", uuidToString(issue.ID))
 		return
 	}
 	h.runOrchestration(ctx, issue, true)
@@ -90,9 +67,6 @@ func (h *Handler) advanceOrchestrationOnChildDone(ctx context.Context, prev, iss
 		return
 	}
 	if !h.issueHasOrchestrateLabel(ctx, parent) {
-		return
-	}
-	if !h.cerebroOrchestrateEnabled(ctx, parent.WorkspaceID) {
 		return
 	}
 	h.runOrchestration(ctx, parent, false)
@@ -190,7 +164,7 @@ func (h *Handler) runOrchestration(ctx context.Context, parent db.Issue, postSum
 		if len(started) > 0 {
 			b.WriteString("\nStarted now: " + strings.Join(started, ", ") + ".")
 		} else {
-			b.WriteString("\nNothing started yet — the first wave's sub-issues are either not agent-assigned or already running.")
+			b.WriteString("\nNothing started yet — the first wave's sub-issues are either not assigned to a squad/agent, or already running.")
 		}
 		h.postOrchestrationComment(ctx, parent, b.String())
 	} else if len(started) > 0 {
@@ -223,43 +197,88 @@ func (h *Handler) loadBlockers(ctx context.Context, workspaceID pgtype.UUID, chi
 	return out
 }
 
-// startOrchestratedchild promotes a ready child out of `backlog` (so the
-// platform's own enqueue gates accept it) and enqueues a task for its agent
-// assignee. Returns true only when a task was actually enqueued. Children
-// without a ready agent assignee, or that already have a pending task, are left
-// for a human to pick up — orchestration never restarts running work and never
-// starts a human-owned issue automatically.
+// startOrchestratedChild promotes a ready child out of `backlog` (so the
+// platform's own enqueue gates accept it) and dispatches it. Returns true only
+// when work was actually dispatched.
+//
+// Squad-assigned sub-issues are the primary path: the squad leader is woken and
+// delegates within the team. Agent-assigned sub-issues are also supported and
+// wake the agent directly. Children assigned to a human (or to nobody), or that
+// already have a pending task, are left alone — orchestration never restarts
+// running work and never auto-starts a human-owned issue.
 func (h *Handler) startOrchestratedChild(ctx context.Context, child db.Issue) bool {
-	if !h.isAgentAssigneeReady(ctx, child) {
-		return false
-	}
-	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-		IssueID: child.ID,
-		AgentID: child.AssigneeID,
-	})
-	if err != nil || hasPending {
-		return false
-	}
-
-	if child.Status == "backlog" {
-		updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-			ID:          child.ID,
-			Status:      "todo",
+	// CEREBRO-PATCH(orchestration-cerebro): FIR-2564 squad-first dispatch.
+	// Squad path (primary).
+	if child.AssigneeType.Valid && child.AssigneeType.String == "squad" {
+		if !h.isSquadLeaderReady(ctx, child) {
+			return false
+		}
+		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID:          child.AssigneeID,
 			WorkspaceID: child.WorkspaceID,
 		})
 		if err != nil {
-			slog.Warn("orchestration: promote child failed", "child_id", uuidToString(child.ID), "error", err)
 			return false
 		}
-		child = updated
-		h.publishOrchestratedStatus(ctx, child)
+		if h.hasPendingTask(ctx, child.ID, squad.LeaderID) {
+			return false
+		}
+		promoted, ok := h.promoteFromBacklog(ctx, child)
+		if !ok {
+			return false
+		}
+		h.enqueueSquadLeaderTask(ctx, promoted, pgtype.UUID{}, "system", "")
+		return true
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForIssue(ctx, child); err != nil {
-		slog.Warn("orchestration: enqueue child failed", "child_id", uuidToString(child.ID), "error", err)
+	// Agent path.
+	if !h.isAgentAssigneeReady(ctx, child) {
+		return false
+	}
+	if h.hasPendingTask(ctx, child.ID, child.AssigneeID) {
+		return false
+	}
+	promoted, ok := h.promoteFromBacklog(ctx, child)
+	if !ok {
+		return false
+	}
+	if _, err := h.TaskService.EnqueueTaskForIssue(ctx, promoted); err != nil {
+		slog.Warn("orchestration: enqueue child failed", "child_id", uuidToString(promoted.ID), "error", err)
 		return false
 	}
 	return true
+}
+
+// hasPendingTask reports whether the given agent already has an active task for
+// the issue. A lookup error is treated as "pending" so we fail closed and never
+// double-dispatch.
+func (h *Handler) hasPendingTask(ctx context.Context, issueID, agentID pgtype.UUID) bool {
+	pending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+	return err != nil || pending
+}
+
+// promoteFromBacklog flips a sub-issue from `backlog` to `todo` so the
+// platform's enqueue gates accept it, and broadcasts the change. A non-backlog
+// child is returned unchanged. Returns ok=false only when the status write
+// itself fails.
+func (h *Handler) promoteFromBacklog(ctx context.Context, child db.Issue) (db.Issue, bool) {
+	if child.Status != "backlog" {
+		return child, true
+	}
+	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:          child.ID,
+		Status:      "todo",
+		WorkspaceID: child.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("orchestration: promote child failed", "child_id", uuidToString(child.ID), "error", err)
+		return child, false
+	}
+	h.publishOrchestratedStatus(ctx, updated)
+	return updated, true
 }
 
 // publishOrchestratedStatus emits the issue:updated event so UI boards reflect

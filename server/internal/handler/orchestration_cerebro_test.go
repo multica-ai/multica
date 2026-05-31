@@ -254,3 +254,77 @@ func TestOrchestrateNonOrchestrateLabelInert(t *testing.T) {
 		t.Errorf("non-orchestrate label must post no comment, got %d", got)
 	}
 }
+
+// CEREBRO-PATCH(orchestration-cerebro): FIR-2564 squad path test.
+// TestOrchestrateStartsSquadChild verifies the primary path: a sub-issue
+// assigned to a SQUAD is promoted out of backlog and the squad LEADER is woken
+// when the parent gets the `orchestrate` label.
+func TestOrchestrateStartsSquadChild(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	// Leader = the seeded "Handler Test Agent" (has a runtime).
+	var leaderID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&leaderID); err != nil {
+		t.Fatalf("locate test agent: %v", err)
+	}
+	var squadID string
+	if err := testPool.QueryRow(ctx,
+		`INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		 VALUES ($1, $2, '', $3, $4) RETURNING id`,
+		testWorkspaceID, "Orchestrate Squad", leaderID, testUserID,
+	).Scan(&squadID); err != nil {
+		t.Fatalf("create squad: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID) })
+
+	// Parent (active) + one squad-assigned backlog child.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "orch squad parent " + time.Now().Format(time.RFC3339Nano),
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create parent: %d %s", w.Code, w.Body.String())
+	}
+	parentResp := decodeIssue(t, w)
+	parent, err := testHandler.Queries.GetIssue(ctx, parseUUID(parentResp.ID))
+	if err != nil {
+		t.Fatalf("reload parent: %v", err)
+	}
+	child := createBacklogChild(t, parentResp.ID, "squad child")
+	setIssueAssigneeDirect(t, uuidToString(child.ID), "squad", squadID)
+	child, _ = testHandler.Queries.GetIssue(ctx, child.ID)
+
+	label, err := testHandler.Queries.CreateLabel(ctx, db.CreateLabelParams{
+		WorkspaceID: parent.WorkspaceID, Name: "orchestrate", Color: "#a855f7",
+	})
+	if err != nil {
+		t.Fatalf("create label: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, child.ID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, child.ID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, parent.ID)
+		testPool.Exec(context.Background(), `DELETE FROM issue_label WHERE id = $1`, label.ID)
+	})
+
+	testHandler.maybeStartOrchestrationOnLabel(ctx, parent, label.ID)
+
+	got, err := testHandler.Queries.GetIssue(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("reload child: %v", err)
+	}
+	if got.Status != "todo" {
+		t.Errorf("squad child should be promoted to todo, got %q", got.Status)
+	}
+	if n := countPendingTasksForAgent(t, uuidToString(child.ID), leaderID); n != 1 {
+		t.Errorf("squad leader should have 1 pending task, got %d", n)
+	}
+}
