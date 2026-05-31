@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, ShieldCheck, X } from "lucide-react";
+import { Plus, RefreshCw, ShieldCheck, X } from "lucide-react";
 
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 
 import {
@@ -37,6 +38,21 @@ import {
   SUPPORTED_DEFAULT_ROLES,
   type CerebroAuthSettingsRole,
 } from "../types";
+
+// FIR-2596 — the fixed 9 Google Workspace groups mirrored into Multica when
+// the sync is on. Display-only here; the authoritative mapping lives in the
+// Go worker (server/internal/cerebro/identitysync/groups.go).
+const SYNCED_GROUP_NAMES = [
+  "Customer Service",
+  "Purchase",
+  "Goods Flow",
+  "Operations Specialist & Control",
+  "Warehouse",
+  "Sales",
+  "Tech",
+  "Finance",
+  "MGMT",
+];
 
 export interface AuthPermissionsTabProps {}
 
@@ -54,6 +70,7 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
 
   const [domains, setDomains] = useState<string[]>([]);
   const [defaultRole, setDefaultRole] = useState<CerebroAuthSettingsRole>("member");
+  const [syncEnabled, setSyncEnabled] = useState(false);
   const [draftDomain, setDraftDomain] = useState("");
 
   // Re-sync form state when the query resolves OR when a save completes.
@@ -66,6 +83,7 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
       ? (settings.default_role as CerebroAuthSettingsRole)
       : "member";
     setDefaultRole(role);
+    setSyncEnabled(settings.google_workspace_sync_enabled === true);
   }, [settings]);
 
   const dirty = useMemo(() => {
@@ -75,8 +93,12 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
       .sort()
       .join(",");
     const draft = domains.map((d) => d.toLowerCase()).sort().join(",");
-    return saved !== draft || settings.default_role !== defaultRole;
-  }, [settings, domains, defaultRole]);
+    return (
+      saved !== draft ||
+      settings.default_role !== defaultRole ||
+      (settings.google_workspace_sync_enabled === true) !== syncEnabled
+    );
+  }, [settings, domains, defaultRole, syncEnabled]);
 
   if (!enabled) return null;
 
@@ -105,6 +127,7 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
         workspaceId: wsId,
         google_signup_domains: domains,
         default_role: defaultRole,
+        google_workspace_sync_enabled: syncEnabled,
       });
       toast.success("Auth-indstillinger gemt.");
     } catch (err) {
@@ -219,6 +242,37 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
             <SelectItem value="owner">Owner</SelectItem>
           </SelectContent>
         </Select>
+      </section>
+
+      <section className="rounded-md border border-border p-4 space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h4 className="text-sm font-medium flex items-center gap-2">
+              <RefreshCw className="h-4 w-4" />
+              Google Workspace-gruppe-sync
+            </h4>
+            <p className="text-xs text-muted-foreground mt-1 max-w-prose">
+              Når slået til, holder Multica automatisk de 9 Firtal-hold
+              opdateret ud fra Google Workspace (tjekkes hver 4. time). Folk der
+              tilføjes eller fjernes fra en gruppe i Google følger med. Kun
+              brugere der allerede er medlem af dette workspace bliver tilføjet —
+              resten springes over.
+            </p>
+          </div>
+          <Switch
+            checked={syncEnabled}
+            onCheckedChange={(v) => setSyncEnabled(v === true)}
+            disabled={!canEdit || isPending}
+            aria-label="Slå Google Workspace-gruppe-sync til eller fra"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2 pt-1">
+          {SYNCED_GROUP_NAMES.map((name) => (
+            <Badge key={name} variant="secondary" className="py-1">
+              {name}
+            </Badge>
+          ))}
+        </div>
       </section>
 
       {canEdit && (

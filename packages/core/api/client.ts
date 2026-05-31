@@ -1157,7 +1157,12 @@ export class ApiClient {
 
   async updateCerebroAuthSettings<T = unknown>(
     workspaceId: string,
-    payload: { google_signup_domains: string[]; default_role: string },
+    payload: {
+      google_signup_domains: string[];
+      default_role: string;
+      // CEREBRO-PATCH(cerebro-identity-sync-toggle): FIR-2596 per-workspace Google group sync flag
+      google_workspace_sync_enabled: boolean;
+    },
   ): Promise<T> {
     return this.fetch<T>(
       `/api/cerebro/workspaces/${encodeURIComponent(workspaceId)}/auth-settings`,

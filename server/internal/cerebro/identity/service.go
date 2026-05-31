@@ -73,10 +73,11 @@ func (s *Service) Update(
 		return AuthSettings{}, ErrInvalidRole
 	}
 	row, err := s.cerebro.UpsertCerebroWorkspaceAuthSettings(ctx, cerebrodb.UpsertCerebroWorkspaceAuthSettingsParams{
-		WorkspaceID:         workspaceID,
-		GoogleSignupDomains: domains,
-		DefaultRole:         role,
-		UpdatedByUserID:     actorID,
+		WorkspaceID:                workspaceID,
+		GoogleSignupDomains:        domains,
+		DefaultRole:                role,
+		GoogleWorkspaceSyncEnabled: req.GoogleWorkspaceSyncEnabled,
+		UpdatedByUserID:            actorID,
 	})
 	if err != nil {
 		return AuthSettings{}, err

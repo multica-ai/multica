@@ -7,6 +7,7 @@ export const authSettingsSchema = z.object({
   workspace_id: z.string(),
   google_signup_domains: z.array(z.string()).default([]),
   default_role: z.string().default("member"),
+  google_workspace_sync_enabled: z.boolean().default(false),
   updated_at: z.string().default(""),
   updated_by_user_id: z.string().nullable().optional(),
 });
@@ -17,6 +18,7 @@ export const EMPTY_AUTH_SETTINGS: CerebroAuthSettings = {
   workspace_id: "",
   google_signup_domains: [],
   default_role: "member",
+  google_workspace_sync_enabled: false,
   updated_at: "",
   updated_by_user_id: null,
 };

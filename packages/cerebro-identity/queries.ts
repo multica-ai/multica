@@ -31,6 +31,7 @@ export interface UpdateAuthSettingsInput {
   workspaceId: string;
   google_signup_domains: string[];
   default_role: string;
+  google_workspace_sync_enabled: boolean;
 }
 
 export function useUpdateAuthSettings() {
@@ -40,6 +41,7 @@ export function useUpdateAuthSettings() {
       const raw = await api.updateCerebroAuthSettings(input.workspaceId, {
         google_signup_domains: input.google_signup_domains,
         default_role: input.default_role,
+        google_workspace_sync_enabled: input.google_workspace_sync_enabled,
       });
       return parseWithFallback(
         raw,
@@ -49,6 +51,7 @@ export function useUpdateAuthSettings() {
           workspace_id: input.workspaceId,
           google_signup_domains: input.google_signup_domains,
           default_role: input.default_role,
+          google_workspace_sync_enabled: input.google_workspace_sync_enabled,
         },
         { endpoint: "PUT /api/cerebro/workspaces/:id/auth-settings" },
       );

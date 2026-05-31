@@ -468,13 +468,14 @@ type CerebroFeatureFlag struct {
 }
 
 type CerebroGroup struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Name        string             `json:"name"`
-	Description pgtype.Text        `json:"description"`
-	CreatedBy   pgtype.UUID        `json:"created_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Name             string             `json:"name"`
+	Description      pgtype.Text        `json:"description"`
+	CreatedBy        pgtype.UUID        `json:"created_by"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	GoogleGroupEmail pgtype.Text        `json:"google_group_email"`
 }
 
 type CerebroGroupAgentAccess struct {
@@ -496,6 +497,7 @@ type CerebroGroupMember struct {
 	UserID  pgtype.UUID        `json:"user_id"`
 	AddedBy pgtype.UUID        `json:"added_by"`
 	AddedAt pgtype.Timestamptz `json:"added_at"`
+	Source  string             `json:"source"`
 }
 
 type CerebroGroupRuntimeAccess struct {
@@ -741,12 +743,13 @@ type CerebroWorkflowRun struct {
 }
 
 type CerebroWorkspaceAuthSetting struct {
-	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
-	GoogleSignupDomains []string           `json:"google_signup_domains"`
-	DefaultRole         string             `json:"default_role"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
-	UpdatedByUserID     pgtype.UUID        `json:"updated_by_user_id"`
+	WorkspaceID                pgtype.UUID        `json:"workspace_id"`
+	GoogleSignupDomains        []string           `json:"google_signup_domains"`
+	DefaultRole                string             `json:"default_role"`
+	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
+	UpdatedByUserID            pgtype.UUID        `json:"updated_by_user_id"`
+	GoogleWorkspaceSyncEnabled bool               `json:"google_workspace_sync_enabled"`
 }
 
 type CerebroWorkspaceDefaultGroup struct {

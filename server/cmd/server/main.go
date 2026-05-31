@@ -17,6 +17,8 @@ import (
 	// CEREBRO-PATCH(main-agent-pass-gate): JEH-1327 cerebro agent-pass gate import
 	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	// CEREBRO-PATCH(main-gws-group-sync): FIR-2596 Google Workspace group sync worker import
+	cerebroidentitysync "github.com/multica-ai/multica/server/internal/cerebro/identitysync"
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
 	// CEREBRO-PATCH(main-runtime-tool-backfill): JEH-1710 bid 6 cloud-tool registry backfill import
 	cerebroruntimetools "github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
@@ -348,6 +350,8 @@ func main() {
 	go runCerebroAccountTokenUsageCleanup(sweepCtx, cerebrodb.New(pool))
 	// CEREBRO-PATCH(main-runtime-pause-sweeper): cerebro auto-unpause sweeper.
 	go cerebroruntime.New(cerebrodb.New(pool), taskSvc, bus).RunUnpauseSweeper(sweepCtx)
+	// CEREBRO-PATCH(main-gws-group-sync): FIR-2596 Google Workspace → cerebro_group sync worker (BigQuery source; gated per-workspace + on CEREBRO_GWS_SYNC_BQ_PROJECT).
+	cerebroidentitysync.StartWorker(sweepCtx, cerebrodb.New(pool), queries)
 	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 workflow engine subscribe + retry sweeper, wired to the event bus.
 	cerebroworkflows.NewListener(workflowSvc).Attach(bus)
 	go workflowSvc.RunRetrySweeper(sweepCtx, 30*time.Second)
