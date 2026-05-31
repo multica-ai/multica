@@ -71,6 +71,9 @@ func resolveToken(cmd *cobra.Command) string {
 	if v := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); v != "" {
 		return v
 	}
+	if inAgentExecutionContext() {
+		return ""
+	}
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	return cfg.Token
@@ -400,8 +403,24 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	token := resolveToken(cmd)
 	serverURL := resolveServerURL(cmd)
+	tokenSource := tokenSourceSummary()
+	mutationIdentity, mutationErr := mutationIdentitySummary()
+
+	printMutationIdentity := func() {
+		if mutationErr != nil {
+			fmt.Fprintf(os.Stderr, "Mutation identity: invalid (%v)\n", mutationErr)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Mutation identity: %s\n", mutationIdentity)
+	}
 
 	if token == "" {
+		if inAgentExecutionContext() {
+			fmt.Fprintf(os.Stderr, "Server:            %s\nToken:             missing\nToken source:      %s\n", serverURL, tokenSource)
+			printMutationIdentity()
+			fmt.Fprintln(os.Stderr, "Agent execution context is missing MULTICA_TOKEN; mutating commands will fail instead of falling back to user config.")
+			return nil
+		}
 		fmt.Fprintln(os.Stderr, "Not authenticated. Run 'multica login' to authenticate.")
 		return nil
 	}
@@ -416,6 +435,8 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		Email string `json:"email"`
 	}
 	if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
+		fmt.Fprintf(os.Stderr, "Server:            %s\nToken source:      %s\n", serverURL, tokenSource)
+		printMutationIdentity()
 		fmt.Fprintf(os.Stderr, "Token is invalid or expired: %v\nRun 'multica login' to re-authenticate.\n", err)
 		return nil
 	}
@@ -425,7 +446,8 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		prefix = prefix[:12] + "..."
 	}
 
-	fmt.Fprintf(os.Stderr, "Server:  %s\nUser:    %s (%s)\nToken:   %s\n", serverURL, me.Name, me.Email, prefix)
+	fmt.Fprintf(os.Stderr, "Server:            %s\nUser:              %s (%s)\nToken:             %s\nToken source:      %s\n", serverURL, me.Name, me.Email, prefix, tokenSource)
+	printMutationIdentity()
 	return nil
 }
 
