@@ -558,6 +558,8 @@ function SubIssueRow({ child }: { child: Issue }) {
       </div>
       <StatusPicker
         status={child.status}
+        // CEREBRO-PATCH(issue-detail-children-status-picker-v2b): FIR-1550 sub-issue rows pass pin.
+        customStatusKey={child.custom_status?.custom_status_key}
         onUpdate={handleUpdate}
         align="start"
         trigger={
@@ -1352,7 +1354,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           {/* Core props — always rendered. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
-            <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
+            {/* CEREBRO-PATCH(issue-detail-status-picker-v2b): FIR-1550 pass custom_status pin */}
+            <StatusPicker status={issue.status} customStatusKey={issue.custom_status?.custom_status_key} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />

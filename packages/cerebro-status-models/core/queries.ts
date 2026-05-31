@@ -9,6 +9,7 @@ import {
   fetchStatusModels,
   updateStatusModel,
 } from "./api";
+import { issueKeys } from "@multica/core/issues/queries";
 import type { StatusModelWriteInput } from "./types";
 
 export const cerebroStatusModelsKeys = {
@@ -85,11 +86,21 @@ export function useDeleteStatusModelMutation(wsId: string) {
 export function useAssignProjectStatusModelMutation(wsId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ projectId, statusModelId }: { projectId: string; statusModelId: string }) =>
-      assignProjectStatusModel(projectId, statusModelId),
+    mutationFn: ({
+      projectId,
+      statusModelId,
+      mapping,
+    }: {
+      projectId: string;
+      statusModelId: string;
+      mapping?: Record<string, string>;
+    }) => assignProjectStatusModel(projectId, statusModelId, mapping),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: cerebroStatusModelsKeys.assignments(wsId) });
       queryClient.invalidateQueries({ queryKey: cerebroStatusModelsKeys.list(wsId) });
+      // Existing issues were re-pinned server-side — refresh issue lists/boards
+      // so the new custom-status pins show without a manual reload.
+      queryClient.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     },
   });
 }

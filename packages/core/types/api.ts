@@ -35,6 +35,8 @@ export interface UpdateIssueRequest {
    *  Used by the description editor to register newly uploaded files so they
    *  surface in `issueAttachments` and keep their preview Eye on refresh. */
   attachment_ids?: string[];
+  // CEREBRO-PATCH(update-issue-custom-status-key-type): FIR-1550 v2b — picker pin.
+  custom_status_key?: string;
 }
 
 export interface ListIssuesParams {

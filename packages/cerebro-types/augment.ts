@@ -5,6 +5,24 @@
 
 import type {} from "@multica/core/types/agent";
 import type {} from "@multica/core/types/autopilot";
+import type {} from "@multica/core/types/issue";
+
+// FIR-1550 v2b: per-issue custom_status pin joined onto the upstream Issue
+// response. Server returns it via the cerebro-issue-custom-status enricher;
+// older servers omit the field. Frontend pickers read this to show which
+// specific custom status is currently selected (vs. the base status alone).
+declare module "@multica/core/types/issue" {
+  interface IssueCustomStatus {
+    status_model_id: string;
+    custom_status_key: string;
+    base_status: string;
+    label?: string;
+    description?: string;
+  }
+  interface Issue {
+    custom_status?: IssueCustomStatus | null;
+  }
+}
 
 // JEH-848 runtime pause/unpause fields on the upstream RuntimeDevice
 // interface. Server adds the columns via 9016_cerebro_runtime_pause and

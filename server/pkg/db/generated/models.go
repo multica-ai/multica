@@ -536,6 +536,18 @@ type CerebroIssueReference struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroIssueStatus struct {
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	StatusModelID   pgtype.UUID        `json:"status_model_id"`
+	CustomStatusKey string             `json:"custom_status_key"`
+	BaseStatus      string             `json:"base_status"`
+	SetByID         pgtype.UUID        `json:"set_by_id"`
+	SetByType       string             `json:"set_by_type"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroPersonaMaskAudit struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

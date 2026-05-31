@@ -18,7 +18,6 @@ import {
   useCreateStatusModelMutation,
   useUpdateStatusModelMutation,
   useDeleteStatusModelMutation,
-  useAssignProjectStatusModelMutation,
   useClearProjectStatusModelMutation,
 } from "@multica/cerebro-status-models/core";
 import type { CerebroStatusModel } from "@multica/cerebro-status-models/core";
@@ -29,6 +28,7 @@ import {
   NativeSelectOption,
 } from "@multica/ui/components/ui/native-select";
 import { StatusModelEditor } from "./status-model-editor";
+import { StatusModelAssignModal } from "./status-model-assign-modal";
 
 const DEFAULT_VALUE = "__default__";
 
@@ -43,11 +43,16 @@ export function StatusModelsTab() {
   const createMutation = useCreateStatusModelMutation(wsId);
   const updateMutation = useUpdateStatusModelMutation(wsId);
   const deleteMutation = useDeleteStatusModelMutation(wsId);
-  const assignMutation = useAssignProjectStatusModelMutation(wsId);
+  // assignMutation is invoked inside StatusModelAssignModal — kept imported
+  // for the modal child so the v2b mapping flow owns the assignment call.
   const clearMutation = useClearProjectStatusModelMutation(wsId);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<CerebroStatusModel | undefined>();
+  // v2b (FIR-1550): mapping-modal state — open per (project, model) selection.
+  const [assigning, setAssigning] = useState<
+    { projectId: string; projectName: string; modelId: string } | null
+  >(null);
 
   const models = modelsData?.status_models ?? [];
   const assignments = assignmentsData?.assignments ?? [];
@@ -93,10 +98,15 @@ export function StatusModelsTab() {
       });
       return;
     }
-    assignMutation.mutate(
-      { projectId, statusModelId: value },
-      { onError: () => toast.error("Kunne ikke tildele statusmodellen.") },
-    );
+    // v2b (FIR-1550): no silent omplacering — open the mapping modal so the
+    // admin sees per-base custom_status suggestions before the assignment
+    // lands. The modal calls assignProjectStatusModel itself on confirm.
+    const project = projects?.find((p) => p.id === projectId);
+    setAssigning({
+      projectId,
+      projectName: project?.title ?? "projekt",
+      modelId: value,
+    });
   };
 
   return (
@@ -233,6 +243,16 @@ export function StatusModelsTab() {
               ? updateMutation.mutateAsync({ id: editing.id, payload: input })
               : createMutation.mutateAsync(input)
           }
+        />
+      )}
+
+      {assigning && (
+        <StatusModelAssignModal
+          open={!!assigning}
+          projectId={assigning.projectId}
+          projectName={assigning.projectName}
+          modelId={assigning.modelId}
+          onClose={() => setAssigning(null)}
         />
       )}
     </div>

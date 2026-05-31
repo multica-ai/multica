@@ -17,6 +17,21 @@ export const BASE_STATUSES = [
 
 export type BaseStatus = (typeof BASE_STATUSES)[number];
 
+/**
+ * Optional automation attached to a custom status.
+ *
+ * v2b (FIR-1550): when an issue enters a status with triggers, the backend
+ * fires them. `assign_to_*` reassigns the issue; `fire_agent_id` enqueues a
+ * new run for that agent. Both fields are independent — either or both can
+ * be unset. The trigger engine itself lands in the follow-up PR; the schema
+ * is in place so the editor can configure and persist them now.
+ */
+export interface StatusTriggers {
+  assign_to_id?: string;
+  assign_to_type?: "member" | "agent";
+  fire_agent_id?: string;
+}
+
 /** One custom status within a model. position is server-assigned by order. */
 export interface StatusEntry {
   key: string;
@@ -24,6 +39,14 @@ export interface StatusEntry {
   color: string;
   base_status: string;
   position: number;
+  /**
+   * Required for v2b — what agents read to understand what this status
+   * means. The backend validates that it is non-empty on create/update.
+   * Optional in the type so reads of pre-v2b rows degrade gracefully; the
+   * editor enforces "required" on write.
+   */
+  description?: string;
+  triggers?: StatusTriggers;
 }
 
 export interface CerebroStatusModel {
@@ -66,5 +89,27 @@ export interface StatusModelWriteInput {
     label: string;
     color: string;
     base_status: string;
+    description: string;
+    triggers?: StatusTriggers;
   }>;
+}
+
+/**
+ * Per-issue custom status pin (v2b). Returned by GET
+ * /api/cerebro/issues/{id}/custom-status. label + description are joined in
+ * from the model so the UI / agents never have to look up the model
+ * separately.
+ */
+export interface IssueCustomStatus {
+  issue_id: string;
+  workspace_id: string;
+  status_model_id: string;
+  custom_status_key: string;
+  base_status: string;
+  set_by_id: string;
+  set_by_type: "member" | "agent" | "system";
+  label?: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
 }

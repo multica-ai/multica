@@ -445,6 +445,14 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "PUT /api/cerebro/issues/{issueId}/custom-status/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/cerebro/issues/{issueId}/custom-status/",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/channels/",
       "gate": "workspace_member"
     },

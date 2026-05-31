@@ -374,8 +374,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroShareTokenHandler := cerebrosharetoken.NewHandler(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).WithService(opts.WorkflowService)
-	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 workflow v2a status-model handler instance
-	cerebroStatusModelsHandler := cerebrostatusmodels.NewHandler(cerebroQueries)
+	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 v2b — pass upstream queries so per-issue custom status mirrors onto the upstream issue row, and pass the pool so the two writes commit atomically (Mia review).
+	cerebroStatusModelsHandler := cerebrostatusmodels.NewHandler(cerebroQueries).WithUpstream(queries).WithTx(pool)
+	// CEREBRO-PATCH(custom-status-resolver-wire): FIR-1550 v2b — UpdateIssue invokes the resolver.
+	h.CustomStatusResolver = cerebroStatusModelsHandler
 	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler instance; FIR-2049 pass queries so avatar reads gateway creds from workspace settings
 	cerebroAgentAvatarHandler := cerebroagentavatar.New(store, queries)
 
@@ -1379,6 +1381,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", cerebroStatusModelsHandler.SetProjectModel)
 					r.Delete("/", cerebroStatusModelsHandler.ClearProjectModel)
 				})
+			})
+			// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 v2b per-issue custom-status pin.
+			r.Route("/api/cerebro/issues/{issueId}/custom-status", func(r chi.Router) {
+				r.Get("/", cerebroStatusModelsHandler.GetIssueCustomStatus)
+				r.Put("/", cerebroStatusModelsHandler.SetIssueCustomStatus)
+				r.Delete("/", cerebroStatusModelsHandler.ClearIssueCustomStatus)
 			})
 		})
 	})

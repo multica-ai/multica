@@ -68,6 +68,8 @@ type IssueResponse struct {
 	// Pointer + omitempty, same contract as Labels: nil = "field absent, don't touch cache".
 	Blocks    *[]IssueDependencyRef `json:"blocks,omitempty"`
 	BlockedBy *[]IssueDependencyRef `json:"blocked_by,omitempty"`
+	// CEREBRO-PATCH(issue-custom-status): FIR-1550 v2b — joined sidecar pin so agents see custom_status.label/.description alongside the base status.
+	CustomStatus *IssueCustomStatusPayload `json:"custom_status,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -1656,6 +1658,9 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	resp.Blocks = &deps.Blocks
 	resp.BlockedBy = &deps.BlockedBy
 
+	// CEREBRO-PATCH(cerebro-issue-custom-status-enricher): FIR-1550 v2b — join sidecar custom_status so agents read the description.
+	resp.CustomStatus = h.cerebroLoadIssueCustomStatus(r.Context(), issue.ID)
+
 	// Fetch issue reactions.
 	reactions, err := h.Queries.ListIssueReactions(r.Context(), issue.ID)
 	if err == nil && len(reactions) > 0 {
@@ -2451,6 +2456,8 @@ type UpdateIssueRequest struct {
 	// editor's preview Eye keeps working past a refresh. Existing bindings
 	// are idempotent — re-sending the same id is a no-op.
 	AttachmentIDs []string `json:"attachment_ids"`
+	// CEREBRO-PATCH(update-issue-custom-status-key): FIR-1550 v2b — status-picker pin.
+	CustomStatusKey *string `json:"custom_status_key,omitempty"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -2669,8 +2676,22 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
+	// CEREBRO-PATCH(custom-status-prevalidate): FIR-1550 v2b — reject a bad explicit custom_status_key BEFORE commit so the base status never half-applies.
+	if h.CustomStatusResolver != nil && req.CustomStatusKey != nil && *req.CustomStatusKey != "" {
+		if err := h.CustomStatusResolver.ValidateCustomStatusKey(r.Context(), issue.ProjectID, issue.Status, *req.CustomStatusKey); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update issue")
+		return
+	}
+
+	// CEREBRO-PATCH(update-issue-custom-status-hook): FIR-1550 v2b — sync sidecar after commit.
+	_, projectChanged := rawFields["project_id"]
+	if !h.cerebroApplyCustomStatusAfterUpdate(r.Context(), w, r, issue.ID, issue.ProjectID, issue.WorkspaceID, issue.Status, actorType, actorID, statusChanged, projectChanged, req.CustomStatusKey, &resp) {
 		return
 	}
 

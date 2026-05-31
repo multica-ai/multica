@@ -10,6 +10,16 @@ import type { CerebroStatusModel } from "./types";
 
 const VALID_BASE = new Set<string>(ALL_STATUSES);
 
+export interface ResolvedCustomStatus {
+  /** Stable key (within the model) the picker pins via `custom_status_key`. */
+  key: string;
+  label: string;
+  color?: string;
+  baseStatus: IssueStatus;
+  position: number;
+  description?: string;
+}
+
 export interface ResolvedStatusPresentation {
   modelId: string;
   modelName: string;
@@ -19,15 +29,24 @@ export interface ResolvedStatusPresentation {
   labelByBase: Record<string, string>;
   /** Model color per base status (omitted when the entry has no color). */
   colorByBase: Record<string, string>;
+  /**
+   * v2b (FIR-1550): every custom status in model order, no deduplication.
+   * Two statuses under the same base BOTH appear here so the picker can
+   * render them as distinct options. `customByKey` is a key→entry lookup.
+   */
+  customStatuses: ResolvedCustomStatus[];
+  customByKey: Record<string, ResolvedCustomStatus>;
 }
 
 /**
  * Build the render-time presentation for one model.
  *
- * Duplicate-base statuses collapse to the FIRST entry for that base — true
- * separate columns for two statuses sharing one base need a per-issue custom
- * status id and are out of v2a scope (FIR-1553). Unknown base values are
- * skipped so a drifted model never injects a phantom column.
+ * `orderedBaseStatuses` + `labelByBase` + `colorByBase` keep v2a behaviour
+ * (one column per base, first-entry wins) so the board renderer doesn't
+ * change shape. `customStatuses` is the v2b list — every entry, no dedup —
+ * which the picker uses to render true sub-statuses and pin via
+ * `custom_status_key`. Unknown base values are skipped so a drifted model
+ * never injects a phantom column or picker option.
  */
 export function buildStatusPresentation(
   model: CerebroStatusModel,
@@ -35,15 +54,28 @@ export function buildStatusPresentation(
   const orderedBaseStatuses: IssueStatus[] = [];
   const labelByBase: Record<string, string> = {};
   const colorByBase: Record<string, string> = {};
+  const customStatuses: ResolvedCustomStatus[] = [];
+  const customByKey: Record<string, ResolvedCustomStatus> = {};
 
   const sorted = [...model.statuses].sort((a, b) => a.position - b.position);
   for (const entry of sorted) {
     if (!VALID_BASE.has(entry.base_status)) continue;
     const base = entry.base_status as IssueStatus;
-    if (base in labelByBase) continue; // first-match collapse
-    labelByBase[base] = entry.label;
-    if (entry.color) colorByBase[base] = entry.color;
-    orderedBaseStatuses.push(base);
+    if (!(base in labelByBase)) {
+      labelByBase[base] = entry.label;
+      if (entry.color) colorByBase[base] = entry.color;
+      orderedBaseStatuses.push(base);
+    }
+    const custom: ResolvedCustomStatus = {
+      key: entry.key,
+      label: entry.label,
+      color: entry.color || undefined,
+      baseStatus: base,
+      position: entry.position,
+      description: entry.description || undefined,
+    };
+    customStatuses.push(custom);
+    customByKey[entry.key] = custom;
   }
 
   return {
@@ -52,5 +84,7 @@ export function buildStatusPresentation(
     orderedBaseStatuses,
     labelByBase,
     colorByBase,
+    customStatuses,
+    customByKey,
   };
 }
