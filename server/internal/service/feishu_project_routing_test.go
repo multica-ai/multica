@@ -205,6 +205,56 @@ func TestParseFeishuProjectSearchIndexesFieldValuesForLabelSync(t *testing.T) {
 	}
 }
 
+func TestParseFeishuProjectSearchExtractsPriority(t *testing.T) {
+	payload := map[string]any{
+		"data": []any{
+			map[string]any{
+				"id":   123,
+				"name": "priority-item",
+				"fields": []any{
+					map[string]any{
+						"field_key": "field_priority",
+						"name":      "优先级",
+						"field_value": map[string]any{
+							"key_label_value": map[string]any{
+								"key":   "priority_1",
+								"label": "P1",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	items := parseFeishuProjectSearch(payload, "issue", "partopia", "")
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].Priority != "P1" {
+		t.Fatalf("expected priority P1, got %q", items[0].Priority)
+	}
+	if got := mapFeishuPriority(items[0].Priority); got != "high" {
+		t.Fatalf("expected P1 to map to high, got %q", got)
+	}
+}
+
+func TestMapFeishuPriority(t *testing.T) {
+	cases := map[string]string{
+		"P0":     "urgent",
+		"严重":     "high",
+		"普通":     "medium",
+		"低优先级":   "low",
+		"无优先级":   "none",
+		"custom": "",
+		"":       "",
+	}
+	for in, want := range cases {
+		if got := mapFeishuPriority(in); got != want {
+			t.Fatalf("mapFeishuPriority(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestParseFeishuProjectMQLUsesOptionLabelForFieldValues(t *testing.T) {
 	payload := map[string]any{
 		"data": map[string]any{

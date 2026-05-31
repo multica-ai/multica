@@ -133,6 +133,7 @@ type FeishuProjectWorkItem struct {
 	Title              string
 	Description        string
 	Status             string
+	Priority           string
 	OwnerEmail         string
 	UpdatedAt          time.Time
 	URL                string
@@ -475,6 +476,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 	if status == "" {
 		status = "todo"
 	}
+	mappedPriority := mapFeishuPriority(item.Priority)
 
 	phaseStarted := time.Now()
 	binding, err := s.Queries.GetFeishuProjectIssueBindingByExternal(ctx, db.GetFeishuProjectIssueBindingByExternalParams{
@@ -497,6 +499,10 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		if projectID.Valid {
 			nextProjectID = projectID
 		}
+		nextPriority := issue.Priority
+		if mappedPriority != "" {
+			nextPriority = mappedPriority
+		}
 
 		if lightUpdateExisting {
 			// Light-update path for manual full-sync: refresh status / assignee /
@@ -510,6 +516,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			if issue.Status == status &&
 				sameNullableText(issue.AssigneeType, assigneeType) &&
 				sameNullableUUID(issue.AssigneeID, assigneeID) &&
+				issue.Priority == nextPriority &&
 				issue.ProjectID == nextProjectID {
 				labelsChanged, err := s.syncIssueLabels(ctx, cfg, item, issue.ID)
 				if err != nil {
@@ -530,7 +537,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 				Title:         pgtype.Text{},
 				Description:   pgtype.Text{},
 				Status:        pgtype.Text{String: status, Valid: true},
-				Priority:      pgtype.Text{String: issue.Priority, Valid: true},
+				Priority:      pgtype.Text{String: nextPriority, Valid: true},
 				AssigneeType:  assigneeType,
 				AssigneeID:    assigneeID,
 				DueDate:       issue.DueDate,
@@ -561,6 +568,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		nextDesc := externalDescription(item, attachmentMarkdown)
 		nextTitle := externalTitle(item)
 		if issue.Title == nextTitle && issue.Description.String == nextDesc && issue.Status == status &&
+			issue.Priority == nextPriority &&
 			sameNullableText(issue.AssigneeType, assigneeType) && sameNullableUUID(issue.AssigneeID, assigneeID) &&
 			issue.ProjectID == nextProjectID {
 			labelsChanged, err := s.syncIssueLabels(ctx, cfg, item, issue.ID)
@@ -579,7 +587,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			Title:         pgtype.Text{String: nextTitle, Valid: true},
 			Description:   pgtype.Text{String: nextDesc, Valid: true},
 			Status:        pgtype.Text{String: status, Valid: true},
-			Priority:      pgtype.Text{String: issue.Priority, Valid: true},
+			Priority:      pgtype.Text{String: nextPriority, Valid: true},
 			AssigneeType:  assigneeType,
 			AssigneeID:    assigneeID,
 			DueDate:       issue.DueDate,
@@ -622,7 +630,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		Title:        externalTitle(item),
 		Description:  pgtype.Text{String: externalDescription(item, ""), Valid: true},
 		Status:       status,
-		Priority:     "none",
+		Priority:     firstNonEmpty(mappedPriority, "none"),
 		AssigneeType: assigneeType,
 		AssigneeID:   assigneeID,
 		CreatorType:  "member",
@@ -654,7 +662,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			Title:         pgtype.Text{String: externalTitle(item), Valid: true},
 			Description:   pgtype.Text{String: externalDescription(item, attachmentMarkdown), Valid: true},
 			Status:        pgtype.Text{String: status, Valid: true},
-			Priority:      pgtype.Text{String: issue.Priority, Valid: true},
+			Priority:      pgtype.Text{String: firstNonEmpty(mappedPriority, issue.Priority), Valid: true},
 			AssigneeType:  assigneeType,
 			AssigneeID:    assigneeID,
 			DueDate:       issue.DueDate,
@@ -1421,6 +1429,29 @@ func mapFeishuStatus(raw []byte, typ, external string) string {
 	return ""
 }
 
+func mapFeishuPriority(external string) string {
+	normalized := strings.ToLower(strings.TrimSpace(external))
+	normalized = strings.ReplaceAll(normalized, " ", "")
+	normalized = strings.ReplaceAll(normalized, "_", "")
+	normalized = strings.ReplaceAll(normalized, "-", "")
+	switch normalized {
+	case "", "<nil>":
+		return ""
+	case "none", "nopriority", "无", "无优先级", "未设置", "不设置":
+		return "none"
+	case "urgent", "blocker", "critical", "crit", "highest", "p0", "p00", "s0", "致命", "紧急", "最高", "严重阻塞":
+		return "urgent"
+	case "high", "major", "p1", "s1", "高", "高优", "高优先级", "严重":
+		return "high"
+	case "medium", "normal", "middle", "p2", "s2", "中", "中优", "中优先级", "普通", "一般":
+		return "medium"
+	case "low", "minor", "lowest", "p3", "p4", "s3", "s4", "低", "低优", "低优先级", "轻微":
+		return "low"
+	default:
+		return ""
+	}
+}
+
 func MapMulticaStatusToFeishu(raw []byte, typ, status string) string {
 	var mapping map[string]map[string]string
 	if err := json.Unmarshal(raw, &mapping); err == nil {
@@ -1533,7 +1564,7 @@ func buildFeishuProjectSyncMQL(projectKey, workItemType string, statuses []strin
 		conditions = append(conditions, "("+filter+")")
 	}
 	return fmt.Sprintf(
-		"SELECT `work_item_id`, `name`, `description`, `work_item_status`, `updated_at` FROM `%s`.`%s` WHERE %s ORDER BY `updated_at` DESC LIMIT %d, %d",
+		"SELECT `work_item_id`, `name`, `description`, `work_item_status`, `priority`, `updated_at` FROM `%s`.`%s` WHERE %s ORDER BY `updated_at` DESC LIMIT %d, %d",
 		escapeMQLIdent(projectKey),
 		escapeMQLIdent(workItemType),
 		strings.Join(conditions, " AND "),
@@ -2415,6 +2446,7 @@ func parseFeishuProjectMQL(payload map[string]any, typ, projectKey string) []Fei
 				Title:       firstNonEmpty(record["name"], record["title"]),
 				Description: description,
 				Status:      status,
+				Priority:    feishuProjectPriorityValue(record),
 				OwnerEmail:  extractEmail(firstNonEmpty(record["owner"], record["operator"])),
 				UpdatedAt:   updatedAt,
 				URL:         fmt.Sprintf("https://project.feishu.cn/%s/%s/detail/%s", projectKey, typ, id),
@@ -2483,6 +2515,8 @@ func parseFeishuProjectSearch(payload map[string]any, typ, projectKey, businessL
 		}
 		record := map[string]string{
 			"name":               fmt.Sprint(row["name"]),
+			"priority":           fmt.Sprint(row["priority"]),
+			"work_item_priority": fmt.Sprint(row["work_item_priority"]),
 			"sub_stage":          fmt.Sprint(row["sub_stage"]),
 			"current_status":     fmt.Sprint(row["current_status"]),
 			"work_item_status":   feishuProjectStatusValue(row["work_item_status"]),
@@ -2557,6 +2591,7 @@ func parseFeishuProjectSearch(payload map[string]any, typ, projectKey, businessL
 			Title:              firstNonEmpty(record["name"], record["title"]),
 			Description:        description,
 			Status:             firstNonEmpty(record["work_item_status"], record["sub_stage"], record["status"]),
+			Priority:           feishuProjectPriorityValue(record),
 			OwnerEmail:         ownerEmail,
 			UpdatedAt:          updatedAt,
 			URL:                fmt.Sprintf("https://project.feishu.cn/%s/%s/detail/%s", projectKey, typ, id),
@@ -2589,6 +2624,22 @@ func addFeishuProjectFieldValues(out map[string][]string, key, displayName strin
 			seenVals[v] = true
 		}
 	}
+}
+
+func feishuProjectPriorityValue(record map[string]string) string {
+	for _, key := range []string{
+		"priority",
+		"work_item_priority",
+		"issue_priority",
+		"severity",
+		"严重程度",
+		"优先级",
+	} {
+		if value := firstNonEmpty(record[key]); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func feishuProjectOperatorRoleEmail(row map[string]any, userEmails map[string]string) string {
@@ -3229,6 +3280,13 @@ func feishuProjectOpenAPIFieldValue(field map[string]any) string {
 	case float64:
 		return fmt.Sprint(int64(v))
 	case map[string]any:
+		if kv, _ := v["key_label_value"].(map[string]any); len(kv) > 0 {
+			return firstNonEmpty(fmt.Sprint(kv["label"]), fmt.Sprint(kv["key"]))
+		}
+		if list, _ := v["key_label_value_list"].([]any); len(list) > 0 {
+			first, _ := list[0].(map[string]any)
+			return firstNonEmpty(fmt.Sprint(first["label"]), fmt.Sprint(first["key"]))
+		}
 		if text, _ := v["doc_text"].(string); text != "" {
 			return text
 		}
