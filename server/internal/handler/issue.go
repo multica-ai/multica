@@ -584,145 +584,16 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	return query, args
 }
 
+// SearchIssues delegates to the FIR-2595 FTS-based implementation. The old
+// LIKE-driven pipeline (buildSearchQuery / splitSearchTerms / parseQueryNumber
+// in this file) is retained because duplicate_check_cerebro.go still reuses
+// it for create-time similarity ranking — a different use case where the
+// stronger relevance signal of FTS would change behaviour.
+//
+// CEREBRO-PATCH(search-fts-fir-2595): redirect issue-search to Postgres FTS +
+// inline-filter parser. Implementation lives in search_cerebro.go.
 func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	workspaceID := h.resolveWorkspaceID(r)
-
-	q := r.URL.Query().Get("q")
-	if q == "" {
-		writeError(w, http.StatusBadRequest, "q parameter is required")
-		return
-	}
-
-	limit := 20
-	offset := 0
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 {
-			limit = v
-		}
-	}
-	if limit > 50 {
-		limit = 50
-	}
-	if o := r.URL.Query().Get("offset"); o != "" {
-		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
-			offset = v
-		}
-	}
-
-	includeClosed := r.URL.Query().Get("include_closed") == "true"
-
-	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
-	if !ok {
-		return
-	}
-	terms := splitSearchTerms(q)
-	queryNum, hasNum := parseQueryNumber(q)
-
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed)
-	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
-	args[3] = wsUUID
-	args[len(args)-2] = limit
-	args[len(args)-1] = offset
-
-	rows, err := h.DB.Query(ctx, sqlQuery, args...)
-	if err != nil {
-		slog.Warn("search issues failed", "error", err, "workspace_id", workspaceID, "query", q)
-		writeError(w, http.StatusInternalServerError, "failed to search issues")
-		return
-	}
-	defer rows.Close()
-
-	var results []searchResult
-	for rows.Next() {
-		var sr searchResult
-		if err := rows.Scan(
-			&sr.issue.ID,
-			&sr.issue.WorkspaceID,
-			&sr.issue.Title,
-			&sr.issue.Description,
-			&sr.issue.Status,
-			&sr.issue.Priority,
-			&sr.issue.AssigneeType,
-			&sr.issue.AssigneeID,
-			&sr.issue.CreatorType,
-			&sr.issue.CreatorID,
-			&sr.issue.ParentIssueID,
-			&sr.issue.AcceptanceCriteria,
-			&sr.issue.ContextRefs,
-			&sr.issue.Position,
-			&sr.issue.StartDate,
-			&sr.issue.DueDate,
-			&sr.issue.CreatedAt,
-			&sr.issue.UpdatedAt,
-			&sr.issue.Number,
-			&sr.issue.ProjectID,
-			&sr.totalCount,
-			&sr.matchSource,
-			&sr.matchedCommentContent,
-		); err != nil {
-			slog.Warn("search issues scan failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to search issues")
-			return
-		}
-		results = append(results, sr)
-	}
-	if err := rows.Err(); err != nil {
-		slog.Warn("search issues rows error", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to search issues")
-		return
-	}
-
-	// Locked decision: restricted matches are hidden entirely, not shown
-	// as redacted. A user who can't access an issue must never know it
-	// matched their search.
-	member, hasMember := ctxMember(ctx)
-	if hasMember && !isWorkspaceAdmin(member) {
-		filtered := results[:0]
-		for _, sr := range results {
-			if h.canAccessIssue(ctx, member, sr.issue) {
-				filtered = append(filtered, sr)
-			}
-		}
-		results = filtered
-	}
-
-	var total int64
-	if len(results) > 0 {
-		total = results[0].totalCount
-	}
-
-	prefix := h.getIssuePrefix(ctx, wsUUID)
-	resp := make([]SearchIssueResponse, len(results))
-	for i, sr := range results {
-		sir := SearchIssueResponse{
-			IssueResponse: issueToResponse(sr.issue, prefix),
-			MatchSource:   sr.matchSource,
-		}
-		// Always populate comment snippet when a matching comment exists
-		if sr.matchedCommentContent != "" {
-			snippet := extractSnippet(sr.matchedCommentContent, q)
-			sir.MatchedCommentSnippet = &snippet
-			// Keep backward compat: also set MatchedSnippet for comment-source matches
-			if sr.matchSource == "comment" {
-				sir.MatchedSnippet = &snippet
-			}
-		}
-		// Populate description snippet when description matches
-		if sr.matchSource == "description" || descriptionContains(sr.issue.Description, q, terms) {
-			if sr.issue.Description.Valid && sr.issue.Description.String != "" {
-				snippet := extractSnippet(sr.issue.Description.String, q)
-				sir.MatchedDescriptionSnippet = &snippet
-			}
-		}
-		resp[i] = sir
-	}
-
-	w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
-	writeJSON(w, http.StatusOK, map[string]any{
-		"issues": resp,
-		"total":  total,
-	})
+	h.SearchIssuesCerebro(w, r)
 }
 
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,19 @@
+{
+  "name": "@multica/cerebro-search",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./core": "./core/index.ts"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
