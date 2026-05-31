@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -1080,6 +1081,140 @@ func TestListIssuesSearchAndDateFilters(t *testing.T) {
 	}
 }
 
+func TestListIssuesLabelFilters(t *testing.T) {
+	ctx := context.Background()
+	nextNumber := int32(27000)
+
+	insertIssue := func(title string) string {
+		nextNumber++
+		var issueID string
+		err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (
+				workspace_id, title, status, priority, creator_type, creator_id, number, position
+			)
+			VALUES ($1, $2, 'todo', 'none', 'member', $3, $4, $5)
+			RETURNING id
+		`, testWorkspaceID, title, testUserID, nextNumber, float64(nextNumber)).Scan(&issueID)
+		if err != nil {
+			t.Fatalf("failed to insert issue %q: %v", title, err)
+		}
+		return issueID
+	}
+
+	insertLabel := func(name string) string {
+		var labelID string
+		err := testPool.QueryRow(ctx, `
+			INSERT INTO issue_label (workspace_id, name, color)
+			VALUES ($1, $2, '#2563eb')
+			RETURNING id
+		`, testWorkspaceID, name).Scan(&labelID)
+		if err != nil {
+			t.Fatalf("failed to insert label %q: %v", name, err)
+		}
+		return labelID
+	}
+
+	assignLabel := func(issueID, labelID string) {
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO issue_to_label (issue_id, label_id)
+			VALUES ($1, $2)
+		`, issueID, labelID); err != nil {
+			t.Fatalf("failed to assign label %s to issue %s: %v", labelID, issueID, err)
+		}
+	}
+
+	issueAnyID := insertIssue("label-any-match")
+	issueAllID := insertIssue("label-all-match")
+	issueOtherID := insertIssue("label-other-match")
+	labelBackendID := insertLabel("backend-filter")
+	labelBugID := insertLabel("bug-filter")
+	labelOpsID := insertLabel("ops-filter")
+
+	assignLabel(issueAnyID, labelBackendID)
+	assignLabel(issueAllID, labelBackendID)
+	assignLabel(issueAllID, labelBugID)
+	assignLabel(issueOtherID, labelOpsID)
+
+	t.Cleanup(func() {
+		for _, issueID := range []string{issueAnyID, issueAllID, issueOtherID} {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+		for _, labelID := range []string{labelBackendID, labelBugID, labelOpsID} {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM issue_label WHERE id = $1`, labelID)
+		}
+	})
+
+	type issueListResponse struct {
+		Issues []IssueResponse `json:"issues"`
+		Total  int             `json:"total"`
+	}
+
+	decodeList := func(t *testing.T, recorder *httptest.ResponseRecorder) issueListResponse {
+		t.Helper()
+		var resp issueListResponse
+		if err := json.NewDecoder(recorder.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode issue list response: %v", err)
+		}
+		return resp
+	}
+
+	assertTitles := func(t *testing.T, resp issueListResponse, expected ...string) {
+		t.Helper()
+		if resp.Total != len(expected) {
+			t.Fatalf("expected total=%d, got %d", len(expected), resp.Total)
+		}
+		if len(resp.Issues) != len(expected) {
+			t.Fatalf("expected %d issues, got %d", len(expected), len(resp.Issues))
+		}
+
+		got := make([]string, 0, len(resp.Issues))
+		for _, issue := range resp.Issues {
+			got = append(got, issue.Title)
+		}
+		sort.Strings(got)
+		sort.Strings(expected)
+		if strings.Join(got, "|") != strings.Join(expected, "|") {
+			t.Fatalf("expected titles %v, got %v", expected, got)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&label_ids="+labelBackendID, nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("label any filter: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	assertTitles(t, decodeList(t, w), "label-all-match", "label-any-match")
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&label_ids="+labelBackendID+"&label_ids="+labelBugID+"&label_match_mode=all", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("label all filter: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	assertTitles(t, decodeList(t, w), "label-all-match")
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&label_ids="+labelBackendID+"&label_match_mode=invalid", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid label_match_mode: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "label_match_mode") {
+		t.Fatalf("invalid label_match_mode: unexpected body %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&label_ids=not-a-uuid", nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid label_ids: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "label_ids") {
+		t.Fatalf("invalid label_ids: unexpected body %s", w.Body.String())
+	}
+}
+
 func TestIssueUpdatePublishesScheduleDateMetadata(t *testing.T) {
 	createStartDate := "2026-04-10T00:00:00Z"
 	createEndDate := "2026-04-15T00:00:00Z"
@@ -1642,68 +1777,68 @@ func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 }
 
 func TestBulkCreateIssues(t *testing.T) {
-t.Run("success", func(t *testing.T) {
-w := httptest.NewRecorder()
-req := newRequest("POST", "/api/issues/bulk", BulkCreateIssuesRequest{
-Issues: []BulkCreateIssueItem{
-{Title: "Bulk Issue One"},
-{Title: "Bulk Issue Two", Status: "todo", Priority: "high"},
-},
-})
-testHandler.BulkCreateIssues(w, req)
-if w.Code != http.StatusCreated {
-t.Fatalf("BulkCreateIssues: expected 201, got %d: %s", w.Code, w.Body.String())
-}
-var result map[string][]IssueResponse
-json.NewDecoder(w.Body).Decode(&result)
-issues := result["issues"]
-if len(issues) != 2 {
-t.Fatalf("BulkCreateIssues: expected 2 issues, got %d", len(issues))
-}
-if issues[0].Title != "Bulk Issue One" {
-t.Fatalf("BulkCreateIssues: unexpected title %q", issues[0].Title)
-}
-if issues[1].Status != "todo" {
-t.Fatalf("BulkCreateIssues: expected status 'todo', got %q", issues[1].Status)
-}
-// cleanup
-for _, issue := range issues {
-cw := httptest.NewRecorder()
-cr := newRequest("DELETE", "/api/issues/"+issue.ID, nil)
-cr = withURLParam(cr, "id", issue.ID)
-testHandler.DeleteIssue(cw, cr)
-}
-})
+	t.Run("success", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/bulk", BulkCreateIssuesRequest{
+			Issues: []BulkCreateIssueItem{
+				{Title: "Bulk Issue One"},
+				{Title: "Bulk Issue Two", Status: "todo", Priority: "high"},
+			},
+		})
+		testHandler.BulkCreateIssues(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("BulkCreateIssues: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var result map[string][]IssueResponse
+		json.NewDecoder(w.Body).Decode(&result)
+		issues := result["issues"]
+		if len(issues) != 2 {
+			t.Fatalf("BulkCreateIssues: expected 2 issues, got %d", len(issues))
+		}
+		if issues[0].Title != "Bulk Issue One" {
+			t.Fatalf("BulkCreateIssues: unexpected title %q", issues[0].Title)
+		}
+		if issues[1].Status != "todo" {
+			t.Fatalf("BulkCreateIssues: expected status 'todo', got %q", issues[1].Status)
+		}
+		// cleanup
+		for _, issue := range issues {
+			cw := httptest.NewRecorder()
+			cr := newRequest("DELETE", "/api/issues/"+issue.ID, nil)
+			cr = withURLParam(cr, "id", issue.ID)
+			testHandler.DeleteIssue(cw, cr)
+		}
+	})
 
-t.Run("empty_title_rejected", func(t *testing.T) {
-w := httptest.NewRecorder()
-req := newRequest("POST", "/api/issues/bulk", BulkCreateIssuesRequest{
-Issues: []BulkCreateIssueItem{
-{Title: "Valid Title"},
-{Title: "   "},
-},
-})
-testHandler.BulkCreateIssues(w, req)
-if w.Code != http.StatusUnprocessableEntity {
-t.Fatalf("BulkCreateIssues: expected 422, got %d: %s", w.Code, w.Body.String())
-}
-var result map[string]any
-json.NewDecoder(w.Body).Decode(&result)
-if result["errors"] == nil {
-t.Fatalf("BulkCreateIssues: expected 'errors' in response")
-}
-})
+	t.Run("empty_title_rejected", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/bulk", BulkCreateIssuesRequest{
+			Issues: []BulkCreateIssueItem{
+				{Title: "Valid Title"},
+				{Title: "   "},
+			},
+		})
+		testHandler.BulkCreateIssues(w, req)
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("BulkCreateIssues: expected 422, got %d: %s", w.Code, w.Body.String())
+		}
+		var result map[string]any
+		json.NewDecoder(w.Body).Decode(&result)
+		if result["errors"] == nil {
+			t.Fatalf("BulkCreateIssues: expected 'errors' in response")
+		}
+	})
 
-t.Run("over_limit_rejected", func(t *testing.T) {
-items := make([]BulkCreateIssueItem, bulkCreateIssuesLimit+1)
-for i := range items {
-items[i] = BulkCreateIssueItem{Title: fmt.Sprintf("Issue %d", i+1)}
-}
-w := httptest.NewRecorder()
-req := newRequest("POST", "/api/issues/bulk", BulkCreateIssuesRequest{Issues: items})
-testHandler.BulkCreateIssues(w, req)
-if w.Code != http.StatusUnprocessableEntity {
-t.Fatalf("BulkCreateIssues: expected 422, got %d: %s", w.Code, w.Body.String())
-}
-})
+	t.Run("over_limit_rejected", func(t *testing.T) {
+		items := make([]BulkCreateIssueItem, bulkCreateIssuesLimit+1)
+		for i := range items {
+			items[i] = BulkCreateIssueItem{Title: fmt.Sprintf("Issue %d", i+1)}
+		}
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/bulk", BulkCreateIssuesRequest{Issues: items})
+		testHandler.BulkCreateIssues(w, req)
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("BulkCreateIssues: expected 422, got %d: %s", w.Code, w.Body.String())
+		}
+	})
 }

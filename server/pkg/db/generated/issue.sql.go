@@ -104,30 +104,51 @@ WHERE workspace_id = $1
   AND ($7::uuid IS NULL OR project_id = $7)
   AND ($8::text IS NULL OR creator_type = $8)
   AND (
-      (
-          $9::text IS NULL
-          AND $10::uuid IS NULL
-          AND $11::int IS NULL
-      )
-      OR title ILIKE '%' || $9 || '%'
-      OR COALESCE(description, '') ILIKE '%' || $9 || '%'
-      OR ($10::uuid IS NOT NULL AND id = $10)
-      OR ($11::int IS NOT NULL AND number = $11)
-  )
-  AND ($12::date IS NULL OR timezone('UTC', due_date)::date >= $12::date)
-  AND ($13::date IS NULL OR timezone('UTC', due_date)::date <= $13::date)
-  AND ($14::date IS NULL OR timezone('UTC', start_date)::date >= $14::date)
-  AND ($15::date IS NULL OR timezone('UTC', start_date)::date <= $15::date)
-  AND ($16::date IS NULL OR timezone('UTC', end_date)::date >= $16::date)
-  AND ($17::date IS NULL OR timezone('UTC', end_date)::date <= $17::date)
-  AND (
-      $18::text IS NULL
+      COALESCE(cardinality($9::uuid[]), 0) = 0
       OR (
-          $18::text = 'backlog'
+          $10::text = 'any'
+          AND EXISTS (
+              SELECT 1
+              FROM issue_to_label itl
+              WHERE itl.issue_id = issue.id
+                AND itl.label_id = ANY($9::uuid[])
+          )
+      )
+      OR (
+          $10::text = 'all'
+          AND (
+              SELECT count(DISTINCT itl.label_id)
+              FROM issue_to_label itl
+              WHERE itl.issue_id = issue.id
+                AND itl.label_id = ANY($9::uuid[])
+          ) = cardinality($9::uuid[])
+      )
+  )
+  AND (
+      (
+          $11::text IS NULL
+          AND $12::uuid IS NULL
+          AND $13::int IS NULL
+      )
+      OR title ILIKE '%' || $11 || '%'
+      OR COALESCE(description, '') ILIKE '%' || $11 || '%'
+      OR ($12::uuid IS NOT NULL AND id = $12)
+      OR ($13::int IS NOT NULL AND number = $13)
+  )
+  AND ($14::date IS NULL OR timezone('UTC', due_date)::date >= $14::date)
+  AND ($15::date IS NULL OR timezone('UTC', due_date)::date <= $15::date)
+  AND ($16::date IS NULL OR timezone('UTC', start_date)::date >= $16::date)
+  AND ($17::date IS NULL OR timezone('UTC', start_date)::date <= $17::date)
+  AND ($18::date IS NULL OR timezone('UTC', end_date)::date >= $18::date)
+  AND ($19::date IS NULL OR timezone('UTC', end_date)::date <= $19::date)
+  AND (
+      $20::text IS NULL
+      OR (
+          $20::text = 'backlog'
           AND status = 'backlog'
       )
       OR (
-          $18::text = 'today'
+          $20::text = 'today'
           AND status NOT IN ('done', 'cancelled')
           AND (
               (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
@@ -142,7 +163,7 @@ WHERE workspace_id = $1
           )
       )
       OR (
-          $18::text = 'upcoming'
+          $20::text = 'upcoming'
           AND status NOT IN ('done', 'cancelled')
           AND NOT (
               (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
@@ -165,24 +186,26 @@ WHERE workspace_id = $1
 `
 
 type CountListedIssuesParams struct {
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	Status       pgtype.Text `json:"status"`
-	Priority     pgtype.Text `json:"priority"`
-	AssigneeID   pgtype.UUID `json:"assignee_id"`
-	AssigneeType pgtype.Text `json:"assignee_type"`
-	CreatorID    pgtype.UUID `json:"creator_id"`
-	ProjectID    pgtype.UUID `json:"project_id"`
-	CreatorType  pgtype.Text `json:"creator_type"`
-	SearchText   pgtype.Text `json:"search_text"`
-	SearchUuid   pgtype.UUID `json:"search_uuid"`
-	SearchNumber pgtype.Int4 `json:"search_number"`
-	DueFrom      pgtype.Date `json:"due_from"`
-	DueTo        pgtype.Date `json:"due_to"`
-	StartFrom    pgtype.Date `json:"start_from"`
-	StartTo      pgtype.Date `json:"start_to"`
-	EndFrom      pgtype.Date `json:"end_from"`
-	EndTo        pgtype.Date `json:"end_to"`
-	View         pgtype.Text `json:"view"`
+	WorkspaceID    pgtype.UUID   `json:"workspace_id"`
+	Status         pgtype.Text   `json:"status"`
+	Priority       pgtype.Text   `json:"priority"`
+	AssigneeID     pgtype.UUID   `json:"assignee_id"`
+	AssigneeType   pgtype.Text   `json:"assignee_type"`
+	CreatorID      pgtype.UUID   `json:"creator_id"`
+	ProjectID      pgtype.UUID   `json:"project_id"`
+	CreatorType    pgtype.Text   `json:"creator_type"`
+	LabelIds       []pgtype.UUID `json:"label_ids"`
+	LabelMatchMode pgtype.Text   `json:"label_match_mode"`
+	SearchText     pgtype.Text   `json:"search_text"`
+	SearchUuid     pgtype.UUID   `json:"search_uuid"`
+	SearchNumber   pgtype.Int4   `json:"search_number"`
+	DueFrom        pgtype.Date   `json:"due_from"`
+	DueTo          pgtype.Date   `json:"due_to"`
+	StartFrom      pgtype.Date   `json:"start_from"`
+	StartTo        pgtype.Date   `json:"start_to"`
+	EndFrom        pgtype.Date   `json:"end_from"`
+	EndTo          pgtype.Date   `json:"end_to"`
+	View           pgtype.Text   `json:"view"`
 }
 
 func (q *Queries) CountListedIssues(ctx context.Context, arg CountListedIssuesParams) (int64, error) {
@@ -195,6 +218,8 @@ func (q *Queries) CountListedIssues(ctx context.Context, arg CountListedIssuesPa
 		arg.CreatorID,
 		arg.ProjectID,
 		arg.CreatorType,
+		arg.LabelIds,
+		arg.LabelMatchMode,
 		arg.SearchText,
 		arg.SearchUuid,
 		arg.SearchNumber,
@@ -466,30 +491,51 @@ WHERE workspace_id = $1
   AND ($9::uuid IS NULL OR project_id = $9)
   AND ($10::text IS NULL OR creator_type = $10)
   AND (
-      (
-          $11::text IS NULL
-          AND $12::uuid IS NULL
-          AND $13::int IS NULL
-      )
-      OR title ILIKE '%' || $11 || '%'
-      OR COALESCE(description, '') ILIKE '%' || $11 || '%'
-      OR ($12::uuid IS NOT NULL AND id = $12)
-      OR ($13::int IS NOT NULL AND number = $13)
-  )
-  AND ($14::date IS NULL OR timezone('UTC', due_date)::date >= $14::date)
-  AND ($15::date IS NULL OR timezone('UTC', due_date)::date <= $15::date)
-  AND ($16::date IS NULL OR timezone('UTC', start_date)::date >= $16::date)
-  AND ($17::date IS NULL OR timezone('UTC', start_date)::date <= $17::date)
-  AND ($18::date IS NULL OR timezone('UTC', end_date)::date >= $18::date)
-  AND ($19::date IS NULL OR timezone('UTC', end_date)::date <= $19::date)
-  AND (
-      $20::text IS NULL
+      COALESCE(cardinality($11::uuid[]), 0) = 0
       OR (
-          $20::text = 'backlog'
+          $12::text = 'any'
+          AND EXISTS (
+              SELECT 1
+              FROM issue_to_label itl
+              WHERE itl.issue_id = issue.id
+                AND itl.label_id = ANY($11::uuid[])
+          )
+      )
+      OR (
+          $12::text = 'all'
+          AND (
+              SELECT count(DISTINCT itl.label_id)
+              FROM issue_to_label itl
+              WHERE itl.issue_id = issue.id
+                AND itl.label_id = ANY($11::uuid[])
+          ) = cardinality($11::uuid[])
+      )
+  )
+  AND (
+      (
+          $13::text IS NULL
+          AND $14::uuid IS NULL
+          AND $15::int IS NULL
+      )
+      OR title ILIKE '%' || $13 || '%'
+      OR COALESCE(description, '') ILIKE '%' || $13 || '%'
+      OR ($14::uuid IS NOT NULL AND id = $14)
+      OR ($15::int IS NOT NULL AND number = $15)
+  )
+  AND ($16::date IS NULL OR timezone('UTC', due_date)::date >= $16::date)
+  AND ($17::date IS NULL OR timezone('UTC', due_date)::date <= $17::date)
+  AND ($18::date IS NULL OR timezone('UTC', start_date)::date >= $18::date)
+  AND ($19::date IS NULL OR timezone('UTC', start_date)::date <= $19::date)
+  AND ($20::date IS NULL OR timezone('UTC', end_date)::date >= $20::date)
+  AND ($21::date IS NULL OR timezone('UTC', end_date)::date <= $21::date)
+  AND (
+      $22::text IS NULL
+      OR (
+          $22::text = 'backlog'
           AND status = 'backlog'
       )
       OR (
-          $20::text = 'today'
+          $22::text = 'today'
           AND status NOT IN ('done', 'cancelled')
           AND (
               (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
@@ -504,7 +550,7 @@ WHERE workspace_id = $1
           )
       )
       OR (
-          $20::text = 'upcoming'
+          $22::text = 'upcoming'
           AND status NOT IN ('done', 'cancelled')
           AND NOT (
               (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
@@ -529,26 +575,28 @@ LIMIT $2 OFFSET $3
 `
 
 type ListIssuesParams struct {
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	Limit        int32       `json:"limit"`
-	Offset       int32       `json:"offset"`
-	Status       pgtype.Text `json:"status"`
-	Priority     pgtype.Text `json:"priority"`
-	AssigneeID   pgtype.UUID `json:"assignee_id"`
-	AssigneeType pgtype.Text `json:"assignee_type"`
-	CreatorID    pgtype.UUID `json:"creator_id"`
-	ProjectID    pgtype.UUID `json:"project_id"`
-	CreatorType  pgtype.Text `json:"creator_type"`
-	SearchText   pgtype.Text `json:"search_text"`
-	SearchUuid   pgtype.UUID `json:"search_uuid"`
-	SearchNumber pgtype.Int4 `json:"search_number"`
-	DueFrom      pgtype.Date `json:"due_from"`
-	DueTo        pgtype.Date `json:"due_to"`
-	StartFrom    pgtype.Date `json:"start_from"`
-	StartTo      pgtype.Date `json:"start_to"`
-	EndFrom      pgtype.Date `json:"end_from"`
-	EndTo        pgtype.Date `json:"end_to"`
-	View         pgtype.Text `json:"view"`
+	WorkspaceID    pgtype.UUID   `json:"workspace_id"`
+	Limit          int32         `json:"limit"`
+	Offset         int32         `json:"offset"`
+	Status         pgtype.Text   `json:"status"`
+	Priority       pgtype.Text   `json:"priority"`
+	AssigneeID     pgtype.UUID   `json:"assignee_id"`
+	AssigneeType   pgtype.Text   `json:"assignee_type"`
+	CreatorID      pgtype.UUID   `json:"creator_id"`
+	ProjectID      pgtype.UUID   `json:"project_id"`
+	CreatorType    pgtype.Text   `json:"creator_type"`
+	LabelIds       []pgtype.UUID `json:"label_ids"`
+	LabelMatchMode pgtype.Text   `json:"label_match_mode"`
+	SearchText     pgtype.Text   `json:"search_text"`
+	SearchUuid     pgtype.UUID   `json:"search_uuid"`
+	SearchNumber   pgtype.Int4   `json:"search_number"`
+	DueFrom        pgtype.Date   `json:"due_from"`
+	DueTo          pgtype.Date   `json:"due_to"`
+	StartFrom      pgtype.Date   `json:"start_from"`
+	StartTo        pgtype.Date   `json:"start_to"`
+	EndFrom        pgtype.Date   `json:"end_from"`
+	EndTo          pgtype.Date   `json:"end_to"`
+	View           pgtype.Text   `json:"view"`
 }
 
 func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]Issue, error) {
@@ -563,6 +611,8 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]Issue
 		arg.CreatorID,
 		arg.ProjectID,
 		arg.CreatorType,
+		arg.LabelIds,
+		arg.LabelMatchMode,
 		arg.SearchText,
 		arg.SearchUuid,
 		arg.SearchNumber,
