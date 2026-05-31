@@ -16,12 +16,25 @@ export const uiTranslations: Partial<Record<Lang, Partial<Translations>>> = {
     chooseTheme: "切换主题",
     editOnGithub: "在 GitHub 上编辑",
   },
+  ko: {
+    search: "검색",
+    searchNoResult: "결과가 없습니다",
+    toc: "이 페이지에서",
+    tocNoHeadings: "제목 없음",
+    lastUpdate: "마지막 업데이트",
+    chooseLanguage: "언어 선택",
+    nextPage: "다음 페이지",
+    previousPage: "이전 페이지",
+    chooseTheme: "테마 변경",
+    editOnGithub: "GitHub에서 편집",
+  },
 };
 
 // Display name shown in the LanguageToggle dropdown.
 export const localeLabels: Record<Lang, string> = {
   en: "English",
   zh: "简体中文",
+  ko: "한국어",
 };
 
 // Copy for the welcome page (Hero + Byline). Pages are translated as MDX;
@@ -38,5 +51,11 @@ export const homeCopy = {
     titleLead: "人与智能体，",
     titleAccent: "共处一方。",
     byline: ["开始使用", "2026 年 4 月更新", "阅读约 6 分钟"],
+  },
+  ko: {
+    eyebrow: "Multica 문서",
+    titleLead: "사람과 에이전트,",
+    titleAccent: "한곳에서.",
+    byline: ["시작하기", "2026년 4월 업데이트", "약 6분 읽기"],
   },
 } as const satisfies Record<Lang, unknown>;

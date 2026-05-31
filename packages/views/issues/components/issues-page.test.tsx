@@ -622,7 +622,7 @@ describe("IssuesPage (shared)", () => {
     );
   });
 
-  it("shows workspace breadcrumb with 'Issues' label", async () => {
+  it("shows the 'Issues' section header without a workspace prefix", async () => {
     mockListIssues.mockImplementation((params: any) =>
       Promise.resolve({
         issues: mockIssues.filter((i) => i.status === params?.status),
@@ -633,7 +633,9 @@ describe("IssuesPage (shared)", () => {
     renderWithQuery(<IssuesPage />);
 
     await screen.findByText("Issues");
-    expect(screen.getByText("Test WS")).toBeInTheDocument();
+    // The list header is now `icon + title`, matching the other list pages.
+    // The workspace/org name is no longer rendered as a breadcrumb prefix.
+    expect(screen.queryByText("Test WS")).not.toBeInTheDocument();
   });
 
   it("shows empty state when there are no issues", async () => {

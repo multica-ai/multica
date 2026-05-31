@@ -1,0 +1,13 @@
+{
+  "save": "저장",
+  "cancel": "취소",
+  "delete": "삭제",
+  "confirm": "확인",
+  "loading": "로딩 중...",
+  "time": {
+    "just_now": "방금 전",
+    "minutes_ago": "{{count}}분 전",
+    "hours_ago": "{{count}}시간 전",
+    "days_ago": "{{count}}일 전"
+  }
+}

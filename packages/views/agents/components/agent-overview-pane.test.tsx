@@ -99,14 +99,15 @@ function renderPane(runtimes: AgentRuntime[]) {
 }
 
 describe("AgentOverviewPane MCP tab visibility", () => {
-  it("renders the MCP tab when the agent runs on the Claude runtime", () => {
-    renderPane([makeRuntime("claude")]);
-    expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
-  });
-
-  it("renders the MCP tab when the agent runs on the Codex runtime", () => {
-    // Codex now reads mcp_config too — must not be hidden from the tab strip.
-    renderPane([makeRuntime("codex")]);
+  it.each([
+    ["Claude", "claude"],
+    ["Codex", "codex"],
+    ["Hermes", "hermes"],
+    ["Kimi", "kimi"],
+    ["Kiro", "kiro"],
+    ["OpenClaw", "openclaw"],
+  ])("renders the MCP tab when the agent runs on the %s runtime", (_label, provider) => {
+    renderPane([makeRuntime(provider)]);
     expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
   });
 

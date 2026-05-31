@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import {
-  ArrowLeft,
   Trash2,
   ChevronRight,
   Cpu,
@@ -29,6 +28,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
 import { formatLastSeen, isSelfHealingRuntime } from "../utils";
@@ -131,31 +131,22 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Topbar — back link + breadcrumb + right-side actions. Mirrors the
-          skill-detail-page topbar so users build one mental model for
-          "go back to the index" across the dashboard. */}
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-        <Button
-          variant="ghost"
-          size="xs"
-          render={<AppLink href={paths.runtimes()} />}
-        >
-          <ArrowLeft className="h-3 w-3" />
-          {t(($) => $.detail.all_runtimes)}
-        </Button>
-        <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className="truncate font-mono text-xs text-foreground">
-          {runtime.name}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          {!canDelete && (
+      <BreadcrumbHeader
+        segments={[{ href: paths.runtimes(), label: t(($) => $.page.title) }]}
+        leaf={
+          <span className="truncate font-mono text-xs text-foreground">
+            {runtime.name}
+          </span>
+        }
+        actions={
+          !canDelete ? (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Lock className="h-3 w-3" />
               {t(($) => $.detail.read_only)}
             </span>
-          )}
-        </div>
-      </div>
+          ) : null
+        }
+      />
 
       {/* Body — single scroll container that owns the Hero card AND the
           analytic blocks below. Putting Hero inside the scroll (instead of
