@@ -23,6 +23,7 @@ async function sendLog(
       signal: AbortSignal.timeout(3000),
     });
   } catch (_e) {
+    // ignore fetch errors
   }
 }
 
@@ -42,6 +43,7 @@ async function warmup(): Promise<void> {
         signal: AbortSignal.timeout(10000),
       });
     } catch (_e) {
+      // ignore fetch errors
     }
   }
 }
