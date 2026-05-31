@@ -2,10 +2,9 @@
 set -euo pipefail
 
 # Build backend/web from the current checkout as an isolated self-host preview.
-# Unlike `make selfhost-build`, this target is meant for parallel issue QA:
-# it finds free host ports, reuses the shared local Postgres container, and
-# creates a per-preview database so multiple worktrees can run side by side.
-
+# Intended for parallel Issue QA: it derives a stable preview profile from
+# ISSUE/PROFILE, finds free host ports, and keeps DB cleanup out of the preview
+# lifecycle so local test data survives human acceptance.
 
 if [ ! -f .env ]; then
   echo "==> Creating .env from .env.example..."
@@ -51,19 +50,31 @@ slugify() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//'
 }
 
+issue="${ISSUE:-}"
+if [ -n "$issue" ]; then
+  issue="$(printf '%s' "$issue" | tr '[:lower:]' '[:upper:]')"
+fi
+
+if [ -n "${PROFILE:-}" ]; then
+  profile="$(slugify "$PROFILE")"
+elif [ -n "$issue" ]; then
+  profile="$(slugify "$issue")"
+else
+  profile="$(slugify "${WORKTREE_NAME:-$(basename "$PWD")}")"
+fi
+if [ -z "$profile" ]; then
+  profile="multica"
+fi
+
 frontend_port="$(next_free_port "$base_frontend_port")"
 backend_port="$(next_free_port "$base_backend_port")"
 
-worktree_name="${WORKTREE_NAME:-$(basename "$PWD")}"
-slug="$(slugify "$worktree_name")"
-if [ -z "$slug" ]; then
-  slug="multica"
+project_name="${COMPOSE_PROJECT_NAME:-multica_preview_${profile}}"
+if [ "${ISOLATED_DB:-0}" = "1" ]; then
+  db_name="${POSTGRES_DB:-multica_preview_${profile}}"
+else
+  db_name="${POSTGRES_DB:-multica}"
 fi
-
-# Include the frontend port in the project/db name so repeated previews from
-# the same checkout can still coexist if an older stack is left running.
-project_name="${COMPOSE_PROJECT_NAME:-multica_preview_${slug}_${frontend_port}}"
-db_name="${POSTGRES_DB:-multica_preview_${slug}_${frontend_port}}"
 frontend_origin="http://localhost:${frontend_port}"
 backend_origin="http://localhost:${backend_port}"
 database_url="postgres://${postgres_user}:${postgres_password}@host.docker.internal:${postgres_port}/${db_name}?sslmode=disable"
@@ -107,7 +118,7 @@ until docker compose exec -T postgres pg_isready -U "$postgres_user" -d postgres
   sleep 1
 done
 
-echo "==> Ensuring preview database '$db_name' exists..."
+echo "==> Ensuring database '$db_name' exists..."
 db_exists="$(docker compose exec -T postgres \
   psql -U "$postgres_user" -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = '$db_name'")"
 
@@ -150,13 +161,24 @@ done
 if curl -sf "${backend_origin}/health" > /dev/null 2>&1; then
   echo ""
   echo "✓ Multica preview is running!"
+  if [ -n "$issue" ]; then
+    echo "  Issue:           ${issue}"
+  fi
+  echo "  Preview profile: ${profile}"
   echo "  Compose project: ${project_name}"
-  echo "  Database:        ${db_name} (shared Postgres on localhost:${postgres_port})"
+  echo "  Database:        ${db_name} (shared Postgres on localhost:${postgres_port}; cleanup does not drop DB)"
   echo "  Frontend:        ${frontend_origin}"
   echo "  Backend:         ${backend_origin}"
   echo ""
   echo "Stop this preview:"
-  echo "  docker compose -p ${project_name} -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml down"
+  if [ -n "$issue" ]; then
+    echo "  make selfhost-preview-clean ISSUE=${issue}"
+  elif [ -n "${PROFILE:-}" ]; then
+    echo "  make selfhost-preview-clean PROFILE=${PROFILE}"
+  else
+    echo "  make selfhost-preview-clean"
+  fi
+  echo "  # or: docker compose -p ${project_name} -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml down"
 else
   echo ""
   echo "Services are still starting. Check logs:"

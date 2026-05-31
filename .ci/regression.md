@@ -27,6 +27,32 @@ For PR / upstream merge / release acceptance:
 3. Run selected impacted browser cases against the correct build.
 4. Upload report and evidence to the Multica Issue when the task is executed through Multica.
 5. Report PASS / PARTIAL PASS / BLOCKED / FAIL with exact blockers and failed-case handback.
+6. Preserve the tested preview/worktree after tester-run regression so Guodage can perform final human acceptance. Do not tear down Docker Compose preview runtimes, delete worktrees, or delete branches as part of the tester run unless explicitly instructed.
+
+## Preview lifecycle for tester-run regression
+
+When a browser regression requires a local self-host build, prefer:
+
+```bash
+make selfhost-build-preview ISSUE=OPE-123
+```
+
+The `ISSUE` parameter is the primary user-facing key. Internally the preview derives a profile and Docker Compose project from it (for example `OPE-123` → `multica_preview_ope_123`). `PROFILE=<name>` is only an advanced override for non-Issue experiments or duplicate previews.
+
+Tester reports must include enough information for later human acceptance and cleanup:
+
+- Issue key,
+- preview profile,
+- Docker Compose project,
+- frontend URL,
+- backend URL,
+- worktree path,
+- branch,
+- commit SHA and/or PR number.
+
+If Guodage needs to verify from a phone or another machine, the tester may create a temporary tunnel/public link (for example ngrok/cloudflared) and include that URL in the report. WebSocket/live-update support is best effort unless the task specifically requires it.
+
+Cleanup is a separate lifecycle step. `make selfhost-preview-clean ISSUE=OPE-123` may stop the Docker Compose preview runtime, but it must not delete Postgres containers, volumes, databases, or long-lived local test data. Git worktree/branch cleanup is handled by the explicit unified worktree cleanup flow, not by a single tester run.
 
 ## Agent-run-dependent cases
 
@@ -44,6 +70,7 @@ At minimum, the tester must attempt to:
 Reports must include:
 
 - tested URL,
+- preview profile and Docker Compose project when a self-host preview runtime was used,
 - worktree path,
 - branch,
 - commit SHA and/or PR number,

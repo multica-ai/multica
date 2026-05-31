@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev dev-cli server daemon cli multica build build-cli test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-build-preview selfhost-stop
+.PHONY: help makehelp dev dev-cli server daemon cli multica build build-cli test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-build-preview selfhost-preview-clean selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -145,8 +145,11 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 		echo "  docker compose -f docker-compose.selfhost.yml logs"; \
 	fi
 
-selfhost-build-preview: ## Build an isolated self-host preview on the next free ports (parallel issue QA)
+selfhost-build-preview: ## Build an isolated self-host preview on the next free ports (parallel issue QA; pass ISSUE=OPE-123)
 	@bash scripts/selfhost-build-preview.sh
+
+selfhost-preview-clean: ## Stop a self-host preview runtime without deleting DB data (pass ISSUE=OPE-123)
+	@bash scripts/selfhost-preview-clean.sh
 
 selfhost-stop: ## Stop the self-hosted Docker Compose stack
 	@echo "==> Stopping Multica services..."
