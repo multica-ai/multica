@@ -22,7 +22,9 @@ package handler
 // Plan-adequacy precheck (FIR-2564): before starting any wave the engine checks
 // the plan is detailed enough — every sub-issue must carry acceptance criteria
 // (a `- [ ]` checklist). Without criteria there is nothing for the verifier to
-// judge, so an under-specified plan is refused with a list of what to fix.
+// judge. An under-specified plan is NOT bounced back to the human: the engine
+// hands it to the SQUAD LEADER to finish (add the criteria, fix dependencies)
+// and re-apply the label.
 //
 // Sub-issues are driven primarily through squads — a squad-assigned sub-issue
 // wakes the squad leader, who delegates within the team. Agent-assigned
@@ -234,13 +236,11 @@ func (h *Handler) runOrchestration(ctx context.Context, parent db.Issue, postSum
 	}
 	if len(missingCriteria) > 0 {
 		if postSummary {
-			h.postOrchestrationComment(ctx, parent,
-				"Plan is not detailed enough to orchestrate safely. These sub-issues have no "+
-					"acceptance criteria — add a checklist of what \"done\" means (lines like "+
-					"`- [ ] ...`) to each description, then re-apply the `orchestrate` label: "+
-					strings.Join(missingCriteria, ", ")+".\n\n"+
-					"Why: the engine verifies every finished sub-issue against its acceptance "+
-					"criteria before the next ones start. No criteria = nothing to verify against.")
+			// The plan isn't ready to run. The SQUAD LEADER finishes it — not the
+			// human. Hand it to the leader to add each sub-issue's acceptance
+			// criteria and re-apply the label. The owner is never asked to fill
+			// in criteria themselves.
+			h.requestPlanRefinement(ctx, parent, missingCriteria)
 		}
 		return
 	}
@@ -476,6 +476,47 @@ func (h *Handler) markVerificationGate(ctx context.Context, childIssues []db.Iss
 		}
 		blockersByChild[blockedID] = blockers
 	}
+}
+
+// CEREBRO-PATCH(orchestration-plan-refinement): FIR-2564 — squad leader finishes
+// an under-specified plan, not the human.
+// requestPlanRefinement hands an under-specified plan to the SQUAD LEADER to
+// finish — never the human. The leader adds the missing acceptance criteria to
+// each named sub-issue (and fixes dependencies), then re-applies the
+// `orchestrate` label to start. Idempotent: if the leader already has a pending
+// task on the parent, nothing is posted (no spam on a re-applied label).
+func (h *Handler) requestPlanRefinement(ctx context.Context, parent db.Issue, missing []string) {
+	if !h.isSquadLeaderReady(ctx, parent) {
+		// Parent is squad-gated, so this is rare; surface it instead of silently
+		// stalling so the issue isn't stuck with no one to plan it.
+		h.postOrchestrationComment(ctx, parent,
+			"This plan needs acceptance criteria on sub-issues "+strings.Join(missing, ", ")+
+				", but this squad has no available leader to finish the plan. Assign a squad "+
+				"with an active leader and re-apply the `orchestrate` label.")
+		return
+	}
+	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+		ID:          parent.AssigneeID,
+		WorkspaceID: parent.WorkspaceID,
+	})
+	if err != nil {
+		return
+	}
+	if h.hasPendingTask(ctx, parent.ID, squad.LeaderID) {
+		return
+	}
+	instructions := "This issue is set to `orchestrate`, but the plan isn't ready to run yet: " +
+		"these sub-issues have no acceptance criteria — " + strings.Join(missing, ", ") + ".\n\n" +
+		"As squad leader, finish the plan (the issue owner should NOT have to do this):\n" +
+		"1. Add a definition-of-done checklist (lines like `- [ ] ...`) to each listed sub-issue, " +
+		"describing what \"delivered\" means — that is exactly what the verification step judges against.\n" +
+		"2. Check the `blocks` dependencies between the sub-issues are right.\n" +
+		"3. Then remove and re-apply the `orchestrate` label on this issue to start the run."
+	comment, ok := h.postOrchestrationCommentReturning(ctx, parent, instructions)
+	if !ok {
+		return
+	}
+	h.enqueueSquadLeaderTask(ctx, parent, comment.ID, "system", "")
 }
 
 // requestChildVerification dispatches an independent verification of a finished

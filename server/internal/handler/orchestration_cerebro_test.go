@@ -158,7 +158,7 @@ func newOrchestrationFixture(t *testing.T) orchestrationFixture {
 
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = ANY($1)`,
-			[]string{uuidToString(childA.ID), uuidToString(childB.ID)})
+			[]string{uuidToString(childA.ID), uuidToString(childB.ID), uuidToString(parent.ID)})
 		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, childA.ID)
 		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, childB.ID)
 		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, parent.ID)
@@ -275,15 +275,25 @@ func TestOrchestrateRefusesPlanWithoutCriteria(t *testing.T) {
 
 	testHandler.maybeStartOrchestrationOnLabel(ctx, fx.parent, fx.labelID.ID)
 
+	// No sub-issue work starts on an under-specified plan.
 	if got := issueStatus(t, fx.childA); got != "backlog" {
 		t.Errorf("under-specified plan must start nothing; childA got %q", got)
 	}
 	if got := countPendingTasksForAgent(t, uuidToString(fx.childA.ID), fx.agentID); got != 0 {
 		t.Errorf("under-specified plan must enqueue nothing, got %d", got)
 	}
+	// CEREBRO-PATCH(orchestration-plan-refinement): FIR-2564 — leader-finishes-plan assertion.
+	// The SQUAD LEADER (not the human) is dispatched on the parent to finish the
+	// plan, with a comment that names the offending sub-issue.
+	if got := countPendingTasksForAgent(t, uuidToString(fx.parent.ID), fx.leaderID); got != 1 {
+		t.Errorf("squad leader should be dispatched once to finish the plan, got %d", got)
+	}
 	content := parentSystemCommentContent(t, uuidToString(fx.parent.ID))
 	if !strings.Contains(strings.ToLower(content), "acceptance criteria") {
 		t.Errorf("expected an acceptance-criteria explanation, got: %s", content)
+	}
+	if !strings.Contains(strings.ToLower(content), "squad leader") {
+		t.Errorf("explanation should address the squad leader, got: %s", content)
 	}
 	if !strings.Contains(content, "#"+strconv.Itoa(int(fx.childA.Number))) {
 		t.Errorf("explanation should name the offending sub-issue, got: %s", content)
