@@ -68,6 +68,16 @@ export interface AgentRunCount {
   run_count: number;
 }
 
+export type AgentTaskStatus =
+  | "queued"
+  | "dispatched"
+  | "waiting_local_directory"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | (string & {});
+
 export interface AgentTask {
   id: string;
   agent_id: string;
@@ -81,14 +91,7 @@ export interface AgentTask {
   // because another task currently owns the same on-disk path lock.
   // Treated as an active (non-terminal) state alongside queued/dispatched/
   // running by every consumer that buckets tasks into "active vs done".
-  status:
-    | "queued"
-    | "dispatched"
-    | "waiting_local_directory"
-    | "running"
-    | "completed"
-    | "failed"
-    | "cancelled";
+  status: AgentTaskStatus;
   priority: number;
   dispatched_at: string | null;
   started_at: string | null;

@@ -5,8 +5,8 @@ import {
   issueKeys,
   ISSUE_PAGE_SIZE,
   type AssigneeGroupedIssuesFilter,
+  type IssueListFilter,
   type IssueSortParam,
-  type MyIssuesFilter,
 } from "./queries";
 import {
   addIssueToBuckets,
@@ -62,23 +62,39 @@ export type ToggleIssueReactionVars = {
  * latter).
  *
  * `sort` must match the sort the consuming `useQuery` was called with —
- * the query key embeds it (see `listSorted` / `myListSorted`), so a load-more
+ * the query key embeds it (see `listFiltered` / `myListSorted`), so a load-more
  * with the wrong sort would patch a stale cache entry that nobody is
  * subscribed to. It is also threaded into the API request so the appended
  * page lines up with the server-side ordering of the existing items.
  */
+export type IssueListTarget = {
+  scope?: string;
+  filter?: IssueListFilter;
+};
+
 export function useLoadMoreByStatus(
   status: IssueStatus,
-  myIssues?: { scope: string; filter: MyIssuesFilter },
+  target?: IssueListTarget,
+  sort?: IssueSortParam,
+) {
+  const wsId = useWorkspaceId();
+  return useLoadMoreByStatusForWorkspace(wsId, status, target, sort);
+}
+
+export function useLoadMoreByStatusForWorkspace(
+  wsId: string,
+  status: IssueStatus,
+  target?: IssueListTarget,
   sort?: IssueSortParam,
 ) {
   const qc = useQueryClient();
-  const wsId = useWorkspaceId();
   const [isLoading, setIsLoading] = useState(false);
 
-  const activeKey = myIssues
-    ? issueKeys.myListSorted(wsId, myIssues.scope, myIssues.filter, sort)
-    : issueKeys.listSorted(wsId, sort);
+  const filter = target?.filter ?? {};
+  const requestFilter = stripBucketOnlyFilters(filter);
+  const activeKey = target?.scope
+    ? issueKeys.myListSorted(wsId, target.scope, filter, sort)
+    : issueKeys.listFiltered(wsId, filter, sort);
   const cache = qc.getQueryData<ListIssuesCache>(activeKey);
   const bucket = cache?.byStatus[status];
   const loaded = bucket?.issues.length ?? 0;
@@ -94,7 +110,7 @@ export function useLoadMoreByStatus(
         limit: ISSUE_PAGE_SIZE,
         offset: loaded,
         ...sort,
-        ...myIssues?.filter,
+        ...requestFilter,
       });
       qc.setQueryData<ListIssuesCache>(activeKey, (old) => {
         if (!old) return old;
@@ -109,9 +125,14 @@ export function useLoadMoreByStatus(
     } finally {
       setIsLoading(false);
     }
-  }, [qc, activeKey, status, loaded, hasMore, isLoading, myIssues?.filter, sort]);
+  }, [qc, activeKey, status, loaded, hasMore, isLoading, requestFilter, sort]);
 
   return { loadMore, hasMore, isLoading, total };
+}
+
+function stripBucketOnlyFilters(filter: IssueListFilter): Omit<IssueListFilter, "statuses"> {
+  const { statuses: _statuses, ...params } = filter;
+  return params;
 }
 
 /**
@@ -623,9 +644,17 @@ export function useCreateComment(issueId: string) {
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ commentId, content, attachmentIds }: { commentId: string; content: string; attachmentIds: string[] }) =>
+    mutationFn: ({
+      commentId,
+      content,
+      attachmentIds,
+    }: {
+      commentId: string;
+      content: string;
+      attachmentIds?: string[];
+    }) =>
       api.updateComment(commentId, content, attachmentIds),
-    onMutate: async ({ commentId, content, attachmentIds }) => {
+    onMutate: async ({ commentId, content, attachmentIds = [] }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
       const kept = new Set(attachmentIds);

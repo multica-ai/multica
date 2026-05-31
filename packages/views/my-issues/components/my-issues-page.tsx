@@ -15,6 +15,7 @@ import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-contex
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
+import { SwimLaneView } from "../../issues/components/swimlane-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -115,7 +116,7 @@ export function MyIssuesPage() {
   // For the "my" scope, use the combined query that fetches both assigned and
   // created issues. For all other scopes, use the single-filter query.
   const { data: myIssuesMy = [] } = useQuery({
-    ...myIssueListOptions(wsId, "all", serverFilter, user?.id),
+    ...myIssueListOptions(wsId, "all", serverFilter, user?.id, sort),
     enabled: scope === "all" && !!user,
   });
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
@@ -134,7 +135,7 @@ export function MyIssuesPage() {
     sort,
   );
   const statusIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, scope, filter, user?.id, sort),
+    ...myIssueListOptions(wsId, scope, serverFilter, user?.id, sort),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({
@@ -275,6 +276,19 @@ export function MyIssuesPage() {
                 childProgressMap={childProgressMap}
                 myIssuesScope={scope}
                 myIssuesFilter={serverFilter}
+                sort={sort}
+              />
+            ) : viewMode === "swimlane" ? (
+              <SwimLaneView
+                issues={issues}
+                unfilteredIssues={myIssues}
+                visibleStatuses={visibleStatuses}
+                hiddenStatuses={hiddenStatuses}
+                onMoveIssue={handleMoveIssue}
+                childProgressMap={childProgressMap}
+                myIssuesScope={scope}
+                myIssuesFilter={serverFilter}
+                sort={sort}
               />
             ) : (
               <ListView
@@ -283,6 +297,8 @@ export function MyIssuesPage() {
                 childProgressMap={childProgressMap}
                 myIssuesScope={scope}
                 myIssuesFilter={serverFilter}
+                sort={sort}
+                onMoveIssue={handleMoveIssue}
               />
             )}
           </div>

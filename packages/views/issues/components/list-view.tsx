@@ -19,7 +19,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { IssueListFilter } from "@multica/core/issues/queries";
+import type { IssueListTarget } from "@multica/core/issues/mutations";
+import type { IssueListFilter, IssueSortParam } from "@multica/core/issues/queries";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -57,6 +58,7 @@ export function ListView({
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
   myIssuesFilter,
+  sort,
   projectId,
   onMoveIssue,
 }: {
@@ -65,6 +67,7 @@ export function ListView({
   childProgressMap?: Map<string, ChildProgress>;
   myIssuesScope?: string;
   myIssuesFilter?: IssueListFilter;
+  sort?: IssueSortParam;
   /** When set, the per-section "+" pre-fills the project on the create form. */
   projectId?: string;
   onMoveIssue?: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
@@ -306,6 +309,7 @@ export function ListView({
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
             issueListTarget={issueListTarget}
+            sort={sort}
             projectId={projectId}
             dragEnabled={dragEnabled}
             isExpanded={isExpanded}
@@ -354,6 +358,7 @@ function StatusAccordionItem({
   issueMap,
   childProgressMap,
   issueListTarget,
+  sort,
   projectId,
   dragEnabled,
   isExpanded,
@@ -363,7 +368,8 @@ function StatusAccordionItem({
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
-  issueListTarget?: { scope?: string; filter?: IssueListFilter };
+  issueListTarget?: IssueListTarget;
+  sort?: IssueSortParam;
   projectId?: string;
   dragEnabled: boolean;
   isExpanded: boolean;
@@ -375,7 +381,8 @@ function StatusAccordionItem({
   const deselect = useIssueSelectionStore((s) => s.deselect);
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     status,
-    issueListTarget as { scope: string; filter: IssueListFilter } | undefined,
+    issueListTarget,
+    sort,
   );
 
   const issues = useMemo(

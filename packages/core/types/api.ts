@@ -41,6 +41,7 @@ export interface ListIssuesParams {
   offset?: number;
   workspace_id?: string;
   status?: IssueStatus;
+  statuses?: IssueStatus[];
   priority?: IssuePriority;
   priorities?: IssuePriority[];
   assignee_types?: IssueAssigneeType[];

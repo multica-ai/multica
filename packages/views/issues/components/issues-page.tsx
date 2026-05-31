@@ -21,6 +21,7 @@ import { PageHeader } from "../../layout/page-header";
 import { IssuesHeader } from "./issues-header";
 import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
+import { SwimLaneView } from "./swimlane-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
@@ -126,7 +127,7 @@ export function IssuesPage() {
 
   const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, sort);
   const statusIssuesQuery = useQuery({
-    ...issueListOptions(wsId, statusListFilter),
+    ...issueListOptions(wsId, statusListFilter, sort),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({
@@ -240,6 +241,18 @@ export function IssuesPage() {
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
                 myIssuesFilter={statusListFilter}
+                sort={sort}
+              />
+            ) : viewMode === "swimlane" ? (
+              <SwimLaneView
+                issues={issues}
+                unfilteredIssues={scopedIssues}
+                visibleStatuses={visibleStatuses}
+                hiddenStatuses={hiddenStatuses}
+                onMoveIssue={handleMoveIssue}
+                childProgressMap={childProgressMap}
+                myIssuesFilter={statusListFilter}
+                sort={sort}
               />
             ) : (
               <ListView
@@ -247,6 +260,8 @@ export function IssuesPage() {
                 visibleStatuses={visibleStatuses}
                 childProgressMap={childProgressMap}
                 myIssuesFilter={statusListFilter}
+                sort={sort}
+                onMoveIssue={handleMoveIssue}
               />
             )}
           </div>

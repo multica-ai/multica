@@ -11,6 +11,7 @@ import type { ApiClient } from "../api/client";
 import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "./mutations";
 import {
   issueKeys,
+  type IssueListFilter,
   type IssueSortParam,
 } from "./queries";
 import type {
@@ -78,7 +79,7 @@ describe("useLoadMoreByStatus", () => {
 
   it("targets the sorted cache key and forwards sort to the API", async () => {
     const sort: IssueSortParam = { sort_by: "priority", sort_direction: "desc" };
-    const activeKey = issueKeys.listSorted(WS_ID, sort);
+    const activeKey = issueKeys.listFiltered(WS_ID, {}, sort);
     const seed: ListIssuesCache = {
       byStatus: {
         todo: { issues: [makeIssue(1)], total: 3 },
@@ -123,13 +124,13 @@ describe("useLoadMoreByStatus", () => {
   it("ignores a stale cache entry under a different sort", async () => {
     // Stale entry from a previous sort lingers (kept by gcTime / keepPreviousData).
     const staleSort: IssueSortParam = { sort_by: "priority", sort_direction: "desc" };
-    qc.setQueryData<ListIssuesCache>(issueKeys.listSorted(WS_ID, staleSort), {
+    qc.setQueryData<ListIssuesCache>(issueKeys.listFiltered(WS_ID, {}, staleSort), {
       byStatus: { todo: { issues: [makeIssue(99)], total: 99 } },
     });
 
     // The active sort cache has its own bucket — load-more must target THIS one.
     const activeSort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
-    const activeKey = issueKeys.listSorted(WS_ID, activeSort);
+    const activeKey = issueKeys.listFiltered(WS_ID, {}, activeSort);
     qc.setQueryData<ListIssuesCache>(activeKey, {
       byStatus: { todo: { issues: [makeIssue(1)], total: 2 } },
     });
@@ -162,7 +163,7 @@ describe("useLoadMoreByStatus", () => {
     ]);
 
     // Stale cache is untouched.
-    const stale = qc.getQueryData<ListIssuesCache>(issueKeys.listSorted(WS_ID, staleSort));
+    const stale = qc.getQueryData<ListIssuesCache>(issueKeys.listFiltered(WS_ID, {}, staleSort));
     expect(stale?.byStatus.todo?.issues.map((i) => i.id)).toEqual(["issue-99"]);
   });
 
@@ -224,6 +225,39 @@ describe("useLoadMoreByStatus", () => {
 
     const updated = qc.getQueryData<ListIssuesCache>(activeKey);
     expect(updated?.byStatus.todo?.issues).toHaveLength(2);
+  });
+
+  it("targets workspace filtered caches and strips bucket-only statuses from load-more requests", async () => {
+    const filter: IssueListFilter = {
+      statuses: ["todo", "done"],
+      project_ids: ["project-1"],
+    };
+    const activeKey = issueKeys.listFiltered(WS_ID, filter, undefined);
+    qc.setQueryData<ListIssuesCache>(activeKey, {
+      byStatus: { todo: { issues: [makeIssue(1)], total: 2 } },
+    });
+    listIssues.mockResolvedValue({ issues: [makeIssue(2)], total: 2 });
+
+    const { result } = renderHook(
+      () => useLoadMoreByStatus("todo", { filter }),
+      { wrapper: createWrapper(qc) },
+    );
+
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    expect(listIssues).toHaveBeenCalledWith({
+      status: "todo",
+      limit: 50,
+      offset: 1,
+      project_ids: ["project-1"],
+    });
+    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
+    expect(updated?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
+      "issue-1",
+      "issue-2",
+    ]);
   });
 });
 

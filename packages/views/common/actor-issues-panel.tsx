@@ -53,6 +53,8 @@ export function ActorIssuesPanel({
   const projectFilters = useStore(actorIssuesViewStore, (s) => s.projectFilters);
   const includeNoProject = useStore(actorIssuesViewStore, (s) => s.includeNoProject);
   const labelFilters = useStore(actorIssuesViewStore, (s) => s.labelFilters);
+  const sortBy = useStore(actorIssuesViewStore, (s) => s.sortBy);
+  const sortDirection = useStore(actorIssuesViewStore, (s) => s.sortDirection);
 
   const [search, setSearch] = useState("");
 
@@ -111,8 +113,15 @@ export function ActorIssuesPanel({
     ],
   );
   const queryScope = `${actorType}:${actorId}:${scope}`;
+  const sort = useMemo(
+    () => ({
+      sort_by: sortBy,
+      sort_direction: sortBy !== "position" ? sortDirection : undefined,
+    } as const),
+    [sortBy, sortDirection],
+  );
 
-  const rawIssuesQuery = useQuery(myIssueListOptions(wsId, queryScope, serverFilter));
+  const rawIssuesQuery = useQuery(myIssueListOptions(wsId, queryScope, serverFilter, undefined, sort));
   const rawIssues = useMemo(
     () => rawIssuesQuery.data ?? [],
     [rawIssuesQuery.data],
@@ -218,6 +227,7 @@ export function ActorIssuesPanel({
               childProgressMap={childProgressMap}
               myIssuesScope={queryScope}
               myIssuesFilter={serverFilter}
+              sort={sort}
             />
           </div>
         )}

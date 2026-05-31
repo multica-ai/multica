@@ -253,6 +253,7 @@ export function ProjectIssuesContent({
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
+          sort={sort}
           projectId={projectId}
           onMoveIssue={handleMoveIssue}
         />
@@ -377,7 +378,7 @@ export function ProjectIssuesSurface({
   // the current view so switching to Gantt doesn't re-trigger the full
   // per-status fetch in the background.
   const statusIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, scope, serverFilter),
+    ...myIssueListOptions(wsId, scope, serverFilter, undefined, sort),
     enabled: !usesAssigneeBoard && !usesGantt,
   });
   const assigneeGroupsQuery = useQuery({
@@ -413,6 +414,7 @@ export function ProjectIssuesSurface({
         assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
         scope={scope}
         filter={serverFilter}
+        sort={sort}
         ganttIssues={ganttIssues}
         scopedLabelFilters={scopedLabelFilters}
       />

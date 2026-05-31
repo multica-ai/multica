@@ -33,7 +33,8 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import { childrenByParentsOptions, issueKeys, type IssueSortParam, type MyIssuesFilter } from "@multica/core/issues/queries";
+import type { IssueListTarget } from "@multica/core/issues/mutations";
+import { childrenByParentsOptions, issueKeys, type IssueListFilter, type IssueSortParam } from "@multica/core/issues/queries";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -466,7 +467,7 @@ export function SwimLaneView({
   onMoveIssue: (issueId: string, updates: SwimLaneMoveUpdates) => void;
   childProgressMap?: Map<string, ChildProgress>;
   myIssuesScope?: string;
-  myIssuesFilter?: MyIssuesFilter;
+  myIssuesFilter?: IssueListFilter;
   /** Must match the sort the page queried with — embedded in the cache key. */
   sort?: IssueSortParam;
   /** Pre-fills `project_id` on the create form for the in-cell "+" button. */
@@ -492,7 +493,7 @@ export function SwimLaneView({
 
   const myIssuesOpts = useMemo(
     () =>
-      myIssuesScope
+      myIssuesScope || myIssuesFilter
         ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
         : undefined,
     [myIssuesScope, myIssuesFilter],
@@ -1457,7 +1458,7 @@ function SwimLaneLoadMoreRow({
 }: {
   sortedStatuses: IssueStatus[];
   gridStyle: React.CSSProperties;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  myIssuesOpts?: IssueListTarget;
   sort?: IssueSortParam;
 }) {
   return (
@@ -1480,7 +1481,7 @@ function SwimLaneLoadMoreCell({
   sort,
 }: {
   status: IssueStatus;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  myIssuesOpts?: IssueListTarget;
   sort?: IssueSortParam;
 }) {
   const { loadMore, hasMore, isLoading } = useLoadMoreByStatus(status, myIssuesOpts, sort);

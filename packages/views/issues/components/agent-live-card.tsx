@@ -228,7 +228,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
     cancelled: 4,
   };
   const entries = Array.from(taskStates.values()).sort(
-    (a, b) => statusRank[a.task.status] - statusRank[b.task.status],
+    (a, b) => (statusRank[a.task.status] ?? 99) - (statusRank[b.task.status] ?? 99),
   );
   const [firstEntry, ...restEntries] = entries;
   if (!firstEntry) return null;

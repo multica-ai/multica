@@ -90,6 +90,7 @@ function renderPane(runtimes: AgentRuntime[]) {
         <AgentOverviewPane
           agent={baseAgent}
           runtimes={runtimes}
+          canEdit
           onUpdate={vi.fn().mockResolvedValue(undefined)}
         />
       </QueryClientProvider>
