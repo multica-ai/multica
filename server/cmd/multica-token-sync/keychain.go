@@ -33,25 +33,15 @@ func (m *macOSKeychain) Read(service, account string) ([]byte, error) {
 }
 
 func (m *macOSKeychain) Write(service, account string, data []byte) error {
-	// `security -w` (no value) reads the password from the controlling tty AND
-	// asks for confirmation, so on a pipe we must send `data\ndata\n` to answer
-	// both prompts. The data path is the compact JSON blob Claude Code writes,
-	// which is single-line — guard against embedded newlines defensively, since
-	// a newline would split the input across the two prompts and the value
-	// would silently be truncated.
-	if bytes.ContainsAny(data, "\r\n") {
-		return fmt.Errorf("keychain write: payload contains newline (unsupported by stdin path)")
-	}
-	// -U upserts (update if exists, create otherwise). Bytes flow via stdin so
-	// the token never hits argv (where `ps` would expose them).
+	// `security -w PASSWORD` is the only path that handles passwords longer
+	// than ~128 bytes — the stdin/getpass path truncates silently at PASS_MAX,
+	// and Claude Code's credentials blob is comfortably above that. argv on
+	// macOS is owner-visible only (ps restricts arguments to the process
+	// owner by default), and that same owner can already read the Keychain
+	// directly, so passing the value through argv does not leak anything they
+	// could not already see.
 	cmd := exec.Command("/usr/bin/security", "add-generic-password",
-		"-s", service, "-a", account, "-U", "-w")
-	var stdin bytes.Buffer
-	stdin.Write(data)
-	stdin.WriteByte('\n')
-	stdin.Write(data)
-	stdin.WriteByte('\n')
-	cmd.Stdin = &stdin
+		"-s", service, "-a", account, "-U", "-w", string(data))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("keychain write: %s: %w", strings.TrimSpace(string(out)), err)
 	}

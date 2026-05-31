@@ -39,13 +39,6 @@ func TestKeychainStub_WriteIsCopy(t *testing.T) {
 	}
 }
 
-func TestMacOSKeychain_RejectsNewlinePayload(t *testing.T) {
-	kc := &macOSKeychain{}
-	if err := kc.Write("svc", "acct", []byte("a\nb")); err == nil {
-		t.Error("expected error for payload containing newline")
-	}
-}
-
 // macOS-only integration test, opt-in via env to avoid touching CI's Keychain.
 func TestMacOSKeychain_RoundTrip(t *testing.T) {
 	if os.Getenv("MULTICA_KEYCHAIN_TEST") == "" {
@@ -65,5 +58,33 @@ func TestMacOSKeychain_RoundTrip(t *testing.T) {
 	}
 	if string(got) != payload {
 		t.Errorf("got %q want %q", got, payload)
+	}
+}
+
+// Regression: an earlier version piped the value via stdin to keep it out of
+// argv, but `security -w` reads stdin through getpass(3) which silently
+// truncates at PASS_MAX (~128 bytes). Real Claude Code credentials are
+// hundreds of bytes; verify round-trip survives.
+func TestMacOSKeychain_LongPayloadRoundTrip(t *testing.T) {
+	if os.Getenv("MULTICA_KEYCHAIN_TEST") == "" {
+		t.Skip("set MULTICA_KEYCHAIN_TEST=1 to opt into macOS Keychain integration test")
+	}
+	kc := &macOSKeychain{}
+	const svc = "multica-token-sync-test-long"
+	const acct = "test"
+	payload := make([]byte, 512)
+	for i := range payload {
+		payload[i] = byte('A' + i%26)
+	}
+	defer func() { _ = kc.Delete(svc, acct) }()
+	if err := kc.Write(svc, acct, payload); err != nil {
+		t.Fatal(err)
+	}
+	got, err := kc.Read(svc, acct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Errorf("round-trip mismatch (got %d bytes, want %d)", len(got), len(payload))
 	}
 }
