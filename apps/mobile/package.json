@@ -19,10 +19,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@expo/vector-icons": "^14.1.0",
+    "@multica/core": "workspace:*",
     "@react-native-community/datetimepicker": "8.6.0",
     "@react-native-community/netinfo": "11.5.2",
     "@react-native-segmented-control/segmented-control": "2.5.7",
     "@react-navigation/elements": "^2.9.17",
+    "@react-navigation/native": "^7.1.6",
     "@rn-primitives/avatar": "^1.4.0",
     "@rn-primitives/collapsible": "^1.4.0",
     "@rn-primitives/dropdown-menu": "^1.4.0",

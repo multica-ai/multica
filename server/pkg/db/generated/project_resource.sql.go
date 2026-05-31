@@ -226,3 +226,41 @@ func (q *Queries) ListProjectResourcesForProjects(ctx context.Context, projectId
 	}
 	return items, nil
 }
+
+const updateProjectResource = `-- name: UpdateProjectResource :one
+UPDATE project_resource
+SET resource_ref = $2,
+    label        = $3,
+    position     = $4
+WHERE id = $1
+RETURNING id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by
+`
+
+type UpdateProjectResourceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	ResourceRef []byte      `json:"resource_ref"`
+	Label       pgtype.Text `json:"label"`
+	Position    int32       `json:"position"`
+}
+
+func (q *Queries) UpdateProjectResource(ctx context.Context, arg UpdateProjectResourceParams) (ProjectResource, error) {
+	row := q.db.QueryRow(ctx, updateProjectResource,
+		arg.ID,
+		arg.ResourceRef,
+		arg.Label,
+		arg.Position,
+	)
+	var i ProjectResource
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.WorkspaceID,
+		&i.ResourceType,
+		&i.ResourceRef,
+		&i.Label,
+		&i.Position,
+		&i.CreatedAt,
+		&i.CreatedBy,
+	)
+	return i, err
+}

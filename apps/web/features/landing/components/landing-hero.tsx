@@ -1,6 +1,10 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
+import { ArrowRight, Download } from "lucide-react";
+import { useAuthStore } from "@multica/core/auth";
+import { captureDownloadIntent } from "@multica/core/analytics";
 import { useLocale } from "../i18n";
 import {
   ClaudeCodeLogo,
@@ -8,10 +12,12 @@ import {
   GeminiCliLogo,
   OpenClawLogo,
   OpenCodeLogo,
+  heroButtonClassName,
 } from "./shared";
 
 export function LandingHero() {
   const { t } = useLocale();
+  const user = useAuthStore((s) => s.user);
 
   return (
     <div className="relative min-h-full overflow-hidden bg-[#05070b] text-white">
@@ -32,6 +38,30 @@ export function LandingHero() {
             <p className="mx-auto mt-7 max-w-[820px] text-[15px] leading-7 text-white/84 sm:text-[17px]">
               {t.hero.subheading}
             </p>
+
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+              <Link href={user ? "/" : "/login"} className={heroButtonClassName("solid")}>
+                {user ? t.header.dashboard : t.hero.cta}
+              </Link>
+              <Link
+                href="/download"
+                className={heroButtonClassName("ghost")}
+                onClick={() => captureDownloadIntent("landing_hero")}
+              >
+                <Download className="size-4" aria-hidden />
+                {t.hero.downloadDesktop}
+              </Link>
+              <Link
+                href="/contact-sales"
+                className="group inline-flex items-center justify-center gap-1.5 rounded-[12px] px-3 py-3 text-[14px] font-semibold text-white/80 transition-colors hover:text-white"
+              >
+                {t.hero.talkToSales}
+                <ArrowRight
+                  className="size-4 transition-transform group-hover:translate-x-0.5"
+                  aria-hidden
+                />
+              </Link>
+            </div>
           </div>
 
           <div className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-3">

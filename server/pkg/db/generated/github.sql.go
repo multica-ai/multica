@@ -183,65 +183,74 @@ func (q *Queries) GetGitHubPullRequest(ctx context.Context, arg GetGitHubPullReq
 	return i, err
 }
 
-const getSiblingPullRequestStateCountsForIssue = `-- name: GetSiblingPullRequestStateCountsForIssue :one
+const getIssuePullRequestCloseAggregate = `-- name: GetIssuePullRequestCloseAggregate :one
 SELECT
     COALESCE(SUM(CASE WHEN pr.state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
-    COALESCE(SUM(CASE WHEN pr.state = 'merged' THEN 1 ELSE 0 END), 0)::bigint AS merged_count
+    COALESCE(SUM(CASE WHEN pr.state = 'merged' AND ipr.close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 WHERE ipr.issue_id = $1
-  AND pr.id <> $2
 `
 
-type GetSiblingPullRequestStateCountsForIssueParams struct {
-	IssueID pgtype.UUID `json:"issue_id"`
-	ID      pgtype.UUID `json:"id"`
+type GetIssuePullRequestCloseAggregateRow struct {
+	OpenCount                  int64 `json:"open_count"`
+	MergedWithCloseIntentCount int64 `json:"merged_with_close_intent_count"`
 }
 
-type GetSiblingPullRequestStateCountsForIssueRow struct {
-	OpenCount   int64 `json:"open_count"`
-	MergedCount int64 `json:"merged_count"`
-}
-
-// Returns, for the PRs linked to an issue excluding one PR by id (the PR
-// currently being processed by the webhook handler), how many are still in
-// flight (open or draft) and how many have already merged. The webhook
-// handler combines these with the current event's state to decide whether
-// to auto-advance the issue: the issue moves to done only when there is no
-// in-flight sibling AND at least one linked PR (current or sibling) merged.
-func (q *Queries) GetSiblingPullRequestStateCountsForIssue(ctx context.Context, arg GetSiblingPullRequestStateCountsForIssueParams) (GetSiblingPullRequestStateCountsForIssueRow, error) {
-	row := q.db.QueryRow(ctx, getSiblingPullRequestStateCountsForIssue, arg.IssueID, arg.ID)
-	var i GetSiblingPullRequestStateCountsForIssueRow
-	err := row.Scan(&i.OpenCount, &i.MergedCount)
+// Aggregates the issue's linked PRs into the two counts that gate
+// auto-advance: how many are still in flight (`open` or `draft`) and how
+// many merged PRs declared explicit closing intent on the link row. The
+// webhook auto-advances the issue when open_count = 0 AND
+// merged_with_close_intent_count > 0. Both the PR state and the link row
+// (with close_intent) are persisted before this query runs, so the result
+// is event-agnostic — a link-only sibling closing after a closing-keyword
+// PR has already merged still resolves the issue.
+func (q *Queries) GetIssuePullRequestCloseAggregate(ctx context.Context, issueID pgtype.UUID) (GetIssuePullRequestCloseAggregateRow, error) {
+	row := q.db.QueryRow(ctx, getIssuePullRequestCloseAggregate, issueID)
+	var i GetIssuePullRequestCloseAggregateRow
+	err := row.Scan(&i.OpenCount, &i.MergedWithCloseIntentCount)
 	return i, err
 }
 
 const linkIssueToPullRequest = `-- name: LinkIssueToPullRequest :exec
 
 INSERT INTO issue_pull_request (
-    issue_id, pull_request_id, linked_by_type, linked_by_id
+    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent
 ) VALUES (
-    $1, $2, $3, $4
+    $1, $2, $4, $5, $3
 )
-ON CONFLICT (issue_id, pull_request_id) DO NOTHING
+ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
+    close_intent = CASE
+        WHEN $6 THEN issue_pull_request.close_intent
+        ELSE EXCLUDED.close_intent
+    END
 `
 
 type LinkIssueToPullRequestParams struct {
-	IssueID       pgtype.UUID `json:"issue_id"`
-	PullRequestID pgtype.UUID `json:"pull_request_id"`
-	LinkedByType  pgtype.Text `json:"linked_by_type"`
-	LinkedByID    pgtype.UUID `json:"linked_by_id"`
+	IssueID             pgtype.UUID `json:"issue_id"`
+	PullRequestID       pgtype.UUID `json:"pull_request_id"`
+	CloseIntent         bool        `json:"close_intent"`
+	LinkedByType        pgtype.Text `json:"linked_by_type"`
+	LinkedByID          pgtype.UUID `json:"linked_by_id"`
+	PreserveCloseIntent bool        `json:"preserve_close_intent"`
 }
 
 // =====================
 // Issue ↔ Pull Request link
 // =====================
+// close_intent reflects the PR's explicit close declaration at the moment
+// the webhook is allowed to update that intent. Open/edit/merge webhooks use
+// the current title/body parse result so authors can remove a closing keyword
+// before merge. Post-terminal edits can opt into preserving the stored value,
+// keeping the merge-time decision stable.
 func (q *Queries) LinkIssueToPullRequest(ctx context.Context, arg LinkIssueToPullRequestParams) error {
 	_, err := q.db.Exec(ctx, linkIssueToPullRequest,
 		arg.IssueID,
 		arg.PullRequestID,
+		arg.CloseIntent,
 		arg.LinkedByType,
 		arg.LinkedByID,
+		arg.PreserveCloseIntent,
 	)
 	return err
 }

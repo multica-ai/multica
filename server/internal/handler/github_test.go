@@ -68,6 +68,72 @@ func TestExtractIdentifiers(t *testing.T) {
 	}
 }
 
+func TestExtractClosingIdentifiers(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "single_closes",
+			in:   []string{"", "Closes MUL-1"},
+			want: []string{"MUL-1"},
+		},
+		{
+			name: "all_keyword_inflections",
+			in: []string{
+				"",
+				"close MUL-1\nclosed MUL-2\ncloses MUL-3\nfix MUL-4\nfixes MUL-5\nfixed MUL-6\nresolve MUL-7\nresolves MUL-8\nresolved MUL-9",
+			},
+			want: []string{"MUL-1", "MUL-2", "MUL-3", "MUL-4", "MUL-5", "MUL-6", "MUL-7", "MUL-8", "MUL-9"},
+		},
+		{
+			name: "case_insensitive_and_colon",
+			in:   []string{"CLOSES: MUL-1", "Fixes:MUL-2 resolves   MUL-3"},
+			want: []string{"MUL-1", "MUL-2", "MUL-3"},
+		},
+		{
+			name: "bare_reference_does_not_close",
+			// The bug-report repro: only ABC-1 carries closing intent.
+			// ABC-2/ABC-3 are linked (extractIdentifiers) but must not
+			// appear in the closing set.
+			in:   []string{"ABC-1: Lorem Ipsum", "Closes ABC-1. Follow up work planned in ABC-2. Unblocks ABC-3."},
+			want: []string{"ABC-1"},
+		},
+		{
+			name: "keyword_not_adjacent_does_not_close",
+			// "Fix login MUL-1" — keyword present but the identifier is
+			// not adjacent. Consistent with GitHub's closing-keyword
+			// grammar; matches via extractIdentifiers for linking only.
+			in:   []string{"Fix login MUL-1", ""},
+			want: []string{},
+		},
+		{
+			name: "dedupe_across_fields",
+			in:   []string{"Closes MUL-1", "fixes mul-1"},
+			want: []string{"MUL-1"},
+		},
+		{
+			name: "no_match_on_disclosed_or_foreclose",
+			// Word-boundary guards against keyword fragments embedded
+			// in larger words ("Disclosed MUL-1", "Foreclose MUL-1").
+			in:   []string{"Disclosed MUL-1 in foreclose MUL-2", ""},
+			want: []string{},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractClosingIdentifiers(tc.in...)
+			if len(got) == 0 && len(tc.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("extractClosingIdentifiers() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDerivePRState(t *testing.T) {
 	cases := []struct {
 		state  string
@@ -205,7 +271,7 @@ func TestWebhook_MergedPR_AdvancesLinkedIssueToDone(t *testing.T) {
 			"number":     1234,
 			"html_url":   "https://github.com/acme/widget/pull/1234",
 			"title":      "Fix login " + created.Identifier,
-			"body":       "",
+			"body":       "Closes " + created.Identifier,
 			"state":      "closed",
 			"draft":      false,
 			"merged":     true,
@@ -676,6 +742,506 @@ func TestWebhook_AllClosedWithoutMerge(t *testing.T) {
 	}
 }
 
+// fireBareWebhook is a focused helper for the closing-keyword gate tests
+// below: it fires a single merged-PR webhook with caller-controlled title,
+// body, and branch so each test can exercise a specific PR-grammar shape
+// (bare identifier, mixed closing/non-closing references, branch-only
+// reference) without re-typing the full webhook envelope each time.
+func fireBareWebhook(t *testing.T, secret string, installationID int64, prNumber int32, title, body, branch string) {
+	t.Helper()
+	payload := map[string]any{
+		"action": "closed",
+		"pull_request": map[string]any{
+			"number":     prNumber,
+			"html_url":   fmt.Sprintf("https://github.com/acme/widget/pull/%d", prNumber),
+			"title":      title,
+			"body":       body,
+			"state":      "closed",
+			"draft":      false,
+			"merged":     true,
+			"merged_at":  "2026-04-29T00:00:00Z",
+			"closed_at":  "2026-04-29T00:00:00Z",
+			"created_at": "2026-04-28T00:00:00Z",
+			"updated_at": "2026-04-29T00:00:00Z",
+			"head":       map[string]any{"ref": branch},
+			"user":       map[string]any{"login": "octocat"},
+		},
+		"repository":   map[string]any{"name": "widget", "owner": map[string]any{"login": "acme"}},
+		"installation": map[string]any{"id": installationID},
+	}
+	raw, _ := json.Marshal(payload)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(raw)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(raw))
+	req.Header.Set("X-GitHub-Event", "pull_request")
+	req.Header.Set("X-Hub-Signature-256", sig)
+	testHandler.HandleGitHubWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("webhook pr=%d: expected 202, got %d (%s)", prNumber, rec.Code, rec.Body.String())
+	}
+}
+
+// TestWebhook_MergedPR_OnlyClosesIdentifiersWithClosingKeyword is the repro
+// from GitHub issue multica-ai/multica#3264: a PR that mentions three issues
+// must only auto-complete the one declared with a closing keyword. Follow-up
+// / unblocks references are linked but stay in their previous status.
+func TestWebhook_MergedPR_OnlyClosesIdentifiersWithClosingKeyword(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "closing-keyword-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	// Three issues to mention in the same PR body.
+	createIssue := func(title string) IssueResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+			"title":  title,
+			"status": "in_progress",
+		})
+		testHandler.CreateIssue(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateIssue %q: %d %s", title, w.Code, w.Body.String())
+		}
+		var out IssueResponse
+		json.NewDecoder(w.Body).Decode(&out)
+		return out
+	}
+	closes := createIssue("primary work")
+	followUp := createIssue("follow up work")
+	unblocks := createIssue("unblocked work")
+
+	t.Cleanup(func() {
+		for _, id := range []string{closes.ID, followUp.ID, unblocks.ID} {
+			testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, id)
+			testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, id)
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+		}
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+	})
+
+	const installationID int64 = 30264001
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "closing-keyword-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	// PR title mirrors the reporter's repro shape — bare identifier prefix —
+	// and body declares closing intent on `closes` only.
+	title := closes.Identifier + ": Lorem Ipsum dolor sit amet"
+	body := fmt.Sprintf(
+		"Closes %s. Follow up work planned in %s. Unblocks %s.",
+		closes.Identifier, followUp.Identifier, unblocks.Identifier,
+	)
+	fireBareWebhook(t, secret, installationID, 1, title, body, "fix/login")
+
+	// All three should be linked — auto-link layer is intentionally generous.
+	for _, issue := range []IssueResponse{closes, followUp, unblocks} {
+		linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(issue.ID))
+		if err != nil {
+			t.Fatalf("ListPullRequestsByIssue(%s): %v", issue.Identifier, err)
+		}
+		if len(linked) != 1 {
+			t.Errorf("expected %s to be linked to the PR, got %d link rows", issue.Identifier, len(linked))
+		}
+	}
+
+	// Only the closing-keyword identifier advances to done.
+	wantStatus := map[string]string{
+		closes.ID:   "done",
+		followUp.ID: "in_progress",
+		unblocks.ID: "in_progress",
+	}
+	for _, issue := range []IssueResponse{closes, followUp, unblocks} {
+		got, err := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
+		if err != nil {
+			t.Fatalf("GetIssue(%s): %v", issue.Identifier, err)
+		}
+		if got.Status != wantStatus[issue.ID] {
+			t.Errorf("issue %s: status = %q, want %q", issue.Identifier, got.Status, wantStatus[issue.ID])
+		}
+	}
+}
+
+// TestWebhook_MergedPR_TitlePrefixDoesNotClose locks in the design choice
+// that a bare "MUL-X: foo" title (no closing keyword) links but never
+// auto-completes. The user must write `Closes MUL-X` somewhere if they want
+// the merge to flip the status.
+func TestWebhook_MergedPR_TitlePrefixDoesNotClose(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "title-prefix-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "title-prefix repro",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 30264002
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "title-prefix-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	fireBareWebhook(t, secret, installationID, 2, created.Identifier+": fix something", "", "fix/login")
+
+	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Errorf("expected 1 linked PR even without a closing keyword, got %d", len(linked))
+	}
+
+	got, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	if got.Status != "in_progress" {
+		t.Errorf("expected issue to stay in_progress (title prefix alone is not closing intent), got %q", got.Status)
+	}
+}
+
+// TestWebhook_MergedPR_BranchNameDoesNotClose guards the conservative design
+// decision that identifiers extracted from the branch name link the PR but
+// never auto-complete the issue — branch names are not natural-language
+// fields and cannot carry a closing keyword.
+func TestWebhook_MergedPR_BranchNameDoesNotClose(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "branch-name-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "branch-name repro",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 30264003
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "branch-name-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	branch := strings.ToLower(created.Identifier) + "/fix-login"
+	fireBareWebhook(t, secret, installationID, 3, "Fix login flow", "", branch)
+
+	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Errorf("expected branch-name reference to still link the PR, got %d link rows", len(linked))
+	}
+
+	got, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	if got.Status != "in_progress" {
+		t.Errorf("expected issue to stay in_progress (branch-name reference is not closing intent), got %q", got.Status)
+	}
+}
+
+// firePRWebhook fires a webhook for a single PR with caller-controlled
+// title, body, branch, and lifecycle (open / merged / closed without
+// merge). Tests below need the open→merged sequence so close_intent on
+// one PR has to persist across multiple webhook events for a sibling PR.
+func firePRWebhook(t *testing.T, secret string, installationID int64, prNumber int32, title, body, branch, lifecycle string) {
+	t.Helper()
+	var action, state string
+	var merged bool
+	var mergedAt, closedAt any
+	switch lifecycle {
+	case "opened":
+		action, state, merged = "opened", "open", false
+		mergedAt, closedAt = nil, nil
+	case "edited":
+		action, state, merged = "edited", "open", false
+		mergedAt, closedAt = nil, nil
+	case "merged":
+		action, state, merged = "closed", "closed", true
+		mergedAt, closedAt = "2026-04-29T00:00:00Z", "2026-04-29T00:00:00Z"
+	case "edited_merged":
+		action, state, merged = "edited", "closed", true
+		mergedAt, closedAt = "2026-04-29T00:00:00Z", "2026-04-29T00:00:00Z"
+	case "closed":
+		action, state, merged = "closed", "closed", false
+		mergedAt, closedAt = nil, "2026-04-29T00:00:00Z"
+	default:
+		t.Fatalf("firePRWebhook: unknown lifecycle %q", lifecycle)
+	}
+	payload := map[string]any{
+		"action": action,
+		"pull_request": map[string]any{
+			"number":     prNumber,
+			"html_url":   fmt.Sprintf("https://github.com/acme/widget/pull/%d", prNumber),
+			"title":      title,
+			"body":       body,
+			"state":      state,
+			"draft":      false,
+			"merged":     merged,
+			"merged_at":  mergedAt,
+			"closed_at":  closedAt,
+			"created_at": "2026-04-28T00:00:00Z",
+			"updated_at": "2026-04-29T00:00:00Z",
+			"head":       map[string]any{"ref": branch},
+			"user":       map[string]any{"login": "octocat"},
+		},
+		"repository":   map[string]any{"name": "widget", "owner": map[string]any{"login": "acme"}},
+		"installation": map[string]any{"id": installationID},
+	}
+	raw, _ := json.Marshal(payload)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(raw)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(raw))
+	req.Header.Set("X-GitHub-Event", "pull_request")
+	req.Header.Set("X-Hub-Signature-256", sig)
+	testHandler.HandleGitHubWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("webhook pr=%d (%s): expected 202, got %d (%s)", prNumber, lifecycle, rec.Code, rec.Body.String())
+	}
+}
+
+func TestWebhook_CloseKeywordRemovedBeforeMergeDoesNotClose(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "close-intent-removal-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "close intent can be removed",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 30264005
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "close-intent-removal-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	firePRWebhook(t, secret, installationID, 1, "Implement removal path", "Closes "+created.Identifier, "feat/remove-close-intent", "opened")
+	firePRWebhook(t, secret, installationID, 1, "Implement removal path", "Related "+created.Identifier, "feat/remove-close-intent", "edited")
+	firePRWebhook(t, secret, installationID, 1, "Implement removal path", "Related "+created.Identifier, "feat/remove-close-intent", "merged")
+
+	got, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue after merge: %v", err)
+	}
+	if got.Status != "in_progress" {
+		t.Fatalf("after closing keyword was removed before merge: status = %q, want in_progress", got.Status)
+	}
+	counts, err := testHandler.Queries.GetIssuePullRequestCloseAggregate(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssuePullRequestCloseAggregate: %v", err)
+	}
+	if counts.MergedWithCloseIntentCount != 0 {
+		t.Fatalf("merged_with_close_intent_count = %d, want 0", counts.MergedWithCloseIntentCount)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "post merge close keyword is link only",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue second: %d %s", w.Code, w.Body.String())
+	}
+	var second IssueResponse
+	json.NewDecoder(w.Body).Decode(&second)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, second.ID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, second.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, second.ID)
+	})
+
+	// Adding a closing keyword after the merge must not rewrite the
+	// merge-time decision and retroactively close either an existing link
+	// or a newly mentioned issue.
+	firePRWebhook(t, secret, installationID, 1, "Implement removal path", "Closes "+created.Identifier+"\nCloses "+second.Identifier, "feat/remove-close-intent", "edited_merged")
+	got, err = testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue after post-merge edit: %v", err)
+	}
+	if got.Status != "in_progress" {
+		t.Errorf("after adding closing keyword post-merge: status = %q, want in_progress", got.Status)
+	}
+	got, err = testHandler.Queries.GetIssue(ctx, parseUUID(second.ID))
+	if err != nil {
+		t.Fatalf("GetIssue second after post-merge edit: %v", err)
+	}
+	if got.Status != "in_progress" {
+		t.Errorf("second issue after post-merge closing keyword: status = %q, want in_progress", got.Status)
+	}
+}
+
+// TestWebhook_LinkOnlySiblingMergeAfterCloseKeywordPR is the regression
+// guard for the multi-PR sibling case Elon flagged on the first attempt
+// of this fix. Scenario:
+//
+//  1. PR A declares closing intent (`Closes MUL-X`) and is opened.
+//  2. PR B references the same issue (link-only — no closing keyword)
+//     and is opened.
+//  3. PR A merges. The issue stays in_progress because PR B is open.
+//  4. PR B merges later. PR B's webhook has no closing keyword, so the
+//     previous implementation skipped re-evaluating the issue and the
+//     issue stayed stuck in_progress forever.
+//
+// The persisted close_intent column on issue_pull_request fixes this:
+// the aggregate sees PR A's merged+close_intent row regardless of which
+// webhook drives the re-evaluation, so PR B's merge advances the issue.
+func TestWebhook_LinkOnlySiblingMergeAfterCloseKeywordPR(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "link-only-sibling-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "needs two prs",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 30264004
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "link-only-sibling-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	// 1) PR A opens with closing intent.
+	firePRWebhook(t, secret, installationID, 1, "Implement primary path", "Closes "+created.Identifier, "feat/primary", "opened")
+	// 2) PR B opens link-only — title prefix mention, no closing keyword.
+	firePRWebhook(t, secret, installationID, 2, created.Identifier+": follow-up cleanup", "", "feat/cleanup", "opened")
+
+	// Sanity: issue is still in_progress (both PRs open).
+	got, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue after open: %v", err)
+	}
+	if got.Status != "in_progress" {
+		t.Fatalf("after both PRs opened: status = %q, want in_progress", got.Status)
+	}
+
+	// 3) PR A merges. PR B still open → issue stays in_progress.
+	firePRWebhook(t, secret, installationID, 1, "Implement primary path", "Closes "+created.Identifier, "feat/primary", "merged")
+	got, err = testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue after A merge: %v", err)
+	}
+	if got.Status != "in_progress" {
+		t.Fatalf("after PR A merged with PR B still open: status = %q, want in_progress", got.Status)
+	}
+
+	// 4) PR B merges (link-only, no closing keyword). The persisted
+	// close_intent on PR A's link must still carry the advance.
+	firePRWebhook(t, secret, installationID, 2, created.Identifier+": follow-up cleanup", "", "feat/cleanup", "merged")
+	got, err = testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue after B merge: %v", err)
+	}
+	if got.Status != "done" {
+		t.Errorf("after both PRs merged (A with close_intent, B link-only): status = %q, want done", got.Status)
+	}
+}
+
 // ── CI / mergeable_state tests ─────────────────────────────────────────────
 
 func TestDerivePRMergeableState(t *testing.T) {
@@ -720,9 +1286,9 @@ func TestAggregateChecksConclusion(t *testing.T) {
 		return *p
 	}
 	cases := []struct {
-		name                            string
+		name                           string
 		failed, passed, pending, total int64
-		want                            string
+		want                           string
 	}{
 		{"no_suites_nil", 0, 0, 0, 0, "<nil>"},
 		{"any_failure_wins", 1, 5, 0, 6, "failed"},

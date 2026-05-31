@@ -83,6 +83,17 @@ function fakeQc(data: {
   );
   return {
     getQueryData: (key: readonly unknown[]) => map.get(JSON.stringify(key)),
+    getQueriesData: <T,>(filter: { queryKey: readonly unknown[] }) => {
+      const prefix = filter.queryKey as unknown[];
+      const results: [readonly unknown[], T][] = [];
+      for (const [k, v] of map) {
+        const parsed = JSON.parse(k) as unknown[];
+        if (parsed.length >= prefix.length && prefix.every((seg, i) => JSON.stringify(seg) === JSON.stringify(parsed[i]))) {
+          results.push([parsed, v as T]);
+        }
+      }
+      return results;
+    },
   } as unknown as QueryClient;
 }
 

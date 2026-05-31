@@ -7,17 +7,17 @@
     "commands": "命令",
     "members": "成员",
     "projects": "项目",
-    "issues": "issue",
+    "issues": "Issues",
     "recent": "最近"
   },
   "pages": {
     "inbox": "收件箱",
     "my_issues": "我的 issue",
-    "issues": "issue",
+    "issues": "Issues",
     "projects": "项目",
     "agents": "智能体",
     "runtimes": "运行时",
-    "skills": "skill",
+    "skills": "Skills",
     "settings": "设置"
   },
   "commands": {

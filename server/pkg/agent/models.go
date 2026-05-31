@@ -102,6 +102,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return models, nil
 	case "gemini":
 		return geminiStaticModels(), nil
+	case "antigravity":
+		// Antigravity CLI (`agy`) does not expose a `--model` flag today;
+		// model selection lives in the user's Antigravity settings and is
+		// communicated to the backend internally by the CLI itself. Return
+		// an empty catalog so the daemon's model_list endpoint succeeds
+		// without populating a misleading dropdown.
+		return []Model{}, nil
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
@@ -140,14 +147,20 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 }
 
 // ModelSelectionSupported reports whether setting `agent.model` has
-// any effect for the given provider. Today every provider in the
-// registry honours `opts.Model` end-to-end: Hermes routes it through
-// the ACP `session/set_model` RPC before each prompt, which means
-// the UI's dropdown choice is carried all the way down to the LLM
-// call. The helper is retained so we can add a `return false` branch
-// the next time a provider legitimately ignores model selection.
+// any effect for the given provider. Most providers honour `opts.Model`
+// end-to-end — Hermes routes it through the ACP `session/set_model` RPC
+// before each prompt, Claude / Codex / Cursor / Gemini / Copilot / Kimi /
+// Kiro / OpenCode / OpenClaw / Pi pass it via flag or session config.
+//
+// Antigravity is the lone exception: `agy` has no `--model` flag today,
+// and the backend in antigravity.go deliberately drops opts.Model on the
+// floor. Returning false here makes the UI render a disabled
+// "Managed by runtime" picker instead of an empty dropdown plus a
+// silently-ignored manual-entry field.
 func ModelSelectionSupported(providerType string) bool {
-	_ = providerType
+	if providerType == "antigravity" {
+		return false
+	}
 	return true
 }
 
@@ -184,6 +197,7 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 func claudeStaticModels() []Model {
 	return []Model{
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},
 		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "anthropic"},
 		{ID: "claude-haiku-4-5-20251001", Label: "Claude Haiku 4.5", Provider: "anthropic"},
 		{ID: "claude-opus-4-6", Label: "Claude Opus 4.6", Provider: "anthropic"},
@@ -697,42 +711,63 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 // the caller can distinguish "parsed with no models" (valid but
 // empty catalog) from "couldn't find the structure at all".
 func parseACPSessionNewModels(raw json.RawMessage) []Model {
+	type acpModelInfo struct {
+		ModelID      string `json:"modelId"`
+		ModelIDSnake string `json:"model_id"`
+		Name         string `json:"name"`
+		Description  string `json:"description"`
+	}
 	var resp struct {
 		Models struct {
-			AvailableModels []struct {
-				ModelID     string `json:"modelId"`
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			} `json:"availableModels"`
-			CurrentModelID string `json:"currentModelId"`
+			AvailableModels      []acpModelInfo `json:"availableModels"`
+			AvailableModelsSnake []acpModelInfo `json:"available_models"`
+			CurrentModelID       string         `json:"currentModelId"`
+			CurrentModelIDSnake  string         `json:"current_model_id"`
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil
 	}
-	models := make([]Model, 0, len(resp.Models.AvailableModels))
+	availableModels := resp.Models.AvailableModels
+	if len(availableModels) == 0 && resp.Models.AvailableModelsSnake != nil {
+		availableModels = resp.Models.AvailableModelsSnake
+	}
+	currentModelID := strings.TrimSpace(resp.Models.CurrentModelID)
+	if currentModelID == "" {
+		currentModelID = strings.TrimSpace(resp.Models.CurrentModelIDSnake)
+	}
+	models := make([]Model, 0, len(availableModels))
 	seen := map[string]bool{}
-	for _, m := range resp.Models.AvailableModels {
-		if m.ModelID == "" || seen[m.ModelID] {
+	for _, m := range availableModels {
+		modelID := strings.TrimSpace(m.ModelID)
+		if modelID == "" {
+			modelID = strings.TrimSpace(m.ModelIDSnake)
+		}
+		if modelID == "" || seen[modelID] {
 			continue
 		}
-		seen[m.ModelID] = true
-		label := m.Name
-		if label == "" {
-			label = m.ModelID
-		}
+		seen[modelID] = true
+		label := acpModelLabel(m.Name, modelID)
 		provider := ""
-		if idx := strings.Index(m.ModelID, ":"); idx > 0 {
-			provider = m.ModelID[:idx]
+		if idx := strings.Index(modelID, ":"); idx > 0 {
+			provider = modelID[:idx]
 		}
 		models = append(models, Model{
-			ID:       m.ModelID,
+			ID:       modelID,
 			Label:    label,
 			Provider: provider,
-			Default:  m.ModelID == resp.Models.CurrentModelID,
+			Default:  modelID == currentModelID,
 		})
 	}
 	return models
+}
+
+func acpModelLabel(name, modelID string) string {
+	label := strings.TrimSpace(name)
+	if label == "" || strings.EqualFold(label, "unknown") {
+		return modelID
+	}
+	return label
 }
 
 // discoverCursorModels runs `cursor-agent --list-models` and parses

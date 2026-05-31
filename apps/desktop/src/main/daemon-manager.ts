@@ -15,7 +15,7 @@ import {
   type StatsListener,
 } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { homedir, hostname } from "os";
 import type { DaemonStatus, DaemonPrefs } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
@@ -864,6 +864,11 @@ export function setupDaemonManager(
   ipcMain.handle("daemon:stop", () => withGuard(() => stopDaemon()));
   ipcMain.handle("daemon:restart", () => withGuard(() => restartDaemon()));
   ipcMain.handle("daemon:get-status", () => fetchHealth());
+  // The host's OS name, available regardless of daemon state. The Runtimes
+  // page uses it as a fallback identity for "this machine" when no
+  // app-managed daemon is reporting a device name (e.g. the daemon runs
+  // out-of-band in WSL2). See desktop-runtimes-page.tsx.
+  ipcMain.handle("daemon:get-host-name", () => hostname());
   ipcMain.handle(
     "daemon:sync-token",
     (_event, token: string, userId: string) => syncToken(token, userId),

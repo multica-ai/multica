@@ -96,6 +96,7 @@ type AgentTaskQueue struct {
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
 	IsLeaderTask      bool               `json:"is_leader_task"`
+	WaitReason        pgtype.Text        `json:"wait_reason"`
 }
 
 type Attachment struct {
@@ -164,6 +165,7 @@ type AutopilotTrigger struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	Provider       string             `json:"provider"`
 	SigningSecret  pgtype.Text        `json:"signing_secret"`
+	EventFilters   []byte             `json:"event_filters"`
 }
 
 type ChatMessage struct {
@@ -312,6 +314,7 @@ type FeishuProjectIntegration struct {
 	BusinessLineFieldName       string             `json:"business_line_field_name"`
 	LastSeenUpdatedAtMs         pgtype.Int8        `json:"last_seen_updated_at_ms"`
 	LastReconciledAt            pgtype.Timestamptz `json:"last_reconciled_at"`
+	LabelSyncRules              []byte             `json:"label_sync_rules"`
 }
 
 type FeishuProjectIssueBinding struct {
@@ -329,6 +332,16 @@ type FeishuProjectIssueBinding struct {
 	LastSyncedAt          pgtype.Timestamptz `json:"last_synced_at"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FeishuProjectLabelSyncBinding struct {
+	IntegrationID pgtype.UUID        `json:"integration_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	RuleID        string             `json:"rule_id"`
+	LabelID       pgtype.UUID        `json:"label_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type FeishuProjectSyncRun struct {
@@ -465,6 +478,7 @@ type IssuePullRequest struct {
 	LinkedByType  pgtype.Text        `json:"linked_by_type"`
 	LinkedByID    pgtype.UUID        `json:"linked_by_id"`
 	LinkedAt      pgtype.Timestamptz `json:"linked_at"`
+	CloseIntent   bool               `json:"close_intent"`
 }
 
 type IssueReaction struct {
@@ -609,6 +623,17 @@ type TaskMessage struct {
 	Input     []byte             `json:"input"`
 	Output    pgtype.Text        `json:"output"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type TaskToken struct {
+	ID          pgtype.UUID        `json:"id"`
+	TokenHash   string             `json:"token_hash"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type TaskUsage struct {

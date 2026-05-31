@@ -40,10 +40,19 @@ stages:
   # firing for a release that failed to mirror to GitHub.
   # - notify
 
-# Shared release-tag rule. Accept both `vN.N.N` and `N.N.N` because the
-# repo's tag history has both styles — see `git tag | grep '\.'`.
+# Shared release-tag rule. Accepts three tag shapes, all routed to the
+# same mirror-to-github job:
+#   - `vN.N.N` / `N.N.N`   — desktop release. Both styles exist in
+#                            the repo's tag history; see
+#                            `git tag | grep '\.'`. Picked up by
+#                            `.github/workflows/lilith-desktop-release.yml`.
+#   - `mobile-vN.N.N`      — mobile iOS Enterprise release. Separate
+#                            prefix so mobile + desktop cadences are
+#                            independent. Picked up by
+#                            `.github/workflows/lilith-mobile-ios-release.yml`.
+# Any other tag shape is ignored — the pipeline only runs on these.
 .semver-tag-rule: &semver_tag_rule
-  - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+$/'
+  - if: '$CI_COMMIT_TAG =~ /^(v?|mobile-v)[0-9]+\.[0-9]+\.[0-9]+$/'
 
 # Shared runner pin. The project has one registered runner tagged
 # `multica`; pinning here keeps dispatch unambiguous even if the

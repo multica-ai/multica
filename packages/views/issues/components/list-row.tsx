@@ -1,7 +1,10 @@
 "use client";
 
-import { memo } from "react";
+import { memo, type Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
+import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { AppLink } from "../../navigation";
 import type { Issue } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -29,12 +32,22 @@ function formatDate(date: string): string {
   });
 }
 
-export const ListRow = memo(function ListRow({
+function ListRowContent({
   issue,
   childProgress,
+  isDragging,
+  containerRef,
+  containerStyle,
+  containerProps,
+  checkboxProps,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
+  isDragging?: boolean;
+  containerRef?: Ref<HTMLDivElement>;
+  containerStyle?: React.CSSProperties;
+  containerProps?: Record<string, unknown>;
+  checkboxProps?: Pick<React.HTMLAttributes<HTMLDivElement>, "onClick" | "onMouseDown" | "onPointerDown">;
 }) {
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
@@ -58,11 +71,17 @@ export const ListRow = memo(function ListRow({
   return (
     <IssueActionsContextMenu issue={issue}>
       <div
+        ref={containerRef}
+        style={containerStyle}
+        {...containerProps}
         className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
           selected ? "bg-accent/30" : ""
-        }`}
+        } ${isDragging ? "opacity-30" : ""}`}
       >
-        <div className="relative flex shrink-0 items-center justify-center w-4 h-4">
+        <div
+          className="relative flex shrink-0 items-center justify-center w-4 h-4"
+          {...checkboxProps}
+        >
           <PriorityIcon
             priority={issue.priority}
             className={selected ? "hidden" : "group-hover/row:hidden"}
@@ -78,7 +97,7 @@ export const ListRow = memo(function ListRow({
         </div>
         <AppLink
           href={p.issueDetail(issue.id)}
-          className="flex flex-1 items-center gap-2 min-w-0"
+          className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
         >
           <span className="w-16 shrink-0 text-xs text-muted-foreground">
             {issue.identifier}
@@ -135,5 +154,66 @@ export const ListRow = memo(function ListRow({
         </AppLink>
       </div>
     </IssueActionsContextMenu>
+  );
+}
+
+export const ListRow = memo(function ListRow({
+  issue,
+  childProgress,
+}: {
+  issue: Issue;
+  childProgress?: ChildProgress;
+}) {
+  return <ListRowContent issue={issue} childProgress={childProgress} />;
+});
+
+const animateLayoutChanges: AnimateLayoutChanges = (args) => {
+  const { isSorting, wasDragging } = args;
+  if (isSorting || wasDragging) return false;
+  return defaultAnimateLayoutChanges(args);
+};
+
+const stopDrag = (e: React.SyntheticEvent) => {
+  e.stopPropagation();
+};
+
+export const DraggableListRow = memo(function DraggableListRow({
+  issue,
+  childProgress,
+  disableSorting,
+}: {
+  issue: Issue;
+  childProgress?: ChildProgress;
+  disableSorting?: boolean;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: issue.id,
+    data: { status: issue.status },
+    animateLayoutChanges,
+    disabled: disableSorting ? { droppable: true } : undefined,
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <ListRowContent
+      issue={issue}
+      childProgress={childProgress}
+      isDragging={isDragging}
+      containerRef={setNodeRef}
+      containerStyle={style}
+      containerProps={{ ...attributes, ...listeners }}
+      checkboxProps={{ onClick: stopDrag, onMouseDown: stopDrag, onPointerDown: stopDrag }}
+    />
   );
 });

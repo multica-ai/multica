@@ -55,6 +55,17 @@ func isTaskNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(reqErr.Body), "task not found")
 }
 
+// isUnauthorizedError returns true if the error is a 401 from the server.
+// Used by the token-renewal loop to surface a clear "re-login required"
+// message instead of a generic transport-level retry.
+func isUnauthorizedError(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	return reqErr.StatusCode == http.StatusUnauthorized
+}
+
 // isRuntimeNotFoundError returns true if the error is a 404 with "runtime not
 // found" body. The daemon uses this to detect that the runtime row was deleted
 // server-side (UI Delete, 7-day offline GC) while the daemon was still
@@ -156,6 +167,21 @@ func (c *Client) StartTask(ctx context.Context, taskID string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/start", taskID), map[string]any{}, nil)
 }
 
+// MarkTaskWaitingLocalDirectory parks a freshly-dispatched task in the
+// waiting_local_directory state on the server. The daemon calls this after
+// it has claimed a task whose project carries a local_directory resource
+// but the path mutex is held by another in-flight task. reason is a short
+// human-readable hint (e.g. "<path>") surfaced by the UI alongside the
+// status. Idempotent on the daemon's side — calling twice with the same
+// reason is a no-op once the row is already waiting_local_directory (the
+// underlying SQL filters on status='dispatched', so the second call is a
+// 400 the daemon swallows and proceeds to wait).
+func (c *Client) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID, reason string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/wait-local-directory", taskID), map[string]any{
+		"reason": reason,
+	}, nil)
+}
+
 func (c *Client) ReportProgress(ctx context.Context, taskID, summary string, step, total int) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/progress", taskID), map[string]any{
 		"summary": summary,
@@ -191,7 +217,7 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 	if workDir != "" {
 		body["work_dir"] = workDir
 	}
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil)
+	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil, defaultTerminalRetrySchedule)
 }
 
 func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
@@ -214,7 +240,7 @@ func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDi
 	if failureReason != "" {
 		body["failure_reason"] = failureReason
 	}
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil)
+	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil, defaultTerminalRetrySchedule)
 }
 
 // PinTaskSession persists the agent's session_id and work_dir on the task
@@ -298,6 +324,27 @@ func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, re
 type WorkspaceInfo struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// RenewTokenResponse mirrors handler.RenewPATResponse — kept loose (string +
+// bool) because the daemon never parses the timestamp itself; it just logs it
+// for operator visibility.
+type RenewTokenResponse struct {
+	ExpiresAt string `json:"expires_at"`
+	Renewed   bool   `json:"renewed"`
+}
+
+// RenewToken asks the server to extend the daemon's current PAT in place when
+// it's within the server-side renewal window. The server is authoritative on
+// the threshold — the daemon doesn't know the token's expires_at locally —
+// so this is safe to call on any cadence; the only thing extra calls cost is
+// one round trip and one cheap SELECT.
+func (c *Client) RenewToken(ctx context.Context) (*RenewTokenResponse, error) {
+	var resp RenewTokenResponse
+	if err := c.postJSON(ctx, "/api/tokens/current/renew", map[string]any{}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // ListWorkspaces fetches all workspaces the authenticated user belongs to.
@@ -412,6 +459,103 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// defaultTerminalRetrySchedule is the backoff used by postJSONWithRetry for
+// terminal task callbacks (CompleteTask / FailTask). N entries → N+1 attempts
+// in the worst case (one immediate + N retries). Five backoffs totalling
+// 124s is wide enough to ride out the short upstream blips we've seen
+// (MUL-2780) without leaving the task stuck if the outage outlives the
+// window.
+var defaultTerminalRetrySchedule = []time.Duration{
+	4 * time.Second,
+	8 * time.Second,
+	16 * time.Second,
+	32 * time.Second,
+	64 * time.Second,
+}
+
+// retrySleep is the sleep used between retry attempts. Pulled into a package
+// variable so tests can swap in an instant sleep without rewriting the
+// caller's schedule.
+var retrySleep = func(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// isTransientError reports whether err looks like a hiccup that's likely to
+// resolve on retry: connection / TLS / I/O errors at the transport layer
+// (including client timeouts surfacing as context.DeadlineExceeded inside
+// http.Client.Do), 5xx server responses, and 408/429 rate-limit-style 4xx
+// codes. Other 4xx codes are treated as permanent — retrying a 400 (bad
+// body) or 404 (task not found) only burns time.
+//
+// The caller is responsible for separately bailing on parent-context
+// cancellation; this predicate cannot distinguish "the daemon is shutting
+// down" from "the HTTP client timed out a single attempt" because both
+// reach here as context errors wrapped by net/http.
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var reqErr *requestError
+	if errors.As(err, &reqErr) {
+		if reqErr.StatusCode >= 500 {
+			return true
+		}
+		if reqErr.StatusCode == http.StatusRequestTimeout || reqErr.StatusCode == http.StatusTooManyRequests {
+			return true
+		}
+		return false
+	}
+	return true
+}
+
+// postJSONWithRetry posts a JSON body with bounded exponential backoff,
+// intended for "must reach the server" terminal callbacks (CompleteTask /
+// FailTask). It retries transient errors per isTransientError and stops
+// immediately on permanent 4xx responses so we don't burn the schedule on
+// requests the server has already rejected.
+//
+// schedule controls the sleeps between attempts. With N entries the helper
+// performs N+1 attempts in the worst case (one initial + N retries). The
+// returned error is the last response from the server, so callers can still
+// inspect it with isTransientError to decide whether to fall back to a
+// different terminal call (e.g. complete → fail on permanent error only).
+//
+// The server-side CompleteTask / FailTask treat "already terminal" as an
+// idempotent success (see service/task.go), so a duplicate replay from a
+// retry is safe even if the server's prior response was lost in transit.
+func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any, respBody any, schedule []time.Duration) error {
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			if lastErr != nil {
+				return lastErr
+			}
+			return err
+		}
+		err := c.postJSON(ctx, path, reqBody, respBody)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isTransientError(err) {
+			return err
+		}
+		if attempt >= len(schedule) {
+			return err
+		}
+		if sleepErr := retrySleep(ctx, schedule[attempt]); sleepErr != nil {
+			return err
+		}
+	}
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {

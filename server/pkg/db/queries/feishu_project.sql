@@ -18,11 +18,11 @@ INSERT INTO feishu_project_integration (
     workspace_id, project_key, plugin_id, plugin_secret, actor_user_key,
     enabled, sync_story, sync_issue, mql_filter, status_mapping,
     reverse_status_mapping, assign_open_items_to_owner_agent, created_by_id,
-    business_line_field_key, business_line_field_name
+    business_line_field_key, business_line_field_name, label_sync_rules
 ) VALUES (
     $1, $2, $3, $4, sqlc.narg('actor_user_key'),
     $5, $6, $7, $8, $9, $10, $11, sqlc.narg('created_by_id'),
-    $12, $13
+    $12, $13, $14
 )
 ON CONFLICT (workspace_id) DO UPDATE SET
     project_key = EXCLUDED.project_key,
@@ -38,6 +38,7 @@ ON CONFLICT (workspace_id) DO UPDATE SET
     assign_open_items_to_owner_agent = EXCLUDED.assign_open_items_to_owner_agent,
     business_line_field_key = EXCLUDED.business_line_field_key,
     business_line_field_name = EXCLUDED.business_line_field_name,
+    label_sync_rules = EXCLUDED.label_sync_rules,
     updated_at = now()
 RETURNING *;
 
@@ -56,6 +57,7 @@ SET project_key = $3,
     assign_open_items_to_owner_agent = $12,
     business_line_field_key = $13,
     business_line_field_name = $14,
+    label_sync_rules = $15,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
@@ -216,3 +218,22 @@ ON CONFLICT (integration_id, external_attachment_id) DO UPDATE SET
     attachment_id = EXCLUDED.attachment_id,
     external_filename = EXCLUDED.external_filename
 RETURNING *;
+
+-- name: ListFeishuProjectLabelSyncBindingsByIssue :many
+SELECT * FROM feishu_project_label_sync_binding
+WHERE integration_id = $1 AND issue_id = $2
+ORDER BY rule_id ASC;
+
+-- name: UpsertFeishuProjectLabelSyncBinding :exec
+INSERT INTO feishu_project_label_sync_binding (
+    integration_id, workspace_id, issue_id, rule_id, label_id
+) VALUES (
+    $1, $2, $3, $4, $5
+)
+ON CONFLICT (integration_id, issue_id, rule_id) DO UPDATE SET
+    label_id = EXCLUDED.label_id,
+    updated_at = now();
+
+-- name: DeleteFeishuProjectLabelSyncBinding :exec
+DELETE FROM feishu_project_label_sync_binding
+WHERE integration_id = $1 AND issue_id = $2 AND rule_id = $3;

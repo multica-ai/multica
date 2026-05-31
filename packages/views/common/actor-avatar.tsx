@@ -13,6 +13,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { AgentProfileCard } from "../agents/components/agent-profile-card";
 import { AgentLivePeekCard } from "../agents/components/agent-live-peek-card";
 import { MemberProfileCard } from "../members/member-profile-card";
+import { SquadProfileCard } from "../squads/components/squad-profile-card";
 import { availabilityConfig } from "../agents/presence";
 import { useNavigation } from "../navigation";
 
@@ -106,13 +107,17 @@ export function ActorAvatar({
     avatar
   );
   const shouldLinkToProfile =
-    profileLink ?? (actorType === "member" || actorType === "agent");
-  const profileHref =
-    shouldLinkToProfile && actorType === "member"
+    profileLink ??
+    (actorType === "member" || actorType === "agent" || actorType === "squad");
+  const profileHref = shouldLinkToProfile
+    ? actorType === "member"
       ? paths.memberDetail(actorId)
-      : shouldLinkToProfile && actorType === "agent"
+      : actorType === "agent"
         ? paths.agentDetail(actorId)
-        : null;
+        : actorType === "squad"
+          ? paths.squadDetail(actorId)
+          : null
+    : null;
   const content = profileHref ? (
     <ActorAvatarProfileLink href={profileHref}>{dotted}</ActorAvatarProfileLink>
   ) : (
@@ -131,6 +136,9 @@ export function ActorAvatar({
   }
   if (actorType === "member") {
     return <MemberAvatarHoverCard userId={actorId}>{content}</MemberAvatarHoverCard>;
+  }
+  if (actorType === "squad") {
+    return <SquadAvatarHoverCard squadId={actorId}>{content}</SquadAvatarHoverCard>;
   }
   return content;
 }
@@ -239,6 +247,20 @@ function MemberAvatarHoverCard({
 }) {
   return (
     <ActorAvatarHoverCardShell content={<MemberProfileCard userId={userId} />}>
+      {children}
+    </ActorAvatarHoverCardShell>
+  );
+}
+
+function SquadAvatarHoverCard({
+  squadId,
+  children,
+}: {
+  squadId: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <ActorAvatarHoverCardShell content={<SquadProfileCard squadId={squadId} />}>
       {children}
     </ActorAvatarHoverCardShell>
   );

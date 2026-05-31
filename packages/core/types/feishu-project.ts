@@ -13,12 +13,22 @@ export interface FeishuProjectIntegration {
   status_mapping: Record<string, string>;
   reverse_status_mapping: Record<string, string>;
   assign_open_items_to_owner_agent: boolean;
+  label_sync_rules: FeishuProjectLabelSyncRule[];
   business_line_field_key: string;
   business_line_field_name: string;
   last_synced_at: string | null;
   last_error: string | null;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface FeishuProjectLabelSyncRule {
+  id: string;
+  enabled: boolean;
+  field_key: string;
+  field_name: string;
+  match: string;
+  label_name: string;
 }
 
 export interface UpdateFeishuProjectIntegrationRequest {
@@ -34,6 +44,7 @@ export interface UpdateFeishuProjectIntegrationRequest {
   status_mapping: Record<string, string>;
   reverse_status_mapping: Record<string, string>;
   assign_open_items_to_owner_agent: boolean;
+  label_sync_rules?: FeishuProjectLabelSyncRule[];
   business_line_field_key?: string;
   business_line_field_name?: string;
 }

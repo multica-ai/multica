@@ -2,8 +2,8 @@ package execenv
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -12,36 +12,54 @@ import (
 // writeContextFiles renders and writes .agent_context/issue_context.md and
 // skills into the appropriate provider-native location.
 //
-// Claude:   skills → {workDir}/.claude/skills/{name}/SKILL.md  (native discovery)
-// Codex:    skills → handled separately in Prepare via codex-home
-// Copilot:  skills → {workDir}/.github/skills/{name}/SKILL.md  (native project-level discovery)
-// OpenCode: skills → {workDir}/.opencode/skills/{name}/SKILL.md  (native discovery)
-// OpenClaw: skills → {workDir}/skills/{name}/SKILL.md  (native discovery — paired with a per-task synthesized openclaw-config.json that pins agents.defaults.workspace to workDir; see openclaw_config.go)
-// Pi:       skills → {workDir}/.pi/skills/{name}/SKILL.md  (native discovery)
-// Cursor:   skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
-// Kimi:     skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
-// Kiro:     skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
-// Default:  skills → {workDir}/.agent_context/skills/{name}/SKILL.md
-func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
+// Claude:      skills → {workDir}/.claude/skills/{name}/SKILL.md  (native discovery)
+// Codex:       skills → handled separately in Prepare via codex-home
+// Copilot:     skills → {workDir}/.github/skills/{name}/SKILL.md  (native project-level discovery)
+// OpenCode:    skills → {workDir}/.opencode/skills/{name}/SKILL.md  (native discovery)
+// OpenClaw:    skills → {workDir}/skills/{name}/SKILL.md  (native discovery — paired with a per-task synthesized openclaw-config.json that pins agents.defaults.workspace to workDir; see openclaw_config.go)
+// Pi:          skills → {workDir}/.pi/skills/{name}/SKILL.md  (native discovery)
+// Cursor:      skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
+// Kimi:        skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
+// Kiro:        skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
+// Antigravity: skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery — see https://antigravity.google/docs/gcli-migration "Workspace skills")
+// Default:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md
+//
+// manifest, when non-nil, is populated with every file we created and every
+// intermediate directory we had to MkdirAll (skipping any that pre-existed).
+// CleanupSidecars uses it to roll the workdir back to its pre-Prepare
+// state for local_directory tasks. Callers that don't need cleanup —
+// cloud-mode tasks whose envRoot is wiped wholesale by the GC loop — may
+// pass nil to skip the bookkeeping entirely.
+func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
 	contextDir := filepath.Join(workDir, ".agent_context")
-	if err := os.MkdirAll(contextDir, 0o755); err != nil {
+	if err := recordMkdirAll(contextDir, 0o755, manifest); err != nil {
 		return fmt.Errorf("create .agent_context dir: %w", err)
 	}
 
 	content := renderIssueContext(provider, ctx)
 	path := filepath.Join(contextDir, "issue_context.md")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return fmt.Errorf("write issue_context.md: %w", err)
+	if err := recordWriteFile(path, []byte(content), 0o644, manifest); err != nil {
+		// A pre-existing path means the user already owns
+		// .agent_context/issue_context.md — either they created it
+		// themselves or it survived from a crashed prior run we can't
+		// safely distinguish from intentional content. Refusing the
+		// write is the correct call: the runtime brief (CLAUDE.md /
+		// AGENTS.md / GEMINI.md) already carries every fact this file
+		// would, so the agent runs fine without the sidecar copy.
+		// Anything else is a real failure.
+		if !errors.Is(err, errPathPreExists) {
+			return fmt.Errorf("write issue_context.md: %w", err)
+		}
 	}
 
 	if len(ctx.AgentSkills) > 0 {
-		skillsDir, err := resolveSkillsDir(workDir, provider)
+		skillsDir, err := resolveSkillsDir(workDir, provider, manifest)
 		if err != nil {
 			return fmt.Errorf("resolve skills dir: %w", err)
 		}
 		// Codex skills are written to codex-home in Prepare; skip here.
 		if provider != "codex" {
-			if err := writeSkillFiles(skillsDir, ctx.AgentSkills); err != nil {
+			if err := writeSkillFiles(skillsDir, ctx.AgentSkills, manifest); err != nil {
 				return fmt.Errorf("write skill files: %w", err)
 			}
 		}
@@ -51,7 +69,7 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 	// block task startup. Missing resources surface as the agent simply not
 	// seeing the file, which matches the "scoped, not dumped" design (the
 	// meta skill content always lists what the agent should expect).
-	if err := writeProjectResources(workDir, ctx); err != nil {
+	if err := writeProjectResources(workDir, ctx, manifest); err != nil {
 		// Caller logs warnings; avoid noisy returns for non-fatal context.
 		return fmt.Errorf("write project resources: %w", err)
 	}
@@ -93,12 +111,16 @@ func (p ProjectResourceForEnv) MarshalJSON() ([]byte, error) {
 // working directory when the task carries project context. The file is
 // always written when a project is attached (even with zero resources) so
 // agents can rely on its presence as a signal that a project exists.
-func writeProjectResources(workDir string, ctx TaskContextForEnv) error {
+//
+// manifest, when non-nil, is populated with the .multica/project chain
+// of created directories and the resources.json file so CleanupSidecars
+// can undo them on local_directory teardown.
+func writeProjectResources(workDir string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
 	if ctx.ProjectID == "" && len(ctx.ProjectResources) == 0 {
 		return nil
 	}
 	dir := filepath.Join(workDir, ".multica", "project")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := recordMkdirAll(dir, 0o755, manifest); err != nil {
 		return err
 	}
 	resources := ctx.ProjectResources
@@ -114,12 +136,24 @@ func writeProjectResources(workDir string, ctx TaskContextForEnv) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "resources.json"), data, 0o644)
+	if err := recordWriteFile(filepath.Join(dir, "resources.json"), data, 0o644, manifest); err != nil {
+		// .multica/project/resources.json is Multica-owned and a
+		// pre-existing path is almost certainly user content the
+		// manifest must not destroy. The runtime brief already lists
+		// every project resource so the agent runs fine without the
+		// JSON sidecar — collision degrades to brief-only mode.
+		if !errors.Is(err, errPathPreExists) {
+			return err
+		}
+	}
+	return nil
 }
 
 // resolveSkillsDir returns the directory where skills should be written
-// based on the agent provider.
-func resolveSkillsDir(workDir, provider string) (string, error) {
+// based on the agent provider. manifest, when non-nil, is populated with
+// every intermediate directory we had to MkdirAll so CleanupSidecars can
+// rmdir them on local_directory teardown.
+func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (string, error) {
 	var skillsDir string
 	switch provider {
 	case "claude":
@@ -163,11 +197,17 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
 		skillsDir = filepath.Join(workDir, ".kiro", "skills")
+	case "antigravity":
+		// Antigravity (`agy`) auto-discovers workspace-level skills from
+		// .agents/skills/ in the workdir. The CLI inherits Gemini CLI's
+		// workspace skill layout; see https://antigravity.google/docs/gcli-migration
+		// under "Workspace skills".
+		skillsDir = filepath.Join(workDir, ".agents", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		skillsDir = filepath.Join(workDir, ".agent_context", "skills")
 	}
-	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+	if err := recordMkdirAll(skillsDir, 0o755, manifest); err != nil {
 		return "", err
 	}
 	return skillsDir, nil
@@ -280,32 +320,57 @@ func sanitizeSkillName(name string) string {
 }
 
 // writeSkillFiles writes skill directories into the given parent directory.
-// Each skill gets its own subdirectory containing SKILL.md and supporting files.
-func writeSkillFiles(skillsDir string, skills []SkillContextForEnv) error {
-	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+// Each skill gets its own subdirectory containing SKILL.md and supporting
+// files. manifest, when non-nil, is populated with every newly-created
+// directory and file so CleanupSidecars can remove them on
+// local_directory teardown without touching user-owned skill directories
+// that happen to live alongside ours under the same skills/ parent.
+//
+// When a Multica skill's natural slug collides with a user-installed
+// skill at the same path, we allocate a collision-free sibling slug
+// (e.g. `issue-review-multica`) and write there instead. Provider-native
+// discovery still picks it up because every subdir under skillsDir is a
+// distinct skill; the user's original directory stays bit-for-bit
+// intact. Without this fallback writeSkillFiles would have to either
+// overwrite user bytes (the bug PR #3444 review caught) or skip the
+// skill entirely (which would silently drop a Multica skill the agent
+// expects to see).
+func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest) error {
+	if err := recordMkdirAll(skillsDir, 0o755, manifest); err != nil {
 		return fmt.Errorf("create skills dir: %w", err)
 	}
 
 	for _, skill := range skills {
-		slug := sanitizeSkillName(skill.Name)
-		dir := filepath.Join(skillsDir, slug)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		baseSlug := sanitizeSkillName(skill.Name)
+		slug, dir, err := allocateCollisionFreeSkillDir(skillsDir, baseSlug)
+		if err != nil {
+			return fmt.Errorf("allocate skill dir for %q: %w", skill.Name, err)
+		}
+		if err := recordMkdirAll(dir, 0o755, manifest); err != nil {
 			return err
 		}
 
-		// Write main SKILL.md
+		// ensureSkillFrontmatter synthesises a `name:` value when the
+		// upstream skill is missing one. Use the chosen slug (which
+		// may differ from baseSlug on collision) so the YAML name
+		// matches the directory name; runtimes that key on either
+		// stay consistent.
 		body := ensureSkillFrontmatter(skill.Content, slug, skill.Description)
-		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		if err := recordWriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644, manifest); err != nil {
 			return err
 		}
 
-		// Write supporting files
+		// Write supporting files. The skill directory is collision-
+		// free by construction, so a recordWriteFile collision under
+		// it would mean the skill's bundled files list two entries
+		// at the same path — that's an upstream data bug, not a
+		// user-content collision, and we surface it.
 		for _, f := range skill.Files {
 			fpath := filepath.Join(dir, f.Path)
-			if err := os.MkdirAll(filepath.Dir(fpath), 0o755); err != nil {
+			if err := recordMkdirAll(filepath.Dir(fpath), 0o755, manifest); err != nil {
 				return err
 			}
-			if err := os.WriteFile(fpath, []byte(f.Content), 0o644); err != nil {
+			if err := recordWriteFile(fpath, []byte(f.Content), 0o644, manifest); err != nil {
 				return err
 			}
 		}

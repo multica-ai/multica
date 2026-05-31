@@ -40,7 +40,7 @@ WHERE t.autopilot_id = a.id
   AND t.next_run_at IS NOT NULL
   AND t.next_run_at <= now()
   AND a.status = 'active'
-RETURNING t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, a.workspace_id AS autopilot_workspace_id
+RETURNING t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, a.workspace_id AS autopilot_workspace_id
 `
 
 type ClaimDueScheduleTriggersRow struct {
@@ -58,6 +58,7 @@ type ClaimDueScheduleTriggersRow struct {
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	Provider             string             `json:"provider"`
 	SigningSecret        pgtype.Text        `json:"signing_secret"`
+	EventFilters         []byte             `json:"event_filters"`
 	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
 }
 
@@ -90,6 +91,7 @@ func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueSched
 			&i.UpdatedAt,
 			&i.Provider,
 			&i.SigningSecret,
+			&i.EventFilters,
 			&i.AutopilotWorkspaceID,
 		); err != nil {
 			return nil, err
@@ -222,7 +224,7 @@ const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
 VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason
 `
 
 type CreateAutopilotTaskParams struct {
@@ -271,6 +273,7 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.TriggerSummary,
 		&i.ForceFreshSession,
 		&i.IsLeaderTask,
+		&i.WaitReason,
 	)
 	return i, err
 }
@@ -278,12 +281,13 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 const createAutopilotTrigger = `-- name: CreateAutopilotTrigger :one
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
-    next_run_at, webhook_token, label, provider
+    next_run_at, webhook_token, label, provider, event_filters
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
-    COALESCE($9::text, 'generic')
-) RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret
+    COALESCE($9::text, 'generic'),
+    $10
+) RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters
 `
 
 type CreateAutopilotTriggerParams struct {
@@ -296,6 +300,7 @@ type CreateAutopilotTriggerParams struct {
 	WebhookToken   pgtype.Text        `json:"webhook_token"`
 	Label          pgtype.Text        `json:"label"`
 	Provider       pgtype.Text        `json:"provider"`
+	EventFilters   []byte             `json:"event_filters"`
 }
 
 func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilotTriggerParams) (AutopilotTrigger, error) {
@@ -309,6 +314,7 @@ func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilo
 		arg.WebhookToken,
 		arg.Label,
 		arg.Provider,
+		arg.EventFilters,
 	)
 	var i AutopilotTrigger
 	err := row.Scan(
@@ -326,6 +332,7 @@ func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilo
 		&i.UpdatedAt,
 		&i.Provider,
 		&i.SigningSecret,
+		&i.EventFilters,
 	)
 	return i, err
 }
@@ -483,7 +490,7 @@ func (q *Queries) GetAutopilotRunByIssue(ctx context.Context, issueID pgtype.UUI
 }
 
 const getAutopilotTrigger = `-- name: GetAutopilotTrigger :one
-SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret FROM autopilot_trigger
+SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters FROM autopilot_trigger
 WHERE id = $1
 `
 
@@ -505,12 +512,13 @@ func (q *Queries) GetAutopilotTrigger(ctx context.Context, id pgtype.UUID) (Auto
 		&i.UpdatedAt,
 		&i.Provider,
 		&i.SigningSecret,
+		&i.EventFilters,
 	)
 	return i, err
 }
 
 const getWebhookTriggerByToken = `-- name: GetWebhookTriggerByToken :one
-SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, a.workspace_id AS autopilot_workspace_id
+SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, a.workspace_id AS autopilot_workspace_id
 FROM autopilot_trigger t
 JOIN autopilot a ON a.id = t.autopilot_id
 WHERE t.kind = 'webhook'
@@ -532,6 +540,7 @@ type GetWebhookTriggerByTokenRow struct {
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	Provider             string             `json:"provider"`
 	SigningSecret        pgtype.Text        `json:"signing_secret"`
+	EventFilters         []byte             `json:"event_filters"`
 	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
 }
 
@@ -558,6 +567,7 @@ func (q *Queries) GetWebhookTriggerByToken(ctx context.Context, webhookToken pgt
 		&i.UpdatedAt,
 		&i.Provider,
 		&i.SigningSecret,
+		&i.EventFilters,
 		&i.AutopilotWorkspaceID,
 	)
 	return i, err
@@ -613,7 +623,7 @@ func (q *Queries) ListAutopilotRuns(ctx context.Context, arg ListAutopilotRunsPa
 
 const listAutopilotTriggers = `-- name: ListAutopilotTriggers :many
 
-SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret FROM autopilot_trigger
+SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters FROM autopilot_trigger
 WHERE autopilot_id = $1
 ORDER BY created_at ASC
 `
@@ -645,6 +655,7 @@ func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.
 			&i.UpdatedAt,
 			&i.Provider,
 			&i.SigningSecret,
+			&i.EventFilters,
 		); err != nil {
 			return nil, err
 		}
@@ -710,7 +721,7 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 
 const recoverLostTriggers = `-- name: RecoverLostTriggers :many
 
-SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, a.workspace_id AS autopilot_workspace_id
+SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, a.workspace_id AS autopilot_workspace_id
 FROM autopilot_trigger t
 JOIN autopilot a ON t.autopilot_id = a.id
 WHERE t.kind = 'schedule'
@@ -735,6 +746,7 @@ type RecoverLostTriggersRow struct {
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	Provider             string             `json:"provider"`
 	SigningSecret        pgtype.Text        `json:"signing_secret"`
+	EventFilters         []byte             `json:"event_filters"`
 	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
 }
 
@@ -768,6 +780,7 @@ func (q *Queries) RecoverLostTriggers(ctx context.Context) ([]RecoverLostTrigger
 			&i.UpdatedAt,
 			&i.Provider,
 			&i.SigningSecret,
+			&i.EventFilters,
 			&i.AutopilotWorkspaceID,
 		); err != nil {
 			return nil, err
@@ -786,7 +799,7 @@ SET webhook_token = $2,
     updated_at = now()
 WHERE id = $1
   AND kind = 'webhook'
-RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret
+RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters
 `
 
 type RotateAutopilotTriggerWebhookTokenParams struct {
@@ -815,6 +828,7 @@ func (q *Queries) RotateAutopilotTriggerWebhookToken(ctx context.Context, arg Ro
 		&i.UpdatedAt,
 		&i.Provider,
 		&i.SigningSecret,
+		&i.EventFilters,
 	)
 	return i, err
 }
@@ -907,7 +921,7 @@ SET signing_secret = $2,
     updated_at = now()
 WHERE id = $1
   AND kind = 'webhook'
-RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret
+RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters
 `
 
 type SetAutopilotTriggerSigningSecretParams struct {
@@ -938,6 +952,7 @@ func (q *Queries) SetAutopilotTriggerSigningSecret(ctx context.Context, arg SetA
 		&i.UpdatedAt,
 		&i.Provider,
 		&i.SigningSecret,
+		&i.EventFilters,
 	)
 	return i, err
 }
@@ -947,7 +962,7 @@ UPDATE autopilot_trigger
 SET webhook_token = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret
+RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters
 `
 
 type SetAutopilotTriggerWebhookTokenParams struct {
@@ -978,6 +993,7 @@ func (q *Queries) SetAutopilotTriggerWebhookToken(ctx context.Context, arg SetAu
 		&i.UpdatedAt,
 		&i.Provider,
 		&i.SigningSecret,
+		&i.EventFilters,
 	)
 	return i, err
 }
@@ -1323,9 +1339,10 @@ UPDATE autopilot_trigger SET
     timezone = COALESCE($4, timezone),
     next_run_at = $5,
     label = COALESCE($6, label),
+    event_filters = COALESCE($7, event_filters),
     updated_at = now()
 WHERE id = $1
-RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret
+RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters
 `
 
 type UpdateAutopilotTriggerParams struct {
@@ -1335,6 +1352,7 @@ type UpdateAutopilotTriggerParams struct {
 	Timezone       pgtype.Text        `json:"timezone"`
 	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
 	Label          pgtype.Text        `json:"label"`
+	EventFilters   []byte             `json:"event_filters"`
 }
 
 func (q *Queries) UpdateAutopilotTrigger(ctx context.Context, arg UpdateAutopilotTriggerParams) (AutopilotTrigger, error) {
@@ -1345,6 +1363,7 @@ func (q *Queries) UpdateAutopilotTrigger(ctx context.Context, arg UpdateAutopilo
 		arg.Timezone,
 		arg.NextRunAt,
 		arg.Label,
+		arg.EventFilters,
 	)
 	var i AutopilotTrigger
 	err := row.Scan(
@@ -1362,6 +1381,7 @@ func (q *Queries) UpdateAutopilotTrigger(ctx context.Context, arg UpdateAutopilo
 		&i.UpdatedAt,
 		&i.Provider,
 		&i.SigningSecret,
+		&i.EventFilters,
 	)
 	return i, err
 }

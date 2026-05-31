@@ -135,6 +135,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         </Tooltip>
         <FileUploadButton
           size="sm"
+          multiple
           onSelect={(file) => editorRef.current?.uploadFile(file)}
         />
         <SubmitButton

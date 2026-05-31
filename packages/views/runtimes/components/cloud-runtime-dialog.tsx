@@ -56,7 +56,7 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
 
   const sortedNodes = useMemo(
     () =>
-      [...(nodesQuery.data ?? [])].sort(
+      (nodesQuery.data ?? []).toSorted(
         (a, b) =>
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
       ),

@@ -48,7 +48,9 @@
     "squads_group": "Squads",
     "issue_count_one": "{{count}} issue",
     "issue_count_other": "{{count}} issues",
-    "reset": "Reset all filters"
+    "reset": "Reset all filters",
+    "active_count_one": "{{count}} filter",
+    "active_count_other": "{{count}} filters"
   },
   "display": {
     "tooltip": "Display settings",
@@ -59,6 +61,8 @@
     "descending_title": "Descending",
     "group_status": "Status",
     "group_assignee": "Assignee",
+    "group_parent": "Parent issue",
+    "group_project": "Project",
     "sort_manual": "Manual",
     "sort_priority": "Priority",
     "sort_start_date": "Start date",
@@ -78,10 +82,12 @@
     "tooltip_board": "Board view",
     "tooltip_list": "List view",
     "tooltip_gantt": "Gantt view",
+    "tooltip_swimlane": "Swimlane view",
     "section": "View",
     "board": "Board",
     "list": "List",
-    "gantt": "Gantt"
+    "gantt": "Gantt",
+    "swimlane": "Swimlane"
   },
   "gantt": {
     "header_issue": "Issue",
@@ -120,13 +126,22 @@
     "empty_status": "No issues",
     "add_issue_tooltip": "Add issue"
   },
+  "swimlane": {
+    "no_parent": "No parent",
+    "other_parents": "Other parents",
+    "no_project": "No project",
+    "no_assignee": "Unassigned",
+    "open_parent": "Open parent issue",
+    "toggle_collapse": "Toggle lane"
+  },
   "board": {
     "hidden_columns_label": "Hidden columns",
     "hide_column": "Hide column",
     "show_column": "Show column",
     "add_issue_tooltip": "Add issue",
     "empty_column": "No issues",
-    "empty_grouping": "No matching issues"
+    "empty_grouping": "No matching issues",
+    "ordered_by": "Board ordered by {{field}}"
   },
   "detail": {
     "not_found": "This issue does not exist or has been deleted in this workspace.",
@@ -236,7 +251,9 @@
     "squad_leader_failed_reason": "evaluation failed: {{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} activity",
-    "activity_count_other": "{{count}} activities"
+    "activity_count_other": "{{count}} activities",
+    "show_more_activities_one": "Show {{count}} more activity",
+    "show_more_activities_other": "Show {{count}} more activities"
   },
   "comment": {
     "delete_title": "Delete comment",
@@ -289,6 +306,7 @@
   "agent_live": {
     "is_working": "{{name}} is working",
     "is_queued": "{{name}} is queued",
+    "is_waiting_local_directory": "{{name}} is waiting for the local directory",
     "queued_elapsed_prefix": "queued for {{elapsed}}",
     "fallback_name": "Agent",
     "tool_count_one": "{{count}} tool",
@@ -318,6 +336,7 @@
     "trigger_initial": "Initial run",
     "status_queued": "Queued",
     "status_dispatched": "Starting",
+    "status_waiting_local_directory": "Waiting for local directory",
     "status_running": "Working",
     "status_completed": "Completed",
     "status_failed": "Failed",

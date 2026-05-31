@@ -69,30 +69,39 @@ const commentHardCap = 2000
 
 // ListComments returns comments for an issue. The default behaviour is
 // unchanged — full chronological dump capped at commentHardCap — so existing
-// callers and the desktop UI keep working as-is. Four optional query params
-// give agent-style readers a thread-aware view that scales to long issues
-// without dragging every prior comment into context:
+// callers and the desktop UI keep working as-is. Optional query params give
+// agent-style readers bounded views that scale to long issues without dragging
+// every prior reply into context:
+//
+//   - roots_only=true — return only top-level comments (parent_id IS NULL).
+//     May combine with since for incremental polling of newly created roots,
+//     but is exclusive with thread/recent/tail/cursor modes because those
+//     have their own grouping or pagination semantics.
 //
 //   - thread=<comment-uuid> — return the root of the thread containing this
 //     comment plus every descendant. The anchor may be a root or any reply;
 //     the server walks up to the root via a recursive CTE, so callers do not
 //     need to know whether the id they have is a root.
+//
 //   - tail=<N> — only valid with thread. Cap the reply count at the N most
 //     recent replies (per (created_at, id)). The thread root is always
 //     returned, even when N=0, so the reader keeps the "what is this thread
 //     about" context. Without tail, thread returns the entire thread (the
 //     pre-MUL-2421 behavior).
+//
 //   - recent=<N> — return the N most recently active threads (root + every
 //     descendant per thread). A thread's recency is MAX(created_at) across
 //     the whole subtree, so a stale-but-recently-replied thread ranks ahead
 //     of an active-but-quiet one. Row-based "newest N comments" is
 //     deliberately NOT exposed — it surfaces unrelated thread tails and
 //     hides relevant history (#2340).
+//
 //   - before=<RFC3339> + before-id=<uuid> — cursor. The pair's meaning is
 //     context-dependent so the flag surface stays small:
 //
 //   - with recent: a *thread* cursor — (last_activity_at, root_id) — and
 //     the next page returns threads strictly less recent.
+//
 //   - with thread + tail: a *reply* cursor — (created_at, id) — and the
 //     next page returns replies in the same thread strictly older than
 //     that reply.
@@ -104,6 +113,9 @@ const commentHardCap = 2000
 //
 // Combination rules (kept narrow on purpose — Elon flagged the matrix risk):
 //
+//   - roots_only is exclusive with thread, recent, tail, and before/before-id.
+//     It may combine with since. This keeps "list issue roots" separate from
+//     "read a specific thread" and "read recently active threads".
 //   - thread is exclusive with recent. Asking for "the most recent N within
 //     thread X" mixes two different navigation models and is rejected.
 //   - thread + before/before-id requires tail. Without tail, thread returns
@@ -153,7 +165,41 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		beforeIDStr = q.Get("before-id")
 	}
 
+	rootsOnlyStr := q.Get("roots_only")
+	if rootsOnlyStr == "" {
+		// Accept hyphenated alias to match CLI flag convention.
+		rootsOnlyStr = q.Get("roots-only")
+	}
+
+	rootsOnly := false
+	if rootsOnlyStr != "" {
+		switch rootsOnlyStr {
+		case "true":
+			rootsOnly = true
+		case "false":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid roots_only parameter; expected boolean")
+			return
+		}
+	}
+
 	// --- combination validation ----------------------------------------
+	if rootsOnly && threadStr != "" {
+		writeError(w, http.StatusBadRequest, "roots_only and thread are mutually exclusive")
+		return
+	}
+	if rootsOnly && recentStr != "" {
+		writeError(w, http.StatusBadRequest, "roots_only and recent are mutually exclusive")
+		return
+	}
+	if rootsOnly && tailStr != "" {
+		writeError(w, http.StatusBadRequest, "roots_only and tail are mutually exclusive")
+		return
+	}
+	if rootsOnly && (beforeTimeStr != "" || beforeIDStr != "") {
+		writeError(w, http.StatusBadRequest, "roots_only does not support before / before_id")
+		return
+	}
 	if threadStr != "" && recentStr != "" {
 		writeError(w, http.StatusBadRequest, "thread and recent are mutually exclusive")
 		return
@@ -241,6 +287,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		HasCursor:     hasCursor,
 		BeforeAt:      beforeCursor,
 		BeforeID:      beforeUUID,
+		RootsOnly:     rootsOnly,
 	})
 	if err != nil {
 		switch err {
@@ -295,6 +342,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 type fetchCommentsArgs struct {
 	Issue         db.Issue
 	Since         pgtype.Timestamptz
+	RootsOnly     bool
 	ThreadAnchor  string
 	ThreadTail    int
 	ThreadTailSet bool
@@ -562,6 +610,29 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		return out, nil
 	}
 
+	if args.RootsOnly {
+		// Root-only read for issue-level orientation. This intentionally
+		// stays separate from thread/recent modes: callers get the global
+		// top-level discussion first, then fetch a specific thread only when
+		// they need reply context.
+		if args.Since.Valid {
+			comments, err := h.Queries.ListRootCommentsSinceForIssue(ctx, db.ListRootCommentsSinceForIssueParams{
+				IssueID:     issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+				CreatedAt:   args.Since,
+				Limit:       commentHardCap,
+			})
+			return fetchCommentsResult{Comments: comments}, err
+		}
+
+		comments, err := h.Queries.ListRootCommentsForIssue(ctx, db.ListRootCommentsForIssueParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			Limit:       commentHardCap,
+		})
+		return fetchCommentsResult{Comments: comments}, err
+	}
+
 	// Default + since paths preserved verbatim (no behavioural change for
 	// existing callers).
 	if args.Since.Valid {
@@ -687,6 +758,23 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// entity-encode Markdown syntax characters (>, ", &, <) and corrupt the
 	// source. See issue #1303 / discussion in MUL-1119, MUL-1125.
 
+	// Collapse parent_id to the thread root before storing so the comment tree
+	// never exceeds depth 1 (the 2-level model the product and UI assume — see
+	// GetThreadRoot). The agent-drift guard above already compared the *raw*
+	// parent_id to the task's trigger comment, so normalization happens only
+	// here, after that check. We also repoint parentComment at the root so the
+	// downstream thread-aware steps (AutoUnresolveThreadOnReply,
+	// isReplyToMemberThread) act on the thread root, not an interior reply.
+	if parentID.Valid {
+		if root, err := h.Queries.GetThreadRoot(r.Context(), db.GetThreadRootParams{
+			CommentID:   parentID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			parentID = root.ID
+			parentComment = &root
+		}
+	}
+
 	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
@@ -725,38 +813,25 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// must keep the resolved root in sync.
 	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
-	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
-	// Skip when the comment comes from the assigned agent itself to avoid loops.
-	// Also skip when the comment @mentions others but not the assignee agent —
-	// the user is talking to someone else, not requesting work from the assignee.
-	// Also skip when replying in a member-started thread without mentioning the
-	// assignee — the user is continuing a member-to-member conversation.
-	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) &&
+	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID)
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID string) {
+	if actorType == "member" && h.shouldEnqueueOnComment(ctx, issue, actorType, actorID) &&
 		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
-		!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
-		// Always use the current comment as the trigger so the agent reads
-		// the actual new reply, not the thread root. Reply placement (flat
-		// thread grouping) is handled downstream by createAgentComment,
-		// which resolves parent_id to the thread root before posting. This
-		// mirrors the mention path's behavior (see enqueueMentionedAgentTasks).
-		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, comment.ID); err != nil {
-			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
+		!h.isReplyToMemberThread(ctx, parentComment, comment.Content, issue) {
+		if _, err := h.TaskService.EnqueueTaskForIssue(ctx, issue, comment.ID); err != nil {
+			slog.Warn("enqueue agent task on comment failed", "issue_id", uuidToString(issue.ID), "error", err)
 		}
 	}
 
-	// Squad trigger: if the issue is assigned to a squad, trigger the squad leader.
-	// Skip when the comment author is the leader (prevent internal loops), or
-	// when a member explicitly @mentions anyone (agent/member/squad/all) — that
-	// counts as deliberate routing and the leader stays out.
-	if h.shouldEnqueueSquadLeaderOnComment(r.Context(), issue, comment.Content, authorType, authorID) {
-		h.enqueueSquadLeaderTask(r.Context(), issue, comment.ID, authorType, authorID)
+	if h.shouldEnqueueSquadLeaderOnComment(ctx, issue, comment.Content, actorType, actorID) {
+		h.enqueueSquadLeaderTask(ctx, issue, comment.ID, actorType, actorID)
 	}
 
-	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
-	// Pass parentComment so that replies inherit mentions from the thread root.
-	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
-
-	writeJSON(w, http.StatusCreated, resp)
+	h.enqueueMentionedAgentTasks(ctx, issue, comment, parentComment, actorType, actorID)
 }
 
 // commentMentionsOthersButNotAssignee returns true if the comment @mentions
@@ -1024,8 +1099,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Content       string   `json:"content"`
-		AttachmentIDs []string `json:"attachment_ids"`
+		Content       string    `json:"content"`
+		AttachmentIDs *[]string `json:"attachment_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1036,12 +1111,22 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
-	if !ok {
-		return
+	var attachmentIDs []pgtype.UUID
+	replaceAttachments := req.AttachmentIDs != nil
+	if replaceAttachments {
+		var ok bool
+		attachmentIDs, ok = parseUUIDSliceOrBadRequest(w, *req.AttachmentIDs, "attachment_ids")
+		if !ok {
+			return
+		}
 	}
 
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
+
+	oldContent := existing.Content
+
+	// Expand bare issue identifiers (same pipeline as CreateComment).
+	req.Content = mention.ExpandIssueIdentifiers(r.Context(), h.Queries, wsUUID, req.Content)
 
 	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
 		ID:      commentUUID,
@@ -1053,12 +1138,19 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bind any newly uploaded attachments referenced in the edited content so
-	// they appear in the timeline's comment.attachments after refresh. Existing
-	// attachments already point at this comment via the upload flow; passing
-	// them again is a no-op at the SQL level.
-	if len(attachmentIDs) > 0 {
-		h.linkAttachmentsByIDs(r.Context(), comment.ID, existing.IssueID, attachmentIDs)
+	// Replace the comment attachment set when a modern client sends
+	// attachment_ids. Older clients omit the field; in that case preserve the
+	// existing attachment links rather than unlinking everything.
+	if replaceAttachments {
+		if err := h.Queries.ReplaceCommentAttachments(r.Context(), db.ReplaceCommentAttachmentsParams{
+			CommentID:     comment.ID,
+			IssueID:       existing.IssueID,
+			AttachmentIds: attachmentIDs,
+		}); err != nil {
+			slog.Error("failed to replace comment attachments", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to update attachments")
+			return
+		}
 	}
 
 	// Fetch reactions and attachments for the updated comment.
@@ -1068,6 +1160,28 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	resp := commentToResponse(comment, grouped[cid], groupedAtt[cid])
 	slog.Info("comment updated", append(logger.RequestAttrs(r), "comment_id", commentId)...)
 	h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp})
+
+	if oldContent != comment.Content {
+		if err := h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID); err != nil {
+			slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
+		}
+
+		issue, err := h.Queries.GetIssue(r.Context(), existing.IssueID)
+		if err != nil {
+			slog.Warn("load issue for edit post-processing failed", "issue_id", uuidToString(existing.IssueID), "error", err)
+		} else {
+			var parentComment *db.Comment
+			if existing.ParentID.Valid {
+				parent, err := h.Queries.GetComment(r.Context(), existing.ParentID)
+				if err == nil {
+					parentComment = &parent
+				}
+			}
+
+			h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

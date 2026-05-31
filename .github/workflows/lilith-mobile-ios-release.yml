@@ -1,0 +1,417 @@
+name: Lilith mobile iOS release
+
+# Build + sign + publish an Enterprise In-House IPA of the apps/mobile/
+# Expo project, plus the OTA manifest .plist that iOS Safari turns into a
+# tappable install link. Both upload to the same Aliyun OSS bucket the
+# desktop release uses; the Go server's `/api/downloads/<file>` proxy
+# serves them over HTTPS to multica.lilithgames.com.
+#
+# Pipeline mirror:
+#   Lilith GitLab  ──push-mirror──▶  GitHub (CopilotDemo/multica)
+#                                       │
+#                                       ▼
+#                                  this workflow
+#                                       │
+#                                       ▼
+#                              Aliyun OSS  (downloads/multica-mobile-staging-<version>.{ipa,plist})
+#                                       ▲
+#                                       │
+#                              multica.lilithgames.com/api/downloads/
+#                                       ▲
+#                                       │
+#                              iPhone Safari (itms-services://...)
+#
+# Triggered by a tag of the form `mobile-vX.Y.Z` (e.g. `mobile-v0.1.1`) —
+# a separate prefix from the desktop's `vX.Y.Z` so the two cadences are
+# independent. The published install link appears in the workflow's
+# Step Summary; send that to colleagues.
+#
+# Required GitHub secrets (configure under repo Settings → Secrets and
+# variables → Actions):
+#   IOS_CSC_LINK                 base64 of the iOS Distribution .p12
+#                                (cert + private key). The Enterprise team
+#                                cert is created by the runner's Admin in
+#                                Xcode → Settings → Accounts → Manage
+#                                Certificates → + → iOS Distribution, then
+#                                exported with private key from Keychain
+#                                Access. The local Xcode cloud-managed
+#                                signing the developer uses interactively
+#                                does NOT produce an exportable .p12, so a
+#                                non-managed cert is required for CI.
+#   IOS_CSC_KEY_PASSWORD         password used when exporting the .p12.
+#   IOS_PROVISIONING_PROFILE     base64 of the matching Enterprise In-House
+#                                .mobileprovision (downloaded from
+#                                developer.apple.com → Certificates,
+#                                Identifiers & Profiles → Profiles, or copied
+#                                from ~/Library/MobileDevice/Provisioning
+#                                Profiles/ after Xcode auto-creates it on
+#                                the first local Archive against the new
+#                                non-managed cert).
+#
+# Already present (shared with the desktop release workflow):
+#   OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET — RAM user with `downloads/`
+#     write access on the lilith-multica bucket.
+#   vars.OSS_BUCKET, vars.OSS_ENDPOINT, vars.OSS_REGION — bucket addressing.
+#
+# Once configured, releasing is `git tag mobile-v0.1.1 && git push origin
+# mobile-v0.1.1`. The Step Summary on the resulting run contains the
+# itms-services:// install link.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    tags:
+      - "mobile-v[0-9]*.[0-9]*.[0-9]*"
+      # Defend against `git describe --dirty` accidentally producing a
+      # dirty-suffixed tag that gets pushed.
+      - "!*-dirty*"
+  workflow_dispatch:
+
+# Opt JS-based actions into Node 24 to match the desktop workflow's
+# behavior and shake out Node 20 deprecation issues before they're forced.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Refuse to run on the upstream repo
+        if: github.repository_owner == 'multica-ai'
+        run: |
+          echo "::error::This workflow targets the Lilith mirror; the upstream repo does not have these signing secrets."
+          exit 1
+      - name: Validate + extract tag
+        id: meta
+        run: |
+          tag="${GITHUB_REF_NAME:-${{ inputs.tag || '' }}}"
+          if [[ "${{ github.event_name }}" = "workflow_dispatch" ]]; then
+            # Manual dispatch uses HEAD's tag — useful for re-running without
+            # bumping the tag — but require it to be a mobile-v* tag.
+            tag=$(git describe --tags --exact-match 2>/dev/null || true)
+          fi
+          if [[ ! "$tag" =~ ^mobile-v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
+            echo "::error::Mobile iOS release tags must look like mobile-vX.Y.Z (optionally -suffix); got '$tag'."
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: guard
+    runs-on: macos-latest
+    env:
+      # OSS upload credentials — same RAM user the desktop release uses.
+      AWS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+      AWS_DEFAULT_REGION: ${{ vars.OSS_REGION || 'oss-cn-shanghai' }}
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # apps/desktop's package.mjs precedent — needed
+                           # if any local tooling reads `git describe`.
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Import iOS Distribution signing certificate
+        env:
+          CSC_LINK: ${{ secrets.IOS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.IOS_CSC_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CSC_LINK:-}" || -z "${CSC_KEY_PASSWORD:-}" ]]; then
+            echo "::error::IOS_CSC_LINK and IOS_CSC_KEY_PASSWORD must both be configured."
+            exit 1
+          fi
+          # Use a throwaway keychain rather than the login one, so the cert
+          # + key live only for the lifetime of this run and don't bleed
+          # into any cache layer.
+          KEYCHAIN_PATH="$RUNNER_TEMP/ios-build.keychain"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -t 3600 -u "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          # Append the temp keychain to the user search list so codesign
+          # finds the identity. Quoting the existing list defends against
+          # paths with spaces.
+          existing=$(security list-keychains -d user | tr -d '"' | xargs)
+          security list-keychains -d user -s $existing "$KEYCHAIN_PATH"
+
+          P12_PATH="$RUNNER_TEMP/ios-dist.p12"
+          printf '%s' "$CSC_LINK" | base64 -d > "$P12_PATH"
+          security import "$P12_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$CSC_KEY_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          # Without this, codesign hits a UI password prompt on every run
+          # which never resolves on a headless runner.
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          rm -f "$P12_PATH"
+
+          # Sanity-check that we actually got a distribution identity —
+          # an Apple Development .p12 would still import but produce an
+          # unsignable archive at the export step (with a useless error).
+          # Fail loudly here instead.
+          if ! security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+              | grep -iE "iPhone Distribution|Apple Distribution"; then
+            echo "::error::Imported .p12 does not contain an iOS Distribution identity."
+            echo "Identities found:"
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+            exit 1
+          fi
+
+      - name: Install provisioning profile
+        env:
+          PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${PROVISIONING_PROFILE:-}" ]]; then
+            echo "::error::IOS_PROVISIONING_PROFILE must be configured."
+            exit 1
+          fi
+          PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILES_DIR"
+          STAGED="$RUNNER_TEMP/profile.mobileprovision"
+          printf '%s' "$PROVISIONING_PROFILE" | base64 -d > "$STAGED"
+          # Xcode looks the profile up by UUID, so installed filename must
+          # be `<UUID>.mobileprovision` exactly.
+          UUID=$(security cms -D -i "$STAGED" | plutil -extract UUID raw -o - -)
+          NAME=$(security cms -D -i "$STAGED" | plutil -extract Name raw -o - -)
+          APP_ID=$(security cms -D -i "$STAGED" | plutil -extract Entitlements.application-identifier raw -o - -)
+          IS_INHOUSE=$(security cms -D -i "$STAGED" | plutil -extract ProvisionsAllDevices raw -o - - 2>/dev/null || echo "false")
+          cp "$STAGED" "$PROFILES_DIR/$UUID.mobileprovision"
+          rm -f "$STAGED"
+          echo "  ✓ installed provisioning profile"
+          echo "      name:          $NAME"
+          echo "      uuid:          $UUID"
+          echo "      app-id:        $APP_ID"
+          echo "      in-house?      $IS_INHOUSE"
+          # Echo the profile name into a step output so the export step
+          # can reference it without re-decoding.
+          echo "PROFILE_NAME=$NAME" >> "$GITHUB_ENV"
+          if [[ "$IS_INHOUSE" != "true" ]]; then
+            echo "::warning::Profile does not have ProvisionsAllDevices=true — not an Enterprise In-House profile. Export will use 'enterprise' method anyway, but install on non-registered devices will fail."
+          fi
+          if [[ "$APP_ID" != "8DCHGYMM27.lilithgames.multica.mobile.staging" ]]; then
+            echo "::warning::Profile application-identifier ($APP_ID) does not match expected 8DCHGYMM27.lilithgames.multica.mobile.staging — Xcode will reject this profile during Archive."
+          fi
+
+      - name: Expo prebuild for iOS
+        # APP_ENV=staging triggers app.config.ts's staging branch (selects
+        # the Lilith bundle id) and the inline ConfigPlugins
+        # withDisableUserScriptSandboxing + withVariantEnvInXcodeEnv that
+        # together let Archive succeed under Xcode 16's sandbox and inline
+        # EXPO_PUBLIC_API_URL into the JS bundle without a `dotenv`
+        # wrapper. `--clean` ensures we don't carry over any state from a
+        # previous run on a self-hosted runner.
+        run: |
+          APP_ENV=staging pnpm -C apps/mobile exec expo prebuild \
+            --platform ios --clean --non-interactive
+
+      - name: xcodebuild archive
+        # Manual signing — automatic signing requires an Apple ID logged
+        # into Xcode at GUI time, which GitHub-hosted runners don't have.
+        # The profile we just installed + the cert in the temp keychain
+        # are referenced explicitly via DEVELOPMENT_TEAM + PROVISIONING_*
+        # build settings so xcodebuild can resolve them without contacting
+        # Apple at all.
+        run: |
+          set -euo pipefail
+          cd apps/mobile/ios
+          xcodebuild archive \
+            -workspace MulticaStaging.xcworkspace \
+            -scheme MulticaStaging \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/MulticaStaging.xcarchive" \
+            -allowProvisioningUpdates \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM=8DCHGYMM27 \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $RUNNER_TEMP/ios-build.keychain"
+
+      - name: Verify staging URL was inlined into the Hermes bundle
+        # The withVariantEnvInXcodeEnv config plugin is supposed to source
+        # apps/mobile/.env.staging during the Bundle React Native code
+        # build phase, so the resulting Hermes bytecode contains the
+        # multica.lilithgames.com origin as a literal string. If something
+        # broke that chain (env file moved, plugin skipped, .xcode.env
+        # regen failed), the bundle ships with EXPO_PUBLIC_API_URL inlined
+        # as the literal string "undefined" and verify-code requests go to
+        # `undefined/auth/verify-code` — which is exactly the 0.1.0 bug we
+        # already paid for once. Fail loudly here before publishing.
+        run: |
+          set -euo pipefail
+          APP_DIR="$RUNNER_TEMP/MulticaStaging.xcarchive/Products/Applications/MulticaStaging.app"
+          BUNDLE="$APP_DIR/main.jsbundle"
+          if [[ ! -f "$BUNDLE" ]]; then
+            echo "::error::main.jsbundle missing from archive — expected at $BUNDLE"
+            ls -la "$APP_DIR"
+            exit 1
+          fi
+          if strings -n 4 "$BUNDLE" | grep -qF "multica.lilithgames"; then
+            echo "  ✓ multica.lilithgames present in Hermes bundle"
+          else
+            echo "::error::Hermes bundle does not contain multica.lilithgames — the .xcode.env env loader did not pick up .env.staging at build time."
+            exit 1
+          fi
+
+      - name: Export Enterprise IPA
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>enterprise</string>
+            <key>teamID</key><string>8DCHGYMM27</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>stripSwiftSymbols</key><true/>
+            <key>compileBitcode</key><false/>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>lilithgames.multica.mobile.staging</key>
+              <string>$PROFILE_NAME</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/MulticaStaging.xcarchive" \
+            -exportPath "$RUNNER_TEMP/ipa-export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+          ls -la "$RUNNER_TEMP/ipa-export/"
+
+      - name: Upload IPA + manifest to OSS
+        env:
+          BUCKET: ${{ vars.OSS_BUCKET }}
+          OSS_ENDPOINT: ${{ vars.OSS_ENDPOINT }}
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          set -euo pipefail
+          IPA_NAME="multica-mobile-staging-$VERSION.ipa"
+          MANIFEST_NAME="multica-mobile-staging-$VERSION.plist"
+          MANIFEST_URL="https://multica.lilithgames.com/api/downloads/$MANIFEST_NAME"
+          IPA_URL="https://multica.lilithgames.com/api/downloads/$IPA_NAME"
+
+          # Rename to versioned filename matching the desktop release
+          # convention (`multica-<product>-<variant>-<version>.<ext>`),
+          # which surfaces version + variant in the bucket listing.
+          cp "$RUNNER_TEMP/ipa-export/MulticaStaging.ipa" "$RUNNER_TEMP/$IPA_NAME"
+
+          cat > "$RUNNER_TEMP/$MANIFEST_NAME" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>items</key>
+            <array>
+              <dict>
+                <key>assets</key>
+                <array>
+                  <dict>
+                    <key>kind</key><string>software-package</string>
+                    <key>url</key><string>$IPA_URL</string>
+                  </dict>
+                </array>
+                <key>metadata</key>
+                <dict>
+                  <key>bundle-identifier</key><string>lilithgames.multica.mobile.staging</string>
+                  <key>bundle-version</key><string>$VERSION</string>
+                  <key>kind</key><string>software</string>
+                  <key>title</key><string>Multica (Staging)</string>
+                </dict>
+              </dict>
+            </array>
+          </dict>
+          </plist>
+          EOF
+          plutil -lint "$RUNNER_TEMP/$MANIFEST_NAME"
+
+          ep="$OSS_ENDPOINT"
+          case "$ep" in http://*|https://*) ;; *) ep="https://$ep" ;; esac
+          aws configure set default.s3.addressing_style virtual
+
+          # Upload the IPA BEFORE the manifest — the manifest references
+          # the IPA URL, so this ordering means a client polling the
+          # manifest can never see a reference to a missing object.
+          aws s3 cp "$RUNNER_TEMP/$IPA_NAME" "s3://$BUCKET/downloads/$IPA_NAME" \
+            --endpoint-url "$ep" \
+            --cache-control "max-age=31536000, immutable" \
+            --only-show-errors
+          echo "  ✓ uploaded $IPA_NAME"
+          aws s3 cp "$RUNNER_TEMP/$MANIFEST_NAME" "s3://$BUCKET/downloads/$MANIFEST_NAME" \
+            --endpoint-url "$ep" \
+            --cache-control "max-age=31536000, immutable" \
+            --only-show-errors
+          echo "  ✓ uploaded $MANIFEST_NAME"
+
+          # Use ListObjectsV2 for confirmation rather than HeadObject — the
+          # downloads RAM user is provisioned read+list under least-privilege
+          # and typically lacks HeadObject. Equality filter prevents prefix
+          # collisions from masquerading as hits.
+          for name in "$IPA_NAME" "$MANIFEST_NAME"; do
+            key="downloads/$name"
+            found=$(aws s3api list-objects-v2 \
+              --bucket "$BUCKET" --prefix "$key" --endpoint-url "$ep" \
+              --query "Contents[?Key=='$key'].Key | [0]" --output text)
+            if [[ "$found" != "$key" ]]; then
+              echo "::error::MISSING on OSS: s3://$BUCKET/$key"
+              exit 1
+            fi
+            echo "  ✓ verified s3://$BUCKET/$key"
+          done
+
+      - name: Publish install link in Step Summary
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: |
+          MANIFEST_URL="https://multica.lilithgames.com/api/downloads/multica-mobile-staging-$VERSION.plist"
+          INSTALL_URL="itms-services://?action=download-manifest&url=$MANIFEST_URL"
+          {
+            echo "### Multica Mobile (Staging) $VERSION published"
+            echo ""
+            echo "Tag: \`$TAG\`"
+            echo ""
+            echo "**Install link** — paste into iPhone **Safari** (not WeChat / Feishu webview):"
+            echo ""
+            echo "\`\`\`"
+            echo "$INSTALL_URL"
+            echo "\`\`\`"
+            echo ""
+            echo "First-time installers on each iPhone: after the app appears on the home screen, **Settings → General → VPN & Device Management → trust 'Shanghai Lilith Computer Technology Company Limited'** before launching."
+            echo ""
+            echo "Update path for colleagues already on a previous version: tapping the new install link replaces the existing app in place (same bundle id) — no need to delete first, no need to re-trust the developer."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/ios-build.keychain" 2>/dev/null || true
+          rm -rf "$HOME/Library/MobileDevice/Provisioning Profiles" || true

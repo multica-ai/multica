@@ -57,6 +57,16 @@
     "active_issue_more": "and {{count}} more",
     "last_active_label": "last active {{time}}"
   },
+  "profile_card": {
+    "unavailable": "Squad unavailable",
+    "detail_link": "Detail →",
+    "archived": "Archived",
+    "member_count_one": "{{count}} member",
+    "member_count_other": "{{count}} members",
+    "members_section": "Members",
+    "more_members_one": "+{{count}} more",
+    "more_members_other": "+{{count}} more"
+  },
   "instructions_tab": {
     "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",
     "unsaved_changes": "Unsaved changes",

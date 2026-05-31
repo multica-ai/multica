@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // cursorQuery builds a properly URL-encoded query string for the recent +
@@ -170,6 +172,59 @@ func TestListComments_DefaultPreservesChronologicalOrder(t *testing.T) {
 	_, rows := listComments(t, fx.IssueID, "")
 	want := []string{fx.Root1, fx.R1a, fx.R1b, fx.R1b1, fx.Root2, fx.R2a, fx.R2b}
 	eqIDs(t, ids(rows), want, "default order")
+}
+
+// TestListComments_RootsOnlyReturnsTopLevelComments pins the #3164 contract:
+// issue-level orientation should fetch only root comments, leaving replies for
+// a later thread-scoped read if the caller needs detail.
+func TestListComments_RootsOnlyReturnsTopLevelComments(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	for _, tc := range []struct {
+		name  string
+		query string
+	}{
+		{name: "underscore query", query: "roots_only=true"},
+		{name: "hyphenated alias", query: "roots-only=true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, rows := listComments(t, fx.IssueID, tc.query)
+			eqIDs(t, ids(rows), []string{fx.Root1, fx.Root2}, tc.name)
+			for _, row := range rows {
+				if row.ParentID != nil {
+					t.Fatalf("%s: expected root comment %s to have nil parent_id, got %q", tc.name, row.ID, *row.ParentID)
+				}
+			}
+			nb, nbid := nextThreadCursor(w)
+			if nb != "" || nbid != "" {
+				t.Fatalf("%s: roots-only list should not emit cursor headers, got before=%q before_id=%q", tc.name, nb, nbid)
+			}
+		})
+	}
+}
+
+// TestListComments_RootsOnlyWithSinceReturnsNewTopLevelComments proves the
+// one allowed roots-only combination: `since` narrows the root list without
+// pulling newer replies into the response.
+func TestListComments_RootsOnlyWithSinceReturnsNewTopLevelComments(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	v := url.Values{}
+	v.Set("roots_only", "true")
+	v.Set("since", fx.Base.Add(5*time.Minute).UTC().Format(time.RFC3339Nano))
+	_, rows := listComments(t, fx.IssueID, v.Encode())
+	eqIDs(t, ids(rows), []string{fx.Root2}, "roots_only + since")
+	for _, row := range rows {
+		if row.ParentID != nil {
+			t.Fatalf("roots_only + since: expected root comment %s to have nil parent_id, got %q", row.ID, *row.ParentID)
+		}
+	}
 }
 
 // TestListComments_ThreadResolvesFromAnyAnchor proves Elon's point 2:
@@ -546,6 +601,37 @@ func TestListComments_FlagCombinationRules(t *testing.T) {
 		{
 			name:   "non-numeric recent rejected",
 			query:  "recent=lots",
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "non-boolean roots_only rejected",
+			query:  "roots_only=yes",
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "roots_only + thread rejected",
+			query:  "roots_only=true&thread=" + fx.Root1,
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "roots_only + recent rejected",
+			query:  "roots_only=true&recent=1",
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "roots_only + tail rejected",
+			query:  "roots_only=true&tail=1",
+			status: http.StatusBadRequest,
+		},
+		{
+			name: "roots_only + cursor rejected",
+			query: (func() string {
+				v := url.Values{}
+				v.Set("roots_only", "true")
+				v.Set("before", time.Now().UTC().Format(time.RFC3339))
+				v.Set("before_id", uuid.NewString())
+				return v.Encode()
+			})(),
 			status: http.StatusBadRequest,
 		},
 	}
@@ -1012,4 +1098,131 @@ func TestListComments_ThreadTailNotFoundReturns404(t *testing.T) {
 		t.Fatalf("expected 404 for unknown anchor, got %d: %s", w.Code, w.Body.String())
 	}
 	_ = fx
+}
+
+// resolveCommentRow marks a comment resolved directly in the DB (test helper —
+// the public path goes through ResolveComment, but for list-filter tests we
+// just need the column set).
+func resolveCommentRow(t *testing.T, commentID string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE comment SET resolved_at = now(), resolved_by_type = 'member', resolved_by_id = $2 WHERE id = $1`,
+		commentID, testUserID,
+	); err != nil {
+		t.Fatalf("resolve comment row: %v", err)
+	}
+}
+
+// TestCountNewCommentsSince_ExcludesAgentOwn pins the claim-side count query: it
+// counts comments created after the given anchor and excludes the agent's own,
+// so a chatty agent does not inflate its own new-comment count.
+func TestCountNewCommentsSince_ExcludesAgentOwn(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+	agentID := createHandlerTestAgent(t, "count-agent", []byte("[]"))
+
+	// Two agent-authored comments — must NOT be counted.
+	for _, body := range []string{"agent reply 1", "agent reply 2"} {
+		if _, err := testPool.Exec(context.Background(), `
+			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+			VALUES ($1, $2, 'agent', $3, $4, 'comment', $5)
+		`, fx.IssueID, testWorkspaceID, agentID, body, fx.Root2); err != nil {
+			t.Fatalf("insert agent comment: %v", err)
+		}
+	}
+
+	ctx := context.Background()
+
+	// Anchor in the far past: all 7 member comments are newer; agent's 2 excluded.
+	got, err := testHandler.Queries.CountNewCommentsSince(ctx, db.CountNewCommentsSinceParams{
+		IssueID:     parseUUID(fx.IssueID),
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Since:       pgtype.Timestamptz{Time: time.Unix(0, 0), Valid: true},
+		AuthorID:    parseUUID(agentID),
+	})
+	if err != nil {
+		t.Fatalf("count new since epoch: %v", err)
+	}
+	if got != 7 {
+		t.Fatalf("expected 7 new member comments since epoch (agent's own excluded), got %d", got)
+	}
+
+	// Anchor in the future: nothing is newer.
+	got, err = testHandler.Queries.CountNewCommentsSince(ctx, db.CountNewCommentsSinceParams{
+		IssueID:     parseUUID(fx.IssueID),
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Since:       pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+		AuthorID:    parseUUID(agentID),
+	})
+	if err != nil {
+		t.Fatalf("count new since future: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("expected 0 new comments after a future anchor, got %d", got)
+	}
+}
+
+// TestCreateCommentNormalizesParentToThreadRoot pins the write-boundary
+// invariant: a reply created through CreateComment is always stored with its
+// parent_id pointing at the THREAD ROOT, never at an interior reply. This keeps
+// the comment tree at depth 1 (the 2-level model the product/UI assume), so
+// readers can treat a reply's parent_id AS its thread root. We post a reply to a
+// reply and assert the stored parent collapses to the root, not the middle row.
+func TestCreateCommentNormalizesParentToThreadRoot(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("requires DB")
+	}
+	ctx := context.Background()
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		VALUES ($1, 'member', $2, $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, "parent normalization fixture").Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	create := func(parentID, body string) CommentResponse {
+		t.Helper()
+		payload := map[string]any{"content": body}
+		if parentID != "" {
+			payload["parent_id"] = parentID
+		}
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/"+issueID+"/comments", payload)
+		req = withURLParam(req, "id", issueID)
+		testHandler.CreateComment(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment(%q): expected 201, got %d: %s", body, w.Code, w.Body.String())
+		}
+		var resp CommentResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode created comment %q: %v", body, err)
+		}
+		return resp
+	}
+
+	root := create("", "root")
+	if root.ParentID != nil {
+		t.Fatalf("root comment must have nil parent_id, got %v", *root.ParentID)
+	}
+
+	// A direct reply to the root stays parented at the root.
+	reply := create(root.ID, "reply")
+	if reply.ParentID == nil || *reply.ParentID != root.ID {
+		t.Fatalf("direct reply parent_id: want root %s, got %v", root.ID, reply.ParentID)
+	}
+
+	// A reply whose parent is itself a reply must collapse to the thread root,
+	// NOT stay pointed at the interior reply — this is the write-boundary fix.
+	nested := create(reply.ID, "nested")
+	if nested.ParentID == nil || *nested.ParentID != root.ID {
+		t.Fatalf("reply-to-reply parent_id: want collapsed to root %s, got %v (must not be the interior reply %s)", root.ID, nested.ParentID, reply.ID)
+	}
 }
