@@ -133,7 +133,7 @@ describe("useRealtimeSync — ws instance change", () => {
     const ws2 = createMockWs();
     rerender({ ws: ws2 });
 
-    const calls = invalidateSpy.mock.calls.map((call) => call[0].queryKey);
+    const calls = invalidateSpy.mock.calls.map((call: [{ queryKey?: unknown }, ...unknown[]]) => call[0].queryKey);
     expect(calls).toContainEqual(["chat", "ws-1"]);
     expect(calls).toContainEqual(["labels", "ws-1"]);
     expect(calls).toContainEqual(["workspaces", "ws-1", "invitations"]);
