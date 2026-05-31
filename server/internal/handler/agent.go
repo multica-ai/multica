@@ -52,7 +52,16 @@ type AgentResponse struct {
 	HasCustomEnv       bool   `json:"has_custom_env"`
 	CustomEnvKeyCount  int    `json:"custom_env_key_count"`
 	McpConfigRedacted  bool   `json:"mcp_config_redacted"`
-	Visibility         string `json:"visibility"`
+	// InstructionsRedacted is set to true when the caller is not allowed to
+	// view the agent's instructions (system prompt). The `instructions`
+	// field is then empty. See canViewAgentInstructions for the role-based
+	// logic. Instructions often encode methodology — multi-paragraph
+	// system prompts, prompt templates, brand-voice rules, infrastructure
+	// references — so members get a redacted placeholder instead of the
+	// full body. Agent actors are also denied (analogous to the
+	// mcp_config policy in MUL-2600) to prevent lateral-movement.
+	InstructionsRedacted bool   `json:"instructions_redacted"`
+	Visibility           string `json:"visibility"`
 	Status             string `json:"status"`
 	MaxConcurrentTasks int32  `json:"max_concurrent_tasks"`
 	Model              string `json:"model"`
@@ -508,6 +517,13 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		if actorType == "agent" || alwaysRedact || !canViewAgentSecrets(a, userID, member.Role) {
 			redactMcpConfig(&resp)
 		}
+		// Instructions (system prompt) gating is independent of alwaysRedact
+		// (which is a secrets policy) but follows the same lateral-movement
+		// rationale as mcp_config: agent actors never see another agent's
+		// instructions even when their host PAT would normally qualify.
+		if actorType == "agent" || !canViewAgentInstructions(a, userID, member.Role) {
+			redactInstructions(&resp)
+		}
 		visible = append(visible, resp)
 	}
 
@@ -556,6 +572,16 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	} else if member, ok := ctxMember(r.Context()); ok {
 		if !canViewAgentSecrets(agent, userID, member.Role) {
 			redactMcpConfig(&resp)
+		}
+	}
+	// Instructions gating — see ListAgents for the rationale (agent-actor
+	// + role-based, independent of always_redact_secrets which is
+	// credentials-only).
+	if actorType == "agent" {
+		redactInstructions(&resp)
+	} else if member, ok := ctxMember(r.Context()); ok {
+		if !canViewAgentInstructions(agent, userID, member.Role) {
+			redactInstructions(&resp)
 		}
 	}
 
@@ -827,6 +853,20 @@ func canViewAgentSecrets(agent db.Agent, userID string, memberRole string) bool 
 	return uuidToString(agent.OwnerID) == userID
 }
 
+// canViewAgentInstructions checks whether the requesting user is allowed
+// to see the agent's instructions (system prompt). Same access model as
+// canViewAgentSecrets — owner / admin / agent owner — but tracked
+// separately because instructions are methodology rather than
+// credentials. They commonly contain multi-paragraph system prompts
+// encoding processes, prompt templates, brand-voice rules, and
+// infrastructure references. For everyone else the field is redacted.
+func canViewAgentInstructions(agent db.Agent, userID string, memberRole string) bool {
+	if roleAllowed(memberRole, "owner", "admin") {
+		return true
+	}
+	return uuidToString(agent.OwnerID) == userID
+}
+
 // broadcastAgentResponse strips secret-bearing fields from an
 // AgentResponse before it goes onto the WebSocket bus. Mutation
 // handlers call this when fanning out create/update/archive/restore
@@ -839,7 +879,24 @@ func canViewAgentSecrets(agent db.Agent, userID string, memberRole string) bool 
 func broadcastAgentResponse(resp AgentResponse) AgentResponse {
 	out := resp
 	redactMcpConfig(&out)
+	// Same rationale as redactMcpConfig: WS subscribers (including agent
+	// processes) must not learn another agent's instructions via a
+	// fan-out broadcast that bypassed the read-path redaction. Recipients
+	// can still hit GET /api/agents/{id} to receive the canonical role-
+	// gated form.
+	redactInstructions(&out)
 	return out
+}
+
+// redactInstructions removes the instructions value from the response when
+// the caller is not authorised to view it. The field is set to empty;
+// InstructionsRedacted is set to true so callers (and the UI) know an
+// instructions body exists without seeing its contents.
+func redactInstructions(resp *AgentResponse) {
+	if resp.Instructions != "" {
+		resp.Instructions = ""
+		resp.InstructionsRedacted = true
+	}
 }
 
 // redactMcpConfig removes the mcp_config value from the response when the caller is not

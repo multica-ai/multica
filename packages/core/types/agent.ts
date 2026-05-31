@@ -147,6 +147,20 @@ export interface Agent {
   name: string;
   description: string;
   instructions: string;
+  /**
+   * True when the requester is not allowed to view this agent's instructions
+   * (system prompt). The `instructions` field is then an empty string. Same
+   * access model as the (server-side) canViewAgentSecrets — owner / admin /
+   * agent owner see the full body; members see a redacted placeholder.
+   * Instructions are methodology rather than credentials, so this is tracked
+   * separately from the existing mcp_config_redacted flag. See server-side
+   * `canViewAgentInstructions` for the gate.
+   *
+   * Optional in the type so older backends (pre-fix) that omit the field
+   * don't crash the renderer; downstream code should treat `undefined` as
+   * `false` (no redaction).
+   */
+  instructions_redacted?: boolean;
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
