@@ -13,9 +13,9 @@ commonAnnotations:
 #     lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-web=...:${GIT_SHA}
 images:
   - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-server
-    newTag: "0.2.50"
+    newTag: "0.2.50-feishu-label-sync"
   - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-web
-    newTag: "0.2.50"
+    newTag: "0.2.50-feishu-label-sync"
 
 replicas:
   - name: multica-server
