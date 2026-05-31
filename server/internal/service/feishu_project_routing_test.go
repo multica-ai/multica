@@ -164,6 +164,168 @@ func TestParseFeishuProjectSearchExtractsBusinessLine(t *testing.T) {
 	}
 }
 
+func TestParseFeishuProjectSearchIndexesFieldValuesForLabelSync(t *testing.T) {
+	payload := map[string]any{
+		"data": []any{
+			map[string]any{
+				"id":   123,
+				"name": "bug-helper-item",
+				"fields": []any{
+					map[string]any{
+						"field_key": "field_c1f194",
+						"name":      "BUG提单助手",
+						"field_value": map[string]any{
+							"key_label_value": map[string]any{
+								"key":   "govi_kagd",
+								"label": "是",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	items := parseFeishuProjectSearch(payload, "issue", "partopia", "")
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if !feishuProjectLabelRuleMatches(items[0], FeishuProjectLabelSyncRule{
+		Enabled:  true,
+		FieldKey: "field_c1f194",
+		Match:    "是",
+	}) {
+		t.Fatalf("expected field_key label rule to match, values=%#v", items[0].FieldValues)
+	}
+	if !feishuProjectLabelRuleMatches(items[0], FeishuProjectLabelSyncRule{
+		Enabled:  true,
+		FieldKey: "BUG提单助手",
+		Match:    "govi_kagd",
+	}) {
+		t.Fatalf("expected display-name label rule to match option key, values=%#v", items[0].FieldValues)
+	}
+}
+
+func TestParseFeishuProjectSearchExtractsPriority(t *testing.T) {
+	payload := map[string]any{
+		"data": []any{
+			map[string]any{
+				"id":   123,
+				"name": "priority-item",
+				"fields": []any{
+					map[string]any{
+						"field_key": "field_priority",
+						"name":      "优先级",
+						"field_value": map[string]any{
+							"key_label_value": map[string]any{
+								"key":   "priority_1",
+								"label": "P1",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	items := parseFeishuProjectSearch(payload, "issue", "partopia", "")
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].Priority != "P1" {
+		t.Fatalf("expected priority P1, got %q", items[0].Priority)
+	}
+	if got := mapFeishuPriority(items[0].Priority); got != "high" {
+		t.Fatalf("expected P1 to map to high, got %q", got)
+	}
+}
+
+func TestMapFeishuPriority(t *testing.T) {
+	cases := map[string]string{
+		"P0":     "urgent",
+		"严重":     "high",
+		"普通":     "medium",
+		"低优先级":   "low",
+		"无优先级":   "none",
+		"custom": "",
+		"":       "",
+	}
+	for in, want := range cases {
+		if got := mapFeishuPriority(in); got != want {
+			t.Fatalf("mapFeishuPriority(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestParseFeishuProjectMQLUsesOptionLabelForFieldValues(t *testing.T) {
+	payload := map[string]any{
+		"data": map[string]any{
+			"issues": []any{
+				map[string]any{
+					"moql_field_list": []any{
+						map[string]any{
+							"key": "work_item_id",
+							"value": map[string]any{
+								"string_value": "7004582524",
+							},
+						},
+						map[string]any{
+							"key": "field_c1f194",
+							"value": map[string]any{
+								"key_label_value": map[string]any{
+									"key":   "govi_kagd",
+									"label": "是",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	items := parseFeishuProjectMQL(payload, "issue", "partopia")
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if !feishuProjectLabelRuleMatches(items[0], FeishuProjectLabelSyncRule{
+		Enabled:  true,
+		FieldKey: "field_c1f194",
+		Match:    "是",
+	}) {
+		t.Fatalf("expected MQL option label to match, values=%#v", items[0].FieldValues)
+	}
+}
+
+func TestFeishuProjectLabelSyncCleanupKeepsSharedDesiredLabel(t *testing.T) {
+	labelID := uuidLike(41)
+	binding := db.FeishuProjectLabelSyncBinding{
+		RuleID:  "old-rule",
+		LabelID: labelID,
+	}
+	desiredRuleLabels := map[string]pgtype.UUID{
+		"active-rule": labelID,
+	}
+	desiredLabelIDs := map[pgtype.UUID]bool{
+		labelID: true,
+	}
+
+	deleteBinding, detachLabel := feishuProjectLabelSyncCleanupAction(binding, desiredRuleLabels, desiredLabelIDs)
+	if !deleteBinding || detachLabel {
+		t.Fatalf("expected stale binding deletion without shared label detach, got delete=%v detach=%v", deleteBinding, detachLabel)
+	}
+}
+
+func TestFeishuProjectLabelSyncCleanupDetachesUnusedLabel(t *testing.T) {
+	labelID := uuidLike(42)
+	binding := db.FeishuProjectLabelSyncBinding{
+		RuleID:  "old-rule",
+		LabelID: labelID,
+	}
+
+	deleteBinding, detachLabel := feishuProjectLabelSyncCleanupAction(binding, map[string]pgtype.UUID{}, map[pgtype.UUID]bool{})
+	if !deleteBinding || !detachLabel {
+		t.Fatalf("expected stale binding deletion with unused label detach, got delete=%v detach=%v", deleteBinding, detachLabel)
+	}
+}
+
 func TestParseFeishuProjectBusinessLineTree(t *testing.T) {
 	// Shape borrowed from the postman /business/all sample variants — nested children.
 	payload := map[string]any{
@@ -277,6 +439,126 @@ func TestParseFeishuProjectSearchIndexesByDisplayName(t *testing.T) {
 	}
 }
 
+func TestParseFeishuProjectSearchResolvesOwnerFromUserObjects(t *testing.T) {
+	payload := map[string]any{
+		"data": []any{
+			map[string]any{
+				"id":   1,
+				"name": "owner-object-with-email",
+				"fields": []any{
+					map[string]any{
+						"field_key": "owner",
+						"name":      "负责人",
+						"field_value": map[string]any{
+							"id":    "user-1",
+							"name":  "Alice",
+							"email": "alice@example.com",
+						},
+					},
+				},
+			},
+			map[string]any{
+				"id":   2,
+				"name": "owner-object-with-id",
+				"fields": []any{
+					map[string]any{
+						"field_key": "field_abc123",
+						"name":      "经办人",
+						"field_value": []any{
+							map[string]any{
+								"id":   "user-2",
+								"name": "Bob",
+							},
+						},
+					},
+				},
+				"user_details": []any{
+					map[string]any{"id": "user-2", "email": "bob@example.com"},
+				},
+			},
+		},
+	}
+	items := parseFeishuProjectSearch(payload, "issue", "proj", "")
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0].OwnerEmail != "alice@example.com" {
+		t.Fatalf("owner object email: got %q", items[0].OwnerEmail)
+	}
+	if items[1].OwnerEmail != "bob@example.com" {
+		t.Fatalf("owner object id via user_details: got %q", items[1].OwnerEmail)
+	}
+}
+
+func TestParseFeishuProjectSearchUsesOperatorRoleAsOwner(t *testing.T) {
+	payload := map[string]any{
+		"data": []any{
+			map[string]any{
+				"id":   1,
+				"name": "operator-role-owner",
+				"fields": []any{
+					map[string]any{
+						"field_key":   "current_status_operator",
+						"name":        "当前负责人",
+						"field_value": "current@example.com",
+					},
+				},
+				"work_item_attribute": map[string]any{
+					"role_members": []any{
+						map[string]any{
+							"key":  "operator",
+							"name": "处理人",
+							"members": []any{
+								map[string]any{"email": "operator@example.com", "key": "user-1", "name": "Owner"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	items := parseFeishuProjectSearch(payload, "issue", "proj", "")
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].OwnerEmail != "operator@example.com" {
+		t.Fatalf("expected operator role owner, got %q", items[0].OwnerEmail)
+	}
+}
+
+func TestParseFeishuProjectSearchUsesRoleOwnersFieldAsOwner(t *testing.T) {
+	payload := map[string]any{
+		"data": []any{
+			map[string]any{
+				"id":   1,
+				"name": "role-owners-field-owner",
+				"fields": []any{
+					map[string]any{
+						"field_key":      "role_owners",
+						"field_type_key": "role_owners",
+						"field_value": []any{
+							map[string]any{
+								"role":   "role_project_issue_operator",
+								"owners": []any{"user-1"},
+							},
+						},
+					},
+				},
+				"user_details": []any{
+					map[string]any{"user_key": "user-1", "email": "operator@example.com"},
+				},
+			},
+		},
+	}
+	items := parseFeishuProjectSearch(payload, "issue", "proj", "")
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].OwnerEmail != "operator@example.com" {
+		t.Fatalf("expected role_owners owner, got %q", items[0].OwnerEmail)
+	}
+}
+
 func TestFeishuProjectOwnerEmailChineseNameFallback(t *testing.T) {
 	// Owner field_keys are absent; the assignee is stored under a Chinese display
 	// name like 处理人. We treat the email pattern in the value as ground truth.
@@ -296,14 +578,22 @@ func TestFeishuProjectOwnerEmailChineseNameFallback(t *testing.T) {
 		t.Fatalf("经办人 + user_keys: got %q", got)
 	}
 
-	// Standard field_key still wins when both present (current_status_operator is
-	// the most specific signal — see feishuProjectOwnerEmail comment).
+	// Current handler is not the issue owner. The stable owner field should win.
 	record3 := map[string]string{
 		"current_status_operator": "eve@example.com",
 		"处理人":                     "frank@example.com",
+		"owner":                   "grace@example.com",
 	}
-	if got := feishuProjectOwnerEmail(record3, nil); got != "eve@example.com" {
-		t.Fatalf("expected current_status_operator to win, got %q", got)
+	if got := feishuProjectOwnerEmail(record3, nil); got != "grace@example.com" {
+		t.Fatalf("expected owner to win, got %q", got)
+	}
+
+	record4 := map[string]string{
+		"current_status_operator": "eve@example.com",
+		"当前处理人":                   "frank@example.com",
+	}
+	if got := feishuProjectOwnerEmail(record4, nil); got != "" {
+		t.Fatalf("expected current handler fields to be ignored, got %q", got)
 	}
 }
 

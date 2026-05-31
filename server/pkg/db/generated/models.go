@@ -314,6 +314,7 @@ type FeishuProjectIntegration struct {
 	BusinessLineFieldName       string             `json:"business_line_field_name"`
 	LastSeenUpdatedAtMs         pgtype.Int8        `json:"last_seen_updated_at_ms"`
 	LastReconciledAt            pgtype.Timestamptz `json:"last_reconciled_at"`
+	LabelSyncRules              []byte             `json:"label_sync_rules"`
 }
 
 type FeishuProjectIssueBinding struct {
@@ -331,6 +332,16 @@ type FeishuProjectIssueBinding struct {
 	LastSyncedAt          pgtype.Timestamptz `json:"last_synced_at"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FeishuProjectLabelSyncBinding struct {
+	IntegrationID pgtype.UUID        `json:"integration_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	RuleID        string             `json:"rule_id"`
+	LabelID       pgtype.UUID        `json:"label_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type FeishuProjectSyncRun struct {

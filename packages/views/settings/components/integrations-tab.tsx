@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, RefreshCw, Save } from "lucide-react";
+import { Loader2, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -18,6 +18,8 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
+  feishuProjectBusinessLinesOptions,
+  feishuProjectFieldsOptions,
   feishuProjectIntegrationOptions,
   feishuProjectIssueStatusesOptions,
   feishuProjectKeys,
@@ -25,7 +27,12 @@ import {
   feishuProjectSyncOptions,
 } from "@multica/core/feishu-project/queries";
 import { api } from "@multica/core/api";
-import type { FeishuProjectRouteInput } from "@multica/core/types";
+import type {
+  FeishuProjectBusinessLineNode,
+  FeishuProjectFieldMeta,
+  FeishuProjectLabelSyncRule,
+  FeishuProjectRouteInput,
+} from "@multica/core/types";
 import { useT } from "../../i18n";
 import { FeishuProjectRoutingSection, type RouteRow } from "./feishu-project-routing-section";
 
@@ -40,6 +47,8 @@ const MULTICA_STATUS_OPTIONS = [
 ] as const;
 
 const NO_MAPPING = "__none__";
+const NO_FIELD = "__none__";
+const NO_MATCH = "__none__";
 
 // GitHub integration moved to its own Settings tab (see github-tab.tsx).
 // This tab now hosts only third-party integrations that remain workspace-
@@ -63,6 +72,7 @@ export function IntegrationsTab() {
   const [syncWorkItemId, setSyncWorkItemId] = useState("");
   const [statusMapping, setStatusMapping] = useState<Record<string, string>>({});
   const [reverseStatusMapping, setReverseStatusMapping] = useState<Record<string, string>>({});
+  const [labelSyncRules, setLabelSyncRules] = useState<FeishuProjectLabelSyncRule[]>([]);
   // Business-line field config — local while the user is editing, persisted on Save.
   const [businessLineFieldKey, setBusinessLineFieldKey] = useState("");
   const [businessLineFieldName, setBusinessLineFieldName] = useState("");
@@ -81,6 +91,9 @@ export function IntegrationsTab() {
   const { data: issueStatusesData } = useQuery({
     ...feishuProjectIssueStatusesOptions(wsId, canManage && !!projectKey.trim() && !!pluginId.trim()),
   });
+  const { data: fieldsData } = useQuery({
+    ...feishuProjectFieldsOptions(wsId, "issue", canManage && !!projectKey.trim() && !!pluginId.trim()),
+  });
   // Subscribe to the route table so the Save handler can diff/replace it. Section
   // component reads the same query but only for the initial seed — edits flow through
   // routeRows state owned here.
@@ -93,6 +106,7 @@ export function IntegrationsTab() {
     refetchInterval: (query) => (query.state.data?.status === "running" ? 2000 : false),
   });
   const issueStatuses = issueStatusesData?.statuses ?? [];
+  const issueFields = fieldsData?.fields ?? [];
   const syncRun = feishuSync?.run ?? null;
   const syncRunning = syncingFeishu || feishuSync?.status === "running";
   const syncProcessed = syncRun?.processed ?? 0;
@@ -113,6 +127,7 @@ export function IntegrationsTab() {
     setAssignOpenItemsToOwnerAgent(feishuProject.assign_open_items_to_owner_agent);
     setStatusMapping(feishuProject.status_mapping);
     setReverseStatusMapping(feishuProject.reverse_status_mapping);
+    setLabelSyncRules(feishuProject.label_sync_rules ?? []);
     setBusinessLineFieldKey(feishuProject.business_line_field_key);
     setBusinessLineFieldName(feishuProject.business_line_field_name);
   }, [feishuProject]);
@@ -202,6 +217,14 @@ export function IntegrationsTab() {
         return;
       }
     }
+    const invalidLabelRule = labelSyncRules.find(
+      (rule) =>
+        (!rule.field_key.trim() || !rule.match.trim() || !rule.label_name.trim()),
+    );
+    if (invalidLabelRule) {
+      toast.error(t(($) => $.integrations.feishu_project_label_sync_incomplete));
+      return;
+    }
     setSavingFeishu(true);
     try {
       await api.updateFeishuProjectIntegration(wsId, {
@@ -216,6 +239,7 @@ export function IntegrationsTab() {
         status_mapping: compactMapping(statusMapping),
         reverse_status_mapping: compactMapping(reverseStatusMapping),
         assign_open_items_to_owner_agent: assignOpenItemsToOwnerAgent,
+        label_sync_rules: compactLabelSyncRules(labelSyncRules),
         business_line_field_key: bizLineKey,
         business_line_field_name: businessLineFieldName.trim(),
       });
@@ -319,6 +343,64 @@ export function IntegrationsTab() {
                       <Input value={actorUserKey} onChange={(e) => setActorUserKey(e.target.value)} />
                     </label>
                   </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3 border-b border-border/70 pb-2">
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {t(($) => $.integrations.feishu_project_label_sync_section)}
+                      </p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        {t(($) => $.integrations.feishu_project_label_sync_hint)}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setLabelSyncRules((prev) => [
+                          ...prev,
+                          {
+                            id: newLocalRuleId(),
+                            enabled: true,
+                            field_key: "",
+                            field_name: "",
+                            match: "",
+                            label_name: "",
+                          },
+                        ])
+                      }
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      {t(($) => $.integrations.feishu_project_label_sync_add)}
+                    </Button>
+                  </div>
+
+                  {labelSyncRules.length === 0 ? (
+                    <p className="rounded-md border border-border/70 px-3 py-3 text-xs text-muted-foreground">
+                      {t(($) => $.integrations.feishu_project_label_sync_empty)}
+                    </p>
+                  ) : (
+                    <div className="overflow-hidden rounded-md border border-border/70">
+                      {labelSyncRules.map((rule) => (
+                        <FeishuProjectLabelSyncRuleRow
+                          key={rule.id}
+                          workspaceId={wsId}
+                          fields={issueFields}
+                          integrationReady={canManage && !!projectKey.trim() && !!pluginId.trim()}
+                          rule={rule}
+                          onChange={(next) =>
+                            setLabelSyncRules((prev) => prev.map((item) => (item.id === rule.id ? next : item)))
+                          }
+                          onRemove={() =>
+                            setLabelSyncRules((prev) => prev.filter((item) => item.id !== rule.id))
+                          }
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-3">
@@ -521,6 +603,134 @@ export function IntegrationsTab() {
   );
 }
 
+function FeishuProjectLabelSyncRuleRow({
+  workspaceId,
+  fields,
+  integrationReady,
+  rule,
+  onChange,
+  onRemove,
+}: {
+  workspaceId: string;
+  fields: FeishuProjectFieldMeta[];
+  integrationReady: boolean;
+  rule: FeishuProjectLabelSyncRule;
+  onChange: (rule: FeishuProjectLabelSyncRule) => void;
+  onRemove: () => void;
+}) {
+  const { t } = useT("settings");
+  const selectedField = fields.find((field) => field.key === rule.field_key);
+  const { data: optionsData } = useQuery({
+    ...feishuProjectBusinessLinesOptions(workspaceId, rule.field_key, "issue", integrationReady && !!rule.field_key),
+  });
+  const fieldOptions = flattenFieldOptions(optionsData?.business_lines ?? []);
+
+  return (
+    <div className="grid gap-3 border-b border-border/70 p-3 last:border-b-0 lg:grid-cols-[76px_minmax(180px,1fr)_minmax(150px,220px)_minmax(150px,220px)_36px] lg:items-center">
+      <div className="flex items-center justify-between gap-3 lg:justify-start">
+        <span className="text-xs font-medium text-muted-foreground lg:hidden">
+          {t(($) => $.integrations.feishu_project_label_sync_enabled)}
+        </span>
+        <Switch
+          checked={rule.enabled}
+          onCheckedChange={(enabled) => onChange({ ...rule, enabled })}
+        />
+      </div>
+
+      <label className="min-w-0 space-y-1.5 text-xs font-medium">
+        {t(($) => $.integrations.feishu_project_label_sync_field)}
+        <Select
+          value={rule.field_key || NO_FIELD}
+          onValueChange={(value) => {
+            const selected = value ?? NO_FIELD;
+            const key = selected === NO_FIELD ? "" : selected;
+            const nextField = fields.find((field) => field.key === key);
+            onChange({
+              ...rule,
+              field_key: key,
+              field_name: nextField?.name ?? "",
+              match: "",
+            });
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full">
+            <span className="min-w-0 flex-1 truncate text-left">
+              {selectedField
+                ? `${selectedField.name} (${selectedField.key})`
+                : t(($) => $.integrations.feishu_project_label_sync_field_placeholder)}
+            </span>
+          </SelectTrigger>
+          <SelectContent align="start">
+            <SelectItem value={NO_FIELD}>
+              {t(($) => $.integrations.feishu_project_label_sync_field_placeholder)}
+            </SelectItem>
+            {fields.map((field) => (
+              <SelectItem key={field.key} value={field.key}>
+                {field.name} ({field.key})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </label>
+
+      <label className="min-w-0 space-y-1.5 text-xs font-medium">
+        {t(($) => $.integrations.feishu_project_label_sync_match)}
+        {fieldOptions.length > 0 ? (
+          <Select
+            value={rule.match || NO_MATCH}
+            onValueChange={(value) => {
+              const selected = value ?? NO_MATCH;
+              onChange({ ...rule, match: selected === NO_MATCH ? "" : selected });
+            }}
+          >
+            <SelectTrigger size="sm" className="w-full">
+              <span className="min-w-0 flex-1 truncate text-left">
+                {rule.match || t(($) => $.integrations.feishu_project_label_sync_match_placeholder)}
+              </span>
+            </SelectTrigger>
+            <SelectContent align="start">
+              <SelectItem value={NO_MATCH}>
+                {t(($) => $.integrations.feishu_project_label_sync_match_placeholder)}
+              </SelectItem>
+              {fieldOptions.map((option) => (
+                <SelectItem key={option.id} value={option.name}>
+                  {option.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Input
+            value={rule.match}
+            onChange={(event) => onChange({ ...rule, match: event.target.value })}
+            placeholder={t(($) => $.integrations.feishu_project_label_sync_match_placeholder)}
+          />
+        )}
+      </label>
+
+      <label className="min-w-0 space-y-1.5 text-xs font-medium">
+        {t(($) => $.integrations.feishu_project_label_sync_label)}
+        <Input
+          value={rule.label_name}
+          onChange={(event) => onChange({ ...rule, label_name: event.target.value })}
+          placeholder={t(($) => $.integrations.feishu_project_label_sync_label_placeholder)}
+        />
+      </label>
+
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        title={t(($) => $.integrations.feishu_project_label_sync_remove)}
+        onClick={onRemove}
+        className="h-9 w-9 justify-self-end"
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+
 function setMappingValue(mapping: Record<string, string>, key: string, value: string): Record<string, string> {
   const next = { ...mapping };
   if (!value || value === NO_MAPPING) {
@@ -538,6 +748,40 @@ function compactMapping(mapping: Record<string, string>): Record<string, string>
       out[key] = value;
     }
   }
+  return out;
+}
+
+function compactLabelSyncRules(rules: FeishuProjectLabelSyncRule[]): FeishuProjectLabelSyncRule[] {
+  return rules.map((rule) => ({
+    id: rule.id,
+    enabled: rule.enabled,
+    field_key: rule.field_key.trim(),
+    field_name: rule.field_name.trim(),
+    match: rule.match.trim(),
+    label_name: rule.label_name.trim(),
+  }));
+}
+
+function newLocalRuleId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `rule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function flattenFieldOptions(nodes: FeishuProjectBusinessLineNode[]): Array<{ id: string; name: string }> {
+  const out: Array<{ id: string; name: string }> = [];
+  const walk = (items: FeishuProjectBusinessLineNode[]) => {
+    for (const item of items) {
+      if (item.id && item.name) {
+        out.push({ id: item.id, name: item.name });
+      }
+      if (item.children?.length) {
+        walk(item.children);
+      }
+    }
+  };
+  walk(nodes);
   return out;
 }
 

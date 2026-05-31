@@ -45,7 +45,7 @@ const (
 	feishuProjectReconcileInterval       = 6 * time.Hour
 	feishuProjectReconcileLookback       = 6 * time.Hour
 	feishuProjectReconcileLookbackSafety = 30 * time.Minute
-	feishuProjectAttachmentMaxSize = 5 << 20
+	feishuProjectAttachmentMaxSize       = 5 << 20
 	// Feishu Project caps every (token, single interface) pair at 15 QPS
 	// (project.feishu.cn/b/helpcenter/1p8d7djs/4bsmoql6). The advisory lock keeps
 	// only one replica syncing a given integration, so worker fan-out is the only
@@ -133,11 +133,22 @@ type FeishuProjectWorkItem struct {
 	Title              string
 	Description        string
 	Status             string
+	Priority           string
 	OwnerEmail         string
 	UpdatedAt          time.Time
 	URL                string
 	Attachments        []FeishuProjectAttachment
 	BusinessLineTokens []FeishuBusinessLineToken
+	FieldValues        map[string][]string
+}
+
+type FeishuProjectLabelSyncRule struct {
+	ID        string `json:"id"`
+	Enabled   bool   `json:"enabled"`
+	FieldKey  string `json:"field_key"`
+	FieldName string `json:"field_name"`
+	Match     string `json:"match"`
+	LabelName string `json:"label_name"`
 }
 
 // FeishuBusinessLineToken represents one biz-line value attached to a work item,
@@ -465,6 +476,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 	if status == "" {
 		status = "todo"
 	}
+	mappedPriority := mapFeishuPriority(item.Priority)
 
 	phaseStarted := time.Now()
 	binding, err := s.Queries.GetFeishuProjectIssueBindingByExternal(ctx, db.GetFeishuProjectIssueBindingByExternalParams{
@@ -487,6 +499,10 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		if projectID.Valid {
 			nextProjectID = projectID
 		}
+		nextPriority := issue.Priority
+		if mappedPriority != "" {
+			nextPriority = mappedPriority
+		}
 
 		if lightUpdateExisting {
 			// Light-update path for manual full-sync: refresh status / assignee /
@@ -500,8 +516,16 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			if issue.Status == status &&
 				sameNullableText(issue.AssigneeType, assigneeType) &&
 				sameNullableUUID(issue.AssigneeID, assigneeID) &&
+				issue.Priority == nextPriority &&
 				issue.ProjectID == nextProjectID {
+				labelsChanged, err := s.syncIssueLabels(ctx, cfg, item, issue.ID)
+				if err != nil {
+					return "skipped", 0, err
+				}
 				s.reconcileSyncedIssueTasks(ctx, issue, issue)
+				if labelsChanged {
+					return "updated", 0, nil
+				}
 				return "skipped", 0, nil
 			}
 			phaseStarted = time.Now()
@@ -513,7 +537,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 				Title:         pgtype.Text{},
 				Description:   pgtype.Text{},
 				Status:        pgtype.Text{String: status, Valid: true},
-				Priority:      pgtype.Text{String: issue.Priority, Valid: true},
+				Priority:      pgtype.Text{String: nextPriority, Valid: true},
 				AssigneeType:  assigneeType,
 				AssigneeID:    assigneeID,
 				DueDate:       issue.DueDate,
@@ -527,6 +551,9 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			phaseStarted = time.Now()
 			_, _ = s.Queries.UpsertFeishuProjectIssueBinding(ctx, bindingParams(cfg, issue.ID, item))
 			timing.bindingUpsert += time.Since(phaseStarted)
+			if _, err := s.syncIssueLabels(ctx, cfg, item, issue.ID); err != nil {
+				return "skipped", 0, err
+			}
 			s.reconcileSyncedIssueTasks(ctx, issue, updatedIssue)
 			return "updated", 0, nil
 		}
@@ -541,9 +568,17 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		nextDesc := externalDescription(item, attachmentMarkdown)
 		nextTitle := externalTitle(item)
 		if issue.Title == nextTitle && issue.Description.String == nextDesc && issue.Status == status &&
+			issue.Priority == nextPriority &&
 			sameNullableText(issue.AssigneeType, assigneeType) && sameNullableUUID(issue.AssigneeID, assigneeID) &&
 			issue.ProjectID == nextProjectID {
+			labelsChanged, err := s.syncIssueLabels(ctx, cfg, item, issue.ID)
+			if err != nil {
+				return "skipped", 0, err
+			}
 			s.reconcileSyncedIssueTasks(ctx, issue, issue)
+			if labelsChanged {
+				return "updated", 0, nil
+			}
 			return "skipped", 0, nil
 		}
 		phaseStarted = time.Now()
@@ -552,7 +587,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			Title:         pgtype.Text{String: nextTitle, Valid: true},
 			Description:   pgtype.Text{String: nextDesc, Valid: true},
 			Status:        pgtype.Text{String: status, Valid: true},
-			Priority:      pgtype.Text{String: issue.Priority, Valid: true},
+			Priority:      pgtype.Text{String: nextPriority, Valid: true},
 			AssigneeType:  assigneeType,
 			AssigneeID:    assigneeID,
 			DueDate:       issue.DueDate,
@@ -566,6 +601,9 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		phaseStarted = time.Now()
 		_, _ = s.Queries.UpsertFeishuProjectIssueBinding(ctx, bindingParams(cfg, issue.ID, item))
 		timing.bindingUpsert += time.Since(phaseStarted)
+		if _, err := s.syncIssueLabels(ctx, cfg, item, issue.ID); err != nil {
+			return "skipped", 0, err
+		}
 		s.reconcileSyncedIssueTasks(ctx, issue, updatedIssue)
 		return "updated", 0, nil
 	}
@@ -592,7 +630,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		Title:        externalTitle(item),
 		Description:  pgtype.Text{String: externalDescription(item, ""), Valid: true},
 		Status:       status,
-		Priority:     "none",
+		Priority:     firstNonEmpty(mappedPriority, "none"),
 		AssigneeType: assigneeType,
 		AssigneeID:   assigneeID,
 		CreatorType:  "member",
@@ -624,7 +662,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 			Title:         pgtype.Text{String: externalTitle(item), Valid: true},
 			Description:   pgtype.Text{String: externalDescription(item, attachmentMarkdown), Valid: true},
 			Status:        pgtype.Text{String: status, Valid: true},
-			Priority:      pgtype.Text{String: issue.Priority, Valid: true},
+			Priority:      pgtype.Text{String: firstNonEmpty(mappedPriority, issue.Priority), Valid: true},
 			AssigneeType:  assigneeType,
 			AssigneeID:    assigneeID,
 			DueDate:       issue.DueDate,
@@ -637,8 +675,151 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		}
 		issue = updatedIssue
 	}
+	if _, err := s.syncIssueLabels(ctx, cfg, item, issue.ID); err != nil {
+		return "created", 0, err
+	}
 	s.reconcileSyncedIssueTasks(ctx, issue, issue)
 	return "created", 0, nil
+}
+
+func (s *FeishuProjectSyncService) syncIssueLabels(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, issueID pgtype.UUID) (bool, error) {
+	rules := feishuProjectLabelSyncRules(cfg)
+	bindings, err := s.Queries.ListFeishuProjectLabelSyncBindingsByIssue(ctx, db.ListFeishuProjectLabelSyncBindingsByIssueParams{
+		IntegrationID: cfg.ID,
+		IssueID:       issueID,
+	})
+	if err != nil {
+		return false, err
+	}
+	byRule := make(map[string]db.FeishuProjectLabelSyncBinding, len(bindings))
+	for _, binding := range bindings {
+		byRule[binding.RuleID] = binding
+	}
+	desiredRuleLabels := map[string]pgtype.UUID{}
+	desiredLabelIDs := map[pgtype.UUID]bool{}
+	changed := false
+	for _, rule := range rules {
+		if !rule.Enabled || strings.TrimSpace(rule.ID) == "" || strings.TrimSpace(rule.FieldKey) == "" || strings.TrimSpace(rule.Match) == "" || strings.TrimSpace(rule.LabelName) == "" {
+			continue
+		}
+		binding, hadBinding := byRule[rule.ID]
+		if !feishuProjectLabelRuleMatches(item, rule) {
+			continue
+		}
+		label, err := s.ensureIssueLabel(ctx, cfg.WorkspaceID, rule.LabelName)
+		if err != nil {
+			return changed, err
+		}
+		desiredRuleLabels[rule.ID] = label.ID
+		desiredLabelIDs[label.ID] = true
+		if err := s.Queries.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+			IssueID:     issueID,
+			LabelID:     label.ID,
+			WorkspaceID: cfg.WorkspaceID,
+		}); err != nil {
+			return changed, err
+		}
+		if err := s.Queries.UpsertFeishuProjectLabelSyncBinding(ctx, db.UpsertFeishuProjectLabelSyncBindingParams{
+			IntegrationID: cfg.ID,
+			WorkspaceID:   cfg.WorkspaceID,
+			IssueID:       issueID,
+			RuleID:        rule.ID,
+			LabelID:       label.ID,
+		}); err != nil {
+			return changed, err
+		}
+		if !hadBinding || binding.LabelID != label.ID {
+			changed = true
+		}
+	}
+	for _, binding := range bindings {
+		deleteBinding, detachLabel := feishuProjectLabelSyncCleanupAction(binding, desiredRuleLabels, desiredLabelIDs)
+		if !deleteBinding {
+			continue
+		}
+		if detachLabel {
+			if err := s.detachManagedLabel(ctx, cfg.WorkspaceID, issueID, binding.LabelID); err != nil {
+				return changed, err
+			}
+		}
+		if err := s.Queries.DeleteFeishuProjectLabelSyncBinding(ctx, db.DeleteFeishuProjectLabelSyncBindingParams{
+			IntegrationID: cfg.ID,
+			IssueID:       issueID,
+			RuleID:        binding.RuleID,
+		}); err != nil {
+			return changed, err
+		}
+		changed = true
+	}
+	return changed, nil
+}
+
+func feishuProjectLabelSyncCleanupAction(binding db.FeishuProjectLabelSyncBinding, desiredRuleLabels map[string]pgtype.UUID, desiredLabelIDs map[pgtype.UUID]bool) (deleteBinding bool, detachLabel bool) {
+	if labelID, ok := desiredRuleLabels[binding.RuleID]; ok && labelID == binding.LabelID {
+		return false, false
+	}
+	return true, !desiredLabelIDs[binding.LabelID]
+}
+
+func feishuProjectLabelSyncRules(cfg db.FeishuProjectIntegration) []FeishuProjectLabelSyncRule {
+	if len(cfg.LabelSyncRules) == 0 {
+		return nil
+	}
+	var rules []FeishuProjectLabelSyncRule
+	if err := json.Unmarshal(cfg.LabelSyncRules, &rules); err != nil {
+		slog.Warn("Feishu Project label sync rules decode failed", "integration_id", UUIDString(cfg.ID), "error", err)
+		return nil
+	}
+	return rules
+}
+
+func feishuProjectLabelRuleMatches(item FeishuProjectWorkItem, rule FeishuProjectLabelSyncRule) bool {
+	want := strings.TrimSpace(rule.Match)
+	for _, value := range item.FieldValues[strings.TrimSpace(rule.FieldKey)] {
+		if strings.EqualFold(strings.TrimSpace(value), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *FeishuProjectSyncService) ensureIssueLabel(ctx context.Context, workspaceID pgtype.UUID, name string) (db.IssueLabel, error) {
+	name = strings.TrimSpace(name)
+	labels, err := s.Queries.ListLabels(ctx, workspaceID)
+	if err != nil {
+		return db.IssueLabel{}, err
+	}
+	for _, label := range labels {
+		if strings.EqualFold(label.Name, name) {
+			return label, nil
+		}
+	}
+	label, err := s.Queries.CreateLabel(ctx, db.CreateLabelParams{
+		WorkspaceID: workspaceID,
+		Name:        name,
+		Color:       "#3b82f6",
+	})
+	if err == nil {
+		return label, nil
+	}
+	labels, listErr := s.Queries.ListLabels(ctx, workspaceID)
+	if listErr != nil {
+		return db.IssueLabel{}, err
+	}
+	for _, label := range labels {
+		if strings.EqualFold(label.Name, name) {
+			return label, nil
+		}
+	}
+	return db.IssueLabel{}, err
+}
+
+func (s *FeishuProjectSyncService) detachManagedLabel(ctx context.Context, workspaceID, issueID, labelID pgtype.UUID) error {
+	return s.Queries.DetachLabelFromIssue(ctx, db.DetachLabelFromIssueParams{
+		IssueID:     issueID,
+		LabelID:     labelID,
+		WorkspaceID: workspaceID,
+	})
 }
 
 func (s *FeishuProjectSyncService) reconcileSyncedIssueTasks(ctx context.Context, prevIssue, issue db.Issue) {
@@ -790,9 +971,13 @@ func matchBusinessLineRoute(routes []db.FeishuProjectBusinessLineRoute, tokens [
 	}
 	matchers := []func(db.FeishuProjectBusinessLineRoute) bool{
 		func(r db.FeishuProjectBusinessLineRoute) bool { return leafIDs[strings.TrimSpace(r.BusinessLineID)] },
-		func(r db.FeishuProjectBusinessLineRoute) bool { return leafNames[strings.TrimSpace(r.BusinessLineName)] },
+		func(r db.FeishuProjectBusinessLineRoute) bool {
+			return leafNames[strings.TrimSpace(r.BusinessLineName)]
+		},
 		func(r db.FeishuProjectBusinessLineRoute) bool { return parentIDs[strings.TrimSpace(r.BusinessLineID)] },
-		func(r db.FeishuProjectBusinessLineRoute) bool { return parentNames[strings.TrimSpace(r.BusinessLineName)] },
+		func(r db.FeishuProjectBusinessLineRoute) bool {
+			return parentNames[strings.TrimSpace(r.BusinessLineName)]
+		},
 	}
 	for _, m := range matchers {
 		for i := range routes {
@@ -1244,6 +1429,29 @@ func mapFeishuStatus(raw []byte, typ, external string) string {
 	return ""
 }
 
+func mapFeishuPriority(external string) string {
+	normalized := strings.ToLower(strings.TrimSpace(external))
+	normalized = strings.ReplaceAll(normalized, " ", "")
+	normalized = strings.ReplaceAll(normalized, "_", "")
+	normalized = strings.ReplaceAll(normalized, "-", "")
+	switch normalized {
+	case "", "<nil>":
+		return ""
+	case "none", "nopriority", "无", "无优先级", "未设置", "不设置":
+		return "none"
+	case "urgent", "blocker", "critical", "crit", "highest", "p0", "p00", "s0", "致命", "紧急", "最高", "严重阻塞":
+		return "urgent"
+	case "high", "major", "p1", "s1", "高", "高优", "高优先级", "严重":
+		return "high"
+	case "medium", "normal", "middle", "p2", "s2", "中", "中优", "中优先级", "普通", "一般":
+		return "medium"
+	case "low", "minor", "lowest", "p3", "p4", "s3", "s4", "低", "低优", "低优先级", "轻微":
+		return "low"
+	default:
+		return ""
+	}
+}
+
 func MapMulticaStatusToFeishu(raw []byte, typ, status string) string {
 	var mapping map[string]map[string]string
 	if err := json.Unmarshal(raw, &mapping); err == nil {
@@ -1356,7 +1564,7 @@ func buildFeishuProjectSyncMQL(projectKey, workItemType string, statuses []strin
 		conditions = append(conditions, "("+filter+")")
 	}
 	return fmt.Sprintf(
-		"SELECT `work_item_id`, `name`, `description`, `work_item_status`, `current_status_operator`, `updated_at` FROM `%s`.`%s` WHERE %s ORDER BY `updated_at` DESC LIMIT %d, %d",
+		"SELECT `work_item_id`, `name`, `description`, `work_item_status`, `priority`, `updated_at` FROM `%s`.`%s` WHERE %s ORDER BY `updated_at` DESC LIMIT %d, %d",
 		escapeMQLIdent(projectKey),
 		escapeMQLIdent(workItemType),
 		strings.Join(conditions, " AND "),
@@ -2208,6 +2416,7 @@ func parseFeishuProjectMQL(payload map[string]any, typ, projectKey string) []Fei
 			row, _ := rowAny.(map[string]any)
 			fields, _ := row["moql_field_list"].([]any)
 			record := map[string]string{}
+			fieldValues := map[string][]string{}
 			for _, fieldAny := range fields {
 				field, _ := fieldAny.(map[string]any)
 				key, _ := field["key"].(string)
@@ -2216,6 +2425,7 @@ func parseFeishuProjectMQL(payload map[string]any, typ, projectKey string) []Fei
 				}
 				if value := feishuProjectFieldValue(field); value != "" {
 					record[key] = value
+					addFeishuProjectFieldValues(fieldValues, key, "", []string{value})
 				}
 			}
 			id := record["work_item_id"]
@@ -2236,10 +2446,12 @@ func parseFeishuProjectMQL(payload map[string]any, typ, projectKey string) []Fei
 				Title:       firstNonEmpty(record["name"], record["title"]),
 				Description: description,
 				Status:      status,
-				OwnerEmail:  extractEmail(firstNonEmpty(record["current_status_operator"], record["owner"], record["operator"])),
+				Priority:    feishuProjectPriorityValue(record),
+				OwnerEmail:  extractEmail(firstNonEmpty(record["owner"], record["operator"])),
 				UpdatedAt:   updatedAt,
 				URL:         fmt.Sprintf("https://project.feishu.cn/%s/%s/detail/%s", projectKey, typ, id),
 				Attachments: dedupeFeishuProjectAttachments(attachments),
+				FieldValues: fieldValues,
 			})
 		}
 	}
@@ -2303,6 +2515,8 @@ func parseFeishuProjectSearch(payload map[string]any, typ, projectKey, businessL
 		}
 		record := map[string]string{
 			"name":               fmt.Sprint(row["name"]),
+			"priority":           fmt.Sprint(row["priority"]),
+			"work_item_priority": fmt.Sprint(row["work_item_priority"]),
 			"sub_stage":          fmt.Sprint(row["sub_stage"]),
 			"current_status":     fmt.Sprint(row["current_status"]),
 			"work_item_status":   feishuProjectStatusValue(row["work_item_status"]),
@@ -2311,6 +2525,8 @@ func parseFeishuProjectSearch(payload map[string]any, typ, projectKey, businessL
 		if ts := feishuProjectTime(row["updated_at"]); !ts.IsZero() {
 			record["updated_at"] = ts.Format(time.RFC3339Nano)
 		}
+		userEmails := feishuProjectUserEmails(row)
+		fieldValues := map[string][]string{}
 		var businessLineTokens []FeishuBusinessLineToken
 		fields, _ := row["fields"].([]any)
 		var attachments []FeishuProjectAttachment
@@ -2326,12 +2542,17 @@ func parseFeishuProjectSearch(payload map[string]any, typ, projectKey, businessL
 			}
 			attachments = append(attachments, feishuProjectOpenAPIFieldAttachments(field)...)
 			value := feishuProjectOpenAPIFieldValue(field)
+			displayName := feishuFieldDisplayName(field)
+			if feishuProjectIsOwnerField(key, displayName) {
+				value = firstNonEmpty(feishuProjectOpenAPIOwnerFieldValue(field["field_value"]), value)
+			}
 			if value != "" {
 				record[key] = value
-				if displayName := feishuFieldDisplayName(field); displayName != "" {
+				if displayName != "" {
 					record[displayName] = value
 				}
 			}
+			addFeishuProjectFieldValues(fieldValues, key, displayName, feishuProjectOpenAPIFieldValues(field["field_value"]))
 			if businessLineFieldKey != "" && key == businessLineFieldKey {
 				businessLineTokens = extractBusinessLineTokens(field["field_value"])
 			}
@@ -2345,12 +2566,17 @@ func parseFeishuProjectSearch(payload map[string]any, typ, projectKey, businessL
 			}
 			attachments = append(attachments, feishuProjectOpenAPIFieldAttachments(field)...)
 			value := feishuProjectOpenAPIFieldValue(field)
+			displayName := feishuFieldDisplayName(field)
+			if feishuProjectIsOwnerField(key, displayName) {
+				value = firstNonEmpty(feishuProjectOpenAPIOwnerFieldValue(field["field_value"]), value)
+			}
 			if value != "" {
 				record[key] = value
-				if displayName := feishuFieldDisplayName(field); displayName != "" {
+				if displayName != "" {
 					record[displayName] = value
 				}
 			}
+			addFeishuProjectFieldValues(fieldValues, key, displayName, feishuProjectOpenAPIFieldValues(field["field_value"]))
 			if businessLineFieldKey != "" && len(businessLineTokens) == 0 && key == businessLineFieldKey {
 				businessLineTokens = extractBusinessLineTokens(field["field_value"])
 			}
@@ -2358,21 +2584,191 @@ func parseFeishuProjectSearch(payload map[string]any, typ, projectKey, businessL
 		description, descriptionAttachments := normalizeFeishuProjectDescription(record["description"])
 		attachments = append(attachments, descriptionAttachments...)
 		updatedAt, _ := time.Parse(time.RFC3339Nano, record["updated_at"])
-		ownerEmail := feishuProjectOwnerEmail(record, feishuProjectUserEmails(row))
+		ownerEmail := firstNonEmpty(feishuProjectOperatorRoleEmail(row, userEmails), feishuProjectOwnerEmail(record, userEmails))
 		out = append(out, FeishuProjectWorkItem{
 			ID:                 id,
 			Type:               typ,
 			Title:              firstNonEmpty(record["name"], record["title"]),
 			Description:        description,
 			Status:             firstNonEmpty(record["work_item_status"], record["sub_stage"], record["status"]),
+			Priority:           feishuProjectPriorityValue(record),
 			OwnerEmail:         ownerEmail,
 			UpdatedAt:          updatedAt,
 			URL:                fmt.Sprintf("https://project.feishu.cn/%s/%s/detail/%s", projectKey, typ, id),
 			Attachments:        dedupeFeishuProjectAttachments(attachments),
 			BusinessLineTokens: businessLineTokens,
+			FieldValues:        fieldValues,
 		})
 	}
 	return out
+}
+
+func addFeishuProjectFieldValues(out map[string][]string, key, displayName string, values []string) {
+	keys := []string{strings.TrimSpace(key), strings.TrimSpace(displayName)}
+	seenKeys := map[string]bool{}
+	for _, k := range keys {
+		if k == "" || k == "<nil>" || seenKeys[k] {
+			continue
+		}
+		seenKeys[k] = true
+		seenVals := map[string]bool{}
+		for _, existing := range out[k] {
+			seenVals[existing] = true
+		}
+		for _, v := range values {
+			v = strings.TrimSpace(v)
+			if v == "" || v == "<nil>" || seenVals[v] {
+				continue
+			}
+			out[k] = append(out[k], v)
+			seenVals[v] = true
+		}
+	}
+}
+
+func feishuProjectPriorityValue(record map[string]string) string {
+	for _, key := range []string{
+		"priority",
+		"work_item_priority",
+		"issue_priority",
+		"severity",
+		"严重程度",
+		"优先级",
+	} {
+		if value := firstNonEmpty(record[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func feishuProjectOperatorRoleEmail(row map[string]any, userEmails map[string]string) string {
+	for _, rolesAny := range []any{row["role_members"], nestedMapValue(row, "work_item_attribute", "role_members")} {
+		roles, _ := rolesAny.([]any)
+		for _, roleAny := range roles {
+			role, _ := roleAny.(map[string]any)
+			if !feishuProjectIsOperatorRole(role) {
+				continue
+			}
+			members, _ := role["members"].([]any)
+			for _, memberAny := range members {
+				member, _ := memberAny.(map[string]any)
+				if email := extractEmail(fmt.Sprint(member["email"])); email != "" {
+					return email
+				}
+				for _, key := range []string{
+					fmt.Sprint(member["user_key"]),
+					fmt.Sprint(member["key"]),
+					fmt.Sprint(member["id"]),
+					fmt.Sprint(member["username"]),
+					fmt.Sprint(member["open_id"]),
+					fmt.Sprint(member["union_id"]),
+				} {
+					if email := userEmails[strings.TrimSpace(key)]; email != "" {
+						return email
+					}
+				}
+			}
+		}
+	}
+	for _, field := range feishuProjectAllFieldMaps(row) {
+		key := firstNonEmpty(fmt.Sprint(field["field_key"]), fmt.Sprint(field["field_alias"]))
+		fieldType := strings.TrimSpace(fmt.Sprint(field["field_type_key"]))
+		if key != "role_owners" && fieldType != "role_owners" {
+			continue
+		}
+		if email := feishuProjectRoleOwnersFieldEmail(field["field_value"], userEmails); email != "" {
+			return email
+		}
+	}
+	return ""
+}
+
+func feishuProjectAllFieldMaps(row map[string]any) []map[string]any {
+	var out []map[string]any
+	for _, listKey := range []string{"fields", "multi_texts", "work_item_fields"} {
+		fields, _ := row[listKey].([]any)
+		for _, fieldAny := range fields {
+			field, _ := fieldAny.(map[string]any)
+			if field != nil {
+				out = append(out, field)
+			}
+		}
+	}
+	return out
+}
+
+func feishuProjectIsOperatorRole(role map[string]any) bool {
+	for _, key := range []string{"key", "role_key", "role_id"} {
+		if strings.TrimSpace(fmt.Sprint(role[key])) == "operator" {
+			return true
+		}
+	}
+	switch strings.TrimSpace(fmt.Sprint(role["name"])) {
+	case "处理人", "经办人", "负责人":
+		return true
+	}
+	switch strings.TrimSpace(fmt.Sprint(role["role_name"])) {
+	case "处理人", "经办人", "负责人":
+		return true
+	}
+	return false
+}
+
+func feishuProjectRoleOwnersFieldEmail(value any, userEmails map[string]string) string {
+	roles, _ := value.([]any)
+	for _, roleAny := range roles {
+		role, _ := roleAny.(map[string]any)
+		if !feishuProjectRoleOwnersEntryIsOperator(role) {
+			continue
+		}
+		owners, _ := role["owners"].([]any)
+		for _, ownerAny := range owners {
+			switch owner := ownerAny.(type) {
+			case map[string]any:
+				if email := extractEmail(fmt.Sprint(owner["email"])); email != "" {
+					return email
+				}
+				for _, key := range []string{
+					fmt.Sprint(owner["user_key"]),
+					fmt.Sprint(owner["key"]),
+					fmt.Sprint(owner["id"]),
+					fmt.Sprint(owner["username"]),
+					fmt.Sprint(owner["open_id"]),
+					fmt.Sprint(owner["union_id"]),
+				} {
+					if email := userEmails[strings.TrimSpace(key)]; email != "" {
+						return email
+					}
+				}
+			default:
+				token := strings.TrimSpace(fmt.Sprint(owner))
+				if email := extractEmail(token); email != "" {
+					return email
+				}
+				if email := userEmails[token]; email != "" {
+					return email
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func feishuProjectRoleOwnersEntryIsOperator(role map[string]any) bool {
+	raw := strings.TrimSpace(fmt.Sprint(role["role"]))
+	if raw == "operator" || strings.HasSuffix(raw, "_operator") {
+		return true
+	}
+	return feishuProjectIsOperatorRole(role)
+}
+
+func nestedMapValue(row map[string]any, mapKey, valueKey string) any {
+	m, _ := row[mapKey].(map[string]any)
+	if m == nil {
+		return nil
+	}
+	return m[valueKey]
 }
 
 func feishuProjectUserEmails(row map[string]any) map[string]string {
@@ -2387,7 +2783,10 @@ func feishuProjectUserEmails(row map[string]any) map[string]string {
 		for _, key := range []string{
 			fmt.Sprint(user["user_key"]),
 			fmt.Sprint(user["key"]),
+			fmt.Sprint(user["id"]),
 			fmt.Sprint(user["username"]),
+			fmt.Sprint(user["open_id"]),
+			fmt.Sprint(user["union_id"]),
 		} {
 			key = strings.TrimSpace(key)
 			if key != "" && key != "<nil>" {
@@ -2475,9 +2874,22 @@ func feishuFieldDisplayName(field map[string]any) string {
 	return ""
 }
 
+func feishuProjectIsOwnerField(key, displayName string) bool {
+	key = strings.TrimSpace(key)
+	displayName = strings.TrimSpace(displayName)
+	switch key {
+	case "owner", "operator":
+		return true
+	}
+	switch displayName {
+	case "处理人", "经办人", "负责人":
+		return true
+	}
+	return false
+}
+
 // feishuProjectOwnerEmail picks the email of the work-item's assignee/owner. It tries:
-//  1. Stable Meego field_keys (`current_status_operator`, `owner`, `operator`) — the
-//     common case.
+//  1. Stable Meego field_keys (`owner`, `operator`) — the common case.
 //  2. Custom fields indexed by their Chinese display name — different spaces name the
 //     assignee field differently (经办人 / 处理人 / 负责人 / etc.) and may use a
 //     custom field_key like `field_xxx` so a plain field_key match misses them.
@@ -2488,11 +2900,10 @@ func feishuFieldDisplayName(field map[string]any) string {
 func feishuProjectOwnerEmail(record map[string]string, userEmails map[string]string) string {
 	candidates := []string{
 		// Stable field_keys
-		record["current_status_operator"], record["owner"], record["operator"],
+		record["owner"], record["operator"],
 		// Chinese display names (fall back when the field is custom and we matched it
-		// in parseFeishuProjectSearch via field["name"]). Order is intentional: the
-		// more-specific "current" variants first so they win when both exist.
-		record["当前处理人"], record["当前经办人"], record["处理人"], record["经办人"], record["负责人"],
+		// in parseFeishuProjectSearch via field["name"]).
+		record["处理人"], record["经办人"], record["负责人"],
 	}
 	for _, raw := range candidates {
 		if email := extractEmail(raw); email != "" {
@@ -2505,6 +2916,58 @@ func feishuProjectOwnerEmail(record map[string]string, userEmails map[string]str
 		}
 	}
 	return ""
+}
+
+func feishuProjectOpenAPIOwnerFieldValue(value any) string {
+	var values []string
+	add := func(v any) {
+		s := strings.TrimSpace(fmt.Sprint(v))
+		if s != "" && s != "<nil>" {
+			values = append(values, s)
+		}
+	}
+	var walk func(any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case nil:
+			return
+		case string:
+			add(x)
+		case float64:
+			add(int64(x))
+		case map[string]any:
+			if text, _ := x["doc_text"].(string); text != "" {
+				add(text)
+				return
+			}
+			for _, key := range []string{
+				"email",
+				"user_key",
+				"key",
+				"id",
+				"username",
+				"open_id",
+				"union_id",
+				"value",
+				"name_cn",
+				"name_en",
+				"name",
+				"label",
+			} {
+				if v, ok := x[key]; ok {
+					add(v)
+				}
+			}
+		case []any:
+			for _, item := range x {
+				walk(item)
+			}
+		default:
+			add(x)
+		}
+	}
+	walk(value)
+	return strings.Join(values, ", ")
 }
 
 // parseFeishuProjectFieldMetas walks the /work_item/{type}/meta response and surfaces
@@ -2738,12 +3201,73 @@ func feishuProjectFieldValue(field map[string]any) string {
 	}
 	if values, _ := value["key_label_value_list"].([]any); len(values) > 0 {
 		first, _ := values[0].(map[string]any)
-		return firstNonEmpty(fmt.Sprint(first["key"]), fmt.Sprint(first["label"]))
+		return firstNonEmpty(fmt.Sprint(first["label"]), fmt.Sprint(first["key"]))
+	}
+	if v, _ := value["key_label_value"].(map[string]any); len(v) > 0 {
+		return firstNonEmpty(fmt.Sprint(v["label"]), fmt.Sprint(v["key"]))
 	}
 	if values, _ := value["string_value_list"].([]any); len(values) > 0 {
 		return fmt.Sprint(values[0])
 	}
 	return ""
+}
+
+func feishuProjectOpenAPIFieldValues(value any) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(v any) {
+		s := strings.TrimSpace(fmt.Sprint(v))
+		if s == "" || s == "<nil>" || seen[s] {
+			return
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	var walk func(any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case nil:
+			return
+		case string:
+			add(x)
+		case float64:
+			add(int64(x))
+		case json.Number:
+			add(x.String())
+		case map[string]any:
+			if text, _ := x["doc_text"].(string); text != "" {
+				add(text)
+				return
+			}
+			for _, key := range []string{
+				"label",
+				"name",
+				"option_name",
+				"name_cn",
+				"name_en",
+				"email",
+				"value",
+				"key",
+				"id",
+				"option_id",
+			} {
+				if v, ok := x[key]; ok {
+					add(v)
+				}
+			}
+			for _, child := range x {
+				walk(child)
+			}
+		case []any:
+			for _, item := range x {
+				walk(item)
+			}
+		default:
+			add(x)
+		}
+	}
+	walk(value)
+	return out
 }
 
 func feishuProjectOpenAPIFieldValue(field map[string]any) string {
@@ -2756,6 +3280,13 @@ func feishuProjectOpenAPIFieldValue(field map[string]any) string {
 	case float64:
 		return fmt.Sprint(int64(v))
 	case map[string]any:
+		if kv, _ := v["key_label_value"].(map[string]any); len(kv) > 0 {
+			return firstNonEmpty(fmt.Sprint(kv["label"]), fmt.Sprint(kv["key"]))
+		}
+		if list, _ := v["key_label_value_list"].([]any); len(list) > 0 {
+			first, _ := list[0].(map[string]any)
+			return firstNonEmpty(fmt.Sprint(first["label"]), fmt.Sprint(first["key"]))
+		}
 		if text, _ := v["doc_text"].(string); text != "" {
 			return text
 		}

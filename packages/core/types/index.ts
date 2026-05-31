@@ -99,6 +99,7 @@ export type {
   FeishuProjectFieldMeta,
   FeishuProjectFieldsResponse,
   FeishuProjectIntegration,
+  FeishuProjectLabelSyncRule,
   FeishuProjectRoute,
   FeishuProjectRouteInput,
   FeishuProjectRoutesResponse,

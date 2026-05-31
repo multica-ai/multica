@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,43 +18,45 @@ import (
 )
 
 type FeishuProjectIntegrationResponse struct {
-	ID                          string            `json:"id,omitempty"`
-	WorkspaceID                 string            `json:"workspace_id,omitempty"`
-	ProjectName                 string            `json:"project_name"`
-	ProjectKey                  string            `json:"project_key"`
-	PluginID                    string            `json:"plugin_id"`
-	HasPluginSecret             bool              `json:"has_plugin_secret"`
-	ActorUserKey                *string           `json:"actor_user_key"`
-	Enabled                     bool              `json:"enabled"`
-	SyncStory                   bool              `json:"sync_story"`
-	SyncIssue                   bool              `json:"sync_issue"`
-	MQLFilter                   string            `json:"mql_filter"`
-	StatusMapping               map[string]string `json:"status_mapping"`
-	ReverseStatusMapping        map[string]string `json:"reverse_status_mapping"`
-	AssignOpenItemsToOwnerAgent bool              `json:"assign_open_items_to_owner_agent"`
-	BusinessLineFieldKey        string            `json:"business_line_field_key"`
-	BusinessLineFieldName       string            `json:"business_line_field_name"`
-	LastSyncedAt                *string           `json:"last_synced_at"`
-	LastError                   *string           `json:"last_error"`
-	CreatedAt                   string            `json:"created_at,omitempty"`
-	UpdatedAt                   string            `json:"updated_at,omitempty"`
+	ID                          string                               `json:"id,omitempty"`
+	WorkspaceID                 string                               `json:"workspace_id,omitempty"`
+	ProjectName                 string                               `json:"project_name"`
+	ProjectKey                  string                               `json:"project_key"`
+	PluginID                    string                               `json:"plugin_id"`
+	HasPluginSecret             bool                                 `json:"has_plugin_secret"`
+	ActorUserKey                *string                              `json:"actor_user_key"`
+	Enabled                     bool                                 `json:"enabled"`
+	SyncStory                   bool                                 `json:"sync_story"`
+	SyncIssue                   bool                                 `json:"sync_issue"`
+	MQLFilter                   string                               `json:"mql_filter"`
+	StatusMapping               map[string]string                    `json:"status_mapping"`
+	ReverseStatusMapping        map[string]string                    `json:"reverse_status_mapping"`
+	AssignOpenItemsToOwnerAgent bool                                 `json:"assign_open_items_to_owner_agent"`
+	BusinessLineFieldKey        string                               `json:"business_line_field_key"`
+	BusinessLineFieldName       string                               `json:"business_line_field_name"`
+	LabelSyncRules              []service.FeishuProjectLabelSyncRule `json:"label_sync_rules"`
+	LastSyncedAt                *string                              `json:"last_synced_at"`
+	LastError                   *string                              `json:"last_error"`
+	CreatedAt                   string                               `json:"created_at,omitempty"`
+	UpdatedAt                   string                               `json:"updated_at,omitempty"`
 }
 
 type UpdateFeishuProjectIntegrationRequest struct {
-	ProjectName                 string            `json:"project_name"`
-	ProjectKey                  string            `json:"project_key"`
-	PluginID                    string            `json:"plugin_id"`
-	PluginSecret                *string           `json:"plugin_secret"`
-	ActorUserKey                *string           `json:"actor_user_key"`
-	Enabled                     bool              `json:"enabled"`
-	SyncStory                   bool              `json:"sync_story"`
-	SyncIssue                   bool              `json:"sync_issue"`
-	MQLFilter                   string            `json:"mql_filter"`
-	StatusMapping               map[string]string `json:"status_mapping"`
-	ReverseStatusMapping        map[string]string `json:"reverse_status_mapping"`
-	AssignOpenItemsToOwnerAgent bool              `json:"assign_open_items_to_owner_agent"`
-	BusinessLineFieldKey        string            `json:"business_line_field_key"`
-	BusinessLineFieldName       string            `json:"business_line_field_name"`
+	ProjectName                 string                                `json:"project_name"`
+	ProjectKey                  string                                `json:"project_key"`
+	PluginID                    string                                `json:"plugin_id"`
+	PluginSecret                *string                               `json:"plugin_secret"`
+	ActorUserKey                *string                               `json:"actor_user_key"`
+	Enabled                     bool                                  `json:"enabled"`
+	SyncStory                   bool                                  `json:"sync_story"`
+	SyncIssue                   bool                                  `json:"sync_issue"`
+	MQLFilter                   string                                `json:"mql_filter"`
+	StatusMapping               map[string]string                     `json:"status_mapping"`
+	ReverseStatusMapping        map[string]string                     `json:"reverse_status_mapping"`
+	AssignOpenItemsToOwnerAgent bool                                  `json:"assign_open_items_to_owner_agent"`
+	BusinessLineFieldKey        string                                `json:"business_line_field_key"`
+	BusinessLineFieldName       string                                `json:"business_line_field_name"`
+	LabelSyncRules              *[]service.FeishuProjectLabelSyncRule `json:"label_sync_rules"`
 }
 
 type FeishuProjectSyncRunResponse struct {
@@ -100,6 +103,7 @@ func (h *Handler) GetFeishuProjectIntegration(w http.ResponseWriter, r *http.Req
 				StatusMapping:               defaultFeishuProjectStatusMapping(),
 				ReverseStatusMapping:        defaultFeishuProjectReverseStatusMapping(),
 				AssignOpenItemsToOwnerAgent: false,
+				LabelSyncRules:              []service.FeishuProjectLabelSyncRule{},
 			})
 			return
 		}
@@ -155,6 +159,17 @@ func (h *Handler) UpdateFeishuProjectIntegration(w http.ResponseWriter, r *http.
 	}
 	statusJSON, _ := json.Marshal(statusMapping)
 	reverseJSON, _ := json.Marshal(reverseMapping)
+	labelSyncRules := []service.FeishuProjectLabelSyncRule{}
+	if req.LabelSyncRules != nil {
+		var ok bool
+		labelSyncRules, ok = normalizeFeishuProjectLabelSyncRules(w, *req.LabelSyncRules)
+		if !ok {
+			return
+		}
+	} else if existingErr == nil {
+		labelSyncRules = decodeFeishuProjectLabelSyncRules(existing.LabelSyncRules)
+	}
+	labelSyncRulesJSON, _ := json.Marshal(labelSyncRules)
 	mqlFilter := strings.TrimSpace(req.MQLFilter)
 	var actor pgtype.Text
 	if req.ActorUserKey != nil && strings.TrimSpace(*req.ActorUserKey) != "" {
@@ -181,6 +196,7 @@ func (h *Handler) UpdateFeishuProjectIntegration(w http.ResponseWriter, r *http.
 			AssignOpenItemsToOwnerAgent: req.AssignOpenItemsToOwnerAgent,
 			BusinessLineFieldKey:        bizLineKey,
 			BusinessLineFieldName:       bizLineName,
+			LabelSyncRules:              labelSyncRulesJSON,
 		})
 	} else {
 		cfg, err = h.Queries.UpsertFeishuProjectIntegration(r.Context(), db.UpsertFeishuProjectIntegrationParams{
@@ -199,6 +215,7 @@ func (h *Handler) UpdateFeishuProjectIntegration(w http.ResponseWriter, r *http.
 			CreatedByID:                 member.UserID,
 			BusinessLineFieldKey:        bizLineKey,
 			BusinessLineFieldName:       bizLineName,
+			LabelSyncRules:              labelSyncRulesJSON,
 		})
 	}
 	if err != nil {
@@ -207,6 +224,43 @@ func (h *Handler) UpdateFeishuProjectIntegration(w http.ResponseWriter, r *http.
 		return
 	}
 	writeJSON(w, http.StatusOK, feishuProjectIntegrationToResponse(cfg))
+}
+
+func normalizeFeishuProjectLabelSyncRules(w http.ResponseWriter, in []service.FeishuProjectLabelSyncRule) ([]service.FeishuProjectLabelSyncRule, bool) {
+	out := make([]service.FeishuProjectLabelSyncRule, 0, len(in))
+	seen := map[string]bool{}
+	for i, rule := range in {
+		id := strings.TrimSpace(rule.ID)
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "label_sync_rules["+strconv.Itoa(i)+"].id is required")
+			return nil, false
+		}
+		if seen[id] {
+			writeError(w, http.StatusBadRequest, "label_sync_rules["+strconv.Itoa(i)+"].id must be unique")
+			return nil, false
+		}
+		seen[id] = true
+		fieldKey := strings.TrimSpace(rule.FieldKey)
+		match := strings.TrimSpace(rule.Match)
+		labelName, err := validateLabelName(rule.LabelName)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "label_sync_rules["+strconv.Itoa(i)+"].label_name is invalid")
+			return nil, false
+		}
+		if fieldKey == "" || match == "" {
+			writeError(w, http.StatusBadRequest, "label_sync_rules["+strconv.Itoa(i)+"].field_key and match are required")
+			return nil, false
+		}
+		out = append(out, service.FeishuProjectLabelSyncRule{
+			ID:        id,
+			Enabled:   rule.Enabled,
+			FieldKey:  fieldKey,
+			FieldName: strings.TrimSpace(rule.FieldName),
+			Match:     match,
+			LabelName: labelName,
+		})
+	}
+	return out, true
 }
 
 func (h *Handler) SyncFeishuProjectIntegration(w http.ResponseWriter, r *http.Request) {
@@ -350,11 +404,23 @@ func feishuProjectIntegrationToResponse(cfg db.FeishuProjectIntegration) FeishuP
 		AssignOpenItemsToOwnerAgent: cfg.AssignOpenItemsToOwnerAgent,
 		BusinessLineFieldKey:        cfg.BusinessLineFieldKey,
 		BusinessLineFieldName:       cfg.BusinessLineFieldName,
+		LabelSyncRules:              decodeFeishuProjectLabelSyncRules(cfg.LabelSyncRules),
 		LastSyncedAt:                timestampToPtr(cfg.LastSyncedAt),
 		LastError:                   textToPtr(cfg.LastError),
 		CreatedAt:                   timestampToString(cfg.CreatedAt),
 		UpdatedAt:                   timestampToString(cfg.UpdatedAt),
 	}
+}
+
+func decodeFeishuProjectLabelSyncRules(raw []byte) []service.FeishuProjectLabelSyncRule {
+	if len(raw) == 0 {
+		return []service.FeishuProjectLabelSyncRule{}
+	}
+	var out []service.FeishuProjectLabelSyncRule
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return []service.FeishuProjectLabelSyncRule{}
+	}
+	return out
 }
 
 func feishuProjectNameFromRequest(req UpdateFeishuProjectIntegrationRequest) string {
