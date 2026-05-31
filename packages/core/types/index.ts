@@ -191,6 +191,21 @@ export type {
   ListWikiPageActivitiesResponse,
 } from "./wiki";
 export type {
+  ChannelSummary,
+  ListChannelsResponse,
+  ChannelMember,
+  ListChannelMembersResponse,
+  ChannelThreadSummary,
+  ListChannelThreadsResponse,
+  ChannelMessage,
+  ThreadLinkedIssue,
+  ListThreadMessagesResponse,
+  CreateChannelRequest,
+  UpdateChannelRequest,
+  CreateChannelThreadRequest,
+  CreateChannelMessageRequest,
+} from "./channel";
+export type {
   Squad,
   SquadMember,
   SquadMemberType,

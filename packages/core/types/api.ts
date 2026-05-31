@@ -16,6 +16,10 @@ export interface CreateIssueRequest {
   due_date?: string;
   attachment_ids?: string[];
   label_ids?: string[];
+  /** When set, links the new issue back to the channel thread it was
+   *  created from (OPE-1943). The backend records source_channel_id from
+   *  the thread and reflows issue status changes back to the thread. */
+  source_thread_id?: string;
 }
 
 export interface UpdateIssueRequest {

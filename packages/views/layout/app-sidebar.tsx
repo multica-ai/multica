@@ -34,6 +34,7 @@ import {
   X,
   Zap,
   Users,
+  MessagesSquare,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -110,6 +111,7 @@ type NavKey =
   | "autopilots"
   | "agents"
   | "wiki"
+  | "channels"
   | "squads"
   | "usage"
   | "agentDashboard"
@@ -125,6 +127,7 @@ type NavLabelKey =
   | "autopilots"
   | "agents"
   | "wiki"
+  | "channels"
   | "squads"
   | "usage"
   | "agent_dashboard"
@@ -142,6 +145,7 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "wiki", labelKey: "wiki", icon: BookOpenText },
+  { key: "channels", labelKey: "channels", icon: MessagesSquare },
   { key: "squads", labelKey: "squads", icon: Users },
   { key: "usage", labelKey: "usage", icon: BarChart3 },
   { key: "agentDashboard", labelKey: "agent_dashboard", icon: Activity },

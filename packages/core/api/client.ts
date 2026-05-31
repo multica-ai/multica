@@ -145,6 +145,17 @@ import type {
   CreateWikiPageRequest,
   UpdateWikiPageRequest,
   ReorderWikiPagesRequest,
+  ListChannelsResponse,
+  ChannelSummary,
+  ListChannelMembersResponse,
+  ListChannelThreadsResponse,
+  ChannelThreadSummary,
+  ListThreadMessagesResponse,
+  ChannelMessage,
+  CreateChannelRequest,
+  UpdateChannelRequest,
+  CreateChannelThreadRequest,
+  CreateChannelMessageRequest,
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
@@ -1810,6 +1821,90 @@ export class ApiClient {
 
   async listWikiPageActivities(pageId: string, limit = 50): Promise<ListWikiPageActivitiesResponse> {
     return this.fetch(`/api/wiki-pages/${pageId}/activity?limit=${limit}`);
+  }
+
+  // Channels (OPE-1943)
+  async listChannels(): Promise<ListChannelsResponse> {
+    return this.fetch("/api/channels");
+  }
+
+  async getChannel(id: string): Promise<ChannelSummary> {
+    return this.fetch(`/api/channels/${id}`);
+  }
+
+  async createChannel(data: CreateChannelRequest): Promise<ChannelSummary> {
+    return this.fetch("/api/channels", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateChannel(id: string, data: UpdateChannelRequest): Promise<ChannelSummary> {
+    return this.fetch(`/api/channels/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteChannel(id: string): Promise<{ deleted: boolean; channel_id: string }> {
+    return this.fetch(`/api/channels/${id}`, { method: "DELETE" });
+  }
+
+  async joinChannel(id: string): Promise<{ joined: boolean }> {
+    return this.fetch(`/api/channels/${id}/join`, { method: "POST" });
+  }
+
+  async leaveChannel(id: string): Promise<{ left: boolean }> {
+    return this.fetch(`/api/channels/${id}/leave`, { method: "POST" });
+  }
+
+  async markChannelRead(id: string): Promise<{ marked: boolean }> {
+    return this.fetch(`/api/channels/${id}/read`, { method: "POST" });
+  }
+
+  async listChannelMembers(id: string): Promise<ListChannelMembersResponse> {
+    return this.fetch(`/api/channels/${id}/members`);
+  }
+
+  async listChannelThreads(channelId: string): Promise<ListChannelThreadsResponse> {
+    return this.fetch(`/api/channels/${channelId}/threads`);
+  }
+
+  async createChannelThread(
+    channelId: string,
+    data: CreateChannelThreadRequest,
+  ): Promise<ChannelThreadSummary> {
+    return this.fetch(`/api/channels/${channelId}/threads`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteChannelThread(
+    channelId: string,
+    threadId: string,
+  ): Promise<{ deleted: boolean; thread_id: string }> {
+    return this.fetch(`/api/channels/${channelId}/threads/${threadId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listThreadMessages(
+    channelId: string,
+    threadId: string,
+  ): Promise<ListThreadMessagesResponse> {
+    return this.fetch(`/api/channels/${channelId}/threads/${threadId}/messages`);
+  }
+
+  async createChannelMessage(
+    channelId: string,
+    threadId: string,
+    data: CreateChannelMessageRequest,
+  ): Promise<ChannelMessage> {
+    return this.fetch(`/api/channels/${channelId}/threads/${threadId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   }
 
   // Members

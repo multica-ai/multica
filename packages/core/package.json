@@ -26,6 +26,7 @@
     "./workspace/mutations": "./workspace/mutations.ts",
     "./workspace/hooks": "./workspace/hooks.ts",
     "./wiki": "./wiki/index.ts",
+    "./channels": "./channels/index.ts",
     "./wiki/hooks": "./wiki/hooks.ts",
     "./wiki/queries": "./wiki/queries.ts",
     "./wiki/tree": "./wiki/tree.ts",

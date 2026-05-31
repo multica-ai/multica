@@ -12,6 +12,7 @@ import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
 import { wikiKeys } from "../wiki/queries";
+import { channelKeys } from "../channels/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
@@ -313,6 +314,18 @@ export function useRealtimeSync(
       wiki_page: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: wikiKeys.all(wsId) });
+      },
+      channel: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.all(wsId) });
+      },
+      channel_thread: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.all(wsId) });
+      },
+      channel_message: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.all(wsId) });
       },
       squad: () => {
         const wsId = getCurrentWsId();
