@@ -186,7 +186,19 @@ func (h *Handler) SearchIssuesCerebro(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := cerebrosearch.Build(in)
+	// CEREBRO-PATCH(search-hybrid-fir-2604): FIR-2604 hybrid (FTS + vector)
+	// retrieval. Opt in when free text is present, the operator wired a
+	// semantic provider, and the embedding store is reachable; otherwise
+	// fall back to Build — same behaviour as Del 1.
+	var query cerebrosearch.Query
+	if in.Text != "" && h.SemanticSearch != nil {
+		if literal, ok := h.SemanticSearch.QueryVectorLiteral(ctx, in.Text); ok {
+			query = cerebrosearch.BuildHybrid(hybridInputFor(in, literal))
+		}
+	}
+	if query.SQL == "" {
+		query = cerebrosearch.Build(in)
+	}
 	rows, err := h.DB.Query(ctx, query.SQL, query.Args...)
 	if err != nil {
 		slog.Warn("cerebro search failed", "error", err, "workspace_id", workspaceID, "q", rawQ)

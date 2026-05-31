@@ -186,6 +186,8 @@ type Handler struct {
 	// "Ask" verdict keeps its prior block; non-nil routes it to the one /approvals
 	// inbox (CheckDaemonRepoCapability creates the ask, the daemon long-polls it).
 	ApprovalGate *permgate.Gate
+	// CEREBRO-PATCH(handler-semantic-search): FIR-2604 hybrid (FTS+vector) seam.
+	SemanticSearch SemanticSearchInvoker
 }
 
 // CustomStatusResolver is the upstream-side seam for the cerebro status-model

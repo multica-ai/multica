@@ -54,6 +54,77 @@ type QueryInput struct {
 // through without flooding results with weak matches.
 const trigramThreshold = 0.3
 
+// buildFilterClauses returns the AND-ed WHERE predicates that the inline
+// filters (status / from / assignee / project / has) contribute, given the
+// `next` parameter allocator. Workspace and text predicates are emitted by
+// the caller because their treatment differs between the FTS Build and the
+// hybrid CTE in BuildHybrid.
+//
+// Returning a [][]string{(or-group)} lets the caller decide how to compose
+// the groups; the current callers always join with " AND ".
+func buildFilterClauses(in QueryInput, next func(any) string) []string {
+	var out []string
+
+	if len(in.StatusValues) > 0 {
+		params := make([]string, 0, len(in.StatusValues))
+		for _, s := range in.StatusValues {
+			params = append(params, next(s))
+		}
+		out = append(out, fmt.Sprintf("i.status IN (%s)", strings.Join(params, ",")))
+	} else if !in.IncludeClosed {
+		out = append(out, "i.status NOT IN ('done', 'cancelled')")
+	}
+
+	if len(in.FromUserIDs) > 0 || len(in.FromAgentIDs) > 0 {
+		var fromOrs []string
+		if len(in.FromUserIDs) > 0 {
+			ps := paramList(next, in.FromUserIDs)
+			fromOrs = append(fromOrs, fmt.Sprintf("(i.creator_type = 'member' AND i.creator_id IN (%s))", ps))
+			fromOrs = append(fromOrs, fmt.Sprintf(`EXISTS (
+				SELECT 1 FROM comment c
+				WHERE c.issue_id = i.id AND c.author_type = 'member' AND c.author_id IN (%s)
+			)`, ps))
+		}
+		if len(in.FromAgentIDs) > 0 {
+			ps := paramList(next, in.FromAgentIDs)
+			fromOrs = append(fromOrs, fmt.Sprintf("(i.creator_type = 'agent' AND i.creator_id IN (%s))", ps))
+			fromOrs = append(fromOrs, fmt.Sprintf(`EXISTS (
+				SELECT 1 FROM comment c
+				WHERE c.issue_id = i.id AND c.author_type = 'agent' AND c.author_id IN (%s)
+			)`, ps))
+		}
+		out = append(out, "("+strings.Join(fromOrs, " OR ")+")")
+	}
+
+	if in.AssigneeUnassigned ||
+		len(in.AssigneeUserIDs) > 0 || len(in.AssigneeAgentIDs) > 0 {
+		var assignOrs []string
+		if in.AssigneeUnassigned {
+			assignOrs = append(assignOrs, "i.assignee_id IS NULL")
+		}
+		if len(in.AssigneeUserIDs) > 0 {
+			ps := paramList(next, in.AssigneeUserIDs)
+			assignOrs = append(assignOrs, fmt.Sprintf("(i.assignee_type = 'member' AND i.assignee_id IN (%s))", ps))
+		}
+		if len(in.AssigneeAgentIDs) > 0 {
+			ps := paramList(next, in.AssigneeAgentIDs)
+			assignOrs = append(assignOrs, fmt.Sprintf("(i.assignee_type = 'agent' AND i.assignee_id IN (%s))", ps))
+		}
+		out = append(out, "("+strings.Join(assignOrs, " OR ")+")")
+	}
+
+	if len(in.ProjectIDs) > 0 {
+		ps := paramList(next, in.ProjectIDs)
+		out = append(out, fmt.Sprintf("i.project_id IN (%s)", ps))
+	}
+
+	if in.HasAttachment {
+		out = append(out, "EXISTS (SELECT 1 FROM attachment a WHERE a.issue_id = i.id)")
+	}
+
+	return out
+}
+
 // Build produces the final SQL + arg list. It assembles the query in stages
 // so each filter section stays readable; pgx handles parameter binding.
 func Build(in QueryInput) Query {
@@ -108,66 +179,7 @@ func Build(in QueryInput) Query {
 	}
 
 	// --- WHERE clause: filters ---
-
-	if len(in.StatusValues) > 0 {
-		params := make([]string, 0, len(in.StatusValues))
-		for _, s := range in.StatusValues {
-			params = append(params, next(s))
-		}
-		whereParts = append(whereParts, fmt.Sprintf("i.status IN (%s)", strings.Join(params, ",")))
-	} else if !in.IncludeClosed {
-		whereParts = append(whereParts, "i.status NOT IN ('done', 'cancelled')")
-	}
-
-	if len(in.FromUserIDs) > 0 || len(in.FromAgentIDs) > 0 {
-		var fromOrs []string
-		if len(in.FromUserIDs) > 0 {
-			ps := paramList(next, in.FromUserIDs)
-			// Creator on the issue itself.
-			fromOrs = append(fromOrs, fmt.Sprintf("(i.creator_type = 'member' AND i.creator_id IN (%s))", ps))
-			// Or any comment on the issue authored by these members.
-			fromOrs = append(fromOrs, fmt.Sprintf(`EXISTS (
-				SELECT 1 FROM comment c
-				WHERE c.issue_id = i.id AND c.author_type = 'member' AND c.author_id IN (%s)
-			)`, ps))
-		}
-		if len(in.FromAgentIDs) > 0 {
-			ps := paramList(next, in.FromAgentIDs)
-			fromOrs = append(fromOrs, fmt.Sprintf("(i.creator_type = 'agent' AND i.creator_id IN (%s))", ps))
-			fromOrs = append(fromOrs, fmt.Sprintf(`EXISTS (
-				SELECT 1 FROM comment c
-				WHERE c.issue_id = i.id AND c.author_type = 'agent' AND c.author_id IN (%s)
-			)`, ps))
-		}
-		whereParts = append(whereParts, "("+strings.Join(fromOrs, " OR ")+")")
-	}
-
-	if in.AssigneeUnassigned ||
-		len(in.AssigneeUserIDs) > 0 || len(in.AssigneeAgentIDs) > 0 {
-		var assignOrs []string
-		if in.AssigneeUnassigned {
-			assignOrs = append(assignOrs, "i.assignee_id IS NULL")
-		}
-		if len(in.AssigneeUserIDs) > 0 {
-			ps := paramList(next, in.AssigneeUserIDs)
-			assignOrs = append(assignOrs, fmt.Sprintf("(i.assignee_type = 'member' AND i.assignee_id IN (%s))", ps))
-		}
-		if len(in.AssigneeAgentIDs) > 0 {
-			ps := paramList(next, in.AssigneeAgentIDs)
-			assignOrs = append(assignOrs, fmt.Sprintf("(i.assignee_type = 'agent' AND i.assignee_id IN (%s))", ps))
-		}
-		whereParts = append(whereParts, "("+strings.Join(assignOrs, " OR ")+")")
-	}
-
-	if len(in.ProjectIDs) > 0 {
-		ps := paramList(next, in.ProjectIDs)
-		whereParts = append(whereParts, fmt.Sprintf("i.project_id IN (%s)", ps))
-	}
-
-	if in.HasAttachment {
-		whereParts = append(whereParts, "EXISTS (SELECT 1 FROM attachment a WHERE a.issue_id = i.id)")
-	}
-
+	whereParts = append(whereParts, buildFilterClauses(in, next)...)
 	whereClause := strings.Join(whereParts, " AND ")
 
 	// --- ORDER BY ---

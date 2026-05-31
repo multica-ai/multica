@@ -62,6 +62,8 @@ import (
 	cerebroreferences "github.com/multica-ai/multica/server/internal/cerebro/references"
 	// CEREBRO-PATCH(router-runtime-pause): cerebro runtime pause/unpause service.
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
+	// CEREBRO-PATCH(router-semantic-search): FIR-2604 semantic Provider + worker.
+	cerebrosemantic "github.com/multica-ai/multica/server/internal/cerebro/semantic"
 	// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 unified runtime tool admin service.
 	"github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 	// CEREBRO-PATCH(router-capability-register): FIR-2129 capability register service.
@@ -320,6 +322,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// checkout (h.ApprovalGate) and credential governance (newCredentialsPolicy).
 	sharedApprovalGate := cerebroruntime.BuildApprovalGate(cerebroQueries, pool, bus)
 	h.ApprovalGate = sharedApprovalGate
+	// CEREBRO-PATCH(router-semantic-search): FIR-2604 wire semantic provider + worker.
+	semanticCfg := cerebrosemantic.LoadConfig()
+	h.SemanticSearch = handler.NewSemanticSearch(pool, semanticCfg.BuildProvider(), semanticCfg)
 	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196/1197 credential registry handler — cipher loaded from MULTICA_CREDENTIALS_KEY, governance policy wired via newCredentialsPolicy (Persona/Multica cut-over controlled by MULTICA_PERMISSION_ENGINE).
 	cerebroCredentialsCipher := cerebrocredentials.MustNewCipherFromEnv()
 	cerebroCredentialsHandler := cerebrocredentials.New(cerebroQueries, cerebroCredentialsCipher, bus).WithPolicy(newCredentialsPolicy(cerebroQueries, queries, sharedApprovalGate))
