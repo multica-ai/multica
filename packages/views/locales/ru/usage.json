@@ -1,0 +1,58 @@
+{
+  "title": "Использование",
+  "subtitle": "Расход токенов и активность агентов в этой рабочей области.",
+  "filter": {
+    "project_label": "Проект",
+    "all_projects": "Все проекты",
+    "period_label": "Период"
+  },
+  "kpi": {
+    "cost_label": "Стоимость · {{days}} дн.",
+    "tokens_label": "Токены · {{days}} дн.",
+    "tokens_hint": "Ввод {{input}} · Вывод {{output}}",
+    "run_time_label": "Время работы · {{days}} дн.",
+    "run_time_hint": "По {{tasks}} task",
+    "tasks_label": "Tasks · {{days}} дн.",
+    "tasks_hint": "{{failed}} с ошибкой"
+  },
+  "dim": {
+    "label": "Разрез",
+    "daily": "По дням",
+    "weekly": "По неделям"
+  },
+  "daily": {
+    "title_cost": "Стоимость по дням",
+    "title_tokens": "Токены по дням",
+    "title_time": "Время работы по дням",
+    "title_tasks": "Tasks по дням",
+    "metric_cost": "Стоимость",
+    "metric_tokens": "Токены",
+    "metric_time": "Время",
+    "metric_tasks": "Tasks",
+    "no_data": "Нет активности за этот период."
+  },
+  "weekly": {
+    "title_cost": "Стоимость по неделям",
+    "title_tokens": "Токены по неделям",
+    "title_time": "Время работы по неделям",
+    "title_tasks": "Tasks по неделям",
+    "partial_label": "{{range}} (частично · {{covered}} / 7 дней)"
+  },
+  "leaderboard": {
+    "title": "Рейтинг",
+    "caption": "{{count}} агентов",
+    "header_agent": "Агент",
+    "header_tokens": "Токены",
+    "header_cost": "Стоимость",
+    "header_time": "Время",
+    "header_tasks": "Tasks",
+    "no_data": "Нет активности агентов за этот период."
+  },
+  "empty": {
+    "title": "Пока нет активности",
+    "body": "Как только агенты начнут выполнять здесь tasks, их расход токенов и время работы появятся в этом представлении."
+  },
+  "duration": {
+    "less_than_minute": "<1 мин"
+  }
+}

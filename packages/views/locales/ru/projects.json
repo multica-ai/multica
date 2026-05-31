@@ -1,0 +1,120 @@
+{
+  "page": {
+    "title": "Проекты",
+    "new_project": "Новый проект",
+    "empty": "Пока нет проектов",
+    "create_first": "Создайте первый проект",
+    "view_compact": "Компактно",
+    "view_comfortable": "Свободно",
+    "search_placeholder": "Поиск проектов...",
+    "no_search_results": "Ничего не найдено по запросу"
+  },
+  "table": {
+    "name": "Название",
+    "priority": "Приоритет",
+    "status": "Статус",
+    "progress": "Прогресс",
+    "lead": "Руководитель",
+    "created": "Создан"
+  },
+  "status": {
+    "planned": "Запланирован",
+    "in_progress": "В работе",
+    "paused": "Приостановлен",
+    "completed": "Завершён",
+    "cancelled": "Отменён"
+  },
+  "priority": {
+    "urgent": "Срочный",
+    "high": "Высокий",
+    "medium": "Средний",
+    "low": "Низкий",
+    "none": "Без приоритета"
+  },
+  "lead": {
+    "no_lead": "Без руководителя",
+    "assign_placeholder": "Назначить руководителя...",
+    "members_group": "Участники",
+    "agents_group": "Агенты",
+    "no_results": "Ничего не найдено"
+  },
+  "relative_date": {
+    "today": "Сегодня",
+    "one_day_ago": "1 д назад",
+    "days_ago": "{{count}} д назад",
+    "months_ago": "{{count}} мес назад"
+  },
+  "detail": {
+    "not_found": "Проект не найден",
+    "breadcrumb_fallback": "Проекты",
+    "title_placeholder": "Название проекта",
+    "icon_tooltip": "Сменить значок",
+    "pin_tooltip": "Закрепить на боковой панели",
+    "unpin_tooltip": "Открепить с боковой панели",
+    "sidebar_tooltip": "Боковая панель",
+    "copy_link": "Копировать ссылку",
+    "delete_action": "Удалить проект",
+    "section_properties": "Свойства",
+    "section_progress": "Прогресс",
+    "section_description": "Описание",
+    "description_placeholder": "Добавьте описание...",
+    "empty_issues_title": "Нет связанных issues",
+    "empty_issues_hint": "Создайте новую issue или привяжите существующие к этому проекту.",
+    "empty_issues_new_button": "Создать issue",
+    "no_issues_yet": "Пока нет issues",
+    "toast_link_copied": "Ссылка скопирована",
+    "toast_project_deleted": "Проект удалён",
+    "toast_move_issue_failed": "Не удалось переместить issue"
+  },
+  "resources": {
+    "section_header": "Ресурсы",
+    "empty": "Нет прикреплённых ресурсов.",
+    "add_button": "Добавить ресурс",
+    "popover_title": "Прикрепить репозиторий GitHub",
+    "repos_search_placeholder": "Поиск репозиториев...",
+    "repos_search_empty": "Нет репозиториев по вашему запросу.",
+    "attached_badge": "прикреплён",
+    "remove_tooltip": "Убрать",
+    "url_placeholder": "https://github.com/owner/repo или git@github.com:owner/repo.git",
+    "url_submit": "Добавить",
+    "toast_attached": "Репозиторий прикреплён",
+    "toast_attach_failed": "Не удалось прикрепить",
+    "toast_removed": "Ресурс убран",
+    "toast_remove_failed": "Не удалось убрать ресурс",
+    "add_local_directory_button": "Добавить локальный каталог",
+    "local_daemon_offline_hint": "Запустите локальный демон, чтобы прикрепить каталог на этой машине.",
+    "local_daemon_already_attached_hint": "На этой машине уже прикреплён локальный каталог. Уберите его, прежде чем добавить другой.",
+    "local_rename_tooltip": "Переименовать",
+    "local_rename_label": "Метка локального каталога",
+    "local_no_daemon_tooltip": "Локальный демон пока не сообщает ID — агент не может открыть этот каталог.",
+    "local_other_machine_tooltip": "Доступно только на машине, где зарегистрирован этот каталог.",
+    "chat_hint_prefix": "Агент будет работать на месте в",
+    "toast_local_attached": "Локальный каталог прикреплён",
+    "toast_local_renamed": "Переименовано",
+    "toast_local_rename_failed": "Не удалось переименовать",
+    "toast_local_pick_failed": "Не удалось выбрать каталог",
+    "toast_local_already_attached": "Этот каталог уже прикреплён к проекту на этой машине.",
+    "toast_local_daemon_already_attached": "На этой машине к проекту уже прикреплён локальный каталог. Уберите его, прежде чем добавить другой.",
+    "toast_local_daemon_not_running": "Локальный демон не запущен.",
+    "local_validate_not_absolute": "Укажите абсолютный путь.",
+    "local_validate_not_found": "Путь не существует.",
+    "local_validate_not_a_directory": "Путь не является каталогом.",
+    "local_validate_not_readable": "Каталог недоступен для чтения.",
+    "local_validate_not_writable": "Каталог недоступен для записи.",
+    "local_validate_unsupported": "Локальные каталоги можно выбирать только в десктоп-приложении."
+  },
+  "delete_dialog": {
+    "title": "Удалить проект",
+    "description": "Проект будет удалён. Issues не удалятся, но будут отвязаны.",
+    "confirm": "Удалить",
+    "cancel": "Отмена"
+  },
+  "picker": {
+    "no_project": "Без проекта",
+    "remove": "Убрать из проекта",
+    "empty": "Пока нет проектов"
+  },
+  "chip": {
+    "fallback_label": "Проект"
+  }
+}
