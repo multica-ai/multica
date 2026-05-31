@@ -311,6 +311,15 @@
     "stop_tooltip": "停止智能体",
     "cancel_failed": "取消 task 失败"
   },
+  "agent_stream": {
+    "runs": "运行记录",
+    "collapse": "收起",
+    "no_runs": "暂无运行记录",
+    "other_runs": "其他运行",
+    "no_other_runs": "没有其他运行记录。",
+    "no_local_stream": "暂无本地智能体输出。",
+    "jump_to_comment": "跳转到评论"
+  },
   "execution_log": {
     "section": "执行日志",
     "show_past": "显示历史运行（{{count}}）",

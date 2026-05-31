@@ -19,6 +19,7 @@ import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
 import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
+import { sortTaskRunsByCreatedAtAsc, sortTaskRunsByCreatedAtDesc } from "../utils/task-runs";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { RetryWithNoteDialog } from "./retry-with-note-dialog";
 import { useAgentColorMap } from "./task-agent-colors";
@@ -62,15 +63,6 @@ interface ExecutionLogSectionProps {
   onHighlightComment?: (commentId: string) => void;
 }
 
-// Past-runs sort priority: failed first (needs attention), then
-// cancelled (procedural noise), then completed (the boring 'done'
-// case sinks to the bottom). Within each group, newest first.
-const PAST_STATUS_RANK: Record<string, number> = {
-  failed: 0,
-  cancelled: 1,
-  completed: 2,
-};
-
 export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLogSectionProps) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
@@ -89,52 +81,49 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
     refetchOnWindowFocus: false,
   });
 
-  const agentColorMap = useAgentColorMap(tasks);
+  const chronologicalTasks = useMemo(
+    () => sortTaskRunsByCreatedAtAsc(tasks),
+    [tasks],
+  );
+
+  // Display order: newest first (descending) — matches sidebar behavior.
+  const displayTasks = useMemo(
+    () => sortTaskRunsByCreatedAtDesc(tasks),
+    [tasks],
+  );
+
+  const agentColorMap = useAgentColorMap(chronologicalTasks);
 
   // Run index: sequential #1, #2, #3 across all tasks, ordered by created_at.
   // The index is an identity label — it stays stable when filtering.
+  // #1 = earliest run, regardless of display order.
   const taskIndexMap = useMemo(() => {
-    const sorted = [...tasks].sort(
-      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-    );
     const map = new Map<string, number>();
-    sorted.forEach((t, i) => map.set(t.id, i + 1));
+    chronologicalTasks.forEach((t, i) => map.set(t.id, i + 1));
     return map;
-  }, [tasks]);
+  }, [chronologicalTasks]);
 
   const { getAgentName } = useActorName();
 
   const activeTasks = useMemo(
     () =>
-      tasks.filter(
+      displayTasks.filter(
         (t) =>
           t.status === "queued" ||
           t.status === "dispatched" ||
           t.status === "running",
       ),
-    [tasks],
+    [displayTasks],
   );
 
   const pastTasks = useMemo(() => {
-    const past = tasks.filter(
+    return displayTasks.filter(
       (t) =>
         t.status === "completed" ||
         t.status === "failed" ||
         t.status === "cancelled",
     );
-    // Stable sort: failed first, cancelled second, completed last.
-    // Within group: newest completed_at first (fall back to created_at
-    // for malformed rows missing completed_at).
-    return [...past].sort((a, b) => {
-      const rankDiff =
-        (PAST_STATUS_RANK[a.status] ?? 99) -
-        (PAST_STATUS_RANK[b.status] ?? 99);
-      if (rankDiff !== 0) return rankDiff;
-      const at = a.completed_at ?? a.created_at;
-      const bt = b.completed_at ?? b.created_at;
-      return new Date(bt).getTime() - new Date(at).getTime();
-    });
-  }, [tasks]);
+  }, [displayTasks]);
 
   // Filter runs by agent name or trigger summary text
   const matchesFilter = useMemo(() => {
@@ -584,7 +573,6 @@ function RowShell({
       }`}
     >
       {runIndex != null && (
-        // eslint-disable-next-line i18next/no-literal-string
         <span className="shrink-0 w-5 text-right text-[10px] font-mono tabular-nums text-muted-foreground/60">
           #{runIndex}
         </span>
