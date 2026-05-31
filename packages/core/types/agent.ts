@@ -562,6 +562,10 @@ export interface SkillChangeRequest {
   review_comment: string;
   created_at: string;
   updated_at: string;
+  // CEREBRO-PATCH(skill-change-request-session): FIR-2627/FIR-2629 — the agent
+  // work session that proposed this change, so the review UI can link back to
+  // the run. Null/absent for proposals opened from the web UI by a human.
+  work_session_id?: string | null;
 }
 
 export interface SkillFork {
@@ -574,6 +578,18 @@ export interface SkillFork {
   forked_name?: string;
   forked_description?: string;
   current_version?: string;
+}
+
+// CEREBRO-PATCH(skill-fork-parent-lineage): FIR-2629 — "forked from" lineage
+// returned by GET /api/skills/{id}/fork-parent. Absent (404) when the skill is
+// an original, not a fork.
+export interface SkillForkParent {
+  id: string;
+  parent_skill_id: string;
+  forked_skill_id: string;
+  forked_by: string | null;
+  created_at: string;
+  parent_name: string;
 }
 
 export interface UpdateSkillOwnershipRequest {

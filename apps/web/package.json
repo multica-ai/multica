@@ -40,6 +40,7 @@
     "@multica/cerebro-realtime": "workspace:*",
     "@multica/cerebro-references": "workspace:*",
     "@multica/cerebro-runtime": "workspace:*",
+    "@multica/cerebro-skill-ownership": "workspace:*",
     "@multica/cerebro-tasks": "workspace:*",
     "@multica/cerebro-tool-policy": "workspace:*",
     "@multica/cerebro-ui": "workspace:*",

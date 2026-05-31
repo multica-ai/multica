@@ -485,6 +485,40 @@ func (h *Handler) ReviewSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 
 // --- Fork endpoints ---
 
+// GetSkillForkParent returns the lineage link for a skill that is itself a fork
+// — i.e. the parent it was forked from. Returns 404 when the skill is not a
+// fork (no parent link), which the UI treats as "this is an original skill".
+// CEREBRO-PATCH(skill-fork-parent-lineage): FIR-2629 expose "forked from" so the web UI can show both lineage directions.
+func (h *Handler) GetSkillForkParent(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	skill, ok := h.loadSkillForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	row, err := h.Queries.GetSkillForkParent(r.Context(), skill.ID)
+	if err != nil {
+		// No parent link → not a fork. 404 is the "no lineage" signal the
+		// frontend query treats as null rather than an error.
+		writeError(w, http.StatusNotFound, "skill is not a fork")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, struct {
+		SkillForkResponse
+		ParentName string `json:"parent_name"`
+	}{
+		SkillForkResponse: SkillForkResponse{
+			ID:            uuidToString(row.ID),
+			ParentSkillID: uuidToString(row.ParentSkillID),
+			ForkedSkillID: uuidToString(row.ForkedSkillID),
+			ForkedBy:      uuidToPtr(row.ForkedBy),
+			CreatedAt:     timestampToString(row.CreatedAt),
+		},
+		ParentName: row.ParentName,
+	})
+}
+
 func (h *Handler) ListSkillForks(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	skill, ok := h.loadSkillForUser(w, r, id)

@@ -35,6 +35,8 @@ export type CerebroFlagKey =
   | "cerebro_move_comment_to_subissue"
   | "cerebro_move_comment_to_thread"
   | "cerebro_agent_passes"
+  // JEH-216: skill ownership, approvers, version history, change requests, forks.
+  | "cerebro_skill_ownership"
   | "cerebro_references"
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
   | "cerebro_agent_avatar"
@@ -91,6 +93,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_move_comment_to_subissue: true,
   cerebro_move_comment_to_thread: true,
   cerebro_agent_passes: true,
+  // JEH-216: ON by default. Surfaces ownership/approvers, version history,
+  // change-request review, and forking on the skill detail page. Off restores
+  // the plain upstream skill editor with no governance UI.
+  cerebro_skill_ownership: true,
   cerebro_references: true,
   // CEREBRO-PATCH(agent-avatar-generate): JEH-1563
   cerebro_agent_avatar: true,
@@ -389,6 +395,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Enable the workspace agent-pass admin page at /:workspace/agent-passes — issue, list, and revoke agent passes (machine-readable mandates that scope what an agent may do on an issue). Owner/admin only. JEH-1731.",
+  },
+  {
+    key: "cerebro_skill_ownership",
+    label: "Skill ownership & change requests",
+    group: "permissions",
+    description:
+      "Surface ownership, approvers, version history, change-request review (approve/reject with diff), and forking on the skill detail page. Owner / approvers / workspace admins can manage; everyone else can open a change request. Off hides the governance panel and the fork action. JEH-216.",
   },
   {
     key: "cerebro_references",

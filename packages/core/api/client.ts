@@ -48,6 +48,7 @@ import type {
   SkillVersion,
   SkillChangeRequest,
   SkillFork,
+  SkillForkParent,
   UpdateSkillOwnershipRequest,
   CreateSkillChangeRequestRequest,
   ReviewSkillChangeRequestRequest,
@@ -2791,6 +2792,15 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // CEREBRO-PATCH(skill-fork-parent-lineage): FIR-2629 — "forked from" lineage; resolves to null when the skill is an original (404).
+  async getSkillForkParent(id: string): Promise<SkillForkParent | null> {
+    try {
+      return await this.fetch(`/api/skills/${id}/fork-parent`);
+    } catch {
+      return null;
+    }
   }
 
   // Personal Access Tokens

@@ -1134,6 +1134,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/change-requests", h.CreateSkillChangeRequest)
 					r.Get("/forks", h.ListSkillForks)
 					r.Post("/forks", h.CreateSkillFork)
+					// CEREBRO-PATCH(skill-fork-parent-lineage): FIR-2629 — "forked from" lineage for the web UI.
+					r.Get("/fork-parent", h.GetSkillForkParent)
 				})
 			})
 
