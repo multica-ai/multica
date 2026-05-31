@@ -83,6 +83,7 @@
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-groups": "workspace:*",
     "@multica/cerebro-identity": "workspace:*",
+    "@multica/cerebro-tool-policy": "workspace:*",
     "@multica/cerebro-inbox": "workspace:*",
     "@multica/cerebro-pin-input": "workspace:*",
     "@multica/cerebro-search": "workspace:*",
