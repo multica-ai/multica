@@ -127,7 +127,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
           : [...state.creatorFilters, value],
       };
     }),
-  // 标签筛选以 id 列表持久化，便于直接传给 REST 查询参数。
+  // Persist label filters as ID lists for direct REST query usage.
   toggleLabelFilter: (labelId) =>
     set((state) => {
       const nextFilters = state.labelFilters.includes(labelId)
@@ -139,7 +139,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         labelFilterMode: nextFilters.length === 0 ? "any" : state.labelFilterMode,
       };
     }),
-  // 没有选中标签时强制回到 any，避免产生无效匹配模式。
+  // Force `any` when no labels are selected to avoid invalid match modes.
   setLabelFilterMode: (mode) =>
     set((state) => ({
       labelFilterMode: state.labelFilters.length === 0 ? "any" : mode,

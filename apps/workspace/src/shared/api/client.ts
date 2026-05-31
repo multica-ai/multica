@@ -247,7 +247,7 @@ export class ApiClient {
     if (params?.end_from) search.set("end_from", params.end_from);
     if (params?.end_to) search.set("end_to", params.end_to);
     if (params?.view) search.set("view", params.view);
-    // 标签筛选使用重复 query 参数，和后端数组解析保持一致。
+    // Label filtering uses repeated query params to match backend array parsing.
     for (const labelId of params?.label_ids ?? []) {
       search.append("label_ids", labelId);
     }

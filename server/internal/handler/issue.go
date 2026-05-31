@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -135,7 +136,7 @@ func parseIssueListDate(value string, fieldName string) (pgtype.Date, error) {
 	return pgtype.Date{Time: parsed, Valid: true}, nil
 }
 
-// parseIssueListLabelMatchMode 统一约束标签筛选模式，避免前后端出现不一致语义。
+// parseIssueListLabelMatchMode enforces a shared label match-mode contract across frontend and backend.
 func parseIssueListLabelMatchMode(value string) (pgtype.Text, error) {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	if normalized == "" {
@@ -150,7 +151,7 @@ func parseIssueListLabelMatchMode(value string) (pgtype.Text, error) {
 	}
 }
 
-// parseIssueListLabelIDs 负责校验并去重标签 id，避免重复参数影响 all 匹配语义。
+// parseIssueListLabelIDs validates and deduplicates label IDs to keep all-match semantics stable.
 func parseIssueListLabelIDs(values []string) ([]pgtype.UUID, error) {
 	parsed := make([]pgtype.UUID, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
@@ -311,12 +312,12 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	offset := 0
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil {
+		if v, err := strconv.Atoi(l); err == nil && v >= 0 && v <= math.MaxInt32 {
 			limit = v
 		}
 	}
 	if o := r.URL.Query().Get("offset"); o != "" {
-		if v, err := strconv.Atoi(o); err == nil {
+		if v, err := strconv.Atoi(o); err == nil && v >= 0 && v <= math.MaxInt32 {
 			offset = v
 		}
 	}
