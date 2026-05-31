@@ -50,7 +50,20 @@ Tester reports must include enough information for later human acceptance and cl
 - branch,
 - commit SHA and/or PR number.
 
-If Guodage needs to verify from a phone or another machine, the tester may create a temporary tunnel/public link (for example ngrok/cloudflared) and include that URL in the report. WebSocket/live-update support is best effort unless the task specifically requires it.
+If Guodage needs to verify from a phone or another machine, the tester may create a temporary tunnel/public link and include that URL in the report.
+
+Recommended quick path for local human acceptance is to expose the preview frontend port only, for example:
+
+```bash
+ngrok http <frontend-port>
+```
+
+Notes:
+
+- The tunnel URL should be treated as a temporary human-acceptance link, not a production/staging URL.
+- The report must include both the tunnel URL and the original local frontend URL.
+- API requests normally work through the frontend's same-origin proxy/rewrite. WebSocket/live-update support is best effort unless the task specifically requires it; if WebSocket behavior is in scope, call it out explicitly and validate the tunnel/proxy path for `/ws`.
+- If ngrok refuses to start because local HTTP/HTTPS proxy env vars are set, run it with proxy env vars unset (for example `env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY ngrok http <frontend-port>`).
 
 Cleanup is a separate lifecycle step. `make selfhost-preview-clean ISSUE=OPE-123` may stop the Docker Compose preview runtime, but it must not delete Postgres containers, volumes, databases, or long-lived local test data. Git worktree/branch cleanup is handled by the explicit unified worktree cleanup flow, not by a single tester run.
 
