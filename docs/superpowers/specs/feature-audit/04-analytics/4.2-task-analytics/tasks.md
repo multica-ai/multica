@@ -69,9 +69,24 @@
 - 验证方式：
   - mutation + page 联动测试。
 
+### Task 5
+
+- 目标：补任务统计页面级验证，证明 summary、分布和刷新行为走真实用户路径。
+- 文件：
+  - `e2e/task-analytics.spec.ts` 或同等 analytics 专属 Playwright 文件
+  - 如有共享 fixture，更新 `e2e/helpers.ts` / `e2e/fixtures.ts`
+- 改动：
+  - 覆盖统计入口可达、默认 summary、today/week/month 切换、优先级分布展示。
+  - 覆盖 issue 状态或 due date 变更后统计刷新。
+- 完成定义：
+  - Playwright 能证明任务统计页与 Today / Upcoming / Backlog 工作视图分离。
+  - 至少一条用例验证完成率与逾期数，至少一条用例验证 issue 变更后的刷新行为。
+- 验证方式：
+  - 运行 `pnpm exec playwright test e2e/task-analytics.spec.ts`
+
 ## 执行顺序说明
 
-- 先做口径与服务端聚合，再接前端页面；否则前端只能基于错误来源做临时统计。
+- 先做口径与服务端聚合，再接前端页面，最后补页面级验证；否则前端只能基于错误来源做临时统计。
 
 ## 回写要求
 

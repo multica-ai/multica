@@ -47,6 +47,65 @@ test.describe("Time tracking", () => {
     await expect(page.getByRole("heading", { name: /my time/i })).toBeVisible();
   });
 
+  test("Team Time page shows this-week totals grouped by member and project", async ({ page }, testInfo) => {
+    const scope = scopeForTest(testInfo);
+    const project = await api.createProject({
+      title: `E2E Team Time Project ${Date.now()}`,
+      icon: "📁",
+    });
+    const issue = await api.createIssue(`E2E Team Time Issue ${Date.now()}`, {
+      project_id: project.id,
+    });
+    const stop = new Date();
+    const start = new Date(stop.getTime() - 45 * 60 * 1000);
+    await api.createTimeEntry({
+      start_time: start.toISOString(),
+      stop_time: stop.toISOString(),
+      description: "E2E team time current week",
+      issue_id: issue.id,
+    });
+
+    await page.goto("/team-time");
+
+    await expect(page.getByRole("heading", { name: "Team Time" })).toBeVisible();
+    await expect(page.getByText(/total tracked by the team/i)).toContainText("45:00");
+    await expect(page.getByText(`E2E User ${scope}`).first()).toBeVisible();
+    await expect(page.getByText(project.title).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "By Member" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "By Project" })).toBeVisible();
+  });
+
+  test("Team Time page switches to last month and shows only that range", async ({ page }) => {
+    const project = await api.createProject({
+      title: `E2E Last Month Project ${Date.now()}`,
+      icon: "📁",
+    });
+    const issue = await api.createIssue(`E2E Last Month Issue ${Date.now()}`, {
+      project_id: project.id,
+    });
+    const start = new Date();
+    start.setMonth(start.getMonth() - 1, 15);
+    start.setHours(10, 0, 0, 0);
+    const stop = new Date(start.getTime() + 30 * 60 * 1000);
+    await api.createTimeEntry({
+      start_time: start.toISOString(),
+      stop_time: stop.toISOString(),
+      description: "E2E team time last month",
+      issue_id: issue.id,
+    });
+
+    await page.goto("/team-time");
+
+    await expect(page.getByText("No time logged by any member in this period.")).toBeVisible();
+    await expect(page.getByText("No project time logged in this period.")).toBeVisible();
+
+    await page.getByRole("button", { name: "Last Month" }).click();
+
+    await expect(page.getByText(project.title).first()).toBeVisible();
+    await expect(page.getByText(/total tracked by the team/i)).toContainText("30:00");
+    await expect(page.getByText("No time logged by any member in this period.")).not.toBeVisible();
+  });
+
   // ── Start and stop timer via sidebar widget ─────────────────────────────────
 
   test("can start and stop a timer using the sidebar widget", async ({ page }) => {

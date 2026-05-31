@@ -394,6 +394,58 @@ export class TestApiClient {
     }
   }
 
+  async createPomodoroHistoryEntry(opts: {
+    start_time: string;
+    stop_time: string;
+    description?: string;
+    issue_id?: string;
+  }): Promise<{ id: string }> {
+    const userId = typeof this.user?.id === "string" ? this.user.id : null;
+    if (!userId || !this.workspaceId) {
+      throw new Error("Missing user or workspace for pomodoro history seed");
+    }
+
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      const result = await client.query<{ id: string }>(
+        `INSERT INTO time_entry (
+          workspace_id,
+          user_id,
+          issue_id,
+          description,
+          start_time,
+          stop_time,
+          duration_seconds,
+          type
+        ) VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5::timestamptz,
+          $6::timestamptz,
+          GREATEST(0, EXTRACT(EPOCH FROM ($6::timestamptz - $5::timestamptz)))::bigint,
+          'pomodoro'
+        )
+        RETURNING id`,
+        [
+          this.workspaceId,
+          userId,
+          opts.issue_id ?? null,
+          opts.description ?? null,
+          opts.start_time,
+          opts.stop_time,
+        ],
+      );
+      const entry = result.rows[0];
+      this.createdTimeEntryIds.push(entry.id);
+      return entry;
+    } finally {
+      await client.end();
+    }
+  }
+
   /** Clean up all issues created during this test. */
   async cleanup() {
     for (const id of this.createdIssueIds) {

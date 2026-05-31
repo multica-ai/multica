@@ -153,6 +153,54 @@ test.describe("Pomodoro", () => {
     await expect(doneTodayCell.locator("p").last()).toHaveText("1", { timeout: 8000 });
   });
 
+  test("today summary shows capped progress after hitting the focus target", async ({ page }) => {
+    const now = new Date();
+    for (let index = 0; index < 6; index += 1) {
+      const start = new Date(now.getTime() - (index + 1) * 40 * 60 * 1000);
+      const stop = new Date(start.getTime() + 25 * 60 * 1000);
+      await api.createPomodoroHistoryEntry({
+        start_time: start.toISOString(),
+        stop_time: stop.toISOString(),
+        description: `E2E pomodoro target ${index + 1}`,
+      });
+    }
+
+    await page.goto("/pomodoro");
+
+    const todaySection = page.locator('[aria-label="Today"]');
+    await expect(todaySection).toBeVisible({ timeout: 8000 });
+    await expect(todaySection.getByText("Focus target")).toBeVisible();
+    await expect(todaySection.getByText("6 pomodoros")).toBeVisible();
+    await expect(todaySection.getByText("Done today")).toBeVisible();
+    await expect(todaySection.getByText("100%")).toBeVisible();
+    const remainingCell = todaySection.locator("div").filter({ hasText: /^Remaining/ }).first();
+    await expect(remainingCell.locator("p").last()).toHaveText("0");
+  });
+
+  test("today summary shows a two-day streak from consecutive local days", async ({ page }) => {
+    const todayStart = new Date();
+    todayStart.setHours(10, 0, 0, 0);
+    const yesterdayStart = new Date(todayStart);
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    const createSession = async (start: Date, label: string) => {
+      await api.createPomodoroHistoryEntry({
+        start_time: start.toISOString(),
+        stop_time: new Date(start.getTime() + 25 * 60 * 1000).toISOString(),
+        description: label,
+      });
+    };
+
+    await createSession(todayStart, "E2E streak today");
+    await createSession(yesterdayStart, "E2E streak yesterday");
+
+    await page.goto("/pomodoro");
+
+    const todaySection = page.locator('[aria-label="Today"]');
+    await expect(todaySection).toBeVisible({ timeout: 8000 });
+    const streakCell = todaySection.locator("div").filter({ hasText: /^Streak/ }).first();
+    await expect(streakCell.locator("p").last()).toHaveText("2 days");
+  });
+
   // ── Settings ────────────────────────────────────────────────────────────────
 
   test("Settings page includes a Pomodoro tab with time interval inputs", async ({ page }) => {
