@@ -195,6 +195,7 @@
     "skills": "Skills",
     "environment": "Environment",
     "custom_args": "Custom Args",
+    "mcp_config": "MCP",
     "discard_dialog_title": "Discard unsaved changes?",
     "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
     "discard_keep": "Keep editing",
@@ -263,7 +264,7 @@
       "placeholder": "Define this agent's role, expertise, and working style.\n\n# Example\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/"
     },
     "env": {
-      "intro_readonly": "Injected into the agent process at launch. Values are hidden — only the agent owner or workspace admin can view and edit them.",
+      "intro_readonly": "Injected into the agent process at launch. Only workspace owners and admins can read or edit values; every reveal and edit is recorded in the workspace audit log.",
       "empty_readonly": "No environment variables configured.",
       "intro_prefix": "Injected into the agent process at launch (e.g. ",
       "intro_separator": ", ",
@@ -275,7 +276,15 @@
       "remove_aria": "Remove variable",
       "duplicate_keys_toast": "Duplicate environment variable keys",
       "saved_toast": "Environment variables saved",
-      "save_failed_toast": "Failed to save environment variables"
+      "save_failed_toast": "Failed to save environment variables",
+      "not_revealed_title_one": "{{count}} variable configured",
+      "not_revealed_title_other": "{{count}} variables configured",
+      "not_revealed_empty": "No environment variables configured.",
+      "not_revealed_hint": "Values stay masked until you reveal them. Every reveal and edit is recorded in the workspace audit log.",
+      "reveal_action": "Reveal & edit",
+      "revealing": "Revealing…",
+      "reveal_failed_toast": "Failed to load env values",
+      "empty_editable": "No environment variables configured. Add one to inject it into the agent at launch."
     },
     "custom_args": {
       "intro": "Additional CLI arguments appended to the agent command at launch. Multi-token flags can share one row — they'll be split on whitespace before being passed to the CLI.",
@@ -286,10 +295,21 @@
       "saved_toast": "Custom arguments saved",
       "save_failed_toast": "Failed to save custom arguments"
     },
+    "mcp_config": {
+      "intro": "MCP server configuration forwarded to the runtime CLI (Claude via --mcp-config, Codex via $CODEX_HOME/config.toml, Hermes/Kimi/Kiro via ACP mcpServers, OpenCode via OPENCODE_CONFIG_CONTENT, OpenClaw via the per-task config wrapper). Stored verbatim and may contain secrets — only the agent owner and workspace admins can read it. Leave empty to fall back to the CLI's own default. For OpenClaw HTTP/SSE entries use OpenClaw's own field name (e.g. \"transport\": \"streamable-http\") instead of Claude's \"type\".",
+      "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
+      "editor_aria": "MCP config JSON editor",
+      "clear_action": "Clear",
+      "invalid_json": "Invalid JSON: {{error}}",
+      "invalid_not_object": "MCP config must be a JSON object (e.g. {\"mcpServers\": …}).",
+      "saved_toast": "MCP config saved",
+      "save_failed_toast": "Failed to save MCP config",
+      "redacted_title": "Configured — hidden from your view",
+      "redacted_hint": "Only the agent owner or a workspace admin can read this config."
+    },
     "skills": {
       "intro": "Workspace skills assigned to this agent. Local runtime skills are always available automatically.",
       "add_action": "Add skill",
-      "import_hint": "Importing creates a workspace copy that your team can edit and reuse.",
       "empty_title": "No skills assigned",
       "empty_hint": "Add workspace skills to share team knowledge with this agent.",
       "remove_failed_toast": "Failed to remove skill",

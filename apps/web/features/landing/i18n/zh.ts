@@ -5,9 +5,14 @@ export function createZhDict(allowSignup: boolean): LandingDict {
   return {
   header: {
     github: "GitHub",
-    login: "\u767b\u5f55",
+    cta: "\u5f00\u59cb\u4f7f\u7528",
     dashboard: "\u8fdb\u5165\u5de5\u4f5c\u53f0",
+    docs: "\u6587\u6863",
     changelog: "\u66f4\u65b0\u65e5\u5fd7",
+    useCases: "\u6848\u4f8b",
+    navigation: "\u4e3b\u5bfc\u822a",
+    openMenu: "\u6253\u5f00\u5bfc\u822a\u83dc\u5355",
+    closeMenu: "\u5173\u95ed\u5bfc\u822a\u83dc\u5355",
   },
 
   hero: {
@@ -17,6 +22,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       "Multica \u662f\u4e00\u4e2a\u5f00\u6e90\u5e73\u53f0\uff0c\u5c06\u7f16\u7801 智能体 \u53d8\u6210\u771f\u6b63\u7684\u961f\u53cb\u3002\u5206\u914d\u4efb\u52a1\u3001\u8ddf\u8e2a\u8fdb\u5ea6\u3001\u79ef\u7d2f\u6280\u80fd\u2014\u2014\u5728\u4e00\u4e2a\u5730\u65b9\u7ba1\u7406\u4f60\u7684\u4eba\u7c7b + 智能体 \u56e2\u961f\u3002",
     cta: "免费开始",
     downloadDesktop: "下载桌面端",
+    talkToSales: "联系商务",
     worksWith: "支持",
     imageAlt: "Multica \u770b\u677f\u89c6\u56fe\u2014\u2014\u4eba\u7c7b\u548c 智能体 \u534f\u540c\u7ba1\u7406\u4efb\u52a1",
   },
@@ -95,7 +101,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       label: "\u8fd0\u884c\u65f6",
       title: "\u4e00\u4e2a\u63a7\u5236\u53f0\u7ba1\u7406\u6240\u6709\u7b97\u529b",
       description:
-        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 11 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
+        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 12 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
       cards: [
         {
           title: "\u7edf\u4e00\u8fd0\u884c\u65f6\u9762\u677f",
@@ -110,7 +116,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         {
           title: "\u9996\u6b21\u542f\u52a8\u81ea\u52a8\u6ce8\u518c",
           description:
-            "Multica \u626b\u63cf\u672c\u673a\u7684 11 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
+            "Multica \u626b\u63cf\u672c\u673a\u7684 12 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
         },
       ],
     },
@@ -130,7 +136,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
         description:
-          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 11 款支持的 AI 编程工具（Claude Code、Codex、Cursor、Copilot、Gemini、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi）。本机已安装的工具会被自动注册成运行时。",
+          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 12 款支持的 AI 编程工具（Antigravity、Claude Code、Codex、Cursor、Copilot、Gemini、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi）。本机已安装的工具会被自动注册成运行时。",
       },
       {
         title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a 智能体",
@@ -186,7 +192,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:
-          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 11 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aClaude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
+          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 12 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
       },
       {
         question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
@@ -227,6 +233,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "\u529f\u80fd\u7279\u6027", href: "#features" },
           { label: "\u5982\u4f55\u5de5\u4f5c", href: "#how-it-works" },
+          { label: "\u6848\u4f8b", href: "/usecases" },
           { label: "更新日志", href: "/changelog" },
           { label: "下载", href: "/download" },
         ],
@@ -244,6 +251,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "\u5173\u4e8e\u6211\u4eec", href: "/about" },
           { label: "\u5f00\u6e90", href: "#open-source" },
+          { label: "\u8054\u7cfb\u5546\u52a1", href: "/contact-sales" },
           { label: "GitHub", href: githubUrl },
         ],
       },
@@ -284,6 +292,160 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.3.12",
+        date: "2026-05-29",
+        title: "Issue 任务续接与韩语支持",
+        changes: [],
+        features: [
+          "智能体在 Issue 评论区继续任务时，会接着之前的会话继续，不再新开会话，任务上下文可以保留下来",
+          "Multica 现在支持韩语界面、官网和文档，包含完整韩语文档与本地化日期显示",
+          "Issue 页面会在标题附近固定显示正在工作的智能体，多智能体同时工作时也能更清楚地查看",
+          "智能体读取 Issue 讨论时可以先看到线程摘要、回复数量和最近活跃时间，更快找到需要跟进的上下文",
+          "OpenClaw 运行环境现在可以使用智能体里保存的 MCP 设置，Claude Opus 4.8 也可用于模型选择和用量估算",
+        ],
+        improvements: [
+          "详情页统一了面包屑导航，Issue、项目、运行环境、技能、智能体和小队的返回路径更清楚",
+          "恢复中的智能体任务会少读重复评论，更快回到触发它的那条讨论",
+          "Issue 提及说明和命令行片段更容易阅读，复制命令时不容易误读参数",
+        ],
+        fixes: [
+          "更新、归档、恢复或从模板创建智能体后，已绑定的技能仍会正确显示",
+          "单个智能体完成自己负责的子 Issue 后，父 Issue 会继续唤起它推进后续工作",
+          "Windows / WSL2 场景下，属于当前用户的本机运行环境会归到本机分组",
+          "命令行登录现在接受 Cloud Node 令牌",
+        ],
+      },
+      {
+        version: "0.3.11",
+        date: "2026-05-28",
+        title: "Antigravity CLI 支持",
+        changes: [],
+        features: [
+          "Antigravity CLI 现在可作为编码运行环境使用",
+          "智能体详情页新增 MCP 配置，可用于 Hermes、Kimi 和 Kiro",
+          "自托管管理员可以关闭自助创建工作区",
+          "桌面端本机运行环境会在访问令牌过期前自动续期",
+        ],
+        improvements: [
+          "Helm Chart 可发布到 GHCR，邮件配置文档更清晰",
+          "任务记录会显示更短、更安全的工作目录",
+          "手动排序时，新 Issue 会留在列顶部，已删除 Issue 不再回到最近列表",
+          "本机运行环境会按设备名合并同一台机器",
+        ],
+        fixes: [
+          "任务完成回传遇到短暂错误时会重试",
+          "本地目录运行不会覆盖已有的 CLAUDE.md、AGENTS.md 或 GEMINI.md",
+          "Windows 上的 Pi 会保留多行提示词",
+          "运行环境 Logo 显示更稳定",
+          "本机运行服务清理时会跳过不完整父级信息",
+        ],
+      },
+      {
+        version: "0.3.10",
+        date: "2026-05-27",
+        title: "本地工作目录",
+        changes: [],
+        features: [
+          "项目现在可以在桌面端绑定本地工作目录，智能体任务会直接在现有文件夹中运行，并在目录被占用时显示等待状态",
+          "自动任务的 Webhook 触发器可以按事件和动作先过滤请求，配置界面也可以直接打开对应文档",
+          "泳道视图可以按父 Issue、项目或负责人分组，大型看板更容易按团队计划方式查看",
+          "评论现在支持一次选择多个附件，也可以在编辑时保留、移除或替换附件",
+        ],
+        improvements: [
+          "中文界面文案在导航、设置、搜索和运行时页面里更一致",
+          "常用界面做了无障碍和 React 清理，移动端检查也只在移动端代码变化时运行",
+          "命令行列表输出对自动化读取更安静，小队列表也会显示可用的成员数量",
+        ],
+        fixes: [
+          "泳道里超过第一页才加载到的嵌套 Issue 不再显示为空",
+          "从子 Issue 入口切到用智能体创建时，会继续保留父 Issue 关系",
+          "定时自动任务生成标题和描述时，会按触发器配置的时区显示日期",
+          "评论输入框不再因为实时更新闪出重复内容，发送失败后会保留文字，编辑评论时也会正确处理提及",
+          "没有识别出语言的代码块也会正常显示文本，不再出现空白代码块",
+          "桌面端和网页端的头像现在可以正确加载相对路径上传文件",
+          "Codex、Cursor 和 Hermes 运行处理修复了桌面端发现、命令参数、用量归属和卡住诊断提示",
+          "无权限访问私有智能体的用户，不能再用普通评论触发它们",
+          "GitHub 设置、项目创建、看板排序和智能体技能页面清理了若干界面细节",
+        ],
+      },
+      {
+        version: "0.3.9",
+        date: "2026-05-26",
+        title: "泳道视图与更稳定的 Issue 体验",
+        changes: [],
+        features: [
+          "Issue 现在支持泳道视图，团队可以按父 Issue 和状态一起查看工作，拆分后的子任务更容易归类和追踪",
+          "Issue 列表支持拖拽调整顺序，分组标题会在滚动时保持可见，加载更多内容后也能保持正确排序",
+        ],
+        improvements: [
+          "命令行里的本机运行服务状态现在会显示版本，并用更清晰的字段展示运行状态",
+          "自托管文档补充了用量统计所需的小时汇总配置，排查步骤也覆盖中英文文档",
+          "智能体技能设置在发布前收紧，产品里不再显示运行环境不支持的本机技能开关",
+          "依赖检查更严格，前端包会更早发现缺失依赖，减少打包和桌面端运行时的意外",
+        ],
+        fixes: [
+          "GitHub PR 只有写明关闭意图时才会自动完成关联 Issue，普通引用链接不会误关 Issue",
+          "父子 Issue 的自动推进更稳：依赖未满足时不会提前启动后续任务，智能体把待处理任务切到进行中时也会正确触发负责人",
+          "Issue 讨论串和列表加载更多内容时会保持正确顺序，看板拖拽后的位置也更稳定",
+          "聊天窗口放大、看板卡片负责人行和 XML 解析依赖都做了稳定性修复",
+        ],
+      },
+      {
+        version: "0.3.8",
+        date: "2026-05-25",
+        title: "iOS 客户端、Helm 自托管与更顺畅的协作体验",
+        changes: [],
+        features: [
+          "Multica iOS 客户端发布官方首个可用版本，覆盖登录、工作区、收件箱、Issue、项目、聊天、评论、表情回应、在线状态和实时更新；目前暂未上架 App Store，需要用户自行打包安装",
+          "自托管团队现在可以通过 Helm 将 Multica 部署到 Kubernetes，Docker 安装也有更清晰的端口和 URL 配置",
+          "项目资源选择器新增仓库搜索，工作区仓库设置也可以保存描述，帮助智能体理解每个代码库",
+          "运行时用量现在可以更准确识别 DeepSeek、Kimi K2.6、Zhipu GLM 和长上下文 Claude Opus 的费用",
+          "官网新增使用场景页面能力，并让文档、更新日志和开始使用入口更清晰",
+        ],
+        improvements: [
+          "小队头像和看板卡片会显示更完整的悬浮信息、成员状态和实时工作状态",
+          "桌面端在长 Issue 和聊天中切换标签页时，会更好地保留滚动位置，并避免重复的历史记录",
+          "代码和富文本内容更容易阅读，命令文本会按原样显示，编辑器样式也拆分得更清晰",
+          "工作区仓库描述会进入智能体的任务上下文，让分配的工作带上更有用的项目背景",
+          "文档和 README 补充了移动端支持、自动化、授权说明和自托管选项",
+        ],
+        fixes: [
+          "实时评论和动态连续到达时，Issue 时间线仍会按正确时间顺序显示",
+          "Codex 运行不再继承本机隐藏记忆，Pi 运行也能收到更明确的输入结束信号",
+          "本地运行时的删除入口会避开会自动恢复的项目，服务端依赖也更新到修复安全问题的版本",
+          "标题字段会在外部更新后安全刷新，Markdown 代码也不再使用会影响命令参数阅读的连字",
+        ],
+      },
+      {
+        version: "0.3.6",
+        date: "2026-05-22",
+        title: "父子 Issue 协作优化、实时智能体工作状态展示",
+        changes: [],
+        features: [
+          "父 Issue 会在子 Issue 完成时自动收到更新，并通知对应负责人",
+          "Issue 列表新增实时智能体工作状态，支持详情查看和工作中筛选",
+          "新用户完成设置后，会进入由 Multica Helper 引导的欢迎体验",
+          "官网新增 Contact Sales 流程，支持商务邮箱提交和防滥用保护",
+          "桌面端支持 macOS 触控板前进/后退手势",
+        ],
+        improvements: [
+          "Issue 看板卡片更容易扫读，信息分行更清晰，长名称会稳定截断，时间也会按当前语言显示",
+          "创建 Issue 时，开始日期默认收进更多菜单，主属性栏更清爽",
+          "工作区可以启用更严格的密钥可见性，让智能体环境信息在读取时始终保持隐藏",
+          "成员较多时，工作区列表加载更高效",
+          "Helper 发现命令行、文档或仓库有更新时，会先提示并建议更新指引，而不是静默沿用旧信息",
+        ],
+        fixes: [
+          "智能体运行时现在会收到工作区设置中的上下文，共享指引可以真正进入任务现场",
+          "在线本地运行环境不再显示会立刻失效的删除操作，并会说明原因",
+          "Pi 回复中的工具调用标记不再泄露到可见消息或 Issue 评论里",
+          "SVG 上传和内联文件预览使用更安全的处理方式",
+          "小队负责人会看到更明确的提醒，避免重复触发同一个智能体",
+          "自托管部署默认不再暴露数据库端口，删除云端运行节点时也会发送正确信息",
+          "桌面端更新设置、移动端技能页面和负责人选择器在不同语言与窄屏下更稳定",
+        ],
+      },
       {
         version: "0.3.5",
         date: "2026-05-21",
@@ -1359,6 +1521,121 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       allReleases: "查看所有版本",
       currentVersion: "当前版本：{version}",
       versionUnavailable: "版本获取失败——请前往 GitHub 查看",
+    },
+  },
+  contactSales: {
+    pageTitle: "联系商务",
+    pageDescription:
+      "了解如何在你的团队中落地 Multica 的人类 + 智能体协作工作流。",
+    eyebrow: "联系商务",
+    title: "先了解你的需求",
+    subtitle: "在正式沟通之前，让我们为你定制最合适的方案。",
+    notice: {
+      badge: "系统仅识别企业邮箱域名。",
+      body: "来自个人邮箱（例如 @gmail.com、@outlook.com）的请求不会被处理。",
+    },
+    fields: {
+      firstName: "名",
+      lastName: "姓",
+      businessEmail: "企业邮箱",
+      businessEmailHint:
+        "请使用真实的企业邮箱域名，方便我们后续与你联系。",
+      companyName: "公司名称",
+      companySize: "公司规模",
+      countryRegion: "国家 / 地区",
+      useCase: "你打算如何使用 Multica 或与我们合作？",
+      goals: "你的目标或挑战",
+      goalsHint:
+        "告诉我们你希望借助 Multica 达成什么目标，或正在面临的挑战。信息越详细，我们越能给到合适的支持。",
+      selectPlaceholder: "请选择",
+      submit: "提交",
+      submitting: "正在提交…",
+    },
+    companySizes: [
+      { value: "1-10", label: "1 – 10 人" },
+      { value: "11-50", label: "11 – 50 人" },
+      { value: "51-200", label: "51 – 200 人" },
+      { value: "201-500", label: "201 – 500 人" },
+      { value: "501-1000", label: "501 – 1,000 人" },
+      { value: "1000+", label: "1,000 人以上" },
+    ],
+    useCases: [
+      { value: "evaluate", label: "正在为团队评估 Multica" },
+      { value: "adopt_team", label: "希望在团队 / 公司内推广使用" },
+      { value: "self_host", label: "需要在自有基础设施上自托管" },
+      { value: "integrate", label: "希望与现有工具集成" },
+      { value: "partner", label: "合作 / 渠道合作咨询" },
+      { value: "other", label: "其他" },
+    ],
+    countries: [
+      "中国大陆",
+      "中国香港",
+      "中国澳门",
+      "中国台湾",
+      "新加坡",
+      "马来西亚",
+      "印度尼西亚",
+      "泰国",
+      "越南",
+      "菲律宾",
+      "日本",
+      "韩国",
+      "印度",
+      "阿联酋",
+      "沙特阿拉伯",
+      "以色列",
+      "土耳其",
+      "美国",
+      "加拿大",
+      "英国",
+      "德国",
+      "法国",
+      "荷兰",
+      "瑞典",
+      "瑞士",
+      "西班牙",
+      "意大利",
+      "爱尔兰",
+      "挪威",
+      "丹麦",
+      "芬兰",
+      "比利时",
+      "葡萄牙",
+      "澳大利亚",
+      "新西兰",
+      "南非",
+      "巴西",
+      "墨西哥",
+      "阿根廷",
+      "智利",
+      "其他",
+    ],
+    consent: {
+      intro:
+        "Multica, Inc. 尊重你的隐私。我们仅会将你的个人信息用于管理账户，以及提供你所请求的产品或服务。我们偶尔也希望与你分享产品更新、最佳实践或行业洞察，如果你愿意接收，请在下方勾选。",
+      outreach:
+        "我希望接收来自 Multica, Inc. 的一对一沟通，包括服务更新、支持咨询以及业务相关的跟进。",
+      updates:
+        "我希望接收 Multica 的产品更新、洞察以及活动邀请。",
+      unsubscribe:
+        "你可以随时取消订阅我们的邮件。关于我们如何处理你的数据以及隐私权利，请参阅",
+      submitConsent:
+        "点击「提交」即表示你同意 Multica, Inc. 存储并处理你提交的信息，以便交付你请求的内容。",
+      privacyLinkLabel: "隐私政策。",
+      privacyLinkHref: "/about",
+    },
+    success: {
+      title: "已收到，谢谢！",
+      message:
+        "Multica 团队会在三个工作日内回复你。在此期间，欢迎查看我们的文档，或在 GitHub 上为我们点个 Star。",
+      cta: "返回首页",
+    },
+    errors: {
+      generic: "提交失败，请稍后再试。",
+      rateLimit: "该邮箱近期已提交多次，请稍后再试。",
+      freeEmail:
+        "请使用企业邮箱——免费邮箱（gmail、outlook 等）暂不接受。",
+      invalidEmail: "邮箱地址格式不正确。",
     },
   },
   };

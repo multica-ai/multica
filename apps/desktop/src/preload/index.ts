@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
+import {
+  isNavigationGesture,
+  NAVIGATION_GESTURE_CHANNEL,
+  type NavigationGesture,
+} from "../shared/navigation-gestures";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -141,6 +146,22 @@ const desktopAPI = {
       ipcRenderer.removeListener("inbox:open", handler);
     };
   },
+  /** Listen for native macOS back/forward swipe gestures. */
+  onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, gesture: unknown) => {
+      if (isNavigationGesture(gesture)) callback(gesture);
+    };
+    ipcRenderer.on(NAVIGATION_GESTURE_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(NAVIGATION_GESTURE_CHANNEL, handler);
+    };
+  },
+  /** Open the OS folder picker and return the chosen absolute path. */
+  pickDirectory: (defaultPath?: string) =>
+    ipcRenderer.invoke("local-directory:pick", defaultPath),
+  /** Validate that a path is an existing readable+writable directory. */
+  validateLocalDirectory: (path: string) =>
+    ipcRenderer.invoke("local-directory:validate", path),
 };
 
 interface DaemonStatus {
@@ -164,6 +185,8 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:restart"),
   getStatus: (): Promise<DaemonStatus> =>
     ipcRenderer.invoke("daemon:get-status"),
+  getHostName: (): Promise<string> =>
+    ipcRenderer.invoke("daemon:get-host-name"),
   onStatusChange: (callback: (status: DaemonStatus) => void) => {
     const handler = (_: unknown, status: DaemonStatus) => callback(status);
     ipcRenderer.on("daemon:status", handler);

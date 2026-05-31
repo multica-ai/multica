@@ -269,7 +269,7 @@ func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 func TestWriteProjectResourcesSkippedWhenNone(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := writeProjectResources(dir, TaskContextForEnv{}); err != nil {
+	if err := writeProjectResources(dir, TaskContextForEnv{}, nil); err != nil {
 		t.Fatalf("writeProjectResources: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".multica", "project", "resources.json")); !os.IsNotExist(err) {
@@ -352,7 +352,7 @@ func TestWriteContextFiles(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "", ctx); err != nil {
+	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -405,7 +405,7 @@ func TestWriteContextFilesOmitsSkillsWhenEmpty(t *testing.T) {
 		IssueID: "minimal-issue-id",
 	}
 
-	if err := writeContextFiles(dir, "", ctx); err != nil {
+	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -435,7 +435,7 @@ func TestWriteContextFilesAutopilotRunOnly(t *testing.T) {
 		AutopilotSource:      "manual",
 	}
 
-	if err := writeContextFiles(dir, "", ctx); err != nil {
+	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -479,7 +479,7 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "claude", ctx); err != nil {
+	if err := writeContextFiles(dir, "claude", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -757,7 +757,7 @@ func TestWriteContextFilesCopilotNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "copilot", ctx); err != nil {
+	if err := writeContextFiles(dir, "copilot", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -808,7 +808,7 @@ func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx); err != nil {
+	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -880,7 +880,7 @@ func TestWriteContextFilesPreservesExistingSkillFrontmatter(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx); err != nil {
+	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -915,7 +915,7 @@ func TestWriteContextFilesInjectsNameIntoNamelessFrontmatter(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx); err != nil {
+	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -953,7 +953,7 @@ func TestWriteContextFilesOpenclawNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "openclaw", ctx); err != nil {
+	if err := writeContextFiles(dir, "openclaw", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -993,7 +993,7 @@ func TestWriteContextFilesKiroNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "kiro", ctx); err != nil {
+	if err := writeContextFiles(dir, "kiro", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1072,6 +1072,74 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 	}
 	if !strings.Contains(s, "discovered automatically") {
 		t.Error("AGENTS.md missing native skill discovery hint")
+	}
+}
+
+// TestInjectRuntimeConfigAntigravity pins that AGENTS.md for Antigravity
+// advertises native skill discovery (rather than the .agent_context fallback)
+// — the CLI inherits Gemini CLI's workspace skill layout at .agents/skills/.
+func TestInjectRuntimeConfigAntigravity(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "antigravity", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "Coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md for Antigravity should advertise native skill discovery")
+	}
+	if strings.Contains(s, ".agent_context/skills/") {
+		t.Error("AGENTS.md for Antigravity must not reference the .agent_context/skills/ fallback")
+	}
+}
+
+// TestWriteContextFilesAntigravityNativeSkills pins that skills for the
+// antigravity provider land in {workDir}/.agents/skills/<slug>/, matching the
+// CLI's native workspace discovery path (Gemini CLI lineage).
+func TestWriteContextFilesAntigravityNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "antigravity-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "antigravity", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".agents", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .agents/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+	// The fallback path must NOT be written — Antigravity's scanner reads
+	// .agents/skills/, not .agent_context/skills/.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error(".agent_context/skills/ MUST NOT be written for antigravity — its scanner does not read that path")
 	}
 }
 
@@ -1482,7 +1550,7 @@ func TestWriteContextFilesHermesFallbackSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "hermes", ctx); err != nil {
+	if err := writeContextFiles(dir, "hermes", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1748,6 +1816,200 @@ func TestPrepareCodexHome_RefreshesStaleAuthCopyOnReuse(t *testing.T) {
 	}
 	if string(data) != `{"refresh_token":"v2"}` {
 		t.Errorf("auth.json content = %q, want refreshed v2 contents", data)
+	}
+}
+
+// Regression for MUL-2646: when the user updates `~/.codex/config.toml`
+// between two task runs against the same per-task codex-home — e.g. to
+// rotate the active [model_providers.X] base_url or point env_key at a
+// new API key — the per-task copy must refresh from the shared source on
+// Reuse(). Without this, Codex keeps reading the old provider URL / env
+// var on session resume, so the agent hits the new endpoint with the old
+// key and the API rejects the token. Symmetric to issue #2081's fix for
+// the symlinked auth.json (covered above).
+func TestPrepareCodexHome_RefreshesStaleCopiedConfigOnReuse(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	oldConfig := `model_provider = "old-provider"
+
+[model_providers.old-provider]
+name = "Old"
+base_url = "https://old.example.com"
+env_key = "OLD_API_KEY"
+`
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(oldConfig), 0o644); err != nil {
+		t.Fatalf("seed shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.json"), []byte(`{"model":"old-model"}`), 0o644); err != nil {
+		t.Fatalf("seed shared config.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "instructions.md"), []byte("old instructions"), 0o644); err != nil {
+		t.Fatalf("seed shared instructions.md: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("first prepareCodexHome: %v", err)
+	}
+
+	// User rotates provider + API key in the shared config between runs.
+	newConfig := `model_provider = "new-provider"
+
+[model_providers.new-provider]
+name = "New"
+base_url = "https://new.example.com"
+env_key = "NEW_API_KEY"
+`
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(newConfig), 0o644); err != nil {
+		t.Fatalf("rotate shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.json"), []byte(`{"model":"new-model"}`), 0o644); err != nil {
+		t.Fatalf("rotate shared config.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "instructions.md"), []byte("new instructions"), 0o644); err != nil {
+		t.Fatalf("rotate shared instructions.md: %v", err)
+	}
+
+	// Resume path: same per-task codex-home, re-prepared.
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("second prepareCodexHome (resume): %v", err)
+	}
+
+	// config.toml must reflect the new provider/URL/env_key.
+	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read per-task config.toml: %v", err)
+	}
+	s := string(data)
+	for _, want := range []string{`model_provider = "new-provider"`, "https://new.example.com", "NEW_API_KEY"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("per-task config.toml missing %q after refresh, got:\n%s", want, s)
+		}
+	}
+	for _, bad := range []string{"old-provider", "https://old.example.com", "OLD_API_KEY"} {
+		if strings.Contains(s, bad) {
+			t.Errorf("per-task config.toml still contains stale %q after refresh, got:\n%s", bad, s)
+		}
+	}
+	// Daemon-managed sandbox / multi-agent / memory blocks must all be
+	// re-applied on top of the fresh copy — PR correctness depends on it.
+	for _, marker := range []string{
+		multicaManagedBeginMarker,
+		multicaMultiAgentBeginMarker,
+		multicaMemoryFeatureBeginMarker,
+		multicaMemoryConfigBeginMarker,
+	} {
+		if !strings.Contains(s, marker) {
+			t.Errorf("daemon-managed marker %q missing after refresh, got:\n%s", marker, s)
+		}
+	}
+
+	// config.json must reflect the new model.
+	data, err = os.ReadFile(filepath.Join(codexHome, "config.json"))
+	if err != nil {
+		t.Fatalf("read per-task config.json: %v", err)
+	}
+	if string(data) != `{"model":"new-model"}` {
+		t.Errorf("per-task config.json content = %q, want refreshed contents", data)
+	}
+
+	// instructions.md must reflect the new content.
+	data, err = os.ReadFile(filepath.Join(codexHome, "instructions.md"))
+	if err != nil {
+		t.Fatalf("read per-task instructions.md: %v", err)
+	}
+	if string(data) != "new instructions" {
+		t.Errorf("per-task instructions.md content = %q, want refreshed contents", data)
+	}
+}
+
+// Regression for MUL-2646 (deletion arm): when the user removes a file from
+// the shared ~/.codex/ between two task runs — for example by dropping the
+// whole `~/.codex/config.toml`, removing `config.json`, or deleting
+// `instructions.md` — the per-task copy must be dropped too, otherwise
+// session resume keeps replaying a provider / instruction file the user has
+// already removed from the shared config. For config.toml the subsequent
+// daemon-managed ensure* passes recreate a minimal file with only the
+// managed sandbox / multi-agent / memory blocks; for config.json and
+// instructions.md the per-task copy simply disappears.
+func TestPrepareCodexHome_DropsCopiedConfigWhenSharedSourceRemoved(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	oldConfig := `model_provider = "old-provider"
+
+[model_providers.old-provider]
+name = "Old"
+base_url = "https://old.example.com"
+env_key = "OLD_API_KEY"
+`
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(oldConfig), 0o644); err != nil {
+		t.Fatalf("seed shared config.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.json"), []byte(`{"model":"old-model"}`), 0o644); err != nil {
+		t.Fatalf("seed shared config.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "instructions.md"), []byte("old instructions"), 0o644); err != nil {
+		t.Fatalf("seed shared instructions.md: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("first prepareCodexHome: %v", err)
+	}
+
+	// Sanity: first prepare seeded all three files into the per-task home.
+	for _, name := range []string{"config.toml", "config.json", "instructions.md"} {
+		if _, err := os.Stat(filepath.Join(codexHome, name)); err != nil {
+			t.Fatalf("first prepare did not seed per-task %s: %v", name, err)
+		}
+	}
+
+	// User removes the shared sources between runs.
+	for _, name := range []string{"config.toml", "config.json", "instructions.md"} {
+		if err := os.Remove(filepath.Join(sharedHome, name)); err != nil {
+			t.Fatalf("remove shared %s: %v", name, err)
+		}
+	}
+
+	// Resume path: same per-task codex-home, re-prepared.
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("second prepareCodexHome (resume): %v", err)
+	}
+
+	// config.json and instructions.md have no daemon-managed default — they
+	// must disappear in lockstep with the shared source.
+	for _, name := range []string{"config.json", "instructions.md"} {
+		if _, err := os.Stat(filepath.Join(codexHome, name)); !os.IsNotExist(err) {
+			t.Errorf("per-task %s still exists after shared source removed (stat err = %v)", name, err)
+		}
+	}
+
+	// config.toml must still exist because the ensure* passes recreate it,
+	// but it must contain only the daemon-managed blocks — no stale user
+	// provider/URL/env_key.
+	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read per-task config.toml after shared removal: %v", err)
+	}
+	s := string(data)
+	for _, bad := range []string{"old-provider", "https://old.example.com", "OLD_API_KEY"} {
+		if strings.Contains(s, bad) {
+			t.Errorf("per-task config.toml still contains stale %q after shared source removed, got:\n%s", bad, s)
+		}
+	}
+	for _, marker := range []string{
+		multicaManagedBeginMarker,
+		multicaMultiAgentBeginMarker,
+		multicaMemoryFeatureBeginMarker,
+		multicaMemoryConfigBeginMarker,
+	} {
+		if !strings.Contains(s, marker) {
+			t.Errorf("daemon-managed marker %q missing after shared source removed, got:\n%s", marker, s)
+		}
 	}
 }
 
@@ -3083,14 +3345,14 @@ func TestBuildMetaSkillContentOmitsRequestingUserWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigCommentTriggerThreadFirstReads locks in
-// MUL-2387 + MUL-2421: the runtime config's comment-triggered Workflow
-// section must steer the agent at thread-aware reads first, default the
-// trigger thread to `--thread <id> --tail 30` (bounded), and explain the
-// reply-cursor walk for older replies. `--recent N` stays as the
-// cross-thread fallback. The Available Commands core line also has to
-// surface the `--tail` flag so the agent has a single place to discover it.
-func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
+// TestInjectRuntimeConfigCommentTriggerColdStartRead checks the
+// comment-triggered Workflow on cold start (no prior run): it points the agent
+// at the triggering thread (--thread <trigger> --tail 30) instead of the flat
+// dump and with no since-delta hint, while the Available Commands core line
+// still surfaces the thread/recent/cursor flags so they remain discoverable for
+// CLI use even though the verbose cursor walkthrough was dropped from the
+// workflow steps.
+func TestInjectRuntimeConfigCommentTriggerColdStartRead(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -3111,33 +3373,18 @@ func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
 	}
 	s := string(data)
 
-	// Workflow step 2 must read the trigger's thread with --thread anchored
-	// on the exact trigger comment id from this task, bounded to --tail 30.
+	// Cold start (no prior run) → read the triggering thread, not the flat dump,
+	// and no since-delta hint.
 	for _, want := range []string{
-		"--thread " + triggerID,
-		"--tail 30",
+		"Read the triggering conversation first",
 		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
-		// Reply cursor walks older replies inside the same thread.
-		"Next reply cursor:",
-		"--before-id <reply-id>",
-		// --recent fallback at the documented default N=20 for cross-thread context.
-		"multica issue comment list " + issueID + " --recent 20 --output json",
-		// Cursor walks via the stderr line the CLI emits, not invented flags.
-		"Next thread cursor",
-		"--before",
-		"--before-id",
-		// --since is still available and combinable (now scoped to the
-		// post-MUL-2421 mode names).
-		"--since",
-		"may combine with `--thread --tail` or `--recent`",
-		// Explicit pushback on the legacy full-dump recipe so the model has
-		// no reason to fall back to it on long issues.
-		"Avoid the unfiltered",
-		"wastes context",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("comment-triggered Workflow missing %q\n---\n%s", want, s)
+			t.Errorf("comment-triggered Workflow missing cold-start read %q\n---\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "new comment(s) since your last run") {
+		t.Errorf("cold-start workflow must not render the since-delta hint\n---\n%s", s)
 	}
 
 	// Available Commands core line must surface the new flags (this is the
@@ -3162,6 +3409,52 @@ func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
 	// regression target: it dumps the entire thread on long threads.
 	if strings.Contains(s, "multica issue comment list "+issueID+" --thread "+triggerID+" --output json") {
 		t.Errorf("comment-triggered Workflow regressed to unbounded --thread recipe (no --tail) — long threads will overflow context\n---\n%s", s)
+	}
+}
+
+// TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead checks the
+// comment-triggered Workflow when the daemon is resuming a prior session and no
+// since-delta hint is present. In that shape, the agent already has session
+// context and the trigger body is injected in the per-turn prompt, so the
+// runtime brief must not force a duplicate thread read.
+func TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead(t *testing.T) {
+	t.Parallel()
+
+	const (
+		issueID   = "issue-resumed-1"
+		triggerID = "trigger-comment-1"
+	)
+	dir := t.TempDir()
+	ctx := TaskContextForEnv{
+		IssueID:             issueID,
+		TriggerCommentID:    triggerID,
+		PriorSessionResumed: true,
+	}
+	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(data)
+
+	for _, want := range []string{
+		"triggering comment is already included above",
+		"No other new comments on this issue since your last run",
+		"Do not re-read comment history by default",
+		"Only if the resumed session is missing thread context",
+		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("comment-triggered resumed Workflow missing %q\n---\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "scoped to the triggering thread") {
+		t.Errorf("resumed Workflow must not claim the delta is thread-scoped\n---\n%s", s)
+	}
+	if strings.Contains(s, "Read the triggering conversation first") {
+		t.Errorf("resumed workflow must not force the cold-start thread read\n---\n%s", s)
 	}
 }
 
@@ -3328,10 +3621,10 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			want: withSection,
 		},
 		{
-			name:                "assignment_triggered",
-			ctx:                 TaskContextForEnv{IssueID: "issue-md-2"},
-			provider:            "claude",
-			filename:            "CLAUDE.md",
+			name:     "assignment_triggered",
+			ctx:      TaskContextForEnv{IssueID: "issue-md-2"},
+			provider: "claude",
+			filename: "CLAUDE.md",
 			workflowStepPresent: []string{
 				"multica issue metadata list issue-md-2 --output json",
 				"See the `## Issue Metadata` section above",
@@ -3485,4 +3778,148 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 			t.Fatalf("codex Windows --content-file rule missing\n---\n%s", s)
 		}
 	})
+}
+
+// Tests below cover the local_directory flow (MUL-2663): the daemon
+// substitutes LocalWorkDir for the synthesized envRoot/workdir when a
+// project pins the task to a user-supplied directory. The agent runs in
+// place; the daemon's envRoot still hosts output/, logs/, and .gc_meta.json
+// (the daemon's logbook), but the workdir slot is the user's path.
+
+func TestPrepareLocalWorkDir(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	userDir := t.TempDir()
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-local",
+		TaskID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "Test Agent",
+		LocalWorkDir:   userDir,
+		Task: TaskContextForEnv{
+			IssueID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if !env.LocalDirectory {
+		t.Fatal("expected env.LocalDirectory to be true")
+	}
+	if env.WorkDir != userDir {
+		t.Errorf("WorkDir = %q, want %q (user-supplied path)", env.WorkDir, userDir)
+	}
+
+	// envRoot should still be created for scratch dirs, but the synthesised
+	// workdir/ subdirectory should NOT exist (we substituted the user's
+	// path for it).
+	for _, sub := range []string{"output", "logs"} {
+		path := filepath.Join(env.RootDir, sub)
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected %s to exist: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(env.RootDir, "workdir")); !os.IsNotExist(err) {
+		t.Fatalf("expected envRoot/workdir to NOT exist for local_directory tasks; err=%v", err)
+	}
+
+	// Context files should still land in the user's directory so the
+	// agent can discover them.
+	contextPath := filepath.Join(userDir, ".agent_context", "issue_context.md")
+	if _, err := os.Stat(contextPath); err != nil {
+		t.Fatalf("expected context file in user dir: %v", err)
+	}
+}
+
+func TestEnvironmentCleanupPreservesLocalDirectory(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	userDir := t.TempDir()
+
+	// Drop a sentinel file inside the user's directory so we can verify
+	// Cleanup never removed it.
+	sentinel := filepath.Join(userDir, "user-file.txt")
+	if err := os.WriteFile(sentinel, []byte("keep me"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-local",
+		TaskID:         "b1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "Test Agent",
+		LocalWorkDir:   userDir,
+		Task:           TaskContextForEnv{IssueID: "issue-1"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	// removeAll=true on a local_directory env MUST NOT touch the user's
+	// directory. envRoot (the daemon's logbook) is fair game.
+	if err := env.Cleanup(true); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("user file removed by Cleanup: %v", err)
+	}
+	if _, err := os.Stat(env.RootDir); !os.IsNotExist(err) {
+		t.Fatalf("expected envRoot to be cleaned, got err=%v", err)
+	}
+
+	// removeAll=false should also leave the user's directory alone (the
+	// existing semantics for non-local tasks would have removed WorkDir
+	// — that's exactly what we must NOT do here).
+	env2, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-local-2",
+		TaskID:         "b2b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "Test Agent",
+		LocalWorkDir:   userDir,
+		Task:           TaskContextForEnv{IssueID: "issue-1"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare 2: %v", err)
+	}
+	if err := env2.Cleanup(false); err != nil {
+		t.Fatalf("Cleanup 2: %v", err)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("partial Cleanup removed user file: %v", err)
+	}
+}
+
+// TestEnvironmentCleanupStandardModeRemovesWorkdir is the negative control:
+// a non-local_directory env preserves its existing semantics so the
+// local_directory branch can't silently regress the regular flow.
+func TestEnvironmentCleanupStandardModeRemovesWorkdir(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-std",
+		TaskID:         "c1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "Test Agent",
+		Task:           TaskContextForEnv{IssueID: "issue-1"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if env.LocalDirectory {
+		t.Fatal("expected LocalDirectory to be false for standard env")
+	}
+	if err := env.Cleanup(false); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if _, err := os.Stat(env.WorkDir); !os.IsNotExist(err) {
+		t.Fatalf("expected workdir to be removed in standard mode")
+	}
+	// output/logs should remain.
+	if _, err := os.Stat(filepath.Join(env.RootDir, "output")); err != nil {
+		t.Fatalf("output/ removed by partial cleanup: %v", err)
+	}
 }

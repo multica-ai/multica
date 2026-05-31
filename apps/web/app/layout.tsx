@@ -1,28 +1,23 @@
 import type { Metadata, Viewport } from "next";
-import { headers } from "next/headers";
 import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
-import {
-  DEFAULT_LOCALE,
-  SUPPORTED_LOCALES,
-  type SupportedLocale,
-} from "@multica/core/i18n";
+import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
+import { getRequestLocale } from "@/lib/request-locale";
 import "./globals.css";
 
-// Font stack: Inter for Latin UI text + system Chinese fonts for zh content.
+// Font stack: Inter for Latin UI text + system CJK fonts for localized content.
 // Desktop app uses the same stack via apps/desktop/src/renderer/src/globals.css —
 // keep the CJK fallback tail in sync across both files. The Inter primary family
 // differs by design: next/font produces `__Inter_xxx` (with a synthetic size-adjusted
 // fallback face to prevent FOUT layout shift); desktop uses fontsource's "Inter Variable".
 // Both resolve to Inter glyphs, so rendering is identical in practice.
-// Currently covers English + Simplified Chinese. When ja/ko i18n lands, extend
-// the tail with Hiragino Kaku Gothic ProN / Yu Gothic / Apple SD Gothic Neo / Malgun Gothic.
-// Per-character fallback: Latin chars render with Inter, Chinese chars with
-// PingFang SC (macOS) / Microsoft YaHei (Windows) / Noto Sans CJK SC (Linux).
+// Per-character fallback: Latin chars render with Inter, CJK chars render with the
+// platform-native Chinese/Korean fallback when needed. Chinese fonts must stay before
+// Korean fonts so zh users do not receive Korean Hanja glyph shapes.
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-sans",
@@ -33,6 +28,9 @@ const inter = Inter({
     "PingFang SC",
     "Microsoft YaHei",
     "Noto Sans CJK SC",
+    "Apple SD Gothic Neo",
+    "Malgun Gothic",
+    "Noto Sans CJK KR",
     "sans-serif",
   ],
 });
@@ -103,10 +101,6 @@ export const metadata: Metadata = {
   },
 };
 
-function isSupportedLocale(value: string | null): value is SupportedLocale {
-  return value !== null && (SUPPORTED_LOCALES as readonly string[]).includes(value);
-}
-
 // HTML lang attribute uses BCP-47 region tags that screen readers and font
 // stacks recognize widely. i18next keeps `zh-Hans` as its internal locale
 // (script subtag is what we actually translate against), but the html element
@@ -114,6 +108,7 @@ function isSupportedLocale(value: string | null): value is SupportedLocale {
 const HTML_LANG: Record<SupportedLocale, string> = {
   en: "en",
   "zh-Hans": "zh-CN",
+  ko: "ko-KR",
 };
 
 export default async function RootLayout({
@@ -121,11 +116,7 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const h = await headers();
-  const headerLocale = h.get("x-multica-locale");
-  const locale: SupportedLocale = isSupportedLocale(headerLocale)
-    ? headerLocale
-    : DEFAULT_LOCALE;
+  const locale = await getRequestLocale();
   const resources = { [locale]: RESOURCES[locale] };
 
   return (

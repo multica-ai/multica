@@ -26,7 +26,7 @@
  * 80px placeholder and the toolbar pins itself open with all actions enabled.
  */
 
-import { Download, ExternalLink, Maximize2 } from "lucide-react";
+import { Download, ExternalLink, Maximize2, Trash2 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useT } from "../i18n";
@@ -42,6 +42,7 @@ interface HtmlAttachmentPreviewProps {
   filename: string;
   onPreview: () => void;
   onDownload: () => void;
+  onDelete?: () => void;
 }
 
 export function HtmlAttachmentPreview({
@@ -49,6 +50,7 @@ export function HtmlAttachmentPreview({
   filename,
   onPreview,
   onDownload,
+  onDelete,
 }: HtmlAttachmentPreviewProps) {
   const { t } = useT("editor");
   // Subscribe to the same React Query cache key the body consumes so the
@@ -143,6 +145,21 @@ export function HtmlAttachmentPreview({
         >
           <Download className="h-3.5 w-3.5" />
         </button>
+        {onDelete && (
+          <button
+            type="button"
+            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            title={t(($) => $.attachment.remove)}
+            aria-label={t(($) => $.attachment.remove)}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onDelete();
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );

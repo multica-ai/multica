@@ -22,7 +22,7 @@ import {
   Tag,
   Users,
 } from "lucide-react";
-import { PageHeader } from "../../layout/page-header";
+import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
@@ -49,6 +49,7 @@ import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
+import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
@@ -59,7 +60,7 @@ import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
@@ -76,7 +77,7 @@ import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { timeAgo } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
@@ -386,6 +387,12 @@ function TimelineSkeleton() {
   );
 }
 
+// When the trailing block is expanded, we still truncate its body to the most
+// recent N entries — a single block of 50 status flips drowns the comment area
+// as badly as N blocks of 1 would. Older entries fold behind a "Show N more
+// activities" line that expands in place.
+const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
+
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
 // priority / assignee churn; the trailing block stays expanded because it
@@ -395,14 +402,25 @@ function ActivityBlock({
   entries,
   expanded,
   onToggle,
+  truncateOlder,
+  showOlder,
+  onToggleShowOlder,
   getActorName,
   t,
+  timeAgo,
 }: {
   entries: TimelineEntry[];
   expanded: boolean;
   onToggle: () => void;
+  // Trailing block only: when true, the body shows only the most recent
+  // LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT entries with the older ones folded
+  // behind a "Show N more activities" inline toggle.
+  truncateOlder: boolean;
+  showOlder: boolean;
+  onToggleShowOlder: () => void;
   getActorName: (type: string, id: string) => string;
   t: ActivityT;
+  timeAgo: (dateStr: string) => string;
 }) {
   if (!expanded) {
     const count = entries.length;
@@ -419,17 +437,42 @@ function ActivityBlock({
       </div>
     );
   }
+  const hiddenOlderCount =
+    truncateOlder && !showOlder && entries.length > LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
+      ? entries.length - LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
+      : 0;
+  const visibleEntries =
+    hiddenOlderCount > 0 ? entries.slice(-LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT) : entries;
+  // Hide the "v N activities" collapse header while we're in the truncated
+  // default state. The "Show N more" link is the only control users need
+  // when they're glancing at recent activity — stacking two chevron rows
+  // looked like nested folds and added visual noise without value. Once the
+  // user explicitly reveals older entries, the header reappears so they can
+  // fold the whole block back to a single count line.
+  const showHeader = hiddenOlderCount === 0;
   return (
     <div className="pb-3 px-4 flex flex-col gap-3">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ChevronDown className="h-3 w-3 shrink-0" />
-        <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
-      </button>
-      {entries.map((entry) => {
+      {showHeader && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronDown className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
+        </button>
+      )}
+      {hiddenOlderCount > 0 && (
+        <button
+          type="button"
+          onClick={onToggleShowOlder}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.show_more_activities, { count: hiddenOlderCount })}</span>
+        </button>
+      )}
+      {visibleEntries.map((entry) => {
         const details = (entry.details ?? {}) as Record<string, string>;
         const isStatusChange = entry.action === "status_changed";
         const isPriorityChange = entry.action === "priority_changed";
@@ -614,10 +657,10 @@ interface IssueDetailProps {
 
 export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
-  const workspace = useCurrentWorkspace();
   const paths = useWorkspacePaths();
 
   // Issue navigation — read from TQ list cache
@@ -709,6 +752,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // versa). Not persisted, matches the resolved-thread behaviour above.
   const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
   const [collapsedActivityIds, setCollapsedActivityIds] = useState<Set<string>>(() => new Set());
+  // Block IDs where the user has explicitly chosen to also reveal the older
+  // (pre-last-8) entries within the trailing block. Kept independent of the
+  // expanded/collapsed sets so collapsing then re-expanding preserves the
+  // "show all" choice, and so the choice survives the block losing its
+  // trailing position when a new comment lands after it.
+  const [showOlderActivityIds, setShowOlderActivityIds] = useState<Set<string>>(() => new Set());
   const toggleActivityBlock = useCallback((id: string, currentlyExpanded: boolean) => {
     if (currentlyExpanded) {
       setCollapsedActivityIds((prev) => {
@@ -735,6 +784,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         return next;
       });
     }
+  }, []);
+  const showOlderActivities = useCallback((id: string) => {
+    setShowOlderActivityIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
   }, []);
   const didHighlightRef = useRef<string | null>(null);
 
@@ -961,7 +1018,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Project segment in the breadcrumb. The issue's project_id is the source of
   // truth — same URL renders the same breadcrumb regardless of entry path.
   const issueProjectId = issue?.project_id;
-  const { data: breadcrumbProject = null, isError: breadcrumbProjectError } = useQuery({
+  const { data: breadcrumbProject = null } = useQuery({
     ...projectDetailOptions(wsId, issueProjectId ?? ""),
     enabled: !!issueProjectId,
   });
@@ -1231,6 +1288,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {/* Properties */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
@@ -1352,6 +1410,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {parentIssue && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${parentIssueOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setParentIssueOpen(!parentIssueOpen)}
           >
@@ -1377,6 +1436,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {githubSettings.prSidebar && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
           >
@@ -1390,6 +1450,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {/* Details */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setDetailsOpen(!detailsOpen)}
         >
@@ -1419,6 +1480,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {usage && usage.task_count > 0 && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${tokenUsageOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setTokenUsageOpen(!tokenUsageOpen)}
           >
@@ -1524,71 +1586,62 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       : collapsedActivityIds.has(item.id)
         ? false
         : item.id === lastActivityGroupId;
+    const truncateOlder = item.id === lastActivityGroupId;
+    const showOlder = showOlderActivityIds.has(item.id);
     return (
       <ActivityBlock
         entries={item.entries}
         expanded={expanded}
         onToggle={() => toggleActivityBlock(item.id, expanded)}
+        truncateOlder={truncateOlder}
+        showOlder={showOlder}
+        onToggleShowOlder={() => showOlderActivities(item.id)}
         getActorName={getActorName}
         t={t}
+        timeAgo={timeAgo}
       />
     );
   };
 
+  // Breadcrumb shows the single most-direct container, never a fabricated chain.
+  // project_id and parent_issue_id are orthogonal (a sub-issue can live in a
+  // different project than its parent), so we never render both: parent wins,
+  // else project, else nothing. The project is still shown in the properties
+  // panel. The workspace name is intentionally absent — "all issues" is a view,
+  // not a container.
+  const breadcrumbSegments: BreadcrumbSegment[] = parentIssue
+    ? [{ href: paths.issueDetail(parentIssue.id), label: parentIssue.identifier }]
+    : breadcrumbProject
+      ? [
+          {
+            href: paths.projectDetail(breadcrumbProject.id),
+            className: "flex items-center gap-1 min-w-0 max-w-72",
+            label: (
+              <>
+                <ProjectIcon project={breadcrumbProject} size="sm" />
+                <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
+              </>
+            ),
+          },
+        ]
+      : [];
+
   const detailContent = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
-        <PageHeader className="gap-2 bg-background text-sm">
-          <div className="flex flex-1 items-center gap-1.5 min-w-0">
-            {workspace && (
-              <>
-                <AppLink
-                  href={paths.issues()}
-                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                >
-                  {workspace.name}
-                </AppLink>
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              </>
-            )}
-            {issueProjectId && (
-              <>
-                {breadcrumbProject ? (
-                  <AppLink
-                    href={paths.projectDetail(breadcrumbProject.id)}
-                    className="flex items-center gap-1 min-w-0 max-w-72 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <ProjectIcon project={breadcrumbProject} size="sm" />
-                    <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
-                  </AppLink>
-                ) : breadcrumbProjectError ? (
-                  <span className="italic text-muted-foreground/70 shrink-0">
-                    {t(($) => $.detail.breadcrumb_project_unknown)}
-                  </span>
-                ) : (
-                  <Skeleton className="h-3.5 w-20 shrink-0" />
-                )}
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              </>
-            )}
-            {parentIssue && (
-              <>
-                <AppLink
-                  href={paths.issueDetail(parentIssue.id)}
-                  className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
-                >
-                  {parentIssue.identifier}
-                </AppLink>
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              </>
-            )}
-            <span className="text-muted-foreground tabular-nums shrink-0">
-              {issue.identifier}
-            </span>
-            <span className="truncate font-medium text-foreground">
-              {issue.title}
-            </span>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
+        <BreadcrumbHeader
+          segments={breadcrumbSegments}
+          leaf={
+            <AppLink
+              href={paths.issueDetail(issue.id)}
+              className="flex min-w-0 transition-opacity hover:opacity-80"
+            >
+              <span className="truncate font-medium text-foreground">
+                {issue.identifier} {issue.title}
+              </span>
+            </AppLink>
+          }
+          actions={
+            <>
             {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
               <Tooltip>
                 <TooltipTrigger
@@ -1665,11 +1718,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               />
               <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
             </Tooltip>
-          </div>
-        </PageHeader>
+            </>
+          }
+        />
 
         <div
           ref={setScrollContainerEl}
+          data-tab-scroll-root
           className="relative flex-1 overflow-y-auto"
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
@@ -1841,6 +1896,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
                   onClick={handleToggleSubscribe}
                   className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
@@ -1879,6 +1935,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 </Popover>
               </div>
             </div>
+
+            <LocalDirectoryHint projectId={issue?.project_id} />
 
             {/* Agent live output — sticky banner in the activity section,
                 keyed by issue id so switching issues remounts the card and

@@ -32,10 +32,13 @@ Multica is an AI-native task management platform — like Linear, but with AI ag
 - `server/` — Go backend (Chi router, sqlc for DB, gorilla/websocket for real-time)
 - `apps/web/` — Next.js frontend (App Router)
 - `apps/desktop/` — Electron desktop app (electron-vite)
-- `packages/core/` — Headless business logic (zero react-dom, all-platform reuse)
+- `apps/mobile/` — Expo / React Native iOS app. See `apps/mobile/CLAUDE.md`.
+- `packages/core/` — Headless business logic (zero react-dom)
 - `packages/ui/` — Atomic UI components (zero business logic)
 - `packages/views/` — Shared business pages/components (zero next/* imports, zero react-router imports)
 - `packages/tsconfig/` — Shared TypeScript configuration
+
+What lives where for sharing purposes is documented in *Sharing Principles* below — read it once.
 
 ### Key Architectural Decisions
 
@@ -52,7 +55,7 @@ Multica is an AI-native task management platform — like Linear, but with AI ag
 The architecture relies on a strict split between server state and client state. Mixing them is the most common way to break it.
 
 - **TanStack Query owns all server state.** Issues, users, workspaces, inbox — anything fetched from the API lives in the Query cache. WS events keep it fresh via invalidation; no polling, no `staleTime` workarounds.
-- **Zustand owns all client state.** UI selections, filters, drafts, modal state, navigation history. Stores live in `packages/core/` (never in `packages/views/`) so both apps share them.
+- **Zustand owns all client state.** UI selections, filters, drafts, modal state, navigation history. Stores live in `packages/core/` (never in `packages/views/`) so they're shared.
 - **React Context** is reserved for cross-cutting platform plumbing — `WorkspaceIdProvider`, `NavigationProvider`. Don't reach for it for general state.
 - **Auth and workspace stores are the only stores allowed to call `api.*` directly**, because they manage critical state that must exist before queries can run. They're created via factory + injected dependencies, registered by the platform layer.
 
@@ -68,6 +71,17 @@ The architecture relies on a strict split between server state and client state.
 
 - Selectors must return stable references. Returning a freshly built object or array on every call (e.g. `s => ({ a: s.a, b: s.b })` or `s => s.items.map(...)`) triggers infinite re-renders. Either select primitives separately or use shallow comparison.
 - Hooks that need workspace context should accept `wsId` as a parameter, not call `useWorkspaceId()` internally — this lets them work outside the `WorkspaceIdProvider` (e.g. in a sidebar that renders before workspace is loaded).
+
+## Sharing Principles
+
+The monorepo splits into two share zones:
+
+- **Web and desktop** share business logic, components, hooks, stores, and views through `packages/core/`, `packages/ui/`, and `packages/views/`. Existing model — keep using it.
+- **Mobile (`apps/mobile/`) is independent.** It shares only **types and pure functions** from `@multica/core/`, with `import type` for types (zero runtime coupling). UI, state, hooks, providers, i18n, React version, build pipeline, release cadence — all mobile-owned.
+
+Mobile is locked to the React version that Expo SDK / React Native ships (which lags React main by 6-12 months). Coupling mobile to the root `catalog:` React would block mobile from upgrading on its own schedule.
+
+See `apps/mobile/CLAUDE.md` for the mobile rules and tech-stack baseline.
 
 ## Commands
 
@@ -110,6 +124,16 @@ cd server && go test ./internal/handler/ -run TestName
 
 # Run a single E2E test (requires backend + frontend running)
 pnpm exec playwright test e2e/tests/specific-test.spec.ts
+
+# Mobile (Expo) — two environments only: dev and staging
+pnpm dev:mobile                  # Metro, dev env       (reads apps/mobile/.env.development.local)
+pnpm dev:mobile:staging          # Metro, staging env   (reads apps/mobile/.env.staging)
+pnpm ios:mobile                  # Native build + install dev-client to iOS Simulator, dev env
+pnpm ios:mobile:staging          # Native build + install dev-client to iOS Simulator, staging env
+pnpm ios:mobile:device           # Native build + install dev-client to USB iPhone, dev env
+pnpm ios:mobile:device:staging   # Native build + install dev-client to USB iPhone, staging env
+# Daily flow: run `pnpm dev:mobile:staging` (or :dev). Only re-run `ios:mobile*` when
+# native code or any expo-*/react-native-* dependency changes (lockfile drift counts).
 
 # Desktop build & package
 pnpm --filter @multica/desktop build      # Compile TS → JS (reads .env.production)
@@ -179,21 +203,29 @@ Every Go handler in `server/internal/handler/` follows these rules. The conventi
 
 When adding a `Queries.Delete*` or `Queries.Update*` call, ask: "Where did this UUID come from?" If the answer is "raw user input that hasn't been validated," route it through `parseUUIDOrBadRequest` or a loader first.
 
+### Dependency Declaration Rule
+
+Every workspace (`apps/` and `packages/` directories) must explicitly declare all directly imported external packages in its own `package.json`. Relying on pnpm hoist to resolve undeclared imports (phantom deps) is prohibited — it causes production build failures when pnpm creates peer-dep variants.
+
+- Use `"pkg": "catalog:"` to reference the shared version from `pnpm-workspace.yaml`.
+- CI enforces this via `eslint-plugin-import-x/no-extraneous-dependencies`.
+- Exception: `apps/mobile/` uses pinned versions (not `catalog:`) for packages tied to its own React/Expo version.
+
 ### Package Boundary Rules
 
 These are hard constraints. Violating them breaks the cross-platform architecture:
 
-- `packages/core/` — zero react-dom, zero localStorage (use StorageAdapter), zero process.env, zero UI libraries. **All shared Zustand stores live here**, even view-related ones (filters, view modes) — stores are pure state, not UI.
+- `packages/core/` — zero react-dom, zero localStorage (use StorageAdapter), zero process.env, zero UI libraries. **Shared Zustand stores live here**, even view-related ones (filters, view modes) — stores are pure state, not UI.
 - `packages/ui/` — zero `@multica/core` imports (pure UI, no business logic).
 - `packages/views/` — zero `next/*` imports, zero `react-router-dom` imports, zero stores. Use `NavigationAdapter` for all routing.
 - `apps/web/platform/` — the only place for Next.js APIs (`next/navigation`).
 - `apps/desktop/src/renderer/src/platform/` — the only place for react-router-dom navigation wiring.
 
-### The No-Duplication Rule
+### The No-Duplication Rule (web + desktop)
 
-**If the same logic exists in both apps, it must be extracted to a shared package.**
+**If the same logic exists in both web and desktop, it must be extracted to a shared package.**
 
-This applies to everything: components, hooks, guards, providers, utility functions. The decision process:
+This applies to everything between web and desktop: components, hooks, guards, providers, utility functions. The decision process:
 
 1. Does this code depend on Next.js or Electron APIs? → Keep in the respective app.
 2. Does it depend on `react-router-dom` or `next/navigation`? → Keep in app's `platform/` layer.
@@ -201,9 +233,9 @@ This applies to everything: components, hooks, guards, providers, utility functi
 
 When the two apps need different behavior for the same concept (e.g., different loading UI), extract the shared logic into a component with props/slots for the differences. Don't duplicate the logic.
 
-### Cross-Platform Development Rules
+### Cross-Platform Development Rules (web + desktop)
 
-When adding a new page or feature:
+When adding a new page or feature for web/desktop:
 
 1. **New page component** → add to `packages/views/<domain>/`. Never import from `next/*` or `react-router-dom`.
 2. **Wire it in both apps** → add a route in `apps/web/app/` (Next.js page file) AND in the desktop router. **Exception**: pre-workspace transition flows (create workspace, accept invite) are NOT routes on desktop — they're `WindowOverlay` state. See *Desktop-specific Rules → Route categories*.
@@ -212,13 +244,17 @@ When adding a new page or feature:
 5. **Platform-specific UI** → if a feature is web-only or desktop-only, keep it in the respective app. Use props slots (`extra`, `topSlot`) on shared layout components to inject platform-specific UI.
 6. **New hooks that need workspace context** → accept `wsId` as parameter instead of reading from `useWorkspaceId()` Context, so they work both inside and outside `WorkspaceIdProvider`.
 
-### CSS Architecture
+### CSS Architecture (web + desktop)
 
-Both apps share the same CSS foundation from `packages/ui/styles/`.
+Web and desktop share the same CSS foundation from `packages/ui/styles/`.
 
 - **Design tokens** → use semantic tokens (`bg-background`, `text-muted-foreground`). Never use hardcoded Tailwind colors (`text-red-500`, `bg-gray-100`).
 - **Shared styles** → `packages/ui/styles/`. Never duplicate scrollbar styling, keyframes, or base layer rules in app CSS.
 - **`@source` directives** → both apps scan shared packages so Tailwind sees all class names.
+
+## Mobile-specific Rules
+
+Rules for `apps/mobile/` live in `apps/mobile/CLAUDE.md`. Read it before touching anything in `apps/mobile/` — it covers what may be imported from `@multica/core/`, the React version policy, the build/release pipeline, and the locked tech-stack baseline.
 
 ## Desktop-specific Rules
 

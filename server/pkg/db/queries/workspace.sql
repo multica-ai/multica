@@ -1,6 +1,9 @@
 -- name: ListWorkspaces :many
-SELECT w.* FROM workspace w
-JOIN member m ON m.workspace_id = w.id
+SELECT w.id, w.name, w.slug, w.description, w.settings,
+       w.created_at, w.updated_at, w.context, w.repos,
+       w.issue_prefix, w.issue_counter
+FROM member m
+JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
 ORDER BY w.created_at ASC;
 

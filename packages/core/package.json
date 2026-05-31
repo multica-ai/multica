@@ -10,6 +10,7 @@
   },
   "exports": {
     ".": "./index.ts",
+    "./markdown": "./markdown/index.ts",
     "./types": "./types/index.ts",
     "./types/*": "./types/*.ts",
     "./api": "./api/index.ts",
@@ -23,9 +24,11 @@
     "./workspace/queries": "./workspace/queries.ts",
     "./workspace/mutations": "./workspace/mutations.ts",
     "./workspace/hooks": "./workspace/hooks.ts",
+    "./workspace/avatar-url": "./workspace/avatar-url.ts",
     "./issues": "./issues/index.ts",
     "./issues/queries": "./issues/queries.ts",
     "./issues/mutations": "./issues/mutations.ts",
+    "./issues/timeline-sort": "./issues/timeline-sort.ts",
     "./issues/ws-updaters": "./issues/ws-updaters.ts",
     "./issues/config": "./issues/config/index.ts",
     "./issues/config/status": "./issues/config/status.ts",
@@ -72,6 +75,9 @@
     "./pins": "./pins/index.ts",
     "./pins/queries": "./pins/queries.ts",
     "./pins/mutations": "./pins/mutations.ts",
+    "./billing": "./billing/index.ts",
+    "./billing/queries": "./billing/queries.ts",
+    "./billing/mutations": "./billing/mutations.ts",
     "./github": "./github/index.ts",
     "./github/queries": "./github/queries.ts",
     "./feedback": "./feedback/index.ts",
@@ -108,6 +114,7 @@
     "react": "catalog:"
   },
   "devDependencies": {
+    "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",

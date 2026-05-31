@@ -1,15 +1,15 @@
 {
   "nav": {
     "inbox": "收件箱",
-    "my_issues": "我的 Issue",
-    "issues": "Issue",
+    "my_issues": "我的 issue",
+    "issues": "Issues",
     "projects": "项目",
     "autopilots": "自动化",
     "agents": "智能体",
     "squads": "小队",
     "usage": "用量",
     "runtimes": "运行时",
-    "skills": "Skill",
+    "skills": "Skills",
     "settings": "设置"
   },
   "help": {

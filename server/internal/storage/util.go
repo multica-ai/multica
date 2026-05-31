@@ -22,9 +22,27 @@ func sanitizeFilename(name string) string {
 // isInlineContentType returns true for media types that browsers should
 // display inline (images, video, audio, PDF). Everything else triggers a
 // download via Content-Disposition: attachment.
+//
+// SVG is excluded even though its MIME type is image/svg+xml: SVG is XML
+// and can carry <script>, <foreignObject>, or onload= attributes that
+// execute in the document's origin when rendered inline. Forcing
+// attachment disposition prevents stored-XSS via uploaded .svg files.
+//
+// Input is normalized (trim, lowercase, strip parameters) before matching
+// so that values like "image/svg+xml; charset=utf-8" or "IMAGE/SVG+XML"
+// can't slip past the SVG carve-out. RFC 2045 §5.1 defines MIME type
+// matching as case-insensitive with optional parameters; this is the
+// security boundary, so normalize here instead of trusting callers.
 func isInlineContentType(ct string) bool {
-	return strings.HasPrefix(ct, "image/") ||
-		strings.HasPrefix(ct, "video/") ||
-		strings.HasPrefix(ct, "audio/") ||
-		ct == "application/pdf"
+	mediaType := strings.ToLower(strings.TrimSpace(ct))
+	if i := strings.IndexByte(mediaType, ';'); i >= 0 {
+		mediaType = strings.TrimSpace(mediaType[:i])
+	}
+	if mediaType == "image/svg+xml" {
+		return false
+	}
+	return strings.HasPrefix(mediaType, "image/") ||
+		strings.HasPrefix(mediaType, "video/") ||
+		strings.HasPrefix(mediaType, "audio/") ||
+		mediaType == "application/pdf"
 }

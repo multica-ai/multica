@@ -190,7 +190,15 @@ vi.mock("../issues/components", () => ({
   StatusPicker: () => <div data-testid="status-picker" />,
   PriorityPicker: () => <div data-testid="priority-picker" />,
   AssigneePicker: () => <div data-testid="assignee-picker" />,
-  StartDatePicker: () => <div data-testid="start-date-picker" />,
+  // Surface open/onOpenChange so tests can assert progressive-disclosure
+  // behavior (mounted only when the user has opted in or has a value).
+  StartDatePicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
+    <div
+      data-testid="start-date-picker"
+      data-open={open ? "true" : "false"}
+      onClick={() => onOpenChange?.(false)}
+    />
+  ),
   DueDatePicker: () => <div data-testid="due-date-picker" />,
 }));
 
@@ -554,6 +562,71 @@ describe("CreateIssueModal", () => {
         project_id: "proj-1",
       }),
     );
+  });
+
+  // Manual → agent must forward parent_issue_id when the modal was opened
+  // from "Add sub issue". Before this, the agent panel received no parent
+  // context and the new issue was filed as a standalone — silently dropping
+  // the sub-issue intent set by openCreateSubIssue. The parent_issue_identifier
+  // tags along so the agent panel can render a "Sub-issue of MUL-XX" chip
+  // without an extra round-trip.
+  //
+  // The identifier fallback matters here: the mocked issueDetailOptions
+  // resolves to null (parent query not hydrated), so without the
+  // `data.parent_issue_identifier` fallback the agent chip would render as
+  // "Sub-issue of " with an empty tail. The UUID alone still wires the
+  // sub-issue relationship correctly, but the visible affordance breaks.
+  it("forwards parent_issue_id and falls back to seeded identifier when switching to agent mode", async () => {
+    const user = userEvent.setup();
+    const onSwitchMode = vi.fn();
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={onSwitchMode}
+        data={{
+          parent_issue_id: "parent-uuid-1",
+          parent_issue_identifier: "MUL-2534",
+        }}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+        backlogHintIssueId={null}
+        setBacklogHintIssueId={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
+    await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
+
+    expect(onSwitchMode).toHaveBeenCalledTimes(1);
+    expect(onSwitchMode.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        prompt: "Refactor auth",
+        parent_issue_id: "parent-uuid-1",
+        parent_issue_identifier: "MUL-2534",
+      }),
+    );
+  });
+
+  // Start date is a low-frequency field — by default it lives behind the
+  // ⋯ overflow menu and is not rendered inline. Clicking the overflow
+  // entry opens it (and mounts the inline pill so the popover has an
+  // anchor); closing without picking returns it to the menu-only state.
+  it("hides start date behind the overflow menu and reveals it on demand", async () => {
+    const user = userEvent.setup();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.queryByTestId("start-date-picker")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Set start date/i }));
+
+    const picker = await screen.findByTestId("start-date-picker");
+    expect(picker).toHaveAttribute("data-open", "true");
+
+    await user.click(picker);
+
+    expect(screen.queryByTestId("start-date-picker")).not.toBeInTheDocument();
   });
 
   // Title + description are packed into the agent prompt on switch; if we

@@ -2,142 +2,33 @@
 
 import { useMemo } from "react";
 import { useStore } from "zustand";
-import {
-  ArrowDown,
-  ArrowUp,
-  Check,
-  ChevronDown,
-  CircleDot,
-  Columns3,
-  Filter,
-  List,
-  SignalHigh,
-  SlidersHorizontal,
-} from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuCheckboxItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-} from "@multica/ui/components/ui/dropdown-menu";
-import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from "@multica/ui/components/ui/popover";
-import { Switch } from "@multica/ui/components/ui/switch";
-import {
-  ALL_STATUSES,
-  STATUS_CONFIG,
-  PRIORITY_ORDER,
-  PRIORITY_CONFIG,
-} from "@multica/core/issues/config";
-import { StatusIcon, PriorityIcon } from "../../issues/components";
-import {
-  SORT_OPTIONS,
-  GROUPING_OPTIONS,
-  CARD_PROPERTY_OPTIONS,
-} from "@multica/core/issues/stores/view-store";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { Issue } from "@multica/core/types";
 import { myIssuesViewStore, type MyIssuesScope } from "@multica/core/issues/stores/my-issues-view-store";
 import { useT } from "../../i18n";
-
-// ---------------------------------------------------------------------------
-// HoverCheck
-// ---------------------------------------------------------------------------
-
-const FILTER_ITEM_CLASS =
-  "group/fitem pr-1.5! [&>[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden";
-
-function HoverCheck({ checked }: { checked: boolean }) {
-  return (
-    <div
-      className="border-input data-[selected=true]:border-primary data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground pointer-events-none size-4 shrink-0 rounded-[4px] border transition-all select-none *:[svg]:opacity-0 data-[selected=true]:*:[svg]:opacity-100 opacity-0 group-hover/fitem:opacity-100 group-focus/fitem:opacity-100 data-[selected=true]:opacity-100"
-      data-selected={checked}
-    >
-      <Check className="size-3.5 text-current" />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function getActiveFilterCount(state: {
-  statusFilters: string[];
-  priorityFilters: string[];
-}) {
-  let count = 0;
-  if (state.statusFilters.length > 0) count++;
-  if (state.priorityFilters.length > 0) count++;
-  return count;
-}
-
-function useIssueCounts(allIssues: Issue[]) {
-  return useMemo(() => {
-    const status = new Map<string, number>();
-    const priority = new Map<string, number>();
-
-    for (const issue of allIssues) {
-      status.set(issue.status, (status.get(issue.status) ?? 0) + 1);
-      priority.set(issue.priority, (priority.get(issue.priority) ?? 0) + 1);
-    }
-
-    return { status, priority };
-  }, [allIssues]);
-}
-
-// ---------------------------------------------------------------------------
-// Scope config
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// MyIssuesHeader
-// ---------------------------------------------------------------------------
+import { WorkspaceAgentWorkingChip } from "../../issues/components/workspace-agent-working-chip";
+import { IssueDisplayControls } from "../../issues/components/issues-header";
 
 export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
   const { t } = useT("my-issues");
+  const { t: tIssues } = useT("issues");
   const SCOPES: { value: MyIssuesScope; label: string; description: string }[] = [
+    { value: "all", label: t(($) => $.header.scope.all_label), description: t(($) => $.header.scope.all_description) },
     { value: "assigned", label: t(($) => $.header.scope.assigned_label), description: t(($) => $.header.scope.assigned_description) },
     { value: "created", label: t(($) => $.header.scope.created_label), description: t(($) => $.header.scope.created_description) },
     { value: "agents", label: t(($) => $.header.scope.agents_label), description: t(($) => $.header.scope.agents_description) },
   ];
-  const viewMode = useStore(myIssuesViewStore, (s) => s.viewMode);
-  const statusFilters = useStore(myIssuesViewStore, (s) => s.statusFilters);
-  const priorityFilters = useStore(myIssuesViewStore, (s) => s.priorityFilters);
-  const sortBy = useStore(myIssuesViewStore, (s) => s.sortBy);
-  const sortDirection = useStore(myIssuesViewStore, (s) => s.sortDirection);
-  const grouping = useStore(myIssuesViewStore, (s) => s.grouping);
-  const cardProperties = useStore(myIssuesViewStore, (s) => s.cardProperties);
   const scope = useStore(myIssuesViewStore, (s) => s.scope);
+  const agentRunningFilter = useStore(myIssuesViewStore, (s) => s.agentRunningFilter);
   const act = myIssuesViewStore.getState();
-
-  const counts = useIssueCounts(allIssues);
-
-  const hasActiveFilters =
-    getActiveFilterCount({ statusFilters, priorityFilters }) > 0;
-
-  const sortLabel =
-    SORT_OPTIONS.find((o) => o.value === sortBy)?.label ?? t(($) => $.header.sort_manual);
-  const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee"> = {
-    status: "group_status",
-    assignee: "group_assignee",
-  };
-  const groupingLabel = t(($) => $.header[GROUPING_LABEL_KEY[grouping]]);
+  const scopedIssueIds = useMemo(
+    () => new Set(allIssues.map((i) => i.id)),
+    [allIssues],
+  );
 
   return (
     <div className="flex h-12 shrink-0 items-center justify-between px-4">
-      {/* Left: scope buttons */}
       <div className="flex items-center gap-1">
         {SCOPES.map((s) => (
           <Tooltip key={s.value}>
@@ -162,270 +53,18 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
         ))}
       </div>
 
-      {/* Right: filter + display + view toggle */}
       <div className="flex items-center gap-1">
-        {/* Filter */}
-        <DropdownMenu>
-          <Tooltip>
-            <DropdownMenuTrigger
-              render={
-                <TooltipTrigger
-                  render={
-                    <Button variant="outline" size="icon-sm" className="relative text-muted-foreground">
-                      <Filter className="size-4" />
-                      {hasActiveFilters && (
-                        <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />
-                      )}
-                    </Button>
-                  }
-                />
-              }
-            />
-            <TooltipContent side="bottom">{t(($) => $.header.filter_button)}</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end" className="w-auto">
-            {/* Status */}
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <CircleDot className="size-3.5" />
-                <span className="flex-1">{t(($) => $.header.filter_status)}</span>
-                {statusFilters.length > 0 && (
-                  <span className="text-xs text-primary font-medium">
-                    {statusFilters.length}
-                  </span>
-                )}
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-auto min-w-48">
-                {ALL_STATUSES.map((s) => {
-                  const checked = statusFilters.includes(s);
-                  const count = counts.status.get(s) ?? 0;
-                  return (
-                    <DropdownMenuCheckboxItem
-                      key={s}
-                      checked={checked}
-                      onCheckedChange={() => act.toggleStatusFilter(s)}
-                      className={FILTER_ITEM_CLASS}
-                    >
-                      <HoverCheck checked={checked} />
-                      <StatusIcon status={s} className="h-3.5 w-3.5" />
-                      {STATUS_CONFIG[s].label}
-                      {count > 0 && (
-                        <span className="ml-auto text-xs text-muted-foreground">
-                          {t(($) => $.header.issue_count, { count })}
-                        </span>
-                      )}
-                    </DropdownMenuCheckboxItem>
-                  );
-                })}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-
-            {/* Priority */}
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
-                <SignalHigh className="size-3.5" />
-                <span className="flex-1">{t(($) => $.header.filter_priority)}</span>
-                {priorityFilters.length > 0 && (
-                  <span className="text-xs text-primary font-medium">
-                    {priorityFilters.length}
-                  </span>
-                )}
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-auto min-w-44">
-                {PRIORITY_ORDER.map((p) => {
-                  const checked = priorityFilters.includes(p);
-                  const count = counts.priority.get(p) ?? 0;
-                  return (
-                    <DropdownMenuCheckboxItem
-                      key={p}
-                      checked={checked}
-                      onCheckedChange={() => act.togglePriorityFilter(p)}
-                      className={FILTER_ITEM_CLASS}
-                    >
-                      <HoverCheck checked={checked} />
-                      <PriorityIcon priority={p} />
-                      {PRIORITY_CONFIG[p].label}
-                      {count > 0 && (
-                        <span className="ml-auto text-xs text-muted-foreground">
-                          {t(($) => $.header.issue_count, { count })}
-                        </span>
-                      )}
-                    </DropdownMenuCheckboxItem>
-                  );
-                })}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-
-            {/* Reset */}
-            {hasActiveFilters && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={act.clearFilters}>
-                  {t(($) => $.header.reset_filters)}
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Display settings */}
-        <Popover>
-          <Tooltip>
-            <PopoverTrigger
-              render={
-                <TooltipTrigger
-                  render={
-                    <Button variant="outline" size="icon-sm" className="text-muted-foreground">
-                      <SlidersHorizontal className="size-4" />
-                    </Button>
-                  }
-                />
-              }
-            />
-            <TooltipContent side="bottom">{t(($) => $.header.display_settings)}</TooltipContent>
-          </Tooltip>
-          <PopoverContent align="end" className="w-64 p-0">
-            {viewMode === "board" && (
-              <div className="border-b px-3 py-2.5">
-                <span className="text-xs font-medium text-muted-foreground">
-                  {t(($) => $.header.grouping)}
-                </span>
-                <div className="mt-2">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full justify-between text-xs"
-                        >
-                          {groupingLabel}
-                          <ChevronDown className="size-3 text-muted-foreground" />
-                        </Button>
-                      }
-                    />
-                    <DropdownMenuContent align="start" className="w-auto">
-                      {GROUPING_OPTIONS.map((opt) => (
-                        <DropdownMenuItem
-                          key={opt.value}
-                          onClick={() => act.setGrouping(opt.value)}
-                        >
-                          {t(($) => $.header[GROUPING_LABEL_KEY[opt.value]])}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            )}
-
-            <div className="border-b px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                {t(($) => $.header.ordering)}
-              </span>
-              <div className="mt-2 flex items-center gap-1.5">
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="flex-1 justify-between text-xs"
-                      >
-                        {sortLabel}
-                        <ChevronDown className="size-3 text-muted-foreground" />
-                      </Button>
-                    }
-                  />
-                  <DropdownMenuContent align="start" className="w-auto">
-                    {SORT_OPTIONS.map((opt) => (
-                      <DropdownMenuItem
-                        key={opt.value}
-                        onClick={() => act.setSortBy(opt.value)}
-                      >
-                        {opt.label}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Button
-                  variant="outline"
-                  size="icon-sm"
-                  onClick={() =>
-                    act.setSortDirection(
-                      sortDirection === "asc" ? "desc" : "asc",
-                    )
-                  }
-                  title={sortDirection === "asc" ? t(($) => $.header.ascending) : t(($) => $.header.descending)}
-                >
-                  {sortDirection === "asc" ? (
-                    <ArrowUp className="size-3.5" />
-                  ) : (
-                    <ArrowDown className="size-3.5" />
-                  )}
-                </Button>
-              </div>
-            </div>
-
-            <div className="px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                {t(($) => $.header.card_properties)}
-              </span>
-              <div className="mt-2 space-y-2">
-                {CARD_PROPERTY_OPTIONS.map((opt) => (
-                  <label
-                    key={opt.key}
-                    className="flex cursor-pointer items-center justify-between"
-                  >
-                    <span className="text-sm">{opt.label}</span>
-                    <Switch
-                      size="sm"
-                      checked={cardProperties[opt.key]}
-                      onCheckedChange={() => act.toggleCardProperty(opt.key)}
-                    />
-                  </label>
-                ))}
-              </div>
-            </div>
-          </PopoverContent>
-        </Popover>
-
-        {/* View toggle */}
-        <DropdownMenu>
-          <Tooltip>
-            <DropdownMenuTrigger
-              render={
-                <TooltipTrigger
-                  render={
-                    <Button variant="outline" size="icon-sm" className="text-muted-foreground">
-                      {viewMode === "board" ? (
-                        <Columns3 className="size-4" />
-                      ) : (
-                        <List className="size-4" />
-                      )}
-                    </Button>
-                  }
-                />
-              }
-            />
-            <TooltipContent side="bottom">
-              {viewMode === "board" ? t(($) => $.header.view_board) : t(($) => $.header.view_list)}
-            </TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end" className="w-auto">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>{t(($) => $.header.view_label)}</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => act.setViewMode("board")}>
-                <Columns3 />
-                {t(($) => $.header.view_board_short)}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => act.setViewMode("list")}>
-                <List />
-                {t(($) => $.header.view_list_short)}
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {agentRunningFilter && (
+          <span className="mr-1 text-xs text-muted-foreground">
+            {tIssues(($) => $.agent_activity.filter_active_label)}
+          </span>
+        )}
+        <WorkspaceAgentWorkingChip
+          value={agentRunningFilter}
+          onToggle={act.toggleAgentRunningFilter}
+          scopedIssueIds={scopedIssueIds}
+        />
+        <IssueDisplayControls scopedIssues={allIssues} />
       </div>
     </div>
   );

@@ -50,6 +50,9 @@ func ProbeAgents() (map[string]AgentEntry, error) {
 				Model: strings.TrimSpace(os.Getenv(modelEnv)),
 			}, true
 		}
+		// The shell fallback only rescues bare command names. An operator who
+		// pinned MULTICA_*_PATH to an absolute or relative path that doesn't
+		// exist should hard-miss, not silently get a different binary.
 		if strings.ContainsAny(cmd, "/\\") {
 			return AgentEntry{}, false
 		}
@@ -58,6 +61,18 @@ func ProbeAgents() (map[string]AgentEntry, error) {
 				Path:  path,
 				Model: strings.TrimSpace(os.Getenv(modelEnv)),
 			}, true
+		}
+		if defaultCmd == "codex" && cmd == defaultCmd {
+			// Codex Desktop bundles its CLI inside the macOS app instead of
+			// installing it onto PATH.
+			for _, p := range codexDesktopAppBundlePaths() {
+				if _, err := os.Stat(p); err == nil {
+					return AgentEntry{
+						Path:  p,
+						Model: strings.TrimSpace(os.Getenv(modelEnv)),
+					}, true
+				}
+			}
 		}
 		return AgentEntry{}, false
 	}
@@ -96,8 +111,15 @@ func ProbeAgents() (map[string]AgentEntry, error) {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
+	// Antigravity has no `--model` flag and ModelSelectionSupported returns
+	// false for it (see server/pkg/agent/models.go). Pass an empty modelEnv
+	// so we don't seed AgentEntry.Model from an environment variable that the
+	// backend would silently ignore, and don't lead users to set it.
+	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", ""); ok {
+		agents["antigravity"] = e
+	}
 	if len(agents) == 0 {
-		return nil, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+		return nil, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or agy and ensure it is on PATH")
 	}
 	return agents, nil
 }
@@ -543,7 +565,19 @@ func shellArgsFromEnv(name string) ([]string, error) {
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
 	"claude", "codex", "opencode", "openclaw", "hermes",
-	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
+	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "agy",
+}
+
+// codexDesktopAppBundlePaths returns the absolute paths where the Codex
+// Desktop app bundles its CLI on macOS. var-not-func so tests can stub it.
+var codexDesktopAppBundlePaths = func() []string {
+	paths := []string{
+		"/Applications/Codex.app/Contents/Resources/codex",
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex"))
+	}
+	return paths
 }
 
 // loginShellResolveTimeout caps how long the daemon will wait for the user's

@@ -343,7 +343,10 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := qtx.DeleteChatSession(r.Context(), session.ID); err != nil {
+	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
+		ID:          session.ID,
+		WorkspaceID: session.WorkspaceID,
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete chat session")
 		return
 	}
@@ -733,7 +736,7 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, taskToResponse(*cancelled))
+	writeJSON(w, http.StatusOK, taskToResponse(*cancelled, workspaceID))
 }
 
 // ---------------------------------------------------------------------------

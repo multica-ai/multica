@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask, TaskFailureReason } from "@multica/core/types";
-import { timeAgo } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import {
   Tooltip,
   TooltipContent,
@@ -89,6 +89,10 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
         (t) =>
           t.status === "queued" ||
           t.status === "dispatched" ||
+          // Daemon-parked task on a busy local_directory — still active
+          // (waiting on a path lock), not terminal. Surfacing it here is
+          // what tells the user the agent is alive and will resume.
+          t.status === "waiting_local_directory" ||
           t.status === "running",
       ),
     [tasks],
@@ -104,7 +108,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
     // Stable sort: failed first, cancelled second, completed last.
     // Within group: newest completed_at first (fall back to created_at
     // for malformed rows missing completed_at).
-    return [...past].sort((a, b) => {
+    return past.toSorted((a, b) => {
       const rankDiff =
         (PAST_STATUS_RANK[a.status] ?? 99) -
         (PAST_STATUS_RANK[b.status] ?? 99);
@@ -120,6 +124,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
   return (
     <div>
       <button
+        type="button"
         className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${
           open ? "" : "text-muted-foreground hover:text-foreground"
         }`}
@@ -200,6 +205,9 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
 const STATUS_TONE: Record<AgentTask["status"], string> = {
   queued: "text-warning",
   dispatched: "text-warning",
+  // Same tone as queued/dispatched — visually "stopped" so users see the
+  // task is parked, but distinguished by the status label.
+  waiting_local_directory: "text-warning",
   running: "text-info",
   completed: "text-success",
   failed: "text-destructive",
@@ -209,11 +217,14 @@ const STATUS_TONE: Record<AgentTask["status"], string> = {
 // Time anchor depends on status. Active rows want "Started 2m ago" /
 // "Queued 30s ago" — what's happening now. Past rows want "5m ago" — when
 // the verdict landed.
-function activeTimeText(task: AgentTask): string {
+function activeTimeText(task: AgentTask, timeAgo: (dateStr: string) => string): string {
   if (task.status === "running" && task.started_at) {
     return timeAgo(task.started_at);
   }
-  if (task.status === "dispatched" && task.dispatched_at) {
+  if (
+    (task.status === "dispatched" || task.status === "waiting_local_directory") &&
+    task.dispatched_at
+  ) {
     return timeAgo(task.dispatched_at);
   }
   return timeAgo(task.created_at);
@@ -248,6 +259,8 @@ function useStatusLabel(status: AgentTask["status"]): string {
   switch (status) {
     case "queued": return t(($) => $.execution_log.status_queued);
     case "dispatched": return t(($) => $.execution_log.status_dispatched);
+    case "waiting_local_directory":
+      return t(($) => $.execution_log.status_waiting_local_directory);
     case "running": return t(($) => $.execution_log.status_running);
     case "completed": return t(($) => $.execution_log.status_completed);
     case "failed": return t(($) => $.execution_log.status_failed);
@@ -257,16 +270,18 @@ function useStatusLabel(status: AgentTask["status"]): string {
 
 function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
   const [cancelling, setCancelling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
-  const time = activeTimeText(task);
+  const time = activeTimeText(task, timeAgo);
 
-  // Transcript only meaningful once messages exist — pure-queued tasks
-  // have nothing to show yet.
-  const showTranscript = task.status !== "queued";
+  // Transcript only meaningful once messages exist — pure-queued and
+  // waiting_local_directory tasks haven't streamed any agent output yet.
+  const showTranscript =
+    task.status !== "queued" && task.status !== "waiting_local_directory";
 
   const handleCancel = async () => {
     if (cancelling) return;
@@ -327,7 +342,11 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         onConfirm={() => void handleCancel()}
-        showRunningNote={task.status === "running" || task.status === "dispatched"}
+        showRunningNote={
+          task.status === "running" ||
+          task.status === "dispatched" ||
+          task.status === "waiting_local_directory"
+        }
       />
     </RowShell>
   );
@@ -337,6 +356,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
 function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
+  const timeAgo = useTimeAgo();
   const [retrying, setRetrying] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);

@@ -1,5 +1,6 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
+import type { NavigationGesture } from "../shared/navigation-gestures";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -42,6 +43,34 @@ interface DesktopAPI {
       issueKey: string;
     }) => void,
   ) => () => void;
+  /** Listen for native macOS back/forward swipe gestures. Returns an unsubscribe function. */
+  onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => () => void;
+  /** Open the OS folder picker and return the chosen absolute path.
+   *  Used by the Project settings "Add local directory" flow. */
+  pickDirectory: (
+    defaultPath?: string,
+  ) => Promise<{
+    ok: boolean;
+    path?: string;
+    basename?: string;
+    reason?: "cancelled" | "no_window" | "error";
+    error?: string;
+  }>;
+  /** Validate that a path is an existing readable+writable directory.
+   *  Mirrors the daemon's runtime check so the user sees errors before submit. */
+  validateLocalDirectory: (
+    path: string,
+  ) => Promise<{
+    ok: boolean;
+    reason?:
+      | "not_absolute"
+      | "not_found"
+      | "not_a_directory"
+      | "not_readable"
+      | "not_writable"
+      | "error";
+    error?: string;
+  }>;
 }
 
 interface DaemonStatus {
@@ -66,6 +95,7 @@ interface DaemonAPI {
   stop: () => Promise<{ success: boolean; error?: string }>;
   restart: () => Promise<{ success: boolean; error?: string }>;
   getStatus: () => Promise<DaemonStatus>;
+  getHostName: () => Promise<string>;
   onStatusChange: (callback: (status: DaemonStatus) => void) => () => void;
   setTargetApiUrl: (url: string) => Promise<void>;
   syncToken: (token: string, userId: string) => Promise<void>;

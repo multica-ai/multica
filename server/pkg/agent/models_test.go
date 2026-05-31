@@ -144,9 +144,9 @@ func TestInferCopilotProvider(t *testing.T) {
 		"raptor-mini":       "",
 		// negative cases: must not be misidentified as OpenAI
 		// reasoning series even though they start with `o`.
-		"opus-fake":         "",
-		"omni":              "",
-		"o":                 "",
+		"opus-fake": "",
+		"omni":      "",
+		"o":         "",
 	}
 	for id, want := range cases {
 		if got := inferCopilotProvider(id); got != want {
@@ -511,6 +511,32 @@ func TestParseHermesSessionNewModels(t *testing.T) {
 	}
 }
 
+func TestParseHermesSessionNewModelsSnakeCaseAndUnknownNames(t *testing.T) {
+	raw := []byte(`{
+      "session_id": "ses_123",
+      "models": {
+        "available_models": [
+          {"model_id": "nous:moonshotai/kimi-k2.6", "name": "Unknown", "description": "Provider: Nous"},
+          {"model_id": "nous:anthropic/claude-sonnet-4.6", "name": "unknown", "description": "Provider: Nous"}
+        ],
+        "current_model_id": "nous:moonshotai/kimi-k2.6"
+      }
+    }`)
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d: %+v", len(models), models)
+	}
+	if models[0].Label != "nous:moonshotai/kimi-k2.6" {
+		t.Errorf("Unknown label should fall back to model id, got %+v", models[0])
+	}
+	if !models[0].Default {
+		t.Errorf("snake_case current_model_id should mark default: %+v", models[0])
+	}
+	if models[1].Label != "nous:anthropic/claude-sonnet-4.6" {
+		t.Errorf("lowercase unknown label should fall back to model id, got %+v", models[1])
+	}
+}
+
 func TestParseHermesSessionNewModelsMissingField(t *testing.T) {
 	// session/new without the models field — older hermes or
 	// failed _build_model_state — should yield nil so the caller
@@ -533,6 +559,18 @@ func TestHermesModelSelectionSupported(t *testing.T) {
 	// not be disabled for it.
 	if !ModelSelectionSupported("hermes") {
 		t.Error("hermes should be model-selection-supported now that set_session_model is wired")
+	}
+}
+
+// TestAntigravityModelSelectionUnsupported pins that the antigravity
+// provider reports model selection as unsupported: `agy` has no
+// `--model` flag and antigravityBackend deliberately drops opts.Model on
+// the floor, so the UI must render a disabled "Managed by runtime"
+// picker rather than an empty dropdown that accepts a silently-ignored
+// custom value.
+func TestAntigravityModelSelectionUnsupported(t *testing.T) {
+	if ModelSelectionSupported("antigravity") {
+		t.Error("antigravity should not be model-selection-supported: agy has no --model flag")
 	}
 }
 

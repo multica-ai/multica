@@ -5,9 +5,14 @@ export function createEnDict(allowSignup: boolean): LandingDict {
   return {
   header: {
     github: "GitHub",
-    login: "Log in",
+    cta: "Get started",
     dashboard: "Dashboard",
+    docs: "Docs",
     changelog: "Changelog",
+    useCases: "Use cases",
+    navigation: "Primary navigation",
+    openMenu: "Open navigation menu",
+    closeMenu: "Close navigation menu",
   },
 
   hero: {
@@ -17,6 +22,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       "Multica is an open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills \u2014 manage your human + agent workforce in one place.",
     cta: "Start free trial",
     downloadDesktop: "Download Desktop",
+    talkToSales: "Talk to sales",
     worksWith: "Works with",
     imageAlt: "Multica board view \u2014 issues managed by humans and agents",
   },
@@ -95,7 +101,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       label: "RUNTIMES",
       title: "One dashboard for all your compute",
       description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 11 supported coding tools on your machine.",
+        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 12 supported coding tools on your machine.",
       cards: [
         {
           title: "Unified runtime panel",
@@ -110,7 +116,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         {
           title: "Auto-detection on first run",
           description:
-            "Multica scans for 11 supported coding tools \u2014 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 12 supported coding tools \u2014 Antigravity, Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -130,7 +136,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 11 supported coding tools (Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi). Whichever ones you already have installed get registered as runtimes automatically.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 12 supported coding tools (Antigravity, Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -186,7 +192,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 11 coding tools out of the box: Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
+          "Multica supports 12 coding tools out of the box: Antigravity, Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -227,6 +233,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "Features", href: "#features" },
           { label: "How it Works", href: "#how-it-works" },
+          { label: "Use cases", href: "/usecases" },
           { label: "Changelog", href: "/changelog" },
           { label: "Download", href: "/download" },
         ],
@@ -244,6 +251,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "About", href: "/about" },
           { label: "Open Source", href: "#open-source" },
+          { label: "Contact Sales", href: "/contact-sales" },
           { label: "GitHub", href: githubUrl },
         ],
       },
@@ -284,6 +292,160 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.3.12",
+        date: "2026-05-29",
+        title: "Issue Session Resume and Korean Support",
+        changes: [],
+        features: [
+          "Agents that continue work from an Issue comment now resume the previous session instead of starting over, keeping the task context intact",
+          "Multica now supports Korean across the app, public site, and documentation, including Korean docs pages and localized date formatting",
+          "Issue pages now keep active agent work visible near the title, with a cleaner view when multiple agents are working at once",
+          "Agents can scan Issue discussions faster with thread previews, reply counts, and recent activity before opening the full conversation",
+          "OpenClaw runtimes can use the MCP setup saved on an agent, and Claude Opus 4.8 is available in model selection and usage estimates",
+        ],
+        improvements: [
+          "Detail pages now share clearer breadcrumb headers, making Issues, projects, runtimes, skills, agents, and squads feel more consistent",
+          "Resumed agent tasks spend less time re-reading comments they already have, so follow-up work returns to the right discussion faster",
+          "Issue mention guidance and CLI command snippets are easier to read and safer to copy",
+        ],
+        fixes: [
+          "Agent skills stay visible after updates, archive, restore, template creation, and environment changes",
+          "Parent Issues assigned to a single agent continue when that agent completes a child Issue",
+          "Desktop now groups WSL2 local runtimes under the local machine when they belong to the current user",
+          "CLI login now accepts Cloud Node tokens",
+        ],
+      },
+      {
+        version: "0.3.11",
+        date: "2026-05-28",
+        title: "Antigravity CLI Support",
+        changes: [],
+        features: [
+          "Antigravity CLI is now a supported coding runtime",
+          "Agent settings now include MCP configuration for Hermes, Kimi, and Kiro",
+          "Self-hosted admins can turn off self-service workspace creation",
+          "Desktop local runtimes can renew access tokens before they expire",
+        ],
+        improvements: [
+          "Helm charts can be published to GHCR, and email setup docs are clearer",
+          "Task transcripts show shorter, safer working-folder labels",
+          "New Issues stay at the top in manual boards, and deleted Issues stay out of recents",
+          "Local runtime machines are grouped by device name",
+        ],
+        fixes: [
+          "Terminal task completion retries brief callback failures",
+          "Local-directory runs preserve existing CLAUDE.md, AGENTS.md, and GEMINI.md files",
+          "Windows Pi runs keep multi-line prompts intact",
+          "Provider logos render consistently",
+          "Daemon cleanup skips incomplete parent-task metadata",
+        ],
+      },
+      {
+        version: "0.3.10",
+        date: "2026-05-27",
+        title: "Local Working Directories",
+        changes: [],
+        features: [
+          "Projects can now use a local working directory on Desktop, so tasks can run in an existing folder while Multica shows when another task is waiting for that directory",
+          "Autopilot webhook triggers can now filter incoming events and actions before work starts, with docs linked directly from the setup flow",
+          "Swimlane views can group Issues by parent Issue, project, or assignee, making large boards easier to slice by how the team plans work",
+          "Comments now support selecting multiple attachments and keeping, removing, or replacing attachments while editing",
+        ],
+        improvements: [
+          "Chinese product copy is more consistent across navigation, settings, search, and runtime screens",
+          "The frontend codebase received accessibility and React cleanup across common screens, and mobile checks now run only when mobile code changes",
+          "CLI list output is cleaner for automated readers, and squad lists now show member counts when available",
+        ],
+        fixes: [
+          "Swimlane lanes no longer appear empty when nested Issues load beyond the first page",
+          "Creating a sub-Issue with an intelligent agent now preserves the parent Issue relationship",
+          "Scheduled autopilot titles and descriptions now use the trigger's configured timezone",
+          "Comment editors avoid duplicate live-update flashes, keep text after failed sends, and apply mention behavior consistently when edited",
+          "Code blocks without a detected language now render their text instead of an empty block",
+          "Desktop and web avatars now resolve relative upload paths correctly",
+          "Codex, Cursor, and Hermes runtime handling received fixes for Desktop discovery, command arguments, usage attribution, and clearer stalled-run diagnostics",
+          "Private intelligent agents can no longer be triggered by plain comments from users who cannot access them",
+          "Several UI details were cleaned up across GitHub settings, project creation, board sorting, and agent skill screens",
+        ],
+      },
+      {
+        version: "0.3.9",
+        date: "2026-05-26",
+        title: "Swimlanes & More Predictable Issues",
+        changes: [],
+        features: [
+          "Issues now support a swimlane view, letting teams review parent work and status columns together when large projects have many subtasks",
+          "Issue lists now support drag-and-drop ordering, sticky group headers, and stable ordering when more results load",
+        ],
+        improvements: [
+          "The CLI now shows the local service version in status output and uses cleaner status fields",
+          "Self-hosting guidance now explains the hourly usage rollup required for accurate usage views, with updated English and Chinese troubleshooting notes",
+          "Agent skill settings were simplified before release so unsupported local-skill controls no longer appear in the product",
+          "Dependency checks are stricter, helping missing packages surface earlier before builds or desktop runs",
+        ],
+        fixes: [
+          "GitHub PRs now finish linked Issues only when the PR clearly says it closes them, so reference-only links no longer close work by accident",
+          "Parent/child Issue automation waits for dependency checks before starting queued follow-up work, and agent-driven status changes trigger the right assignee",
+          "Issue threads and list pages keep their order when loading more content, and board drag positions stay stable",
+          "Chat resize behavior, board-card assignee rows, and XML parsing security received smaller stability fixes",
+        ],
+      },
+      {
+        version: "0.3.8",
+        date: "2026-05-25",
+        title: "Multica for iOS, Helm Self-Hosting & Smoother Collaboration",
+        changes: [],
+        features: [
+          "Multica for iOS is now available as our first official usable mobile client, covering login, workspaces, inbox, Issues, projects, chat, comments, reactions, presence, and live updates; it is not on the App Store yet, so users need to build and install it manually",
+          "Self-hosted teams can now deploy Multica to Kubernetes with a Helm chart, while Docker-based installs keep clearer port and URL controls",
+          "Project resource pickers now include repository search, and workspace repository settings can store descriptions that help agents understand each codebase",
+          "Runtime usage now recognizes DeepSeek, Kimi K2.6, Zhipu GLM, and long-context Claude Opus model costs more accurately",
+          "The public site now supports use-case pages and a clearer path to Docs, Changelog, and getting started",
+        ],
+        improvements: [
+          "Squad avatars and board cards now show richer hover details, clearer member information, and better live status handling",
+          "Desktop tabs better preserve position in long Issues and chats when switching views, with navigation that avoids duplicate history entries",
+          "Code and rich-text content are easier to read, with literal command text preserved and editor styling split into focused areas",
+          "Repository descriptions now travel with the workspace context given to agents, so assigned work can include more useful project background",
+          "Documentation and README content now better reflect mobile support, automatic workflows, license details, and self-host options",
+        ],
+        fixes: [
+          "Issue timelines stay in chronological order when live comments and activity arrive close together",
+          "Codex runs no longer inherit hidden host memory during Multica tasks, and Pi runs receive a cleaner end-of-input signal",
+          "Local runtime delete actions now avoid self-healing rows that would immediately reappear, and dependency updates close server security advisories",
+          "Title fields now refresh safely after external updates, and markdown code no longer uses ligatures that can distort command flags",
+        ],
+      },
+      {
+        version: "0.3.6",
+        date: "2026-05-22",
+        title: "Smarter Welcome, Live Work Signals & Safer Collaboration",
+        changes: [],
+        features: [
+          "New users now enter a guided welcome experience where Multica Helper can introduce the workspace, give a tour, or build a slide-style welcome page",
+          "Issue lists now show when agents are actively working, with per-Issue indicators, hover details, and a quick filter for work in progress",
+          "When a child Issue is finished, the parent Issue now receives a platform-generated update and can notify the right parent owner without creating loops",
+          "The public site now includes a Contact Sales flow with a business-email form and submission protection",
+          "Desktop users can navigate back and forward with macOS swipe gestures",
+        ],
+        improvements: [
+          "Issue board cards are easier to scan, with cleaner rows, better truncation, and localized relative times",
+          "Create Issue keeps start date in the overflow menu until it is needed, leaving the main property bar less crowded",
+          "Workspaces can choose stricter secret visibility so agent environment values stay hidden even from read views",
+          "Workspace lists load more efficiently for members in larger deployments",
+          "Helper now surfaces newer CLI, documentation, or repository behavior instead of silently relying on stale guidance",
+        ],
+        fixes: [
+          "Agents now receive the workspace context configured in settings, so shared guidance is available during runs",
+          "Online local runtimes no longer offer a delete action that immediately reappears because the local service is still running",
+          "Pi responses no longer leak raw tool-call markup into visible assistant messages or Issue comments",
+          "SVG uploads and inline file previews use safer handling by default",
+          "Squad leaders get clearer protection against accidentally triggering the same agent twice",
+          "Self-hosted setups no longer expose the database port by default, and cloud runtime deletion sends the correct request details",
+          "Desktop update settings, mobile skill pages, and assignee pickers now fit better across languages and small screens",
+        ],
+      },
       {
         version: "0.3.5",
         date: "2026-05-21",
@@ -1362,6 +1524,122 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       allReleases: "View all releases",
       currentVersion: "Current version: {version}",
       versionUnavailable: "Version unavailable — check GitHub",
+    },
+  },
+  contactSales: {
+    pageTitle: "Contact Sales",
+    pageDescription:
+      "Talk to the Multica team about rolling out human + agent workflows at your company.",
+    eyebrow: "Contact Sales",
+    title: "Let’s understand your needs",
+    subtitle:
+      "Help us tailor the best solution for you before we connect.",
+    notice: {
+      badge: "Our system only recognizes business email domains.",
+      body: "Requests from personal emails (e.g., @gmail.com, @outlook.com) will not be detected or processed.",
+    },
+    fields: {
+      firstName: "First name",
+      lastName: "Last name",
+      businessEmail: "Business email",
+      businessEmailHint:
+        "Company email required. Please use a valid company domain so we can follow up with you.",
+      companyName: "Company name",
+      companySize: "Company size",
+      countryRegion: "Country / Region",
+      useCase: "How do you plan to use or collaborate with Multica?",
+      goals: "Your goals or challenges",
+      goalsHint:
+        "Tell us what you’d like to achieve with Multica or the challenges you’re facing. The more details you provide, the better we can support you.",
+      selectPlaceholder: "Please select",
+      submit: "Submit",
+      submitting: "Submitting…",
+    },
+    companySizes: [
+      { value: "1-10", label: "1 – 10 employees" },
+      { value: "11-50", label: "11 – 50 employees" },
+      { value: "51-200", label: "51 – 200 employees" },
+      { value: "201-500", label: "201 – 500 employees" },
+      { value: "501-1000", label: "501 – 1,000 employees" },
+      { value: "1000+", label: "1,000+ employees" },
+    ],
+    useCases: [
+      { value: "evaluate", label: "Evaluating Multica for my team" },
+      { value: "adopt_team", label: "Rolling out Multica to a team or company" },
+      { value: "self_host", label: "Self-hosting on our own infrastructure" },
+      { value: "integrate", label: "Integrating Multica with existing tools" },
+      { value: "partner", label: "Partnership or reseller inquiry" },
+      { value: "other", label: "Something else" },
+    ],
+    countries: [
+      "United States",
+      "Canada",
+      "United Kingdom",
+      "Germany",
+      "France",
+      "Netherlands",
+      "Sweden",
+      "Switzerland",
+      "Spain",
+      "Italy",
+      "Ireland",
+      "Norway",
+      "Denmark",
+      "Finland",
+      "Belgium",
+      "Portugal",
+      "Australia",
+      "New Zealand",
+      "Japan",
+      "South Korea",
+      "Singapore",
+      "Hong Kong SAR",
+      "Taiwan",
+      "China (Mainland)",
+      "India",
+      "Indonesia",
+      "Thailand",
+      "Vietnam",
+      "Philippines",
+      "Malaysia",
+      "United Arab Emirates",
+      "Saudi Arabia",
+      "Israel",
+      "Turkey",
+      "South Africa",
+      "Brazil",
+      "Mexico",
+      "Argentina",
+      "Chile",
+      "Other",
+    ],
+    consent: {
+      intro:
+        "Multica, Inc. respects your privacy. We’ll use your personal information only to manage your account and deliver the products or services you’ve requested. Occasionally, we’d love to share product updates, best practices, and insights that may be relevant to you. Please let us know below if you’d like to hear from us.",
+      outreach:
+        "I’d like to receive one-to-one communication from Multica, Inc., including service updates, support inquiries, and business-related follow-ups.",
+      updates:
+        "I’d like to receive product updates, insights, and event invitations from Multica.",
+      unsubscribe:
+        "You can unsubscribe from our communications at any time. For more details on how we handle your data and privacy rights, please review our",
+      submitConsent:
+        "By clicking “Submit,” you consent to allow Multica, Inc. to store and process your information for the purpose of delivering the requested content.",
+      privacyLinkLabel: "Privacy Policy.",
+      privacyLinkHref: "/about",
+    },
+    success: {
+      title: "Thanks — we got it.",
+      message:
+        "A member of the Multica team will respond within three business days. In the meantime, feel free to explore the docs or star us on GitHub.",
+      cta: "Back to home",
+    },
+    errors: {
+      generic: "Something went wrong — please try again in a moment.",
+      rateLimit:
+        "We’ve received a few inquiries from this address recently. Please try again in a little while.",
+      freeEmail:
+        "Please use a business email address — free providers (gmail, outlook, etc.) are not accepted.",
+      invalidEmail: "That doesn’t look like a valid email address.",
     },
   },
   };

@@ -259,6 +259,14 @@ func TestLocalStorage_ServeFile_ContentDispositionFromSidecar(t *testing.T) {
 			filename:    "weird\";name.txt",
 			wantHeader:  `attachment; filename="weird__name.txt"`,
 		},
+		{
+			// SVG can carry <script>/onload — never serve inline.
+			name:        "attachment for svg (stored-XSS prevention)",
+			key:         "workspaces/ws-1/jkl.svg",
+			contentType: "image/svg+xml",
+			filename:    "logo.svg",
+			wantHeader:  `attachment; filename="logo.svg"`,
+		},
 	}
 
 	for _, tc := range cases {

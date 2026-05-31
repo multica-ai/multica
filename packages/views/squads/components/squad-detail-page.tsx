@@ -6,15 +6,18 @@ import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { isImeComposing, timeAgo } from "@multica/core/utils";
+import { isImeComposing } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import { agentListOptions, memberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { CreateAgentDialog } from "../../agents/components/create-agent-dialog";
 import { useNavigation } from "../../navigation";
 import { AppLink } from "../../navigation";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { PageHeader } from "../../layout/page-header";
-import { Users, Plus, Trash2, ArrowLeft, ArrowUpRight, Crown, Camera, Loader2, Pencil, FileText, Save } from "lucide-react";
+import { Users, Plus, Trash2, ArrowUpRight, Crown, Camera, Loader2, Pencil, FileText, Save } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -219,19 +222,21 @@ export function SquadDetailPage() {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="justify-between px-5">
-        <div className="flex items-center gap-2">
-          <AppLink href={p.squads()} className="text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" />
-          </AppLink>
-          <SquadHeaderAvatar squad={squad} initials={initials} />
-          <h1 className="text-sm font-medium">{squad.name}</h1>
-        </div>
-        <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmArchive(true)}>
-          <Trash2 className="size-3.5 mr-1" />
-          {t(($) => $.inspector.archive_button)}
-        </Button>
-      </PageHeader>
+      <BreadcrumbHeader
+        segments={[{ href: p.squads(), label: t(($) => $.page.title) }]}
+        leaf={
+          <>
+            <SquadHeaderAvatar squad={squad} initials={initials} />
+            <h1 className="truncate text-sm font-medium text-foreground">{squad.name}</h1>
+          </>
+        }
+        actions={
+          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmArchive(true)}>
+            <Trash2 className="size-3.5 mr-1" />
+            {t(($) => $.inspector.archive_button)}
+          </Button>
+        }
+      />
 
       {/* Two-column grid mirrors agent-detail-page: left inspector (identity +
           properties + leader), right pane with tabs (Members | Instructions).
@@ -369,7 +374,7 @@ function SquadHeaderAvatar({ squad, initials }: { squad: Squad; initials: string
     <ActorAvatarBase
       name={squad.name}
       initials={initials}
-      avatarUrl={squad.avatar_url}
+      avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
       size={16}
       className="rounded"
     />
@@ -421,7 +426,7 @@ function SquadAvatarEditor({
           <ActorAvatarBase
             name={squad.name}
             initials={initials}
-            avatarUrl={squad.avatar_url}
+            avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
             size={64}
             className="rounded-none"
           />
@@ -809,6 +814,7 @@ function SquadDetailInspector({
   onUpdateDescription: (next: string) => Promise<void>;
 }) {
   const { t } = useT("squads");
+  const timeAgo = useTimeAgo();
   const initials = squad.name
     .split(" ")
     .map((w) => w[0])
@@ -1148,6 +1154,7 @@ function SquadMembersTab({
   setLeaderPending: boolean;
 }) {
   const { t } = useT("squads");
+  const timeAgo = useTimeAgo();
   const p = useWorkspacePaths();
   return (
     <div className="flex flex-col gap-4">
