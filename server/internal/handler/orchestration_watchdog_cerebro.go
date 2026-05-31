@@ -106,6 +106,20 @@ func (w *OrchestrationWatchdog) sweepParent(ctx context.Context, parent db.Issue
 			if w.h.issueHasLabelNamed(ctx, child, orchestrateStalledLabelName) {
 				w.h.detachWorkspaceLabel(ctx, child, orchestrateStalledLabelName)
 			}
+			// CEREBRO-PATCH(orchestration-status-reconcile): FIR-2564 — status must
+			// match reality: a VERIFIED sub-issue is complete, so it must be `done`.
+			// (A run can bump a verified child back to in_progress/in_review — e.g.
+			// a paused/rate-limited agent — leaving it stuck in a non-done status.)
+			if w.h.issueHasLabelNamed(ctx, child, orchestrateVerifiedLabelName) &&
+				child.Status != "done" && child.Status != "cancelled" {
+				if updated, err := w.h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+					ID:          child.ID,
+					Status:      "done",
+					WorkspaceID: child.WorkspaceID,
+				}); err == nil {
+					w.h.publishOrchestratedStatus(ctx, updated)
+				}
+			}
 			continue
 		}
 		switch child.Status {

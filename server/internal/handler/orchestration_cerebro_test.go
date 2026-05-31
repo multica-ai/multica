@@ -580,6 +580,33 @@ func TestOrchestrationWatchdog_NudgesInReviewVerification(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(orchestration-status-reconcile): FIR-2564 — verified ⟹ done.
+// TestOrchestrationWatchdog_ReconcilesVerifiedToDone: a verified sub-issue that
+// got bumped back to a non-done status (e.g. a paused run) is reconciled to done
+// so status matches reality.
+func TestOrchestrationWatchdog_ReconcilesVerifiedToDone(t *testing.T) {
+	fx := newOrchestrationFixture(t)
+	ctx := context.Background()
+
+	if _, err := testHandler.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID: fx.childA.ID, Status: "in_progress", WorkspaceID: fx.parent.WorkspaceID,
+	}); err != nil {
+		t.Fatalf("set in_progress: %v", err)
+	}
+	verified := getOrCreateTestLabel(t, fx.labelID, "orch-verified", "#16a34a")
+	if err := testHandler.Queries.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+		IssueID: fx.childA.ID, LabelID: verified.ID, WorkspaceID: fx.parent.WorkspaceID,
+	}); err != nil {
+		t.Fatalf("attach verified: %v", err)
+	}
+
+	NewOrchestrationWatchdog(testHandler).sweepOnce(ctx, time.Now())
+
+	if got := issueStatus(t, fx.childA); got != "done" {
+		t.Errorf("a verified-but-not-done child should be reconciled to done, got %q", got)
+	}
+}
+
 func TestOrchestrateRejectsCycle(t *testing.T) {
 	fx := newOrchestrationFixture(t)
 	ctx := context.Background()
