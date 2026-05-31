@@ -34,6 +34,7 @@ describe("getAutoSubscribe", () => {
       assignee: true,
       mentioned: false,
       commenter: false,
+      triggered_agent: true,
     });
   });
 });

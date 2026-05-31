@@ -171,6 +171,11 @@ const autoSubscribeRows: AutoSubscribeRowSpec[] = [
     label: "Issues you comment on",
     hint: "Off by default — opt in to follow every issue you reply to.",
   },
+  {
+    reason: "triggered_agent",
+    label: "Issues started by your agents",
+    hint: "On by default — keeps you in the loop when an agent opens an issue on your behalf so it doesn't slip past your inbox.",
+  },
 ];
 
 interface ChannelMeta {

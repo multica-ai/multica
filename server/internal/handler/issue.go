@@ -2302,6 +2302,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		originID = oid
 	}
 
+	// CEREBRO-PATCH(issue-origin-agent-task): MUL-2553 — stamp agent-created issues
+	// with origin_type='agent_task' so the subscriber listener can resolve the
+	// triggering human via agent_task_queue.original_user_id and keep them in the inbox.
+	if !originType.Valid && creatorType == "agent" {
+		if oid, perr := util.ParseUUID(r.Header.Get("X-Task-ID")); perr == nil {
+			originType = pgtype.Text{String: "agent_task", Valid: true}
+			originID = oid
+		}
+	}
+
 	newPosition, err := issueposition.NextTopPosition(r.Context(), tx, wsUUID, status)
 	if err != nil {
 		slog.Warn("get next issue position failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "status", status)...)
@@ -2383,7 +2393,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
-	h.publishToAudience(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp}, h.audienceForIssue(r.Context(), issue))
+	// CEREBRO-PATCH(issue-created-triggering-task): MUL-2553 — include the triggering task_id
+	// in the event payload so the subscriber listener resolves agent_task_queue.original_user_id
+	// and auto-subscribes the human who started the chain.
+	createdPayload := map[string]any{"issue": resp}
+	if originType.Valid && originType.String == "agent_task" {
+		createdPayload["triggering_task_id"] = uuidToString(originID)
+	}
+	h.publishToAudience(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, createdPayload, h.audienceForIssue(r.Context(), issue))
 	analyticsActorID := actualCreatorID
 	analyticsAgentID := ""
 	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" {
