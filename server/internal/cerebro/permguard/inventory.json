@@ -1965,12 +1965,20 @@
       "exempt": "bootstrap \u2014 uses runtime-setup token before any user session exists"
     },
     {
+      "id": "skill change-requests",
+      "exempt": "read-only \u2014 wraps GET /api/skills/[{id}/]change-requests"
+    },
+    {
       "id": "skill create",
       "gate": "via:POST /api/skills/"
     },
     {
       "id": "skill delete",
       "gate": "via:DELETE /api/skills/{id}/"
+    },
+    {
+      "id": "skill diff",
+      "exempt": "read-only \u2014 wraps GET /api/skills/{id}/versions"
     },
     {
       "id": "skill files delete",
@@ -1985,6 +1993,10 @@
       "gate": "via:PUT /api/skills/{id}/files"
     },
     {
+      "id": "skill fork",
+      "gate": "via:POST /api/skills/{id}/forks"
+    },
+    {
       "id": "skill get",
       "exempt": "read-only \u2014 wraps GET /api/skills/{id}"
     },
@@ -1997,8 +2009,24 @@
       "exempt": "read-only \u2014 wraps GET /api/skills/"
     },
     {
+      "id": "skill ownership",
+      "gate": "via:PUT /api/skills/{id}/ownership"
+    },
+    {
+      "id": "skill propose",
+      "gate": "via:POST /api/skills/{id}/change-requests"
+    },
+    {
+      "id": "skill review",
+      "gate": "via:POST /api/skills/change-requests/{crId}/review"
+    },
+    {
       "id": "skill update",
       "gate": "via:PUT /api/skills/{id}/"
+    },
+    {
+      "id": "skill versions",
+      "exempt": "read-only \u2014 wraps GET /api/skills/{id}/versions"
     },
     {
       "id": "squad activity",
