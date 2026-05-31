@@ -3,6 +3,7 @@
 import { Cloud, Lock, Monitor } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { Agent, AgentRuntime } from "@multica/core/types";
+import { formatPauseReason } from "@multica/cerebro-runtime/views";
 import {
   type AgentActivity,
   type AgentPresenceDetail,
@@ -98,7 +99,12 @@ export function createAgentColumns({
         if (row.original.agent.archived_at) {
           return <span className="text-xs text-muted-foreground">—</span>;
         }
-        return <AvailabilityCell presence={row.original.presence} />;
+        return (
+          <AvailabilityCell
+            presence={row.original.presence}
+            runtime={row.original.runtime}
+          />
+        );
       },
     },
     {
@@ -252,8 +258,10 @@ function AgentNameCell({ row }: { row: AgentRow }) {
 
 function AvailabilityCell({
   presence,
+  runtime,
 }: {
   presence: AgentPresenceDetail | null | undefined;
+  runtime: AgentRuntime | null;
 }) {
   const { t } = useT("agents");
   if (!presence) {
@@ -262,10 +270,14 @@ function AvailabilityCell({
     );
   }
   const av = availabilityConfig[presence.availability];
+  const label =
+    presence.availability === "paused" && runtime?.paused_at
+      ? `${t(($) => $.availability.paused)} · ${formatPauseReason(runtime.pause_reason)}`
+      : t(($) => $.availability[presence.availability]);
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${av.dotClass}`} />
-      <span className={`text-xs ${av.textClass}`}>{t(($) => $.availability[presence.availability])}</span>
+      <span className={`truncate text-xs ${av.textClass}`}>{label}</span>
     </span>
   );
 }

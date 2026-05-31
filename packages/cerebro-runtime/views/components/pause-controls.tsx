@@ -91,7 +91,7 @@ export function PauseBanner({ runtime }: PauseBannerProps) {
 
   if (!runtime.paused_at) return null;
 
-  const reason = runtime.pause_reason || "manual";
+  const reason = formatPauseReason(runtime.pause_reason);
   const remaining = runtime.unpause_at ? formatRemaining(runtime.unpause_at, now) : null;
 
   return (
@@ -108,6 +108,24 @@ export function PauseBanner({ runtime }: PauseBannerProps) {
       </div>
     </div>
   );
+}
+
+export function formatPauseReason(reason?: string | null): string {
+  switch (reason) {
+    case "rate_limit":
+      return "usage or rate limit";
+    case "auth_error":
+      return "authentication failed";
+    case "auto":
+      return "automatic pause";
+    case "manual":
+    case "":
+    case null:
+    case undefined:
+      return "manual pause";
+    default:
+      return reason.replaceAll("_", " ");
+  }
 }
 
 /**

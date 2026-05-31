@@ -13,4 +13,13 @@ export const failureReasonLabel: Record<TaskFailureReason, string> = {
   runtime_offline: "Daemon offline",
   runtime_recovery: "Daemon restarted",
   manual: "Cancelled by user",
+  runtime_paused: "Runtime paused",
+  rate_limit: "Usage or rate limit",
+  auth_error: "Authentication failed",
+  queued_expired: "Queue expired",
+  idle_watchdog: "No activity timeout",
+  codex_semantic_inactivity: "No semantic progress",
+  iteration_limit: "Iteration limit reached",
+  agent_fallback_message: "Fallback response",
+  api_invalid_request: "Invalid provider request",
 };

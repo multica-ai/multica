@@ -2395,9 +2395,10 @@ export class ApiClient {
     );
   }
 
-  async rerunIssue(issueId: string): Promise<AgentTask> {
+  async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
+      body: taskId ? JSON.stringify({ task_id: taskId }) : undefined,
     });
   }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -52,8 +53,8 @@ const (
 // the consecutive-pause counter once per cycle.
 func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTaskQueue) bool {
 	now := time.Now()
-	resetAt, hasReset, pauseWorthy := classifyAutoPause(task, now)
-	if !pauseWorthy {
+	decision := classifyAutoPause(task, now)
+	if !decision.pauseWorthy {
 		return false
 	}
 
@@ -72,9 +73,12 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 	}
 
 	circuitOpen := count >= autoPauseCircuitLimit
-	unpauseAt := nextUnpauseAt(count, resetAt, hasReset, now)
+	if decision.manualOnly {
+		circuitOpen = true
+	}
+	unpauseAt := nextUnpauseAt(count, decision.resetAt, decision.hasReset, now)
 
-	opts := handler.RuntimePauseOptions{Reason: "auto"}
+	opts := handler.RuntimePauseOptions{Reason: decision.pauseReason}
 	if !circuitOpen {
 		opts.UnpauseAt = unpauseAt
 	}
@@ -90,31 +94,28 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 		)
 		return false
 	}
-	// Re-classify the triggering task so the unpause sweeper can resume it.
+	// Re-classify the triggering task so the run log and unpause sweeper see
+	// the real pause cause. Rate-limit-like failures remain resumable; auth
+	// failures stay manual-only and require a human to fix credentials before
+	// retrying.
 	// The daemon sends an empty failure_reason for generic errors, which
 	// defaults to 'agent_error'. That value is excluded from
-	// ListResumableTasksForRuntime's Category-2 resume set. Reclassifying
-	// to 'rate_limit' puts it back in the window. The SQL WHERE guard
-	// makes this idempotent on re-pause.
-	if err := s.Cerebro.ReclassifyAsRateLimit(ctx, task.ID); err != nil {
+	// ListResumableTasksForRuntime's Category-2 resume set.
+	if err := s.Cerebro.ReclassifyAutoPauseFailure(ctx, task.ID, decision.failureReason); err != nil {
 		slog.Warn("auto-pause on failure: reclassify task failed",
 			"task_id", util.UUIDToString(task.ID),
 			"error", err,
 		)
 	}
 
-	// Post the circuit-breaker notice exactly once — on the failure whose
-	// increment hit the limit. Bursts can't double-post: the atomic counter
-	// hands a distinct value to each caller, so only one sees == limit.
-	if count == autoPauseCircuitLimit {
-		s.notifyAutoPauseCircuitOpen(ctx, task, count)
-	}
+	s.notifyAutoPauseFailure(ctx, task, decision, unpauseAt, circuitOpen, count)
 
 	slog.Info("auto-paused runtime on task failure",
 		"runtime_id", util.UUIDToString(task.RuntimeID),
 		"task_id", util.UUIDToString(task.ID),
 		"consecutive_pauses", count,
 		"circuit_open", circuitOpen,
+		"pause_reason", decision.pauseReason,
 		"unpause_at", unpauseAtLog(unpauseAt, circuitOpen),
 	)
 	return true
@@ -137,23 +138,59 @@ func (s *Service) ResetAutoPauseCount(ctx context.Context, runtimeID pgtype.UUID
 	}
 }
 
+type autoPauseDecision struct {
+	pauseWorthy   bool
+	hasReset      bool
+	manualOnly    bool
+	resetAt       time.Time
+	pauseReason   string
+	failureReason string
+	title         string
+	detail        string
+}
+
 // classifyAutoPause is the pure decision half of MaybeAutoPauseOnFailure.
-// Returns (resetAt, hasReset, pauseWorthy):
-//   - pauseWorthy=false → the error does not warrant a runtime pause.
-//   - hasReset=true     → resetAt is a concrete provider reset time to pause until.
-//   - hasReset=false    → pause-worthy but no parseable reset; caller applies
-//     the growing backoff.
+// It separates pause-worthy provider blockers into user-facing categories so
+// the task row, runtime banner, and issue comment all explain the same cause.
 //
 // Split out for unit-testability — the side-effectful PauseRuntime / counter
 // calls sit behind a real DB so cannot be exercised in a plain unit test.
-func classifyAutoPause(task db.AgentTaskQueue, now time.Time) (time.Time, bool, bool) {
+func classifyAutoPause(task db.AgentTaskQueue, now time.Time) autoPauseDecision {
 	if !task.RuntimeID.Valid {
-		return time.Time{}, false, false
+		return autoPauseDecision{}
 	}
 	if !task.Error.Valid || task.Error.String == "" {
-		return time.Time{}, false, false
+		return autoPauseDecision{}
 	}
-	return account.ClassifyRateLimitReset(task.Error.String, now)
+	if isProviderAuthError(task.Error.String) {
+		return autoPauseDecision{
+			pauseWorthy:   true,
+			manualOnly:    true,
+			pauseReason:   "auth_error",
+			failureReason: "auth_error",
+			title:         "Provider authentication failed",
+			detail:        "Runtimen kan ikke starte nye kørsler, før konto eller API-nøgle er fornyet.",
+		}
+	}
+	resetAt, hasReset, pauseWorthy := account.ClassifyRateLimitReset(task.Error.String, now)
+	if !pauseWorthy {
+		return autoPauseDecision{}
+	}
+	return autoPauseDecision{
+		pauseWorthy:   true,
+		hasReset:      hasReset,
+		resetAt:       resetAt,
+		pauseReason:   "rate_limit",
+		failureReason: "rate_limit",
+		title:         "Usage or rate limit reached",
+		detail:        "Runtimen er midlertidigt sat på pause, så den ikke brænder flere forsøg mens udbyderen afviser kørsler.",
+	}
+}
+
+func isProviderAuthError(errText string) bool {
+	lower := strings.ToLower(errText)
+	return strings.Contains(lower, "401 invalid authentication credentials") ||
+		strings.Contains(lower, "failed to authenticate")
 }
 
 // nextUnpauseAt computes the scheduled unpause time for a non-circuit-open
@@ -183,22 +220,29 @@ func growingBackoff(count int32) time.Duration {
 	return d
 }
 
-// notifyAutoPauseCircuitOpen posts the single human-facing notice when the
-// circuit breaker trips. Best-effort and deliberately mention-free: an
-// @mention here would re-trigger the agent loop the breaker just stopped.
+// notifyAutoPauseFailure posts the human-facing explanation for the failed run
+// that paused the runtime. Best-effort and deliberately mention-free: an
+// @mention here would re-trigger the agent loop the pause just stopped.
 // Skipped for tasks with no issue (e.g. chat tasks) — there is nowhere to post.
-func (s *Service) notifyAutoPauseCircuitOpen(ctx context.Context, task db.AgentTaskQueue, count int32) {
+func (s *Service) notifyAutoPauseFailure(ctx context.Context, task db.AgentTaskQueue, decision autoPauseDecision, unpauseAt time.Time, manualOnly bool, count int32) {
 	if !task.IssueID.Valid || !task.AgentID.Valid {
 		return
 	}
+	next := "Den genoptager automatisk " + unpauseAt.Format(time.RFC3339) + "."
+	if manualOnly {
+		next = "Den genoptager ikke automatisk. Ret årsagen og genoptag runtimen manuelt."
+		if count >= autoPauseCircuitLimit && !decision.manualOnly {
+			next = fmt.Sprintf(
+				"Den genoptager ikke automatisk, fordi samme runtime er blevet pauset %d gange i træk uden en succesfuld kørsel.",
+				count,
+			)
+		}
+	}
 	body := fmt.Sprintf(
-		"⚠️ Auto-genoptagelse er stoppet for denne runtime.\n\n"+
-			"Runtimen er blevet automatisk sat på pause %d gange i træk uden en succesfuld kørsel "+
-			"(typisk \"usage limit\" eller \"runtime paused\"). For ikke at brænde flere kreditter på "+
-			"forsøg der alligevel fejler, genoptager systemet ikke længere automatisk.\n\n"+
-			"Et menneske skal gribe ind: vent til runtimens loft er nulstillet og genoptag den manuelt, "+
-			"eller skift den fejlende konto/nøgle ud. Tælleren nulstilles automatisk ved første succesfulde kørsel.",
-		count,
+		"Runtimen er sat på pause: %s.\n\n%s\n\n%s",
+		decision.title,
+		decision.detail,
+		next,
 	)
 	comment, err := s.Cerebro.CreateAutoPauseAlertComment(ctx, cerebrodb.CreateAutoPauseAlertCommentParams{
 		AuthorID: task.AgentID,
@@ -206,7 +250,7 @@ func (s *Service) notifyAutoPauseCircuitOpen(ctx context.Context, task db.AgentT
 		IssueID:  task.IssueID,
 	})
 	if err != nil {
-		slog.Warn("auto-pause circuit breaker: post notice failed",
+		slog.Warn("auto-pause failure: post notice failed",
 			"runtime_id", util.UUIDToString(task.RuntimeID),
 			"issue_id", util.UUIDToString(task.IssueID),
 			"error", err,
