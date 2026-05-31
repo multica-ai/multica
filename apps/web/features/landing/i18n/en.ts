@@ -293,6 +293,30 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.12",
+        date: "2026-05-29",
+        title: "Issue Session Resume and Korean Support",
+        changes: [],
+        features: [
+          "Agents that continue work from an Issue comment now resume the previous session instead of starting over, keeping the task context intact",
+          "Multica now supports Korean across the app, public site, and documentation, including Korean docs pages and localized date formatting",
+          "Issue pages now keep active agent work visible near the title, with a cleaner view when multiple agents are working at once",
+          "Agents can scan Issue discussions faster with thread previews, reply counts, and recent activity before opening the full conversation",
+          "OpenClaw runtimes can use the MCP setup saved on an agent, and Claude Opus 4.8 is available in model selection and usage estimates",
+        ],
+        improvements: [
+          "Detail pages now share clearer breadcrumb headers, making Issues, projects, runtimes, skills, agents, and squads feel more consistent",
+          "Resumed agent tasks spend less time re-reading comments they already have, so follow-up work returns to the right discussion faster",
+          "Issue mention guidance and CLI command snippets are easier to read and safer to copy",
+        ],
+        fixes: [
+          "Agent skills stay visible after updates, archive, restore, template creation, and environment changes",
+          "Parent Issues assigned to a single agent continue when that agent completes a child Issue",
+          "Desktop now groups WSL2 local runtimes under the local machine when they belong to the current user",
+          "CLI login now accepts Cloud Node tokens",
+        ],
+      },
+      {
         version: "0.3.11",
         date: "2026-05-28",
         title: "Antigravity CLI Support",

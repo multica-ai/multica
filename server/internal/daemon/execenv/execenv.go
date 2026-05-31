@@ -41,6 +41,11 @@ type PrepareParams struct {
 	Provider       string // agent provider (determines runtime config and skill injection paths)
 	CodexVersion   string // detected Codex CLI version (only used when Provider == "codex")
 	OpenclawBin    string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
+	// provider-specific config preparer when that provider materialises MCP
+	// via a per-task config file. Only OpenClaw consumes it here today; other
+	// providers wire MCP via ExecOptions.McpConfig in the agent backend.
+	McpConfig json.RawMessage
 	// LocalWorkDir, when non-empty, redirects the agent's working directory
 	// to a user-supplied absolute path instead of the synthesised envRoot/
 	// workdir. The path is NOT copied or mounted — the agent operates on
@@ -56,6 +61,9 @@ type PrepareParams struct {
 type TaskContextForEnv struct {
 	IssueID                 string
 	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
+	NewCommentCount         int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)
+	NewCommentsSince        string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
+	PriorSessionResumed     bool   // true when the daemon will resume an existing provider session for this task
 	AgentID                 string // unique ID of the dispatched agent
 	AgentName               string
 	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
@@ -229,7 +237,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// silently degrading to a minimal config would mask it by booting
 	// OpenClaw without the agents / providers / API keys it expects.
 	if params.Provider == "openclaw" {
-		result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: params.OpenclawBin})
+		result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
+			OpenclawBin: params.OpenclawBin,
+			McpConfig:   params.McpConfig,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare openclaw config: %w", err)
 		}
@@ -249,6 +260,11 @@ type ReuseParams struct {
 	Provider     string
 	CodexVersion string // only used when Provider == "codex"
 	OpenclawBin  string // only used when Provider == "openclaw"; empty = PATH lookup
+	// McpConfig is the agent's saved `mcp_config` JSON. Reused on reuse so a
+	// freshly-saved managed set re-materialises into the wrapper before the
+	// task starts — without this a stale wrapper from a prior run would keep
+	// the old MCP set in play.
+	McpConfig json.RawMessage
 	// LocalDirectory is true when the reused WorkDir is a user-supplied
 	// directory (the local_directory flow). The flag is propagated into
 	// the returned Environment so downstream callers (notably the GC
@@ -330,7 +346,10 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// reuse rather than degrade to a minimal config that boots OpenClaw
 	// without the registered agents.
 	if params.Provider == "openclaw" {
-		result, err := prepareOpenclawConfig(env.RootDir, params.WorkDir, OpenclawConfigPrep{OpenclawBin: params.OpenclawBin})
+		result, err := prepareOpenclawConfig(env.RootDir, params.WorkDir, OpenclawConfigPrep{
+			OpenclawBin: params.OpenclawBin,
+			McpConfig:   params.McpConfig,
+		})
 		if err != nil {
 			logger.Warn("execenv: refresh openclaw config failed", "error", err)
 			return nil

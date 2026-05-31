@@ -37,7 +37,7 @@
     "section_local": "Local",
     "section_remote": "Remote",
     "section_cloud": "Cloud",
-    "this_machine": "This Mac",
+    "this_machine": "This device",
     "local_badge": "Local · this machine",
     "runtime_count_one": "{{count}} runtime",
     "runtime_count_other": "{{count}} runtimes",

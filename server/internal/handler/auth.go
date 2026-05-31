@@ -47,6 +47,7 @@ const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
 var supportedLanguages = map[string]struct{}{
 	"en":      {},
 	"zh-Hans": {},
+	"ko":      {},
 }
 
 type UserResponse struct {

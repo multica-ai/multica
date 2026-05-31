@@ -2681,6 +2681,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:                          task.IssueID,
 		TriggerCommentID:                 task.TriggerCommentID,
+		NewCommentCount:                  task.NewCommentCount,
+		NewCommentsSince:                 task.NewCommentsSince,
+		PriorSessionResumed:              task.PriorSessionID != "",
 		AgentID:                          agentID,
 		AgentName:                        agentName,
 		AgentInstructions:                instructions,
@@ -2736,12 +2739,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running
 	// Prepare against a stable user path is cheap (no clone, no copy).
+	var agentMcpConfig json.RawMessage
+	if task.Agent != nil {
+		agentMcpConfig = task.Agent.McpConfig
+	}
 	if task.PriorWorkDir != "" && localAssignment == nil {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkDir:      task.PriorWorkDir,
 			Provider:     provider,
 			CodexVersion: codexVersion,
 			OpenclawBin:  openclawBin,
+			McpConfig:    agentMcpConfig,
 			Task:         taskCtx,
 		}, d.logger)
 	}
@@ -2755,6 +2763,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Provider:       provider,
 			CodexVersion:   codexVersion,
 			OpenclawBin:    openclawBin,
+			McpConfig:      agentMcpConfig,
 			Task:           taskCtx,
 		}
 		if localAssignment != nil {

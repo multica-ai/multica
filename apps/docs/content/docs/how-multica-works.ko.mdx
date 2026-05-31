@@ -1,0 +1,54 @@
+---
+title: Multica의 작동 방식
+description: 세 가지 핵심 구성 요소(서버 / 데몬 / AI 코딩 도구)가 어떻게 협력하여 에이전트의 작업을 실행하는지 설명합니다.
+---
+
+import { ArchitectureDiagram } from "@/components/architecture-diagram";
+
+Multica는 **분산형** 플랫폼입니다. 여러분이 보는 웹 인터페이스는 겉으로 드러난 부분일 뿐이고, 실제 작업은 세 가지 구성 요소가 처리합니다. **Multica 서버**는 데이터를 소유합니다([워크스페이스](/workspaces), [이슈](/issues), [멤버](/members-roles), [작업](/tasks) 대기열 등). **[데몬](/daemon-runtimes)**은 여러분 자신의 기기에서 실행되며 작업을 가져와 AI 코딩 도구를 구동합니다. 그리고 **[AI 코딩 도구](/providers)**(Claude Code, Codex, 그 밖의 로컬 CLI)는 실제로 코드를 작성하는 구성 요소입니다. 이것이 Multica와 Linear 또는 Jira의 가장 큰 차이입니다. **[에이전트](/agents)는 우리 서버가 아니라 여러분의 기기에서 실행됩니다.**
+
+## 세 가지 핵심 구성 요소
+
+<ArchitectureDiagram />
+
+- **Multica 서버** — 여러분이 보는 워크스페이스, 이슈 목록, 댓글 스레드는 모두 이곳의 데이터베이스에 저장됩니다. 또한 여러분과 동료 사이의 실시간 업데이트를 푸시하는 WebSocket 허브이기도 합니다. 에이전트 작업은 **실행하지 않습니다.**
+- **데몬** — Multica CLI의 일부로, 여러분 자신의 기기에서 실행됩니다. 시작 시 로컬에 설치된 AI 코딩 도구를 감지하고, 서버에 등록한 다음, 3초마다 작업을 폴링하고 15초마다 하트비트를 전송하기 시작합니다.
+- **AI 코딩 도구** — 다음 열두 가지 중 하나(또는 여러 개를 병렬로): [Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi). 데몬이 작업을 가져온 뒤에는 이러한 도구를 사용해 실제 작업을 수행합니다.
+
+도구 체인이 로컬에 유지되므로 **여러분의 API 키, 코드 디렉터리, 인증된 도구**는 오직 여러분의 기기에서만 사용됩니다. Multica 서버는 그중 어떤 것도 보지 못합니다. 이는 자체 호스팅을 하든 Cloud를 사용하든 동일하게 적용됩니다.
+
+## 작업의 수명 주기
+
+가장 흔한 시나리오인, 이슈를 에이전트에게 할당하는 경우를 살펴보겠습니다.
+
+1. 여러분이 웹 UI에서 할당을 클릭합니다. 브라우저가 Multica 서버로 HTTP 요청을 보냅니다.
+2. 서버가 해당 이슈의 담당자를 에이전트로 설정하고, 동시에 작업 대기열에 상태 `queued`인 실행 작업을 생성합니다.
+3. 여러분의 기기에 있는 데몬이 다음 폴링(3초 이내) 때 작업을 가져옵니다. 작업 상태가 `dispatched`로 바뀝니다.
+4. 데몬이 로컬에 격리된 작업 디렉터리를 생성하고 해당 AI 코딩 도구를 호출합니다. 작업 상태가 `running`으로 바뀝니다.
+5. AI가 로컬에서 코드를 작성하고, 테스트를 실행하고, 댓글을 서버로 다시 게시합니다.
+6. 실행이 종료됩니다. 데몬이 결과(성공 / 실패)를 서버에 보고하고, 작업 상태가 `completed` 또는 `failed`로 바뀝니다. 여러분은 웹 UI에서 진행 상황 업데이트를 실시간으로(WebSocket을 통해) 확인합니다.
+
+자세한 동작 원리는 [데몬과 런타임](/daemon-runtimes) 및 [작업](/tasks)을 참조하세요.
+
+## 에이전트를 작동시키는 네 가지 방법
+
+"이슈 할당"만 있는 것은 아닙니다. Multica에는 협업 스타일별로 하나씩, 4가지 트리거가 있습니다.
+
+| 방법 | 일반적인 시나리오 | 문서 |
+|---|---|---|
+| **이슈 할당** | 가장 흔한 방법. 이슈를 에이전트에게 할당하면 스스로 작업을 시작합니다 | [이슈 할당하기](/assigning-issues) |
+| **댓글에서 에이전트 @멘션** | "이거 한번 봐 줘" — 담당자나 상태를 바꾸지 않고 댓글 하나로 실행을 시작합니다 | [에이전트 멘션하기](/mentioning-agents) |
+| **다이렉트 채팅** | 이슈에 묶이지 않은 독립적인 대화 — 질문하거나, 이슈 초안을 작성하게 합니다 | [채팅](/chat) |
+| **오토파일럿(예약)** | 상시 지시 — "매주 월요일 아침에 스탠드업 요약을 해 줘" 같은 것 | [오토파일럿](/autopilots) |
+
+## 런타임: 어디서 실행되고, 도구는 몇 개인가
+
+**런타임**은 "데몬 × 하나의 AI 코딩 도구"의 조합입니다. 한 기기의 데몬에 Claude Code와 Codex가 모두 설치되어 있고 두 개의 워크스페이스에 참여해 있다면, Multica는 4개의 독립적인 런타임(워크스페이스 2개 × 도구 2개)을 등록합니다.
+
+현재는 **로컬 데몬** 런타임 모델만 지원됩니다. 클라우드 런타임(여러분 자신의 기기를 켜 둘 필요가 없는 방식)은 **곧 제공될 예정**이며, 현재는 대기자 명단 등록만 받고 있습니다. [다운로드](https://multica.ai/download) 페이지에서 신청하세요.
+
+## 다음 단계
+
+- [Cloud Quickstart](/cloud-quickstart) — 5분 만에 Multica Cloud에 연결하기
+- [Self-Host Quickstart](/self-host-quickstart) — 자체 백엔드 실행하기
+- [데몬과 런타임](/daemon-runtimes) — 아키텍처가 의존하는 구성 요소에 대한 심층 분석

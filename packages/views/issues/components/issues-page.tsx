@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo } from "react";
 import { toast } from "sonner";
-import { ChevronRight, ListTodo } from "lucide-react";
+import { ListTodo } from "lucide-react";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
@@ -10,8 +10,6 @@ import { useIssueViewStore, useClearFiltersOnWorkspaceChange } from "@multica/co
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
-import { useCurrentWorkspace } from "@multica/core/paths";
-import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type IssueListFilter } from "@multica/core/issues/queries";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
@@ -34,7 +32,6 @@ export function IssuesPage() {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
 
-  const workspace = useCurrentWorkspace();
   const scope = useIssuesScopeStore((s) => s.scope);
   const viewMode = useIssueViewStore((s) => s.viewMode);
   const grouping = useIssueViewStore((s) => s.grouping);
@@ -210,13 +207,9 @@ export function IssuesPage() {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="gap-1.5">
-        <WorkspaceAvatar name={workspace?.name ?? "W"} size="sm" />
-        <span className="text-sm text-muted-foreground">
-          {workspace?.name ?? t(($) => $.page.breadcrumb_workspace_fallback)}
-        </span>
-        <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className="text-sm font-medium">{t(($) => $.page.breadcrumb_title)}</span>
+      <PageHeader className="gap-2">
+        <ListTodo className="h-4 w-4 text-muted-foreground" />
+        <h1 className="text-sm font-medium">{t(($) => $.page.breadcrumb_title)}</h1>
       </PageHeader>
 
       <ViewStoreProvider store={useIssueViewStore}>
