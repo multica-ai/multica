@@ -14,9 +14,25 @@ package handler
 // auto-starts. The label is the only control: there is no separate workspace
 // toggle (it belongs on the issue, not the workspace).
 //
+// Squad-only trigger (FIR-2564): orchestration runs ONLY when the parent issue
+// is assigned to a squad. The squad leader both owns the composite task and is
+// the independent verifier of each finished sub-issue. A non-squad parent with
+// the label is told to assign a squad and does nothing else.
+//
+// Plan-adequacy precheck (FIR-2564): before starting any wave the engine checks
+// the plan is detailed enough — every sub-issue must carry acceptance criteria
+// (a `- [ ]` checklist). Without criteria there is nothing for the verifier to
+// judge, so an under-specified plan is refused with a list of what to fix.
+//
 // Sub-issues are driven primarily through squads — a squad-assigned sub-issue
 // wakes the squad leader, who delegates within the team. Agent-assigned
 // sub-issues are also supported and wake the agent directly.
+//
+// Verification gate (FIR-2564): a sub-issue reaching `done` does NOT release
+// the work that waits on it on its own word. An independent verifier judges the
+// deliverable against the sub-issue's acceptance criteria first; only an
+// `orch-verified` (PASS) label releases dependents, while `orch-rejected` (FAIL)
+// re-opens the child for rework. See the "Verification gate" section below.
 
 import (
 	"context"
@@ -31,21 +47,64 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-const orchestrateLabelName = "orchestrate"
+const (
+	orchestrateLabelName = "orchestrate"
+	// orchestrateVerifiedLabelName is the PASS token an independent verifier
+	// attaches to a finished sub-issue once it confirms the deliverable. Only
+	// then does the engine let that sub-issue release its dependents.
+	orchestrateVerifiedLabelName = "orch-verified"
+	// orchestrateRejectedLabelName is the FAIL token a verifier attaches when
+	// the deliverable does not meet the sub-issue's acceptance criteria. The
+	// engine re-opens the child and re-dispatches its worker.
+	orchestrateVerifiedLabelColor = "#16a34a"
+	orchestrateRejectedLabelName  = "orch-rejected"
+	orchestrateRejectedLabelColor = "#dc2626"
+)
 
-// maybeStartOrchestrationOnLabel is the entrypoint from AttachLabel. It is a
-// no-op unless the just-attached label is named `orchestrate`. Best-effort:
-// failures are logged, never surfaced to the label-attach response (the label
-// attach already succeeded).
+// maybeStartOrchestrationOnLabel is the entrypoint from AttachLabel. It routes
+// the three orchestration labels: `orchestrate` starts/advances a parent's
+// sub-issues; `orch-verified` (PASS) and `orch-rejected` (FAIL) are the
+// independent-verifier verdicts on a finished child. Any other label is a
+// no-op. Best-effort: failures are logged, never surfaced to the label-attach
+// response (the label attach already succeeded).
 func (h *Handler) maybeStartOrchestrationOnLabel(ctx context.Context, issue db.Issue, labelID pgtype.UUID) {
 	label, err := h.Queries.GetLabel(ctx, db.GetLabelParams{ID: labelID, WorkspaceID: issue.WorkspaceID})
 	if err != nil {
 		return
 	}
-	if !strings.EqualFold(strings.TrimSpace(label.Name), orchestrateLabelName) {
-		return
+	switch strings.ToLower(strings.TrimSpace(label.Name)) {
+	case orchestrateLabelName:
+		// CEREBRO-PATCH(orchestration-squad-gate): FIR-2564 — squad-only trigger.
+		// Orchestration runs only on a parent issue assigned to a squad. The
+		// squad leader is the team that owns the composite task AND the
+		// independent verifier of each finished sub-issue, so squad-ownership is
+		// the precondition for the whole flow.
+		if !issueAssignedToSquad(issue) {
+			h.postOrchestrationComment(ctx, issue,
+				"Orchestration only runs on an issue assigned to a **squad**. "+
+					"Assign this issue to a squad (the squad leader drives the sub-issues and "+
+					"verifies each one), then re-apply the `orchestrate` label.")
+			return
+		}
+		h.runOrchestration(ctx, issue, true)
+	case orchestrateVerifiedLabelName:
+		h.advanceOnChildVerified(ctx, issue)
+	case orchestrateRejectedLabelName:
+		h.reopenRejectedChild(ctx, issue)
 	}
-	h.runOrchestration(ctx, issue, true)
+}
+
+// issueAssignedToSquad reports whether the issue is assigned to a squad.
+func issueAssignedToSquad(issue db.Issue) bool {
+	return issue.AssigneeType.Valid && issue.AssigneeType.String == "squad"
+}
+
+// isOrchestratedParent reports whether a parent issue is eligible to be driven:
+// it carries the `orchestrate` label AND is assigned to a squad. Used by the
+// child-done / verdict entrypoints so they honor the same squad-only gate as
+// the label trigger.
+func (h *Handler) isOrchestratedParent(ctx context.Context, parent db.Issue) bool {
+	return issueAssignedToSquad(parent) && h.issueHasOrchestrateLabel(ctx, parent)
 }
 
 // advanceOrchestrationOnChildDone is the entrypoint from the UpdateIssue
@@ -66,15 +125,35 @@ func (h *Handler) advanceOrchestrationOnChildDone(ctx context.Context, prev, iss
 	if parent.Status == "done" || parent.Status == "cancelled" {
 		return
 	}
-	if !h.issueHasOrchestrateLabel(ctx, parent) {
+	if !h.isOrchestratedParent(ctx, parent) {
 		return
 	}
+
+	// Verification gate (FIR-2564): a child reporting `done` is NOT trusted to
+	// release its dependents on its own word. Before advancing, if this child
+	// is done and not yet independently verified, request verification — an
+	// independent agent judges the deliverable against the child's acceptance
+	// criteria (or, when no independent agent exists, the human owner is asked).
+	// runOrchestration below still releases any OTHER children that became
+	// ready (e.g. siblings unblocked by a cancelled or already-verified
+	// blocker), but this child's own dependents stay blocked until it is
+	// verified.
+	if issue.Status == "done" && !h.issueHasLabelNamed(ctx, issue, orchestrateVerifiedLabelName) {
+		h.requestChildVerification(ctx, parent, issue)
+	}
+
 	h.runOrchestration(ctx, parent, false)
 }
 
 // issueHasOrchestrateLabel reports whether the issue currently carries the
 // `orchestrate` label.
 func (h *Handler) issueHasOrchestrateLabel(ctx context.Context, issue db.Issue) bool {
+	return h.issueHasLabelNamed(ctx, issue, orchestrateLabelName)
+}
+
+// issueHasLabelNamed reports whether the issue currently carries a label with
+// the given (case-insensitive) name.
+func (h *Handler) issueHasLabelNamed(ctx context.Context, issue db.Issue, name string) bool {
 	labels, err := h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
@@ -83,7 +162,7 @@ func (h *Handler) issueHasOrchestrateLabel(ctx context.Context, issue db.Issue) 
 		return false
 	}
 	for _, l := range labels {
-		if strings.EqualFold(strings.TrimSpace(l.Name), orchestrateLabelName) {
+		if strings.EqualFold(strings.TrimSpace(l.Name), name) {
 			return true
 		}
 	}
@@ -129,6 +208,7 @@ func (h *Handler) runOrchestration(ctx context.Context, parent db.Issue, postSum
 	}
 
 	blockersByChild := h.loadBlockers(ctx, parent.WorkspaceID, childIDs)
+	h.markVerificationGate(ctx, childIssues, blockersByChild)
 	plan := orchestration.PlanFromChildren(parent.Title, children, blockersByChild)
 
 	if orchestration.DetectCycle(plan.Nodes) {
@@ -137,6 +217,30 @@ func (h *Handler) runOrchestration(ctx context.Context, parent db.Issue, postSum
 				"Cannot orchestrate: the sub-issues have a circular `blocks` dependency "+
 					"(some sub-issue waits on one that waits back on it). Fix the dependency "+
 					"loop and re-apply the `orchestrate` label.")
+		}
+		return
+	}
+
+	// Plan-adequacy precheck (FIR-2564): the plan must be detailed enough to
+	// verify before the engine runs it. Every sub-issue needs acceptance
+	// criteria (a `- [ ]` checklist in its description) — without them the
+	// independent verifier has nothing to judge "delivered as planned" against.
+	// Refuse an under-specified plan and say exactly which sub-issues to fix.
+	var missingCriteria []string
+	for _, c := range childIssues {
+		if !orchestration.HasAcceptanceCriteria(c.Description.String) {
+			missingCriteria = append(missingCriteria, "#"+strconv.Itoa(int(c.Number)))
+		}
+	}
+	if len(missingCriteria) > 0 {
+		if postSummary {
+			h.postOrchestrationComment(ctx, parent,
+				"Plan is not detailed enough to orchestrate safely. These sub-issues have no "+
+					"acceptance criteria — add a checklist of what \"done\" means (lines like "+
+					"`- [ ] ...`) to each description, then re-apply the `orchestrate` label: "+
+					strings.Join(missingCriteria, ", ")+".\n\n"+
+					"Why: the engine verifies every finished sub-issue against its acceptance "+
+					"criteria before the next ones start. No criteria = nothing to verify against.")
 		}
 		return
 	}
@@ -294,12 +398,19 @@ func (h *Handler) publishOrchestratedStatus(ctx context.Context, issue db.Issue)
 	}, h.audienceForIssue(ctx, issue))
 }
 
-// postOrchestrationComment writes a system comment on the parent issue and
+// postOrchestrationComment writes a system comment on the given issue and
 // broadcasts it. Best-effort: failure is logged, not propagated.
-func (h *Handler) postOrchestrationComment(ctx context.Context, parent db.Issue, content string) {
+func (h *Handler) postOrchestrationComment(ctx context.Context, issue db.Issue, content string) {
+	h.postOrchestrationCommentReturning(ctx, issue, content)
+}
+
+// postOrchestrationCommentReturning is postOrchestrationComment but returns the
+// created comment so callers can use its ID as a task trigger (e.g. the
+// independent-verifier request). Returns ok=false on write failure.
+func (h *Handler) postOrchestrationCommentReturning(ctx context.Context, issue db.Issue, content string) (db.Comment, bool) {
 	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
-		IssueID:     parent.ID,
-		WorkspaceID: parent.WorkspaceID,
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
 		AuthorType:  "system",
 		AuthorID:    pgtype.UUID{Valid: true},
 		Content:     content,
@@ -307,14 +418,225 @@ func (h *Handler) postOrchestrationComment(ctx context.Context, parent db.Issue,
 		ParentID:    pgtype.UUID{Valid: false},
 	})
 	if err != nil {
-		slog.Warn("orchestration: create system comment failed", "parent_id", uuidToString(parent.ID), "error", err)
+		slog.Warn("orchestration: create system comment failed", "issue_id", uuidToString(issue.ID), "error", err)
+		return db.Comment{}, false
+	}
+	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
+		"comment":             commentToResponse(comment, nil, nil),
+		"issue_title":         issue.Title,
+		"issue_assignee_type": textToPtr(issue.AssigneeType),
+		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
+		"issue_status":        issue.Status,
+	})
+	return comment, true
+}
+
+// ---------------------------------------------------------------------------
+// CEREBRO-PATCH(orchestration-verify-gate): FIR-2564 — independent verification
+// gate. Cerebro-only; reuses the existing AttachLabel + child-done seams.
+// Verification gate (FIR-2564)
+//
+// The orchestrator never trusts a sub-issue's own `done` to release the work
+// that waits on it. When a child reaches `done`, an INDEPENDENT verifier judges
+// the deliverable against the child's acceptance criteria before its dependents
+// run. Defense-in-depth, cheapest layer first:
+//
+//   - Independent judge (a different agent than the worker): squad-owned parent
+//     -> the squad leader; agent-owned parent -> the parent agent. The verifier
+//     reviews and either attaches `orch-verified` (PASS) or `orch-rejected`
+//     (FAIL).
+//   - Human gate (no independent agent available, e.g. a human owns the parent):
+//     the engine asks the owner to confirm, with explicit instructions.
+//
+// PASS (`orch-verified`) releases the child's dependents; FAIL (`orch-rejected`)
+// re-opens the child and re-dispatches its worker. A child stays a blocker until
+// it is verified, so nothing downstream runs on an unverified deliverable.
+// ---------------------------------------------------------------------------
+
+// markVerificationGate enriches the loaded blocker edges with verification
+// state: a blocker that is one of this parent's own children must be VERIFIED
+// (carry `orch-verified`), not merely done, before it stops holding back
+// dependents. Cross-tree blockers are untouched (they keep terminal-status
+// semantics). This is the handler-side input to orchestration.BlockerSatisfied.
+func (h *Handler) markVerificationGate(ctx context.Context, childIssues []db.Issue, blockersByChild map[string][]orchestration.BlockerState) {
+	verifiedByID := map[string]bool{}
+	isChild := map[string]bool{}
+	for _, c := range childIssues {
+		id := orchestration.NormalizeID(uuidToString(c.ID))
+		isChild[id] = true
+		verifiedByID[id] = h.issueHasLabelNamed(ctx, c, orchestrateVerifiedLabelName)
+	}
+	for blockedID, blockers := range blockersByChild {
+		for i := range blockers {
+			bid := orchestration.NormalizeID(blockers[i].ID)
+			if isChild[bid] {
+				blockers[i].RequiresVerification = true
+				blockers[i].Verified = verifiedByID[bid]
+			}
+		}
+		blockersByChild[blockedID] = blockers
+	}
+}
+
+// requestChildVerification dispatches an independent verification of a finished
+// child, or asks the human owner when no independent agent exists. Idempotent:
+// a child already carrying a verdict label, or with a pending verifier task, is
+// left alone.
+func (h *Handler) requestChildVerification(ctx context.Context, parent, child db.Issue) {
+	if h.issueHasLabelNamed(ctx, child, orchestrateVerifiedLabelName) ||
+		h.issueHasLabelNamed(ctx, child, orchestrateRejectedLabelName) {
 		return
 	}
-	h.publish(protocol.EventCommentCreated, uuidToString(parent.WorkspaceID), "system", "", map[string]any{
-		"comment":             commentToResponse(comment, nil, nil),
-		"issue_title":         parent.Title,
-		"issue_assignee_type": textToPtr(parent.AssigneeType),
-		"issue_assignee_id":   uuidToPtr(parent.AssigneeID),
-		"issue_status":        parent.Status,
+	// Ensure the verdict labels exist so the verifier (or the human) can attach
+	// them by name without first creating them.
+	h.ensureWorkspaceLabel(ctx, parent.WorkspaceID, orchestrateVerifiedLabelName, orchestrateVerifiedLabelColor)
+	h.ensureWorkspaceLabel(ctx, parent.WorkspaceID, orchestrateRejectedLabelName, orchestrateRejectedLabelColor)
+
+	verifierID, ok := h.selectVerifierAgent(ctx, parent, child)
+	childRef := "#" + strconv.Itoa(int(child.Number))
+
+	if !ok {
+		// Human gate: no independent agent. Ask the parent owner to confirm.
+		h.postOrchestrationComment(ctx, parent,
+			"Sub-issue "+childRef+" reports done — it needs your verification before the "+
+				"sub-issues that depend on it start.\n\n"+
+				"Check "+childRef+" against its acceptance criteria (the checklist in its "+
+				"description). If it delivered: add the `"+orchestrateVerifiedLabelName+"` label to "+
+				childRef+" and the next wave starts. If not: add `"+orchestrateRejectedLabelName+"` "+
+				"to send it back for rework.")
+		return
+	}
+
+	if h.hasPendingTask(ctx, child.ID, verifierID) {
+		return
+	}
+	req, posted := h.postOrchestrationCommentReturning(ctx, child, h.buildVerifierInstructions(childRef))
+	if !posted {
+		return
+	}
+	if _, err := h.TaskService.EnqueueTaskForMention(ctx, child, verifierID, req.ID); err != nil {
+		slog.Warn("orchestration: enqueue verifier failed", "child_id", uuidToString(child.ID), "error", err)
+		return
+	}
+	h.postOrchestrationComment(ctx, parent,
+		"Verifying "+childRef+" independently before releasing the sub-issues that depend on it.")
+}
+
+// buildVerifierInstructions is the judge prompt posted on the child as the
+// verifier's task trigger. It is explicit enough to act on without the
+// orchestration-verify skill, but that skill documents the same contract.
+func (h *Handler) buildVerifierInstructions(childRef string) string {
+	return "Independent verification requested for " + childRef + ".\n\n" +
+		"You did NOT do this work — your job is to judge it, not to trust the `done`.\n\n" +
+		"1. Read this issue's acceptance criteria (the definition-of-done checklist in its " +
+		"description) and the work that was delivered (PR, artifact, comments).\n" +
+		"2. Verify against evidence, not claims — a checklist item counts only if you can see " +
+		"it actually delivered (tests green, file exists, PR merged, feature works). " +
+		"\"should/probably/seems\" is not verified.\n" +
+		"3. Verdict:\n" +
+		"   - PASS → attach the `" + orchestrateVerifiedLabelName + "` label to this issue. " +
+		"That releases the sub-issues waiting on it.\n" +
+		"   - FAIL → attach the `" + orchestrateRejectedLabelName + "` label and add one comment " +
+		"listing exactly which criteria are unmet. The issue is re-opened and its worker redoes it.\n\n" +
+		"Default to FAIL if you cannot confirm the deliverable."
+}
+
+// selectVerifierAgent picks an agent that is independent of the child's worker.
+// Squad-owned parent -> the squad leader. Agent-owned parent (different from the
+// child's own agent) -> the parent agent. Otherwise ok=false (human gate).
+func (h *Handler) selectVerifierAgent(ctx context.Context, parent, child db.Issue) (pgtype.UUID, bool) {
+	if parent.AssigneeType.Valid && parent.AssigneeType.String == "squad" {
+		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID:          parent.AssigneeID,
+			WorkspaceID: parent.WorkspaceID,
+		})
+		if err != nil || !squad.LeaderID.Valid {
+			return pgtype.UUID{}, false
+		}
+		// Leader must not be the child's own agent worker.
+		if child.AssigneeType.Valid && child.AssigneeType.String == "agent" &&
+			child.AssigneeID == squad.LeaderID {
+			return pgtype.UUID{}, false
+		}
+		return squad.LeaderID, true
+	}
+	if parent.AssigneeType.Valid && parent.AssigneeType.String == "agent" && parent.AssigneeID.Valid {
+		if child.AssigneeType.Valid && child.AssigneeType.String == "agent" &&
+			child.AssigneeID == parent.AssigneeID {
+			return pgtype.UUID{}, false
+		}
+		return parent.AssigneeID, true
+	}
+	return pgtype.UUID{}, false
+}
+
+// advanceOnChildVerified runs when an `orch-verified` label is attached to a
+// child. If the child's parent is orchestrated, release whatever the now-verified
+// child unblocked.
+func (h *Handler) advanceOnChildVerified(ctx context.Context, child db.Issue) {
+	if !child.ParentIssueID.Valid {
+		return
+	}
+	parent, err := h.Queries.GetIssue(ctx, child.ParentIssueID)
+	if err != nil || parent.Status == "done" || parent.Status == "cancelled" {
+		return
+	}
+	if !h.isOrchestratedParent(ctx, parent) {
+		return
+	}
+	h.runOrchestration(ctx, parent, false)
+}
+
+// reopenRejectedChild runs when an `orch-rejected` label is attached to a child.
+// The deliverable failed verification: re-open the child and re-dispatch its
+// worker so the work is redone. The rejected label is removed so the next
+// verification round starts clean. No-op unless the parent is orchestrated.
+func (h *Handler) reopenRejectedChild(ctx context.Context, child db.Issue) {
+	if !child.ParentIssueID.Valid {
+		return
+	}
+	parent, err := h.Queries.GetIssue(ctx, child.ParentIssueID)
+	if err != nil || parent.Status == "done" || parent.Status == "cancelled" {
+		return
+	}
+	if !h.isOrchestratedParent(ctx, parent) {
+		return
+	}
+	// Re-open: send the child back to todo so its worker is re-dispatched.
+	reopened, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:          child.ID,
+		Status:      "todo",
+		WorkspaceID: child.WorkspaceID,
 	})
+	if err != nil {
+		slog.Warn("orchestration: reopen rejected child failed", "child_id", uuidToString(child.ID), "error", err)
+		return
+	}
+	h.publishOrchestratedStatus(ctx, reopened)
+	h.startOrchestratedChild(ctx, reopened)
+	h.postOrchestrationComment(ctx, parent,
+		"Sub-issue #"+strconv.Itoa(int(child.Number))+" failed verification and was sent back for rework.")
+}
+
+// ensureWorkspaceLabel returns the id of a workspace label with the given name,
+// creating it if absent. Best-effort: returns invalid on failure.
+func (h *Handler) ensureWorkspaceLabel(ctx context.Context, workspaceID pgtype.UUID, name, color string) pgtype.UUID {
+	labels, err := h.Queries.ListLabels(ctx, workspaceID)
+	if err == nil {
+		for _, l := range labels {
+			if strings.EqualFold(strings.TrimSpace(l.Name), name) {
+				return l.ID
+			}
+		}
+	}
+	created, err := h.Queries.CreateLabel(ctx, db.CreateLabelParams{
+		WorkspaceID: workspaceID,
+		Name:        name,
+		Color:       color,
+	})
+	if err != nil {
+		slog.Warn("orchestration: ensure label failed", "name", name, "error", err)
+		return pgtype.UUID{}
+	}
+	return created.ID
 }

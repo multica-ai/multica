@@ -125,6 +125,84 @@ func TestRenderWaves_Numbers(t *testing.T) {
 	}
 }
 
+func TestHasAcceptanceCriteria(t *testing.T) {
+	cases := []struct {
+		name string
+		desc string
+		want bool
+	}{
+		{"empty", "", false},
+		{"prose only", "Build the login page and ship it.", false},
+		{"unchecked item", "Done means:\n- [ ] login works", true},
+		{"checked item", "- [x] tests green", true},
+		{"checked upper", "- [X] deployed", true},
+		{"asterisk bullet", "* [ ] api returns 200", true},
+		{"plus bullet", "+ [ ] migration applied", true},
+		{"indented item", "Criteria:\n    - [ ] nested but valid", true},
+		{"bullet without checkbox is not criteria", "- just a bullet point", false},
+		{"empty checkbox line too short", "- [ ]", true},
+	}
+	for _, tc := range cases {
+		if got := HasAcceptanceCriteria(tc.desc); got != tc.want {
+			t.Errorf("%s: HasAcceptanceCriteria(%q) = %v, want %v", tc.name, tc.desc, got, tc.want)
+		}
+	}
+}
+
+func TestBlockerSatisfied_VerificationGate(t *testing.T) {
+	cases := []struct {
+		name string
+		b    BlockerState
+		want bool
+	}{
+		{"running never satisfies", BlockerState{Status: "in_progress"}, false},
+		{"in_review never satisfies", BlockerState{Status: "in_review"}, false},
+		{"cancelled always satisfies", BlockerState{Status: "cancelled"}, true},
+		{"cancelled satisfies even when gated", BlockerState{Status: "cancelled", RequiresVerification: true}, true},
+		{"plain done satisfies (non-child)", BlockerState{Status: "done"}, true},
+		{"gated done unverified holds", BlockerState{Status: "done", RequiresVerification: true, Verified: false}, false},
+		{"gated done verified satisfies", BlockerState{Status: "done", RequiresVerification: true, Verified: true}, true},
+		{"verified flag ignored when not gated", BlockerState{Status: "done", RequiresVerification: false, Verified: false}, true},
+	}
+	for _, tc := range cases {
+		if got := BlockerSatisfied(tc.b); got != tc.want {
+			t.Errorf("%s: BlockerSatisfied(%+v) = %v, want %v", tc.name, tc.b, got, tc.want)
+		}
+	}
+}
+
+func TestReadyToStart_VerificationGateHoldsDependents(t *testing.T) {
+	children := []ChildState{
+		{ID: "a", Number: 1, Status: "done"},
+		{ID: "b", Number: 2, Status: "backlog"},
+	}
+	// b waits on a; a is an orchestrated child so it must be verified, not
+	// just done, before b is released.
+	blockers := map[string][]BlockerState{
+		"b": {{ID: "a", Status: "done", RequiresVerification: true, Verified: false}},
+	}
+	if got := ReadyToStart(children, blockers); len(got) != 0 {
+		t.Fatalf("expected b held while blocker a is done-but-unverified, got %v", ids(got))
+	}
+	// a verified -> b released.
+	blockers["b"][0].Verified = true
+	got := ids(ReadyToStart(children, blockers))
+	if !reflect.DeepEqual(got, []string{"b"}) {
+		t.Fatalf("expected b ready after blocker a verified, got %v", got)
+	}
+}
+
+func TestReadyToStart_CancelledGatedBlockerNeedsNoVerification(t *testing.T) {
+	children := []ChildState{{ID: "b", Number: 2, Status: "backlog"}}
+	blockers := map[string][]BlockerState{
+		"b": {{ID: "a", Status: "cancelled", RequiresVerification: true, Verified: false}},
+	}
+	got := ids(ReadyToStart(children, blockers))
+	if !reflect.DeepEqual(got, []string{"b"}) {
+		t.Fatalf("cancelled blocker should release b without verification, got %v", got)
+	}
+}
+
 func TestPlanFromChildren_CycleDetected(t *testing.T) {
 	children := []ChildState{
 		{ID: "a", Number: 1, Status: "backlog"},
