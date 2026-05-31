@@ -1625,6 +1625,7 @@ func (h *Handler) canManageAgentAllowedPrincipals(w http.ResponseWriter, r *http
 		return false
 	}
 	return true
+}
 
 // attachAgentSkills populates resp.Skills from the agent_skill junction
 // table for the given agent. agentToResponse zeros the field; mutation

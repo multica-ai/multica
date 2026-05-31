@@ -38,6 +38,7 @@ func validateLoginTokenPrefix(token string) error {
 		}
 	}
 	return fmt.Errorf("invalid token format: must start with %s", strings.Join(loginTokenPrefixes, " or "))
+}
 
 type browserCommand struct {
 	name string

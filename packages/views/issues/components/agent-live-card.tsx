@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, ChevronDown, Clock, Loader2, Square } from "lucide-react";
+import { Bot, ChevronDown, Clock, Loader2, PauseCircle, Square } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import type { AgentTask } from "@multica/core/types/agent";
 import { toast } from "sonner";
+import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import {
@@ -265,7 +266,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
     cancelled: 4,
   };
   const entries = Array.from(taskStates.values()).sort(
-    (a, b) => statusRank[a.task.status] - statusRank[b.task.status],
+    (a, b) => (statusRank[a.task.status] ?? 99) - (statusRank[b.task.status] ?? 99),
   );
   const firstEntry = entries[0];
   if (!firstEntry) return null;
