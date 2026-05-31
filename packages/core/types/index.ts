@@ -120,6 +120,14 @@ export type {
   RedeemLarkBindingTokenResponse,
 } from "./lark";
 export type {
+  ADOInstallation,
+  ADOPullRequest,
+  ADOPullRequestState,
+  ADOPolicyStatus,
+  ADOChecksConclusion,
+  ListADOInstallationsResponse,
+} from "./azuredevops";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,

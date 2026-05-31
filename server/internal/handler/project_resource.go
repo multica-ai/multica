@@ -76,6 +76,8 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 		return validateGithubRepoRef(ref)
 	case "local_directory":
 		return validateLocalDirectoryRef(ref)
+	case "azure_devops_repo":
+		return validateAzureDevOpsRepoRef(ref)
 	default:
 		return nil, fmt.Errorf("unknown resource_type %q", resourceType)
 	}
@@ -106,6 +108,108 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// azureDevOpsRepoRef is the JSONB shape stored for resource_type=azure_devops_repo.
+// The canonical URL form is always https://dev.azure.com/{org}/{project}/_git/{repo}.
+// Legacy https://{org}.visualstudio.com/{project}/_git/{repo} URLs are silently
+// normalized on the way in. SSH URLs (git@ssh.dev.azure.com:v3/...) are kept as-is
+// since the daemon clones via whatever scheme the caller provides.
+type azureDevOpsRepoRef struct {
+	URL               string `json:"url"`
+	Organization      string `json:"organization,omitempty"`
+	Project           string `json:"project,omitempty"`
+	Repository        string `json:"repository,omitempty"`
+	DefaultBranchHint string `json:"default_branch_hint,omitempty"`
+	// InstallationID links this resource to a workspace ado_installation row so
+	// the daemon can retrieve the PAT for HTTPS authentication. Optional: if
+	// unset the daemon falls back to SSH keys / environment credential helpers.
+	InstallationID string `json:"installation_id,omitempty"`
+}
+
+func validateAzureDevOpsRepoRef(ref json.RawMessage) (json.RawMessage, error) {
+	var payload azureDevOpsRepoRef
+	if err := json.Unmarshal(ref, &payload); err != nil {
+		return nil, fmt.Errorf("invalid azure_devops_repo payload: %w", err)
+	}
+	payload.URL = strings.TrimSpace(payload.URL)
+	if payload.URL == "" {
+		return nil, errors.New("azure_devops_repo: url is required")
+	}
+	// Silent normalization: visualstudio.com → dev.azure.com canonical form.
+	normalized, org, project, repo := normalizeADOURL(payload.URL)
+	if normalized == "" {
+		// Not a known ADO URL form — fall through to generic git URL check.
+		if !isValidGitRepoURL(payload.URL) {
+			return nil, errors.New("azure_devops_repo: url must be a valid Azure DevOps URL")
+		}
+	} else {
+		payload.URL = normalized
+	}
+	// Populate structured fields if we were able to parse them and the caller
+	// didn't provide overrides.
+	if org != "" && payload.Organization == "" {
+		payload.Organization = org
+	}
+	if project != "" && payload.Project == "" {
+		payload.Project = project
+	}
+	if repo != "" && payload.Repository == "" {
+		payload.Repository = repo
+	}
+	payload.DefaultBranchHint = strings.TrimSpace(payload.DefaultBranchHint)
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// normalizeADOURL converts the supported Azure DevOps URL forms to the
+// canonical https://dev.azure.com/{org}/{project}/_git/{repo} form and
+// returns the extracted (org, project, repo) triple. Returns ("","","","")
+// when the input is not a recognized ADO URL, leaving the caller to apply
+// the generic git URL check.
+//
+// Supported inputs:
+//   - https://dev.azure.com/{org}/{project}/_git/{repo}           (already canonical)
+//   - https://{org}.visualstudio.com/{project}/_git/{repo}        (legacy, normalized silently)
+//   - git@ssh.dev.azure.com:v3/{org}/{project}/{repo}             (SSH, kept as-is)
+func normalizeADOURL(rawURL string) (normalized, org, project, repo string) {
+	// Handle SCP-style SSH URLs before url.Parse — the standard parser does
+	// not recognise the git@host:path form and would return garbage results.
+	if strings.HasPrefix(rawURL, "git@ssh.dev.azure.com:v3/") {
+		path := strings.TrimPrefix(rawURL, "git@ssh.dev.azure.com:v3/")
+		parts := strings.SplitN(path, "/", 3)
+		if len(parts) == 3 {
+			org, project, repo = parts[0], parts[1], parts[2]
+			normalized = rawURL
+		}
+		return
+	}
+
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return
+	}
+	switch {
+	case u.Scheme == "https" && u.Host == "dev.azure.com":
+		// Already canonical. Extract components from path: /{org}/{project}/_git/{repo}
+		parts := strings.SplitN(strings.TrimPrefix(u.Path, "/"), "/", 5)
+		if len(parts) >= 4 && parts[2] == "_git" {
+			org, project, repo = parts[0], parts[1], parts[3]
+			normalized = rawURL
+		}
+	case u.Scheme == "https" && strings.HasSuffix(u.Host, ".visualstudio.com"):
+		// Legacy: https://{org}.visualstudio.com/{project}/_git/{repo}
+		org = strings.TrimSuffix(u.Host, ".visualstudio.com")
+		parts := strings.SplitN(strings.TrimPrefix(u.Path, "/"), "/", 4)
+		if len(parts) >= 3 && parts[1] == "_git" {
+			project, repo = parts[0], parts[2]
+			normalized = fmt.Sprintf("https://dev.azure.com/%s/%s/_git/%s", org, project, repo)
+		}
+	}
+	return
 }
 
 // localDirectoryRef is the JSONB shape stored for resource_type=local_directory.

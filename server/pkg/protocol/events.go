@@ -134,4 +134,8 @@ const (
 	// deleting the row; the audit trail is preserved.
 	EventLarkInstallationCreated = "lark_installation:created"
 	EventLarkInstallationRevoked = "lark_installation:revoked"
+	// Azure DevOps integration events
+	EventADOInstallationCreated  = "ado_installation:created"
+	EventADOInstallationDeleted  = "ado_installation:deleted"
+	EventADOPullRequestUpdated   = "ado_pull_request:updated"
 )
