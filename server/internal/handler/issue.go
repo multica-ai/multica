@@ -2660,6 +2660,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// fails best-effort.
 	if statusChanged {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		// CEREBRO-PATCH(child-status-notify): FIR-2601 — also notify+wake parent on in_review/blocked.
+		h.notifyParentOfChildStatus(r.Context(), prevIssue, issue)
 		// CEREBRO-PATCH(orchestrate-advance): FIR-2564 — advance sub-issue waves.
 		h.advanceOrchestrationOnChildDone(r.Context(), prevIssue, issue)
 	}
@@ -3171,6 +3173,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// (MUL-2538). Best-effort; failure does not abort the batch.
 		if statusChanged {
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+			// CEREBRO-PATCH(child-status-notify): FIR-2601 — also notify+wake parent on in_review/blocked.
+			h.notifyParentOfChildStatus(r.Context(), prevIssue, issue)
 		}
 
 		updated++
