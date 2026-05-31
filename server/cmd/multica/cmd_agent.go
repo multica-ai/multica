@@ -122,6 +122,20 @@ var agentSkillsSetCmd = &cobra.Command{
 	RunE:  runAgentSkillsSet,
 }
 
+var agentSkillsAddCmd = &cobra.Command{
+	Use:   "add <agent-id>",
+	Short: "Add skills to an agent (appends to current assignments, skips duplicates)",
+	Args:  exactArgs(1),
+	RunE:  runAgentSkillsAdd,
+}
+
+var agentSkillsRemoveCmd = &cobra.Command{
+	Use:   "remove <agent-id>",
+	Short: "Remove skills from an agent (silently skips IDs not currently assigned)",
+	Args:  exactArgs(1),
+	RunE:  runAgentSkillsRemove,
+}
+
 func init() {
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentGetCmd)
@@ -136,6 +150,8 @@ func init() {
 
 	agentSkillsCmd.AddCommand(agentSkillsListCmd)
 	agentSkillsCmd.AddCommand(agentSkillsSetCmd)
+	agentSkillsCmd.AddCommand(agentSkillsAddCmd)
+	agentSkillsCmd.AddCommand(agentSkillsRemoveCmd)
 
 	agentEnvCmd.AddCommand(agentEnvGetCmd)
 	agentEnvCmd.AddCommand(agentEnvSetCmd)
@@ -203,6 +219,14 @@ func init() {
 	// agent skills set
 	agentSkillsSetCmd.Flags().StringSlice("skill-ids", nil, "Skill IDs to assign (comma-separated)")
 	agentSkillsSetCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// agent skills add
+	agentSkillsAddCmd.Flags().StringSlice("skill-ids", nil, "Skill IDs to add (comma-separated)")
+	agentSkillsAddCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// agent skills remove
+	agentSkillsRemoveCmd.Flags().StringSlice("skill-ids", nil, "Skill IDs to remove (comma-separated)")
+	agentSkillsRemoveCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent env get
 	agentEnvGetCmd.Flags().String("output", "json", "Output format: json or table")
@@ -845,6 +869,124 @@ func runAgentSkillsSet(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Skills updated for agent %s\n", args[0])
+	return nil
+}
+
+func runAgentSkillsAdd(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	if !cmd.Flags().Changed("skill-ids") {
+		return fmt.Errorf("--skill-ids is required (comma-separated skill IDs to add)")
+	}
+	skillIDs, _ := cmd.Flags().GetStringSlice("skill-ids")
+	addIDs := make([]string, 0, len(skillIDs))
+	for _, id := range skillIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			addIDs = append(addIDs, id)
+		}
+	}
+	if len(addIDs) == 0 {
+		return fmt.Errorf("--skill-ids must contain at least one non-empty ID")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Fetch current skills.
+	var skills []map[string]any
+	if err := client.GetJSON(ctx, "/api/agents/"+args[0]+"/skills", &skills); err != nil {
+		return fmt.Errorf("list agent skills: %w", err)
+	}
+
+	// Build the merged set (existing + new, no duplicates).
+	existing := make(map[string]struct{}, len(skills))
+	merged := make([]string, 0, len(skills)+len(addIDs))
+	for _, s := range skills {
+		id := strVal(s, "id")
+		existing[id] = struct{}{}
+		merged = append(merged, id)
+	}
+	for _, id := range addIDs {
+		if _, dup := existing[id]; !dup {
+			merged = append(merged, id)
+			existing[id] = struct{}{}
+		}
+	}
+
+	body := map[string]any{"skill_ids": merged}
+	var result json.RawMessage
+	if err := client.PutJSON(ctx, "/api/agents/"+args[0]+"/skills", body, &result); err != nil {
+		return fmt.Errorf("add agent skills: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		var pretty any
+		json.Unmarshal(result, &pretty)
+		return cli.PrintJSON(os.Stdout, pretty)
+	}
+
+	fmt.Printf("Skills added for agent %s\n", args[0])
+	return nil
+}
+
+func runAgentSkillsRemove(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	if !cmd.Flags().Changed("skill-ids") {
+		return fmt.Errorf("--skill-ids is required (comma-separated skill IDs to remove)")
+	}
+	skillIDs, _ := cmd.Flags().GetStringSlice("skill-ids")
+	removeSet := make(map[string]struct{}, len(skillIDs))
+	for _, id := range skillIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			removeSet[id] = struct{}{}
+		}
+	}
+	if len(removeSet) == 0 {
+		return fmt.Errorf("--skill-ids must contain at least one non-empty ID")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Fetch current skills.
+	var skills []map[string]any
+	if err := client.GetJSON(ctx, "/api/agents/"+args[0]+"/skills", &skills); err != nil {
+		return fmt.Errorf("list agent skills: %w", err)
+	}
+
+	// Filter out the IDs to remove.
+	remaining := make([]string, 0, len(skills))
+	for _, s := range skills {
+		id := strVal(s, "id")
+		if _, drop := removeSet[id]; !drop {
+			remaining = append(remaining, id)
+		}
+	}
+
+	body := map[string]any{"skill_ids": remaining}
+	var result json.RawMessage
+	if err := client.PutJSON(ctx, "/api/agents/"+args[0]+"/skills", body, &result); err != nil {
+		return fmt.Errorf("remove agent skills: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		var pretty any
+		json.Unmarshal(result, &pretty)
+		return cli.PrintJSON(os.Stdout, pretty)
+	}
+
+	fmt.Printf("Skills removed for agent %s\n", args[0])
 	return nil
 }
 
