@@ -129,6 +129,14 @@ if [ "$db_exists" != "1" ]; then
     > /dev/null
 fi
 
+echo "==> Stopping any previous preview with the same project name (idempotent rebuild)..."
+COMPOSE_PROJECT_NAME="$project_name" \
+docker compose \
+  -p "$project_name" \
+  -f docker-compose.selfhost.yml \
+  -f docker-compose.selfhost.build.yml \
+  down 2>/dev/null || true
+
 echo "==> Building Multica preview from the current checkout..."
 COMPOSE_PROJECT_NAME="$project_name" \
 POSTGRES_DB="$db_name" \
@@ -167,6 +175,17 @@ if curl -sf "${backend_origin}/health" > /dev/null 2>&1; then
   echo "  Preview profile: ${profile}"
   echo "  Compose project: ${project_name}"
   echo "  Database:        ${db_name} (shared Postgres on localhost:${postgres_port}; cleanup does not drop DB)"
+  if [ "${ISOLATED_DB:-0}" != "1" ]; then
+    other_previews="$(docker ps --filter "label=com.docker.compose.project" --format '{{.Labels}}' 2>/dev/null \
+      | grep -o 'com.docker.compose.project=[^ ,]*' | cut -d= -f2 | sort -u \
+      | grep '^multica_preview_' | grep -v "^${project_name}$" || true)"
+    if [ -n "$other_previews" ]; then
+      echo ""
+      echo "  ⚠️  Other preview projects detected sharing the same DB:"
+      echo "$other_previews" | sed 's/^/     - /'
+      echo "  If any of them run migrations, consider: ISOLATED_DB=1 make selfhost-build-preview ISSUE=..."
+    fi
+  fi
   echo "  Frontend:        ${frontend_origin}"
   echo "  Backend:         ${backend_origin}"
   echo ""

@@ -1,5 +1,7 @@
 # Regression and Acceptance Convention
 
+> **Default: Human acceptance is required after tester regression unless the task explicitly waives it.** Tester agents must preserve the tested preview environment intact after regression so the human reviewer can perform final verification.
+
 This file defines project-level regression rules for Multica PR acceptance, upstream merge verification, and release verification. It complements `.ci/deploy.md`.
 
 ## Principles
