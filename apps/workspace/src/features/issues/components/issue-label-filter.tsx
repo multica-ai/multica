@@ -19,7 +19,7 @@ interface IssueLabelFilterProps {
 }
 
 function sortLabels(labels: IssueLabel[], selectedIds: string[], query: string) {
-  // 搜索结果优先展示已选标签，减少长列表下重复滚动的成本。
+  // Prioritize selected labels in search results to reduce extra scrolling in long lists.
   const normalizedQuery = query.trim().toLowerCase();
   const selectedIdSet = new Set(selectedIds);
 
