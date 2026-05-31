@@ -79,7 +79,7 @@ beforeEach(() => {
 });
 
 describe("ExecutionLogSection local CLI rows", () => {
-  it("numbers and renders past runs by created_at ascending", async () => {
+  it("displays past runs newest-first but numbers #1 = earliest", async () => {
     mockApi.listTasksByIssue.mockResolvedValue([
       makeTask({
         id: "run-new",
@@ -100,9 +100,11 @@ describe("ExecutionLogSection local CLI rows", () => {
     await waitFor(() => expect(screen.getByText("Execution log")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Show past runs (2)"));
 
+    // Numbering: #1 = earliest, #2 = newest (chronological identity)
     const labels = screen.getAllByText(/^#\d+$/).map((el) => el.textContent);
-    expect(labels).toEqual(["#1", "#2"]);
-    expect(screen.getByText("Oldest run").compareDocumentPosition(screen.getByText("Newest run"))).toBe(
+    expect(labels).toEqual(["#2", "#1"]);
+    // Display order: newest first
+    expect(screen.getByText("Newest run").compareDocumentPosition(screen.getByText("Oldest run"))).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });

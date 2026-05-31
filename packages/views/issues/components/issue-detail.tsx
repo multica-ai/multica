@@ -1119,14 +1119,16 @@ export function IssueDetail({
   // Navigate by the canonical trigger_comment_id, then let the deep-link
   // timeline path fetch the exact target if it is not currently mounted.
   const handleHighlightComment = useCallback((commentId: string) => {
-    router.replace(paths.issueDetail(id, { commentId }));
+    // Update URL without triggering a router navigation/data fetch
+    const url = paths.issueDetail(id, { commentId });
+    window.history.replaceState(window.history.state, "", url);
     const el = document.getElementById(`comment-${commentId}`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       setHighlightedId(commentId);
       setTimeout(() => setHighlightedId(null), 2000);
     }
-  }, [id, paths, router]);
+  }, [id, paths]);
 
   const [clearHistoryDialogOpen, setClearHistoryDialogOpen] = useState(false);
   const clearHistoryMutation = useClearIssueHistory();
