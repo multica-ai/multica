@@ -99,9 +99,26 @@ func (w *OrchestrationWatchdog) sweepParent(ctx context.Context, parent db.Issue
 		return
 	}
 	for _, child := range children {
+		// Already adjudicated (PASS/FAIL) -> the verdict path owns it. Clear any
+		// stale marker and leave it alone.
+		if w.h.issueHasLabelNamed(ctx, child, orchestrateVerifiedLabelName) ||
+			w.h.issueHasLabelNamed(ctx, child, orchestrateRejectedLabelName) {
+			if w.h.issueHasLabelNamed(ctx, child, orchestrateStalledLabelName) {
+				w.h.detachWorkspaceLabel(ctx, child, orchestrateStalledLabelName)
+			}
+			continue
+		}
 		switch child.Status {
-		case "todo", "in_progress", "in_review":
-			w.checkInFlightChild(ctx, parent, child, now)
+		case "in_review":
+			// CEREBRO-PATCH(orchestration-thread): FIR-2564 — in_review = worker
+			// finished, awaiting verification; nudge it, don't treat it as stalled.
+			// The worker finished into in_review (not done), so the verification
+			// gate never fired. Nudge verification rather than treat it as stalled.
+			if active, err := w.h.Queries.HasActiveTaskForIssue(ctx, child.ID); err == nil && !active {
+				w.h.requestChildVerification(ctx, parent, child)
+			}
+		case "todo", "in_progress":
+			w.checkStalledChild(ctx, parent, child, now)
 		default:
 			// Backlog/terminal children are not "started + stuck"; clear any
 			// stale marker so a future stall is flagged fresh.
@@ -112,9 +129,9 @@ func (w *OrchestrationWatchdog) sweepParent(ctx context.Context, parent db.Issue
 	}
 }
 
-// checkInFlightChild flags + recovers a started sub-issue whose run has gone
-// stale with no active task.
-func (w *OrchestrationWatchdog) checkInFlightChild(ctx context.Context, parent, child db.Issue, now time.Time) {
+// checkStalledChild flags + recovers a todo/in_progress sub-issue whose run has
+// gone stale with no active task.
+func (w *OrchestrationWatchdog) checkStalledChild(ctx context.Context, parent, child db.Issue, now time.Time) {
 	// Still within the grace window since its last change -> a normal run is
 	// likely in progress; leave it alone.
 	if child.UpdatedAt.Valid && now.Sub(child.UpdatedAt.Time) < w.stallAfter {

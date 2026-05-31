@@ -521,6 +521,65 @@ func TestOrchestrationWatchdog_EscalatesPersistentStall(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(orchestration-thread): FIR-2564 — in_review handling tests.
+// TestOrchestrateVerifyCompletesInReviewChild: workers often finish into
+// in_review (not done). A PASS verdict completes it to done and releases
+// dependents.
+func TestOrchestrateVerifyCompletesInReviewChild(t *testing.T) {
+	fx := newOrchestrationFixture(t)
+	ctx := context.Background()
+
+	if _, err := testHandler.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID: fx.childA.ID, Status: "in_review", WorkspaceID: fx.parent.WorkspaceID,
+	}); err != nil {
+		t.Fatalf("set in_review: %v", err)
+	}
+	verified := getOrCreateTestLabel(t, fx.labelID, "orch-verified", "#16a34a")
+	if err := testHandler.Queries.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+		IssueID: fx.childA.ID, LabelID: verified.ID, WorkspaceID: fx.parent.WorkspaceID,
+	}); err != nil {
+		t.Fatalf("attach verified: %v", err)
+	}
+	verifiedA, _ := testHandler.Queries.GetIssue(ctx, fx.childA.ID)
+
+	testHandler.advanceOnChildVerified(ctx, verifiedA)
+
+	if got := issueStatus(t, fx.childA); got != "done" {
+		t.Errorf("a verified in_review child should be completed to done, got %q", got)
+	}
+	if got := issueStatus(t, fx.childB); got != "todo" {
+		t.Errorf("childB should release after A is verified+done, got %q", got)
+	}
+}
+
+// TestOrchestrationWatchdog_NudgesInReviewVerification: an in_review sub-issue
+// (worker finished, verification never fired) is nudged to verification, NOT
+// treated as stalled.
+func TestOrchestrationWatchdog_NudgesInReviewVerification(t *testing.T) {
+	fx := newOrchestrationFixture(t)
+	ctx := context.Background()
+
+	if _, err := testHandler.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID: fx.childA.ID, Status: "in_review", WorkspaceID: fx.parent.WorkspaceID,
+	}); err != nil {
+		t.Fatalf("set in_review: %v", err)
+	}
+	testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.childA.ID)
+
+	wd := NewOrchestrationWatchdog(testHandler)
+	wd.stallAfter = -time.Hour
+	before := countSystemCommentsOn(t, uuidToString(fx.parent.ID))
+
+	wd.sweepOnce(ctx, time.Now())
+
+	if testHandler.issueHasLabelNamed(ctx, fx.childA, "orch-stalled") {
+		t.Errorf("in_review child must NOT be flagged stalled")
+	}
+	if countSystemCommentsOn(t, uuidToString(fx.parent.ID)) <= before {
+		t.Errorf("watchdog should nudge verification (post a comment) for an in_review child")
+	}
+}
+
 func TestOrchestrateRejectsCycle(t *testing.T) {
 	fx := newOrchestrationFixture(t)
 	ctx := context.Background()

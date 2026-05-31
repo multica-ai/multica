@@ -38,6 +38,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -45,9 +46,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/orchestration"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// CEREBRO-PATCH(orchestration-thread): FIR-2564 — single Orchestrator comment
+// thread + dedup fix + in_review completion.
+// orchestrationThreadMetaKey stores, per issue, the comment id that roots all of
+// that issue's Orchestrator comments — so they stay in one thread instead of
+// flooding the issue with top-level system comments.
+const orchestrationThreadMetaKey = "orch_thread"
 
 const (
 	orchestrateLabelName = "orchestrate"
@@ -428,11 +437,14 @@ func (h *Handler) postOrchestrationCommentReturning(ctx context.Context, issue d
 	// Attribution: make every engine comment unmistakably the Orchestrator's.
 	body := orchestratorCommentPrefix + content
 	// Dedup: the same engine action can fire twice (label re-applied, double
-	// child-done nudge). Skip posting if an identical Orchestrator comment is
-	// already among the most recent comments on this issue.
+	// child-done nudge, watchdog tick). Skip posting if an identical Orchestrator
+	// comment is already among the most recent comments on this issue.
 	if existing := h.findRecentOrchestrationComment(ctx, issue, body); existing != nil {
 		return *existing, true
 	}
+	// Single thread: keep all of this issue's Orchestrator comments under one
+	// root so the issue doesn't fill with scattered top-level system comments.
+	root := h.orchestrationThreadRoot(ctx, issue)
 	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
@@ -440,11 +452,15 @@ func (h *Handler) postOrchestrationCommentReturning(ctx context.Context, issue d
 		AuthorID:    pgtype.UUID{Valid: true},
 		Content:     body,
 		Type:        "system",
-		ParentID:    pgtype.UUID{Valid: false},
+		ParentID:    root,
 	})
 	if err != nil {
 		slog.Warn("orchestration: create system comment failed", "issue_id", uuidToString(issue.ID), "error", err)
 		return db.Comment{}, false
+	}
+	if !root.Valid {
+		// First Orchestrator comment on this issue → it becomes the thread root.
+		h.setOrchestrationThreadRoot(ctx, issue, comment.ID)
 	}
 	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
 		"comment":             commentToResponse(comment, nil, nil),
@@ -461,10 +477,12 @@ func (h *Handler) postOrchestrationCommentReturning(ctx context.Context, issue d
 // Orchestrator comments from a doubly-fired action. Best-effort: on query
 // failure it returns nil (post proceeds).
 func (h *Handler) findRecentOrchestrationComment(ctx context.Context, issue db.Issue, body string) *db.Comment {
-	recent, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+	// Newest-first: the chronological ListCommentsForIssue returns oldest-first,
+	// so on a long thread it never sees the just-posted duplicate.
+	recent, err := h.Queries.ListRecentCommentsForIssue(ctx, db.ListRecentCommentsForIssueParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
-		Limit:       15,
+		Limit:       25,
 	})
 	if err != nil {
 		return nil
@@ -476,6 +494,45 @@ func (h *Handler) findRecentOrchestrationComment(ctx context.Context, issue db.I
 		}
 	}
 	return nil
+}
+
+// orchestrationThreadRoot returns the comment id that roots this issue's
+// Orchestrator thread (from issue metadata), or an invalid UUID if none yet.
+func (h *Handler) orchestrationThreadRoot(ctx context.Context, issue db.Issue) pgtype.UUID {
+	fresh, err := h.Queries.GetIssue(ctx, issue.ID)
+	if err != nil || len(fresh.Metadata) == 0 {
+		return pgtype.UUID{}
+	}
+	var m map[string]any
+	if json.Unmarshal(fresh.Metadata, &m) != nil {
+		return pgtype.UUID{}
+	}
+	s, _ := m[orchestrationThreadMetaKey].(string)
+	if s == "" {
+		return pgtype.UUID{}
+	}
+	id, err := util.ParseUUID(s)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return id
+}
+
+// setOrchestrationThreadRoot records the thread root comment id in issue
+// metadata. Best-effort.
+func (h *Handler) setOrchestrationThreadRoot(ctx context.Context, issue db.Issue, commentID pgtype.UUID) {
+	val, err := json.Marshal(uuidToString(commentID))
+	if err != nil {
+		return
+	}
+	if _, err := h.Queries.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
+		Key:         orchestrationThreadMetaKey,
+		Value:       val,
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	}); err != nil {
+		slog.Warn("orchestration: set thread root failed", "issue_id", uuidToString(issue.ID), "error", err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -671,6 +728,18 @@ func (h *Handler) advanceOnChildVerified(ctx context.Context, child db.Issue) {
 	}
 	if !h.isOrchestratedParent(ctx, parent) {
 		return
+	}
+	// Workers often finish a sub-issue into `in_review` (or leave it
+	// in_progress), not `done`. A PASS verdict completes it so the parent can
+	// see it terminal and the wave/full-delivery logic can advance.
+	if child.Status == "in_review" || child.Status == "in_progress" || child.Status == "todo" {
+		if updated, uerr := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID:          child.ID,
+			Status:      "done",
+			WorkspaceID: child.WorkspaceID,
+		}); uerr == nil {
+			h.publishOrchestratedStatus(ctx, updated)
+		}
 	}
 	h.runOrchestration(ctx, parent, false)
 }

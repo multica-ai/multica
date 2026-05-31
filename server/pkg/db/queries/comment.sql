@@ -394,3 +394,12 @@ UPDATE comment SET
     updated_at = CASE WHEN resolved_at IS NOT NULL THEN now() ELSE updated_at END
 WHERE id = $1
 RETURNING *;
+
+-- name: ListRecentCommentsForIssue :many
+-- CEREBRO-PATCH(orchestration-thread): newest-first, capped — used by the
+-- orchestrator's comment dedup (ListCommentsForIssue returns oldest-first, so it
+-- never sees a just-posted duplicate on a long thread).
+SELECT * FROM comment
+WHERE issue_id = $1 AND workspace_id = $2
+ORDER BY created_at DESC, id DESC
+LIMIT $3;
