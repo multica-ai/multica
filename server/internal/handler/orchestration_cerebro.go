@@ -61,6 +61,16 @@ const (
 	orchestrateVerifiedLabelColor = "#16a34a"
 	orchestrateRejectedLabelName  = "orch-rejected"
 	orchestrateRejectedLabelColor = "#dc2626"
+	// orchestrateEvalLabelName marks that the final full-delivery evaluation has
+	// already been requested for a parent, so it is requested exactly once.
+	orchestrateEvalLabelName  = "orch-eval-done"
+	orchestrateEvalLabelColor = "#7c3aed"
+
+	// CEREBRO-PATCH(orchestration-comments-eval): FIR-2564 — orchestrator
+	// attribution prefix + dedup + full-delivery eval.
+	// orchestratorCommentPrefix is prepended to every comment the engine posts so
+	// it is unmistakably the Orchestrator speaking — not a human or a worker agent.
+	orchestratorCommentPrefix = "🎼 **Orchestrator**\n\n"
 )
 
 // maybeStartOrchestrationOnLabel is the entrypoint from AttachLabel. It routes
@@ -275,6 +285,13 @@ func (h *Handler) runOrchestration(ctx context.Context, parent db.Issue, postSum
 		h.postOrchestrationComment(ctx, parent,
 			"Orchestration advanced: started "+strings.Join(started, ", ")+" now that their dependencies are done.")
 	}
+
+	// Full-delivery evaluation (FIR-2564): per-sub-issue verification is not the
+	// same as "the whole feature actually works." Once every sub-issue is
+	// complete (verified-done or cancelled), the orchestrator asks the squad
+	// leader to evaluate the COMPLETE delivery end-to-end against the parent's
+	// goal — is it built, deployed and working live — before this is called done.
+	h.maybeRequestFullDeliveryEval(ctx, parent, childIssues)
 }
 
 // loadBlockers returns, per child issue id (string), the issues that block it.
@@ -408,12 +425,20 @@ func (h *Handler) postOrchestrationComment(ctx context.Context, issue db.Issue, 
 // created comment so callers can use its ID as a task trigger (e.g. the
 // independent-verifier request). Returns ok=false on write failure.
 func (h *Handler) postOrchestrationCommentReturning(ctx context.Context, issue db.Issue, content string) (db.Comment, bool) {
+	// Attribution: make every engine comment unmistakably the Orchestrator's.
+	body := orchestratorCommentPrefix + content
+	// Dedup: the same engine action can fire twice (label re-applied, double
+	// child-done nudge). Skip posting if an identical Orchestrator comment is
+	// already among the most recent comments on this issue.
+	if existing := h.findRecentOrchestrationComment(ctx, issue, body); existing != nil {
+		return *existing, true
+	}
 	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		AuthorType:  "system",
 		AuthorID:    pgtype.UUID{Valid: true},
-		Content:     content,
+		Content:     body,
 		Type:        "system",
 		ParentID:    pgtype.UUID{Valid: false},
 	})
@@ -429,6 +454,28 @@ func (h *Handler) postOrchestrationCommentReturning(ctx context.Context, issue d
 		"issue_status":        issue.Status,
 	})
 	return comment, true
+}
+
+// findRecentOrchestrationComment returns a recent system comment on the issue
+// whose content exactly equals body, or nil if none. Used to suppress duplicate
+// Orchestrator comments from a doubly-fired action. Best-effort: on query
+// failure it returns nil (post proceeds).
+func (h *Handler) findRecentOrchestrationComment(ctx context.Context, issue db.Issue, body string) *db.Comment {
+	recent, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		Limit:       15,
+	})
+	if err != nil {
+		return nil
+	}
+	for i := range recent {
+		c := recent[i]
+		if c.AuthorType == "system" && c.Content == body {
+			return &c
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -653,10 +700,101 @@ func (h *Handler) reopenRejectedChild(ctx context.Context, child db.Issue) {
 		slog.Warn("orchestration: reopen rejected child failed", "child_id", uuidToString(child.ID), "error", err)
 		return
 	}
+	// Clear the rejected marker so the NEXT completion re-triggers verification
+	// (requestChildVerification skips a child that still carries a verdict label).
+	h.detachWorkspaceLabel(ctx, child, orchestrateRejectedLabelName)
 	h.publishOrchestratedStatus(ctx, reopened)
 	h.startOrchestratedChild(ctx, reopened)
 	h.postOrchestrationComment(ctx, parent,
 		"Sub-issue #"+strconv.Itoa(int(child.Number))+" failed verification and was sent back for rework.")
+}
+
+// detachWorkspaceLabel removes a label (by name) from an issue if present.
+// Best-effort: lookup/detach failures are logged, not propagated.
+func (h *Handler) detachWorkspaceLabel(ctx context.Context, issue db.Issue, name string) {
+	labels, err := h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return
+	}
+	for _, l := range labels {
+		if strings.EqualFold(strings.TrimSpace(l.Name), name) {
+			if err := h.Queries.DetachLabelFromIssue(ctx, db.DetachLabelFromIssueParams{
+				IssueID:     issue.ID,
+				LabelID:     l.ID,
+				WorkspaceID: issue.WorkspaceID,
+			}); err != nil {
+				slog.Warn("orchestration: detach label failed", "name", name, "error", err)
+			}
+			return
+		}
+	}
+}
+
+// maybeRequestFullDeliveryEval dispatches a final, holistic evaluation of the
+// COMPLETE delivery once every sub-issue is complete (verified-done or
+// cancelled, with at least one real delivery). Per-sub-issue verification only
+// proves each step in isolation; this asks the squad leader to confirm the whole
+// feature is built, deployed and actually working live before the parent is
+// done. Fires exactly once (guarded by the `orch-eval-done` label on the parent).
+func (h *Handler) maybeRequestFullDeliveryEval(ctx context.Context, parent db.Issue, childIssues []db.Issue) {
+	if len(childIssues) == 0 || h.issueHasLabelNamed(ctx, parent, orchestrateEvalLabelName) {
+		return
+	}
+	anyDelivered := false
+	for _, c := range childIssues {
+		switch c.Status {
+		case "cancelled":
+			// complete, nothing delivered
+		case "done":
+			if !h.issueHasLabelNamed(ctx, c, orchestrateVerifiedLabelName) {
+				return // a done child still awaiting verification — not complete yet
+			}
+			anyDelivered = true
+		default:
+			return // a child still in flight — not complete yet
+		}
+	}
+	if !anyDelivered {
+		return // everything cancelled — nothing to evaluate
+	}
+	if !h.isSquadLeaderReady(ctx, parent) {
+		return
+	}
+	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+		ID:          parent.AssigneeID,
+		WorkspaceID: parent.WorkspaceID,
+	})
+	if err != nil || h.hasPendingTask(ctx, parent.ID, squad.LeaderID) {
+		return
+	}
+	// Mark requested (once) before dispatching. Attaching via Queries does NOT
+	// re-enter the label trigger (that only fires from the HTTP AttachLabel seam).
+	if id := h.ensureWorkspaceLabel(ctx, parent.WorkspaceID, orchestrateEvalLabelName, orchestrateEvalLabelColor); id.Valid {
+		_ = h.Queries.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+			IssueID:     parent.ID,
+			LabelID:     id,
+			WorkspaceID: parent.WorkspaceID,
+		})
+	}
+	content := "All sub-issues are delivered and individually verified. Requesting a " +
+		"**full-delivery evaluation** from the squad leader before this is called done.\n\n" +
+		"Squad leader: evaluate the COMPLETE delivery end-to-end against this issue's goal:\n" +
+		"1. Does the whole feature actually work together — not just that each step's checks " +
+		"passed in isolation?\n" +
+		"2. Is it merged AND deployed live? Verify in the real app, not from the PRs alone " +
+		"(\"should/probably/seems\" is not verified — show evidence).\n" +
+		"3. Do the delivered pieces still fit the original plan, or did something drift?\n\n" +
+		"Post a short evaluation — what works live, what doesn't, and a clear verdict (delivered " +
+		"or not). If it is genuinely delivered and working live, mark this issue done; otherwise " +
+		"open follow-up sub-issues for the gaps."
+	comment, ok := h.postOrchestrationCommentReturning(ctx, parent, content)
+	if !ok {
+		return
+	}
+	h.enqueueSquadLeaderTask(ctx, parent, comment.ID, "system", "")
 }
 
 // ensureWorkspaceLabel returns the id of a workspace label with the given name,

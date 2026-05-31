@@ -397,6 +397,61 @@ func TestOrchestrateRejectReopensChild(t *testing.T) {
 
 // TestOrchestrateRejectsCycle: a mutual block between children is rejected with
 // an explanatory comment and nothing is started.
+// CEREBRO-PATCH(orchestration-comments-eval): FIR-2564 — dedup/attribution + full-eval tests.
+// TestOrchestrateCommentDedupAndAttribution: an identical Orchestrator comment
+// posted twice is written once, and every engine comment is attributed.
+func TestOrchestrateCommentDedupAndAttribution(t *testing.T) {
+	fx := newOrchestrationFixture(t)
+	ctx := context.Background()
+
+	testHandler.postOrchestrationComment(ctx, fx.parent, "duplicate note from a doubly-fired action")
+	testHandler.postOrchestrationComment(ctx, fx.parent, "duplicate note from a doubly-fired action")
+
+	if got := countSystemCommentsOn(t, uuidToString(fx.parent.ID)); got != 1 {
+		t.Errorf("identical Orchestrator comment should be deduped to 1, got %d", got)
+	}
+	content := parentSystemCommentContent(t, uuidToString(fx.parent.ID))
+	if !strings.Contains(content, "Orchestrator") {
+		t.Errorf("engine comment should be attributed to the Orchestrator, got: %s", content)
+	}
+}
+
+// TestOrchestrateFullDeliveryEval: once every sub-issue is verified-done, the
+// orchestrator requests a full-delivery evaluation from the squad leader — once.
+func TestOrchestrateFullDeliveryEval(t *testing.T) {
+	fx := newOrchestrationFixture(t)
+	ctx := context.Background()
+
+	verified := getOrCreateTestLabel(t, fx.labelID, "orch-verified", "#16a34a")
+	for _, ch := range []db.Issue{fx.childA, fx.childB} {
+		if _, err := testHandler.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID: ch.ID, Status: "done", WorkspaceID: fx.parent.WorkspaceID,
+		}); err != nil {
+			t.Fatalf("mark child done: %v", err)
+		}
+		if err := testHandler.Queries.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+			IssueID: ch.ID, LabelID: verified.ID, WorkspaceID: fx.parent.WorkspaceID,
+		}); err != nil {
+			t.Fatalf("attach verified: %v", err)
+		}
+	}
+
+	testHandler.maybeStartOrchestrationOnLabel(ctx, fx.parent, fx.labelID.ID)
+
+	if !testHandler.issueHasLabelNamed(ctx, fx.parent, "orch-eval-done") {
+		t.Errorf("parent should be marked orch-eval-done once full-delivery eval is requested")
+	}
+	if got := countPendingTasksForAgent(t, uuidToString(fx.parent.ID), fx.leaderID); got != 1 {
+		t.Errorf("squad leader should have 1 full-delivery-eval task, got %d", got)
+	}
+
+	// Fires exactly once: a second trigger must not enqueue a second eval task.
+	testHandler.maybeStartOrchestrationOnLabel(ctx, fx.parent, fx.labelID.ID)
+	if got := countPendingTasksForAgent(t, uuidToString(fx.parent.ID), fx.leaderID); got != 1 {
+		t.Errorf("full-delivery eval must fire exactly once, got %d tasks", got)
+	}
+}
+
 func TestOrchestrateRejectsCycle(t *testing.T) {
 	fx := newOrchestrationFixture(t)
 	ctx := context.Background()
