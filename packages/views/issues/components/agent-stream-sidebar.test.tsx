@@ -82,32 +82,32 @@ beforeEach(() => {
 });
 
 describe("AgentStreamSidebar", () => {
-  it("renders runs in created_at ascending order even when the API returns newest first", async () => {
+  it("renders runs in created_at descending order (newest first)", async () => {
     mockApi.listTasksByIssue.mockResolvedValue([
-      makeTask({
-        id: "task-new",
-        created_at: "2026-01-01T00:03:00Z",
-        completed_at: "2026-01-01T00:04:00Z",
-        trigger_summary: "Newest run",
-      }),
       makeTask({
         id: "task-old",
         created_at: "2026-01-01T00:01:00Z",
         completed_at: "2026-01-01T00:02:00Z",
         trigger_summary: "Oldest run",
       }),
+      makeTask({
+        id: "task-new",
+        created_at: "2026-01-01T00:03:00Z",
+        completed_at: "2026-01-01T00:04:00Z",
+        trigger_summary: "Newest run",
+      }),
     ]);
 
     renderSidebar();
 
-    await waitFor(() => expect(screen.getByText("Oldest run")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Newest run")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /runs/i }));
 
     const rows = screen.getAllByRole("button").filter((button) =>
       button.textContent?.includes("run"),
     );
-    expect(rows[0]).toHaveTextContent("Oldest run");
-    expect(rows[1]).toHaveTextContent("Newest run");
+    expect(rows[0]).toHaveTextContent("Newest run");
+    expect(rows[1]).toHaveTextContent("Oldest run");
   });
 
   it("jumps using the task trigger_comment_id", async () => {

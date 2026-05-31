@@ -12,7 +12,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT, useTimeAgo } from "../../i18n";
 import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
-import { sortTaskRunsByCreatedAtAsc } from "../utils/task-runs";
+import { sortTaskRunsByCreatedAtDesc } from "../utils/task-runs";
 import { useAgentColorMap } from "./task-agent-colors";
 import { TaskTraceOutput } from "./task-trace-output";
 
@@ -35,7 +35,7 @@ export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamS
   });
 
   const chronologicalTasks = useMemo(
-    () => sortTaskRunsByCreatedAtAsc(tasks),
+    () => sortTaskRunsByCreatedAtDesc(tasks),
     [tasks],
   );
 
@@ -95,12 +95,16 @@ export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamS
   }, [selectedTask, isLive]);
 
   useEffect(() => {
+    if (!isLive) {
+      setPaused(false);
+      return;
+    }
     refreshPaused();
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") refreshPaused();
     }, 30_000);
     return () => clearInterval(interval);
-  }, [refreshPaused]);
+  }, [refreshPaused, isLive]);
 
   useWSEvent("interaction:created", (payload: unknown) => {
     const p = payload as { task_id?: string };

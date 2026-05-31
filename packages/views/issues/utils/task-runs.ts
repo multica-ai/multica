@@ -12,6 +12,16 @@ export function compareTaskRunsByCreatedAtAsc(a: AgentTask, b: AgentTask): numbe
   return a.id.localeCompare(b.id);
 }
 
+export function compareTaskRunsByCreatedAtDesc(a: AgentTask, b: AgentTask): number {
+  const diff = timeValue(b.created_at) - timeValue(a.created_at);
+  if (diff !== 0) return diff;
+  return b.id.localeCompare(a.id);
+}
+
 export function sortTaskRunsByCreatedAtAsc(tasks: readonly AgentTask[]): AgentTask[] {
   return [...tasks].sort(compareTaskRunsByCreatedAtAsc);
+}
+
+export function sortTaskRunsByCreatedAtDesc(tasks: readonly AgentTask[]): AgentTask[] {
+  return [...tasks].sort(compareTaskRunsByCreatedAtDesc);
 }
