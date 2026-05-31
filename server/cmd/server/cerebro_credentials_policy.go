@@ -34,8 +34,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	persona "github.com/hvejsel/firtal-persona/sdk/go"
+	// CEREBRO-PATCH(cerebro-credentials-approval-gate): FIR-2586 route a credential
+	// needs-approval verdict through the shared approval inbox instead of a silent deny.
+	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	"github.com/multica-ai/multica/server/internal/cerebro/credentials"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	cerebropermissions "github.com/multica-ai/multica/server/internal/cerebro/permissions"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/db/generated"
@@ -116,6 +120,11 @@ func (p *personaBackend) CheckCredential(ctx context.Context, action, resource, 
 // exact credential first, credential-type fallback second.
 type multicaCredentialPolicy struct {
 	resolver *cerebropermissions.Resolver
+	// CEREBRO-PATCH(cerebro-credentials-approval-gate): FIR-2586 — shared approval
+	// seam. nil when CEREBRO_APPROVAL_GATE_ENABLED is off, so a needs-approval
+	// verdict falls through to deny exactly as before; non-nil routes it to the
+	// one /approvals inbox and blocks until a human decides.
+	gate *permgate.Gate
 }
 
 func (m *multicaCredentialPolicy) Check(ctx context.Context, req credentials.PolicyRequest) credentials.PolicyDecision {
@@ -127,42 +136,101 @@ func (m *multicaCredentialPolicy) Check(ctx context.Context, req credentials.Pol
 		Type: req.ActorType,
 		ID:   req.ActorID,
 	}
+
+	// Resolve the most-specific scope first, then the type fallback. A matching
+	// allow at either scope wins immediately and never raises an approval.
 	idResource := "cerebro-credential:" + util.UUIDToString(req.CredentialID)
-	if dec := m.checkResource(ctx, req, actor, action, idResource); dec.Allowed {
-		return dec
+	idDec, err := m.resolveScope(ctx, req, actor, action, idResource)
+	if err != nil {
+		return credentials.Deny("multica permission engine failed: " + err.Error())
 	}
+	if idDec.Kind == cerebropermissions.DecisionAllow {
+		return credentials.Allow("multica grant matched")
+	}
+
+	var typeDec cerebropermissions.Decision
+	var typeResource string
+	if req.CredentialType != "" {
+		typeResource = "cerebro-credential-type:" + string(req.CredentialType)
+		typeDec, err = m.resolveScope(ctx, req, actor, action, typeResource)
+		if err != nil {
+			return credentials.Deny("multica permission engine failed: " + err.Error())
+		}
+		if typeDec.Kind == cerebropermissions.DecisionAllow {
+			return credentials.Allow("multica grant matched (type)")
+		}
+	}
+
+	// Neither scope allows. If either asks for approval and the shared gate is
+	// wired, raise ONE inbox request (most-specific scope first) and await the
+	// human decision — the same seam agent tool calls and repo checkout use
+	// (FIR-2586). Flag off (gate==nil) keeps the prior deny-by-default behaviour.
+	if m.gate != nil {
+		if askResource, askReason, ok := firstCredentialAsk(idDec, idResource, typeDec, typeResource); ok {
+			return m.awaitApproval(ctx, req, action, askResource, askReason)
+		}
+	}
+
 	if req.CredentialType == "" {
 		return credentials.Deny("no id-scoped grant; no type fallback")
-	}
-	typeResource := "cerebro-credential-type:" + string(req.CredentialType)
-	if dec := m.checkResource(ctx, req, actor, action, typeResource); dec.Allowed {
-		return dec
 	}
 	return credentials.Deny("no matching credential grant (id or type)")
 }
 
-func (m *multicaCredentialPolicy) checkResource(ctx context.Context, req credentials.PolicyRequest, actor cerebropermissions.Actor, action, resource string) credentials.PolicyDecision {
-	dec, err := m.resolver.Can(ctx, cerebropermissions.Request{
+// resolveScope returns the raw engine decision for one (action, resource) pair.
+func (m *multicaCredentialPolicy) resolveScope(ctx context.Context, req credentials.PolicyRequest, actor cerebropermissions.Actor, action, resource string) (cerebropermissions.Decision, error) {
+	return m.resolver.Can(ctx, cerebropermissions.Request{
 		WorkspaceID: req.WorkspaceID,
 		Actor:       actor,
 		Capability:  action,
 		Resource:    resource,
 	})
+}
+
+// firstCredentialAsk picks the scope whose verdict is needs-approval, preferring
+// the most-specific (id) scope so the inbox row names the exact credential.
+func firstCredentialAsk(idDec cerebropermissions.Decision, idResource string, typeDec cerebropermissions.Decision, typeResource string) (string, string, bool) {
+	if idDec.Kind == cerebropermissions.DecisionNeedsApproval {
+		return idResource, idDec.Reason, true
+	}
+	if typeResource != "" && typeDec.Kind == cerebropermissions.DecisionNeedsApproval {
+		return typeResource, typeDec.Reason, true
+	}
+	return "", "", false
+}
+
+// awaitApproval raises a credential approval in the shared inbox and blocks until
+// a human decides. Approve → Allow; reject/expire/timeout → Deny. A gate error
+// fails closed (Deny), never a silent allow. (FIR-2586)
+func (m *multicaCredentialPolicy) awaitApproval(ctx context.Context, req credentials.PolicyRequest, action, resource, reason string) credentials.PolicyDecision {
+	greq := permgate.Request{
+		Permission: cerebropermissions.Request{
+			WorkspaceID: req.WorkspaceID,
+			Actor:       cerebropermissions.Actor{Type: req.ActorType, ID: req.ActorID},
+			Capability:  action,
+			Resource:    resource,
+		},
+		RequesterType: req.ActorType,
+		RequesterID:   req.ActorID,
+		Surface:       approvals.SurfaceSystem,
+		Context: map[string]any{
+			"credential_id":   util.UUIDToString(req.CredentialID),
+			"credential_type": string(req.CredentialType),
+			"permission":      string(req.Permission),
+			"resource":        resource,
+		},
+	}
+	res, err := m.gate.GuardDecision(ctx, greq, cerebropermissions.Decision{
+		Kind:   cerebropermissions.DecisionNeedsApproval,
+		Reason: reason,
+	})
 	if err != nil {
-		return credentials.Deny("multica permission engine failed: " + err.Error())
+		return credentials.Deny("approval gate error: " + err.Error())
 	}
-	switch dec.Kind {
-	case cerebropermissions.DecisionAllow:
-		return credentials.Allow("multica grant matched")
-	case cerebropermissions.DecisionNeedsApproval:
-		return credentials.Deny("approval required")
-	default:
-		reason := dec.Reason
-		if reason == "" {
-			reason = "multica deny"
-		}
-		return credentials.Deny(reason)
+	if res.Outcome.Stops() {
+		return credentials.Deny("approval " + string(res.Outcome))
 	}
+	return credentials.Allow("approved via inbox")
 }
 
 // newCredentialsPolicy builds the production chain. queries is the
@@ -174,14 +242,17 @@ func (m *multicaCredentialPolicy) checkResource(ctx context.Context, req credent
 // are unset, only the owner check fires. This matches the issue's
 // deny-by-default behaviour — non-owners get nothing until persona is
 // configured and grants are issued.
-func newCredentialsPolicy(cerebroQueries *cerebrodb.Queries, queries *db.Queries) credentials.PolicyChecker {
+// gate is the shared approval seam (nil when CEREBRO_APPROVAL_GATE_ENABLED is
+// off). When non-nil a credential needs-approval verdict lands in the one
+// /approvals inbox and blocks until a human decides, instead of a silent deny.
+func newCredentialsPolicy(cerebroQueries *cerebrodb.Queries, queries *db.Queries, gate *permgate.Gate) credentials.PolicyChecker {
 	if queries == nil {
 		return credentials.DenyAllChecker
 	}
 	owner := credentials.NewOwnerPolicyChecker(&memberLookupFromQueries{q: queries})
 	multica := credentials.PolicyChecker(nil)
 	if cerebroQueries != nil {
-		multica = &multicaCredentialPolicy{resolver: cerebropermissions.New(cerebroQueries)}
+		multica = &multicaCredentialPolicy{resolver: cerebropermissions.New(cerebroQueries), gate: gate}
 	}
 
 	url := strings.TrimSpace(os.Getenv("MULTICA_PERSONA_URL"))

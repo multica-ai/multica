@@ -1069,9 +1069,18 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL, agen
 	// CEREBRO-PATCH(daemon-repo-grants): FIR-2512 — when grants are enabled,
 	// use the server-side grants resolver instead of the flat workspace allowlist.
 	if d.repoGrantsEnabled(workspaceID) {
-		allowed, reason, grantErr := d.client.CheckRepoCapability(ctx, workspaceID, agentID, projectID, repoURL, "repo.checkout")
+		allowed, decision, reason, approvalID, grantErr := d.client.CheckRepoCapability(ctx, workspaceID, agentID, projectID, repoURL, "repo.checkout")
 		if grantErr != nil {
 			return fmt.Errorf("repo permission check: %w", grantErr)
+		}
+		// CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 — an "Ask" verdict on a
+		// real checkout returns a pending approval in the shared inbox; wait for the
+		// human decision instead of failing outright.
+		if decision == "pending" && approvalID != "" {
+			allowed, reason, grantErr = d.awaitRepoApproval(ctx, workspaceID, repoURL, approvalID)
+			if grantErr != nil {
+				return fmt.Errorf("repo approval wait: %w", grantErr)
+			}
 		}
 		if !allowed {
 			if reason == "" {
@@ -1098,6 +1107,43 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL, agen
 	}
 
 	return fmt.Errorf("repo is configured but not synced")
+}
+
+// CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 — long-poll a pending repo
+// checkout approval until a human decides. repoApprovalWaitBudget stays under
+// the CLI→daemon checkout HTTP timeout (5 min) so the CLI gets a clean
+// pending/denied answer rather than a transport timeout.
+const (
+	repoApprovalPollInterval = 3 * time.Second
+	repoApprovalWaitBudget   = 4 * time.Minute
+)
+
+// awaitRepoApproval long-polls a pending repo-checkout approval until a human
+// decides or the wait budget elapses. Returns (allowed, reason, error). A still-
+// pending ask at the deadline is reported as not-allowed with a clear reason —
+// the ask stays open in the inbox so the agent can retry once it is approved.
+func (d *Daemon) awaitRepoApproval(ctx context.Context, workspaceID, repoURL, approvalID string) (bool, string, error) {
+	slog.Info("repo checkout awaiting approval", "workspace_id", workspaceID, "repo", repoURL, "approval_id", approvalID)
+	deadline := time.Now().Add(repoApprovalWaitBudget)
+	ticker := time.NewTicker(repoApprovalPollInterval)
+	defer ticker.Stop()
+	for {
+		allowed, decision, reason, err := d.client.PollRepoApproval(ctx, workspaceID, approvalID)
+		if err != nil {
+			return false, "", err
+		}
+		if decision != "pending" {
+			return allowed, reason, nil
+		}
+		if time.Now().After(deadline) {
+			return false, "approval still pending — request is in your inbox, retry the checkout once approved", nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, "", ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 // DefaultTokenRenewalInterval is how often the daemon asks the server to

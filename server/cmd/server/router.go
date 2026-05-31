@@ -312,9 +312,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.PrivateAgentRunRequester = cerebroprivateagentrun.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
 	cerebroAccountHandler := cerebroaccount.New(cerebroQueries, bus)
+	// CEREBRO-PATCH(router-approval-gate): FIR-2586 build the shared approval gate
+	// once (nil when CEREBRO_APPROVAL_GATE_ENABLED is off) and wire it into every
+	// enforcement point so an "Ask" lands in the one /approvals inbox: daemon repo
+	// checkout (h.ApprovalGate) and credential governance (newCredentialsPolicy).
+	sharedApprovalGate := cerebroruntime.BuildApprovalGate(cerebroQueries, pool, bus)
+	h.ApprovalGate = sharedApprovalGate
 	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196/1197 credential registry handler — cipher loaded from MULTICA_CREDENTIALS_KEY, governance policy wired via newCredentialsPolicy (Persona/Multica cut-over controlled by MULTICA_PERMISSION_ENGINE).
 	cerebroCredentialsCipher := cerebrocredentials.MustNewCipherFromEnv()
-	cerebroCredentialsHandler := cerebrocredentials.New(cerebroQueries, cerebroCredentialsCipher, bus).WithPolicy(newCredentialsPolicy(cerebroQueries, queries))
+	cerebroCredentialsHandler := cerebrocredentials.New(cerebroQueries, cerebroCredentialsCipher, bus).WithPolicy(newCredentialsPolicy(cerebroQueries, queries, sharedApprovalGate))
 	// CEREBRO-PATCH(router-infisical-provisioner): FIR-2192 scoped-per-user
 	// Infisical machine identity provisioner. Reads admin credentials +
 	// project/org IDs from INFISICAL_ADMIN_* env vars. Nil when unset so dev
@@ -491,7 +497,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/heartbeat", h.DaemonHeartbeat)
 		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
-		r.Post("/workspaces/{workspaceId}/repo/check", h.CheckDaemonRepoCapability) // CEREBRO-PATCH(daemon-repo-grants): FIR-2512
+		r.Post("/workspaces/{workspaceId}/repo/check", h.CheckDaemonRepoCapability)                 // CEREBRO-PATCH(daemon-repo-grants): FIR-2512
+		r.Get("/workspaces/{workspaceId}/repo/check/{approvalId}", h.PollDaemonRepoApproval)        // CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 poll a repo-checkout approval
 		r.Get("/workspaces/{workspaceId}/agents/persona", h.ListWorkspacePersonaAgents)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)

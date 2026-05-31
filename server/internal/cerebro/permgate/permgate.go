@@ -117,6 +117,7 @@ type resolverIface interface {
 type approvalsIface interface {
 	Intake(ctx context.Context, p approvals.IntakeParams) (cerebrodb.CerebroApprovalRequest, error)
 	Get(ctx context.Context, id, workspaceID pgtype.UUID) (cerebrodb.CerebroApprovalRequest, error)
+	FindReusable(ctx context.Context, q approvals.ReusableQuery) (cerebrodb.CerebroApprovalRequest, bool, error)
 }
 
 // Gate wires the resolver and the approval inbox together.
@@ -222,6 +223,44 @@ func (g *Gate) resultForDecision(ctx context.Context, req Request, decision perm
 	}
 }
 
+// EvaluateDecisionReusing is EvaluateDecision with dedup for poll-based callers.
+// Before materialising a new ask for a needs_approval decision it looks for a
+// still-actionable approval for the same (agent, capability, resource): a
+// pending match is returned as OutcomePending with its existing id so a retry
+// rejoins the SAME inbox request, and an approved, unexpired match
+// short-circuits to OutcomeApproved so the retry is honoured. Only when nothing
+// reusable exists does it create a fresh ask. This is what stops a retried repo
+// checkout — the daemon long-polls, gives up, the agent retries — from spawning
+// a duplicate inbox request each round (FIR-2586). Allow/Deny decisions are
+// unchanged. Blocking callers should keep using EvaluateDecision: they hold one
+// Await across the whole window, so there is no retry to dedup.
+func (g *Gate) EvaluateDecisionReusing(ctx context.Context, req Request, decision permissions.Decision) (Result, error) {
+	if g == nil || g.Approvals == nil {
+		return Result{Outcome: OutcomeDenied, Reason: "gate not configured"},
+			errors.New("permgate: gate not configured")
+	}
+	if decision.Kind == permissions.DecisionNeedsApproval {
+		existing, ok, err := g.Approvals.FindReusable(ctx, approvals.ReusableQuery{
+			WorkspaceID: req.Permission.WorkspaceID,
+			Agent:       req.Permission.Agent,
+			Capability:  req.Permission.Capability,
+			Resource:    req.Permission.Resource,
+		})
+		if err != nil {
+			// Fail closed loudly, like createAsk: a lookup error must not silently
+			// become a deny or a duplicate.
+			return Result{Outcome: OutcomeDenied, Decision: decision, Reason: "could not look up existing approval"}, err
+		}
+		if ok {
+			if existing.Status == approvals.StatusApproved {
+				return Result{Outcome: OutcomeApproved, Decision: decision, ApprovalID: existing.ID, Reason: existing.Reason}, nil
+			}
+			return Result{Outcome: OutcomePending, Decision: decision, ApprovalID: existing.ID, Reason: existing.Reason}, nil
+		}
+	}
+	return g.resultForDecision(ctx, req, decision)
+}
+
 // Guard is the synchronous convenience: Evaluate, and if the result is pending,
 // Await the human decision. Used by in-process call sites that can block the
 // caller until the human acts (the runtime hook uses Evaluate + its own poll
@@ -287,6 +326,24 @@ func (g *Gate) Await(ctx context.Context, workspaceID, approvalID pgtype.UUID) (
 		case <-ticker.C:
 		}
 	}
+}
+
+// Status reports an approval's current outcome in a single, non-blocking read:
+// OutcomePending while it is still open, or the terminal outcome once decided.
+// The repo-checkout poll endpoint calls it on each daemon tick instead of
+// holding the HTTP connection — the daemon's client has a short timeout, so the
+// server cannot Await across the whole approval window the way an in-process
+// caller can. (FIR-2586)
+func (g *Gate) Status(ctx context.Context, workspaceID, approvalID pgtype.UUID) (Outcome, error) {
+	if g == nil || g.Approvals == nil {
+		return OutcomeDenied, errors.New("permgate: gate not configured")
+	}
+	ask, err := g.Approvals.Get(ctx, approvalID, workspaceID)
+	if err != nil {
+		return OutcomePending, err
+	}
+	outcome, _ := outcomeForStatus(ask.Status)
+	return outcome, nil
 }
 
 // outcomeForStatus maps an approval row status to a gate outcome. The boolean

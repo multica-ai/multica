@@ -599,24 +599,44 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 // CEREBRO-PATCH(daemon-repo-grants): FIR-2512 repo capability check via grants resolver.
 
 // CheckRepoCapability asks the server whether the given agent (optionally in a
-// project context) holds the requested capability for a repo URL.
-// Returns (allowed, reason, error).
-func (c *Client) CheckRepoCapability(ctx context.Context, workspaceID, agentID, projectID, repoURL, capability string) (bool, string, error) {
+// project context) holds the requested capability for a repo URL. It sets
+// raise_approval so an "Ask" verdict creates a shared-inbox approval rather than
+// a silent block (FIR-2586); when that happens the server answers
+// decision="pending" with an approvalID the caller long-polls via
+// PollRepoApproval. Returns (allowed, decision, reason, approvalID, error).
+func (c *Client) CheckRepoCapability(ctx context.Context, workspaceID, agentID, projectID, repoURL, capability string) (bool, string, string, string, error) { // CEREBRO-PATCH(daemon-repo-approval): FIR-2586 raise shared-inbox approval on Ask.
+	var resp struct {
+		Allowed    bool   `json:"allowed"`
+		Decision   string `json:"decision"`
+		Reason     string `json:"reason"`
+		ApprovalID string `json:"approval_id"`
+	}
+	body := map[string]any{
+		"url":            repoURL,
+		"capability":     capability,
+		"agent_id":       agentID,
+		"project_id":     projectID,
+		"raise_approval": true,
+	}
+	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/repo/check", workspaceID), body, &resp); err != nil {
+		return false, "", "", "", err
+	}
+	return resp.Allowed, resp.Decision, resp.Reason, resp.ApprovalID, nil
+}
+
+// PollRepoApproval reads the current status of a pending repo-checkout approval.
+// Single-shot: the caller loops on it (with its own sleep + deadline) until the
+// decision is no longer "pending". Returns (allowed, decision, reason, error).
+func (c *Client) PollRepoApproval(ctx context.Context, workspaceID, approvalID string) (bool, string, string, error) {
 	var resp struct {
 		Allowed  bool   `json:"allowed"`
 		Decision string `json:"decision"`
 		Reason   string `json:"reason"`
 	}
-	body := map[string]string{
-		"url":        repoURL,
-		"capability": capability,
-		"agent_id":   agentID,
-		"project_id": projectID,
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/repo/check/%s", workspaceID, approvalID), &resp); err != nil {
+		return false, "", "", err
 	}
-	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/repo/check", workspaceID), body, &resp); err != nil {
-		return false, "", err
-	}
-	return resp.Allowed, resp.Reason, nil
+	return resp.Allowed, resp.Decision, resp.Reason, nil
 }
 
 // defaultTerminalRetrySchedule is the backoff used by postJSONWithRetry for

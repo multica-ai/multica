@@ -323,3 +323,88 @@ func randomUUID(t *testing.T) pgtype.UUID {
 	}
 	return id
 }
+
+// seedAskFor intakes a pending ask scoped to a specific agent/capability/resource
+// so the FindReusable matching can be exercised.
+func seedAskFor(t *testing.T, svc *Service, agent pgtype.UUID, capability, resource string, expires pgtype.Timestamptz) cerebrodb.CerebroApprovalRequest {
+	t.Helper()
+	row, err := svc.Intake(context.Background(), IntakeParams{
+		WorkspaceID:   testWorkspace,
+		RequesterType: RequesterAgent,
+		RequesterID:   testRequester,
+		Agent:         agent,
+		Capability:    capability,
+		Resource:      resource,
+		Reason:        "approval required",
+		ExpiresAt:     expires,
+	})
+	if err != nil {
+		t.Fatalf("intake: %v", err)
+	}
+	return row
+}
+
+// TestFindReusable proves the FIR-2586 dedup contract that stops a retried
+// repo checkout from piling up duplicate asks: a pending ask for the same
+// (agent, capability, resource) is rejoined, an approved one is honoured, and
+// anything else (different scope, rejected, expired) yields no match so a fresh
+// ask is raised.
+func TestFindReusable(t *testing.T) {
+	svc := newService()
+	agent := randomUUID(t)
+	const cap, res = "repo.checkout", "https://github.com/firtal-group/x"
+	q := ReusableQuery{WorkspaceID: testWorkspace, Agent: agent, Capability: cap, Resource: res}
+
+	// No ask yet → no match.
+	if _, ok, err := svc.FindReusable(context.Background(), q); err != nil || ok {
+		t.Fatalf("empty: ok=%v err=%v, want ok=false", ok, err)
+	}
+
+	// Pending ask → matched and returned so the retry rejoins it.
+	pending := seedAskFor(t, svc, agent, cap, res, pgtype.Timestamptz{})
+	got, ok, err := svc.FindReusable(context.Background(), q)
+	if err != nil || !ok {
+		t.Fatalf("pending: ok=%v err=%v, want ok=true", ok, err)
+	}
+	if got.ID != pending.ID || got.Status != StatusPending {
+		t.Fatalf("pending: got id=%v status=%q, want id=%v pending", got.ID, got.Status, pending.ID)
+	}
+
+	// A different resource must NOT match this ask.
+	if _, ok, _ := svc.FindReusable(context.Background(), ReusableQuery{WorkspaceID: testWorkspace, Agent: agent, Capability: cap, Resource: "https://github.com/firtal-group/y"}); ok {
+		t.Fatal("different resource must not match")
+	}
+	// A different agent must NOT match this ask.
+	if _, ok, _ := svc.FindReusable(context.Background(), ReusableQuery{WorkspaceID: testWorkspace, Agent: randomUUID(t), Capability: cap, Resource: res}); ok {
+		t.Fatal("different agent must not match")
+	}
+
+	// Once approved, the ask is honoured (approved status returned) so a later
+	// retry proceeds instead of asking again.
+	if _, err := svc.Approve(context.Background(), pending.ID, testWorkspace, testApprover, "", SurfaceUI); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	got, ok, err = svc.FindReusable(context.Background(), q)
+	if err != nil || !ok {
+		t.Fatalf("approved: ok=%v err=%v, want ok=true", ok, err)
+	}
+	if got.Status != StatusApproved {
+		t.Fatalf("approved: got status=%q, want approved", got.Status)
+	}
+
+	// A rejected ask (different scope, isolated) must NOT be reusable.
+	rej := seedAskFor(t, svc, agent, cap, "https://github.com/firtal-group/rejected", pgtype.Timestamptz{})
+	if _, err := svc.Reject(context.Background(), rej.ID, testWorkspace, testApprover, "", SurfaceUI); err != nil {
+		t.Fatalf("reject: %v", err)
+	}
+	if _, ok, _ := svc.FindReusable(context.Background(), ReusableQuery{WorkspaceID: testWorkspace, Agent: agent, Capability: cap, Resource: "https://github.com/firtal-group/rejected"}); ok {
+		t.Fatal("rejected ask must not be reusable")
+	}
+
+	// An already-expired ask (expires_at in the past) must NOT be reusable.
+	expAgent := randomUUID(t)
+	seedAskFor(t, svc, expAgent, cap, res, pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true})
+	if _, ok, _ := svc.FindReusable(context.Background(), ReusableQuery{WorkspaceID: testWorkspace, Agent: expAgent, Capability: cap, Resource: res}); ok {
+		t.Fatal("expired ask must not be reusable")
+	}
+}

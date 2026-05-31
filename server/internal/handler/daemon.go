@@ -2893,6 +2893,10 @@ type daemonRepoCheckRequest struct {
 	Capability string `json:"capability"`
 	AgentID    string `json:"agent_id,omitempty"`
 	ProjectID  string `json:"project_id,omitempty"`
+	// CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 — set by the real daemon
+	// checkout so an "Ask" verdict raises one shared-inbox approval; left false by
+	// the read-only `repo check` pre-flight, which only reports the decision.
+	RaiseApproval bool `json:"raise_approval,omitempty"`
 }
 
 // CheckDaemonRepoCapability evaluates whether a repo capability is allowed for an
@@ -2956,6 +2960,30 @@ func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		slog.Error("repo capability check failed", "workspace_id", workspaceID, "url", req.URL, "error", err)
 		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return
+	}
+
+	// CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 — on a real checkout an
+	// "Ask" verdict no longer silently blocks: it rejoins or creates one
+	// shared-inbox approval and returns its decision (pending/allow/deny) + id so
+	// the daemon can long-poll or proceed. Rejoining a still-open ask (and
+	// honouring one approved after the daemon's earlier poll budget) is what keeps
+	// a retried checkout from piling up duplicate requests. Gate off
+	// (h.ApprovalGate==nil) or the pre-flight path (raise_approval false) keep the
+	// prior report-only behaviour, so production is unchanged.
+	if req.RaiseApproval && h.ApprovalGate != nil && eff.Setting == toolpolicy.SettingAsk {
+		allowed, decision, approvalID, askErr := h.repoCheckoutAsk(r.Context(), wsUUID, agentID, req.URL, req.Capability, eff.Reason)
+		if askErr != nil {
+			slog.Error("repo approval ask failed", "workspace_id", workspaceID, "url", req.URL, "error", askErr)
+			writeError(w, http.StatusInternalServerError, "could not create approval request")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"allowed":     allowed,
+			"decision":    decision,
+			"approval_id": util.UUIDToString(approvalID),
+			"reason":      eff.Reason,
+		})
 		return
 	}
 
