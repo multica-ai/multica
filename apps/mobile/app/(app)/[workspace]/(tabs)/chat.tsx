@@ -254,6 +254,7 @@ export default function ChatTab() {
         content,
         task_id: null,
         created_at: sentAt,
+        responded_at: null,
       };
       qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
         old ? [...old, optimistic] : [optimistic],

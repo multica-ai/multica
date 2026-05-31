@@ -46,6 +46,7 @@ const PRIORITY_LABEL: Record<IssuePriority, string> = {
 // Mirrors useTypeLabels in packages/views/inbox/components/inbox-detail-label.tsx
 const TYPE_LABEL: Record<InboxItemType, string> = {
   issue_assigned: "Assigned",
+  issue_started: "Issue started",
   unassigned: "Unassigned",
   assignee_changed: "Reassigned",
   status_changed: "Status changed",
@@ -62,6 +63,10 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   reaction_added: "Reaction added",
   quick_create_done: "Quick-create done",
   quick_create_failed: "Quick-create failed",
+  reminder: "Reminder",
+  due_date_reminder: "Due date reminder",
+  start_date_reminder: "Start date reminder",
+  private_agent_run_request: "Private agent request",
 };
 
 function shortDate(dateStr: string): string {

@@ -724,6 +724,7 @@ export const UserSchema = z.object({
   onboarding_questionnaire: z.record(z.string(), z.unknown()).default({}),
   starter_content_state: z.string().nullable().default(null),
   language: z.string().nullable().default(null),
+  timezone: z.string().nullable().default(null), // CEREBRO-PATCH(user-timezone-schema): server emits timezone in UserResponse.
   profile_description: z.string().default(""),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
@@ -739,6 +740,7 @@ export const EMPTY_USER: User = {
   onboarding_questionnaire: {},
   starter_content_state: null,
   language: null,
+  timezone: null, // CEREBRO-PATCH(user-timezone-schema): keep fallback aligned with User.
   profile_description: "",
   created_at: "",
   updated_at: "",
