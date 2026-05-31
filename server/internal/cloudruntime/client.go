@@ -34,8 +34,19 @@ type Request struct {
 	Query     url.Values
 	Body      []byte
 	UserID    string
-	UserPAT   string
 	RequestID string
+
+	// Headers carries arbitrary outbound headers that the caller wants
+	// forwarded verbatim. They are applied AFTER the client's defaults
+	// (Accept, Content-Type, X-User-ID, X-Request-ID) so a caller
+	// supplying any of those overrides them — useful when proxying a
+	// request whose Content-Type is not application/json or whose
+	// signed body must not be touched (e.g. the Stripe webhook
+	// passthrough preserving Stripe-Signature alongside the raw body).
+	//
+	// Nil / empty is the common case; existing call sites can ignore
+	// this field.
+	Headers http.Header
 }
 
 type Response struct {
@@ -97,11 +108,27 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	if len(req.Body) > 0 {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
+	// Caller-supplied headers go before the X-User-ID / X-Request-ID
+	// stamps, since those are derived from authenticated context and
+	// must not be overridable by the caller. Defaults (Accept,
+	// Content-Type) ARE overridable — a webhook passthrough may need
+	// to preserve a non-JSON Content-Type.
+	for k, vs := range req.Headers {
+		// Skip the headers we stamp authoritatively below. Canonicalize
+		// once per key — http.CanonicalHeaderKey allocates on its
+		// fast path so calling it twice per iteration would double
+		// the per-request header overhead for no reason.
+		canon := http.CanonicalHeaderKey(k)
+		if canon == "X-User-Id" || canon == "X-Request-Id" {
+			continue
+		}
+		httpReq.Header.Del(k)
+		for _, v := range vs {
+			httpReq.Header.Add(k, v)
+		}
+	}
 	if req.UserID != "" {
 		httpReq.Header.Set("X-User-ID", req.UserID)
-	}
-	if req.UserPAT != "" {
-		httpReq.Header.Set("X-User-PAT", req.UserPAT)
 	}
 	if req.RequestID != "" {
 		httpReq.Header.Set("X-Request-ID", req.RequestID)

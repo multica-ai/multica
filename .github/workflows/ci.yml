@@ -42,7 +42,12 @@ jobs:
           git diff --exit-code -- packages/core/paths/reserved-slugs.ts
 
       - name: Build, type check, lint, and test
-        run: pnpm exec turbo build typecheck lint test --filter='!@multica/docs'
+        # Mobile lives in a parallel mobile-verify workflow (path-filtered
+        # to apps/mobile/** + packages/core/types/**) so it doesn't add
+        # ~50s of expo-lint + tsc to every web/desktop PR. Keep this
+        # filter in sync with the root package.json scripts, which also
+        # exclude @multica/mobile.
+        run: pnpm exec turbo build typecheck lint test --filter='!@multica/docs' --filter='!@multica/mobile'
 
   backend:
     runs-on: ubuntu-latest

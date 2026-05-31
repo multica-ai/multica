@@ -1,14 +1,11 @@
 "use client";
 
 import { cn } from "@multica/ui/lib/utils";
-import { SidebarTrigger, useSidebar } from "@multica/ui/components/ui/sidebar";
+import { SidebarTrigger, useSidebarSafe } from "@multica/ui/components/ui/sidebar";
 
 function MobileSidebarTrigger() {
-  try {
-    useSidebar();
-  } catch {
-    return null;
-  }
+  const sidebar = useSidebarSafe();
+  if (!sidebar) return null;
   return <SidebarTrigger className="mr-2 md:hidden" />;
 }
 

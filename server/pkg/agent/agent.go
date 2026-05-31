@@ -1,7 +1,7 @@
 // Package agent provides a unified interface for executing prompts via
-// coding agents (Claude Code, Codex, CodeBuddy, Copilot, OpenCode, OpenClaw,
-// Hermes, Gemini, Pi, Cursor, Kimi, Kiro, DeepSeek). It mirrors the
-// happy-cli AgentBackend pattern, translated to idiomatic Go.
+// coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, OpenClaw,
+// Hermes, Gemini, Pi, Cursor, Kimi, Kiro, DeepSeek, Antigravity). It mirrors
+// the happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
 
 import (
@@ -162,13 +162,13 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, cbc, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, DeepSeek-TUI)
+	ExecutablePath string            // path to CLI binary (claude, cbc, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, deepseek, agy)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -201,8 +201,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &kiroBackend{cfg: cfg}, nil
 	case "DeepSeek-TUI":
 		return &deepseekBackend{cfg: cfg}, nil
+	case "antigravity":
+		return &antigravityBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI, antigravity)", agentType)
 	}
 }
 
@@ -210,7 +212,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 func SupportedBackends() []string {
 	return []string{
 		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw",
-		"hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI",
+		"hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity",
 	}
 }
 
@@ -231,19 +233,20 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
+	"antigravity":  "agy -p (print mode)",
 	"claude":       "claude (stream-json)",
 	"codebuddy":    "codebuddy (stream-json)",
 	"codex":        "codex app-server",
 	"copilot":      "copilot (json)",
 	"cursor":       "cursor-agent (stream-json)",
+	"DeepSeek-TUI": "deepseek-tui exec --json --auto",
 	"gemini":       "gemini (stream-json)",
 	"hermes":       "hermes acp",
+	"kimi":         "kimi acp",
+	"kiro":         "kiro-cli acp",
 	"openclaw":     "openclaw agent (json)",
 	"opencode":     "opencode run (json)",
 	"pi":           "pi (json mode)",
-	"kimi":         "kimi acp",
-	"kiro":         "kiro-cli acp",
-	"DeepSeek-TUI": "deepseek-tui exec --json --auto",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

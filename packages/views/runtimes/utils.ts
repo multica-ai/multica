@@ -310,7 +310,7 @@ export function collectUnmappedModels(rows: readonly Priceable[]): string[] {
   for (const r of rows) {
     if (r.model && !isModelPriced(r.model)) set.add(r.model);
   }
-  return [...set].sort();
+  return Array.from(set).toSorted();
 }
 
 // Anything carrying per-model token totals can be priced — RuntimeUsage,
@@ -487,20 +487,20 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
     return `${date.getMonth() + 1}/${date.getDate()}`;
   };
 
-  const dailyTokens = [...dateMap.values()]
-    .sort((a, b) => a.date.localeCompare(b.date))
+  const dailyTokens = Array.from(dateMap.values())
+    .toSorted((a, b) => a.date.localeCompare(b.date))
     .map((d) => ({ ...d, label: formatLabel(d.date) }));
 
-  const dailyCost = [...costMap.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
+  const dailyCost = Array.from(costMap.entries())
+    .toSorted(([a], [b]) => a.localeCompare(b))
     .map(([date, cost]) => ({
       date,
       label: formatLabel(date),
       cost: Math.round(cost * 100) / 100,
     }));
 
-  const dailyCostStack = [...stackMap.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
+  const dailyCostStack = Array.from(stackMap.entries())
+    .toSorted(([a], [b]) => a.localeCompare(b))
     .map(([date, s]) => {
       const round = (n: number) => Math.round(n * 100) / 100;
       const input = round(s.input);
@@ -622,12 +622,12 @@ export function aggregateByWeek(
     };
   };
 
-  const weeklyTokens: WeeklyTokenData[] = [...tokenMap.values()]
-    .sort((a, b) => a.weekStart.localeCompare(b.weekStart))
+  const weeklyTokens: WeeklyTokenData[] = Array.from(tokenMap.values())
+    .toSorted((a, b) => a.weekStart.localeCompare(b.weekStart))
     .map((t) => ({ ...t, ...decorate(t.weekStart) }));
 
-  const weeklyCostStack: WeeklyCostStackData[] = [...stackMap.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
+  const weeklyCostStack: WeeklyCostStackData[] = Array.from(stackMap.entries())
+    .toSorted(([a], [b]) => a.localeCompare(b))
     .map(([weekStart, s]) => {
       const round = (n: number) => Math.round(n * 100) / 100;
       const input = round(s.input);
@@ -760,7 +760,7 @@ export function aggregateCostByAgent(rows: RuntimeUsageByAgent[]): CostByKey[] {
     entry.taskCount += r.task_count;
     map.set(r.agent_id, entry);
   }
-  return [...map.values()].sort((a, b) => b.cost - a.cost);
+  return Array.from(map.values()).toSorted((a, b) => b.cost - a.cost);
 }
 
 // Per-(date, model) rows → per-model totals (the "By model" tab reuses the
@@ -774,7 +774,7 @@ export function aggregateCostByModel(rows: RuntimeUsage[]): CostByKey[] {
     entry.cost += estimateCost(r);
     map.set(key, entry);
   }
-  return [...map.values()].sort((a, b) => b.cost - a.cost);
+  return Array.from(map.values()).toSorted((a, b) => b.cost - a.cost);
 }
 
 // Per-(hour, model) rows → 24 fixed buckets (0..23). Hours with no activity

@@ -29,18 +29,39 @@ The user enters an email on the sign-in page → the server sends a 6-digit code
 
 ### Option B: SMTP relay (for self-hosted / on-premise deployments)
 
-Use this when the deployment can't reach `api.resend.com` or you already have an internal mail relay (Exchange, Postfix, on-prem SendGrid, etc.). `SMTP_HOST` takes priority over `RESEND_API_KEY` when both are set.
+Use this when the deployment can't reach `api.resend.com` or you already have an internal mail relay (Microsoft Exchange, Postfix, on-prem SendGrid, etc.). `SMTP_HOST` takes priority over `RESEND_API_KEY` when both are set — if `SMTP_HOST` is non-empty the server always goes through SMTP, even if `RESEND_API_KEY` is also configured, so verification and invite mail never leaves the internal network.
+
+The SMTP path supports the three relay modes most on-premise mail servers (notably Microsoft Exchange's receive connectors) expose:
+
+| Mode | Port | Auth | TLS |
+|---|---|---|---|
+| Anonymous internal relay | `25` | none — submission is trusted by IP / subnet | none on the wire (internal segment only) |
+| Authenticated submission | `587` | `SMTP_USERNAME` + `SMTP_PASSWORD` | STARTTLS, upgraded automatically |
+| Implicit TLS (SMTPS) | `465` | — | **not supported yet** — use port 25 or 587 |
+
+**Anonymous Exchange relay on port 25** — the typical "internal SMTP relay" / Exchange anonymous receive connector that accepts mail from a trusted subnet without credentials:
 
 ```bash
-SMTP_HOST=smtp.internal.example.com
-SMTP_PORT=587                  # default 25; use 587 for STARTTLS submission
-SMTP_USERNAME=multica          # leave empty for unauthenticated relay
-SMTP_PASSWORD=...
-SMTP_TLS_INSECURE=false        # set true only for self-signed / private CA
+SMTP_HOST=exchange.internal.example.com
+SMTP_PORT=25
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_TLS_INSECURE=false
 RESEND_FROM_EMAIL=noreply@yourdomain.com  # reused as the From: header
 ```
 
-STARTTLS is upgraded automatically when the server advertises it. Port 465 (SMTPS / implicit TLS) is **not** currently supported — use port 25 or 587.
+**Authenticated submission on port 587** — for relays that require a service account; STARTTLS is upgraded automatically when the server advertises it:
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587
+SMTP_USERNAME=multica
+SMTP_PASSWORD=...
+SMTP_TLS_INSECURE=false        # set true only for self-signed / private CA
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+At startup the server prints which provider it picked — for example `EmailService: SMTP relay exchange.internal.example.com:25 from=noreply@example.com` (or `Resend API` / `DEV mode`). The password is never logged. If you don't see the SMTP line after restart, `SMTP_HOST` didn't reach the process — check the container env (`docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP`).
 
 **What happens if you set neither**: the server doesn't error, but **every email that should have been sent is written to the server's stdout only**. Handy for local development (copy the code from the logs); in production it's a black hole.
 

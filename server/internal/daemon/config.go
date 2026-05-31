@@ -68,7 +68,7 @@ type Config struct {
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
 	ConfigPath                     string                // explicit config path (empty = profile/default resolution)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI, antigravity
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	LocalNotificationEnabled       bool                  // enable local system notifications after task completion/failure
@@ -183,6 +183,18 @@ func LoadConfig(overrides Overrides) (Config, error) {
 				Model: strings.TrimSpace(os.Getenv(modelEnv)),
 			}, true
 		}
+		if cmd == "codex" {
+			// Codex Desktop bundles its CLI inside the macOS app instead of
+			// installing it onto PATH.
+			for _, p := range codexDesktopAppBundlePaths() {
+				if _, err := os.Stat(p); err == nil {
+					return AgentEntry{
+						Path:  p,
+						Model: strings.TrimSpace(os.Getenv(modelEnv)),
+					}, true
+				}
+			}
+		}
 		return AgentEntry{}, false
 	}
 	probe := func(envVar, defaultCmd, modelEnv string) (AgentEntry, bool) {
@@ -236,8 +248,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			break
 		}
 	}
+	// Antigravity has no `--model` flag and ModelSelectionSupported returns
+	// false for it (see server/pkg/agent/models.go). Pass an empty modelEnv
+	// so we don't seed AgentEntry.Model from an environment variable that
+	// the backend would silently ignore, and don't lead users to set it.
+	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", ""); ok {
+		agents["antigravity"] = e
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or DeepSeek-TUI (deepseek-tui) and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, DeepSeek-TUI (deepseek-tui), or agy and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -630,7 +649,17 @@ func shellArgsFromEnv(name string) ([]string, error) {
 var defaultAgentCommandNames = []string{
 	"claude", "cbc", "codex", "opencode", "openclaw", "hermes",
 	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
-	"deepseek-tui", "deepseek",
+	"deepseek-tui", "deepseek", "agy",
+}
+
+var codexDesktopAppBundlePaths = func() []string {
+	paths := []string{
+		"/Applications/Codex.app/Contents/Resources/codex",
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex"))
+	}
+	return paths
 }
 
 // loginShellResolveTimeout caps how long the daemon will wait for the user's

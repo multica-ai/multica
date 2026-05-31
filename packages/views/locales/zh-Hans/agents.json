@@ -125,7 +125,7 @@
   "inspector": {
     "section_properties": "属性",
     "section_details": "详情",
-    "section_skills": "skill",
+    "section_skills": "Skills",
     "prop_runtime": "运行时",
     "prop_model": "模型",
     "prop_thinking": "思考",
@@ -218,11 +218,12 @@
   },
   "tabs": {
     "activity": "动态",
-    "tasks": "task",
+    "tasks": "Tasks",
     "instructions": "指令",
-    "skills": "skill",
+    "skills": "Skills",
     "environment": "环境变量",
     "custom_args": "自定义参数",
+    "mcp_config": "MCP",
     "discard_dialog_title": "放弃未保存的修改？",
     "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
     "discard_keep": "继续编辑",
@@ -261,7 +262,7 @@
       "editor_placeholder": "写下这个智能体该做什么、关注什么、要避开什么…"
     },
     "skills_section": {
-      "label": "Skill",
+      "label": "Skills",
       "placeholder": "从工作区添加 skill",
       "selected_other": "已选 {{count}} 个 —— 点击修改",
       "collapse": "收起",
@@ -322,10 +323,21 @@
       "saved_toast": "已保存自定义参数",
       "save_failed_toast": "保存自定义参数失败"
     },
+    "mcp_config": {
+      "intro": "转发给运行时 CLI 的 MCP 服务器配置（Claude 通过 --mcp-config，Codex 通过 $CODEX_HOME/config.toml）。原样保存，可能包含密钥 —— 只有智能体所有者和工作区管理员可以读取。留空则回退到 CLI 自身的默认设置。",
+      "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
+      "editor_aria": "MCP 配置 JSON 编辑器",
+      "clear_action": "清空",
+      "invalid_json": "JSON 无效：{{error}}",
+      "invalid_not_object": "MCP 配置必须是 JSON 对象（例如 {\"mcpServers\": …}）。",
+      "saved_toast": "已保存 MCP 配置",
+      "save_failed_toast": "保存 MCP 配置失败",
+      "redacted_title": "已配置 —— 当前账号无权查看",
+      "redacted_hint": "只有智能体所有者或工作区管理员可以读取该配置。"
+    },
     "skills": {
       "intro": "分配给该智能体的工作区 skill。本地运行时 skill 会自动可用。",
       "add_action": "添加 skill",
-      "import_hint": "导入会在工作区创建一份副本，团队可以编辑和复用。",
       "empty_title": "尚未分配 skill",
       "empty_hint": "添加工作区 skill，把团队知识共享给这个智能体。",
       "remove_failed_toast": "移除 skill 失败",
@@ -361,7 +373,7 @@
       "success_pct": "{{percent}}% 成功",
       "avg_duration": "平均 {{value}}",
       "failed_count": "{{count}} 次失败",
-      "source_issue": "issue",
+      "source_issue": "Issue",
       "source_chat": "聊天",
       "source_autopilot": "自动化",
       "source_untracked": "未追踪",
@@ -369,7 +381,7 @@
       "source_creating_issue": "正在创建 issue",
       "source_chat_session": "聊天会话",
       "source_autopilot_run": "自动化运行",
-      "issue_short_fallback": "issue {{prefix}}...",
+      "issue_short_fallback": "Issue {{prefix}}...",
       "triggered_by": "触发来源",
       "open_issue_aria": "打开 issue",
       "open_issue_tooltip": "打开 issue",
@@ -403,7 +415,7 @@
     "unavailable": "智能体不可用",
     "detail_link": "详情 →",
     "runtime_label": "运行时",
-    "skills_label": "skill",
+    "skills_label": "Skills",
     "owner_label": "所有者",
     "unknown_runtime": "未知运行时"
   },

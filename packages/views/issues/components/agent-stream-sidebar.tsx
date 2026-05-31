@@ -384,9 +384,11 @@ function statusText(status: AgentTask["status"]): string {
     case "queued": return "queued";
     case "dispatched": return "dispatched";
     case "running": return "running";
+    case "waiting_local_directory": return "waiting";
     case "completed": return "completed";
     case "failed": return "failed";
     case "cancelled": return "cancelled";
+    default: return status;
   }
 }
 

@@ -7,12 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 type fakeCloudRuntimeProxy struct {
@@ -44,22 +40,13 @@ func useCloudRuntimeProxy(t *testing.T, proxy cloudRuntimeProxy) {
 	t.Cleanup(func() { testHandler.CloudRuntime = prevProxy })
 }
 
-func TestCreateCloudRuntimeNodeForwardsValidatedPAT(t *testing.T) {
-	rawPAT := "mul_cloud_runtime_test_valid_pat"
-	_, err := testHandler.Queries.CreatePersonalAccessToken(context.Background(), db.CreatePersonalAccessTokenParams{
-		UserID:      parseUUID(testUserID),
-		Name:        "cloud runtime test",
-		TokenHash:   auth.HashToken(rawPAT),
-		TokenPrefix: rawPAT[:12],
-		ExpiresAt:   pgtype.Timestamptz{},
-	})
-	if err != nil {
-		t.Fatalf("create PAT: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE token_hash = $1`, auth.HashToken(rawPAT))
-	})
-
+// TestCreateCloudRuntimeNodeForwardsBody is the post-MUL-2671 happy
+// path for CreateCloudRuntimeNode: the handler no longer reads, asks
+// for, or auto-generates an mul_ PAT — Cloud now mints its own
+// node-scoped mcn_ PAT during /api/v1/nodes and ships it to the EC2
+// instance via SSM. Multica-api just forwards the request body and
+// the caller's user_id; there is no PAT plumbing on this endpoint.
+func TestCreateCloudRuntimeNodeForwardsBody(t *testing.T) {
 	proxy := &fakeCloudRuntimeProxy{
 		enabled: true,
 		resp: &cloudruntime.Response{
@@ -73,7 +60,6 @@ func TestCreateCloudRuntimeNodeForwardsValidatedPAT(t *testing.T) {
 	req := newRequest(http.MethodPost, "/api/cloud-runtime/nodes", map[string]any{
 		"instance_type": "g5.xlarge",
 	})
-	req.Header.Set("X-User-PAT", rawPAT)
 	req.Header.Set("X-Request-ID", "api-request-id")
 	w := httptest.NewRecorder()
 
@@ -91,114 +77,12 @@ func TestCreateCloudRuntimeNodeForwardsValidatedPAT(t *testing.T) {
 	if proxy.req.UserID != testUserID {
 		t.Fatalf("proxied user id = %q", proxy.req.UserID)
 	}
-	if proxy.req.UserPAT != rawPAT {
-		t.Fatalf("proxied PAT = %q", proxy.req.UserPAT)
-	}
 	if proxy.req.RequestID != "api-request-id" {
 		t.Fatalf("proxied request id = %q", proxy.req.RequestID)
 	}
 	if got := w.Header().Get("X-Request-ID"); got != "fleet-request-id" {
 		t.Fatalf("response request id = %q", got)
 	}
-}
-
-func TestCreateCloudRuntimeNodeRejectsUnownedPAT(t *testing.T) {
-	proxy := &fakeCloudRuntimeProxy{
-		enabled: true,
-		resp: &cloudruntime.Response{
-			StatusCode: http.StatusCreated,
-			Body:       []byte(`{"status":"launching"}`),
-		},
-	}
-	useCloudRuntimeProxy(t, proxy)
-
-	req := newRequest(http.MethodPost, "/api/cloud-runtime/nodes", map[string]any{
-		"instance_type": "g5.xlarge",
-	})
-	req.Header.Set("X-User-PAT", "mul_cloud_runtime_test_missing_pat")
-	w := httptest.NewRecorder()
-
-	testHandler.CreateCloudRuntimeNode(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
-	}
-	if proxy.called {
-		t.Fatal("cloud runtime proxy should not be called")
-	}
-}
-
-func TestCreateCloudRuntimeNodeRejectsExpiredPAT(t *testing.T) {
-	rawPAT := "mul_cloud_runtime_test_expired_pat"
-	_, err := testHandler.Queries.CreatePersonalAccessToken(context.Background(), db.CreatePersonalAccessTokenParams{
-		UserID:      parseUUID(testUserID),
-		Name:        "cloud runtime expired test",
-		TokenHash:   auth.HashToken(rawPAT),
-		TokenPrefix: rawPAT[:12],
-		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true},
-	})
-	if err != nil {
-		t.Fatalf("create PAT: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE token_hash = $1`, auth.HashToken(rawPAT))
-	})
-
-	proxy := &fakeCloudRuntimeProxy{
-		enabled: true,
-		resp: &cloudruntime.Response{
-			StatusCode: http.StatusCreated,
-			Body:       []byte(`{"status":"launching"}`),
-		},
-	}
-	useCloudRuntimeProxy(t, proxy)
-
-	req := newRequest(http.MethodPost, "/api/cloud-runtime/nodes", map[string]any{
-		"instance_type": "g5.xlarge",
-	})
-	req.Header.Set("X-User-PAT", rawPAT)
-	w := httptest.NewRecorder()
-
-	testHandler.CreateCloudRuntimeNode(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
-	}
-	if proxy.called {
-		t.Fatal("cloud runtime proxy should not be called")
-	}
-}
-
-func TestCreateCloudRuntimeNodeAutoGeneratesPAT(t *testing.T) {
-	proxy := &fakeCloudRuntimeProxy{
-		enabled: true,
-		resp: &cloudruntime.Response{
-			StatusCode: http.StatusCreated,
-			Header:     http.Header{},
-			Body:       []byte(`{"status":"launching"}`),
-		},
-	}
-	useCloudRuntimeProxy(t, proxy)
-
-	req := newRequest(http.MethodPost, "/api/cloud-runtime/nodes", map[string]any{
-		"instance_type": "g5.xlarge",
-	})
-	// No X-User-PAT header set — should auto-generate.
-	w := httptest.NewRecorder()
-
-	testHandler.CreateCloudRuntimeNode(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
-	}
-	if !proxy.called {
-		t.Fatal("cloud runtime proxy was not called")
-	}
-	if !strings.HasPrefix(proxy.req.UserPAT, "mul_") {
-		t.Fatalf("expected auto-generated PAT with mul_ prefix, got %q", proxy.req.UserPAT)
-	}
-	// Clean up the auto-generated PAT.
-	_, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE token_hash = $1`, auth.HashToken(proxy.req.UserPAT))
 }
 
 func TestCloudRuntimeDisabledReturnsUnavailable(t *testing.T) {

@@ -26,7 +26,8 @@
     ],
     "overrides": {
       "@types/react": "catalog:",
-      "@types/react-dom": "catalog:"
+      "@types/react-dom": "catalog:",
+      "@xmldom/xmldom": "^0.8.13"
     }
   },
   "devDependencies": {
