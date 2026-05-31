@@ -36,7 +36,7 @@ function Indicator({ checked }: { checked: boolean }) {
  * (matches the backend `on_behalf_of_ids` param); `onToggle` flips one user.
  */
 export function OnBehalfOfFilterSub({
-  selected,
+  selected = [],
   onToggle,
 }: {
   selected: string[];

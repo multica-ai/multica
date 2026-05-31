@@ -122,7 +122,7 @@ function getActiveFilterCount(state: {
   if (state.creatorFilters.length > 0) count++;
   if (state.projectFilters.length > 0 || state.includeNoProject) count++;
   if (state.labelFilters.length > 0) count++;
-  if (state.onBehalfOfFilters.length > 0) count++;
+  if ((state.onBehalfOfFilters ?? []).length > 0) count++;
   return count;
 }
 
