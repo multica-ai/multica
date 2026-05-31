@@ -104,6 +104,9 @@ import type {
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,
+  ADOInstallation,
+  ADOPullRequest,
+  ListADOInstallationsResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -2094,10 +2097,36 @@ export class ApiClient {
     });
   }
 
+  // Azure DevOps integration
+  async listADOInstallations(workspaceId: string): Promise<ListADOInstallationsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/azuredevops/installations`);
+  }
+
+  async createADOInstallation(
+    workspaceId: string,
+    orgUrl: string,
+    pat: string,
+  ): Promise<ADOInstallation> {
+    return this.fetch(`/api/workspaces/${workspaceId}/azuredevops/installations`, {
+      method: "POST",
+      body: JSON.stringify({ org_url: orgUrl, pat }),
+    });
+  }
+
+  async deleteADOInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/azuredevops/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
   async redeemLarkBindingToken(token: string): Promise<RedeemLarkBindingTokenResponse> {
     return this.fetch(`/api/lark/binding/redeem`, {
       method: "POST",
       body: JSON.stringify({ token }),
     });
+  }
+
+  async listIssueADOPullRequests(issueId: string): Promise<{ pull_requests: ADOPullRequest[] }> {
+    return this.fetch(`/api/issues/${issueId}/ado-pull-requests`);
   }
 }

@@ -111,6 +111,20 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 			out += " — " + label
 		}
 		return out
+	case "azure_devops_repo":
+		var payload struct {
+			URL               string `json:"url"`
+			DefaultBranchHint string `json:"default_branch_hint,omitempty"`
+		}
+		_ = json.Unmarshal(r.ResourceRef, &payload)
+		out := fmt.Sprintf("**Azure DevOps repo**: %s", payload.URL)
+		if payload.DefaultBranchHint != "" {
+			out += fmt.Sprintf(" (default branch: `%s`)", payload.DefaultBranchHint)
+		}
+		if label != "" {
+			out += " — " + label
+		}
+		return out
 	default:
 		ref := string(r.ResourceRef)
 		if ref == "" {
