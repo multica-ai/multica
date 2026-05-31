@@ -137,15 +137,22 @@ func Build(in QueryInput) Query {
 	// $1 = workspace_id (always present)
 	wsParam := next(in.WorkspaceID)
 
-	// $2..$3 = text params. We always allocate them so the SQL is shape-
-	// stable. When in.Text == "" they bind to empty strings and the tsquery
-	// branch falls through harmlessly.
-	tsParam := next(in.Text)       // for websearch_to_tsquery
-	trgmParam := next(in.Text)     // for similarity()
-	rawParam := next(in.Text)      // for exact-title compare
-	startsParam := next(in.Text + "%")
-
 	hasText := strings.TrimSpace(in.Text) != ""
+
+	// Text params are allocated ONLY when free text is present. Allocating
+	// them unconditionally left $2..$5 bound but never referenced in a
+	// filter-only search, producing a non-contiguous placeholder set
+	// ($1, then jumping to $6...) that Postgres rejects with a "bind message
+	// supplies N parameters, but prepared statement requires M" error — the
+	// FIR-2595 filter-only 500. Every consumer of these params below is gated
+	// on hasText, so when there is no free text they correctly stay empty.
+	var tsParam, trgmParam, rawParam, startsParam string
+	if hasText {
+		tsParam = next(in.Text)   // for websearch_to_tsquery
+		trgmParam = next(in.Text) // for similarity()
+		rawParam = next(in.Text)  // for exact-title compare
+		startsParam = next(in.Text + "%")
+	}
 
 	// --- WHERE clause: text predicates ---
 	var textPreds []string
