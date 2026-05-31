@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -70,6 +71,34 @@ func TestShouldPostTimeoutFailureComment_DefaultsTrueWhenQueriesNil(t *testing.T
 	got := (&TaskService{}).shouldPostTimeoutFailureComment(t.Context(), task)
 	if !got {
 		t.Fatalf("shouldPostTimeoutFailureComment with nil Queries = false; want true (defaults to post)")
+	}
+}
+
+// CEREBRO-PATCH(suppress-serverside-timeout-blocked-test): FIR-2609 — a
+// serverside "task timed out" on a task that NEVER started (the runtime was
+// away) is bookkeeping noise and must be silent; a started-then-stalled run
+// and any agent-internal timeout ("<agent> timed out after <dur>") must still
+// surface BLOCKED.
+func TestIsUnstartedServersideTimeout(t *testing.T) {
+	started := db.AgentTaskQueue{StartedAt: pgtype.Timestamptz{Valid: true}}
+	unstarted := db.AgentTaskQueue{} // StartedAt zero / invalid: task never ran
+	cases := []struct {
+		name   string
+		task   db.AgentTaskQueue
+		errMsg string
+		want   bool
+	}{
+		{"dispatched-never-started serverside timeout is suppressed", unstarted, "task timed out", true},
+		{"trimmed serverside timeout still matches", unstarted, "  task timed out  ", true},
+		{"running-stalled serverside timeout still posts", started, "task timed out", false},
+		{"agent-internal claude timeout still posts", unstarted, "claude timed out after 2h0m0s", false},
+		{"agent-internal codex timeout still posts", started, "codex timed out after 2h0m0s", false},
+		{"empty error does not match", unstarted, "", false},
+	}
+	for _, tc := range cases {
+		if got := isUnstartedServersideTimeout(tc.task, tc.errMsg); got != tc.want {
+			t.Fatalf("%s: isUnstartedServersideTimeout = %v; want %v", tc.name, got, tc.want)
+		}
 	}
 }
 
