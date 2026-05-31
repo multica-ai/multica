@@ -105,7 +105,7 @@ FULL_SHA=$(git rev-parse HEAD)
 生成项目版本时要避免 nested git-describe tag。示例：
 
 ```bash
-PROJECT_VERSION=v$(git describe --tags --long \
+PROJECT_VERSION=$(git describe --tags --long \
   --match 'v[0-9]*' \
   --exclude 'v[0-9]*-[0-9]*-g*' \
   --exclude '*-k3s-*' \

@@ -13,6 +13,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { useT, useTimeAgo } from "../../i18n";
 import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
 import { sortTaskRunsByCreatedAtAsc } from "../utils/task-runs";
+import { useAgentColorMap } from "./task-agent-colors";
 import { TaskTraceOutput } from "./task-trace-output";
 
 interface AgentStreamSidebarProps {
@@ -69,6 +70,7 @@ export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamS
     () => allSorted.find((t) => t.id === selectedId) ?? allSorted[0] ?? null,
     [allSorted, selectedId],
   );
+  const agentColorMap = useAgentColorMap(tasks);
 
   // Reset manual selection when selected task is gone from the list.
   useEffect(() => {
@@ -193,6 +195,7 @@ export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamS
               task={primaryTask}
               selected={primaryTask.id === selectedTask?.id}
               paused={primaryTask.id === selectedTask?.id ? paused : false}
+              colorClass={agentColorMap?.get(primaryTask.agent_id)}
               timeAgo={timeAgo}
               onSelect={handleSelect}
               onHighlightComment={onHighlightComment}
@@ -207,6 +210,7 @@ export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamS
                     task={task}
                     selected={task.id === selectedTask?.id}
                     paused={task.id === selectedTask?.id ? paused : false}
+                    colorClass={agentColorMap?.get(task.agent_id)}
                     timeAgo={timeAgo}
                     onSelect={handleSelect}
                     onHighlightComment={onHighlightComment}
@@ -235,6 +239,7 @@ export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamS
                     task={task}
                     selected={task.id === selectedTask?.id}
                     paused={false}
+                    colorClass={agentColorMap?.get(task.agent_id)}
                     timeAgo={timeAgo}
                     onSelect={handleSelectAndClose}
                     onHighlightComment={onHighlightComment}
@@ -292,6 +297,7 @@ function PanelRunRow({
   onSelect,
   onHighlightComment,
   trailingAction,
+  colorClass,
   pinned = false,
 }: {
   task: AgentTask;
@@ -301,6 +307,7 @@ function PanelRunRow({
   onSelect: (id: string) => void;
   onHighlightComment?: (commentId: string) => void;
   trailingAction?: ReactNode;
+  colorClass?: string;
   pinned?: boolean;
 }) {
   const trigger = useTriggerText(task);
@@ -322,7 +329,7 @@ function PanelRunRow({
     <div
       className={cn(
         "group flex w-full items-center gap-2 rounded border-l-2 px-1 py-1.5 text-left text-xs transition-colors",
-        paused ? "border-l-indigo-500/80" : ROW_ACCENT_TONE[task.status] ?? "border-l-muted-foreground/50",
+        colorClass ?? (paused ? "border-l-indigo-500/80" : ROW_ACCENT_TONE[task.status] ?? "border-l-muted-foreground/50"),
         selected ? "bg-accent/45" : pinned && "bg-accent/30",
         !selected && "hover:bg-accent/40",
       )}
