@@ -199,8 +199,8 @@ Release 内容必须至少包含：
 - CLI Jenkins build URL / build number / result / CLI version / code revision
 - CLI manifest URL 和实际 version
 - previous release tag
-- 官方上游变更摘要（如果本次发布包含官方版本合入）
-- Fork 独有变更摘要（每条尽量包含 Gitee PR 和 Multica Issue）
+- 官方上游变更明细（如果本次发布包含官方版本合入；按领域分组列 GitHub PR 链接和一句话摘要。注意不是二次摘要，是具体变更列表）
+- Fork 独有变更明细（每条尽量包含 Gitee PR 和 Multica Issue；同样不是摘要，是具体变更列表）
 - 基础设施 / 发布流程变更（如果本次发布包含 ENV、K8S、Jenkins、OBS、backfill 等变化）
 - 下载与安装信息（CLI / desktop / mobile 等客户端产物；没有客户端产物时明确写暂无）
 
@@ -243,8 +243,9 @@ Release 内容必须至少包含：
 
 如果本次 release 覆盖官方上游版本合入：
 
-- 明确本次 release 对应/覆盖到的官方基线版本，例如 `v0.3.8`。
-- 总结该官方版本 Changelog 中和本次发布相关的核心变化。
+- 明确本次 release 对应/覆盖到的官方基线版本（以及从哪个版本推进到哪个版本），例如 `v0.3.6 → v0.3.8`。
+- 用具体功能/模块名称总结官方 Changelog 中的核心变化，不能用「稳定性增强」「能力提升」等空洞表述代替。合格示例：「iOS 客户端首次可用」「新增 Helm chart 支持 Kubernetes 部署」「运行时成本识别新增 DeepSeek/Kimi K2.6/Zhipu GLM」。不合格示例：「重点落在 CLI、Runtime 和交互体验的稳定性增强」——这句没有告诉读者任何具体信息。
+- 如果挂了官方 Changelog 锚点，正文必须至少提及该 Changelog 里 2-3 个具体变更点，不能只挂链接不写内容。
 - 带上对应官方基线版本锚点，例如 `[官方 Changelog](https://multica.ai/changelog#release-0-3-8)`。
 - 注意：锚点必须对应本次 release 实际覆盖到的官方基线版本，不是官方网站当前最新版本。比如本次只覆盖到 `v0.3.8`，即使官方已经发布 `v0.3.12`，也只能链接 `#release-0-3-8`。
 
@@ -271,7 +272,7 @@ Release 内容必须至少包含：
 
 ## 官方上游变更
 
-仅当本次发布包含官方上游合入时填写。按领域分组列 GitHub PR 链接和一句话摘要；本节保留 PR/commit 级别追溯，不替代顶部「版本摘要」。来源优先级：
+仅当本次发布包含官方上游合入时填写。按领域分组列 GitHub PR 链接和一句话摘要；本节是具体变更明细（不是二次摘要），与顶部「版本摘要」分工明确——版本摘要做提炼，本节做追溯。来源优先级：
 1. `git log <previous-release-tag>..<PROJECT_VERSION>` 中的 GitHub PR merge commits
 2. 官方 release/changelog
 3. GitHub PR title/body
@@ -351,7 +352,8 @@ curl -fsSL https://obs-multica.wujieai.com/cli/manifest.json | jq -r .version
 - `PROJECT_VERSION`、Gitee release tag、CLI manifest version 三者一致。
 - 组件交付表包含 backend / frontend / CLI 的 build URL、build number、result、产物版本、code revision。
 - Release 顶部有「版本摘要」，用人话说明核心变化和用户可感知价值；不能只有 PR/Issue 明细。
-- 如果包含官方上游合入，「版本摘要」已总结相关官方 Changelog，并链接到本次 release 覆盖到的官方基线版本锚点。
+- 如果包含官方上游合入，「版本摘要」已总结相关官方 Changelog，并链接到本次 release 覆盖到的官方基线版本锚点；正文至少包含 2-3 个来自官方 Changelog 的具体变更点，不能只有「稳定性增强」等空泛表述。
+- 「版本摘要」下面各节（官方上游变更、Fork 独有变更）不使用「摘要」字样——它们是具体变更明细。
 - 「官方上游变更」和「Fork 独有变更」已分开；无官方合入时说明跳过。
 - Fork 变更不漏当前 tag 内的重要 PR，不混入 tag 之后的 PR。
 - ENV / K8S / Jenkins / OBS / backfill 等基础设施变化有独立 section。
