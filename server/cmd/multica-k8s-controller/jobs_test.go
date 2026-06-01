@@ -239,6 +239,9 @@ func TestDispatchJob_WithRepoCache(t *testing.T) {
 		`[url "file:///repos/ws-rc/github.com+chrissnell+graywolf.git"]`,
 		"insteadOf = https://github.com/chrissnell/graywolf",
 		"insteadOf = git@github.com:chrissnell/graywolf",
+		// Push must route to SSH origin, NOT the read-only cache PVC.
+		`[url "git@github.com:chrissnell/graywolf.git"]`,
+		"pushInsteadOf = https://github.com/chrissnell/graywolf",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("gitconfig missing %q\ngot:\n%s", want, content)

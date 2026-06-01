@@ -19,11 +19,35 @@ func TestGitconfigForTask_GitHubHTTPS(t *testing.T) {
 		"insteadOf = https://github.com/chrissnell/graywolf.git",
 		"insteadOf = git@github.com:chrissnell/graywolf",
 		"insteadOf = git@github.com:chrissnell/graywolf.git",
+		// pushInsteadOf block: pushes route to SSH origin, not to the
+		// read-only cache PVC.
+		`[url "git@github.com:chrissnell/graywolf.git"]`,
+		"pushInsteadOf = https://github.com/chrissnell/graywolf",
+		"pushInsteadOf = https://github.com/chrissnell/graywolf.git",
+		"pushInsteadOf = git@github.com:chrissnell/graywolf",
 	}
 	for _, want := range wantSubstrings {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing: %q\ngot:\n%s", want, got)
 		}
+	}
+}
+
+func TestGitconfigForTask_PushDoesNotRouteToCache(t *testing.T) {
+	got := gitconfigForTask(
+		"ws",
+		"/repos",
+		[]daemon.RepoData{{URL: "https://github.com/org/repo.git"}},
+	)
+	// There must be a pushInsteadOf entry — without it, push would route
+	// through the file:// insteadOf rewrite to the RO PVC and fail.
+	if !strings.Contains(got, "pushInsteadOf =") {
+		t.Errorf("missing pushInsteadOf entries:\n%s", got)
+	}
+	// The push target MUST be the git@host:owner/repo.git form (SSH),
+	// not the file:// cache.
+	if !strings.Contains(got, `[url "git@github.com:org/repo.git"]`) {
+		t.Errorf("missing SSH push target block:\n%s", got)
 	}
 }
 
@@ -77,8 +101,9 @@ func TestGitconfigForTask_SkipsMalformedURLs(t *testing.T) {
 	if !strings.Contains(got, "ok+repo.git") {
 		t.Errorf("missing valid repo:\n%s", got)
 	}
-	if strings.Contains(got, "insteadOf =\n") || strings.Count(got, "[url ") != 1 {
-		t.Errorf("expected exactly one url block, got:\n%s", got)
+	// One fetch block + one push block per valid repo.
+	if strings.Contains(got, "insteadOf =\n") || strings.Count(got, "[url ") != 2 {
+		t.Errorf("expected exactly two url blocks (fetch + push) for one valid repo, got:\n%s", got)
 	}
 }
 

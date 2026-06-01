@@ -12,12 +12,19 @@ import (
 // rewrites every repo URL in `repos` to the local file:// path of its bare
 // clone inside the mounted repo cache.
 //
-// The agent never sees this rewrite — when it runs `git clone <origin-url>`
-// (or fetch / pull / push), git's url.<base>.insteadOf substitution kicks in
-// before the protocol dial, turning the clone into a sub-second local
-// `git clone --shared file://...`. The rewrite covers both http(s) and
-// scp-style URLs, with and without the `.git` suffix, so any URL form an
-// agent might construct from origin remotes hits the cache.
+// Two rewrite layers are emitted per repo:
+//
+//   - `insteadOf` (fetch path): every URL form an agent might use
+//     (https/scp-style × with/without `.git`) rewrites to
+//     `file:///<mountPath>/<workspaceID>/<slug>.git`. This makes `git clone`,
+//     `git fetch`, and `git pull` sub-second local operations.
+//
+//   - `pushInsteadOf` (push path): the same URL forms rewrite to
+//     `git@<host>:<owner>/<repo>.git` so pushes go to the origin via SSH.
+//     Without this, pushes would route through `insteadOf` to the
+//     read-only PVC mount and fail with "could not write to ref". The
+//     runtime image bakes in github.com host keys and the worker pod
+//     mounts the multica-git-ssh deploy key, so SSH push succeeds.
 //
 // Returns an empty string if the resulting config would have no rewrites
 // (no repos, or every URL was malformed) so the caller can decide whether
@@ -39,6 +46,7 @@ func gitconfigForTask(workspaceID, mountPath string, repos []daemon.RepoData) st
 		}
 		slug := cache.SlugFor(workspaceID, r.URL)
 		base := fmt.Sprintf("file://%s/%s/%s", strings.TrimRight(mountPath, "/"), workspaceID, slug)
+		sshPushBase := fmt.Sprintf("git@%s:%s.git", host, ownerRepo)
 
 		var b strings.Builder
 		fmt.Fprintf(&b, "[url \"%s\"]\n", base)
@@ -46,6 +54,14 @@ func gitconfigForTask(workspaceID, mountPath string, repos []daemon.RepoData) st
 		fmt.Fprintf(&b, "\tinsteadOf = https://%s/%s.git\n", host, ownerRepo)
 		fmt.Fprintf(&b, "\tinsteadOf = git@%s:%s\n", host, ownerRepo)
 		fmt.Fprintf(&b, "\tinsteadOf = git@%s:%s.git\n", host, ownerRepo)
+		fmt.Fprintf(&b, "[url \"%s\"]\n", sshPushBase)
+		fmt.Fprintf(&b, "\tpushInsteadOf = https://%s/%s\n", host, ownerRepo)
+		fmt.Fprintf(&b, "\tpushInsteadOf = https://%s/%s.git\n", host, ownerRepo)
+		fmt.Fprintf(&b, "\tpushInsteadOf = git@%s:%s\n", host, ownerRepo)
+		// We don't push-rewrite the cache file:// URL itself because git
+		// applies pushInsteadOf to the ORIGINAL (pre-insteadOf) remote URL.
+		// The agent's clone records the original URL, so push lookups
+		// always start from one of the four entries above.
 		blocks = append(blocks, b.String())
 	}
 	return strings.Join(blocks, "\n")
