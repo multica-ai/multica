@@ -332,10 +332,10 @@ var catalog = []Capability{
 		Key:         "trigger_other_agent",
 		Title:       "Trigger someone else's agent",
 		Category:    CategoryAgents,
-		Description: "Whether you may start an agent you do not own (via an @mention or run-request). Today a hardcoded group allowlist, NOT on the controllable engine — the confirmed audit example.",
+		Description: "Whether you may start an agent you do not own (via an @mention or run-request). FIR-2409: now settable on the controllable engine at workspace / group / member / agent level. With no rule set, the hardcoded default applies (owners/admins master key, members blocked); an explicit Deny removes the master key, an explicit Allow grants a blocked member.",
 		Evidence: []string{
-			"server/internal/cerebro/grouppermissions/permissions.go:336", // CanUseAgent
-			"server/internal/cerebro/mentiongate/gate.go:31",              // CanTriggerMention
+			"server/internal/cerebro/grouppermissions/permissions.go:336", // CanUseAgent (baseline)
+			"server/internal/cerebro/mentiongate/gate.go:31",              // CanTriggerMention (now resolves trigger_other_agent via toolpolicy)
 		},
 	},
 	{
