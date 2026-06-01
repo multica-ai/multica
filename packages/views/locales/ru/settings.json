@@ -55,24 +55,24 @@
   },
   "notifications": {
     "title": "Уведомления во входящих",
-    "description": "Управляйте тем, какие события создают уведомления во входящих. Отключённые типы событий тихо фильтруются — их по-прежнему видно, если открыть issue напрямую.",
+    "description": "Управляйте тем, какие события создают уведомления во входящих. Отключённые типы событий тихо фильтруются — их по-прежнему видно, если открыть задачу напрямую.",
     "toast_failed": "Не удалось обновить настройки уведомлений",
     "groups": {
       "assignments": {
         "label": "Назначения",
-        "description": "Когда вас назначают на issue или снимают назначение"
+        "description": "Когда вас назначают на задачу или снимают назначение"
       },
       "status_changes": {
         "label": "Изменения статуса",
-        "description": "Когда issue, за которой вы следите, меняет статус (например, todo, in progress, done)"
+        "description": "Когда задача, за которой вы следите, меняет статус (например, todo, in progress, done)"
       },
       "comments": {
         "label": "Комментарии и упоминания",
-        "description": "Новые комментарии к issues, за которыми вы следите, или когда кто-то упоминает вас через @"
+        "description": "Новые комментарии к задачам, за которыми вы следите, или когда кто-то упоминает вас через @"
       },
       "updates": {
         "label": "Приоритет и срок",
-        "description": "Когда меняется приоритет или срок у issues, за которыми вы следите"
+        "description": "Когда меняется приоритет или срок у задач, за которыми вы следите"
       },
       "agent_activity": {
         "label": "Активность агентов",
@@ -129,10 +129,10 @@
     "context_label": "Контекст",
     "context_placeholder": "Справочная информация и контекст для AI-агентов, работающих в этой рабочей области",
     "slug_label": "Слаг",
-    "issue_prefix_label": "Префикс issue",
-    "issue_prefix_hint": "Используется в номерах issue, например {{example}}.",
-    "prefix_confirm_title": "Изменить префикс issue?",
-    "prefix_confirm_description": "Все issues будут перенумерованы с {{oldPrefix}}-N на {{newPrefix}}-N. Внешние ссылки — заголовки pull request, названия веток, ссылки в документах и чатах, — использующие {{oldPrefix}}-N, перестанут работать.",
+    "issue_prefix_label": "Префикс задачи",
+    "issue_prefix_hint": "Используется в номерах задач, например {{example}}.",
+    "prefix_confirm_title": "Изменить префикс задачи?",
+    "prefix_confirm_description": "Все задачи будут перенумерованы с {{oldPrefix}}-N на {{newPrefix}}-N. Внешние ссылки — заголовки pull request, названия веток, ссылки в документах и чатах, — использующие {{oldPrefix}}-N, перестанут работать.",
     "save": "Сохранить",
     "saving": "Сохранение...",
     "manage_hint": "Обновлять настройки рабочей области могут только администраторы и владельцы.",
@@ -158,7 +158,7 @@
   },
   "delete_workspace_dialog": {
     "title": "Удалить рабочую область",
-    "description": "Это нельзя отменить. Все issues, агенты и данные будут удалены безвозвратно.",
+    "description": "Это нельзя отменить. Все задачи, агенты и данные будут удалены безвозвратно.",
     "type_to_confirm_prefix": "Для подтверждения введите",
     "type_to_confirm_suffix": " ниже.",
     "cancel": "Отмена",
@@ -183,8 +183,8 @@
     "master_description_off": "Функции GitHub выключены. Боковая панель PR, трейлер соавтора и автосвязывание приостановлены. Данные на бэкенде не удаляются.",
     "section_connection": "Подключение",
     "connection_title": "GitHub App",
-    "connection_description_prefix": "Автоматически связывайте issues с pull request. Когда PR, содержащий",
-    "connection_description_suffix": "в ветке, заголовке или описании, сливается, соответствующая issue переходит в",
+    "connection_description_prefix": "Автоматически связывайте задачи с pull request. Когда PR, содержащий",
+    "connection_description_suffix": "в ветке, заголовке или описании, сливается, соответствующая задача переходит в",
     "connection_description_done": "Done",
     "connection_identifier_example": "MUL-123",
     "connected_to": "Подключено к {{login}}",
@@ -208,12 +208,12 @@
     "toast_disconnected": "GitHub App отключён",
     "section_features": "Функции",
     "feature_pr_sidebar_label": "Боковая панель pull request",
-    "feature_pr_sidebar_description": "Показывать связанные pull request в боковой панели карточки issue.",
+    "feature_pr_sidebar_description": "Показывать связанные pull request в боковой панели карточки задачи.",
     "feature_co_author_label": "Трейлер Co-authored-by",
     "feature_co_author_description_prefix": "Добавлять",
     "feature_co_author_description_suffix": "в коммиты, созданные агентами.",
-    "feature_auto_link_label": "Автосвязывание issues и PR",
-    "feature_auto_link_description": "Сопоставлять заголовки, описания и названия веток PR с идентификаторами issue и создавать связь автоматически.",
+    "feature_auto_link_label": "Автосвязывание задач и PR",
+    "feature_auto_link_description": "Сопоставлять заголовки, описания и названия веток PR с идентификаторами задач и создавать связь автоматически.",
     "section_repositories": "Репозитории",
     "repositories_shortcut_label": "URL репозиториев находятся на вкладке «Репозитории»",
     "repositories_shortcut_link": "Управление репозиториями →",
@@ -292,7 +292,7 @@
       },
       "member": {
         "label": "Участник",
-        "description": "Создание issues и работа над ними"
+        "description": "Создание задач и работа над ними"
       }
     }
   }

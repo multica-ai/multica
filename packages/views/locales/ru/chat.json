@@ -76,7 +76,7 @@
   "empty_state": {
     "first_time_title": "Общайтесь со своими агентами",
     "first_time_intro": "✨ Они знают вашу рабочую область —",
-    "first_time_pillars": "issues, проекты, skills",
+    "first_time_pillars": "задачи, проекты, навыки",
     "first_time_pillars_suffix": ".",
     "first_time_actions": "Попросите сводку, спланируйте день или передайте небольшую task.",
     "returning_title_named": "Привет, я {{name}}",

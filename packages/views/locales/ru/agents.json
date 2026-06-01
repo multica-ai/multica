@@ -1,7 +1,7 @@
 {
   "page": {
     "title": "Агенты",
-    "tagline": "AI-коллеги, которые берут issues, комментируют и обновляют статус.",
+    "tagline": "AI-коллеги, которые берут задачи, комментируют и обновляют статус.",
     "learn_more": "Подробнее →",
     "new_agent": "Новый агент",
     "search_placeholder": "Поиск агентов…",
@@ -38,7 +38,7 @@
   },
   "empty": {
     "title": "Пока нет агентов",
-    "description": "Создайте агента и назначайте ему issues, как любому коллеге. Локальные агенты работают на вашей машине; облачные — в среде выполнения Multica."
+    "description": "Создайте агента и назначайте ему задачи, как любому коллеге. Локальные агенты работают на вашей машине; облачные — в среде выполнения Multica."
   },
   "no_matches": {
     "title": "Совпадений нет",
@@ -135,7 +135,7 @@
   "inspector": {
     "section_properties": "Свойства",
     "section_details": "Сведения",
-    "section_skills": "Skills",
+    "section_skills": "Навыки",
     "prop_runtime": "Среда выполнения",
     "prop_model": "Модель",
     "prop_thinking": "Размышление",
@@ -157,7 +157,7 @@
     "cancel": "Отмена"
   },
   "skill_attach": {
-    "trigger_aria": "Прикрепить skill рабочей области",
+    "trigger_aria": "Прикрепить навык рабочей области",
     "trigger_label": "Прикрепить"
   },
   "pickers": {
@@ -200,7 +200,7 @@
     "activity": "Активность",
     "tasks": "Tasks",
     "instructions": "Инструкции",
-    "skills": "Skills",
+    "skills": "Навыки",
     "environment": "Окружение",
     "custom_args": "Свои аргументы",
     "mcp_config": "MCP",
@@ -213,7 +213,7 @@
     "title_create": "Создать агента",
     "title_duplicate": "Дублировать агента",
     "description_create": "Создайте нового AI-агента для вашей рабочей области.",
-    "description_duplicate": "Создайте нового агента на основе «{{name}}». Инструкции, окружение и skills копируются за вас.",
+    "description_duplicate": "Создайте нового агента на основе «{{name}}». Инструкции, окружение и навыки копируются за вас.",
     "name_label": "Имя",
     "name_placeholder": "например, Deep Research Agent",
     "description_label": "Описание",
@@ -232,7 +232,7 @@
     "creating": "Создание...",
     "cancel": "Отмена",
     "create_failed_toast": "Не удалось создать агента",
-    "skill_attach_failed_toast": "Агент создан, но не удалось прикрепить skills: {{error}}",
+    "skill_attach_failed_toast": "Агент создан, но не удалось прикрепить навыки: {{error}}",
     "squad_join_failed_toast": "Агент «{{name}}» создан, но не смог присоединиться к отряду: {{error}}. Вы можете добавить его вручную из раздела «Участники».",
     "instructions": {
       "label": "Инструкции",
@@ -242,18 +242,18 @@
       "editor_placeholder": "Напишите, что должен делать этот агент, на чём сосредоточиться, чего избегать…"
     },
     "skills_section": {
-      "label": "Skills",
-      "placeholder": "Добавьте skills из рабочей области",
+      "label": "Навыки",
+      "placeholder": "Добавьте навыки из рабочей области",
       "selected_one": "Выбран {{count}} — нажмите для редактирования",
       "selected_few": "Выбрано {{count}} — нажмите для редактирования",
       "selected_many": "Выбрано {{count}} — нажмите для редактирования",
       "selected_other": "Выбрано {{count}} — нажмите для редактирования",
       "collapse": "Свернуть",
-      "list_empty_multi": "В этой рабочей области пока нет skills. Сначала создайте или импортируйте один.",
+      "list_empty_multi": "В этой рабочей области пока нет навыков. Сначала создайте или импортируйте один.",
       "list_loading": "Загрузка…",
-      "list_empty_default": "Нет доступных skills.",
-      "list_no_match": "Нет подходящих skills.",
-      "search_placeholder": "Поиск skills…"
+      "list_empty_default": "Нет доступных навыков.",
+      "list_no_match": "Нет подходящих навыков.",
+      "search_placeholder": "Поиск навыков…"
     },
     "avatar": {
       "change_aria": "Сменить аватар",
@@ -320,25 +320,25 @@
       "redacted_hint": "Читать этот конфиг может только владелец агента или администратор рабочей области."
     },
     "skills": {
-      "intro": "Skills рабочей области, назначенные этому агенту. Skills локальной среды выполнения всегда доступны автоматически.",
-      "add_action": "Добавить skill",
-      "empty_title": "Skills не назначены",
-      "empty_hint": "Добавьте skills рабочей области, чтобы поделиться знаниями команды с этим агентом.",
-      "remove_failed_toast": "Не удалось убрать skill",
-      "add_dialog_title": "Добавить skill",
-      "add_dialog_description": "Выберите skill рабочей области, чтобы назначить этому агенту.",
-      "add_dialog_search_placeholder": "Поиск skills",
-      "add_dialog_empty": "Все skills рабочей области уже назначены.",
-      "add_dialog_no_match": "Нет skills по вашему запросу.",
-      "add_dialog_empty_partial": "Больше нечего добавить — у этого агента уже есть все skills.",
+      "intro": "Навыки рабочей области, назначенные этому агенту. Навыки локальной среды выполнения всегда доступны автоматически.",
+      "add_action": "Добавить навык",
+      "empty_title": "Навыки не назначены",
+      "empty_hint": "Добавьте навыки рабочей области, чтобы поделиться знаниями команды с этим агентом.",
+      "remove_failed_toast": "Не удалось убрать навык",
+      "add_dialog_title": "Добавить навык",
+      "add_dialog_description": "Выберите навык рабочей области, чтобы назначить этому агенту.",
+      "add_dialog_search_placeholder": "Поиск навыков",
+      "add_dialog_empty": "Все навыки рабочей области уже назначены.",
+      "add_dialog_no_match": "Нет навыков по вашему запросу.",
+      "add_dialog_empty_partial": "Больше нечего добавить — у этого агента уже есть все навыки.",
       "add_dialog_saving": "Добавление…",
       "add_dialog_confirm_default": "Добавить",
-      "add_dialog_confirm_one": "Добавить {{count}} skill",
-      "add_dialog_confirm_few": "Добавить {{count}} skills",
-      "add_dialog_confirm_many": "Добавить {{count}} skills",
-      "add_dialog_confirm_other": "Добавить {{count}} skills",
+      "add_dialog_confirm_one": "Добавить {{count}} навык",
+      "add_dialog_confirm_few": "Добавить {{count}} навыка",
+      "add_dialog_confirm_many": "Добавить {{count}} навыков",
+      "add_dialog_confirm_other": "Добавить {{count}} навыков",
       "add_dialog_cancel": "Отмена",
-      "add_failed_toast": "Не удалось добавить skill"
+      "add_failed_toast": "Не удалось добавить навык"
     },
     "activity": {
       "section_now": "Сейчас",
@@ -364,18 +364,18 @@
       "success_pct": "{{percent}}% успеха",
       "avg_duration": "в среднем {{value}}",
       "failed_count": "{{count}} с ошибкой",
-      "source_issue": "Issue",
+      "source_issue": "Задача",
       "source_chat": "Чат",
       "source_autopilot": "Автопилот",
       "source_untracked": "Без отслеживания",
       "source_quick_create": "Быстрое создание",
-      "source_creating_issue": "Создание issue",
+      "source_creating_issue": "Создание задачи",
       "source_chat_session": "Сессия чата",
       "source_autopilot_run": "Запуск автопилота",
-      "issue_short_fallback": "Issue {{prefix}}…",
+      "issue_short_fallback": "Задача {{prefix}}…",
       "triggered_by": "Запущено",
-      "open_issue_aria": "Открыть issue",
-      "open_issue_tooltip": "Открыть issue",
+      "open_issue_aria": "Открыть задачу",
+      "open_issue_tooltip": "Открыть задачу",
       "transcript_tooltip": "Посмотреть транскрипт",
       "cancel_task_aria": "Отменить task",
       "cancel_task_tooltip": "Отменить task",
@@ -406,7 +406,7 @@
     "unavailable": "Агент недоступен",
     "detail_link": "Подробнее →",
     "runtime_label": "Среда выполнения",
-    "skills_label": "Skills",
+    "skills_label": "Навыки",
     "owner_label": "Владелец",
     "unknown_runtime": "Неизвестная среда выполнения"
   },

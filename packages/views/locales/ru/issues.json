@@ -1,10 +1,10 @@
 {
   "page": {
-    "breadcrumb_title": "Issues",
+    "breadcrumb_title": "Задачи",
     "breadcrumb_workspace_fallback": "Рабочая область",
-    "empty_title": "Пока нет issues",
-    "empty_hint": "Создайте issue, чтобы начать.",
-    "move_failed": "Не удалось переместить issue"
+    "empty_title": "Пока нет задач",
+    "empty_hint": "Создайте задачу, чтобы начать.",
+    "move_failed": "Не удалось переместить задачу"
   },
   "status": {
     "backlog": "Бэклог",
@@ -24,11 +24,11 @@
   },
   "scope": {
     "all_label": "Все",
-    "all_description": "Все issues в этой рабочей области",
+    "all_description": "Все задачи в этой рабочей области",
     "members_label": "Участники",
-    "members_description": "Issues, назначенные участникам команды",
+    "members_description": "Задачи, назначенные участникам команды",
     "agents_label": "Агенты",
-    "agents_description": "Issues, назначенные AI-агентам"
+    "agents_description": "Задачи, назначенные AI-агентам"
   },
   "filters": {
     "tooltip": "Фильтр",
@@ -46,10 +46,10 @@
     "members_group": "Участники",
     "agents_group": "Агенты",
     "squads_group": "Отряды",
-    "issue_count_one": "{{count}} issue",
-    "issue_count_few": "{{count}} issues",
-    "issue_count_many": "{{count}} issues",
-    "issue_count_other": "{{count}} issues",
+    "issue_count_one": "{{count}} задача",
+    "issue_count_few": "{{count}} задачи",
+    "issue_count_many": "{{count}} задач",
+    "issue_count_other": "{{count}} задач",
     "reset": "Сбросить все фильтры",
     "active_count_one": "{{count}} фильтр",
     "active_count_few": "{{count}} фильтра",
@@ -65,7 +65,7 @@
     "descending_title": "По убыванию",
     "group_status": "Статус",
     "group_assignee": "Исполнитель",
-    "group_parent": "Родительская issue",
+    "group_parent": "Родительская задача",
     "group_project": "Проект",
     "sort_manual": "Вручную",
     "sort_priority": "Приоритет",
@@ -80,7 +80,7 @@
     "card_due_date": "Срок",
     "card_project": "Проект",
     "card_labels": "Метки",
-    "card_child_progress": "Прогресс под-issues"
+    "card_child_progress": "Прогресс подзадач"
   },
   "view": {
     "tooltip_board": "Вид доски",
@@ -94,78 +94,78 @@
     "swimlane": "Дорожки"
   },
   "gantt": {
-    "header_issue": "Issue",
+    "header_issue": "Задача",
     "zoom_day": "День",
     "zoom_week": "Неделя",
     "zoom_month": "Месяц",
     "show_completed": "Показать завершённые",
-    "empty": "Пока нет запланированных issues — задайте дату начала или срок у любой issue, чтобы увидеть её на временной шкале.",
+    "empty": "Пока нет запланированных задач — задайте дату начала или срок у любой задачи, чтобы увидеть её на временной шкале.",
     "inverted_dates_warning": "Дата начала позже срока — полоса показана от минимума до максимума."
   },
   "actor_issues": {
     "scope": {
       "assigned": {
         "label": "Назначенные",
-        "description": "Issues, назначенные этому участнику или агенту"
+        "description": "Задачи, назначенные этому участнику или агенту"
       },
       "created": {
         "label": "Созданные",
-        "description": "Issues, созданные этим участником или агентом"
+        "description": "Задачи, созданные этим участником или агентом"
       }
     },
     "empty": {
       "assigned": {
-        "title": "Нет назначенных issues",
-        "description": "Назначенные сюда issues появятся в этом представлении."
+        "title": "Нет назначенных задач",
+        "description": "Назначенные сюда задачи появятся в этом представлении."
       },
       "created": {
-        "title": "Нет созданных issues",
-        "description": "Созданные здесь issues появятся в этом представлении."
+        "title": "Нет созданных задач",
+        "description": "Созданные здесь задачи появятся в этом представлении."
       }
     },
-    "search_placeholder": "Поиск issues...",
-    "search_empty": "Нет issues по вашему запросу."
+    "search_placeholder": "Поиск задач...",
+    "search_empty": "Нет задач по вашему запросу."
   },
   "list": {
-    "empty_status": "Нет issues",
-    "add_issue_tooltip": "Добавить issue"
+    "empty_status": "Нет задач",
+    "add_issue_tooltip": "Добавить задачу"
   },
   "swimlane": {
     "no_parent": "Без родителя",
     "other_parents": "Другие родители",
     "no_project": "Без проекта",
     "no_assignee": "Без исполнителя",
-    "open_parent": "Открыть родительскую issue",
+    "open_parent": "Открыть родительскую задачу",
     "toggle_collapse": "Свернуть дорожку"
   },
   "board": {
     "hidden_columns_label": "Скрытые колонки",
     "hide_column": "Скрыть колонку",
     "show_column": "Показать колонку",
-    "add_issue_tooltip": "Добавить issue",
-    "empty_column": "Нет issues",
-    "empty_grouping": "Нет подходящих issues",
+    "add_issue_tooltip": "Добавить задачу",
+    "empty_column": "Нет задач",
+    "empty_grouping": "Нет подходящих задач",
     "ordered_by": "Доска отсортирована по: {{field}}"
   },
   "detail": {
-    "not_found": "Эта issue не существует или была удалена в этой рабочей области.",
+    "not_found": "Эта задача не существует или была удалена в этой рабочей области.",
     "breadcrumb_project_unknown": "Неизвестный проект",
-    "back_to_issues": "Назад к Issues",
-    "title_placeholder": "Название issue",
+    "back_to_issues": "Назад к задачам",
+    "title_placeholder": "Название задачи",
     "desc_placeholder": "Добавьте описание...",
-    "sub_issues_label": "Под-issues",
-    "sub_issue_of": "Под-issue для",
-    "add_sub_issues": "Добавить под-issues",
-    "add_sub_issue_tooltip": "Добавить под-issue",
-    "add_sub_issue_aria": "Добавить под-issue",
+    "sub_issues_label": "Подзадачи",
+    "sub_issue_of": "Подзадача для",
+    "add_sub_issues": "Добавить подзадачи",
+    "add_sub_issue_tooltip": "Добавить подзадачу",
+    "add_sub_issue_aria": "Добавить подзадачу",
     "section_properties": "Свойства",
-    "section_parent_issue": "Родительская issue",
+    "section_parent_issue": "Родительская задача",
     "section_pull_requests": "Pull request",
     "section_metadata": "Метаданные",
     "section_details": "Сведения",
     "section_token_usage": "Использование токенов",
     "pull_requests_loading": "Загрузка…",
-    "pull_requests_empty": "Пока нет связанных pull request. Укажите идентификатор этой issue в названии ветки, заголовке или описании PR, чтобы автоматически его связать.",
+    "pull_requests_empty": "Пока нет связанных pull request. Укажите идентификатор этой задачи в названии ветки, заголовке или описании PR, чтобы автоматически его связать.",
     "pull_request_state_open": "Открыт",
     "pull_request_state_draft": "Черновик",
     "pull_request_state_merged": "Слит",
@@ -220,19 +220,19 @@
     "sidebar_tooltip": "Боковая панель",
     "cmdf_toast_title": "Поиск по странице охватывает только видимое",
     "cmdf_toast_description": "Лента виртуализирована — ⌘F не видит комментарии за пределами экрана. Полноценный поиск в приложении скоро появится.",
-    "update_failed": "Не удалось обновить issue",
+    "update_failed": "Не удалось обновить задачу",
     "link_copied": "Ссылка скопирована",
     "link_copy_failed": "Не удалось скопировать ссылку",
     "workdir_path_copied": "Путь рабочего каталога скопирован",
     "workdir_path_copy_failed": "Не удалось скопировать путь рабочего каталога",
-    "workdir_path_unavailable": "Локального рабочего каталога пока нет — issue не запускалась локальным агентом"
+    "workdir_path_unavailable": "Локального рабочего каталога пока нет — задача не запускалась локальным агентом"
   },
   "timeline": {
     "loading": "Загрузка..."
   },
   "activity": {
-    "created": "создал эту issue",
-    "self_assigned": "назначил эту issue себе",
+    "created": "создал эту задачу",
+    "self_assigned": "назначил эту задачу себе",
     "assigned_to": "назначил {{name}}",
     "removed_assignee": "убрал исполнителя",
     "changed_assignee": "сменил исполнителя",
@@ -242,7 +242,7 @@
     "start_date_removed": "убрал дату начала",
     "due_date_set": "задал срок {{date}}",
     "due_date_removed": "убрал срок",
-    "title_renamed": "переименовал эту issue с «{{from}}» на «{{to}}»",
+    "title_renamed": "переименовал эту задачу с «{{from}}» на «{{to}}»",
     "description_updated": "обновил описание",
     "task_completed_one": "выполнил task",
     "task_completed_few": "выполнил task ({{count}} раза)",
@@ -379,29 +379,29 @@
     "priority": "Приоритет",
     "assignee": "Исполнитель",
     "delete": "Удалить",
-    "update_success_one": "Обновлена {{count}} issue",
-    "update_success_few": "Обновлено {{count}} issues",
-    "update_success_many": "Обновлено {{count}} issues",
-    "update_success_other": "Обновлено {{count}} issues",
-    "update_failed": "Не удалось обновить issues",
-    "delete_success_one": "Удалена {{count}} issue",
-    "delete_success_few": "Удалено {{count}} issues",
-    "delete_success_many": "Удалено {{count}} issues",
-    "delete_success_other": "Удалено {{count}} issues",
-    "delete_failed": "Не удалось удалить issues",
-    "delete_dialog_title_one": "Удалить {{count}} issue?",
-    "delete_dialog_title_few": "Удалить {{count}} issues?",
-    "delete_dialog_title_many": "Удалить {{count}} issues?",
-    "delete_dialog_title_other": "Удалить {{count}} issues?",
-    "delete_dialog_desc_one": "Это действие нельзя отменить. Выбранная issue и все связанные данные будут удалены безвозвратно.",
-    "delete_dialog_desc_few": "Это действие нельзя отменить. Выбранные issues и все связанные данные будут удалены безвозвратно.",
-    "delete_dialog_desc_many": "Это действие нельзя отменить. Выбранные issues и все связанные данные будут удалены безвозвратно.",
-    "delete_dialog_desc_other": "Это действие нельзя отменить. Выбранные issues и все связанные данные будут удалены безвозвратно.",
-    "delete_dialog_warning": "Удалять issues может любой участник рабочей области.",
+    "update_success_one": "Обновлена {{count}} задача",
+    "update_success_few": "Обновлено {{count}} задачи",
+    "update_success_many": "Обновлено {{count}} задач",
+    "update_success_other": "Обновлено {{count}} задач",
+    "update_failed": "Не удалось обновить задачи",
+    "delete_success_one": "Удалена {{count}} задача",
+    "delete_success_few": "Удалено {{count}} задачи",
+    "delete_success_many": "Удалено {{count}} задач",
+    "delete_success_other": "Удалено {{count}} задач",
+    "delete_failed": "Не удалось удалить задачи",
+    "delete_dialog_title_one": "Удалить {{count}} задачу?",
+    "delete_dialog_title_few": "Удалить {{count}} задачи?",
+    "delete_dialog_title_many": "Удалить {{count}} задач?",
+    "delete_dialog_title_other": "Удалить {{count}} задач?",
+    "delete_dialog_desc_one": "Это действие нельзя отменить. Выбранная задача и все связанные данные будут удалены безвозвратно.",
+    "delete_dialog_desc_few": "Это действие нельзя отменить. Выбранные задачи и все связанные данные будут удалены безвозвратно.",
+    "delete_dialog_desc_many": "Это действие нельзя отменить. Выбранные задачи и все связанные данные будут удалены безвозвратно.",
+    "delete_dialog_desc_other": "Это действие нельзя отменить. Выбранные задачи и все связанные данные будут удалены безвозвратно.",
+    "delete_dialog_warning": "Удалять задачи может любой участник рабочей области.",
     "cancel": "Отмена"
   },
   "card": {
-    "update_failed": "Не удалось обновить issue",
+    "update_failed": "Не удалось обновить задачу",
     "updated_ago": "Обновлено {{time}}"
   },
   "actions": {
@@ -424,10 +424,10 @@
     "copy_link": "Копировать ссылку",
     "copy_workdir_path": "Копировать путь локального рабочего каталога",
     "more": "Ещё",
-    "create_sub_issue": "Создать под-issue",
-    "set_parent_issue": "Назначить родительскую issue...",
-    "add_sub_issue": "Добавить под-issue...",
-    "delete_issue": "Удалить issue"
+    "create_sub_issue": "Создать подзадачу",
+    "set_parent_issue": "Назначить родительскую задачу...",
+    "add_sub_issue": "Добавить подзадачу...",
+    "delete_issue": "Удалить задачу"
   },
   "pickers": {
     "filter_options_aria": "Опции фильтра",
@@ -457,7 +457,7 @@
     }
   },
   "labels_panel": {
-    "intro": "Создавайте метки и управляйте ими, чтобы категоризировать issues по всей рабочей области.",
+    "intro": "Создавайте метки и управляйте ими, чтобы категоризировать задачи по всей рабочей области.",
     "new_placeholder": "Название новой метки…",
     "new_aria": "Название новой метки",
     "add_action": "Добавить",
@@ -472,7 +472,7 @@
     "cancel_aria": "Отмена",
     "delete_dialog_title": "Удалить метку?",
     "delete_dialog_desc_prefix": "Метка ",
-    "delete_dialog_desc_suffix": " будет убрана со всех issues. Это нельзя отменить.",
+    "delete_dialog_desc_suffix": " будет убрана со всех задач. Это нельзя отменить.",
     "delete_dialog_cancel": "Отмена",
     "delete_dialog_confirm": "Удалить",
     "create_failed": "Не удалось создать метку",
@@ -481,7 +481,7 @@
   },
   "backlog_hint": {
     "title": "Агент приостановлен в бэклоге",
-    "description": "Эта issue отложена, поэтому назначенный агент будет ждать. Переместите её в «К выполнению», когда захотите, чтобы агент начал.",
+    "description": "Эта задача отложена, поэтому назначенный агент будет ждать. Переместите её в «К выполнению», когда захотите, чтобы агент начал.",
     "row_backlog_label": "Бэклог",
     "row_backlog_hint": "оставляет агента на паузе",
     "row_todo_label": "К выполнению",

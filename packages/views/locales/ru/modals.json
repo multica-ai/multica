@@ -8,17 +8,17 @@
   },
   "create_workspace": {
     "title": "Создать новую рабочую область",
-    "description": "Рабочие области — это общие пространства, где команды работают над проектами и issues."
+    "description": "Рабочие области — это общие пространства, где команды работают над проектами и задачами."
   },
   "delete_issue": {
-    "title": "Удалить issue",
-    "description": "Эта issue и все её комментарии будут удалены безвозвратно. Это действие нельзя отменить.",
-    "hint": "Удалять issues может любой участник рабочей области.",
+    "title": "Удалить задачу",
+    "description": "Эта задача и все её комментарии будут удалены безвозвратно. Это действие нельзя отменить.",
+    "hint": "Удалять задачи может любой участник рабочей области.",
     "cancel": "Отмена",
     "confirm": "Удалить",
     "deleting": "Удаление...",
-    "toast_deleted": "Issue удалена",
-    "toast_delete_failed": "Не удалось удалить issue"
+    "toast_deleted": "Задача удалена",
+    "toast_delete_failed": "Не удалось удалить задачу"
   },
   "feedback": {
     "title": "Обратная связь",
@@ -33,22 +33,22 @@
     "github_hint_link": "GitHub"
   },
   "issue_picker": {
-    "search_placeholder": "Поиск issues...",
+    "search_placeholder": "Поиск задач...",
     "searching": "Поиск...",
-    "no_results": "Issues не найдены.",
-    "prompt_to_search": "Введите запрос для поиска issues"
+    "no_results": "Задачи не найдены.",
+    "prompt_to_search": "Введите запрос для поиска задач"
   },
   "set_parent": {
-    "title": "Назначить родительскую issue",
-    "description": "Найдите issue, чтобы сделать её родительской для этой issue",
-    "toast_failed": "Не удалось обновить issue",
-    "toast_success": "{{identifier}} назначена родительской issue"
+    "title": "Назначить родительскую задачу",
+    "description": "Найдите задачу, чтобы сделать её родительской для этой задачи",
+    "toast_failed": "Не удалось обновить задачу",
+    "toast_success": "{{identifier}} назначена родительской задачей"
   },
   "add_child": {
-    "title": "Добавить под-issue",
-    "description": "Найдите issue, чтобы добавить её как под-issue",
-    "toast_failed": "Не удалось добавить под-issue",
-    "toast_success": "{{identifier}} добавлена как под-issue"
+    "title": "Добавить подзадачу",
+    "description": "Найдите задачу, чтобы добавить её как подзадачу",
+    "toast_failed": "Не удалось добавить подзадачу",
+    "toast_success": "{{identifier}} добавлена как подзадача"
   },
   "backlog_hint": {
     "toast_status_failed": "Не удалось обновить статус"
@@ -130,44 +130,44 @@
     "local_hint": "Агенты на других машинах не увидят этот путь — они не смогут запуститься. Для совместной работы используйте репозитории."
   },
   "create_issue": {
-    "sr_manual": "Создать issue",
-    "sr_agent": "Быстрое создание issue",
+    "sr_manual": "Создать задачу",
+    "sr_agent": "Быстрое создание задачи",
     "manual_breadcrumb": "Создать вручную",
     "agent_breadcrumb": "Создать агентом",
-    "title_placeholder": "Название issue",
+    "title_placeholder": "Название задачи",
     "description_placeholder": "Добавьте описание...",
     "more_options_aria": "Больше опций",
     "title_required": "Введите название для создания",
-    "submit": "Создать issue",
+    "submit": "Создать задачу",
     "submitting": "Создание...",
-    "toast_created": "Issue создана",
-    "view_issue": "Открыть issue",
-    "toast_failed": "Не удалось создать issue",
-    "toast_duplicate_title": "Дублирующая issue",
-    "toast_duplicate_view": "Открыть существующую issue",
-    "toast_link_subissues_all_failed": "Не удалось привязать под-issues",
-    "toast_link_subissues_partial": "Не удалось привязать {{failed}} из {{total}} под-issues",
+    "toast_created": "Задача создана",
+    "view_issue": "Открыть задачу",
+    "toast_failed": "Не удалось создать задачу",
+    "toast_duplicate_title": "Дублирующая задача",
+    "toast_duplicate_view": "Открыть существующую задачу",
+    "toast_link_subissues_all_failed": "Не удалось привязать подзадачи",
+    "toast_link_subissues_partial": "Не удалось привязать {{failed}} из {{total}} подзадач",
     "switch_to_agent": "Переключиться на агента",
-    "switch_to_agent_tooltip": "Переключиться на создание агентом — опишите в одну строку, и агент оформит issue",
+    "switch_to_agent_tooltip": "Переключиться на создание агентом — опишите в одну строку, и агент оформит задачу",
     "switch_to_manual": "Переключиться на ручной режим",
     "switch_to_manual_tooltip": "Переключиться на ручное создание — заполните поля сами",
     "create_another": "Создать ещё",
     "remove_parent_aria": "Убрать родителя",
-    "remove_subissue_aria": "Убрать под-issue {{identifier}}",
-    "subissue_of": "Под-issue для {{identifier}}",
-    "subissue_chip": "Под-issue: {{identifier}}",
+    "remove_subissue_aria": "Убрать подзадачу {{identifier}}",
+    "subissue_of": "Подзадача для {{identifier}}",
+    "subissue_chip": "Подзадача: {{identifier}}",
     "parent_with_id": "Родитель: {{identifier}}",
     "set_start_date": "Указать дату начала...",
-    "set_parent": "Назначить родительскую issue...",
-    "add_subissue": "Добавить под-issue...",
+    "set_parent": "Назначить родительскую задачу...",
+    "add_subissue": "Добавить подзадачу...",
     "remove_parent": "Убрать родителя",
     "set_parent_picker": {
-      "title": "Назначить родительскую issue",
-      "description": "Найдите issue, чтобы сделать её родительской для новой issue"
+      "title": "Назначить родительскую задачу",
+      "description": "Найдите задачу, чтобы сделать её родительской для новой задачи"
     },
     "add_subissue_picker": {
-      "title": "Добавить под-issue",
-      "description": "Найдите issue, чтобы добавить её как под-issue новой issue"
+      "title": "Добавить подзадачу",
+      "description": "Найдите задачу, чтобы добавить её как подзадачу новой задачи"
     },
     "agent": {
       "created_by": "Создатель",
@@ -190,7 +190,7 @@
       "error_agent_unavailable_fallback": "Агент недоступен. Выберите другого агента.",
       "error_daemon_version": "CLI демона этого агента ({{current}}) ниже требуемой {{min}}. Обновите демон, чтобы использовать создание агентом.",
       "error_unknown": "Не удалось отправить. Попробуйте снова.",
-      "sub_issue_of": "Под-issue для {{identifier}}"
+      "sub_issue_of": "Подзадача для {{identifier}}"
     }
   }
 }

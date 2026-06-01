@@ -1,15 +1,15 @@
 {
   "nav": {
     "inbox": "Входящие",
-    "my_issues": "Мои issues",
-    "issues": "Issues",
+    "my_issues": "Мои задачи",
+    "issues": "Задачи",
     "projects": "Проекты",
     "autopilots": "Автопилот",
     "agents": "Агенты",
     "squads": "Отряды",
     "usage": "Использование",
     "runtimes": "Среды выполнения",
-    "skills": "Skills",
+    "skills": "Навыки",
     "settings": "Настройки"
   },
   "help": {
@@ -31,7 +31,7 @@
     "invitation_join": "Присоединиться",
     "invitation_decline": "Отклонить",
     "log_out": "Выйти",
-    "new_issue": "Создать issue",
+    "new_issue": "Создать задачу",
     "new_issue_shortcut": "C",
     "pinned_label": "Закреплено",
     "workspace_group": "Рабочая область",

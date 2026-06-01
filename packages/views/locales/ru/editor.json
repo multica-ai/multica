@@ -20,9 +20,9 @@
       "ordered_list": "Нумерованный список"
     },
     "sub_issue": {
-      "tooltip": "Создать под-issue из выделения",
+      "tooltip": "Создать подзадачу из выделения",
       "created": "Создано {{identifier}}",
-      "create_failed": "Не удалось создать под-issue"
+      "create_failed": "Не удалось создать подзадачу"
     }
   },
   "image": {
@@ -52,7 +52,7 @@
   },
   "mention": {
     "group_users": "Пользователи",
-    "group_issues": "Issues",
+    "group_issues": "Задачи",
     "all_members": "Все участники",
     "searching": "Поиск...",
     "no_results": "Ничего не найдено"
