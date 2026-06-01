@@ -19,15 +19,19 @@ function makeWs(slug: string): Workspace {
 }
 
 describe("resolvePostAuthDestination", () => {
-  it("!onboarded → /onboarding (even with a workspace)", () => {
-    // V3 invariant: onboarded_at is the single source of truth for
-    // workspace access. A user holding workspaces but flagged !onboarded
-    // (rare mid-flow state: closed app between Step 2 and Step 3) gets
-    // routed to /onboarding so they can finish; the layout hard gate
-    // would redirect them anyway.
+  it("!onboarded + workspace[0] → /<first.slug>/issues (skip onboarding)", () => {
+    // Onboarding guide is skipped — new users with a workspace land
+    // directly on their first workspace.
     const ws = [makeWs("acme")];
-    expect(resolvePostAuthDestination(ws, false)).toBe(paths.onboarding());
-    expect(resolvePostAuthDestination([], false)).toBe(paths.onboarding());
+    expect(resolvePostAuthDestination(ws, false)).toBe(
+      paths.workspace("acme").issues(),
+    );
+  });
+
+  it("!onboarded + no workspace → /workspaces/new (skip onboarding)", () => {
+    // Onboarding guide is skipped — new users without a workspace go
+    // straight to workspace creation.
+    expect(resolvePostAuthDestination([], false)).toBe(paths.newWorkspace());
   });
 
   it("onboarded + workspace[0] → /<first.slug>/issues", () => {
