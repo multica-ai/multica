@@ -106,12 +106,14 @@ func DiscoveryConfig(rawSettings []byte) (ModelDiscoveryConfig, bool, error) {
 			return cfg, false, fmt.Errorf("parse workspace gateway settings: %w", err)
 		}
 	}
+	workspaceProvidedURL := false
 	if envelope.FirtalGateway != nil {
 		if !envelope.FirtalGateway.Enabled {
 			return cfg, false, nil
 		}
 		if gatewayURL := strings.TrimSpace(envelope.FirtalGateway.GatewayURL); gatewayURL != "" {
 			cfg.BaseURL = strings.TrimRight(gatewayURL, "/")
+			workspaceProvidedURL = true
 		}
 		if key := strings.TrimSpace(envelope.FirtalGateway.APIKey); key != "" {
 			cfg.APIKey = key
@@ -120,7 +122,13 @@ func DiscoveryConfig(rawSettings []byte) (ModelDiscoveryConfig, bool, error) {
 	if cfg.BaseURL == "" || cfg.APIKey == "" {
 		return cfg, false, nil
 	}
-	normalizedURL, err := ValidateBaseURL(cfg.BaseURL)
+	// Untrusted workspace URLs validate strictly; the inherited operator env URL
+	// honors the internal-address opt-in.
+	validate := ValidateTrustedBaseURL
+	if workspaceProvidedURL {
+		validate = ValidateBaseURL
+	}
+	normalizedURL, err := validate(cfg.BaseURL)
 	if err != nil {
 		return cfg, false, fmt.Errorf("workspace firtal gateway URL %w", err)
 	}

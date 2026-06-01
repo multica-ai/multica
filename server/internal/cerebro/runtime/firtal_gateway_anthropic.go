@@ -148,7 +148,7 @@ func (c *GatewayClient) completeAnthropic(
 		model = defaultFirtalGatewayModel
 	}
 
-	baseURL, err := firtalgateway.NormalizeBaseURL(c.cfg.BaseURL)
+	baseURL, err := firtalgateway.NormalizeTrustedBaseURL(c.cfg.BaseURL)
 	if err != nil {
 		return GatewayCompletion{}, fmt.Errorf("invalid gateway URL: %w", err)
 	}
