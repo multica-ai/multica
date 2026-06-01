@@ -440,6 +440,10 @@ var catalog = []Capability{
 		Title:       "Create local runtime",
 		Category:    CategoryRuntimes,
 		Description: "Register a new LOCAL (daemon-based) runtime that runs on the user's own machine. Settable Allow/Ask/Deny on every layer; enforced live at the runtime setup-token mint through the unified tool-policy chain (workspace > group > user). The local twin of manage_cloud_runtime (FIR-2672).",
+		Ops: []string{
+			"POST /api/runtime-setup/tokens",
+			"POST /api/workspaces/{id}/runtime-setup-token",
+		},
 		Evidence: []string{
 			"server/internal/handler/runtime_setup.go:54",              // CreateRuntimeSetupToken create_local_runtime tool-policy gate
 			"server/internal/handler/group_permissions_cerebro.go:185", // cerebroRequireLocalRuntimePolicy (tool-policy Resolve)
@@ -592,20 +596,20 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_sprints",
-		Title:       "Manage sprints",
+		Key:         "manage_project_sprints",
+		Title:       "Manage project sprints",
 		Category:    CategoryProjects,
-		Description: "Create, edit, or delete sprints, sprint settings, and recurring tasks for a project, and assign issues to a sprint.",
+		Description: "Create, edit, delete, and assign project sprints and recurring sprint tasks.",
 		Ops: []string{
-			"POST /api/cerebro/projects/{projectID}/sprints/",
-			"PUT /api/cerebro/sprints/{sprintID}/",
-			"DELETE /api/cerebro/sprints/{sprintID}/",
-			"PUT /api/cerebro/issues/{issueID}/sprint/",
 			"PUT /api/cerebro/projects/{projectID}/sprint-settings/",
 			"DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
+			"POST /api/cerebro/projects/{projectID}/sprints/",
 			"POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/",
 			"PUT /api/cerebro/sprint-recurring-tasks/{id}/",
 			"DELETE /api/cerebro/sprint-recurring-tasks/{id}/",
+			"PUT /api/cerebro/sprints/{sprintID}/",
+			"DELETE /api/cerebro/sprints/{sprintID}/",
+			"PUT /api/cerebro/issues/{issueID}/sprint/",
 		},
 	},
 
@@ -860,6 +864,7 @@ var excluded = map[string]string{
 	"POST /api/webhooks/stripe":              "pre-auth signed webhook — Stripe HMAC authorises delivery",
 	"POST /api/cerebro/github/pull-requests": "pre-auth service-to-service — CEREBRO_GITHUB_LINK_KEY bearer token authorises the firtal-data-registry poll-based PR-link push (FIR-2568)",
 	"POST /api/contact-sales":                "pre-auth — public marketing form",
+	"POST /api/runtime-setup/exchange":       "bootstrap — exchanges a single-use setup token before a daemon has a user session",
 
 	// billing — external Stripe checkout/portal, human-actor only.
 	"POST /api/cloud-billing/checkout-sessions": "billing — external Stripe, human-actor only",

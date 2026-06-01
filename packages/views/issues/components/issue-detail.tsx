@@ -631,6 +631,8 @@ interface IssueDetailProps {
   highlightCommentId?: string;
   /** When true, the issue identifier+title in the breadcrumb links to the issue detail page. Used when this view is embedded (e.g. inbox) so users can navigate to the dedicated issue page. */
   linkSelfInBreadcrumb?: boolean;
+  // CEREBRO-PATCH(issue-detail-seed-from-list): FIR-2684 — embedded hosts (inbox) pass false so opening a message doesn't cold-load the whole board issue-list just to seed parent/self from cache. Default true keeps issues-page behavior.
+  seedFromIssueList?: boolean;
   // CEREBRO-PATCH(issue-detail-extensions-slot): JEH-838b — cerebro slot for issue-attached panels (references) rendered after attachments/artifacts. Apps supply the node.
   extensions?: ReactNode;
 }
@@ -640,7 +642,7 @@ interface IssueDetailProps {
 // ---------------------------------------------------------------------------
 
 // CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — accept onUnarchive from host.
-export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, linkSelfInBreadcrumb = false, extensions }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, linkSelfInBreadcrumb = false, extensions, seedFromIssueList = true }: IssueDetailProps) { // CEREBRO-PATCH(issue-detail-seed-from-list): FIR-2684
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const id = issueId;
@@ -665,7 +667,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     members.find((m) => m.user_id === user?.id)?.role ?? null;
   const canModerateComments =
     currentUserRole === "owner" || currentUserRole === "admin";
-  const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
+  // CEREBRO-PATCH(issue-detail-seed-from-list): FIR-2684 — only seed from the board issue-list when it's already loaded; embedded hosts (inbox) pass seedFromIssueList=false so opening a message never cold-fetches the 6-status board list (self/parent still load via their own queries).
+  const { data: allIssues = [] } = useQuery({ ...issueListOptions(wsId), enabled: seedFromIssueList });
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({

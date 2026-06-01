@@ -41,6 +41,18 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
+      "gate": "via:DELETE /api/cerebro/projects/{projectID}/sprint-settings/"
+    },
+    {
+      "id": "DELETE /api/cerebro/sprint-recurring-tasks/{id}/",
+      "gate": "via:DELETE /api/cerebro/sprint-recurring-tasks/{id}/"
+    },
+    {
+      "id": "DELETE /api/cerebro/sprints/{sprintID}/",
+      "gate": "via:DELETE /api/cerebro/sprints/{sprintID}/"
+    },
+    {
       "id": "DELETE /api/channels/{id}/archive",
       "gate": "workspace_member"
     },
@@ -413,14 +425,6 @@
       "gate": "workspace_member"
     },
     {
-      "id": "POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/projects/{projectID}/sprints/",
-      "gate": "workspace_member"
-    },
-    {
       "id": "POST /api/cerebro/workflows/",
       "gate": "workspace_member"
     },
@@ -443,6 +447,14 @@
     {
       "id": "POST /api/cerebro/workflows/{id}/toggle",
       "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/",
+      "gate": "via:POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/"
+    },
+    {
+      "id": "POST /api/cerebro/projects/{projectID}/sprints/",
+      "gate": "via:POST /api/cerebro/projects/{projectID}/sprints/"
     },
     {
       "id": "POST /api/cerebro/status-models/",
@@ -470,34 +482,6 @@
     },
     {
       "id": "DELETE /api/cerebro/issues/{issueId}/custom-status/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/cerebro/issues/{issueID}/sprint/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/cerebro/projects/{projectID}/sprint-settings/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/cerebro/sprint-recurring-tasks/{id}/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/cerebro/sprint-recurring-tasks/{id}/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "PUT /api/cerebro/sprints/{sprintID}/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "DELETE /api/cerebro/sprints/{sprintID}/",
       "gate": "workspace_member"
     },
     {
@@ -877,6 +861,14 @@
       "gate": "self_only"
     },
     {
+      "id": "POST /api/runtime-setup/exchange",
+      "exempt": "bootstrap \u2014 exchanges setup token before daemon user session exists"
+    },
+    {
+      "id": "POST /api/runtime-setup/tokens",
+      "gate": "via:POST /api/runtime-setup/tokens"
+    },
+    {
       "id": "POST /api/runtimes/{runtimeId}/archive-agents-and-delete",
       "gate": "cerebro_runtime_access"
     },
@@ -1045,6 +1037,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/workspaces/{id}/runtime-setup-token",
+      "gate": "via:POST /api/workspaces/{id}/runtime-setup-token"
+    },
+    {
       "id": "POST /api/workspaces/{id}/leave",
       "gate": "self_only"
     },
@@ -1119,6 +1115,22 @@
     {
       "id": "PUT /api/cerebro/workflows/{id}",
       "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/issues/{issueID}/sprint/",
+      "gate": "via:PUT /api/cerebro/issues/{issueID}/sprint/"
+    },
+    {
+      "id": "PUT /api/cerebro/projects/{projectID}/sprint-settings/",
+      "gate": "via:PUT /api/cerebro/projects/{projectID}/sprint-settings/"
+    },
+    {
+      "id": "PUT /api/cerebro/sprint-recurring-tasks/{id}/",
+      "gate": "via:PUT /api/cerebro/sprint-recurring-tasks/{id}/"
+    },
+    {
+      "id": "PUT /api/cerebro/sprints/{sprintID}/",
+      "gate": "via:PUT /api/cerebro/sprints/{sprintID}/"
     },
     {
       "id": "PUT /api/cerebro/workspaces/{id}/auth-settings/",

@@ -2,7 +2,7 @@
 
 // CEREBRO-PATCH(comment-card-cerebro): cerebro modification of upstream file
 
-import { CheckCircle2, ChevronRight, Copy, GitFork, MessageCircleQuestion, MessagesSquare, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { BellRing, CheckCircle2, ChevronRight, Copy, GitFork, MessageCircleQuestion, MessagesSquare, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { lazy, memo, Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
@@ -42,6 +42,8 @@ import { ReplyInput } from "./reply-input";
 // CEREBRO-PATCH(comment-edit-attachment-binding): FIR-2394 — pure binding helpers extracted for robustness + unit coverage.
 import { attachmentReferencedInContent, collectActiveAttachmentIds } from "./comment-attachment-binding";
 import { AttachmentList } from "@multica/cerebro-attachments/views";
+// CEREBRO-PATCH(comment-reminder-menu): FIR-2643 — "Remind me" on a comment lives in cerebro-inbox.
+import { useCommentReminder } from "@multica/cerebro-inbox";
 import type { Attachment, TimelineEntry } from "@multica/core/types";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
@@ -388,6 +390,8 @@ function CommentRow({
   // CEREBRO-PATCH(comment-temp-optimistic): dim + gate reactions on optimistic temp rows.
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // CEREBRO-PATCH(comment-reminder-menu): FIR-2643 — "Remind me" surface (cerebro-inbox).
+  const reminder = useCommentReminder(issueId);
 
   const reactions = entry.reactions ?? [];
   const contentText = entry.content ?? "";
@@ -442,6 +446,13 @@ function CommentRow({
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
+              {/* CEREBRO-PATCH(comment-reminder-menu): FIR-2643 — remind me about this comment (all comments). */}
+              {reminder.enabled && (
+                <DropdownMenuItem onClick={() => reminder.openReminder(entry.id, entry.content ?? "")}>
+                  <BellRing className="h-3.5 w-3.5" />
+                  {reminder.label}
+                </DropdownMenuItem>
+              )}
               {/* CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 start a new thread from this reply. */}
               {canStartNewThread && (isOwn || canModerate) && onStartNewThread && (
                 <>
@@ -477,6 +488,8 @@ function CommentRow({
             onOpenChange={setConfirmDelete}
             onConfirm={() => onDelete(entry.id)}
           />
+          {/* CEREBRO-PATCH(comment-reminder-menu): FIR-2643 — dialog lives outside the dropdown so it survives menu close. */}
+          {reminder.dialog}
         </div>
       </div>
 
@@ -600,6 +613,8 @@ function CommentCardImpl({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmMove, setConfirmMove] = useState(false);
   const [moving, setMoving] = useState(false);
+  // CEREBRO-PATCH(comment-reminder-menu): FIR-2643 — "Remind me" surface (cerebro-inbox).
+  const reminder = useCommentReminder(issueId);
 
   // The parent precomputes the flat thread (using collectThreadReplies),
   // memoizes by thread, and stabilizes the array reference, so we render
@@ -762,6 +777,13 @@ function CommentCardImpl({
                     <Copy className="h-3.5 w-3.5" />
                     {t(($) => $.comment.copy_action)}
                   </DropdownMenuItem>
+                  {/* CEREBRO-PATCH(comment-reminder-menu): FIR-2643 — remind me about this comment (all comments). */}
+                  {reminder.enabled && (
+                    <DropdownMenuItem onClick={() => reminder.openReminder(entry.id, entry.content ?? "")}>
+                      <BellRing className="h-3.5 w-3.5" />
+                      {reminder.label}
+                    </DropdownMenuItem>
+                  )}
                   {onResolveToggle && (
                     <>
                       <DropdownMenuSeparator />
@@ -832,6 +854,8 @@ function CommentCardImpl({
                 moving={moving}
                 replyCount={replyCount}
               />
+              {/* CEREBRO-PATCH(comment-reminder-menu): FIR-2643 — dialog lives outside the dropdown so it survives menu close. */}
+              {reminder.dialog}
               </div>
             )}
           </div>
