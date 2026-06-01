@@ -583,6 +583,21 @@ func mergeEnv(base []string, extra map[string]string) []string {
 }
 
 func isFilteredChildEnvKey(key string) bool {
+	// Auth-related vars MUST pass through — claude consumes them at the
+	// API boundary (CLAUDE_CODE_OAUTH_TOKEN is the broker's bearer, others
+	// are alternative auth paths). Stripping them leaves the child claude
+	// process unauthenticated → "Not logged in". The remaining CLAUDE_CODE_*
+	// vars carry parent-session state we don't want a spawned claude to
+	// inherit (project context, fast mode, etc.).
+	if key == "CLAUDE_CODE_OAUTH_TOKEN" ||
+		key == "CLAUDE_CODE_OAUTH_REFRESH_TOKEN" ||
+		key == "CLAUDE_CODE_OAUTH_CLIENT_ID" ||
+		key == "CLAUDE_CODE_OAUTH_SCOPES" ||
+		key == "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR" ||
+		key == "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR" ||
+		key == "CLAUDE_CODE_API_KEY_HELPER_TTL_MS" {
+		return false
+	}
 	return key == "CLAUDECODE" ||
 		strings.HasPrefix(key, "CLAUDECODE_") ||
 		strings.HasPrefix(key, "CLAUDE_CODE_")

@@ -7,8 +7,11 @@
 ARG BASE_IMAGE=multica-runtime-base:test
 FROM ${BASE_IMAGE}
 
+ARG CLAUDE_CODE_VERSION
+
 USER root
-RUN npm install -g @anthropic-ai/claude-code \
+RUN test -n "$CLAUDE_CODE_VERSION" || { echo "CLAUDE_CODE_VERSION build arg is required" >&2; exit 1; } \
+    && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && npm cache clean --force
 USER multica
 

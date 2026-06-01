@@ -391,6 +391,42 @@ func TestMergeEnvFiltersClaudeCodeVars(t *testing.T) {
 	}
 }
 
+func TestMergeEnvPassesThroughOAuthVars(t *testing.T) {
+	t.Parallel()
+
+	// The broker (Plan F.2) sets CLAUDE_CODE_OAUTH_TOKEN on the worker pod.
+	// run-task must not strip it when spawning claude — otherwise the child
+	// process gets "Not logged in". Same for sibling auth vars.
+	env := mergeEnv([]string{
+		"CLAUDECODE=1",                                  // session marker — must strip
+		"CLAUDE_CODE_ENTRYPOINT=cli",                    // session state — must strip
+		"CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x",        // auth — must pass through
+		"CLAUDE_CODE_OAUTH_REFRESH_TOKEN=sk-ant-ort01-x", // auth — must pass through
+		"CLAUDE_CODE_OAUTH_CLIENT_ID=cid",               // auth — must pass through
+		"CLAUDE_CODE_API_KEY_HELPER_TTL_MS=60000",       // auth — must pass through
+	}, nil)
+
+	found := map[string]bool{}
+	for _, entry := range env {
+		found[entry] = true
+	}
+	for _, mustStrip := range []string{"CLAUDECODE=1", "CLAUDE_CODE_ENTRYPOINT=cli"} {
+		if found[mustStrip] {
+			t.Errorf("session var %q must be stripped", mustStrip)
+		}
+	}
+	for _, mustKeep := range []string{
+		"CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x",
+		"CLAUDE_CODE_OAUTH_REFRESH_TOKEN=sk-ant-ort01-x",
+		"CLAUDE_CODE_OAUTH_CLIENT_ID=cid",
+		"CLAUDE_CODE_API_KEY_HELPER_TTL_MS=60000",
+	} {
+		if !found[mustKeep] {
+			t.Errorf("auth var %q must pass through; got env=%v", mustKeep, env)
+		}
+	}
+}
+
 func TestBuildEnvAppendsExtras(t *testing.T) {
 	t.Parallel()
 

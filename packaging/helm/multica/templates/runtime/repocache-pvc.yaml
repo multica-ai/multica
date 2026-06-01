@@ -1,0 +1,19 @@
+{{- if and .Values.runtime.enabled (eq .Values.runtime.mode "controller") .Values.runtime.repocache.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: multica-repocache-repos
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "repocache" "ctx" .) | nindent 4 }}
+  annotations:
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes: [{{ .Values.runtime.repocache.storage.accessMode | quote }}]
+  resources:
+    requests:
+      storage: {{ .Values.runtime.repocache.storage.size | quote }}
+  {{- with .Values.runtime.repocache.storage.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

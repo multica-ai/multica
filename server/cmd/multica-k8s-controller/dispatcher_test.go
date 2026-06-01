@@ -47,7 +47,7 @@ func TestDispatchOnce_CreatesPVCAndJobForClaimedTask(t *testing.T) {
 		RuntimeID: "rt-1", Image: "img:v", PVCSize: "5Gi",
 	}
 
-	dispatched, err := DispatchOnce(context.Background(), cli, k, "multica", "ghcr-pull", r)
+	dispatched, err := DispatchOnce(context.Background(), cli, k, "multica", "ghcr-pull", r, ClaudeBrokerOptions{}, RepoCacheOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestDispatchOnce_CreatesPVCAndJobForClaimedTask(t *testing.T) {
 	}
 
 	// Second call: no task → no new Job
-	if _, err := DispatchOnce(context.Background(), cli, k, "multica", "ghcr-pull", r); err != nil {
+	if _, err := DispatchOnce(context.Background(), cli, k, "multica", "ghcr-pull", r, ClaudeBrokerOptions{}, RepoCacheOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	jobs2, _ := k.BatchV1().Jobs("multica").List(context.Background(), metav1.ListOptions{})

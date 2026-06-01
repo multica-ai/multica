@@ -1,0 +1,16 @@
+{{- if and .Values.runtime.enabled (eq .Values.runtime.mode "controller") .Values.runtime.repocache.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: multica-repocache
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "repocache" "ctx" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "multica.componentSelector" (dict "name" "repocache" "ctx" .) | nindent 4 }}
+  ports:
+    - { name: admin,   port: 8080, targetPort: admin }
+    - { name: metrics, port: 9090, targetPort: metrics }
+{{- end }}

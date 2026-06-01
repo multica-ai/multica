@@ -18,4 +18,27 @@ data:
         storageClass: {{ default $.Values.runtime.controller.workdir.storageClass "" | quote }}
 {{- end }}
     imagePullSecret: {{ .Values.image.pullSecret | quote }}
+    {{- if .Values.runtime.repocache.enabled }}
+    # When the in-cluster repo cache is enabled, the controller mounts the
+    # shared PVC read-only on every worker Job pod and emits a per-task
+    # gitconfig ConfigMap whose url.<base>.insteadOf rewrites convert the
+    # agent's plain `git clone <origin-url>` into a sub-second local file://
+    # clone. Disabling this falls back to direct origin clones; the worker
+    # itself doesn't need to change either way.
+    repoCache:
+      enabled: true
+      pvcName: multica-repocache-repos
+      mountPath: /repos
+    {{- end }}
+    {{- if .Values.runtime.claudeBroker.enabled }}
+    # When the broker is enabled, the controller wires worker Jobs to inject
+    # CLAUDE_CODE_OAUTH_TOKEN from the broker's access-token Secret via
+    # secretKeyRef. The legacy claude-oauth-secret expansion + apiKeyHelper
+    # ConfigMap paths are dropped — apiKeyHelper is x-api-key auth and
+    # rejected OAuth tokens.
+    claudeBroker:
+      enabled: true
+      accessTokenSecret: {{ .Values.runtime.claudeBroker.accessTokenSecret | quote }}
+      secretKey: access_token
+    {{- end }}
 {{- end }}

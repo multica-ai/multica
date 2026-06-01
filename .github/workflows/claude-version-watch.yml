@@ -1,0 +1,120 @@
+name: claude-version-watch
+
+# Daily check: has @anthropic-ai/claude-code shipped a newer release than
+# the version pinned in packaging/claude-code-version? If so, open a PR
+# that bumps the pin AND re-extracts server/cmd/multica-claude-broker/
+# oauth-constants.json from the new binary. Human review before merge.
+#
+# Companion script: scripts/claude-version-bump.sh (also runnable locally).
+
+on:
+  schedule:
+    - cron: "0 10 * * *"   # daily 10:00 UTC
+  workflow_dispatch:        # also runnable on-demand
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0    # need full history to push a branch
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Check whether claude-code has a newer release
+        id: check
+        run: |
+          CURRENT="$(tr -d '[:space:]' < packaging/claude-code-version)"
+          LATEST="$(npm view @anthropic-ai/claude-code version)"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "latest=$LATEST"   >> "$GITHUB_OUTPUT"
+          if [[ "$CURRENT" != "$LATEST" ]]; then
+            echo "needs_bump=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::claude-code newer release: $CURRENT -> $LATEST"
+          else
+            echo "needs_bump=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::claude-code already current at $CURRENT"
+          fi
+
+      - name: Bail out if a bump PR is already open
+        if: steps.check.outputs.needs_bump == 'true'
+        id: pr-check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.check.outputs.latest }}
+        run: |
+          BRANCH="auto/claude-${LATEST}"
+          EXISTING="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' || true)"
+          if [[ -n "$EXISTING" ]]; then
+            echo "::notice::PR for $LATEST already open: #$EXISTING"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run the bump
+        if: steps.check.outputs.needs_bump == 'true' && steps.pr-check.outputs.skip != 'true'
+        run: scripts/claude-version-bump.sh
+
+      - name: Open PR
+        if: steps.check.outputs.needs_bump == 'true' && steps.pr-check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT: ${{ steps.check.outputs.current }}
+          LATEST: ${{ steps.check.outputs.latest }}
+        run: |
+          BRANCH="auto/claude-${LATEST}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add packaging/claude-code-version server/cmd/multica-claude-broker/oauth-constants.json
+          git commit -m "chore(claude): bump to ${LATEST}
+
+          Automated by .github/workflows/claude-version-watch.yml.
+
+          OAuth constants re-extracted from the new claude binary by
+          server/cmd/extract-oauth-constants. Review the oauth-constants.json
+          diff carefully — any change to client_id, version_header, or
+          scopes indicates Anthropic rotated something and the broker
+          needs the new values."
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "chore(claude): bump to ${LATEST}" \
+            --head  "$BRANCH" \
+            --base  main \
+            --body  "$(cat <<EOF
+          Automated bump from \`.github/workflows/claude-version-watch.yml\`.
+
+          - Previous: \`${CURRENT}\`
+          - New:      \`${LATEST}\`
+
+          ### What to review
+
+          1. **\`server/cmd/multica-claude-broker/oauth-constants.json\`** — re-extracted
+             from the new claude binary. A diff on \`client_id\`, \`version_header\`,
+             or \`scopes\` means Anthropic rotated something. Investigate before merging.
+          2. **\`packaging/claude-code-version\`** — just the version string.
+          3. **Anthropic changelog** if visible — does the new version mention
+             anything about OAuth, MCP, or agent execution shape? Anything
+             material there may warrant a manual smoke test in the cluster.
+
+          ### After merge
+
+          - The runtime image at the next \`./packaging/scripts/build-images.sh runtime\`
+            invocation will use the new claude.
+          - The broker image at the next build will embed the new \`oauth-constants.json\`.
+          - CI on this PR confirms tests still pass with the new constants.
+          EOF
+          )"

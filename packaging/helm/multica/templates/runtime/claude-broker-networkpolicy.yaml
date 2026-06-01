@@ -1,0 +1,29 @@
+{{- if and .Values.runtime.enabled (eq .Values.runtime.mode "controller") .Values.runtime.claudeBroker.enabled .Values.runtime.claudeBroker.networkPolicy.enabled }}
+# Restrict who can reach the broker. The broker no longer fronts an in-cluster
+# auth path — workers consume the access token via secretKeyRef from a Secret
+# the broker mirrors, NOT via HTTP. So the admin port (:8080) is operator-only
+# (reachable via kubectl port-forward). The ops port (:8081) is bound to
+# 127.0.0.1 inside the pod and isn't reachable from the cluster network at all.
+# Only the metrics port (:9090) needs ingress, and only from the configured
+# scraper namespace(s).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: multica-claude-broker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "claude-broker" "ctx" .) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "multica.componentSelector" (dict "name" "claude-broker" "ctx" .) | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    {{- with .Values.runtime.claudeBroker.networkPolicy.metricsFrom }}
+    # Metrics port (:9090) — only the configured scraper(s).
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - { protocol: TCP, port: 9090 }
+    {{- end }}
+{{- end }}

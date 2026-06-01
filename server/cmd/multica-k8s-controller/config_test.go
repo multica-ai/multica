@@ -49,3 +49,64 @@ imagePullSecret: ghcr-pull
 		t.Errorf("PollInterval default = %v", got.PollInterval)
 	}
 }
+
+func TestLoadConfig_RepoCacheDefaults(t *testing.T) {
+	cfgDir := t.TempDir()
+	cfgYAML := []byte(`
+workspaces:
+  - id: 11111111-1111-1111-1111-111111111111
+    provider: claude
+    runtimeImage: ghcr.io/x/multica-runtime-claude:dev
+repoCache:
+  enabled: true
+`)
+	if err := os.WriteFile(filepath.Join(cfgDir, "runtime.yaml"), cfgYAML, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MULTICA_SERVER_URL", "http://x")
+	t.Setenv("MULTICA_TOKEN", "tk")
+	t.Setenv("POD_NAMESPACE", "multica")
+	t.Setenv("CONTROLLER_CONFIG_DIR", cfgDir)
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !got.RepoCache.Enabled {
+		t.Errorf("RepoCache.Enabled = false")
+	}
+	if got.RepoCache.PVCName != "multica-repocache-repos" {
+		t.Errorf("RepoCache.PVCName default = %q", got.RepoCache.PVCName)
+	}
+	if got.RepoCache.MountPath != "/repos" {
+		t.Errorf("RepoCache.MountPath default = %q", got.RepoCache.MountPath)
+	}
+}
+
+func TestLoadConfig_RepoCacheDisabledLeavesFieldsZero(t *testing.T) {
+	cfgDir := t.TempDir()
+	cfgYAML := []byte(`
+workspaces:
+  - id: 11111111-1111-1111-1111-111111111111
+    provider: claude
+    runtimeImage: ghcr.io/x/multica-runtime-claude:dev
+`)
+	if err := os.WriteFile(filepath.Join(cfgDir, "runtime.yaml"), cfgYAML, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MULTICA_SERVER_URL", "http://x")
+	t.Setenv("MULTICA_TOKEN", "tk")
+	t.Setenv("POD_NAMESPACE", "multica")
+	t.Setenv("CONTROLLER_CONFIG_DIR", cfgDir)
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.RepoCache.Enabled {
+		t.Errorf("RepoCache.Enabled should be false")
+	}
+	if got.RepoCache.PVCName != "" {
+		t.Errorf("RepoCache.PVCName should be empty when disabled")
+	}
+}

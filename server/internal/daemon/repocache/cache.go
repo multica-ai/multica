@@ -139,6 +139,14 @@ func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 	return firstErr
 }
 
+// SlugFor returns the on-disk bare-directory name (e.g. "github.com+owner+repo.git")
+// that Sync uses for the given repo URL. Useful for callers like the K8s
+// controller that need to construct file:// URLs into a remote-mounted cache
+// without doing a Sync first themselves.
+func (c *Cache) SlugFor(_ string, url string) string {
+	return bareDirName(url)
+}
+
 // Lookup returns the local bare clone path for a repo URL within a workspace.
 // Returns "" if not cached.
 func (c *Cache) Lookup(workspaceID, url string) string {

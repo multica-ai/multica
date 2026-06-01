@@ -1,0 +1,15 @@
+{{- if and .Values.runtime.enabled (eq .Values.runtime.mode "controller") .Values.runtime.repocache.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multica-repocache-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "repocache" "ctx" .) | nindent 4 }}
+data:
+  runtime.yaml: |
+    workspaces:
+{{- range $w := default (list (dict "id" .Values.runtime.workspaceId)) (default list .Values.runtime.workspaces) }}
+      - id: {{ required "runtime.workspaceId or runtime.workspaces[].id required" $w.id | quote }}
+{{- end }}
+{{- end }}

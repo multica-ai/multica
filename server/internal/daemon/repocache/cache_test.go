@@ -105,6 +105,22 @@ func TestGitEnvPreservesExistingConfig(t *testing.T) {
 	}
 }
 
+func TestSlugFor_MatchesBareDirName(t *testing.T) {
+	c := New(t.TempDir(), nil)
+	cases := []string{
+		"https://github.com/owner/repo.git",
+		"git@github.com:owner/repo.git",
+		"ssh://git@gitlab.example.com:22/g/s/r.git",
+		"my-repo",
+	}
+	for _, u := range cases {
+		want := bareDirName(u)
+		if got := c.SlugFor("any-ws", u); got != want {
+			t.Errorf("SlugFor(%q) = %q, want %q", u, got, want)
+		}
+	}
+}
+
 func TestBareDirName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

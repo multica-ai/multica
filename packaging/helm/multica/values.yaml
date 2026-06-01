@@ -135,6 +135,53 @@ runtime:
       requests: { cpu: 100m, memory: 128Mi }
       limits:   { cpu: 500m, memory: 256Mi }
 
+  # ── In-cluster repo cache (Plan F.1) ──────────────────────────────────────
+  # Long-lived Deployment that maintains bare clones of every workspace's repos
+  # on an RWX PVC. Worker Job pods mount the same PVC read-only and `git clone`
+  # locally via a per-task gitconfig with url.<base>.insteadOf rewrites. Cuts
+  # cold-clone time from 5-15s to sub-second.
+  repocache:
+    enabled: true
+    replicaCount: 1
+    image: { name: multica-repocache, tag: "" }   # "" → falls back to image.tag
+    storage:
+      storageClass: ""                  # MUST be RWX-capable
+      accessMode: ReadWriteMany
+      size: 20Gi
+    fetchInterval: 60s
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: 1,    memory: 1Gi }
+
+  # ── Claude OAuth broker (in-cluster refresh token holder) ────────────────
+  # Owns the canonical Anthropic OAuth state and serves the current bearer
+  # to worker Job pods via /access_token. Eliminates the concurrent-refresh
+  # race that caused #15.A. See server/cmd/multica-claude-broker/ and the
+  # design notes in the broker plan.
+  claudeBroker:
+    enabled: false
+    replicaCount: 1
+    image: { name: multica-claude-broker, tag: "" }   # "" → falls back to image.tag
+    refreshPad: 5m         # refresh when expires_at - now < refreshPad
+    refreshInterval: 60s   # how often the refresh loop ticks
+    leaseName: multica-claude-broker-refresh    # coordination.k8s.io/Lease for leader election
+    secretName: multica-claude-oauth-broker     # the broker's own state secret (3 keys: access, refresh, expires_at)
+    accessTokenSecret: multica-claude-broker-access-token  # mirror secret consumed by worker pods (1 key: access_token)
+    bootstrapFromSecret: multica-claude-oauth   # one-time conversion source (the old tarball Secret)
+    resources:
+      requests: { cpu: 50m,  memory: 64Mi }
+      limits:   { cpu: 200m, memory: 128Mi }
+    networkPolicy:
+      enabled: true
+      # Pod- or namespace-selector(s) that should be allowed to scrape /metrics.
+      # Leave empty to expose metrics only to controller-managed pods (which
+      # don't scrape). Typical: a Prometheus or Grafana Agent namespace.
+      # Example:
+      #   metricsFrom:
+      #     - namespaceSelector:
+      #         matchLabels: { kubernetes.io/metadata.name: monitoring }
+      metricsFrom: []
+
 # ── Bootstrap helpers (Plan E fills this) ──────────────────
 bootstrap:
   enabled: false

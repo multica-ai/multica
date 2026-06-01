@@ -1,0 +1,101 @@
+{{- if and .Values.runtime.enabled (eq .Values.runtime.mode "controller") .Values.runtime.repocache.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multica-repocache
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "multica.componentLabels" (dict "name" "repocache" "ctx" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.runtime.repocache.replicaCount }}
+  strategy:
+    type: Recreate   # single-writer; never two replicas live at once
+  selector:
+    matchLabels:
+      {{- include "multica.componentSelector" (dict "name" "repocache" "ctx" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "multica.componentLabels" (dict "name" "repocache" "ctx" .) | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/runtime/repocache-config.yaml") . | sha256sum }}
+    spec:
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecret }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile: { type: RuntimeDefault }
+      initContainers:
+        - name: install-ssh-key
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              cp /secret/id_ed25519 /home/multica/.ssh/id_ed25519
+              chmod 600 /home/multica/.ssh/id_ed25519
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - { name: git-ssh,  mountPath: /secret, readOnly: true }
+            - { name: ssh-home, mountPath: /home/multica/.ssh }
+      containers:
+        - name: repocache
+          image: {{ include "multica.repocacheImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+            readOnlyRootFilesystem: true
+          env:
+            - name: MULTICA_SERVER_URL
+              value: {{ .Values.runtime.serverUrl | quote }}
+            - name: MULTICA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.runtime.tokenSecretName }}
+                  key: token
+            - name: REPOCACHE_CONFIG_DIR
+              value: /etc/repocache
+            - name: REPOCACHE_FETCH_INTERVAL
+              value: {{ .Values.runtime.repocache.fetchInterval | quote }}
+            - name: HOME
+              value: /home/multica
+          ports:
+            - { containerPort: 8080, name: admin }
+            - { containerPort: 9090, name: metrics }
+          readinessProbe:
+            httpGet: { path: /healthz, port: admin }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.runtime.repocache.resources | nindent 12 }}
+          volumeMounts:
+            - { name: repos,    mountPath: /repos }
+            - { name: config,   mountPath: /etc/repocache,      readOnly: true }
+            - { name: ssh-home, mountPath: /home/multica/.ssh,  readOnly: true }
+            - { name: tmp,      mountPath: /tmp }
+      volumes:
+        - name: repos
+          persistentVolumeClaim: { claimName: multica-repocache-repos }
+        - name: config
+          configMap: { name: multica-repocache-config }
+        - name: git-ssh
+          secret:
+            secretName: {{ .Values.runtime.gitSshSecretName }}
+            defaultMode: 0400
+        - name: ssh-home
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+{{- end }}
