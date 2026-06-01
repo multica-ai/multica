@@ -3,25 +3,17 @@
 import { useState } from "react";
 import {
   ArrowRight,
-  Bug,
-  CheckCircle2,
+  BookOpen,
+  Check,
   Download,
-  ExternalLink,
+  LifeBuoy,
   LogOut,
   Monitor,
-  Shield,
   Smartphone,
   Sparkles,
+  X,
 } from "lucide-react";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
 import {
   Accordion,
   AccordionContent,
@@ -29,11 +21,32 @@ import {
   AccordionTrigger,
 } from "@multica/ui/components/ui/accordion";
 import { Card } from "@multica/ui/components/ui/card";
+import { Label } from "@multica/ui/components/ui/label";
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from "@multica/ui/components/ui/radio-group";
 import { markFirtalWelcomeSeen } from "./welcome-state";
 
-const SUPPORT_URL = "https://multica.firtal.com";
 const DESKTOP_DOWNLOAD_URL = "/download";
-const MEMBERS_DOCS_URL = "/docs/cerebro";
+
+/** What a member can do in Firtal Multica. */
+const MEMBER_CAN = [
+  "Oprette og arbejde med issues (opgaver) — beskrive, kommentere, vedhæfte filer og følge dem til de er løst.",
+  "Samarbejde med AI-agenterne — tildele dem opgaver, stille spørgsmål og få dem til at løse ting for dig.",
+  "Bruge inbox, kanaler og chat til at følge med og kommunikere med både kolleger og agenter.",
+  "Se dashboards, dokumenter og de artefakter agenterne producerer undervejs.",
+  "Installere Multica som desktop-app og som app på din telefon (se trinnene længere nede).",
+];
+
+/** What a member cannot do — those actions are reserved for admins. */
+const MEMBER_CANNOT = [
+  "Ændre workspace-indstillinger eller fakturering.",
+  "Oprette, redigere eller slette agenter på workspace-niveau — det styrer en admin.",
+  "Administrere andre medlemmers adgang, roller eller invitationer.",
+  "Ændre tool-policies og sikkerhedsindstillinger for agenterne.",
+  "Slette workspacet eller andres data.",
+];
 
 export interface FirtalWelcomePageProps {
   /** Current user id — used to mark the welcome as seen in localStorage. */
@@ -41,56 +54,40 @@ export interface FirtalWelcomePageProps {
   /** Optional logout handler; renders a Log out button in the top-right when provided. */
   onLogout?: () => void;
   /**
-   * Called when the user is ready to leave the welcome page. Receives a
-   * boolean indicating whether the user installed the desktop app or
-   * explicitly skipped it. The caller decides where to send them next
-   * (typically the inbox).
+   * Called when the user leaves the welcome page (typically routed to the
+   * inbox by the caller). No desktop gate anymore — the only requirement
+   * before continuing is acknowledging how support works.
    */
-  onComplete: (opts: { skippedDesktop: boolean }) => void;
+  onComplete: () => void;
 }
 
 /**
  * Firtal-branded welcome page shown to new members of cerebro-fork
  * workspaces (gated by `cerebro_firtal_welcome` feature flag).
  *
- * Structure:
- *   1. Hero — Firtal Multica branding, one-line description, primary CTA.
- *   2. Desktop install guide — hard-gate modal on download, escape via
- *      "Jeg vil ikke have desktop-appen".
+ * Structure (FIR-2490, revised per Jesper 2026-06-01):
+ *   1. Member documentation — what you can and cannot do as a member.
+ *      This is the most important step, so it comes first. Rendered as
+ *      plain inline content so the page scrolls normally (no nested
+ *      fixed-height container that traps the scroll).
+ *   2. Desktop app — optional recommendation, no hard gate.
  *   3. PWA install guides — iOS Safari + Android Chrome accordion.
- *   4. Members documentation link.
- *   5. Bug reporting — opens the Multica Support workspace in a new tab.
- *   6. Done CTA — marks the welcome seen and calls onComplete.
+ *   4. Support — all support happens inside Multica Support, where Knud
+ *      helps out. No link; the user ticks a radio to confirm they read it.
+ *   5. Done CTA — enabled once support is acknowledged. The app never
+ *      blocks on desktop.
  */
 export function FirtalWelcomePage({
   userId,
   onLogout,
   onComplete,
 }: FirtalWelcomePageProps) {
-  const [desktopModalOpen, setDesktopModalOpen] = useState(false);
-  const [desktopChoice, setDesktopChoice] = useState<"installed" | "skipped" | null>(null);
-
-  const handleDownloadClick = () => {
-    setDesktopModalOpen(true);
-  };
-
-  const handleConfirmDownload = () => {
-    setDesktopChoice("installed");
-    setDesktopModalOpen(false);
-    window.open(DESKTOP_DOWNLOAD_URL, "_blank", "noopener,noreferrer");
-  };
-
-  const handleSkipDesktop = () => {
-    setDesktopChoice("skipped");
-    setDesktopModalOpen(false);
-  };
+  const [supportAcknowledged, setSupportAcknowledged] = useState(false);
 
   const handleComplete = () => {
     markFirtalWelcomeSeen(userId);
-    onComplete({ skippedDesktop: desktopChoice === "skipped" });
+    onComplete();
   };
-
-  const desktopGateCleared = desktopChoice !== null;
 
   return (
     <div className="relative flex min-h-svh flex-col bg-background">
@@ -116,51 +113,91 @@ export function FirtalWelcomePage({
             Velkommen til Firtal Multica
           </h1>
           <p className="max-w-xl text-muted-foreground">
-            Firtals AI-platform. Her arbejder du med agenter, issues og chats — alt
-            samlet ét sted. Følg de få trin herunder, så du er klar til at komme i
-            gang.
+            Firtals AI-platform. Her arbejder du med agenter, issues og chats —
+            alt samlet ét sted. Start med at læse hvad du kan som member, og
+            installér så appen hvis du vil.
           </p>
         </header>
 
-        {/* 1. Desktop install */}
+        {/* 1. Member documentation */}
         <section className="mt-12">
           <SectionHeader
-            icon={<Monitor className="h-5 w-5" />}
-            title="1. Hent desktop-appen"
-            description="Den giver dig den bedste oplevelse: hurtigere genveje, native notifikationer og flere arbejdsruder side om side."
+            icon={<BookOpen className="h-5 w-5" />}
+            title="1. Hvad kan du som member?"
+            description="Læs det her først. Det giver dig overblikket over hvad du kan — og hvad kun en admin kan — i Firtal Multica."
           />
           <Card className="mt-4 p-6">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-muted-foreground">
-                Klik download, læs den korte installationsvejledning, og bekræft at
-                du har forstået trinnene. Det undgår support-bøvl.
+            <div className="grid gap-6 sm:grid-cols-2">
+              <div>
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                  <Check className="h-4 w-4" />
+                  Det kan du
+                </h3>
+                <ul className="mt-3 space-y-2">
+                  {MEMBER_CAN.map((item) => (
+                    <li
+                      key={item}
+                      className="flex gap-2 text-sm text-muted-foreground"
+                    >
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <div className="flex shrink-0 items-center gap-3">
-                {desktopChoice === "installed" && (
-                  <span className="inline-flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Klaret
-                  </span>
-                )}
-                {desktopChoice === "skipped" && (
-                  <span className="text-sm text-muted-foreground">
-                    Springer over
-                  </span>
-                )}
-                <Button onClick={handleDownloadClick}>
-                  <Download className="h-4 w-4" />
-                  {desktopChoice ? "Åbn igen" : "Download desktop-app"}
-                </Button>
+              <div>
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+                  <X className="h-4 w-4" />
+                  Det kan kun en admin
+                </h3>
+                <ul className="mt-3 space-y-2">
+                  {MEMBER_CANNOT.map((item) => (
+                    <li
+                      key={item}
+                      className="flex gap-2 text-sm text-muted-foreground"
+                    >
+                      <X className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/70" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
           </Card>
         </section>
 
-        {/* 2. PWA */}
+        {/* 2. Desktop app — optional, no gate */}
+        <section className="mt-10">
+          <SectionHeader
+            icon={<Monitor className="h-5 w-5" />}
+            title="2. Hent desktop-appen (anbefalet)"
+            description="Den giver dig den bedste oplevelse: hurtigere genveje, native notifikationer og flere arbejdsruder side om side. Du kan også bare blive i browseren."
+          />
+          <Card className="mt-4 p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm text-muted-foreground">
+                Hent appen til Mac eller Windows. På Mac trækker du Multica til
+                Programmer-mappen; på Windows følger du installationsguiden.
+                Første gang logger du ind med samme konto som her.
+              </div>
+              <a
+                className={`${buttonVariants()} shrink-0`}
+                href={DESKTOP_DOWNLOAD_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Download className="h-4 w-4" />
+                Download desktop-app
+              </a>
+            </div>
+          </Card>
+        </section>
+
+        {/* 3. PWA */}
         <section className="mt-10">
           <SectionHeader
             icon={<Smartphone className="h-5 w-5" />}
-            title="2. Installér Multica som app på din telefon"
+            title="3. Installér Multica som app på din telefon"
             description="Du kan tilføje Multica som en app (PWA) på både iPhone og Android — så fungerer den ligesom en native app."
           />
           <Card className="mt-4 p-2 sm:p-4">
@@ -215,111 +252,62 @@ export function FirtalWelcomePage({
           </Card>
         </section>
 
-        {/* 3. Members docs */}
+        {/* 4. Support */}
         <section className="mt-10">
           <SectionHeader
-            icon={<Shield className="h-5 w-5" />}
-            title="3. Hvad kan du som member?"
-            description="Læs hurtigt op på hvad du kan — og hvad du ikke kan — i Firtal Multica som member."
+            icon={<LifeBuoy className="h-5 w-5" />}
+            title="4. Sådan får du hjælp og melder fejl"
+            description="Al support foregår inde i Multica Support — ikke her."
           />
           <Card className="mt-4 p-6">
-            <a
-              className={buttonVariants({ variant: "outline" })}
-              href={MEMBERS_DOCS_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <ExternalLink className="h-4 w-4" />
-              Åbn member-dokumentationen
-            </a>
-          </Card>
-        </section>
-
-        {/* 4. Bug reporting */}
-        <section className="mt-10">
-          <SectionHeader
-            icon={<Bug className="h-5 w-5" />}
-            title="4. Stødt på en bug? Sådan melder du den"
-            description="Bugs meldes ind i Multica Support-workspacet på multica.firtal.com — så ryger de direkte i kø hos os, der vedligeholder platformen."
-          />
-          <Card className="mt-4 p-6">
-            <a
-              className={buttonVariants({ variant: "outline" })}
-              href={SUPPORT_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <ExternalLink className="h-4 w-4" />
-              Åbn Multica Support
-            </a>
+            <p className="text-sm text-muted-foreground">
+              Hvis du støder på en fejl eller har brug for hjælp, sker det hele
+              inde i Multica Support. Du opretter selv en sag derinde, og Knud —
+              en flink og vidende fyr — tager den derfra og hjælper dig videre.
+            </p>
+            <div className="mt-5 rounded-lg border border-border bg-muted/40 p-4">
+              <RadioGroup
+                value={supportAcknowledged ? "ack" : ""}
+                onValueChange={(value) =>
+                  setSupportAcknowledged(value === "ack")
+                }
+              >
+                <div className="flex items-start gap-3">
+                  <RadioGroupItem
+                    value="ack"
+                    id="support-ack"
+                    className="mt-0.5"
+                  />
+                  <Label
+                    htmlFor="support-ack"
+                    className="text-sm font-normal leading-relaxed text-foreground"
+                  >
+                    Jeg har læst og forstået, at al support og fejlmelding
+                    foregår inde i Multica Support, hvor Knud hjælper.
+                  </Label>
+                </div>
+              </RadioGroup>
+            </div>
           </Card>
         </section>
 
         {/* Done CTA */}
         <div className="mt-12 flex flex-col items-center gap-3">
-          {!desktopGateCleared && (
+          {!supportAcknowledged && (
             <p className="text-sm text-muted-foreground">
-              Tag stilling til desktop-appen herover, før du går videre.
+              Bekræft support-trinnet herover, før du går videre.
             </p>
           )}
           <Button
             size="lg"
             onClick={handleComplete}
-            disabled={!desktopGateCleared}
+            disabled={!supportAcknowledged}
           >
             Gå til min indbakke
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
       </div>
-
-      {/* Hard-gate modal for desktop install */}
-      <Dialog open={desktopModalOpen} onOpenChange={setDesktopModalOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Sådan installerer du desktop-appen</DialogTitle>
-            <DialogDescription>
-              Læs guiden igennem. Du klikker enten download eller springer over —
-              du kan ikke fortsætte til din indbakke, før du har taget stilling.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 text-sm">
-            <ol className="ml-5 list-decimal space-y-2">
-              <li>
-                Klik på{" "}
-                <strong>Læst og forstået — download</strong>. Vi åbner
-                download-siden i en ny fane.
-              </li>
-              <li>
-                Kør installationsfilen og følg trinnene. På Mac trækker du Multica
-                til Programmer-mappen. På Windows klikker du gennem
-                installationsguiden.
-              </li>
-              <li>
-                Når du åbner appen første gang, logger du ind med samme e-mail som
-                her — så er du klar.
-              </li>
-              <li>
-                Hvis du sidder på en arbejds-pc hvor du ikke må installere
-                programmer, så vælg <strong>Jeg vil ikke have desktop-appen</strong>
-                . Du kan altid bruge Multica i browseren.
-              </li>
-            </ol>
-            <p className="text-xs text-muted-foreground">
-              Vi spørger ikke igen — dit valg gemmes nu.
-            </p>
-          </div>
-          <DialogFooter className="flex flex-col gap-2 sm:flex-row sm:justify-between">
-            <Button variant="outline" onClick={handleSkipDesktop}>
-              Jeg vil ikke have desktop-appen
-            </Button>
-            <Button onClick={handleConfirmDownload}>
-              <Download className="h-4 w-4" />
-              Læst og forstået — download
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
