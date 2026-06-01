@@ -49,10 +49,21 @@ type QueryInput struct {
 	Offset        int
 }
 
-// trigramThreshold is the pg_trgm similarity cutoff for fuzzy fallback.
-// 0.3 matches Postgres' default `set_limit()` and lets minor typos / endings
-// through without flooding results with weak matches.
+// trigramThreshold is the pg_trgm word-similarity cutoff for fuzzy fallback.
+// 0.3 lets minor typos / endings through without flooding results with weak
+// matches. WHERE predicates use the `<%` operator so the gin_trgm_ops indexes
+// (idx_issue_title_trgm / _description_trgm / idx_comment_content_trgm from
+// migration 9055) can serve them; callers must set
+// `pg_trgm.word_similarity_threshold` to this value for the session/tx that
+// runs the SQL (see TrigramThreshold). ORDER BY keeps the function form
+// because ranking is post-filter and does not need the index.
 const trigramThreshold = 0.3
+
+// TrigramThreshold is the value callers must SET LOCAL on
+// `pg_trgm.word_similarity_threshold` (as a string for SET) so the `<%`
+// operator in Build / BuildHybrid matches the same recall as the previous
+// function-form predicate.
+const TrigramThreshold = "0.3"
 
 // buildFilterClauses returns the AND-ed WHERE predicates that the inline
 // filters (status / from / assignee / project / has) contribute, given the
@@ -159,16 +170,20 @@ func Build(in QueryInput) Query {
 	if hasText {
 		// FTS hit on title+description (the GENERATED column)
 		textPreds = append(textPreds, fmt.Sprintf("i.search_tsv @@ websearch_to_tsquery('simple', %s)", tsParam))
-		// Trigram fallback on title / description for spell-tolerance
-		textPreds = append(textPreds, fmt.Sprintf("word_similarity(%s, lower(i.title)) > %.2f", trgmParam, trigramThreshold))
-		textPreds = append(textPreds, fmt.Sprintf("word_similarity(%s, lower(coalesce(i.description, ''))) > %.2f", trgmParam, trigramThreshold))
+		// Trigram fallback on title / description for spell-tolerance. We use
+		// the `<%` operator so the gin_trgm_ops indexes (idx_issue_title_trgm
+		// / _description_trgm) actually serve the predicate; the function
+		// form `word_similarity(...) > 0.3` looks identical to a human reader
+		// but is opaque to the planner and forces a seq scan.
+		textPreds = append(textPreds, fmt.Sprintf("%s <%% lower(i.title)", trgmParam))
+		textPreds = append(textPreds, fmt.Sprintf("%s <%% lower(coalesce(i.description, ''))", trgmParam))
 		// FTS or trigram hit on a comment of this issue
 		textPreds = append(textPreds, fmt.Sprintf(`EXISTS (
 			SELECT 1 FROM comment c
 			WHERE c.issue_id = i.id
 			  AND (c.search_tsv @@ websearch_to_tsquery('simple', %s)
-			       OR word_similarity(%s, lower(c.content)) > %.2f)
-		)`, tsParam, trgmParam, trigramThreshold))
+			       OR %s <%% lower(c.content))
+		)`, tsParam, trgmParam))
 	}
 
 	// Optional identifier-number match.
@@ -246,11 +261,11 @@ func Build(in QueryInput) Query {
 			SELECT c.content FROM comment c
 			WHERE c.issue_id = i.id
 			  AND (c.search_tsv @@ websearch_to_tsquery('simple', %s)
-			       OR word_similarity(%s, lower(c.content)) > %.2f)
+			       OR %s <%% lower(c.content))
 			ORDER BY ts_rank(c.search_tsv, websearch_to_tsquery('simple', %s)) DESC NULLS LAST,
 			         c.created_at DESC
 			LIMIT 1
-		), '')`, tsParam, trgmParam, trigramThreshold, tsParam)
+		), '')`, tsParam, trgmParam, tsParam)
 	}
 
 	// --- pagination ---

@@ -56,17 +56,19 @@ func BuildHybrid(h HybridInput) Query {
 	vecParam := next(h.QueryVectorLit)
 
 	// --- FTS CTE: same composite ranker as Build, but capped + ROW_NUMBER'd. ---
+	// Trigram predicates use the `<%` operator so the gin_trgm_ops indexes
+	// can serve them — same indexability reason as in Build (see query.go).
 	var ftsTextPreds []string
 	ftsTextPreds = append(ftsTextPreds,
 		fmt.Sprintf("i.search_tsv @@ websearch_to_tsquery('simple', %s)", tsParam),
-		fmt.Sprintf("word_similarity(%s, lower(i.title)) > %.2f", trgmParam, trigramThreshold),
-		fmt.Sprintf("word_similarity(%s, lower(coalesce(i.description, ''))) > %.2f", trgmParam, trigramThreshold),
+		fmt.Sprintf("%s <%% lower(i.title)", trgmParam),
+		fmt.Sprintf("%s <%% lower(coalesce(i.description, ''))", trgmParam),
 		fmt.Sprintf(`EXISTS (
 			SELECT 1 FROM comment c
 			WHERE c.issue_id = i.id
 			  AND (c.search_tsv @@ websearch_to_tsquery('simple', %s)
-			       OR word_similarity(%s, lower(c.content)) > %.2f)
-		)`, tsParam, trgmParam, trigramThreshold),
+			       OR %s <%% lower(c.content))
+		)`, tsParam, trgmParam),
 	)
 
 	var numParam string
@@ -126,20 +128,20 @@ func BuildHybrid(h HybridInput) Query {
 			SELECT 1 FROM comment c
 			WHERE c.issue_id = i.id
 			  AND (c.search_tsv @@ websearch_to_tsquery('simple', %s)
-			       OR word_similarity(%s, lower(c.content)) > %.2f)
+			       OR %s <%% lower(c.content))
 		) THEN 'comment'
 		ELSE 'semantic'
-	END`, tsParam, trgmParam, trgmParam, tsParam, trgmParam, trigramThreshold)
+	END`, tsParam, trgmParam, trgmParam, tsParam, trgmParam)
 
 	matchedCommentExpr := fmt.Sprintf(`COALESCE((
 		SELECT c.content FROM comment c
 		WHERE c.issue_id = i.id
 		  AND (c.search_tsv @@ websearch_to_tsquery('simple', %s)
-		       OR word_similarity(%s, lower(c.content)) > %.2f)
+		       OR %s <%% lower(c.content))
 		ORDER BY ts_rank(c.search_tsv, websearch_to_tsquery('simple', %s)) DESC NULLS LAST,
 		         c.created_at DESC
 		LIMIT 1
-	), '')`, tsParam, trgmParam, trigramThreshold, tsParam)
+	), '')`, tsParam, trgmParam, tsParam)
 
 	limitParam := next(in.Limit)
 	offsetParam := next(in.Offset)

@@ -67,6 +67,30 @@ func TestBuildHybrid_AppliesFiltersInOuterWhere(t *testing.T) {
 	}
 }
 
+func TestBuildHybrid_UsesIndexableTrigramOperator(t *testing.T) {
+	// FIR-2664: the WHERE / EXISTS predicates must use the `<%` operator so
+	// the gin_trgm_ops indexes serve them. The function-form
+	// word_similarity(...) > 0.30 looked identical but was a seq scan.
+	in := QueryInput{
+		WorkspaceID: pgtype.UUID{Valid: true},
+		Text:        "deploy",
+		Limit:       10,
+	}
+	q := BuildHybrid(HybridInput{
+		Query:          in,
+		QueryVectorLit: "[0.1]",
+	})
+	for _, want := range []string{
+		"<% lower(i.title)",
+		"<% lower(coalesce(i.description, ''))",
+		"<% lower(c.content)",
+	} {
+		if !strings.Contains(q.SQL, want) {
+			t.Errorf("BuildHybrid SQL missing indexable trigram fragment %q", want)
+		}
+	}
+}
+
 func TestBuildHybrid_WorkspaceClauseAlwaysPresent(t *testing.T) {
 	in := QueryInput{
 		WorkspaceID: pgtype.UUID{Valid: true},

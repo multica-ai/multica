@@ -17,8 +17,14 @@ func TestBuild_FreeText(t *testing.T) {
 	if !strings.Contains(q.SQL, "websearch_to_tsquery") {
 		t.Error("SQL should use websearch_to_tsquery for text search")
 	}
-	if !strings.Contains(q.SQL, "similarity(") {
-		t.Error("SQL should use similarity() for trigram fuzzy fallback")
+	if !strings.Contains(q.SQL, "<% lower(i.title)") {
+		t.Error("SQL should use the `<%` operator for the title trigram fallback so gin_trgm_ops index is used (FIR-2664)")
+	}
+	if !strings.Contains(q.SQL, "<% lower(coalesce(i.description, ''))") {
+		t.Error("SQL should use the `<%` operator for the description trigram fallback (FIR-2664)")
+	}
+	if !strings.Contains(q.SQL, "<% lower(c.content)") {
+		t.Error("SQL should use the `<%` operator for the comment trigram fallback (FIR-2664)")
 	}
 	if !strings.Contains(q.SQL, "search_tsv @@") {
 		t.Error("SQL should match against the generated tsvector column")

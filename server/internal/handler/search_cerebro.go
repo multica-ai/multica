@@ -66,6 +66,11 @@ func (h *Handler) SearchIssuesCerebro(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	includeClosed := q.Get("include_closed") == "true"
+	// CEREBRO-PATCH(search-perf-fir-2664): semantic is opt-in. Wiring a
+	// provider on prod does not (any longer) silently turn every text search
+	// into a pgvector-CTE + RRF query. The frontend must pass ?semantic=true
+	// when it actually wants meaning-based ranking.
+	semanticRequested := q.Get("semantic") == "true"
 
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
@@ -187,11 +192,13 @@ func (h *Handler) SearchIssuesCerebro(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// CEREBRO-PATCH(search-hybrid-fir-2604): FIR-2604 hybrid (FTS + vector)
-	// retrieval. Opt in when free text is present, the operator wired a
-	// semantic provider, and the embedding store is reachable; otherwise
-	// fall back to Build — same behaviour as Del 1.
+	// retrieval. Opt in when free text is present, the request asked for
+	// semantic ranking, the operator wired a semantic provider, and the
+	// embedding store is reachable; otherwise fall back to Build. FIR-2664
+	// added the `semanticRequested` gate — without it BuildHybrid ran on
+	// every text search because the deterministic provider is wired on prod.
 	var query cerebrosearch.Query
-	if in.Text != "" && h.SemanticSearch != nil {
+	if in.Text != "" && semanticRequested && h.SemanticSearch != nil {
 		if literal, ok := h.SemanticSearch.QueryVectorLiteral(ctx, in.Text); ok {
 			query = cerebrosearch.BuildHybrid(hybridInputFor(in, literal))
 		}
@@ -199,7 +206,26 @@ func (h *Handler) SearchIssuesCerebro(w http.ResponseWriter, r *http.Request) {
 	if query.SQL == "" {
 		query = cerebrosearch.Build(in)
 	}
-	rows, err := h.DB.Query(ctx, query.SQL, query.Args...)
+
+	// CEREBRO-PATCH(search-perf-fir-2664): run inside a tx so we can SET
+	// LOCAL pg_trgm.word_similarity_threshold for the duration of this
+	// statement. Build / BuildHybrid use the `<%` operator on trigram
+	// predicates, which is GIN-indexable; the operator obeys this GUC and
+	// the GUC's default is 0.6 — too strict and would silently drop typo-
+	// tolerance. SET LOCAL keeps the threshold scoped to this transaction.
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		slog.Warn("cerebro search begin tx failed", "error", err, "workspace_id", workspaceID)
+		writeError(w, http.StatusInternalServerError, "failed to search issues")
+		return
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SET LOCAL pg_trgm.word_similarity_threshold = "+cerebrosearch.TrigramThreshold); err != nil {
+		slog.Warn("cerebro search set trgm threshold failed", "error", err, "workspace_id", workspaceID)
+		writeError(w, http.StatusInternalServerError, "failed to search issues")
+		return
+	}
+	rows, err := tx.Query(ctx, query.SQL, query.Args...)
 	if err != nil {
 		slog.Warn("cerebro search failed", "error", err, "workspace_id", workspaceID, "q", rawQ)
 		writeError(w, http.StatusInternalServerError, "failed to search issues")

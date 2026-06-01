@@ -55,6 +55,10 @@ func hybridSearch(t *testing.T, q string, includeClosed bool) SearchIssuesRespon
 	t.Helper()
 	params := url.Values{}
 	params.Set("q", q)
+	// FIR-2664: semantic ranking is now opt-in. These hybrid-pipeline tests
+	// must request it explicitly; the bare /api/issues/search path runs the
+	// keyword-only Build now.
+	params.Set("semantic", "true")
 	if includeClosed {
 		params.Set("include_closed", "true")
 	}
@@ -80,6 +84,53 @@ func unitVecAt(bucket int) []float32 {
 	v := make([]float32, semantic.EmbeddingDim)
 	v[bucket%semantic.EmbeddingDim] = 1
 	return v
+}
+
+// CEREBRO-PATCH(search-perf-test-fir-2664): no-semantic counterpart to hybridSearch.
+// keywordSearch is the no-`semantic=true` counterpart to hybridSearch — it
+// exercises the FIR-2664 gate that keeps a wired semantic provider from
+// silently turning every text query into the heavy pgvector pipeline.
+func keywordSearch(t *testing.T, q string, includeClosed bool) SearchIssuesResponseEnvelope {
+	t.Helper()
+	params := url.Values{}
+	params.Set("q", q)
+	if includeClosed {
+		params.Set("include_closed", "true")
+	}
+	req := httptest.NewRequest("GET", "/api/issues/search?"+params.Encode(), nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	w := httptest.NewRecorder()
+	testHandler.SearchIssuesCerebro(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("SearchIssuesCerebro: %d %s", w.Code, w.Body.String())
+	}
+	var env SearchIssuesResponseEnvelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v (body=%s)", err, w.Body.String())
+	}
+	return env
+}
+
+// TestSearch_Semantic_OptInRequired asserts the FIR-2664 gate: even with a
+// semantic provider wired AND an issue whose embedding matches the query
+// bucket, the bare /api/issues/search (no ?semantic=true) must NOT surface a
+// match that exists only in vector space — that path returns a slow pgvector
+// + RRF query and was the cause of the ~1.5s baseline.
+func TestSearch_Semantic_OptInRequired(t *testing.T) {
+	id := seedIssueWithComment(t, "Quiet maintenance window", "", "")
+
+	installLookupProvider(t, map[string][]float32{
+		"quiet maintenance window\n": unitVecAt(7),
+		"rollout":                    unitVecAt(7), // same bucket as the issue
+	})
+
+	env := keywordSearch(t, "rollout", false)
+	for _, hit := range env.Issues {
+		if hit.ID == id {
+			t.Errorf("semantic-only match leaked through without ?semantic=true — gate (FIR-2664) is not enforced")
+		}
+	}
 }
 
 func TestSearch_Semantic_FindsSynonymWithoutLexicalOverlap(t *testing.T) {
