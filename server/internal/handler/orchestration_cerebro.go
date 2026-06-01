@@ -851,7 +851,14 @@ func (h *Handler) selectVerifierAgent(ctx context.Context, parent, child db.Issu
 		if squad.LeaderID.Valid && !(workerIsAgent && child.AssigneeID == squad.LeaderID) {
 			return squad.LeaderID, true
 		}
-		return h.selectIndependentSquadMember(ctx, parent.AssigneeID, child.AssigneeID, workerIsAgent)
+		if id, ok := h.selectIndependentSquadMember(ctx, parent.AssigneeID, child.AssigneeID, workerIsAgent); ok {
+			return id, true
+		}
+		// CEREBRO-PATCH(orchestration-workspace-verifier-fallback): FIR-2564 — a solo
+		// or small squad may have NO independent member to judge the leader's own
+		// work. Rather than freeze at the human gate (a manual label nobody adds),
+		// fall back to a workspace-level QA/reviewer agent. Human gate only if none.
+		return h.selectWorkspaceReviewerAgent(ctx, parent.WorkspaceID, child.AssigneeID)
 	}
 	if parent.AssigneeType.Valid && parent.AssigneeType.String == "agent" && parent.AssigneeID.Valid {
 		if child.AssigneeType.Valid && child.AssigneeType.String == "agent" &&
@@ -896,6 +903,30 @@ func (h *Handler) selectIndependentSquadMember(ctx context.Context, squadID, wor
 	}
 	if haveFallback {
 		return fallback, true
+	}
+	return pgtype.UUID{}, false
+}
+
+// CEREBRO-PATCH(orchestration-workspace-verifier-fallback): FIR-2564 — last
+// independent-verifier rung before the human gate. When a squad has no member
+// who can judge the leader's own work (a solo-leader squad, the common case),
+// the run would otherwise freeze waiting on a manual `orch-verified` label a
+// human has to add. selectWorkspaceReviewerAgent finds a workspace-level
+// QA/reviewer agent (by name: review/qa/test/verif) that is not the worker and
+// is runnable, so verification proceeds automatically instead of stalling.
+// ok=false only when the workspace has no such agent — then the human gate.
+func (h *Handler) selectWorkspaceReviewerAgent(ctx context.Context, workspaceID, workerID pgtype.UUID) (pgtype.UUID, bool) {
+	agents, err := h.Queries.ListAgents(ctx, workspaceID)
+	if err != nil {
+		return pgtype.UUID{}, false
+	}
+	for _, a := range agents {
+		if a.ArchivedAt.Valid || !a.RuntimeID.Valid || a.ID == workerID {
+			continue
+		}
+		if isReviewerRole(a.Name) {
+			return a.ID, true
+		}
 	}
 	return pgtype.UUID{}, false
 }

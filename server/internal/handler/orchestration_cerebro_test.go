@@ -483,6 +483,35 @@ func TestOrchestrateVerifierFallsBackToReviewerWhenLeaderIsWorker(t *testing.T) 
 	}
 }
 
+// CEREBRO-PATCH(orchestration-workspace-verifier-fallback): FIR-2564 — regression test.
+// When the squad has NO independent member (a solo-leader squad) and the leader built
+// the work, the verifier falls back to a workspace-level QA/reviewer agent — NOT the
+// human gate, which would freeze the run waiting on a manual label nobody adds. This
+// was the last live stall-cause (Team Sara: leader-only squad, reminder orchestration).
+func TestOrchestrateVerifierFallsBackToWorkspaceQAWhenSquadHasNoIndependent(t *testing.T) {
+	fx := newOrchestrationFixture(t)
+	ctx := context.Background()
+
+	// Leader builds childA herself; the squad has no other members to judge it.
+	setIssueAssigneeDirect(t, uuidToString(fx.childA.ID), "agent", fx.leaderID)
+	childA, _ := testHandler.Queries.GetIssue(ctx, fx.childA.ID)
+
+	v, ok := testHandler.selectVerifierAgent(ctx, fx.parent, childA)
+	if !ok {
+		t.Fatal("expected a workspace QA fallback verifier; got none (would freeze at the human gate)")
+	}
+	if uuidToString(v) == fx.leaderID {
+		t.Fatal("verifier must not be the leader who built the work")
+	}
+	ag, err := testHandler.Queries.GetAgent(ctx, v)
+	if err != nil {
+		t.Fatalf("load verifier agent: %v", err)
+	}
+	if !isReviewerRole(ag.Name) {
+		t.Errorf("workspace fallback verifier %q should be a QA/reviewer-named agent", ag.Name)
+	}
+}
+
 // TestOrchestrateRejectReopensChild: attaching `orch-rejected` to a done child
 // re-opens it (back to todo) and re-dispatches its worker, so failed work is
 // redone instead of silently releasing dependents.
