@@ -5,6 +5,40 @@ import (
 	"testing"
 )
 
+func TestBuildSkillFindPrompt(t *testing.T) {
+	out := buildSkillFindPrompt(Task{AITaskPrompt: "improve React rendering performance"})
+	mustContain := []string{
+		"improve React rendering performance",
+		"Curated skill index JSON",
+		"https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices",
+		"multica skill find --output-results",
+		"Do not invent URLs",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("buildSkillFindPrompt output missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+}
+
+func TestBuildAgentCreatePrompt(t *testing.T) {
+	out := buildAgentCreatePrompt(Task{AITaskPrompt: "create a frontend review agent"})
+	mustContain := []string{
+		"create a frontend review agent",
+		"Curated skill index JSON",
+		"multica agent create --runtime-id",
+		"multica skill import --url",
+		"multica agent skills set",
+		"multica agent draft --output-results",
+		"agent_id, name, summary, skill_source_urls",
+		"Do not invent skill URLs",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("buildAgentCreatePrompt output missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+}
 // TestBuildQuickCreatePromptRules locks in the rules that govern how the
 // quick-create agent is allowed to translate raw user input into the issue
 // description body. Each substring corresponds to a concrete failure mode

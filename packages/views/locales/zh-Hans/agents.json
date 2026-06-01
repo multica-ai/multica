@@ -9,7 +9,8 @@
     "of_total": "{{visible}} / {{total}}",
     "list_load_failed": "无法加载智能体列表",
     "list_load_failed_default": "获取智能体列表时出错。",
-    "try_again": "重试"
+    "try_again": "重试",
+    "ai_draft": "AI 起草"
   },
   "scope": {
     "mine": "我的",
@@ -356,7 +357,8 @@
       "cancel_failed_toast": "取消 task 失败",
       "started_prefix": "{{when}}启动",
       "dispatched_prefix": "{{when}}派发",
-      "queued_prefix": "{{when}}排队"
+      "queued_prefix": "{{when}}排队",
+      "source_ai_task": "AI task"
     }
   },
   "char_counter": {
@@ -415,5 +417,18 @@
     "runtime_offline": "守护进程离线",
     "runtime_recovery": "守护进程已重启",
     "manual": "用户取消"
+  },
+  "ai_draft": {
+    "title": "用 AI 起草智能体",
+    "subtitle": "让一个在线智能体为当前工作区创建并配置新的队友。",
+    "host_agent_label": "执行智能体",
+    "host_agent_placeholder": "选择一个在线智能体",
+    "no_agents": "当前没有可用的在线智能体。请先启动带运行时的智能体。",
+    "prompt_label": "这个智能体应该做什么？",
+    "prompt_placeholder": "例如：创建一个前端审查智能体，关注 React 性能、可访问性和回归测试。",
+    "cancel": "取消",
+    "submit": "起草智能体",
+    "toast_queued": "智能体起草已开始，结果会进入收件箱。",
+    "fallback_error": "启动智能体起草失败"
   }
 }

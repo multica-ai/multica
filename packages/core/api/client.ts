@@ -12,6 +12,7 @@ import type {
   ListIssuesParams,
   ListGroupedIssuesParams,
   Agent,
+  AITaskQueuedResponse,
   CreateAgentRequest,
   AgentTemplate,
   AgentTemplateSummary,
@@ -38,6 +39,8 @@ import type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
+  DraftAgentWithAIRequest,
+  FindSkillsWithAIRequest,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
@@ -125,6 +128,7 @@ import { parseWithFallback } from "./schema";
 import {
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
+  AITaskQueuedResponseSchema,
   AttachmentResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
@@ -139,10 +143,14 @@ import {
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
+  EMPTY_AI_TASK_QUEUED_RESPONSE,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
+  EMPTY_GITHUB_CONNECT_RESPONSE,
+  EMPTY_GITHUB_INSTALLATIONS_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
+  EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SQUAD,
   EMPTY_SQUAD_LIST,
@@ -153,7 +161,10 @@ import {
   EMPTY_WEBHOOK_DELIVERY,
   AppConfigSchema,
   type AppConfigResponse,
+  GitHubConnectResponseSchema,
   GroupedIssuesResponseSchema,
+  IssuePullRequestsResponseSchema,
+  ListGitHubInstallationsResponseSchema,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
@@ -746,6 +757,16 @@ export class ApiClient {
     return this.fetch("/api/agents", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  async draftAgentWithAI(data: DraftAgentWithAIRequest): Promise<AITaskQueuedResponse> {
+    const raw = await this.fetch<unknown>("/api/agents/ai-draft", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, AITaskQueuedResponseSchema, EMPTY_AI_TASK_QUEUED_RESPONSE, {
+      endpoint: "POST /api/agents/ai-draft",
     });
   }
 
@@ -1494,6 +1515,16 @@ export class ApiClient {
     });
   }
 
+  async findSkillsWithAI(data: FindSkillsWithAIRequest): Promise<AITaskQueuedResponse> {
+    const raw = await this.fetch<unknown>("/api/skills/find", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, AITaskQueuedResponseSchema, EMPTY_AI_TASK_QUEUED_RESPONSE, {
+      endpoint: "POST /api/skills/find",
+    });
+  }
+
   async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
     return this.fetch(`/api/agents/${agentId}/skills`);
   }
@@ -1999,11 +2030,23 @@ export class ApiClient {
 
   // GitHub integration
   async getGitHubConnectURL(workspaceId: string): Promise<GitHubConnectResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/github/connect`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/github/connect`);
+    return parseWithFallback(
+      raw,
+      GitHubConnectResponseSchema,
+      EMPTY_GITHUB_CONNECT_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/github/connect" },
+    );
   }
 
   async listGitHubInstallations(workspaceId: string): Promise<ListGitHubInstallationsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/github/installations`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/github/installations`);
+    return parseWithFallback(
+      raw,
+      ListGitHubInstallationsResponseSchema,
+      EMPTY_GITHUB_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/github/installations" },
+    );
   }
 
   async deleteGitHubInstallation(workspaceId: string, installationId: string): Promise<void> {
@@ -2013,6 +2056,12 @@ export class ApiClient {
   }
 
   async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
-    return this.fetch(`/api/issues/${issueId}/pull-requests`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/pull-requests`);
+    return parseWithFallback(
+      raw,
+      IssuePullRequestsResponseSchema,
+      EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
+      { endpoint: "GET /api/issues/:id/pull-requests" },
+    );
   }
 }

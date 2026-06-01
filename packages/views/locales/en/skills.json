@@ -6,10 +6,22 @@
     "new_skill": "New skill",
     "search_placeholder": "Search skills…",
     "scopes": {
-      "all": { "label": "All", "description": "All skills in this workspace" },
-      "used": { "label": "In use", "description": "Skills assigned to at least one agent" },
-      "unused": { "label": "Unused", "description": "Skills not assigned to any agent" },
-      "mine": { "label": "Created by me", "description": "Skills you created" }
+      "all": {
+        "label": "All",
+        "description": "All skills in this workspace"
+      },
+      "used": {
+        "label": "In use",
+        "description": "Skills assigned to at least one agent"
+      },
+      "unused": {
+        "label": "Unused",
+        "description": "Skills not assigned to any agent"
+      },
+      "mine": {
+        "label": "Created by me",
+        "description": "Skills you created"
+      }
     },
     "empty": {
       "title": "No skills yet",
@@ -244,5 +256,19 @@
     "no_content": "*No content yet*",
     "markdown_placeholder": "Write markdown content...",
     "raw_placeholder": "File content..."
+  },
+  "finder": {
+    "action": "Find with AI",
+    "title": "Find skills with AI",
+    "subtitle": "Ask an online agent to recommend workspace skills.",
+    "agent_label": "Agent",
+    "agent_placeholder": "Choose an agent",
+    "prompt_label": "What should the skill help with?",
+    "prompt_placeholder": "Example: Improve React render performance and avoid unnecessary re-renders",
+    "no_agents": "No online agent is available for skill finding.",
+    "cancel": "Cancel",
+    "submit": "Find skills",
+    "toast_queued": "Skill finder started. Results will appear in your inbox.",
+    "fallback_error": "Failed to start skill finder"
   }
 }

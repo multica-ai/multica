@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { InboxItem } from "@multica/core/types";
 import {
+  getAgentDraftResult,
   getInboxDisplayTitle,
   getQuickCreateFailureDetail,
+  getSkillFindRecommendations,
   stripQuickCreatePrefix,
 } from "./inbox-display";
 
@@ -76,5 +78,64 @@ describe("inbox display helpers", () => {
     expect(getQuickCreateFailureDetail(failedItem)).toBe(
       "CLI failed with exit status 1",
     );
+  });
+  it("uses the original prompt as the skill finder row title", () => {
+    const skillFindItem = item({
+      type: "skill_find_done",
+      title: "2 skill recommendations ready",
+      issue_id: null,
+      details: { original_prompt: "Need React performance help" },
+    });
+
+    expect(getInboxDisplayTitle(skillFindItem)).toBe("Need React performance help");
+  });
+
+  it("uses the drafted agent name as the agent draft row title", () => {
+    const draftItem = item({
+      type: "agent_draft_done",
+      title: "Agent draft ready: Frontend Reviewer",
+      issue_id: null,
+      details: {
+        drafted_agent_id: "agent-2",
+        drafted_agent_name: "Frontend Reviewer",
+        summary: "Created a review agent.",
+        skill_source_urls: ["https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices"],
+      },
+    });
+
+    expect(getInboxDisplayTitle(draftItem)).toBe("Frontend Reviewer");
+    expect(getAgentDraftResult(draftItem)).toEqual({
+      agent_id: "agent-2",
+      name: "Frontend Reviewer",
+      summary: "Created a review agent.",
+      skill_source_urls: ["https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices"],
+    });
+  });
+
+  it("extracts skill finder recommendations defensively", () => {
+    const skillFindItem = item({
+      type: "skill_find_done",
+      issue_id: null,
+      details: {
+        recommendations: [
+          {
+            name: "react-best-practices",
+            description: "React guidance",
+            source_url: "https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices",
+            reason: "Matches rendering work.",
+          },
+          { name: "bad" },
+        ],
+      },
+    });
+
+    expect(getSkillFindRecommendations(skillFindItem)).toEqual([
+      {
+        name: "react-best-practices",
+        description: "React guidance",
+        source_url: "https://github.com/vercel-labs/agent-skills/tree/main/skills/react-best-practices",
+        reason: "Matches rendering work.",
+      },
+    ]);
   });
 });

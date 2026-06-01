@@ -28,7 +28,7 @@ import {
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
-import { deduplicateInboxItems } from "@/lib/inbox-display";
+import { deduplicateInboxItems, getInboxStringDetail } from "@/lib/inbox-display";
 
 export default function Inbox() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
@@ -64,7 +64,7 @@ export default function Inbox() {
         params: {
           workspace: wsSlug,
           id: item.issue_id,
-          highlight: item.details?.comment_id,
+          highlight: getInboxStringDetail(item, "comment_id"),
           h: String(Date.now()),
         },
       });

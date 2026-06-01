@@ -58,6 +58,12 @@ var skillImportCmd = &cobra.Command{
 	RunE:  runSkillImport,
 }
 
+var skillFindCmd = &cobra.Command{
+	Use:   "find",
+	Short: "Write AI skill finder results",
+	RunE:  runSkillFind,
+}
+
 // Skill file subcommands.
 
 var skillFilesCmd = &cobra.Command{
@@ -93,6 +99,7 @@ func init() {
 	skillCmd.AddCommand(skillUpdateCmd)
 	skillCmd.AddCommand(skillDeleteCmd)
 	skillCmd.AddCommand(skillImportCmd)
+	skillCmd.AddCommand(skillFindCmd)
 	skillCmd.AddCommand(skillFilesCmd)
 
 	skillFilesCmd.AddCommand(skillFilesListCmd)
@@ -125,6 +132,9 @@ func init() {
 	// skill import
 	skillImportCmd.Flags().String("url", "", "URL to import from (required)")
 	skillImportCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// skill find
+	skillFindCmd.Flags().String("output-results", "", "Structured recommendation JSON to return to the AI task")
 
 	// skill files list
 	skillFilesListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -355,6 +365,15 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 	}
 
 	fmt.Printf("Skill imported: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
+	return nil
+}
+
+func runSkillFind(cmd *cobra.Command, _ []string) error {
+	results, _ := cmd.Flags().GetString("output-results")
+	if err := writeStructuredAIResult(results); err != nil {
+		return err
+	}
+	fmt.Println("Skill recommendations captured")
 	return nil
 }
 

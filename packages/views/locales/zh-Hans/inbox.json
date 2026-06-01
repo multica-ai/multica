@@ -25,7 +25,11 @@
     "empty": "收件箱为空",
     "original_input": "原始输入",
     "edit_advanced": "在完整表单中编辑",
-    "archive": "归档"
+    "archive": "归档",
+    "skill_find_empty": "没有返回有效推荐。",
+    "agent_draft_fallback_name": "新智能体",
+    "open_agent": "打开智能体",
+    "attached_skills": "已关联 skill"
   },
   "types": {
     "issue_assigned": "已分配",
@@ -44,7 +48,11 @@
     "agent_completed": "智能体已完成",
     "reaction_added": "添加了表情反应",
     "quick_create_done": "通过智能体创建",
-    "quick_create_failed": "通过智能体创建失败"
+    "quick_create_failed": "通过智能体创建失败",
+    "skill_find_done": "skill 推荐",
+    "skill_find_failed": "skill 查找失败",
+    "agent_draft_done": "智能体起草",
+    "agent_draft_failed": "智能体起草失败"
   },
   "labels": {
     "set_status_to": "状态设为",

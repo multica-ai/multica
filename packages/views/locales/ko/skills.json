@@ -244,5 +244,19 @@
     "no_content": "*아직 내용이 없습니다*",
     "markdown_placeholder": "Markdown 내용 작성...",
     "raw_placeholder": "파일 내용..."
+  },
+  "finder": {
+    "action": "AI로 찾기",
+    "title": "AI로 스킬 찾기",
+    "subtitle": "온라인 에이전트에게 워크스페이스 스킬을 추천해 달라고 요청하세요.",
+    "agent_label": "에이전트",
+    "agent_placeholder": "에이전트 선택",
+    "prompt_label": "스킬이 어떤 일을 도와야 하나요?",
+    "prompt_placeholder": "예: React 렌더링 성능을 개선하고 불필요한 리렌더링을 피하기",
+    "no_agents": "스킬 찾기에 사용할 수 있는 온라인 에이전트가 없습니다.",
+    "cancel": "취소",
+    "submit": "스킬 찾기",
+    "toast_queued": "스킬 찾기를 시작했습니다. 결과는 인박스에 표시됩니다.",
+    "fallback_error": "스킬 찾기를 시작하지 못했습니다"
   }
 }

@@ -9,7 +9,8 @@
     "of_total": "{{visible}} of {{total}}",
     "list_load_failed": "Couldn't load agents",
     "list_load_failed_default": "Something went wrong fetching the agent list.",
-    "try_again": "Try again"
+    "try_again": "Try again",
+    "ai_draft": "AI draft"
   },
   "scope": {
     "mine": "Mine",
@@ -365,7 +366,8 @@
       "cancel_failed_toast": "Failed to cancel task",
       "started_prefix": "Started {{when}}",
       "dispatched_prefix": "Dispatched {{when}}",
-      "queued_prefix": "Queued {{when}}"
+      "queued_prefix": "Queued {{when}}",
+      "source_ai_task": "AI task"
     }
   },
   "char_counter": {
@@ -426,5 +428,18 @@
     "runtime_offline": "Daemon offline",
     "runtime_recovery": "Daemon restarted",
     "manual": "Cancelled by user"
+  },
+  "ai_draft": {
+    "title": "Draft agent with AI",
+    "subtitle": "Ask an online agent to create a configured teammate for this workspace.",
+    "host_agent_label": "Host agent",
+    "host_agent_placeholder": "Select an online agent",
+    "no_agents": "No online agents are available. Start a runtime-backed agent first.",
+    "prompt_label": "What should this agent do?",
+    "prompt_placeholder": "e.g. Create a frontend review agent for React performance, accessibility, and regression testing.",
+    "cancel": "Cancel",
+    "submit": "Draft agent",
+    "toast_queued": "Agent draft started. Results will arrive in Inbox.",
+    "fallback_error": "Failed to start agent draft"
   }
 }

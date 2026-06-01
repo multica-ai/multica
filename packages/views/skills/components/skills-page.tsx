@@ -7,6 +7,7 @@ import {
   BookOpen,
   Plus,
   Search,
+  Sparkles,
 } from "lucide-react";
 import type {
   AgentRuntime,
@@ -40,6 +41,7 @@ import { PageHeader } from "../../layout/page-header";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
 import { readOrigin } from "../lib/origin";
 import { CreateSkillDialog } from "./create-skill-dialog";
+import { SkillFinderDialog } from "./skill-finder-dialog";
 import { type SkillRow, useSkillColumns } from "./skill-columns";
 import { useT } from "../../i18n";
 
@@ -55,9 +57,11 @@ const SCOPE_KEYS: FilterKey[] = ["all", "used", "unused", "mine"];
 function PageHeaderBar({
   totalCount,
   onCreate,
+  onFind,
 }: {
   totalCount: number;
   onCreate: () => void;
+  onFind: () => void;
 }) {
   const { t } = useT("skills");
   return (
@@ -82,10 +86,16 @@ function PageHeaderBar({
           </a>
         </p>
       </div>
-      <Button type="button" size="sm" onClick={onCreate}>
-        <Plus className="h-3 w-3" />
-        {t(($) => $.page.new_skill)}
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={onFind}>
+          <Sparkles className="h-3 w-3" />
+          {t(($) => $.finder.action)}
+        </Button>
+        <Button type="button" size="sm" onClick={onCreate}>
+          <Plus className="h-3 w-3" />
+          {t(($) => $.page.new_skill)}
+        </Button>
+      </div>
     </PageHeader>
   );
 }
@@ -199,6 +209,7 @@ export default function SkillsPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [createOpen, setCreateOpen] = useState(false);
+  const [finderOpen, setFinderOpen] = useState(false);
 
   const assignments = useMemo(
     () => selectSkillAssignments(agents),
@@ -286,7 +297,7 @@ export default function SkillsPage() {
   if (isLoading) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
-        <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} />
+        <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} onFind={() => setFinderOpen(true)} />
         <div className="flex flex-1 min-h-0 flex-col gap-4 p-3 sm:p-6">
           <div className="space-y-3 pl-4">
             <Skeleton className="h-5 w-full max-w-2xl rounded-md" />
@@ -314,7 +325,7 @@ export default function SkillsPage() {
   if (listError) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
-        <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} />
+        <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} onFind={() => setFinderOpen(true)} />
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <AlertCircle className="h-8 w-8 text-destructive" />
           <div>
@@ -350,6 +361,7 @@ export default function SkillsPage() {
       <PageHeaderBar
         totalCount={totalCount}
         onCreate={() => setCreateOpen(true)}
+        onFind={() => setFinderOpen(true)}
       />
 
       {supportingQueryDown && (
@@ -419,6 +431,14 @@ export default function SkillsPage() {
         <CreateSkillDialog
           onClose={() => setCreateOpen(false)}
           onCreated={handleCreated}
+        />
+      )}
+
+      {finderOpen && (
+        <SkillFinderDialog
+          agents={agents}
+          runtimesById={runtimesById}
+          onClose={() => setFinderOpen(false)}
         />
       )}
     </div>
