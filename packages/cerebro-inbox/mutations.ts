@@ -201,11 +201,14 @@ export function useCreateInboxReminder() {
       text,
       plannedAt,
       issueId,
+      // FIR-2643 — pin the reminder to one specific comment.
+      commentId,
     }: {
       text: string;
       plannedAt: Date;
       issueId?: string | null;
-    }) => api.createInboxReminder({ text, plannedAt, issueId }),
+      commentId?: string | null;
+    }) => api.createInboxReminder({ text, plannedAt, issueId, commentId }),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
     },

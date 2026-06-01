@@ -13,7 +13,8 @@
   "dependencies": {
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/core": "workspace:*",
-    "@multica/ui": "workspace:*"
+    "@multica/ui": "workspace:*",
+    "sonner": "^2.0.7"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",

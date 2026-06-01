@@ -2511,6 +2511,8 @@ export class ApiClient {
     text: string;
     plannedAt: Date;
     issueId?: string | null;
+    // CEREBRO-PATCH(comment-reminder-client): FIR-2643 — pin a reminder to one comment.
+    commentId?: string | null;
   }): Promise<InboxItem> {
     return this.fetch("/api/inbox/reminders", {
       method: "POST",
@@ -2518,6 +2520,7 @@ export class ApiClient {
         text: params.text,
         planned_at: params.plannedAt.toISOString(),
         issue_id: params.issueId ?? null,
+        comment_id: params.commentId ?? null, // CEREBRO-PATCH(comment-reminder-client): FIR-2643
       }),
     });
   }
