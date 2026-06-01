@@ -236,10 +236,6 @@ func runCodexPluginBind(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	sourceKey, _ := cmd.Flags().GetString("source-key")
-	if strings.TrimSpace(sourceKey) == "" {
-		return fmt.Errorf("source-key is required")
-	}
 	projectFolder := codexPluginFlagString(cmd, "project-folder")
 	sessionID, err := codexPluginBindingSessionID(cmd, codexPluginFlagString(cmd, "codex-session-id"), projectFolder)
 	if err != nil {
@@ -247,6 +243,11 @@ func runCodexPluginBind(cmd *cobra.Command, args []string) error {
 	}
 	threadID := codexPluginFlagString(cmd, "codex-thread-id")
 	branch := codexPluginFlagString(cmd, "branch")
+	sourceKey, _ := cmd.Flags().GetString("source-key")
+	sourceKey = codexPluginBindingSourceKey(threadID, sessionID, strings.TrimSpace(sourceKey))
+	if sourceKey == "" {
+		return fmt.Errorf("source-key is required")
+	}
 	body := map[string]any{
 		"cli_name":         "codex_app",
 		"work_dir":         projectFolder,
@@ -262,6 +263,9 @@ func runCodexPluginBind(cmd *cobra.Command, args []string) error {
 	path := "/api/issues/" + url.PathEscape(issueRef.ID) + "/local-runs"
 	if err := client.PostJSON(ctx, path, body, &result); err != nil {
 		return fmt.Errorf("bind codex plugin session: %w", err)
+	}
+	if err := codexPluginValidateThreadBinding(result); err != nil {
+		return err
 	}
 	if err := codexPluginPersistBinding(cmd, issueRef.ID, result, map[string]string{
 		"project_folder":   projectFolder,
@@ -973,10 +977,7 @@ func codexPluginMCPToolSessionBind(cmd *cobra.Command, args map[string]any) (any
 	}
 	threadID := mcpString(args, "codex_thread_id")
 	branch := mcpString(args, "branch")
-	sourceKey := mcpString(args, "source_key")
-	if sourceKey == "" {
-		sourceKey = defaultCodexPluginSourceKeyFromValues(threadID, sessionID, "bind")
-	}
+	sourceKey := codexPluginBindingSourceKey(threadID, sessionID, mcpString(args, "source_key"))
 	if sourceKey == "" {
 		return nil, fmt.Errorf("source_key is required")
 	}
@@ -995,6 +996,9 @@ func codexPluginMCPToolSessionBind(cmd *cobra.Command, args map[string]any) (any
 	path := "/api/issues/" + url.PathEscape(issueRef.ID) + "/local-runs"
 	if err := client.PostJSON(ctx, path, body, &result); err != nil {
 		return nil, fmt.Errorf("session_bind: %w", err)
+	}
+	if err := codexPluginValidateThreadBinding(result); err != nil {
+		return nil, err
 	}
 	if err := codexPluginPersistBinding(cmd, issueRef.ID, result, map[string]string{
 		"project_folder":   projectFolder,
@@ -1279,6 +1283,9 @@ func codexPluginPersistBinding(cmd *cobra.Command, issueID string, run map[strin
 	if bindingID == "" {
 		return fmt.Errorf("session_bind response missing binding id")
 	}
+	if err := codexPluginValidateThreadBinding(run); err != nil {
+		return err
+	}
 	now := time.Now()
 	binding := codexPluginHookBinding{
 		IssueID:         firstNonEmpty(issueID, strVal(run, "issue_id")),
@@ -1302,6 +1309,13 @@ func codexPluginPersistBinding(cmd *cobra.Command, issueID string, run map[strin
 	state.Bindings = upsertCodexPluginBinding(state.Bindings, binding)
 	state.Bindings = trimCodexPluginBindings(state.Bindings, 50)
 	return codexPluginWriteHookState(cmd, state)
+}
+
+func codexPluginValidateThreadBinding(run map[string]any) error {
+	if strVal(run, "top_comment_id") == "" {
+		return fmt.Errorf("session_bind response missing top_comment_id")
+	}
+	return nil
 }
 
 func codexPluginBindingSessionID(cmd *cobra.Command, explicitSessionID, projectFolder string) (string, error) {
@@ -1858,4 +1872,22 @@ func defaultCodexPluginSourceKeyFromValues(threadID, sessionID, suffix string) s
 		return ""
 	}
 	return "codex_app_plugin:" + keyID + ":" + suffix
+}
+
+func codexPluginBindingSourceKey(threadID, sessionID, requested string) string {
+	if sessionID == "" {
+		return strings.TrimSpace(requested)
+	}
+	sessionScoped := defaultCodexPluginSourceKeyFromValues(sessionID, "", "bind")
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return sessionScoped
+	}
+	threadScoped := strings.TrimSpace(threadID) != "" &&
+		(requested == strings.TrimSpace(threadID)+":bind" ||
+			requested == defaultCodexPluginSourceKeyFromValues(threadID, "", "bind"))
+	if threadScoped || !strings.Contains(requested, sessionID) {
+		return sessionScoped
+	}
+	return requested
 }

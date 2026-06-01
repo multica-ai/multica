@@ -112,11 +112,16 @@ mixing unrelated chat sessions into the bound issue.
 Binding and runtime-event writes should include a stable `source_key` derived
 from the Codex thread/session plus a stable event id. Repeating the same
 binding or runtime-event write reuses the existing localrun row/message.
+For `session_bind`, the helper normalizes binding idempotency to the current
+Codex `session_id` when it is available. This avoids reusing older thread-level
+bindings that may not have a visible issue comment thread.
 
 The plugin binds localrun with `comments_mode=thread`, so the binding creates a
 top-level issue comment and visible Codex App context is preserved as replies in
 that thread. User prompts are mirrored as `user_input` replies, while assistant
-results are mirrored as `final` replies.
+results are mirrored as `final` replies. If the server returns a binding without
+`top_comment_id`, the helper rejects it instead of storing a binding that hooks
+cannot visibly sync to.
 
 Usage reuses the existing localrun cumulative snapshot endpoint, so callers
 must send cumulative totals by binding/provider/model. Direct `comment_add`

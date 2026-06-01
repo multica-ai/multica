@@ -93,12 +93,43 @@ func TestRunCodexPluginBindPostsBinding(t *testing.T) {
 	if err := runCodexPluginBind(cmd, []string{"OPE-1493"}); err != nil {
 		t.Fatalf("runCodexPluginBind() error = %v", err)
 	}
-	if posted["source_key"] != "thread-1:bind" || posted["cli_name"] != "codex_app" || posted["comments_mode"] != "thread" {
+	if posted["source_key"] != "codex_app_plugin:session-1:bind" || posted["cli_name"] != "codex_app" || posted["comments_mode"] != "thread" {
 		t.Fatalf("posted body = %+v", posted)
 	}
 	contextDir, _ := posted["context_dir"].(string)
 	if !strings.Contains(contextDir, "codex_session_id=session-1") {
 		t.Fatalf("context_dir = %q, want codex_session_id", contextDir)
+	}
+}
+
+func TestRunCodexPluginBindRejectsThreadlessBinding(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/OPE-1493":
+			json.NewEncoder(w).Encode(map[string]any{"id": "11111111-1111-4111-8111-111111111111", "identifier": "OPE-1493"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/11111111-1111-4111-8111-111111111111/local-runs":
+			json.NewEncoder(w).Encode(map[string]any{"id": "run-1", "issue_id": "11111111-1111-4111-8111-111111111111", "status": "running"})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	cmd := testCodexPluginBindCommand(srv.URL)
+	err := runCodexPluginBind(cmd, []string{"OPE-1493"})
+	if err == nil || !strings.Contains(err.Error(), "top_comment_id") {
+		t.Fatalf("runCodexPluginBind() error = %v, want missing top_comment_id", err)
+	}
+
+	state, err := codexPluginReadHookState(cmd)
+	if err != nil {
+		t.Fatalf("codexPluginReadHookState() error = %v", err)
+	}
+	if len(state.Bindings) != 0 {
+		t.Fatalf("state bindings = %+v, want none", state.Bindings)
 	}
 }
 
@@ -223,7 +254,7 @@ func TestRunCodexPluginMCPServerCallsSessionBind(t *testing.T) {
 		t.Fatalf("runCodexPluginMCPServer() error = %v", err)
 	}
 
-	if posted["source_key"] != "thread-1:bind" || posted["cli_name"] != "codex_app" || posted["comments_mode"] != "thread" {
+	if posted["source_key"] != "codex_app_plugin:session-1:bind" || posted["cli_name"] != "codex_app" || posted["comments_mode"] != "thread" {
 		t.Fatalf("posted body = %+v", posted)
 	}
 
