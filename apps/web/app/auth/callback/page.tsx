@@ -200,8 +200,11 @@ function CallbackContent() {
     <div className="flex min-h-screen items-center justify-center">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">Signing in...</CardTitle>
-          <CardDescription>Please wait while we complete your login</CardDescription>
+          <CardTitle className="text-2xl">Setting up your account…</CardTitle>
+          <CardDescription>
+            Signing you in and preparing your workspace — this only takes a
+            moment.
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex justify-center">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

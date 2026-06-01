@@ -37,8 +37,13 @@ type IdentityProvisionerInvoker interface {
 // uses them only for structured logging.
 type ProvisionMembershipResult struct {
 	WorkspaceIDs []pgtype.UUID
-	Skipped      bool
-	SkipReason   string
+	// CEREBRO-PATCH(auth-identity-group-placement): FIR-2523 default-group placement result.
+	// GroupIDs are the cerebro default-groups the user was placed into (one per
+	// matching workspace that has a default group configured). Observational —
+	// used only for structured logging.
+	GroupIDs   []pgtype.UUID
+	Skipped    bool
+	SkipReason string
 }
 
 // provisionMembershipForNewUser is the cerebro hook called from
@@ -74,9 +79,14 @@ func (h *Handler) provisionMembershipForNewUser(ctx context.Context, user db.Use
 	for i, id := range res.WorkspaceIDs {
 		wsIDs[i] = uuidToString(id)
 	}
+	groupIDs := make([]string, len(res.GroupIDs))
+	for i, id := range res.GroupIDs {
+		groupIDs[i] = uuidToString(id)
+	}
 	slog.Info("identity provisioner hook: user auto-provisioned",
 		"user_id", uuidToString(user.ID),
 		"email", user.Email,
 		"auth_source", authSource,
-		"workspace_ids", wsIDs)
+		"workspace_ids", wsIDs,
+		"group_ids", groupIDs)
 }
