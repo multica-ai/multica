@@ -288,6 +288,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 pricing endpoint handler instance (service key from CEREBRO_PRICING_KEY).
 	cerebroPricingHandler := cerebropricing.New(os.Getenv("CEREBRO_PRICING_KEY"))
+	// CEREBRO-PATCH(cerebro-github-pr-link-route): FIR-2568 poll-based PR↔issue linking endpoint instance (service key from CEREBRO_GITHUB_LINK_KEY; default workspace slug from CEREBRO_GITHUB_LINK_WORKSPACE_SLUG). Logic in handler/github_pr_link_cerebro.go.
+	cerebroGitHubPRLinkHandler := handler.NewCerebroGitHubPRLinkHandler(h, os.Getenv("CEREBRO_GITHUB_LINK_KEY"), os.Getenv("CEREBRO_GITHUB_LINK_WORKSPACE_SLUG"))
 	// CEREBRO-PATCH(cerebro-dictation-routes): JEH-729 workspace-scoped WebSocket proxy; inference deploy stays out of this slice.
 	cerebroDictationHandler := cerebrodictation.NewFromEnv(queries, patCache)
 	// CEREBRO-PATCH(cerebro-groups-routes): JEH-721 workspace groups handler
@@ -475,6 +477,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Get("/api/config", h.GetConfig)
 	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 service-to-service price-table read for the registry's hourly pricing pull. Outside the user-auth group on purpose — the caller is a backend service that presents CEREBRO_PRICING_KEY as a Bearer token (loopback-only when the key is unset).
 	r.Get("/api/cerebro/pricing", cerebroPricingHandler.Get)
+	// CEREBRO-PATCH(cerebro-github-pr-link-route): FIR-2568 service-to-service PR-link write for the registry's poll-based scanner. Outside the user-auth group on purpose — the caller is a backend service presenting CEREBRO_GITHUB_LINK_KEY as a Bearer token (loopback-only when the key is unset).
+	r.Post("/api/cerebro/github/pull-requests", cerebroGitHubPRLinkHandler.Post)
 	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
 
 	// Webhook ingress for autopilots. Outside the authenticated group on

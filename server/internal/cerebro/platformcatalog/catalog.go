@@ -835,13 +835,14 @@ var excluded = map[string]string{
 
 	// pre-auth — establishes or clears identity, or a signed external webhook;
 	// there is no authenticated actor yet to gate on.
-	"POST /auth/google":         "pre-auth — establishes identity",
-	"POST /auth/send-code":      "pre-auth — establishes identity",
-	"POST /auth/verify-code":    "pre-auth — establishes identity",
-	"POST /auth/logout":         "pre-auth — clears identity",
-	"POST /api/webhooks/github": "pre-auth signed webhook — GitHub HMAC authorises delivery",
-	"POST /api/webhooks/stripe": "pre-auth signed webhook — Stripe HMAC authorises delivery",
-	"POST /api/contact-sales":   "pre-auth — public marketing form",
+	"POST /auth/google":                      "pre-auth — establishes identity",
+	"POST /auth/send-code":                   "pre-auth — establishes identity",
+	"POST /auth/verify-code":                 "pre-auth — establishes identity",
+	"POST /auth/logout":                      "pre-auth — clears identity",
+	"POST /api/webhooks/github":              "pre-auth signed webhook — GitHub HMAC authorises delivery",
+	"POST /api/webhooks/stripe":              "pre-auth signed webhook — Stripe HMAC authorises delivery",
+	"POST /api/cerebro/github/pull-requests": "pre-auth service-to-service — CEREBRO_GITHUB_LINK_KEY bearer token authorises the firtal-data-registry poll-based PR-link push (FIR-2568)",
+	"POST /api/contact-sales":                "pre-auth — public marketing form",
 
 	// billing — external Stripe checkout/portal, human-actor only.
 	"POST /api/cloud-billing/checkout-sessions": "billing — external Stripe, human-actor only",
