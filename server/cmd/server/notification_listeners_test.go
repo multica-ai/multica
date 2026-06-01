@@ -388,6 +388,105 @@ func TestNotification_CommentCreated(t *testing.T) {
 	}
 }
 
+// TestNotification_SystemCommentSkipsInboxAndMentions guards the MUL-2538
+// must-fix: a comment with author_type='system' (the platform-generated
+// child-done parent notify) must NOT create any inbox rows for parent
+// subscribers and must NOT spawn mention-inbox rows even if the body string
+// contains markdown mentions. The reviewer's concern was that a child title
+// containing `mention://member/<uuid>` would silently light up that member's
+// inbox once the title was transcluded into the system comment body —
+// because the generic comment:created listener treated all comments
+// identically. The fix is to gate at author_type='system'.
+func TestNotification_SystemCommentSkipsInboxAndMentions(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	// Subscriber on the issue who would normally receive new_comment.
+	subEmail := "notif-system-comment-sub@multica.ai"
+	subID := createTestUser(t, subEmail)
+	t.Cleanup(func() { cleanupTestUser(t, subEmail) })
+
+	// A second member whose UUID we will smuggle into the system-comment
+	// body as a fake mention to prove the listener does not parse it.
+	targetEmail := "notif-system-comment-target@multica.ai"
+	targetID := createTestUser(t, targetEmail)
+	t.Cleanup(func() { cleanupTestUser(t, targetEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", subID, "manual")
+
+	// Publish a system-authored comment that transcludes a member mention
+	// in the body — the exact attack vector the reviewer flagged. If the
+	// generic listener path runs, the new_comment row will fire for `sub`
+	// and the mention path will fire for `target`.
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000000",
+				IssueID:    issueID,
+				AuthorType: "system",
+				AuthorID:   "00000000-0000-0000-0000-000000000000",
+				Content:    "Sub-issue done — see [@Target](mention://member/" + targetID + ").",
+				Type:       "system",
+			},
+			"issue_title":  "system comment isolation",
+			"issue_status": "in_progress",
+		},
+	})
+
+	if items := inboxItemsForRecipient(t, queries, subID); len(items) != 0 {
+		t.Errorf("expected 0 inbox rows for issue subscriber, got %d", len(items))
+	}
+	if items := inboxItemsForRecipient(t, queries, targetID); len(items) != 0 {
+		t.Errorf("expected 0 inbox rows for smuggled @mention target, got %d", len(items))
+	}
+}
+
+// TestSubscriberSystemCommentDoesNotSubscribe guards the same boundary on
+// the subscriber listener: a system-authored comment must NOT be treated as
+// "a commenter joined the conversation." The CHECK constraint on
+// issue_subscriber.user_type only permits ('member','agent'); without the
+// author_type='system' early-return, AddIssueSubscriber would log a noisy
+// constraint violation on every child-done event.
+func TestSubscriberSystemCommentDoesNotSubscribe(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000000",
+				IssueID:    issueID,
+				AuthorType: "system",
+				AuthorID:   "00000000-0000-0000-0000-000000000000",
+				Content:    "platform notify",
+				Type:       "system",
+			},
+		},
+	})
+
+	if count := subscriberCount(t, queries, issueID); count != 0 {
+		t.Fatalf("expected 0 subscribers after system comment, got %d", count)
+	}
+}
+
 // TestNotification_AssigneeChanged verifies the full assignee change flow:
 // - New assignee gets "issue_assigned" (Direct)
 // - Old assignee gets "unassigned" (Direct)

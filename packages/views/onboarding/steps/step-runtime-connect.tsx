@@ -307,7 +307,7 @@ function FancyView({
                   onClick={handleContinue}
                 >
                   {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {t(($) => $.common.continue)}
+                  {t(($) => $.step_runtime.start_exploring)}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </div>

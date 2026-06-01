@@ -9,9 +9,11 @@ export type {
 export {
   saveQuestionnaire,
   completeOnboarding,
-  bootstrapRuntimeOnboarding,
-  bootstrapNoRuntimeOnboarding,
   joinCloudWaitlist,
 } from "./store";
 export { ONBOARDING_STEP_ORDER } from "./step-order";
 export { recommendTemplate, type AgentTemplateId } from "./recommend-template";
+export {
+  useWelcomeStore,
+  type WelcomeSignal,
+} from "./welcome-store";

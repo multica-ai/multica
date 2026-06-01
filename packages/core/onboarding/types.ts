@@ -5,7 +5,6 @@ export type OnboardingStep =
   | "use_case"
   | "workspace"
   | "runtime"
-  | "teammate"
   | "agent"
   | "first_issue";
 
@@ -59,20 +58,32 @@ export type UseCase =
   | "other";
 
 /**
- * v2 questionnaire shape. `*_skipped: true` distinguishes an explicit
- * Skip click from a slot the user never reached. Both states are
- * "unknown" for recommendation purposes; the skip marker exists for
- * analytics and so future re-prompts can avoid nagging users who
- * already declined.
+ * Questionnaire shape. `source` and `use_case` allow multiple values
+ * (users hear about us through several channels and use Multica for
+ * several things); `role` stays single-select since the agent template
+ * recommendation wants a primary identity.
+ *
+ * `*_skipped: true` distinguishes an explicit Skip click from a slot
+ * the user never reached. Both states are "unknown" for recommendation
+ * purposes; the skip marker exists for analytics and so future
+ * re-prompts can avoid nagging users who already declined.
+ *
+ * Backward compat: prior versions of this app wrote `source` and
+ * `use_case` as a single string. `mergeQuestionnaire` in
+ * `onboarding-flow.tsx` upgrades those rows to single-element arrays
+ * on read; the server's `questionnaireAnswers.UnmarshalJSON` does the
+ * same. `version` stays at 2 — the JSONB column is schema-less so a
+ * mechanical bump would only show up in analytics, not in storage,
+ * and we keep one funnel cohort.
  */
 export interface QuestionnaireAnswers {
-  source: Source | null;
+  source: Source[];
   source_other: string | null;
   source_skipped: boolean;
   role: Role | null;
   role_other: string | null;
   role_skipped: boolean;
-  use_case: UseCase | null;
+  use_case: UseCase[];
   use_case_other: string | null;
   use_case_skipped: boolean;
   version: 2;

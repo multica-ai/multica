@@ -11,6 +11,7 @@ interface FileUploadButtonProps {
   disabled?: boolean;
   className?: string;
   size?: "sm" | "default";
+  multiple?: boolean;
 }
 
 function FileUploadButton({
@@ -18,16 +19,17 @@ function FileUploadButton({
   disabled,
   className,
   size = "default",
+  multiple = false,
 }: FileUploadButtonProps) {
   const { t } = useTranslation("ui");
   const inputRef = useRef<HTMLInputElement>(null);
   const attachLabel = t(($) => $.attach_file);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
     e.target.value = "";
-    onSelect(file);
+    for (const file of files) onSelect(file);
   };
 
   const iconSize = size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4";
@@ -52,6 +54,7 @@ function FileUploadButton({
       <input
         ref={inputRef}
         type="file"
+        multiple={multiple}
         className="hidden"
         onChange={handleChange}
       />

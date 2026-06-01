@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useAuthStore } from "@multica/core/auth";
 import { useSquadsViewStore } from "@multica/core/squads/stores";
 import { AppLink } from "../../navigation";
@@ -221,7 +222,7 @@ function SquadAvatar({ squad }: { squad: Squad }) {
       <ActorAvatarBase
         name={squad.name}
         initials={initials}
-        avatarUrl={squad.avatar_url}
+        avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
         size={36}
         className="rounded-md"
       />

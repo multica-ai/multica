@@ -27,7 +27,6 @@ func TestBuildCursorArgs(t *testing.T) {
 	}, slog.Default())
 
 	expected := []string{
-		"chat",
 		"-p", "do something",
 		"--output-format", "stream-json",
 		"--yolo",
@@ -67,7 +66,7 @@ func TestBuildCursorArgsMinimal(t *testing.T) {
 	t.Parallel()
 
 	args := buildCursorArgs("hello", ExecOptions{}, slog.Default())
-	expected := []string{"chat", "-p", "hello", "--output-format", "stream-json", "--yolo"}
+	expected := []string{"-p", "hello", "--output-format", "stream-json", "--yolo"}
 
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)

@@ -501,3 +501,94 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 			beforeCount, afterCount)
 	}
 }
+
+// TestShouldEnqueueOnComment_PrivateAgentGate is the regression test for
+// GH #3300: after an owner/admin assigns a private agent to an issue, the
+// agent's UUID is "welded" onto that issue and any member with comment
+// access could previously dispatch a new task to the private agent simply by
+// posting a plain (non-@mention) comment, bypassing the visibility gate that
+// #2359 added to chat / @mention / assignment.
+//
+// The gate must:
+//   - reject plain workspace members (not owner, not admin, not agent owner)
+//   - allow the agent owner
+//   - allow workspace owners/admins
+//   - allow agent-to-agent traffic regardless of agent visibility
+func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, ownerID, memberID := privateAgentTestFixture(t)
+
+	// Assign the private agent to a fresh issue. Owner/admin would normally
+	// be the one performing this step; we insert directly so the test
+	// focuses on the on_comment trigger path.
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id,
+		                   assignee_type, assignee_id, number)
+		VALUES ($1, 'on_comment private-agent gate test', 'todo', 'medium', 'member', $2,
+		        'agent', $3,
+		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue assigned to private agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+
+	cases := []struct {
+		name       string
+		actorType  string
+		actorID    string
+		want       bool
+		reason     string
+	}{
+		{
+			name:      "plain member — denied",
+			actorType: "member",
+			actorID:   memberID,
+			want:      false,
+			reason:    "GH #3300: plain members must not be able to dispatch a task to a private agent via on_comment",
+		},
+		{
+			name:      "agent owner — allowed",
+			actorType: "member",
+			actorID:   ownerID,
+			want:      true,
+			reason:    "agent owner is always in the allowed_principals set",
+		},
+		{
+			name:      "workspace owner — allowed",
+			actorType: "member",
+			actorID:   testUserID,
+			want:      true,
+			reason:    "workspace owners/admins are in the allowed_principals set",
+		},
+		{
+			name:      "agent-to-agent — allowed",
+			actorType: "agent",
+			actorID:   agentID,
+			want:      true,
+			reason:    "A2A traffic bypasses the visibility gate by design",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := testHandler.shouldEnqueueOnComment(ctx, issue, tc.actorType, tc.actorID)
+			if got != tc.want {
+				t.Fatalf("%s\n  actor=%s/%s got=%v want=%v",
+					tc.reason, tc.actorType, tc.actorID, got, tc.want)
+			}
+		})
+	}
+}

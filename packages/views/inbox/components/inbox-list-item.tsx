@@ -42,6 +42,7 @@ export function InboxListItem({
 
   return (
     <button
+      type="button"
       onClick={onClick}
       className={`group flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
         isSelected ? "bg-accent" : "hover:bg-accent/50"

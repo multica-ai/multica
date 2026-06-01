@@ -64,7 +64,7 @@ ANTHROPIC_BASE_URL = https://my-proxy.example.com
 系统关键变量不能被覆盖：`PATH`、`HOME`、`USER`、`SHELL`、`TERM`、`CODEX_HOME`，以及任何 `MULTICA_*` 开头的 key 都会被守护进程静默忽略（日志里有 warn，不会报错）。
 
 <Callout type="warning">
-**`custom_env` 的值在 Multica 服务器的数据库里是明文存储的。** 非智能体创建者 / 非 workspace admin 看不到值（API 返回 `****`），但数据库备份、DB 审计里仍然能看到。
+**`custom_env` 的值在 Multica 服务器的数据库里是明文存储的。** agent list/get 接口不再返回任何 env 值——只返回键的数量。读取真实值需要 workspace owner / admin 调用专用且会审计的 `GET /api/agents/{id}/env`（CLI: `multica agent env get <id>`）。正在执行任务的智能体即便宿主是 owner，也无法借此读取其它智能体的 env——这个接口拒绝 agent-actor 会话。数据库备份、DB 审计里仍然能看到真实值。
 
 **不要把高价值 secret 放进 `custom_env`**（生产数据库密码、root 级 token 等）。给智能体用**独立的、有限权限的凭证**（只读 API key、单 scope 的 PAT），定期轮换。
 </Callout>
@@ -96,7 +96,7 @@ claude --model <model> --max-turns 100 --append-system-prompt "always respond in
 
 新建默认 `private`。
 
-**私有不等于隐藏**——列表里所有成员都能看到私有智能体的名字和描述，只是看不到敏感配置字段（`custom_env`、MCP 配置的值被打码）。完整含义见 [智能体 → 谁能把智能体分配出去](/agents#谁能把智能体分配出去)。
+**私有不等于隐藏**——列表里所有成员都能看到私有智能体的名字和描述，只是看不到敏感配置（env 值从不会出现在 agent list/get 响应里；MCP 配置对非 owner 会被打码）。完整含义见 [智能体 → 谁能把智能体分配出去](/agents#谁能把智能体分配出去)。
 
 ## 并发上限
 

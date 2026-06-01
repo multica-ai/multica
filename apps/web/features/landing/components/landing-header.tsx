@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { Menu, X } from "lucide-react";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
-import { useLocale } from "../i18n";
+import { isZhLocale, useLocale } from "../i18n";
 import { GitHubMark, githubUrl, headerButtonClassName } from "./shared";
 
 export function LandingHeader({
@@ -12,64 +14,159 @@ export function LandingHeader({
 }: {
   variant?: "dark" | "light";
 }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const user = useAuthStore((s) => s.user);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const docsHref = isZhLocale(locale) ? "/docs/zh" : "/docs";
+  const navLinks = [
+    { href: "/usecases", label: t.header.useCases },
+    { href: docsHref, label: t.header.docs },
+    { href: "/changelog", label: t.header.changelog },
+  ];
+  const ctaHref = user ? "/" : "/login";
+  const ctaLabel = user ? t.header.dashboard : t.header.cta;
 
   return (
     <header
       className={cn(
-        "inset-x-0 top-0 z-30",
+        "relative inset-x-0 top-0 z-30",
         variant === "dark"
           ? "absolute bg-transparent"
           : "border-b border-[#0a0d12]/8 bg-white",
       )}
     >
       <div className="mx-auto flex h-[76px] max-w-[1320px] items-center justify-between px-4 sm:px-6 lg:px-8">
-        <Link href="/" className="flex items-center gap-3">
-          <MulticaIcon
-            className={cn(
-              "size-5",
-              variant === "dark" ? "text-white" : "text-[#0a0d12]",
-            )}
-            noSpin
-          />
-          <span
-            className={cn(
-              "text-[18px] font-semibold tracking-[0.04em] lowercase sm:text-[20px]",
-              variant === "dark" ? "text-white/92" : "text-[#0a0d12]",
-            )}
-          >
-            multica
-          </span>
-        </Link>
+        <div className="flex min-w-0 items-center gap-6 lg:gap-8">
+          <Link href="/" className="flex shrink-0 items-center gap-3">
+            <MulticaIcon
+              className={cn(
+                "size-5",
+                variant === "dark" ? "text-white" : "text-[#0a0d12]",
+              )}
+              noSpin
+            />
+            <span
+              className={cn(
+                "text-[18px] font-semibold tracking-[0.04em] lowercase sm:text-[20px]",
+                variant === "dark" ? "text-white/92" : "text-[#0a0d12]",
+              )}
+            >
+              multica
+            </span>
+          </Link>
 
-        <div className="flex items-center gap-2.5 sm:gap-3">
-          <Link
-            href="/changelog"
+          <nav
+            aria-label={t.header.navigation}
+            className="hidden items-center gap-1 md:flex"
+          >
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={navLinkClassName(variant)}
+              >
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
+          <button
+            type="button"
+            aria-label={isMenuOpen ? t.header.closeMenu : t.header.openMenu}
+            aria-expanded={isMenuOpen}
+            onClick={() => setIsMenuOpen((open) => !open)}
             className={cn(
               headerButtonClassName("ghost", variant),
-              "hidden sm:inline-flex",
+              "px-3 md:hidden",
             )}
           >
-            {t.header.changelog}
-          </Link>
+            {isMenuOpen ? (
+              <X className="size-4" aria-hidden />
+            ) : (
+              <Menu className="size-4" aria-hidden />
+            )}
+          </button>
           <Link
             href={githubUrl}
             target="_blank"
             rel="noreferrer"
-            className={headerButtonClassName("ghost", variant)}
+            className={cn(
+              headerButtonClassName("ghost", variant),
+              "hidden lg:inline-flex",
+            )}
           >
             <GitHubMark className="size-3.5" />
             {t.header.github}
           </Link>
           <Link
-            href={user ? "/" : "/login"}
+            href={ctaHref}
             className={headerButtonClassName("solid", variant)}
           >
-            {user ? t.header.dashboard : t.header.login}
+            {ctaLabel}
           </Link>
         </div>
       </div>
+
+      {isMenuOpen ? (
+        <div
+          className={cn(
+            "absolute left-4 right-4 top-[calc(100%+8px)] z-50 rounded-[14px] border p-2 shadow-[0_18px_60px_rgba(0,0,0,0.18)] backdrop-blur-xl md:hidden",
+            variant === "dark"
+              ? "border-white/14 bg-[#070a10]/95 text-white"
+              : "border-[#0a0d12]/10 bg-white text-[#0a0d12]",
+          )}
+        >
+          <nav aria-label={t.header.navigation} className="flex flex-col">
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                onClick={() => setIsMenuOpen(false)}
+                className={mobileNavLinkClassName(variant)}
+              >
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+          <div
+            className={cn(
+              "mt-2 border-t pt-2",
+              variant === "dark" ? "border-white/10" : "border-[#0a0d12]/8",
+            )}
+          >
+            <Link
+              href={githubUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setIsMenuOpen(false)}
+              className={mobileNavLinkClassName(variant)}
+            >
+              <GitHubMark className="size-3.5" />
+              {t.header.github}
+            </Link>
+          </div>
+        </div>
+      ) : null}
     </header>
+  );
+}
+
+function navLinkClassName(variant: "dark" | "light") {
+  return cn(
+    "inline-flex h-9 items-center rounded-[9px] px-3 text-[13px] font-medium transition-colors",
+    variant === "dark"
+      ? "text-white/72 hover:bg-white/8 hover:text-white"
+      : "text-[#0a0d12]/62 hover:bg-[#0a0d12]/5 hover:text-[#0a0d12]",
+  );
+}
+
+function mobileNavLinkClassName(variant: "dark" | "light") {
+  return cn(
+    "flex min-h-11 items-center gap-2 rounded-[10px] px-3 text-[14px] font-medium transition-colors",
+    variant === "dark"
+      ? "text-white/76 hover:bg-white/8 hover:text-white"
+      : "text-[#0a0d12]/68 hover:bg-[#0a0d12]/5 hover:text-[#0a0d12]",
   );
 }

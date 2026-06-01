@@ -67,6 +67,7 @@ import {
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { api, ApiError } from "@multica/core/api";
@@ -493,7 +494,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <ActorAvatar
                       name={user?.name ?? ""}
                       initials={(user?.name ?? "U").charAt(0).toUpperCase()}
-                      avatarUrl={user?.avatar_url}
+                      avatarUrl={resolvePublicFileUrl(user?.avatar_url)}
                       size={32}
                     />
                     <div className="min-w-0 flex-1">

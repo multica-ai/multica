@@ -5,9 +5,11 @@ import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
+import { setupLocalDirectory } from "./local-directory";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
+import { installNavigationGestures } from "./navigation-gestures";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -252,6 +254,7 @@ function createWindow(): void {
   }
 
   installContextMenu(mainWindow.webContents);
+  installNavigationGestures(mainWindow);
 
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
     mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
@@ -458,6 +461,7 @@ if (!gotTheLock) {
 
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
+    setupLocalDirectory(() => mainWindow);
 
     // macOS: deep link arrives via open-url event
     app.on("open-url", (_event, url) => {

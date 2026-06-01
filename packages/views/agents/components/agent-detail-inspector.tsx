@@ -19,7 +19,8 @@ import {
 } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { isImeComposing, timeAgo } from "@multica/core/utils";
+import { isImeComposing } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Input } from "@multica/ui/components/ui/input";
@@ -92,6 +93,7 @@ export function AgentDetailInspector({
   onUpdate,
 }: InspectorProps) {
   const { t } = useT("agents");
+  const timeAgo = useTimeAgo();
   const update = (data: Record<string, unknown>) => onUpdate(agent.id, data);
   const isOnline = runtime?.status === "online";
 

@@ -26,6 +26,7 @@ import {
   onIssueUpdated,
   onIssueDeleted,
   onIssueLabelsChanged,
+  onIssueMetadataChanged,
 } from "../issues/ws-updaters";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
@@ -44,6 +45,7 @@ import type {
   IssueCreatedPayload,
   IssueDeletedPayload,
   IssueLabelsChangedPayload,
+  IssueMetadataChangedPayload,
   InboxNewPayload,
   CommentCreatedPayload,
   CommentUpdatedPayload,
@@ -60,6 +62,8 @@ import type {
   TaskMessagePayload,
   TaskQueuedPayload,
   TaskDispatchPayload,
+  TaskRunningPayload,
+  TaskWaitingLocalDirectoryPayload,
   TaskCompletedPayload,
   TaskFailedPayload,
   TaskCancelledPayload,
@@ -163,6 +167,20 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
+function invalidateSquadMemberStatusQueries(qc: QueryClient, wsId: string): void {
+  qc.invalidateQueries({
+    predicate: (query) => {
+      const key = query.queryKey;
+      return (
+        key[0] === "workspaces" &&
+        key[1] === wsId &&
+        key[2] === "squads" &&
+        key[4] === "members-status"
+      );
+    },
+  });
+}
+
 export interface RealtimeSyncStores {
   authStore: UseBoundStore<StoreApi<AuthState>>;
 }
@@ -213,10 +231,10 @@ export function useRealtimeSync(
         if (wsId) {
           qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
           // Squad members status is derived per agent, so any agent
-          // change (status flip, archive, runtime swap) needs to refresh
-          // the per-squad members-status cache. Prefix-matches both the
-          // squad list and every squadMemberStatus query.
-          qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+          // change (status flip, archive, runtime swap) needs to refresh the
+          // per-squad members-status cache without refetching the static squad
+          // list summary.
+          invalidateSquadMemberStatusQueries(qc, wsId);
         }
       },
       member: () => {
@@ -269,9 +287,8 @@ export function useRealtimeSync(
           qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
           // Runtime online/offline transitions move the derived status
           // for every agent that hosts on this runtime, which shifts the
-          // working/idle/offline pill on the squad page. Same prefix
-          // invalidation pattern as the agent handler above.
-          qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+          // working/idle/offline pill on the squad page.
+          invalidateSquadMemberStatusQueries(qc, wsId);
         }
       },
       autopilot: () => {
@@ -319,9 +336,8 @@ export function useRealtimeSync(
         // event shifts the aggregated usage numbers.
         qc.invalidateQueries({ queryKey: ["issues", "usage"] });
         // Squad members-status reads the same task lifecycle to flip
-        // working ↔ idle for each agent member. Prefix-matches every
-        // mounted squad-page's members-status query in O(1).
-        qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+        // working ↔ idle for each agent member.
+        invalidateSquadMemberStatusQueries(qc, wsId);
       },
     };
 
@@ -341,7 +357,7 @@ export function useRealtimeSync(
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
       "workspace:updated",
-      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "issue_metadata:changed", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -410,6 +426,13 @@ export function useRealtimeSync(
       if (!issue_id) return;
       const wsId = getCurrentWsId();
       if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? []);
+    });
+
+    const unsubIssueMetadataChanged = ws.on("issue_metadata:changed", (p) => {
+      const { issue_id, metadata } = p as IssueMetadataChangedPayload;
+      if (!issue_id) return;
+      const wsId = getCurrentWsId();
+      if (wsId) onIssueMetadataChanged(qc, wsId, issue_id, metadata ?? {});
     });
 
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
@@ -764,6 +787,43 @@ export function useRealtimeSync(
       );
     });
 
+    // task:running fires when the daemon transitions a previously-parked task
+    // (waiting_local_directory) back into the run phase. The dispatch→running
+    // path is collapsed in the handler above, so this handler exists mainly to
+    // clear a stale `waiting_local_directory` pill — without it, the pill
+    // would stay parked even after the daemon resumed work.
+    const unsubTaskRunning = ws.on("task:running", (p) => {
+      const payload = p as TaskRunningPayload;
+      if (!payload.chat_session_id) return;
+      qc.setQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(payload.chat_session_id),
+        (old) => {
+          if (!old || old.task_id !== payload.task_id) return old;
+          return { ...old, status: "running" };
+        },
+      );
+    });
+
+    // task:waiting_local_directory fires when the daemon dequeues a task but
+    // can't acquire the local_directory path lock — another task on this
+    // daemon is in the same directory. Write the status so TaskStatusPill
+    // can render the "Waiting for local directory" stage instead of pinning
+    // a stale "Starting / Thinking" frame.
+    const unsubTaskWaitingLocalDir = ws.on(
+      "task:waiting_local_directory",
+      (p) => {
+        const payload = p as TaskWaitingLocalDirectoryPayload;
+        if (!payload.chat_session_id) return;
+        qc.setQueryData<ChatPendingTask>(
+          chatKeys.pendingTask(payload.chat_session_id),
+          (old) => {
+            if (!old || old.task_id !== payload.task_id) return old;
+            return { ...old, status: "waiting_local_directory" };
+          },
+        );
+      },
+    );
+
     // task:cancelled reaches us when:
     //   1. handleStop already cleared the cache locally (this is a no-op confirm)
     //   2. another tab / admin / system cancels — this is the only path that
@@ -878,6 +938,7 @@ export function useRealtimeSync(
       unsubIssueCreated();
       unsubIssueDeleted();
       unsubIssueLabelsChanged();
+      unsubIssueMetadataChanged();
       unsubInboxNew();
       unsubCommentCreated();
       unsubCommentUpdated();
@@ -904,6 +965,8 @@ export function useRealtimeSync(
       unsubChatDone();
       unsubTaskQueued();
       unsubTaskDispatch();
+      unsubTaskRunning();
+      unsubTaskWaitingLocalDir();
       unsubTaskCancelled();
       unsubTaskCompleted();
       unsubTaskFailed();

@@ -5,6 +5,7 @@ import { Camera, ImagePlus, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 
@@ -85,7 +86,7 @@ export function AvatarPicker({ value, onChange, size = 56 }: AvatarPickerProps) 
       >
         {hasValue ? (
           <img
-            src={value ?? undefined}
+            src={resolvePublicFileUrl(value) ?? undefined}
             alt=""
             className="h-full w-full object-cover"
             onError={() => setPreviewError(true)}

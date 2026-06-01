@@ -3,9 +3,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { pickLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
+import { useWelcomeStore } from "@multica/core/onboarding";
 import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import { useHasOnboarded } from "@multica/core/paths";
+import { setCurrentWorkspace } from "@multica/core/platform";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "@multica/ui/components/ui/sonner";
@@ -118,25 +120,31 @@ function AppContent() {
     : undefined;
   useDaemonIPCBridge(activeWsId);
 
-  // Pre-workspace overlay routing for desktop. Mirrors the web entry-point
-  // judgment in callback / login:
-  //   un-onboarded:
-  //     pending invites on email → /invitations overlay
-  //     no invites               → /onboarding overlay
-  //   already onboarded:
-  //     zero workspaces          → /workspaces/new overlay
-  //     ≥1 workspaces            → no overlay, fall through to dashboard
+  // Pre-workspace overlay routing for desktop. Mirrors the web layout
+  // hard gate via overlays (desktop has no URL bar, so we open the
+  // onboarding overlay instead of router.replace):
+  //   onboarded + has workspace      → no overlay, dashboard
+  //   un-onboarded (any wsCount):
+  //     pending invites on email     → /invitations overlay
+  //     no invites                   → /onboarding overlay
+  //   onboarded + no workspace       → /workspaces/new overlay
   //
-  // The "un-onboarded but in workspace" state is now physically impossible
-  // because backend transactions atomically set onboarded_at when a user
-  // joins the `member` table. Anyone with workspaces is by definition
-  // onboarded.
+  // V3 invariant: `onboarded_at != null` is the only path into the
+  // dashboard. CreateWorkspace does not mark onboarded; only Step 3's
+  // CompleteOnboarding (and AcceptInvitation) flip the flag. A user who
+  // somehow has a workspace but no onboarded mark must be sent back to
+  // /onboarding — we also clear the active workspace so the dashboard
+  // doesn't render under the overlay with stale workspace context.
   useEffect(() => {
     if (!user || !workspaceListFetched) return undefined;
     const { overlay, open } = useWindowOverlayStore.getState();
     if (overlay) return undefined;
-    if (wsCount > 0) return undefined;
+    if (hasOnboarded && wsCount > 0) return undefined;
     if (!hasOnboarded) {
+      // Stale workspace context (if any) would leak X-Workspace-Slug
+      // headers into onboarding-time API calls. Clear it before opening
+      // the overlay.
+      setCurrentWorkspace(null, null);
       // Look up pending invitations by email. Network blip is non-fatal —
       // fall through to onboarding so the user isn't stuck on a blank
       // window. The sidebar's pending-invitations dropdown will surface
@@ -258,6 +266,9 @@ function BlockingRuntimeConfigError({ message }: { message: string }) {
 async function handleDaemonLogout() {
   useTabStore.getState().reset();
   useWindowOverlayStore.getState().close();
+  // Drop any post-onboarding welcome signal so user B logging in next
+  // doesn't inherit user A's pending modal state.
+  useWelcomeStore.getState().reset();
   try {
     await window.daemonAPI.clearToken();
   } catch {

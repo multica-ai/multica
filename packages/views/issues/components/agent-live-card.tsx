@@ -211,21 +211,30 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
 
   useWSEvent("task:queued", handleTaskActive);
   useWSEvent("task:dispatch", handleTaskActive);
+  // The daemon publishes these two transitions while a task moves through
+  // the dispatch → waiting_local_directory → running sequence on a busy
+  // local_directory path. Without subscribing here, the sticky banner
+  // would stay stuck on the optimistic dispatch state instead of flipping
+  // to "waiting" then resuming "is working".
+  useWSEvent("task:waiting_local_directory", handleTaskActive);
+  useWSEvent("task:running", handleTaskActive);
 
   if (taskStates.size === 0) return null;
 
-  // Order: running → dispatched → queued. The most-active task takes the
-  // sticky slot; queued tasks sit below so the "is working" banner isn't
-  // pushed off by a freshly-enqueued sibling. ListActiveTasksByIssue's
-  // server-side ORDER BY is created_at DESC, which doesn't reflect lifecycle
-  // priority, so we re-sort on the client.
+  // Order: running → dispatched → waiting → queued. The most-active task
+  // takes the sticky slot; the parked / queued tasks sit below so the
+  // "is working" banner isn't pushed off by a freshly-enqueued or
+  // path-parked sibling. ListActiveTasksByIssue's server-side ORDER BY is
+  // created_at DESC, which doesn't reflect lifecycle priority, so we
+  // re-sort on the client.
   const statusRank: Record<AgentTask["status"], number> = {
     running: 0,
     dispatched: 1,
-    queued: 2,
-    completed: 3,
-    failed: 3,
-    cancelled: 3,
+    waiting_local_directory: 2,
+    queued: 3,
+    completed: 4,
+    failed: 4,
+    cancelled: 4,
   };
   const entries = Array.from(taskStates.values()).sort(
     (a, b) => statusRank[a.task.status] - statusRank[b.task.status],
@@ -278,6 +287,14 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const isQueued = task.status === "queued";
+  // `waiting_local_directory` is the daemon-parked stage of an otherwise-
+  // active task: it's been dispatched (no longer pure-queued) but hasn't
+  // entered the running phase yet because another task on this daemon
+  // holds the same local_directory lock.
+  const isWaitingLocalDirectory = task.status === "waiting_local_directory";
+  // Treat parked + queued the same visually (non-shimmering, muted accent),
+  // but the label below is distinct so the user sees the specific reason.
+  const isParked = isQueued || isWaitingLocalDirectory;
 
   // Elapsed time — ticks every second so users see the agent is alive.
   // For queued tasks neither started_at nor dispatched_at is set yet, so
@@ -308,10 +325,11 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
 
-  // Queued tasks render with a non-spinning Clock and dimmer accent so the
-  // banner reads as "waiting" rather than "working" at a glance.
+  // Queued / waiting tasks render with a non-spinning Clock and dimmer
+  // accent so the banner reads as "waiting" rather than "working" at a
+  // glance.
   return (
-    <div className={isQueued ? "rounded-lg border border-border bg-muted/30" : "rounded-lg border border-info/20 bg-info/5"}>
+    <div className={isParked ? "rounded-lg border border-border bg-muted/30" : "rounded-lg border border-info/20 bg-info/5"}>
       <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
         {task.agent_id ? (
           <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard showStatusDot />
@@ -321,27 +339,29 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
           </div>
         )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
-          {isQueued ? (
+          {isParked ? (
             <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
           ) : (
             <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
           )}
           <span className="font-medium text-foreground truncate">
-            {isQueued
-              ? t(($) => $.agent_live.is_queued, { name: agentName })
-              : t(($) => $.agent_live.is_working, { name: agentName })}
+            {isWaitingLocalDirectory
+              ? t(($) => $.agent_live.is_waiting_local_directory, { name: agentName })
+              : isQueued
+                ? t(($) => $.agent_live.is_queued, { name: agentName })
+                : t(($) => $.agent_live.is_working, { name: agentName })}
           </span>
           <span className="text-muted-foreground tabular-nums shrink-0">
-            {isQueued
+            {isParked
               ? t(($) => $.agent_live.queued_elapsed_prefix, { elapsed })
               : elapsed}
           </span>
-          {!isQueued && toolCount > 0 && (
+          {!isParked && toolCount > 0 && (
             <span className="text-muted-foreground shrink-0">{t(($) => $.agent_live.tool_count, { count: toolCount })}</span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
-          {!isQueued && (
+          {!isParked && (
             <TranscriptButton
               task={task}
               agentName={agentName}
@@ -351,6 +371,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             />
           )}
           <button
+            type="button"
             onClick={requestCancel}
             disabled={cancelling}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
@@ -365,7 +386,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         onConfirm={() => void handleCancel()}
-        showRunningNote={!isQueued}
+        showRunningNote={!isParked}
       />
     </div>
   );

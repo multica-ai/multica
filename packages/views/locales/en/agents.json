@@ -263,7 +263,7 @@
       "placeholder": "Define this agent's role, expertise, and working style.\n\n# Example\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/"
     },
     "env": {
-      "intro_readonly": "Injected into the agent process at launch. Values are hidden — only the agent owner or workspace admin can view and edit them.",
+      "intro_readonly": "Injected into the agent process at launch. Only workspace owners and admins can read or edit values; every reveal and edit is recorded in the workspace audit log.",
       "empty_readonly": "No environment variables configured.",
       "intro_prefix": "Injected into the agent process at launch (e.g. ",
       "intro_separator": ", ",
@@ -275,7 +275,15 @@
       "remove_aria": "Remove variable",
       "duplicate_keys_toast": "Duplicate environment variable keys",
       "saved_toast": "Environment variables saved",
-      "save_failed_toast": "Failed to save environment variables"
+      "save_failed_toast": "Failed to save environment variables",
+      "not_revealed_title_one": "{{count}} variable configured",
+      "not_revealed_title_other": "{{count}} variables configured",
+      "not_revealed_empty": "No environment variables configured.",
+      "not_revealed_hint": "Values stay masked until you reveal them. Every reveal and edit is recorded in the workspace audit log.",
+      "reveal_action": "Reveal & edit",
+      "revealing": "Revealing…",
+      "reveal_failed_toast": "Failed to load env values",
+      "empty_editable": "No environment variables configured. Add one to inject it into the agent at launch."
     },
     "custom_args": {
       "intro": "Additional CLI arguments appended to the agent command at launch. Multi-token flags can share one row — they'll be split on whitespace before being passed to the CLI.",
@@ -289,7 +297,6 @@
     "skills": {
       "intro": "Workspace skills assigned to this agent. Local runtime skills are always available automatically.",
       "add_action": "Add skill",
-      "import_hint": "Importing creates a workspace copy that your team can edit and reuse.",
       "empty_title": "No skills assigned",
       "empty_hint": "Add workspace skills to share team knowledge with this agent.",
       "remove_failed_toast": "Failed to remove skill",

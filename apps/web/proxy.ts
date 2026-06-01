@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { matchLocale, LOCALE_COOKIE } from "@multica/core/i18n";
+import { LOCALE_COOKIE } from "@multica/core/i18n";
+import {
+  MULTICA_LOCALE_HEADER,
+  resolveLocaleFromSignals,
+} from "./lib/locale-routing";
 
 // Old workspace-scoped route segments that existed before the URL refactor
 // (pre-#1131). Any URL with these as the FIRST segment is a legacy URL that
@@ -17,18 +21,11 @@ const LEGACY_ROUTE_SEGMENTS = new Set([
   "settings",
 ]);
 
-// Resolve the active locale per request. Cookie wins over Accept-Language;
-// matchLocale() falls back to DEFAULT_LOCALE when neither yields a match.
 function resolveLocale(req: NextRequest): string {
-  const cookieLocale = req.cookies.get(LOCALE_COOKIE)?.value;
-  const acceptLanguage = req.headers.get("accept-language") ?? "";
-  const candidates: string[] = [];
-  if (cookieLocale) candidates.push(cookieLocale);
-  for (const part of acceptLanguage.split(",")) {
-    const tag = part.split(";")[0]?.trim();
-    if (tag) candidates.push(tag);
-  }
-  return matchLocale(candidates);
+  return resolveLocaleFromSignals({
+    cookieLocale: req.cookies.get(LOCALE_COOKIE)?.value,
+    acceptLanguage: req.headers.get("accept-language"),
+  });
 }
 
 // Forward the resolved locale to RSC layouts via the `x-multica-locale`
@@ -37,7 +34,7 @@ function resolveLocale(req: NextRequest): string {
 // request — without it the value would only sit on the response.
 function nextWithLocale(req: NextRequest): NextResponse {
   const headers = new Headers(req.headers);
-  headers.set("x-multica-locale", resolveLocale(req));
+  headers.set(MULTICA_LOCALE_HEADER, resolveLocale(req));
   return NextResponse.next({ request: { headers } });
 }
 

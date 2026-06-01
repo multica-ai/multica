@@ -24,6 +24,7 @@ export function FAQSection() {
           {t.faq.items.map((faq, i) => (
             <div key={i}>
               <button
+                type="button"
                 onClick={() => setOpenIndex(openIndex === i ? null : i)}
                 className="flex w-full items-start justify-between gap-4 py-6 text-left"
               >

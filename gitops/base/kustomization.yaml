@@ -11,6 +11,7 @@ resources:
   - provider-config.yaml
   - rds-security-group.yaml
   - rds-subnet-group.yaml
+  - rds-cluster-parameter-group.yaml
   - rds-cluster.yaml
   - rds-instance.yaml
   - elasticache-security-group.yaml

@@ -9,7 +9,18 @@ spec:
     engine: aurora-postgresql
     engineVersion: "16.4"
     allowMajorVersionUpgrade: true
-    applyImmediately: false
+    # Apply the cluster parameter group association (dynamic params, e.g.
+    # cron.database_name) without waiting for the maintenance window. The
+    # static param (shared_preload_libraries=pg_cron) still requires a
+    # manual cluster reboot — DevOps is doing that as part of this PR's
+    # rollout.
+    applyImmediately: true
+
+    # Cluster parameter group: enables pg_cron via shared_preload_libraries
+    # and points cron at the agentfarm database. See
+    # rds-cluster-parameter-group.yaml.
+    dbClusterParameterGroupNameRef:
+      name: agentfarm-postgres-cluster-params
 
     # Password: SSM /agentfarm/tools/POSTGRES_MASTER_PASSWORD → surfaced into
     # agentfarm-secret-store by secret-store.yaml's bulk dataFrom.find (prefix

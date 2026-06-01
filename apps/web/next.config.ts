@@ -1,11 +1,13 @@
 import type { NextConfig } from "next";
 import { config } from "dotenv";
 import { resolve } from "path";
+import { resolveRemoteApiUrl } from "./config/runtime-urls";
+import { createMDX } from "fumadocs-mdx/next";
 
 // Load root .env so REMOTE_API_URL is available to next.config.ts
 config({ path: resolve(__dirname, "../../.env") });
 
-const remoteApiUrl = process.env.REMOTE_API_URL || "http://localhost:8080";
+const remoteApiUrl = resolveRemoteApiUrl(process.env);
 const docsUrl = process.env.DOCS_URL || "http://localhost:4000";
 
 // Parse hostnames from CORS_ALLOWED_ORIGINS so that Next.js dev server
@@ -69,4 +71,10 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// fumadocs-mdx@12 is incompatible with Next 16's Turbopack: its loader fails to
+// dynamic-import `.source/source.config.mjs` under the Turbopack Node evaluator
+// (see fumadocs#2658). `dev`/`build` scripts pass `--webpack` to opt out.
+// Drop the flag once fumadocs-mdx ships a Turbopack-compatible loader.
+const withMDX = createMDX() as (config: NextConfig) => NextConfig;
+
+export default withMDX(nextConfig);

@@ -666,3 +666,350 @@ func TestListComments_ThreadWithSinceFiltersWithinThread(t *testing.T) {
 	_, rows := listComments(t, fx.IssueID, v.Encode())
 	eqIDs(t, ids(rows), []string{fx.R1b, fx.R1b1}, "thread+since")
 }
+
+// nextReplyCursor reads the (before, before-id) headers the thread + tail
+// path emits when there is likely an older page of replies inside the same
+// thread. Same wire shape as the thread-cursor headers — context decides
+// which (the caller knows whether they used --recent or --tail).
+func nextReplyCursor(w *httptest.ResponseRecorder) (string, string) {
+	return w.Header().Get("X-Multica-Next-Before"), w.Header().Get("X-Multica-Next-Before-Id")
+}
+
+// TestListComments_ThreadTailReturnsRootPlusNewestReplies pins the core
+// MUL-2421 contract: `--thread X --tail N` returns the thread root + the N
+// most recent replies in that thread. Body stays chronological, so the
+// root sits at the head and the freshest reply at the tail (closest to
+// "now" in an agent prompt).
+func TestListComments_ThreadTailReturnsRootPlusNewestReplies(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	t.Run("tail=2 keeps newest 2 replies + root", func(t *testing.T) {
+		v := url.Values{}
+		v.Set("thread", fx.Root1)
+		v.Set("tail", "2")
+		// root1 has r1a, r1b, r1b1 in order. Newest 2 = r1b, r1b1.
+		_, rows := listComments(t, fx.IssueID, v.Encode())
+		eqIDs(t, ids(rows), []string{fx.Root1, fx.R1b, fx.R1b1}, "tail=2")
+	})
+
+	t.Run("tail larger than reply count returns full thread", func(t *testing.T) {
+		v := url.Values{}
+		v.Set("thread", fx.Root1)
+		v.Set("tail", "99")
+		_, rows := listComments(t, fx.IssueID, v.Encode())
+		eqIDs(t, ids(rows), []string{fx.Root1, fx.R1a, fx.R1b, fx.R1b1}, "tail=99 (oversized)")
+	})
+
+	t.Run("tail=0 returns root only", func(t *testing.T) {
+		// Per the issue: root must never be elided — even tail=0 keeps it,
+		// so a reader landing on a long thread still gets the "what is this
+		// about" context without dragging any replies into prompt context.
+		v := url.Values{}
+		v.Set("thread", fx.Root1)
+		v.Set("tail", "0")
+		_, rows := listComments(t, fx.IssueID, v.Encode())
+		eqIDs(t, ids(rows), []string{fx.Root1}, "tail=0 (root only)")
+	})
+
+	t.Run("anchor on a nested reply still walks up to the root", func(t *testing.T) {
+		// r1b1 is a reply-of-reply (parent_id = r1b, itself a reply).
+		// The recursive root walk must climb to root1 regardless. tail
+		// applies to *that* thread's replies, not to whichever subtree
+		// the anchor happens to be in.
+		v := url.Values{}
+		v.Set("thread", fx.R1b1)
+		v.Set("tail", "1")
+		_, rows := listComments(t, fx.IssueID, v.Encode())
+		eqIDs(t, ids(rows), []string{fx.Root1, fx.R1b1}, "tail=1 anchored at nested reply")
+	})
+}
+
+// TestListComments_ThreadTailEmitsReplyCursorWhenPageFull pins the cursor
+// header contract for the thread + tail path. A full page (replyCount ==
+// tail) emits a reply cursor pointing at the oldest reply in the page; an
+// underfilled page emits nothing so the caller stops paginating.
+func TestListComments_ThreadTailEmitsReplyCursorWhenPageFull(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	t.Run("underfilled page emits no cursor", func(t *testing.T) {
+		// tail=5 on a thread with 3 replies (r1a, r1b, r1b1). The SQL
+		// returns all 3 — no older page exists.
+		v := url.Values{}
+		v.Set("thread", fx.Root1)
+		v.Set("tail", "5")
+		w, _ := listComments(t, fx.IssueID, v.Encode())
+		nb, nbid := nextReplyCursor(w)
+		if nb != "" || nbid != "" {
+			t.Fatalf("expected no cursor, got before=%q before_id=%q", nb, nbid)
+		}
+	})
+
+	t.Run("tail=0 emits no cursor (no replies were requested)", func(t *testing.T) {
+		// tail=0 is the "I just want the root context" mode. There is no
+		// reply page to scroll, so the server must not invite the caller
+		// to walk one.
+		v := url.Values{}
+		v.Set("thread", fx.Root1)
+		v.Set("tail", "0")
+		w, _ := listComments(t, fx.IssueID, v.Encode())
+		nb, nbid := nextReplyCursor(w)
+		if nb != "" || nbid != "" {
+			t.Fatalf("tail=0 must not emit cursor, got before=%q before_id=%q", nb, nbid)
+		}
+	})
+
+	t.Run("full page emits cursor pointing at oldest reply", func(t *testing.T) {
+		// tail=2 on root1 ⇒ page = r1b, r1b1. Oldest reply on page = r1b.
+		v := url.Values{}
+		v.Set("thread", fx.Root1)
+		v.Set("tail", "2")
+		w, _ := listComments(t, fx.IssueID, v.Encode())
+		nb, nbid := nextReplyCursor(w)
+		if nbid != fx.R1b {
+			t.Fatalf("cursor before_id = %q, want %q (r1b — oldest reply on page)", nbid, fx.R1b)
+		}
+		if nb == "" {
+			t.Fatalf("cursor before is empty; expected RFC3339Nano timestamp")
+		}
+		if _, err := time.Parse(time.RFC3339Nano, nb); err != nil {
+			t.Fatalf("cursor before = %q is not RFC3339Nano: %v", nb, err)
+		}
+	})
+
+	t.Run("exact-boundary page emits no cursor", func(t *testing.T) {
+		// root1 has exactly 3 replies (r1a, r1b, r1b1). Requesting --tail 3
+		// returns the entire reply set; there is nothing older to scroll
+		// to, so no cursor must be emitted. Pre-fix the server used
+		// `replyCount >= tail` and falsely sent a cursor here — the next
+		// page then returned just the root, wasting a round-trip.
+		// (MUL-2421 review fix.)
+		v := url.Values{}
+		v.Set("thread", fx.Root1)
+		v.Set("tail", "3")
+		w, rows := listComments(t, fx.IssueID, v.Encode())
+		eqIDs(t, ids(rows), []string{fx.Root1, fx.R1a, fx.R1b, fx.R1b1}, "tail==replyCount returns full thread")
+		nb, nbid := nextReplyCursor(w)
+		if nb != "" || nbid != "" {
+			t.Fatalf("exact-boundary page must not emit cursor, got before=%q before_id=%q", nb, nbid)
+		}
+	})
+}
+
+// TestListComments_ThreadTailCursorScrollsOlderReplies walks a long thread
+// reply-by-reply via the cursor the server emits. This is the analogue of
+// TestListComments_RecentWithThreadCursorScrollsOlderThreads but inside
+// one thread: cursor returns are reply cursors, not thread cursors, and
+// the root must keep showing up on every page.
+func TestListComments_ThreadTailCursorScrollsOlderReplies(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	// Page 1: tail=1 on root1 → newest reply = r1b1.
+	v := url.Values{}
+	v.Set("thread", fx.Root1)
+	v.Set("tail", "1")
+	w1, page1 := listComments(t, fx.IssueID, v.Encode())
+	eqIDs(t, ids(page1), []string{fx.Root1, fx.R1b1}, "page1 = root + r1b1")
+	nb, nbid := nextReplyCursor(w1)
+	if nb == "" || nbid != fx.R1b1 {
+		t.Fatalf("page1 cursor = (%q, %q), want (non-empty, %q)", nb, nbid, fx.R1b1)
+	}
+
+	// Page 2: cursor points at r1b1 → server returns the next older reply
+	// (r1b). Root is re-emitted on every page so the agent never loses the
+	// thread context.
+	v.Set("before", nb)
+	v.Set("before_id", nbid)
+	w2, page2 := listComments(t, fx.IssueID, v.Encode())
+	eqIDs(t, ids(page2), []string{fx.Root1, fx.R1b}, "page2 = root + r1b")
+	nb2, nbid2 := nextReplyCursor(w2)
+	if nb2 == "" || nbid2 != fx.R1b {
+		t.Fatalf("page2 cursor = (%q, %q), want (non-empty, %q)", nb2, nbid2, fx.R1b)
+	}
+
+	// Page 3: cursor points at r1b → server returns r1a (the last reply).
+	// r1a is the oldest reply in the thread, so the server must NOT emit a
+	// cursor — the next page would return just the root, which is a wasted
+	// round-trip. (MUL-2421 review: probe `reply_limit + 1` to detect
+	// has-more instead of trusting replyCount >= tail.)
+	v.Set("before", nb2)
+	v.Set("before_id", nbid2)
+	w3, page3 := listComments(t, fx.IssueID, v.Encode())
+	eqIDs(t, ids(page3), []string{fx.Root1, fx.R1a}, "page3 = root + r1a (last reply)")
+	nb3, nbid3 := nextReplyCursor(w3)
+	if nb3 != "" || nbid3 != "" {
+		t.Fatalf("page3 cursor = (%q, %q), want both empty (end-of-thread, no older replies after r1a)", nb3, nbid3)
+	}
+}
+
+// TestListComments_ThreadTailWithSinceFiltersAfterTail proves the documented
+// combination: `--thread + --tail + --since` applies `tail` first (newest N
+// replies in the thread) and then drops anything <= since from that page.
+// The root is exempt — it is always returned so the reader keeps the thread
+// context even when the page would otherwise be empty.
+func TestListComments_ThreadTailWithSinceFiltersAfterTail(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	t.Run("since drops older replies, keeps root + fresher", func(t *testing.T) {
+		// tail=3 on root1 → all 3 replies (r1a, r1b, r1b1) + root1.
+		// since = base + 90s → drops r1a (base+1m); keeps r1b (base+2m),
+		// r1b1 (base+3m).
+		v := url.Values{}
+		v.Set("thread", fx.Root1)
+		v.Set("tail", "3")
+		v.Set("since", fx.Base.Add(90*time.Second).UTC().Format(time.RFC3339Nano))
+		_, rows := listComments(t, fx.IssueID, v.Encode())
+		eqIDs(t, ids(rows), []string{fx.Root1, fx.R1b, fx.R1b1}, "tail=3+since")
+	})
+
+	t.Run("since drops every reply but root stays", func(t *testing.T) {
+		// since past every comment in the fixture — root is still emitted
+		// for context.
+		v := url.Values{}
+		v.Set("thread", fx.Root1)
+		v.Set("tail", "3")
+		v.Set("since", fx.Base.Add(1*time.Hour).UTC().Format(time.RFC3339Nano))
+		_, rows := listComments(t, fx.IssueID, v.Encode())
+		eqIDs(t, ids(rows), []string{fx.Root1}, "since past everything keeps root")
+	})
+
+	t.Run("tail overflow with since past oldest retained reply suppresses cursor", func(t *testing.T) {
+		// Recreate Elon's MUL-2421 v2 case: long thread, tail=2 overflows
+		// (3 replies exist, only top 2 kept), the page body still retains
+		// a fresher reply (r1b1 at base+3m), but the oldest reply on the
+		// retained page (r1b at base+2m) is already <= since (base+2m30s).
+		// Older replies are strictly older than r1b → strictly older than
+		// since → all guaranteed-filtered. Server must NOT emit a reply
+		// cursor; otherwise the agent walks root-only pages until the
+		// thread bottoms out.
+		v := url.Values{}
+		v.Set("thread", fx.Root1)
+		v.Set("tail", "2")
+		v.Set("since", fx.Base.Add(150*time.Second).UTC().Format(time.RFC3339Nano))
+		w, rows := listComments(t, fx.IssueID, v.Encode())
+		// Sanity-check the body precondition: we kept the fresher reply
+		// (r1b1, base+3m) but dropped r1b (base+2m) via since. If this
+		// assertion ever shifts, the cursor assertion below would be
+		// testing a different shape than the bug Elon described.
+		eqIDs(t, ids(rows), []string{fx.Root1, fx.R1b1}, "body keeps root + fresher reply only")
+		nb, nbid := nextReplyCursor(w)
+		if nb != "" || nbid != "" {
+			t.Fatalf("expected no cursor (older page is guaranteed-empty under since), got before=%q before_id=%q", nb, nbid)
+		}
+	})
+}
+
+// TestListComments_ThreadTailFlagCombinationRules locks the API-surface
+// rules for the new --tail flag. The matrix is narrow on purpose — the
+// only legal combinations are: (thread + tail), (thread + tail + since),
+// (thread + tail + before + before_id), and a thread/recent/cursor matrix
+// that does NOT include tail.
+func TestListComments_ThreadTailFlagCombinationRules(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	cases := []struct {
+		name   string
+		query  string
+		status int
+	}{
+		{
+			// tail is a thread-scoped limit; outside of --thread there is
+			// no defined behavior so it must be rejected at the API surface.
+			name:   "tail without thread rejected",
+			query:  "tail=5",
+			status: http.StatusBadRequest,
+		},
+		{
+			// Negative tail would round-trip to LIMIT -N which Postgres
+			// flags as a syntax error. Catch it at the boundary.
+			name:   "negative tail rejected",
+			query:  "thread=" + fx.Root1 + "&tail=-1",
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "non-numeric tail rejected",
+			query:  "thread=" + fx.Root1 + "&tail=lots",
+			status: http.StatusBadRequest,
+		},
+		{
+			// Cursor without --tail in the thread path used to be rejected
+			// outright; now it requires --tail so the cursor's "scroll
+			// older replies" meaning has somewhere to land. Without --tail
+			// the server returns the whole thread anyway, so the cursor is
+			// meaningless.
+			name: "thread + before without tail rejected",
+			query: (func() string {
+				v := url.Values{}
+				v.Set("thread", fx.Root1)
+				v.Set("before", time.Now().UTC().Format(time.RFC3339))
+				v.Set("before_id", uuid.NewString())
+				return v.Encode()
+			})(),
+			status: http.StatusBadRequest,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w, _ := listComments(t, fx.IssueID, tc.query)
+			if w.Code != tc.status {
+				t.Fatalf("query=%q\n  got=%d want=%d body=%s", tc.query, w.Code, tc.status, w.Body.String())
+			}
+		})
+	}
+}
+
+// TestListComments_ThreadTailZeroReplyCountIsAllowed pins tail=0 as a valid
+// caller intent (root-only). The split between "did not pass --tail" and
+// "passed --tail 0" lives in the handler (ThreadTailSet bool); collapsing
+// them into a single int would silently downgrade tail=0 to the full
+// thread path.
+func TestListComments_ThreadTailZeroReplyCountIsAllowed(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	v := url.Values{}
+	v.Set("thread", fx.Root1)
+	v.Set("tail", "0")
+	w, rows := listComments(t, fx.IssueID, v.Encode())
+	if w.Code != http.StatusOK {
+		t.Fatalf("tail=0 should succeed, got %d: %s", w.Code, w.Body.String())
+	}
+	eqIDs(t, ids(rows), []string{fx.Root1}, "tail=0 returns only root")
+}
+
+// TestListComments_ThreadTailNotFoundReturns404 makes the not-found surface
+// of the paged path match the legacy thread path. A stale anchor is a
+// realistic agent footgun (mention a comment that was later deleted), and
+// returning [] would be indistinguishable from "the thread really does
+// have no comments".
+func TestListComments_ThreadTailNotFoundReturns404(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	v := url.Values{}
+	v.Set("thread", "00000000-0000-0000-0000-000000000001")
+	v.Set("tail", "5")
+	w, _ := listComments(t, fx.IssueID, v.Encode())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown anchor, got %d: %s", w.Code, w.Body.String())
+	}
+	_ = fx
+}

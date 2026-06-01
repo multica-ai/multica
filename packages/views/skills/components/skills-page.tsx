@@ -107,39 +107,41 @@ function CardToolbar({
 }) {
   const { t } = useT("skills");
   return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-      <div className="relative">
+    <div className="flex h-auto shrink-0 flex-col gap-2 border-b px-3 py-3 sm:h-12 sm:flex-row sm:items-center sm:px-4 sm:py-0">
+      <div className="relative w-full sm:w-auto">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t(($) => $.page.search_placeholder)}
-          className="h-8 w-64 pl-8 text-sm"
+          className="h-8 w-full pl-8 text-sm sm:w-64"
         />
       </div>
-      {SCOPE_KEYS.map((scope) => (
-        <Tooltip key={scope}>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="outline"
-                size="sm"
-                className={
-                  filter === scope
-                    ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                    : "text-muted-foreground"
-                }
-                onClick={() => setFilter(scope)}
-              >
-                {t(($) => $.page.scopes[scope].label)}
-              </Button>
-            }
-          />
-          <TooltipContent side="bottom">
-            {t(($) => $.page.scopes[scope].description)}
-          </TooltipContent>
-        </Tooltip>
-      ))}
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:overflow-visible sm:px-0 sm:pb-0">
+        {SCOPE_KEYS.map((scope) => (
+          <Tooltip key={scope}>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={
+                    filter === scope
+                      ? "shrink-0 bg-accent text-accent-foreground hover:bg-accent/80"
+                      : "shrink-0 text-muted-foreground"
+                  }
+                  onClick={() => setFilter(scope)}
+                >
+                  {t(($) => $.page.scopes[scope].label)}
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom">
+              {t(($) => $.page.scopes[scope].description)}
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
     </div>
   );
 }
@@ -285,14 +287,14 @@ export default function SkillsPage() {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
         <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} />
-        <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
+        <div className="flex flex-1 min-h-0 flex-col gap-4 p-3 sm:p-6">
           <div className="space-y-3 pl-4">
             <Skeleton className="h-5 w-full max-w-2xl rounded-md" />
             <Skeleton className="h-14 w-full max-w-3xl rounded-md" />
           </div>
           <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border">
-            <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-              <Skeleton className="h-8 w-64 rounded-md" />
+            <div className="flex h-auto shrink-0 flex-col gap-2 border-b px-3 py-3 sm:h-12 sm:flex-row sm:items-center sm:px-4 sm:py-0">
+              <Skeleton className="h-8 w-full rounded-md sm:w-64" />
               <Skeleton className="h-7 w-12 rounded-md" />
               <Skeleton className="h-7 w-14 rounded-md" />
               <Skeleton className="h-7 w-16 rounded-md" />
@@ -360,7 +362,7 @@ export default function SkillsPage() {
         </div>
       )}
 
-      <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
+      <div className="flex flex-1 min-h-0 flex-col gap-4 p-3 sm:p-6">
         {!showEmpty && (
           <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
             <span className="font-medium text-foreground">

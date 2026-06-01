@@ -8,13 +8,21 @@ import type { QuestionnaireAnswers, Role, UseCase } from "./types";
 export type AgentTemplateId = "coding" | "planning" | "writing" | "assistant";
 
 /**
- * Pick a recommended agent template based on the v2 questionnaire
+ * Pick a recommended agent template based on the questionnaire
  * (role × use_case). Role is the primary signal; use_case is a
  * tiebreaker for roles that legitimately split between templates
  * (engineer / product / marketing).
  *
+ * `use_case` is multi-select — when a user picks several, the rules
+ * below use `.includes(...)` against the set. Order of evaluation
+ * inside each role's switch is the implicit priority (first match
+ * wins). For ambiguous overlaps (e.g. engineer who picks both
+ * `manage_team` and `write_publish`) the earlier branch wins, which
+ * matches the prior single-select behavior when only one of those
+ * was selectable.
+ *
  * Fallback chain when role is skipped or null:
- *   1. Derive from use_case alone.
+ *   1. Derive from use_case alone (same priority order).
  *   2. Both unknown → `assistant` (the generic default).
  *
  * Pure / deterministic — safe to call on every render.
@@ -23,25 +31,25 @@ export function recommendTemplate(
   answers: Pick<QuestionnaireAnswers, "role" | "use_case">,
 ): AgentTemplateId {
   const role: Role | null = answers.role;
-  const useCase: UseCase | null = answers.use_case;
+  const useCases: readonly UseCase[] = answers.use_case ?? [];
 
-  if (role === null) return fallbackFromUseCase(useCase);
+  if (role === null) return fallbackFromUseCase(useCases);
 
   switch (role) {
     case "engineer":
-      if (useCase === "manage_team" || useCase === "plan_research")
+      if (useCases.includes("manage_team") || useCases.includes("plan_research"))
         return "planning";
-      if (useCase === "write_publish") return "writing";
+      if (useCases.includes("write_publish")) return "writing";
       return "coding";
     case "product":
-      if (useCase === "ship_code") return "coding";
+      if (useCases.includes("ship_code")) return "coding";
       return "planning";
     case "designer":
       return "assistant";
     case "writer":
       return "writing";
     case "marketing":
-      if (useCase === "write_publish" || useCase === "plan_research")
+      if (useCases.includes("write_publish") || useCases.includes("plan_research"))
         return "writing";
       return "planning";
     case "research":
@@ -54,16 +62,10 @@ export function recommendTemplate(
   }
 }
 
-function fallbackFromUseCase(useCase: UseCase | null): AgentTemplateId {
-  switch (useCase) {
-    case "ship_code":
-      return "coding";
-    case "write_publish":
-      return "writing";
-    case "manage_team":
-    case "plan_research":
-      return "planning";
-    default:
-      return "assistant";
-  }
+function fallbackFromUseCase(useCases: readonly UseCase[]): AgentTemplateId {
+  if (useCases.includes("ship_code")) return "coding";
+  if (useCases.includes("write_publish")) return "writing";
+  if (useCases.includes("manage_team") || useCases.includes("plan_research"))
+    return "planning";
+  return "assistant";
 }

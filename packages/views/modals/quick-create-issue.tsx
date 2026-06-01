@@ -201,6 +201,16 @@ export function AgentCreatePanel({
     return seed ?? null;
   });
 
+  // Parent-issue context — seeded by `openCreateSubIssue` when the modal is
+  // opened from the "Add sub issue" entry on an existing issue. We carry it
+  // through (not as an editable form field) so a manual→agent flip preserves
+  // the sub-issue intent; the agent panel never exposes this as a picker.
+  // Identifier is best-effort display context only — the UUID is the
+  // authoritative reference the backend/agent uses for `--parent <uuid>`.
+  const parentIssueId = (data?.parent_issue_id as string | undefined) ?? undefined;
+  const parentIssueIdentifier =
+    (data?.parent_issue_identifier as string | undefined) ?? undefined;
+
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
   // a `projectId` that isn't in the list means the project was deleted in
@@ -280,6 +290,7 @@ export function AgentCreatePanel({
           : { squad_id: actor.id }),
         prompt: md,
         project_id: projectId ?? undefined,
+        parent_issue_id: parentIssueId,
       });
       setLastActor(actor.type, actor.id);
       setLastProjectId(projectId);
@@ -358,11 +369,17 @@ export function AgentCreatePanel({
         : {}),
     });
     setLastMode("manual");
-    // Hand the picked project to the manual panel through the same `data`
-    // channel that already carries agent_id / parent_issue_id. The manual
-    // panel reads `data.project_id` on mount; this preserves the user's
-    // selection across the mode flip without piping a third store through.
-    onSwitchMode?.(projectId ? { project_id: projectId } : null);
+    // Hand the picked project and the parent-issue context to the manual
+    // panel through the same `data` channel that already carries agent_id /
+    // parent_issue_id. The manual panel reads these on mount; this preserves
+    // the user's selection (and the sub-issue intent seeded by
+    // openCreateSubIssue) across the mode flip without piping a third store
+    // through.
+    const carry: Record<string, unknown> = {};
+    if (projectId) carry.project_id = projectId;
+    if (parentIssueId) carry.parent_issue_id = parentIssueId;
+    if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
+    onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 
   return (
@@ -467,7 +484,14 @@ export function AgentCreatePanel({
             owns only the project (status / priority / assignee / due-date are
             inferred from the prompt), so it's a single pill. The pick is
             persisted per-workspace via useQuickCreateStore.lastProjectId so
-            users targeting one project skip retyping "in project X". */}
+            users targeting one project skip retyping "in project X".
+            When the modal was opened from "Add sub issue" on an existing
+            issue, a read-only chip on the same row tells the user that the
+            new issue will be filed as a sub-issue of that parent — the agent
+            handles the wiring silently, but surfacing the relationship
+            avoids "where did this end up?" surprise. We deliberately keep
+            it non-editable: changing the parent is a `Set parent` action on
+            the parent itself, not a knob in the quick-create flow. */}
         <div className="flex items-center gap-1.5 px-4 pb-2 shrink-0 flex-wrap">
           <ProjectPicker
             projectId={projectId}
@@ -475,6 +499,19 @@ export function AgentCreatePanel({
             triggerRender={<PillButton />}
             align="start"
           />
+          {parentIssueId && (
+            <span
+              data-testid="agent-sub-issue-chip"
+              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+              title={t(($) => $.create_issue.agent.sub_issue_of, {
+                identifier: parentIssueIdentifier ?? "",
+              })}
+            >
+              {t(($) => $.create_issue.agent.sub_issue_of, {
+                identifier: parentIssueIdentifier ?? "",
+              })}
+            </span>
+          )}
         </div>
 
         {/* Footer */}

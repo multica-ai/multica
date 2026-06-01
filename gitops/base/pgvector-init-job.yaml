@@ -50,11 +50,25 @@ spec:
           set -euo pipefail
           echo "Testing database connection..."
           psql "$DATABASE_URL" -c "SELECT version();"
+
           echo "Initializing pgvector extension..."
           psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS vector;"
-          echo "Verifying extension installation..."
           psql "$DATABASE_URL" -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"
-          echo "pgvector extension initialized successfully"
+
+          # pg_cron is loaded via the cluster parameter group's
+          # shared_preload_libraries (see rds-cluster-parameter-group.yaml).
+          # CREATE EXTENSION will fail until the cluster has been rebooted to
+          # pick up that static param — we fail loud here so a missed reboot
+          # cannot ship as an apparent green sync with migration 103's
+          # rollup quietly disabled. Migration 076 in the app is wrapped in
+          # DO/EXCEPTION and would silently skip, which is exactly the trap.
+          echo "Initializing pg_cron extension..."
+          psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS pg_cron;"
+          psql "$DATABASE_URL" -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'pg_cron';" \
+            | grep -q pg_cron \
+            || { echo "ERROR: pg_cron not loaded — verify cluster parameter group applied and the cluster was rebooted"; exit 1; }
+
+          echo "Extensions initialized successfully (vector, pg_cron)"
         env:
           - name: POSTGRES_HOST
             valueFrom:

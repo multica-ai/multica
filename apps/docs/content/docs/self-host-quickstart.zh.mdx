@@ -1,6 +1,6 @@
 ---
 title: Self-Host 快速上手
-description: 在自己的服务器或本机用 Docker 把 Multica 跑起来。约 10 分钟。
+description: 在自己的服务器或本机用 Docker 把 Multica 跑起来（也可以在 Kubernetes 上用 Helm）。约 10 分钟。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -17,6 +17,10 @@ import { Callout } from "fumadocs-ui/components/callout";
 - 至少一款 AI 编程工具装在**运行守护进程的机器上**（不一定是跑服务器的机器——可以是你开发用的笔记本）
 
 ## 1. 拉取项目 + 一键启动后端
+
+<Callout type="info">
+**已经有 Kubernetes 集群？** 不用走 Docker，直接用 Helm chart——跳到下面的 [Kubernetes 部署（替代方案）](#kubernetes-部署替代方案)，装完再回到 [第 4 步](#4-首次登录--创建工作区) 完成登录。
+</Callout>
 
 ```bash
 git clone https://github.com/multica-ai/multica.git
@@ -154,11 +158,99 @@ multica.example.com {
 
 流程和 Cloud 一样——见 [Cloud 快速上手 → 5-6 步](/cloud-quickstart#5-创建智能体)。
 
+## 7. 调度用量汇总任务（Usage Dashboard 必需）
+
+<Callout type="warning">
+Usage / Runtime 看板读的是派生表 `task_usage_hourly`，需要 `rollup_task_usage_hourly()` 周期性运行才能填充。**默认的 `pgvector/pgvector:pg17` 镜像不带 `pg_cron`**，后端进程内部也不会跑这个 rollup——什么都没调度的话，原始 `task_usage` 行会继续写入，但 dashboard 会一直停在 0，不会报错。
+</Callout>
+
+三种支持路径，三选一即可。
+
+**Option A —— 外部 cron / systemd-timer（最简单）。** 在任意外部调度器上每 5 分钟跑一次 rollup。函数是幂等的、按 watermark 推进，丢一两个 tick 下次能补上：
+
+```bash
+# /etc/cron.d/multica-rollup —— 每 5 分钟跑一次
+*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
+  exec -T postgres psql -U multica -d multica \
+  -c "SELECT rollup_task_usage_hourly();" >/dev/null
+```
+
+**Option B —— 换成自带 `pg_cron` 的 Postgres 镜像。** 把 `docker-compose.selfhost.yml` 里的 `pgvector/pgvector:pg17` 换成同时带 `pgvector` 和 `pg_cron` 的镜像（比如 `supabase/postgres`，或自己 build 一份），把 `shared_preload_libraries=pg_cron` 配上、重启 Postgres，然后注册一次任务：
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+SELECT cron.schedule(
+  'rollup_task_usage_hourly',
+  '*/5 * * * *',
+  $$SELECT rollup_task_usage_hourly()$$
+);
+```
+
+**Option C —— 先回填历史（升级路径）。** 如果你是从 `v0.3.4` 升级到 `v0.3.5+` 且数据库里已经有 `task_usage` 行，migration `103` 会以 `refusing to drop legacy daily rollups: ...` 报错并中止 `migrate up`，直到 hourly 表被 seed 过。先跑一次内置的 backfill 命令，然后再配 Option A 或 Option B 让新数据持续流进来：
+
+```bash
+docker compose -f docker-compose.selfhost.yml exec backend \
+  ./backfill_task_usage_hourly --sleep-between-slices=2s
+```
+
+`--sleep-between-slices=2s` 用来在繁忙的数据库上限制读压力。回填跑完后重启后端容器（migration 在启动时自动跑），升级就能继续。
+
+完整参考（含 Kubernetes `CronJob` 模板和升级顺序）见仓库的 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)。
+
+## Kubernetes 部署（替代方案）
+
+如果你已经在跑 Kubernetes 集群，仓库里也带了一个 Helm chart，路径 `deploy/helm/multica/`。它就是 k8s 版的 `make selfhost`——一样的 backend 镜像、frontend 镜像、`pgvector/pgvector:pg17` Postgres，封装成 Deployment / Service / Ingress，再加上一个由 `values.yaml` 渲染出来的 `ConfigMap`。这套 chart 是按照 k3s + Traefik + `local-path` 写的，集群里只要有 Ingress controller 和默认的 `ReadWriteOnce` StorageClass 就能跑，其他类型的集群稍微改一改也能用。
+
+这个 chart **不会模板化任何敏感值**。它通过 name 引用一个叫 `multica-secrets` 的 Secret，所以真实的 JWT / DB / Resend / Google 密钥永远不用进 git，也不用进 `values.yaml`。先用 kubectl 一次性把命名空间和 Secret 建好：
+
+```bash
+kubectl create namespace multica
+
+kubectl -n multica create secret generic multica-secrets \
+  --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
+  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+  --from-literal=RESEND_API_KEY="" \
+  --from-literal=GOOGLE_CLIENT_SECRET="" \
+  --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+  --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+```
+
+再装 chart：
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+helm install multica deploy/helm/multica -n multica
+```
+
+默认主机名是 `multica.dev.lan`（web）和 `api.multica.dev.lan`（backend）。把它们加进 `/etc/hosts`（或者本地 DNS），指向任意一个 Ingress 可达的节点 IP 就行。要换主机名，就把 `deploy/helm/multica/values.yaml` 复制一份，改掉 `ingress.frontend.host` / `ingress.backend.host`，再把 `backend.config.appUrl` / `frontendOrigin` / `localUploadBaseUrl` / `googleRedirectUri` 改成相应的地址，然后 `helm install ... -f my-values.yaml`。
+
+冷集群上 backend 可能会 `Running` 但 `Not Ready` 持续几分钟，等 Postgres 起来并跑完 migration——startupProbe 会兜住这一段，pod 不会被 liveness 重启。等它 `Ready` 之后：
+
+```bash
+curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
+# {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+然后浏览器打开 `http://multica.dev.lan`，回到上面的 [第 4 步——首次登录](#4-首次登录--创建工作区) 继续。命令行连到你的 Ingress 主机：
+
+```bash
+multica setup self-host \
+  --server-url http://api.multica.dev.lan \
+  --app-url http://multica.dev.lan
+```
+
+只想拉最新镜像、不动 chart：`kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend`。要锁到某个 Multica 版本，就在 values 文件里设 `images.backend.tag` / `images.frontend.tag`，再 `helm upgrade`。`helm -n multica uninstall multica` 只删工作负载，PVC 和 Secret 都保留；`kubectl delete namespace multica` 才会全清。
+
+完整参考——三种登录方式、为了绕过 web 镜像 build-time 写死的 `REMOTE_API_URL` 而加的 `backend` ExternalName 别名、资源限制、TLS——都在仓库的 [`SELF_HOSTING.md`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative)。
+
 ## 常见问题
 
 - **后端起不来**：看容器日志 `docker compose -f docker-compose.selfhost.yml logs backend`；常见是 `.env` 里 `DATABASE_URL` 或 `JWT_SECRET` 有问题
 - **验证码收不到**：没配任何邮件后端（Resend 和 SMTP 都没设） → 从 `docker compose logs backend` 里找 `[DEV] Verification code`
 - **WebSocket 连不上**：公网部署必须设 `FRONTEND_ORIGIN` 成你真实的前端域名；见 [故障排查 → WebSocket 连不上](/troubleshooting#websocket-连不上)
+- **Usage / Runtime 看板一直是 0**：没人调度 `rollup_task_usage_hourly()` —— 见上面的 [第 7 步](#7-调度用量汇总任务usage-dashboard-必需) 和 [故障排查 → Usage 看板一直是 0](/troubleshooting#usage-看板一直是-0)
+- **`migrate up` 报 `refusing to drop legacy daily rollups`**：`v0.3.4 → v0.3.5+` 升级路径的 fail-closed guard。先跑 `backfill_task_usage_hourly` —— 见 [第 7 步 → Option C](#7-调度用量汇总任务usage-dashboard-必需)
 
 ## 下一步
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"text/tabwriter"
 	"time"
 
@@ -52,10 +53,23 @@ func runSquadList(cmd *cobra.Command, _ []string) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tNAME\tLEADER ID\tMEMBERS")
 	for _, s := range squads {
-		fmt.Fprintf(w, "%s\t%s\t%s\t-\n",
-			strVal(s, "id"), strVal(s, "name"), strVal(s, "leader_id"))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			strVal(s, "id"), strVal(s, "name"), strVal(s, "leader_id"),
+			memberCountDisplay(s))
 	}
 	return w.Flush()
+}
+
+func memberCountDisplay(m map[string]any) string {
+	v, ok := m["member_count"]
+	if !ok || v == nil {
+		return "-"
+	}
+	n, ok := v.(float64)
+	if !ok || n <= 0 {
+		return "-"
+	}
+	return strconv.Itoa(int(n))
 }
 
 // ── Get ─────────────────────────────────────────────────────────────────────

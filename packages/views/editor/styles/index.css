@@ -1,0 +1,13 @@
+/*
+ * Editor content styles.
+ *
+ * ContentEditor and ReadonlyContent intentionally share this stylesheet so
+ * editable Tiptap content and readonly markdown content render with the same
+ * typography, code highlighting, embeds, and inline affordances.
+ */
+
+@import "./shell.css";
+@import "./prose.css";
+@import "./code.css";
+@import "./mermaid.css";
+@import "./media.css";

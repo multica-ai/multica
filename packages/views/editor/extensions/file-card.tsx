@@ -29,16 +29,19 @@ const FILE_CARD_MARKDOWN_RE = new RegExp(
 // React NodeView — thin wrapper, all rendering lives in <Attachment>
 // ---------------------------------------------------------------------------
 
-export function FileCardView({ node }: NodeViewProps) {
+export function FileCardView({ node, editor, deleteNode }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
+  const editable = editor?.isEditable ?? false;
 
   return (
     <NodeViewWrapper as="div" className="file-card-node" data-type="fileCard">
       <div contentEditable={false}>
         <Attachment
           attachment={{ kind: "url", url: href, filename, uploading }}
+          editable={editable}
+          onDelete={editable ? deleteNode : undefined}
         />
       </div>
     </NodeViewWrapper>

@@ -1,0 +1,37 @@
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: ClusterParameterGroup
+metadata:
+  name: agentfarm-postgres-cluster-params
+spec:
+  deletionPolicy: Orphan
+  forProvider:
+    region: us-east-1
+    family: aurora-postgresql16
+    description: "agentfarm Aurora PostgreSQL 16 cluster parameters (pg_cron preload + database)"
+
+    parameter:
+      # Static parameter — takes effect only after a cluster reboot. The PR
+      # that introduces this association is the maintenance window: DevOps
+      # reboots the cluster after the rds-cluster.yaml change applies, which
+      # is what loads pg_cron into the postmaster and lets migration 103
+      # (drop_legacy_daily_rollups) pass its fail-closed guard.
+      - name: shared_preload_libraries
+        value: pg_cron
+        applyMethod: pending-reboot
+
+      # Dynamic — pg_cron schedules cron jobs in the database named here.
+      # Defaults to `postgres`; our app DB is `agentfarm`, so the jobs
+      # registered by migration 076 / rollup_task_usage_hourly() would not
+      # be visible without this.
+      - name: cron.database_name
+        value: agentfarm
+        applyMethod: immediate
+
+    tags:
+      Owner: DevOps
+      Application: agentfarm
+      Environment: tools
+      Purpose: "pg_cron preload + cron.database_name for task_usage_hourly rollup"
+
+  providerConfigRef:
+    name: agentfarm-provider-aws-upbound-config

@@ -13,6 +13,24 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// TestSquadOperatingProtocolWarnsAgainstDualTrigger locks in the rule
+// added for #3033: the protocol must tell the squad leader that a `todo`
+// child issue with an agent assignee already fires that agent, so they
+// must not also @mention the same agent on the parent issue for the
+// same work. Asserts behavior, not exact wording — keep the substrings
+// narrow so harmless rewording doesn't break the test.
+func TestSquadOperatingProtocolWarnsAgainstDualTrigger(t *testing.T) {
+	compact := strings.Join(strings.Fields(squadOperatingProtocol), " ")
+	for _, want := range []string{
+		"--status todo` and an agent assignee already fires that agent automatically",
+		"Never both for the same work.",
+	} {
+		if !strings.Contains(compact, want) {
+			t.Errorf("expected squad operating protocol to contain %q\n--- protocol ---\n%s", want, squadOperatingProtocol)
+		}
+	}
+}
+
 // seedSquadForBriefing creates a squad with the seeded test agent as
 // leader. Returns the loaded db.Squad and a cleanup-registered ID.
 func seedSquadForBriefing(t *testing.T, leaderID string, name, instructions string) db.Squad {

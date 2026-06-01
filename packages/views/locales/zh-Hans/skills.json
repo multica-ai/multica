@@ -1,6 +1,6 @@
 {
   "page": {
-    "title": "skill",
+    "title": "Skills",
     "tagline": "工作区里任何智能体都能使用的指令。",
     "learn_more": "了解更多 →",
     "new_skill": "新建 skill",
@@ -198,7 +198,7 @@
       "toast_created": "已创建 skill"
     },
     "url": {
-      "url_label": "skill URL",
+      "url_label": "Skill URL",
       "supported_sources": "支持的来源",
       "import": "导入",
       "importing": "导入中...",

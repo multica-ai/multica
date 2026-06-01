@@ -89,6 +89,11 @@ function tryRouteToOverlay(path: string, router?: DataRouter): boolean {
   return false;
 }
 
+function routerLocationPath(router: DataRouter): string {
+  const { pathname, search, hash } = router.state.location;
+  return `${pathname}${search ?? ""}${hash ?? ""}`;
+}
+
 /**
  * Intercept pushes that change workspace. Returns `true` if the navigation
  * was delegated to the tab store (caller should NOT proceed).
@@ -195,6 +200,7 @@ export function DesktopNavigationProvider({
         }
         const active = currentActiveTab();
         if (tryRouteToOverlay(path, active?.router)) return;
+        if (active && routerLocationPath(active.router) === path) return;
         if (tryRouteToOtherWorkspace(path)) return;
         if (tryRouteToPinnedNewTab(path)) return;
         active?.router.navigate(path);
@@ -271,6 +277,7 @@ export function TabNavigationProvider({
     () => ({
       push: (path: string) => {
         if (tryRouteToOverlay(path, router)) return;
+        if (routerLocationPath(router) === path) return;
         if (tryRouteToOtherWorkspace(path)) return;
         if (tryRouteToPinnedNewTab(path)) return;
         router.navigate(path);

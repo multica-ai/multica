@@ -127,9 +127,11 @@ func TestRunCodexDebugModels_ArgvSeenByBinary(t *testing.T) {
 	script := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$@\" > '" + argvFile + "'\n" +
 		"echo '{\"models\":[]}'\n"
-	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake codex: %v", err)
-	}
+	// Use the ForkLock-protected helper instead of os.WriteFile: under
+	// t.Parallel() with the rest of this package, a sibling test's
+	// concurrent fork can inherit our still-open write fd, causing
+	// Linux ETXTBSY when we exec the file (Go #22315).
+	writeTestExecutable(t, fake, []byte(script))
 
 	raw, err := runCodexDebugModels(context.Background(), fake)
 	if err != nil {
@@ -384,9 +386,10 @@ func writeFakeClaudeHelpBinary(t *testing.T) string {
 		"  --model <model>     Model to use\n" +
 		"  --effort <level>    Effort level for the current session (low, medium, high, xhigh, max)\n" +
 		"EOF\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake claude: %v", err)
-	}
+	// Same ForkLock rationale as TestRunCodexDebugModels_ArgvSeenByBinary —
+	// the parser tests that consume this helper exec the script in parallel,
+	// so a sibling fork can otherwise inherit our write fd and trip ETXTBSY.
+	writeTestExecutable(t, path, []byte(script))
 	return path
 }
 

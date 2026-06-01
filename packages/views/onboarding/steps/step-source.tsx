@@ -54,6 +54,43 @@ export function StepSource({
     { slug: "other", icon: <MoreHorizontal className="h-4 w-4" />, label: t(($) => $.questions.source.other), isOther: true },
   ];
 
+  // Multi-select: source already had several "yes I heard via X" intents
+  // collapsed into a single radio pick. Letting users tick multiple
+  // channels keeps attribution honest without making them rank them.
+  // `other` is a Source enum value so it stacks into the array alongside
+  // regular picks; the free-text input lives in `source_other`.
+  const selected: readonly string[] = [
+    ...(answers.source ?? []),
+    ...(!answers.source?.includes("other") && answers.source_other
+      ? ["other"]
+      : []),
+  ];
+
+  const toggle = (slug: string) => {
+    const current = answers.source ?? [];
+    if (slug === "other") {
+      // Toggling Other: add/remove from the array; clear the text when
+      // removing so a re-tick starts from an empty input.
+      if (current.includes("other")) {
+        onChange({
+          source: current.filter((s) => s !== "other"),
+          source_other: null,
+        });
+      } else {
+        onChange({
+          source: [...current, "other"],
+          source_skipped: false,
+        });
+      }
+      return;
+    }
+    const typed = slug as Source;
+    const next = current.includes(typed)
+      ? current.filter((s) => s !== typed)
+      : [...current, typed];
+    onChange({ source: next, source_skipped: false });
+  };
+
   return (
     <StepQuestion
       step="source"
@@ -61,27 +98,18 @@ export function StepSource({
       eyebrow={t(($) => $.questions.eyebrow_about_you)}
       question={t(($) => $.questions.source.question)}
       options={options}
-      selectedSlug={answers.source ?? (answers.source_other ? "other" : null)}
+      selectedSlugs={selected}
       otherValue={answers.source_other ?? ""}
       onOtherChange={(v) => onChange({ source_other: v })}
       otherPlaceholder={t(($) => $.questions.source.other_placeholder)}
-      onAnswer={(slug) => {
-        if (slug === "other") {
-          onChange({ source: "other", source_skipped: false });
-        } else {
-          onChange({
-            source: slug as Source,
-            source_other: null,
-            source_skipped: false,
-          });
-        }
-      }}
+      onAnswer={toggle}
       onAdvance={onAdvance}
       onSkip={() => {
-        onChange({ source: null, source_other: null, source_skipped: true });
+        onChange({ source: [], source_other: null, source_skipped: true });
         onSkip();
       }}
       onBack={onBack}
+      multiSelect
     />
   );
 }

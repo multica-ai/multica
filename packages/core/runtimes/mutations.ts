@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { runtimeKeys } from "./queries";
+import { workspaceKeys } from "../workspace/queries";
+import { agentTaskSnapshotKeys } from "../agents/queries";
 
 export function useDeleteRuntime(wsId: string) {
   const qc = useQueryClient();
@@ -12,12 +14,36 @@ export function useDeleteRuntime(wsId: string) {
   });
 }
 
-// useUpdateRuntime patches editable fields on a runtime (timezone, visibility).
-// Invalidates the runtime list AND any keys downstream of the updated runtime
-// — usage queries are bucketed by tz on the server, so a tz change must blow
-// away cached usage rows or the chart would lie for one polling cycle. A
-// visibility change only needs the runtime list to refetch so the picker
-// disabled-state recomputes.
+// Cascade-mode counterpart to useDeleteRuntime. The dialog routes here when
+// the strict DELETE refused with `runtime_has_active_agents` (or when the
+// caller already knows the runtime has active agents and wants to skip the
+// pre-flight refusal). Mutation fn returns the server-reported counts so
+// the caller can render a richer success toast.
+//
+// Invalidates runtimes (the list / detail), workspace agents (the cascade
+// archives them) and the agent presence snapshot (cascade also cancels
+// queued/running tasks). Without the agent-side invalidation the Agents
+// page would keep showing the just-archived rows as live until a refetch.
+export function useArchiveAgentsAndDeleteRuntime(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      runtimeId,
+      expectedActiveAgentIds,
+    }: {
+      runtimeId: string;
+      expectedActiveAgentIds: string[];
+    }) => api.archiveAgentsAndDeleteRuntime(runtimeId, expectedActiveAgentIds),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
+    },
+  });
+}
+
+// useUpdateRuntime patches editable fields on a runtime (visibility).
+// Invalidates the runtime list so the picker disabled-state recomputes.
 export function useUpdateRuntime(wsId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -26,23 +52,10 @@ export function useUpdateRuntime(wsId: string) {
       patch,
     }: {
       runtimeId: string;
-      patch: { timezone?: string; visibility?: "private" | "public" };
+      patch: { visibility?: "private" | "public" };
     }) => api.updateRuntime(runtimeId, patch),
-    onSettled: (_data, _err, vars) => {
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-      if (vars && vars.patch.timezone !== undefined) {
-        // Usage query keys are not workspace-scoped; invalidate only this
-        // runtime's daily/by-agent/by-hour usage rows under the new tz buckets.
-        qc.invalidateQueries({
-          queryKey: ["runtimes", "usage", vars.runtimeId],
-        });
-        qc.invalidateQueries({
-          queryKey: ["runtimes", "usage", "by-agent", vars.runtimeId],
-        });
-        qc.invalidateQueries({
-          queryKey: ["runtimes", "usage", "by-hour", vars.runtimeId],
-        });
-      }
     },
   });
 }

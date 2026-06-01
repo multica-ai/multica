@@ -10,6 +10,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { useT } from "../../i18n";
 
@@ -96,7 +97,7 @@ export function AccountTab() {
               >
                 {user?.avatar_url ? (
                   <img
-                    src={user.avatar_url}
+                    src={resolvePublicFileUrl(user.avatar_url) ?? undefined}
                     alt={user.name}
                     className="h-full w-full object-cover"
                   />

@@ -11,6 +11,12 @@
       "english": "English",
       "chinese": "中文",
       "sync_failed": "Language saved on this device, but failed to sync to your account. Other devices may show the previous language."
+    },
+    "timezone": {
+      "title": "Viewing Timezone",
+      "browser_suffix": " (browser)",
+      "hint": "Used for dashboards, charts, and any 'today' label shown to you. It's a personal preference that applies across all your workspaces.",
+      "sync_failed": "Failed to save your timezone preference."
     }
   },
   "page": {
@@ -228,6 +234,22 @@
     "manage_hint": "Only admins and owners can manage repositories.",
     "toast_saved": "Repositories saved",
     "toast_save_failed": "Failed to save repositories"
+  },
+  "desktop": {
+    "tabs": {
+      "updates": "Updates"
+    },
+    "updates": {
+      "title": "Updates",
+      "description": "The desktop app checks for new versions automatically once an hour and shortly after launch, downloading them in the background. You'll be prompted to restart once an update is ready.",
+      "current_version": "Current version",
+      "check_section_title": "Check for updates",
+      "check_section_description": "Trigger a check now instead of waiting for the next automatic poll. Available updates download in the background and show a restart prompt when ready.",
+      "up_to_date": "You're on the latest version.",
+      "downloading": "v{{version}} is downloading in the background — you'll be notified when it's ready to install.",
+      "check_now": "Check now",
+      "checking": "Checking…"
+    }
   },
   "members": {
     "section_title": "Members ({{count}})",

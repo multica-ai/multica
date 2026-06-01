@@ -34,13 +34,12 @@ import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
-import { timeAgo } from "@multica/core/utils";
 import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
 import { taskStatusConfig } from "../../config";
 import { failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
-import { useT } from "../../../i18n";
+import { useT, useTimeAgo } from "../../../i18n";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 // Recent work pagination: small initial cohort to keep the section
@@ -353,6 +352,7 @@ function TaskRow({
   agent: Agent;
 }) {
   const { t } = useT("agents");
+  const timeAgo = useTimeAgo();
   const paths = useWorkspacePaths();
   const [cancelling, setCancelling] = useState(false);
   const cfg = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
@@ -418,7 +418,7 @@ function TaskRow({
 
   const timeText =
     timeMode === "active"
-      ? activeTaskTimeText(task, t)
+      ? activeTaskTimeText(task, t, timeAgo)
       : task.completed_at
         ? timeAgo(task.completed_at)
         : "—";
@@ -600,8 +600,9 @@ function Sep() {
 }
 
 type AgentsT = ReturnType<typeof useT<"agents">>["t"];
+type TimeAgoFn = (dateStr: string) => string;
 
-function activeTaskTimeText(task: AgentTask, t: AgentsT): string {
+function activeTaskTimeText(task: AgentTask, t: AgentsT, timeAgo: TimeAgoFn): string {
   if (task.status === "running" && task.started_at) {
     return t(($) => $.tab_body.activity.started_prefix, { when: timeAgo(task.started_at) });
   }

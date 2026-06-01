@@ -77,7 +77,12 @@ export function ChatMessageList({
   const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
 
   return (
-    <div ref={scrollRef} style={fadeStyle} className="flex-1 overflow-y-auto">
+    <div
+      ref={scrollRef}
+      data-tab-scroll-root
+      style={fadeStyle}
+      className="flex-1 overflow-y-auto"
+    >
       {/* Inner container matches issue / project detail width convention
        *  (max-w-4xl + mx-auto) so switching between chat and content
        *  views doesn't jolt the reading width. px-5 is a touch tighter

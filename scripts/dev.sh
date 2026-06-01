@@ -40,6 +40,9 @@ set -a
 . "$ENV_FILE"
 set +a
 
+# shellcheck disable=SC1091
+. scripts/local-env.sh
+
 # ---------- Install dependencies ----------
 if [ ! -d node_modules ]; then
   echo "==> Installing dependencies..."

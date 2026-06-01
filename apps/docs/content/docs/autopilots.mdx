@@ -99,6 +99,126 @@ nothing matches, the event is `webhook.received`.
 When configuring GitHub or similar sources, set the content type to
 `application/json` — form-encoded webhook payloads are not accepted.
 
+### Event filters
+
+A new webhook trigger fires on every inbound POST, which is fine for a
+single-purpose URL but noisy for sources that fan out many event types
+(GitHub being the obvious one — a single repo webhook can deliver
+`push`, `pull_request`, `workflow_run`, `check_suite`, and more). The
+**Event filters** section on a webhook trigger lets you restrict which
+events actually dispatch a run; everything else is recorded in delivery
+history with `status = ignored` and `reason = event_filtered`, and no
+run or issue is created.
+
+Each row is one rule: an **event name** plus an optional
+comma-separated **actions** list. Multica allows a webhook if **any**
+row matches; leave the section empty to accept everything (the
+pre-filter behavior).
+
+Examples:
+
+| Event name     | Actions             | Matches                                                                  |
+| -------------- | ------------------- | ------------------------------------------------------------------------ |
+| `workflow_run` | `completed, failed` | `workflow_run` events with `action: completed` or `action: failed` only  |
+| `workflow_run` | _(empty)_           | every `workflow_run` event, regardless of action                         |
+| `push`         | _(empty)_           | every `push` event                                                       |
+
+#### Where the event name and action come from
+
+Multica derives the `event` name and `action` from the inbound request
+in this order — **the first match wins**.
+
+**1. Body envelope.** If the body is a JSON object with a string
+`event` field, that value is the event name directly. An optional
+`eventPayload` object then supplies action candidates from its
+`action` / `state` / `conclusion` / `status` fields.
+
+```bash
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'Content-Type: application/json' \
+  -d '{"event":"trigger","eventPayload":{"action":"true"}}'
+# inferred: event = trigger, action candidate = true
+```
+
+**2. Headers.** When no body envelope is present, Multica reads the
+following well-known provider headers:
+
+- `X-GitHub-Event: <event>` — combined with the top-level body
+  `action` field (when present) to form `github.<event>.<action>`.
+- `X-Gitlab-Event: <event>` — becomes `gitlab.<event>`.
+- `X-Event-Type: <event>` — passed through verbatim.
+
+```bash
+# GitHub-style: header gives the event name, body gives the action.
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'X-GitHub-Event: workflow_run' \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"completed"}'
+# inferred: event = github.workflow_run.completed
+#        → matches a filter row of workflow_run / completed
+
+# Generic event-type header — no body fields needed.
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'X-Event-Type: trigger.true' \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+# inferred: event = trigger.true → matches trigger / true
+```
+
+**3. Body fallback.** If neither a body envelope nor a known header is
+present, Multica falls back to top-level body string fields in this
+order: `event` → `type` → `action`.
+
+```bash
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"trigger","action":"true"}'
+# inferred: event = trigger (from `type`), action candidate = true
+```
+
+**4. Default.** If nothing above matches, the event is
+`webhook.received` and there are no action candidates.
+
+**Action candidates, in full.** Once the event is determined, Multica
+considers every value below as a possible action match:
+
+- The event-name suffix, when the event has the form
+  `provider.event.<action>` (e.g. `github.workflow_run.completed` →
+  `completed`).
+- The body fields `action`, `state`, `conclusion`, and `status` —
+  **only when they are JSON strings**. A boolean (`{"action": true}`)
+  or a number does not qualify, so a filter expecting
+  `event=trigger, action=true` will never match a body of
+  `{"trigger": true}` because `true` is a bool, not a string.
+
+**Common gotcha.** A filter row like `Event name: trigger` /
+`Actions: true` does **not** mean "fire when the body has
+`trigger: true`" — Event filters match the *inferred event and
+action*, not arbitrary body fields. Send `trigger.true` via
+`X-Event-Type` (or use the body envelope shown above) to hit it.
+Surrounding whitespace in saved filter rows (`" workflow_run "`) is
+stored verbatim and will never match — trim before saving.
+
+#### Quick test
+
+Once a filter is configured, you can confirm both branches with `curl`:
+
+```bash
+# Allowed — header drives event=workflow_run, body drives action=completed
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'X-GitHub-Event: workflow_run' \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"completed"}'
+# → 200 {"status":"accepted", ...}
+
+# Filtered — same event, action not in allowlist
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'X-GitHub-Event: workflow_run' \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"in_progress"}'
+# → 200 {"status":"ignored","reason":"event_filtered"}
+```
+
 ### URL is a bearer secret
 
 The generated URL **is** the credential. Anyone with it can fire the

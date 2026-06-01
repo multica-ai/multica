@@ -70,9 +70,6 @@ export function GitHubTab() {
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
-  const githubRepoCount =
-    workspace?.repos?.filter((r) => /github\.com/i.test(r.url ?? "")).length ?? 0;
-
   async function persistSetting(key: SettingsKey, next: boolean) {
     if (!workspace || savingKey) return;
     setSavingKey(key);
@@ -314,14 +311,9 @@ export function GitHubTab() {
         <Card>
           <CardContent>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium">
-                  {t(($) => $.github.repositories_shortcut_label)}
-                </p>
-                <p className="text-xs text-muted-foreground tabular-nums">
-                  {githubRepoCount}
-                </p>
-              </div>
+              <p className="text-sm font-medium">
+                {t(($) => $.github.repositories_shortcut_label)}
+              </p>
               <Button
                 variant="outline"
                 size="sm"

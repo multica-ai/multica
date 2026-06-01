@@ -206,7 +206,7 @@ export function ActorIssuesPanel({
             <p className="text-sm">{t(($) => $.actor_issues.search_empty)}</p>
           </div>
         ) : (
-          <div className="flex flex-1 min-h-0 flex-col">
+          <div className="flex flex-1 min-h-0 flex-col p-1">
             <ListView
               issues={issues}
               visibleStatuses={visibleStatuses}

@@ -9,10 +9,10 @@
  *
  * Visual parity with ContentEditor is achieved by:
  * - Wrapping output in <div class="rich-text-editor readonly"> so the same
- *   content-editor.css rules apply to standard HTML tags
+ *   styles/index.css rules apply to standard HTML tags
  * - Using the same preprocessMarkdown pipeline (mention shortcodes + linkify)
  * - Using lowlight for code highlighting (same engine as Tiptap's CodeBlockLowlight)
- *   so .hljs-* CSS rules from content-editor.css produce identical colors
+ *   so .hljs-* CSS rules from styles/code.css produce identical colors
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
@@ -43,7 +43,7 @@ import { HtmlBlockPreview } from "./html-block-preview";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
 import { Attachment as AttachmentRenderer } from "./attachment";
 import "katex/dist/katex.min.css";
-import "./content-editor.css";
+import "./styles/index.css";
 
 // ---------------------------------------------------------------------------
 // Lowlight — same engine + language set as Tiptap's CodeBlockLowlight
@@ -242,20 +242,23 @@ function buildComponents(): Partial<Components> {
         const tree = lang
           ? lowlight.highlight(lang, code)
           : lowlight.highlightAuto(code);
-        return (
-          <code
-            className={cn("hljs", lang && `language-${lang}`)}
-            dangerouslySetInnerHTML={{ __html: toHtml(tree) }}
-          />
-        );
+        const html = toHtml(tree);
+        if (html) {
+          return (
+            <code
+              className={cn("hljs", lang && `language-${lang}`)}
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
+          );
+        }
       } catch {
-        // Fallback — render without highlighting
-        return (
-          <code className={className} {...props}>
-            {children}
-          </code>
-        );
+        // fall through to plain render
       }
+      return (
+        <code className={cn("hljs", className)} {...props}>
+          {children}
+        </code>
+      );
     },
 
     // Pre — pass through (CSS handles styling via .rich-text-editor pre).

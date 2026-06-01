@@ -48,23 +48,37 @@ export interface ListProjectsResponse {
 }
 
 // ProjectResource is a typed pointer from a project to an external resource.
-// The resource_ref shape depends on resource_type (e.g. github_repo carries
-// { url, default_branch_hint? }). New types add a case in
-// validateAndNormalizeResourceRef on the server and a renderer in the UI;
-// no schema or type changes required.
-export type ProjectResourceType = "github_repo";
+// The resource_ref shape depends on resource_type. New types add a case in
+// validateAndNormalizeResourceRef on the server and a renderer in the UI.
+//
+// Known types (UI must default-case unknown server-side additions):
+//   - github_repo: cloud-side git checkout, ref = { url, default_branch_hint? }
+//   - local_directory: in-place agent execution on a specific daemon,
+//     ref = { local_path, daemon_id, label? }
+export type ProjectResourceType = "github_repo" | "local_directory";
 
 export interface GithubRepoResourceRef {
   url: string;
   default_branch_hint?: string;
 }
 
+export interface LocalDirectoryResourceRef {
+  local_path: string;
+  daemon_id: string;
+  label?: string;
+}
+
+export type ProjectResourceRef =
+  | GithubRepoResourceRef
+  | LocalDirectoryResourceRef
+  | Record<string, unknown>;
+
 export interface ProjectResource {
   id: string;
   project_id: string;
   workspace_id: string;
   resource_type: ProjectResourceType;
-  resource_ref: GithubRepoResourceRef | Record<string, unknown>;
+  resource_ref: ProjectResourceRef;
   label: string | null;
   position: number;
   created_at: string;
@@ -73,8 +87,17 @@ export interface ProjectResource {
 
 export interface CreateProjectResourceRequest {
   resource_type: ProjectResourceType;
-  resource_ref: GithubRepoResourceRef | Record<string, unknown>;
+  resource_ref: ProjectResourceRef;
   label?: string;
+  position?: number;
+}
+
+// resource_type is immutable server-side; partial-update payload mirrors that.
+// Sending only the field(s) you want to change is fine — the server merges
+// the request body with the existing row, including resource_ref shortcuts.
+export interface UpdateProjectResourceRequest {
+  resource_ref?: ProjectResourceRef;
+  label?: string | null;
   position?: number;
 }
 

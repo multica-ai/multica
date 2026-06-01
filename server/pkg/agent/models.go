@@ -697,42 +697,63 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 // the caller can distinguish "parsed with no models" (valid but
 // empty catalog) from "couldn't find the structure at all".
 func parseACPSessionNewModels(raw json.RawMessage) []Model {
+	type acpModelInfo struct {
+		ModelID      string `json:"modelId"`
+		ModelIDSnake string `json:"model_id"`
+		Name         string `json:"name"`
+		Description  string `json:"description"`
+	}
 	var resp struct {
 		Models struct {
-			AvailableModels []struct {
-				ModelID     string `json:"modelId"`
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			} `json:"availableModels"`
-			CurrentModelID string `json:"currentModelId"`
+			AvailableModels      []acpModelInfo `json:"availableModels"`
+			AvailableModelsSnake []acpModelInfo `json:"available_models"`
+			CurrentModelID       string         `json:"currentModelId"`
+			CurrentModelIDSnake  string         `json:"current_model_id"`
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil
 	}
-	models := make([]Model, 0, len(resp.Models.AvailableModels))
+	availableModels := resp.Models.AvailableModels
+	if len(availableModels) == 0 && resp.Models.AvailableModelsSnake != nil {
+		availableModels = resp.Models.AvailableModelsSnake
+	}
+	currentModelID := strings.TrimSpace(resp.Models.CurrentModelID)
+	if currentModelID == "" {
+		currentModelID = strings.TrimSpace(resp.Models.CurrentModelIDSnake)
+	}
+	models := make([]Model, 0, len(availableModels))
 	seen := map[string]bool{}
-	for _, m := range resp.Models.AvailableModels {
-		if m.ModelID == "" || seen[m.ModelID] {
+	for _, m := range availableModels {
+		modelID := strings.TrimSpace(m.ModelID)
+		if modelID == "" {
+			modelID = strings.TrimSpace(m.ModelIDSnake)
+		}
+		if modelID == "" || seen[modelID] {
 			continue
 		}
-		seen[m.ModelID] = true
-		label := m.Name
-		if label == "" {
-			label = m.ModelID
-		}
+		seen[modelID] = true
+		label := acpModelLabel(m.Name, modelID)
 		provider := ""
-		if idx := strings.Index(m.ModelID, ":"); idx > 0 {
-			provider = m.ModelID[:idx]
+		if idx := strings.Index(modelID, ":"); idx > 0 {
+			provider = modelID[:idx]
 		}
 		models = append(models, Model{
-			ID:       m.ModelID,
+			ID:       modelID,
 			Label:    label,
 			Provider: provider,
-			Default:  m.ModelID == resp.Models.CurrentModelID,
+			Default:  modelID == currentModelID,
 		})
 	}
 	return models
+}
+
+func acpModelLabel(name, modelID string) string {
+	label := strings.TrimSpace(name)
+	if label == "" || strings.EqualFold(label, "unknown") {
+		return modelID
+	}
+	return label
 }
 
 // discoverCursorModels runs `cursor-agent --list-models` and parses

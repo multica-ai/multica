@@ -98,6 +98,116 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
 配置 GitHub 之类的来源时，请把 content type 设为 `application/json`——
 表单编码的 webhook payload 在 v1 里不接受。
 
+### 事件过滤
+
+新建的 webhook 触发器对每一条入站 POST 都会触发，这在单一用途的 URL
+上没问题，但对那种会扇出很多事件类型的来源（典型就是 GitHub——
+一个仓库 webhook 就会同时下发 `push`、`pull_request`、`workflow_run`、
+`check_suite` 等等）就会很吵。webhook 触发器上的**事件过滤**区块用来
+限制哪些事件真正派发一次 run；其它的只记录到投递历史里，
+`status = ignored`、`reason = event_filtered`，不会建任何 issue 或 run。
+
+每一行是一条规则：一个**事件名**加可选的、逗号分隔的 **action** 列表。
+**任意一行命中**即放行；区块留空则接受所有事件（即过滤前的行为）。
+
+例子：
+
+| 事件名           | Actions             | 命中范围                                                                 |
+| ---------------- | ------------------- | ------------------------------------------------------------------------ |
+| `workflow_run`   | `completed, failed` | 只有 `action` 为 `completed` 或 `failed` 的 `workflow_run` 事件          |
+| `workflow_run`   | _(留空)_            | 所有 `workflow_run` 事件，不限 action                                    |
+| `push`           | _(留空)_            | 所有 `push` 事件                                                         |
+
+#### 事件名和 action 从哪来
+
+Multica 按下面的顺序从入站请求里推断 `event` 和 `action`，**先命中先用**。
+
+**1. Body envelope。** 如果 body 是一个 JSON 对象、且带字符串字段
+`event`，就直接用它作为事件名。可选的 `eventPayload` 对象再
+从自己的 `action` / `state` / `conclusion` / `status` 字段里提供
+action 候选。
+
+```bash
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'Content-Type: application/json' \
+  -d '{"event":"trigger","eventPayload":{"action":"true"}}'
+# 推断结果：event = trigger，action 候选 = true
+```
+
+**2. 请求头。** 没有 body envelope 时按以下头部识别：
+
+- `X-GitHub-Event: <event>` —— 结合 body 顶层的 `action` 字段
+  （如果有），拼成 `github.<event>.<action>`。
+- `X-Gitlab-Event: <event>` —— 拼成 `gitlab.<event>`。
+- `X-Event-Type: <event>` —— 原样使用。
+
+```bash
+# GitHub 风格：事件名来自 header，action 来自 body。
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'X-GitHub-Event: workflow_run' \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"completed"}'
+# 推断结果：event = github.workflow_run.completed
+#        → 命中 workflow_run / completed 的过滤规则
+
+# 通用 event-type 头部 —— 不需要任何 body 字段。
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'X-Event-Type: trigger.true' \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+# 推断结果：event = trigger.true → 命中 trigger / true
+```
+
+**3. Body 兜底。** Body envelope 和上面的 header 都没有时，
+从 body 顶层字符串字段里依次找：`event` → `type` → `action`。
+
+```bash
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"trigger","action":"true"}'
+# 推断结果：event = trigger（取自 `type`），action 候选 = true
+```
+
+**4. 默认值。** 以上都没命中时，事件名取 `webhook.received`，
+没有 action 候选。
+
+**action 候选的完整清单。** 事件名确定后，下面这些值都会被列为
+可能的 action：
+
+- 事件名后缀，当事件形如 `provider.event.<action>` 时
+  （例如 `github.workflow_run.completed` → `completed`）。
+- body 里 `action`、`state`、`conclusion`、`status` 这四个字段——
+  **必须是 JSON 字符串**。布尔（`{"action": true}`）或数字都不算
+  候选，所以 `event=trigger, action=true` 的过滤规则**永远命中不了**
+  `{"trigger": true}` 这种 body，因为 `true` 是 bool 不是字符串。
+
+**常见误区。** 一条 `Event name: trigger` / `Actions: true` 的规则
+**不是**「body 里出现 `trigger: true` 就放行」的意思——事件过滤匹配的是
+**推断出来的事件和 action**，不是任意 body 字段。要命中它，请用
+`X-Event-Type` 头发送 `trigger.true`，或者用上面的 body envelope。
+保存时带空格的值（例如 `" workflow_run "`）会被原样保存，但永远命中
+不了——保存前请先 trim。
+
+#### 快速验证
+
+配好过滤后，可以用 `curl` 同时验证「命中」和「被过滤」两条路径：
+
+```bash
+# 命中 —— 请求头给出 event=workflow_run，body 给出 action=completed
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'X-GitHub-Event: workflow_run' \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"completed"}'
+# → 200 {"status":"accepted", ...}
+
+# 被过滤 —— 同样的事件，但 action 不在白名单
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H 'X-GitHub-Event: workflow_run' \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"in_progress"}'
+# → 200 {"status":"ignored","reason":"event_filtered"}
+```
+
 ### URL 即 bearer secret
 
 生成的 URL **就是凭证**，谁拿到都能触发这个 Autopilot。请按 token 对待：

@@ -969,3 +969,97 @@ func TestGCMetaForTask(t *testing.T) {
 		}
 	})
 }
+
+// TestShouldCleanTaskDir_LocalDirectoryNeverClean confirms the GC loop
+// never removes the envRoot of a local_directory task even when the parent
+// issue is long-since done. Artifact-pattern cleanup is the most that
+// should ever happen, so output/ and logs/ stay around for the user.
+func TestShouldCleanTaskDir_LocalDirectoryNeverClean(t *testing.T) {
+	t.Parallel()
+	issueID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":     "done",
+			"updated_at": time.Now().Add(-30 * 24 * time.Hour),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "local-task", &execenv.GCMeta{
+		Kind:           execenv.GCKindIssue,
+		IssueID:        issueID,
+		WorkspaceID:    "ws1",
+		CompletedAt:    time.Now().Add(-30 * 24 * time.Hour),
+		LocalDirectory: true,
+	})
+
+	got := d.shouldCleanTaskDir(context.Background(), taskDir)
+	if got == gcActionClean {
+		t.Fatalf("expected local_directory task to never return gcActionClean, got gcActionClean")
+	}
+	// Either skip (no patterns configured) or artifact cleanup is OK —
+	// what matters is that gcActionClean never fires for local_directory.
+	if got != gcActionCleanArtifacts && got != gcActionSkip {
+		t.Fatalf("unexpected action for local_directory done issue: %d", got)
+	}
+}
+
+// TestShouldCleanTaskDir_LocalDirectoryNeverOrphan confirms that even when
+// the parent issue 404s (would normally fall through to mtime-based orphan
+// cleanup) a local_directory task's envRoot is preserved.
+func TestShouldCleanTaskDir_LocalDirectoryNeverOrphan(t *testing.T) {
+	t.Parallel()
+	issueID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCOrphanTTL = 0 // any age is "stale" enough to orphan
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "local-orphan", &execenv.GCMeta{
+		Kind:           execenv.GCKindIssue,
+		IssueID:        issueID,
+		WorkspaceID:    "ws1",
+		LocalDirectory: true,
+	})
+
+	got := d.shouldCleanTaskDir(context.Background(), taskDir)
+	if got == gcActionOrphan || got == gcActionClean {
+		t.Fatalf("expected local_directory orphan to be skipped, got %d", got)
+	}
+}
+
+// TestShouldCleanTaskDir_LocalDirectoryFalsePreservesNormalClean is the
+// negative control: a regular (non-local_directory) task whose parent issue
+// is done + over TTL must still be reclaimed via gcActionClean.
+func TestShouldCleanTaskDir_LocalDirectoryFalsePreservesNormalClean(t *testing.T) {
+	t.Parallel()
+	issueID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":     "done",
+			"updated_at": time.Now().Add(-30 * 24 * time.Hour),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "normal-task", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-30 * 24 * time.Hour),
+		// LocalDirectory unset (false).
+	})
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionClean {
+		t.Fatalf("expected gcActionClean for normal task, got %d", got)
+	}
+}

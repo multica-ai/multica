@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -310,6 +311,45 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.w.Write(p)
+}
+
+type failingWSWriter struct {
+	err error
+}
+
+func (f failingWSWriter) WriteMessage(int, []byte) error {
+	return f.err
+}
+
+func TestWriteWSAuthFrameLogsWriteErrors(t *testing.T) {
+	var buf bytes.Buffer
+	prevDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prevDefault) })
+
+	ok := writeWSAuthFrame(
+		failingWSWriter{err: errors.New("write blocked")},
+		[]byte(`{"error":"invalid token"}`),
+		"auth_error",
+		"workspace_id", testWorkspaceID,
+	)
+
+	if ok {
+		t.Fatal("expected writeWSAuthFrame to report failed write")
+	}
+	logs := buf.String()
+	if !strings.Contains(logs, "ws: failed to send auth frame") {
+		t.Fatalf("expected auth frame write failure log, got:\n%s", logs)
+	}
+	if !strings.Contains(logs, "write blocked") {
+		t.Fatalf("expected write error in log, got:\n%s", logs)
+	}
+	if !strings.Contains(logs, "auth_error") {
+		t.Fatalf("expected frame kind in log, got:\n%s", logs)
+	}
+	if !strings.Contains(logs, testWorkspaceID) {
+		t.Fatalf("expected workspace id in log, got:\n%s", logs)
+	}
 }
 
 func TestCheckOrigin(t *testing.T) {

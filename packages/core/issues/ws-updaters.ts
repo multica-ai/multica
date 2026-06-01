@@ -7,7 +7,7 @@ import {
   patchIssueInBuckets,
 } from "./cache-helpers";
 import { cleanupDeletedIssueCaches } from "./delete-cache";
-import type { Issue, IssueLabelsResponse, Label } from "../types";
+import type { Issue, IssueLabelsResponse, IssueMetadata, Label } from "../types";
 import type { ListIssuesCache } from "../types";
 
 export function onIssueCreated(
@@ -15,9 +15,9 @@ export function onIssueCreated(
   wsId: string,
   issue: Issue,
 ) {
-  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-    old ? addIssueToBuckets(old, issue) : old,
-  );
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, issue));
+  }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
@@ -40,20 +40,24 @@ export function onIssueUpdated(
   // Look up the OLD parent before mutating list state, so we can keep
   // the parent's children cache in sync (powers the sub-issues list
   // shown on the parent issue page).
-  const listData = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
+  const listQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+  const firstListData = listQueries[0]?.[1];
   const detailData = qc.getQueryData<Issue>(issueKeys.detail(wsId, issue.id));
   const oldParentId =
     detailData?.parent_issue_id ??
-    (listData ? findIssueLocation(listData, issue.id)?.issue.parent_issue_id : null) ??
+    (firstListData ? findIssueLocation(firstListData, issue.id)?.issue.parent_issue_id : null) ??
     null;
   // The NEW parent comes from the WS payload when parent_issue_id changed
   const newParentId = issue.parent_issue_id ?? null;
   const parentChanged =
     issue.parent_issue_id !== undefined && newParentId !== oldParentId;
 
-  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-    old ? patchIssueInBuckets(old, issue.id, issue) : old,
-  );
+  for (const [key, data] of listQueries) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issue.id, issue));
+  }
+  if (issue.position !== undefined) {
+    qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+  }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
@@ -85,6 +89,7 @@ export function onIssueUpdated(
     if (issue.status !== undefined || issue.parent_issue_id !== undefined) {
       qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
     }
+    qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
   }
 }
 
@@ -105,9 +110,9 @@ export function onIssueLabelsChanged(
   issueId: string,
   labels: Label[],
 ) {
-  qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-    old ? patchIssueInBuckets(old, issueId, { labels }) : old,
-  );
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { labels }));
+  }
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
   );
@@ -131,6 +136,30 @@ export function onIssueLabelsChanged(
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+}
+
+/**
+ * Apply a metadata snapshot to the issue detail + list + my-issues caches.
+ * The server emits this whenever a single key is set or deleted, so the
+ * payload is always the FULL post-mutation map — we replace, not merge.
+ *
+ * Used for the read-only metadata strip in issue detail. Updates that arrive
+ * while no view is mounted still keep the caches accurate so the next render
+ * shows the latest state without a refetch.
+ */
+export function onIssueMetadataChanged(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  metadata: IssueMetadata,
+) {
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { metadata }));
+  }
+  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
+    old ? { ...old, metadata } : old,
+  );
+  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
 }
 
 export function onIssueDeleted(

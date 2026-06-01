@@ -1,0 +1,65 @@
+name: Mobile Verify
+
+# Runs lint + typecheck for apps/mobile only, parallel to the main CI
+# workflow. Path-filtered so PRs that don't touch mobile (or anything
+# mobile transitively depends on) pay zero cost.
+#
+# Path scope rationale — mobile transitively depends on:
+# - apps/mobile/**                — the app itself
+# - packages/core/**              — mobile imports types AND pure functions
+#                                   (agents, markdown, permissions, api/schemas, …),
+#                                   not only @multica/core/types
+# - package.json / pnpm-lock.yaml — install graph
+# - pnpm-workspace.yaml           — catalog versions
+# - turbo.json                    — turbo task pipeline
+#
+# Mobile has no vitest suite today; if one lands, add `test` to the turbo
+# task list below.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/mobile/**"
+      - "packages/core/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - ".github/workflows/mobile-verify.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/mobile/**"
+      - "packages/core/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - ".github/workflows/mobile-verify.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Type check and lint
+        run: pnpm exec turbo typecheck lint --filter=@multica/mobile

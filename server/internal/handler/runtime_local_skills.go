@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -752,7 +753,10 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 		// side-effects so the retry lands on a clean slate.
 		slog.Error("local skill import Complete failed — rolling back created skill",
 			"error", err, "request_id", requestID, "skill_id", resp.ID)
-		if delErr := h.Queries.DeleteSkill(r.Context(), parseUUID(resp.ID)); delErr != nil {
+		if delErr := h.Queries.DeleteSkill(r.Context(), db.DeleteSkillParams{
+			ID:          parseUUID(resp.ID),
+			WorkspaceID: rt.WorkspaceID,
+		}); delErr != nil {
 			slog.Warn("orphan skill rollback failed", "error", delErr, "skill_id", resp.ID)
 		}
 		writeError(w, http.StatusInternalServerError, "failed to persist import completion")

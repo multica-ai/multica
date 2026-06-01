@@ -64,11 +64,12 @@ WHERE id = $1;
 -- name: CreateAutopilotTrigger :one
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
-    next_run_at, webhook_token, label, provider
+    next_run_at, webhook_token, label, provider, event_filters
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
     sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
-    COALESCE(sqlc.narg('provider')::text, 'generic')
+    COALESCE(sqlc.narg('provider')::text, 'generic'),
+    sqlc.narg('event_filters')
 ) RETURNING *;
 
 -- name: UpdateAutopilotTrigger :one
@@ -78,6 +79,7 @@ UPDATE autopilot_trigger SET
     timezone = COALESCE(sqlc.narg('timezone'), timezone),
     next_run_at = sqlc.narg('next_run_at'),
     label = COALESCE(sqlc.narg('label'), label),
+    event_filters = COALESCE(sqlc.narg('event_filters'), event_filters),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

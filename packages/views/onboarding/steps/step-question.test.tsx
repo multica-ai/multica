@@ -27,7 +27,7 @@ function renderShell(overrides: Partial<React.ComponentProps<typeof StepQuestion
         number={1}
         question="Test question"
         options={OPTIONS}
-        selectedSlug={null}
+        selectedSlugs={[]}
         otherValue=""
         onOtherChange={onOtherChange}
         otherPlaceholder="type here"
@@ -61,7 +61,7 @@ describe("StepQuestion", () => {
 
   it("with a non-Other slug selected, Continue is enabled and fires onAdvance", async () => {
     const user = userEvent.setup();
-    const { onAdvance } = renderShell({ selectedSlug: "a" });
+    const { onAdvance } = renderShell({ selectedSlugs: ["a"] });
     const continueBtn = screen.getByRole("button", { name: /continue/i });
     expect(continueBtn).toBeEnabled();
     await user.click(continueBtn);
@@ -80,7 +80,7 @@ describe("StepQuestion", () => {
   it("Other selected with non-blank otherValue → Continue is enabled", async () => {
     const user = userEvent.setup();
     const { onAdvance } = renderShell({
-      selectedSlug: "other",
+      selectedSlugs: ["other"],
       otherValue: "hello",
     });
     const continueBtn = screen.getByRole("button", { name: /continue/i });
@@ -90,7 +90,7 @@ describe("StepQuestion", () => {
   });
 
   it("Other selected with whitespace-only otherValue → Continue is disabled", () => {
-    renderShell({ selectedSlug: "other", otherValue: "   " });
+    renderShell({ selectedSlugs: ["other"], otherValue: "   " });
     expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
   });
 
@@ -109,7 +109,7 @@ describe("StepQuestion", () => {
           number={1}
           question="Test"
           options={OPTIONS}
-          selectedSlug={null}
+          selectedSlugs={[]}
           otherValue=""
           onOtherChange={vi.fn()}
           otherPlaceholder="type"

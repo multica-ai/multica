@@ -154,6 +154,55 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 	}
 }
 
+// TestBuildQuickCreatePromptParentPinning verifies that when the user
+// opened quick-create from "Add sub issue" on an existing issue, the prompt
+// instructs the agent to pass `--parent <uuid>` so the new issue is filed
+// as a sub-issue. The frontend already seeds parent_issue_id silently
+// through the manual→agent switch, so this is the last hop that has to
+// hold up — without the prompt instruction the agent would create a
+// standalone issue and the sub-issue relationship would be silently
+// dropped.
+func TestBuildQuickCreatePromptParentPinning(t *testing.T) {
+	const (
+		parentID         = "33333333-2222-1111-4444-555555555555"
+		parentIdentifier = "MUL-2534"
+	)
+	out := buildQuickCreatePrompt(Task{
+		QuickCreatePrompt:     "fix the login button color",
+		ParentIssueID:         parentID,
+		ParentIssueIdentifier: parentIdentifier,
+	})
+	mustContain := []string{
+		"--parent \"" + parentID + "\"",
+		parentIdentifier,
+		"modal entry point is authoritative",
+		"filed as a sub-issue",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("buildQuickCreatePrompt with parent missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+
+	// When only the UUID is available (identifier lookup failed on claim),
+	// the agent must still get the --parent instruction so the sub-issue
+	// intent isn't silently dropped.
+	uuidOnly := buildQuickCreatePrompt(Task{
+		QuickCreatePrompt: "fix the login button color",
+		ParentIssueID:     parentID,
+	})
+	if !strings.Contains(uuidOnly, "--parent \""+parentID+"\"") {
+		t.Errorf("buildQuickCreatePrompt with parent UUID only must still pin --parent, got:\n%s", uuidOnly)
+	}
+
+	// Without a parent, the prompt must NOT mention --parent at all — a
+	// plain quick-create run should not start filing sub-issues.
+	plain := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color"})
+	if strings.Contains(plain, "--parent") {
+		t.Errorf("buildQuickCreatePrompt without parent must NOT mention --parent, got:\n%s", plain)
+	}
+}
+
 // TestBuildPromptSquadLeaderNoActionForMemberTrigger verifies that the
 // squad leader no_action prohibition is injected in the per-turn prompt
 // regardless of whether the triggering comment was posted by an agent or
@@ -200,12 +249,13 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
-// TestBuildPromptCommentTriggerPromotesThreadReads pins MUL-2387: the
-// per-turn prompt for a comment-triggered task must steer the agent at the
-// thread-aware reads first (--thread anchored on the trigger comment id,
-// then --recent N as a fallback with cursor guidance) instead of the legacy
-// "dump the entire comment list" recipe. Locking this in test stops the
-// guidance from decaying back to a full-flat-dump on prompt edits.
+// TestBuildPromptCommentTriggerPromotesThreadReads pins MUL-2387 + MUL-2421:
+// the per-turn prompt for a comment-triggered task must default the trigger
+// thread read to `--thread <id> --tail 30` (so long threads don't dump
+// hundreds of replies into the agent's context) and explain reply-cursor
+// pagination for older replies. --recent N stays as the cross-thread
+// fallback. Locking this in test stops the guidance from decaying back to
+// either the legacy full-flat-dump or the unbounded `--thread` recipe.
 func TestBuildPromptCommentTriggerPromotesThreadReads(t *testing.T) {
 	const (
 		issueID   = "issue-thread-1"
@@ -221,18 +271,23 @@ func TestBuildPromptCommentTriggerPromotesThreadReads(t *testing.T) {
 	out := BuildPrompt(task, "claude")
 
 	mustContain := []string{
-		// Thread-first read pinned by trigger comment id.
+		// Thread-first read pinned by trigger comment id, capped via --tail 30.
 		"--thread " + triggerID,
-		"`multica issue comment list " + issueID + " --thread " + triggerID + " --output json`",
-		// --recent fallback uses the documented default N=20.
+		"--tail 30",
+		"`multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json`",
+		// Reply cursor walks older replies inside the same thread.
+		"Next reply cursor:",
+		"--before-id <reply-id>",
+		// --recent stays as the cross-thread background fallback.
 		"--recent 20 --output json",
 		// Cursor walks via the stderr line the CLI emits, not invented flags.
-		"Next thread cursor:",
+		"Next thread cursor",
 		"--before",
 		"--before-id",
-		// --since is preserved as an additional, combinable knob.
+		// --since is preserved as an additional, combinable knob (now scoped
+		// to the post-MUL-2421 mode names).
 		"--since",
-		"may combine with `--thread` or `--recent`",
+		"may combine with `--thread --tail` or `--recent`",
 		// Discourage the unfiltered full dump on long-running issues.
 		"Avoid the unfiltered",
 		"wastes context",
@@ -248,6 +303,12 @@ func TestBuildPromptCommentTriggerPromotesThreadReads(t *testing.T) {
 	// sneaking back in.
 	if strings.Contains(out, "returns all comments for the issue (server caps at 2000)") {
 		t.Errorf("buildCommentPrompt still carries the legacy full-dump phrasing")
+	}
+	// The pre-MUL-2421 unbounded `--thread` recipe (no --tail) is also a
+	// regression target: it dumps the entire thread on long threads, which
+	// is exactly what --tail 30 is meant to bound.
+	if strings.Contains(out, "--thread "+triggerID+" --output json") {
+		t.Errorf("buildCommentPrompt regressed to unbounded --thread recipe (no --tail) — long threads will overflow context\n--- output ---\n%s", out)
 	}
 }
 

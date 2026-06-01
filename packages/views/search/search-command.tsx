@@ -43,6 +43,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import type { WorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions } from "@multica/core/workspace/queries";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
@@ -571,7 +572,7 @@ export function SearchCommand() {
                     <ActorAvatarBase
                       name={member.name}
                       initials={memberInitials(member.name)}
-                      avatarUrl={member.avatar_url}
+                      avatarUrl={resolvePublicFileUrl(member.avatar_url)}
                       size={22}
                     />
                     <div className="min-w-0 flex-1">

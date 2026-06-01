@@ -499,3 +499,98 @@ func TestLoadConfig_SkipsLoginShellWhenLookPathSucceeds(t *testing.T) {
 		t.Fatalf("unexpected error stat-ing marker file: %v", err)
 	}
 }
+
+func TestLoadConfig_UsesCodexDesktopAppBundleFallback(t *testing.T) {
+	pathDir := t.TempDir()
+	fakeCodex := filepath.Join(pathDir, "Codex.app", "Contents", "Resources", "codex")
+	if err := os.MkdirAll(filepath.Dir(fakeCodex), 0o755); err != nil {
+		t.Fatalf("mkdir fake Codex bundle: %v", err)
+	}
+	if err := os.WriteFile(fakeCodex, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake Codex bundle CLI: %v", err)
+	}
+
+	oldBundlePaths := codexDesktopAppBundlePaths
+	codexDesktopAppBundlePaths = func() []string { return []string{fakeCodex} }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("MULTICA_CODEX_MODEL", "gpt-5")
+	pinNonCodexAgentsToMissingPaths(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := cfg.Agents["codex"]
+	if !ok {
+		t.Fatalf("expected codex agent from Desktop app bundle fallback, got %#v", cfg.Agents)
+	}
+	if got.Path != fakeCodex {
+		t.Fatalf("codex path = %q, want %q", got.Path, fakeCodex)
+	}
+	if got.Model != "gpt-5" {
+		t.Fatalf("codex model = %q, want gpt-5", got.Model)
+	}
+}
+
+func TestLoadConfig_CodexDesktopFallbackDoesNotOverrideExplicitPath(t *testing.T) {
+	pathDir := t.TempDir()
+	fakeCodex := filepath.Join(pathDir, "Codex.app", "Contents", "Resources", "codex")
+	if err := os.MkdirAll(filepath.Dir(fakeCodex), 0o755); err != nil {
+		t.Fatalf("mkdir fake Codex bundle: %v", err)
+	}
+	if err := os.WriteFile(fakeCodex, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake Codex bundle CLI: %v", err)
+	}
+
+	oldBundlePaths := codexDesktopAppBundlePaths
+	codexDesktopAppBundlePaths = func() []string { return []string{fakeCodex} }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("MULTICA_CODEX_PATH", filepath.Join(t.TempDir(), "missing-codex"))
+	pinNonCodexAgentsToMissingPaths(t)
+	fakeClaude := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(fakeClaude, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	t.Setenv("MULTICA_CLAUDE_PATH", fakeClaude)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got, ok := cfg.Agents["codex"]; ok {
+		t.Fatalf("explicit missing MULTICA_CODEX_PATH should not fall back to Desktop bundle, got %#v", got)
+	}
+}
+
+func pinNonCodexAgentsToMissingPaths(t *testing.T) {
+	t.Helper()
+	missingDir := t.TempDir()
+	for _, name := range []string{
+		"MULTICA_CLAUDE_PATH",
+		"MULTICA_OPENCODE_PATH",
+		"MULTICA_OPENCLAW_PATH",
+		"MULTICA_HERMES_PATH",
+		"MULTICA_GEMINI_PATH",
+		"MULTICA_PI_PATH",
+		"MULTICA_CURSOR_PATH",
+		"MULTICA_COPILOT_PATH",
+		"MULTICA_KIMI_PATH",
+		"MULTICA_KIRO_PATH",
+	} {
+		t.Setenv(name, filepath.Join(missingDir, strings.ToLower(name)))
+	}
+}
