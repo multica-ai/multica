@@ -19,8 +19,17 @@ spec:
     # Cluster parameter group: enables pg_cron via shared_preload_libraries
     # and points cron at the agentfarm database. See
     # rds-cluster-parameter-group.yaml.
+    #
+    # policy.resolve: Always — the cluster pre-existed this manifest with
+    # dbClusterParameterGroupName=default.aurora-postgresql16 populated by
+    # Crossplane late-initialization. The default Ref resolve policy
+    # (IfNotPresent) only resolves when the underlying field is empty, so
+    # the late-init literal would never get overwritten by the Ref. Always
+    # forces every reconcile to re-resolve and write the resolved value.
     dbClusterParameterGroupNameRef:
       name: agentfarm-postgres-cluster-params
+      policy:
+        resolve: Always
 
     # Password: SSM /agentfarm/tools/POSTGRES_MASTER_PASSWORD → surfaced into
     # agentfarm-secret-store by secret-store.yaml's bulk dataFrom.find (prefix
