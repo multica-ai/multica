@@ -3,7 +3,7 @@
 # devenv-runtime — opencode server running on the shared agent-runtime base.
 #
 # Base: agent-runtime-base (multica, claude, codex, opencode, hermes, pi, gh, acli)
-# Adds: kubectl, G2 devenv tooling (bun, mise, ruby, vim, uv, arb, oh-my-openagent)
+# Adds: kubectl, G2 devenv tooling (bun, vim, uv, arb, oh-my-openagent)
 
 ARG BASE_IMAGE=ghcr.io/g2crowd/agent-runtime-base
 ARG BASE_TAG=latest
@@ -24,10 +24,6 @@ RUN curl -fsSL "https://pkgs.k8s.io/core:/stable:/${KUBECTL_MINOR}/deb/Release.k
  && apt-get install -y --no-install-recommends \
       kubectl yq \
       vim nano tmux fzf unzip \
-      make build-essential pkg-config \
-      libpq-dev libssl-dev libyaml-dev libffi-dev libreadline-dev zlib1g-dev \
-      libcurl4-openssl-dev libsass-dev libxml2-dev libxslt1-dev \
-      imagemagick libmagickwand-dev \
       python3 wget netcat-openbsd tree less dnsutils procps openssh-client \
  && rm -rf /var/lib/apt/lists/*
 
@@ -56,15 +52,6 @@ ENV PATH="/home/agent/.bun/bin:${PATH}"
 # ── Install uv (Python package manager — needed for uvx MCP servers) ─────────
 RUN curl -fsSL https://astral.sh/uv/install.sh | sh
 ENV PATH="/home/agent/.local/bin:${PATH}"
-
-# ── Install mise + Ruby ──────────────────────────────────────────────────────
-RUN curl -fsSL https://mise.run | sh \
- && echo 'eval "$($HOME/.local/bin/mise activate bash)"' >> ~/.bashrc
-ENV PATH="/home/agent/.local/bin:${PATH}"
-ENV MISE_TRUSTED_CONFIG_PATHS="/home/agent/workspaces:/home/developer/workspaces"
-
-RUN mise use --global ruby@3.3.10 && mise reshim
-ENV PATH="/home/agent/.local/share/mise/shims:${PATH}"
 
 # ── Bake in opencode config files ────────────────────────────────────────────
 RUN mkdir -p "${HOME}/.config/opencode"
