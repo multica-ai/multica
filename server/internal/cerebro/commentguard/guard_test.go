@@ -1,9 +1,46 @@
 package commentguard
 
-import "testing"
+import (
+	"context"
+	"testing"
 
-func TestRejectComment(t *testing.T) {
-	g := New()
+	"github.com/jackc/pgx/v5/pgtype"
+
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+)
+
+// fakeFlags is a flagReader stub. enabled controls whether the workspace has
+// the cerebro_comment_target_guard flag turned on; err forces a lookup error.
+type fakeFlags struct {
+	enabled bool
+	err     error
+}
+
+func (f fakeFlags) ListCerebroWorkspaceFeatureFlags(_ context.Context, _ pgtype.UUID) ([]cerebrodb.ListCerebroWorkspaceFeatureFlagsRow, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if !f.enabled {
+		return nil, nil
+	}
+	return []cerebrodb.ListCerebroWorkspaceFeatureFlagsRow{
+		{FlagKey: FlagCommentTargetGuard, Enabled: true},
+	}, nil
+}
+
+func testWorkspaceID(t *testing.T) pgtype.UUID {
+	t.Helper()
+	var id pgtype.UUID
+	if err := id.Scan("11bd8321-b6ac-4bee-ae41-6659a5064608"); err != nil {
+		t.Fatalf("scan workspace id: %v", err)
+	}
+	return id
+}
+
+// With the flag ON, the rejection logic behaves as before.
+func TestRejectCommentFlagOn(t *testing.T) {
+	g := New(fakeFlags{enabled: true})
+	ws := testWorkspaceID(t)
 
 	cases := []struct {
 		name       string
@@ -24,7 +61,7 @@ func TestRejectComment(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			msg, ok := g.RejectComment(tc.authorType, tc.content)
+			msg, ok := g.RejectComment(context.Background(), ws, tc.authorType, tc.content)
 			if ok != tc.wantOK {
 				t.Fatalf("RejectComment(%q, %q) ok=%v, want %v", tc.authorType, tc.content, ok, tc.wantOK)
 			}
@@ -38,10 +75,27 @@ func TestRejectComment(t *testing.T) {
 	}
 }
 
-// A nil Service must be a safe no-op so a disabled guard never blocks.
-func TestRejectCommentNilService(t *testing.T) {
-	var g *Service
-	if msg, ok := g.RejectComment("agent", "no target here"); !ok || msg != "" {
-		t.Fatalf("nil guard must pass everything, got ok=%v msg=%q", ok, msg)
+// With the flag OFF (the default — no override row), even an agent comment with
+// no target passes: the guard does nothing until an admin turns the flag on.
+func TestRejectCommentFlagOffPassesEverything(t *testing.T) {
+	g := New(fakeFlags{enabled: false})
+	ws := testWorkspaceID(t)
+	if msg, ok := g.RejectComment(context.Background(), ws, "agent", "no target here"); !ok || msg != "" {
+		t.Fatalf("flag off must pass everything, got ok=%v msg=%q", ok, msg)
+	}
+}
+
+// A nil Service, or one built with a nil reader, is a safe no-op.
+func TestRejectCommentNilSafe(t *testing.T) {
+	ws := testWorkspaceID(t)
+
+	var nilService *Service
+	if msg, ok := nilService.RejectComment(context.Background(), ws, "agent", "no target"); !ok || msg != "" {
+		t.Fatalf("nil service must pass everything, got ok=%v msg=%q", ok, msg)
+	}
+
+	nilReader := New(nil)
+	if msg, ok := nilReader.RejectComment(context.Background(), ws, "agent", "no target"); !ok || msg != "" {
+		t.Fatalf("nil reader must pass everything, got ok=%v msg=%q", ok, msg)
 	}
 }

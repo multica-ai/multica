@@ -268,7 +268,7 @@ type MentionTriggerGateInvoker interface {
 //
 // CEREBRO-PATCH(handler-comment-target-guard-iface): seam for FIR-2674.
 type CommentTargetGuardInvoker interface {
-	RejectComment(authorType, content string) (string, bool)
+	RejectComment(ctx context.Context, workspaceID pgtype.UUID, authorType, content string) (string, bool) // CEREBRO-PATCH(handler-comment-target-guard-iface): FIR-2674 feature-flag-gated, workspace-scoped.
 }
 
 // PrivateAgentRunRequesterInvoker is the upstream-side seam for FIR-2385. It is
