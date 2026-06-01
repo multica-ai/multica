@@ -387,3 +387,119 @@ restricted to whatever scrape source you list in
 `runtime.claudeBroker.networkPolicy.metricsFrom`. The ops port (`:8081`)
 is bound to loopback inside the pod and isn't reachable from the cluster
 network at all.
+
+## Repo cache (Plan F.1)
+
+The `multica-repocache` Deployment maintains bare clones of every
+workspace's repos on a single RWX PVC and serves them as a read-only
+filesystem to every worker Job pod. The agent's `git clone <origin-url>`
+becomes a transparent sub-second `git clone --shared file:///repos/...`
+clone via git's `url.<base>.insteadOf` rewrite, mounted at
+`/home/multica/.gitconfig` as a per-task ConfigMap. Cold clones drop from
+~5–15 s on a typical repo to under a second, and the cluster keeps
+running through transient GitHub outages because workers never touch
+origin during a task.
+
+### Architecture
+
+- Long-lived Deployment (`replicas: 1`, `strategy: Recreate`) — single
+  writer to avoid `git fetch` racing itself on the same bare clone.
+- One RWX PVC (`multica-repocache-repos`) at `/repos`. The same PVC is
+  mounted **read-only** on every worker Job pod, so multiple concurrent
+  workers can clone in parallel without coordinating.
+- A 60 s sync loop calls `GET /api/daemon/workspaces/<id>/repos` per
+  configured workspace and runs `git fetch` (or `git clone --bare` for
+  new repos) on each URL. Errors per workspace are aggregated and don't
+  abort the loop.
+- The controller reads `repoCache.{enabled,pvcName,mountPath}` from its
+  ConfigMap and, when enabled, adds two volumes + two mounts to every
+  worker Job spec, plus a per-task `task-<short>-gitconfig` ConfigMap
+  with the URL-rewrite block.
+
+### Required storage class
+
+The PVC **must** be backed by an RWX storage class — multiple worker
+pods mount it read-only at the same time. NFS-CSI and EFS both work.
+ReadWriteOnce will fail to schedule the second pod.
+
+```yaml
+runtime:
+  repocache:
+    enabled: true
+    storage:
+      storageClass: synology-nfs-csi-rwx    # or equivalent RWX class
+      size: 20Gi
+```
+
+### Values keys
+
+| Key | Default | Purpose |
+|---|---|---|
+| `runtime.repocache.enabled` | `true` | Master switch. Disabling falls back to direct origin clones in worker pods (slower, but functional). |
+| `runtime.repocache.replicaCount` | `1` | Must stay 1 — see above. |
+| `runtime.repocache.image.{name,tag}` | repocache/`""` (→ `image.tag`) | Image override. |
+| `runtime.repocache.storage.storageClass` | `""` | **MUST be RWX-capable.** |
+| `runtime.repocache.storage.accessMode` | `ReadWriteMany` | |
+| `runtime.repocache.storage.size` | `20Gi` | Sized for all mirrored bare clones. |
+| `runtime.repocache.fetchInterval` | `60s` | Background refresh tick. |
+| `runtime.repocache.resources` | 100m/256Mi req, 1/1Gi limit | Bump for very large org-wide caches. |
+
+### Verifying
+
+```bash
+# Pod is healthy
+kubectl -n multica get deploy/multica-repocache
+
+# Bare clones landed on the PVC
+kubectl -n multica exec deploy/multica-repocache -- ls /repos
+kubectl -n multica exec deploy/multica-repocache -- du -sh /repos/* 2>&1 | head -10
+
+# A worker pod sees the cache and gitconfig
+POD=$(kubectl -n multica get pods -l app.kubernetes.io/managed-by=multica-k8s-controller \
+        --field-selector=status.phase=Running -o name | head -1)
+kubectl -n multica exec "$POD" -c runtask -- cat /home/multica/.gitconfig
+kubectl -n multica exec "$POD" -c runtask -- ls /repos
+```
+
+The gitconfig file should contain blocks like:
+
+```ini
+[url "file:///repos/<workspace-id>/github.com+chrissnell+graywolf.git"]
+        insteadOf = https://github.com/chrissnell/graywolf
+        insteadOf = https://github.com/chrissnell/graywolf.git
+        insteadOf = git@github.com:chrissnell/graywolf
+        insteadOf = git@github.com:chrissnell/graywolf.git
+```
+
+### Metrics
+
+The repocache exposes Prometheus metrics on `:9090`:
+
+```
+multica_repocache_sync_total{workspace_id,outcome="ok|repos_fetch_error|sync_error"}
+multica_repocache_fetch_seconds{workspace_id}    (histogram)
+```
+
+**Recommended alert:** repeated `sync_error` outcomes for the same
+workspace usually mean either a deploy-key permission problem against a
+newly added repo, or a transient GitHub outage. The latter is fine;
+the former needs operator attention on the `multica-git-ssh` Secret.
+
+### Admin API
+
+The Deployment exposes a small admin API on `:8080`:
+
+- `GET /healthz` → `200 ok`
+- `POST /repos/fetch?workspace_id=<ws>&url=<u>` → force a single repo to
+  fetch immediately (404 if the URL isn't cached yet)
+
+These are reachable only from inside the namespace; they're meant for
+human ops, not for the controller (which doesn't call them).
+
+### Disabling
+
+Set `runtime.repocache.enabled=false` and re-apply. Worker pods will no
+longer mount `/repos` or `/home/multica/.gitconfig`; their `git clone`
+calls fall back to direct origin URLs over the network. This is a safe
+sanity-check path — if a clone behaves unexpectedly, flip the cache off,
+re-run the task, and compare.
