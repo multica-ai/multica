@@ -47,3 +47,14 @@ export function parseFrontmatter(raw: string): ParsedFrontmatter {
     body,
   };
 }
+
+export function parseSkillFrontmatter(content: string): {
+  name: string;
+  description: string;
+} {
+  const { frontmatter } = parseFrontmatter(content);
+  return {
+    name: frontmatter?.name ?? "",
+    description: frontmatter?.description ?? "",
+  };
+}

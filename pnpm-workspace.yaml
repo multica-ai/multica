@@ -53,6 +53,9 @@ catalog:
   # YAML parsing (skill frontmatter)
   yaml: "^2.6.0"
 
+  # YAML parsing (skill frontmatter)
+  yaml: "^2.6.0"
+
   # Testing
   vitest: "^4.1.0"
   jsdom: "^29.0.1"
