@@ -226,6 +226,13 @@ export default function WorkspaceLayout() {
           name="issue/[id]/comment/[commentId]/emoji-picker"
           options={SHEET_OPTIONS}
         />
+        {/* "Remind me" picker for a comment — pushed from the comment
+            long-press menu (FIR-2644). Creates a personal reminder pinned to
+            the comment. */}
+        <Stack.Screen
+          name="issue/[id]/comment/[commentId]/reminder"
+          options={SHEET_OPTIONS}
+        />
         {/* Project-detail formSheet pickers. */}
         <Stack.Screen
           name="project/[id]/picker/status"

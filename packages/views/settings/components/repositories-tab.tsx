@@ -13,7 +13,15 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import type { Workspace, WorkspaceRepo } from "@multica/core/types";
-import { RepoDefaultPolicy } from "@multica/cerebro-tool-policy/views"; // CEREBRO-PATCH(repo-default-policy-import): FIR-2505 per-repo default access control
+// CEREBRO-PATCH(repo-default-policy-import): FIR-2505 — set default on add, show + link to Permissions otherwise
+import {
+  RepoDefaultPolicySelect,
+  RepoPolicyBadge,
+  useWriteRepoDefaultPolicy,
+  type ToolSetting,
+} from "@multica/cerebro-tool-policy/views";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 function dropAndShiftIndex(set: Set<number>, removed: number): Set<number> {
@@ -21,6 +29,16 @@ function dropAndShiftIndex(set: Set<number>, removed: number): Set<number> {
   set.forEach((i) => {
     if (i === removed) return;
     next.add(i > removed ? i - 1 : i);
+  });
+  return next;
+}
+
+// CEREBRO-PATCH(repo-default-policy-shift): FIR-2505 keep per-row default drafts aligned when a row is removed
+function dropAndShiftMap(map: Map<number, ToolSetting>, removed: number): Map<number, ToolSetting> {
+  const next = new Map<number, ToolSetting>();
+  map.forEach((v, i) => {
+    if (i === removed) return;
+    next.set(i > removed ? i - 1 : i, v);
   });
   return next;
 }
@@ -41,6 +59,11 @@ export function RepositoriesTab() {
   const [repos, setRepos] = useState<WorkspaceRepo[]>(workspace?.repos ?? []);
   const [editingIndices, setEditingIndices] = useState<Set<number>>(new Set());
   const [saving, setSaving] = useState(false);
+  // CEREBRO-PATCH(repo-default-policy-state): FIR-2505 default access chosen while adding a repo, written on save
+  const toolPolicyEnabled = useFeatureFlag("cerebro_tool_policy");
+  const navigation = useNavigation();
+  const writeRepoPolicy = useWriteRepoDefaultPolicy();
+  const [draftPolicies, setDraftPolicies] = useState<Map<number, ToolSetting>>(new Map());
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
@@ -57,10 +80,18 @@ export function RepositoriesTab() {
     setSaving(true);
     try {
       const updated = await api.updateWorkspace(workspace.id, { repos });
+      // CEREBRO-PATCH(repo-default-policy-save): FIR-2505 persist the default access chosen during add
+      if (toolPolicyEnabled) {
+        repos.forEach((r, i) => {
+          const draft = draftPolicies.get(i);
+          if (draft && r.url) writeRepoPolicy(wsId, r.url, draft);
+        });
+      }
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
       setEditingIndices(new Set());
+      setDraftPolicies(new Map());
       toast.success(t(($) => $.repositories.toast_saved));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.repositories.toast_save_failed));
@@ -73,11 +104,14 @@ export function RepositoriesTab() {
     const nextIndex = repos.length;
     setRepos([...repos, { url: "" }]);
     setEditingIndices(new Set(editingIndices).add(nextIndex));
+    // CEREBRO-PATCH(repo-default-policy-add-default): FIR-2505 new repos default to Ask
+    setDraftPolicies(new Map(draftPolicies).set(nextIndex, "ask"));
   };
 
   const handleRemoveRepo = (index: number) => {
     setRepos(repos.filter((_, i) => i !== index));
     setEditingIndices(dropAndShiftIndex(editingIndices, index));
+    setDraftPolicies(dropAndShiftMap(draftPolicies, index)); // CEREBRO-PATCH(repo-default-policy-remove): keep drafts aligned
   };
 
   const handleRepoChange = (index: number, field: keyof WorkspaceRepo, value: string) => {
@@ -145,6 +179,17 @@ export function RepositoriesTab() {
                         placeholder={t(($) => $.repositories.description_placeholder)}
                         className="text-sm"
                       />
+                      {/* CEREBRO-PATCH(repo-default-policy-setup): FIR-2505 — set default access only when adding a new repo */}
+                      {toolPolicyEnabled && canManageWorkspace && savedRepos[index] === undefined && (
+                        <div className="space-y-1 pt-0.5">
+                          <span className="text-xs text-muted-foreground">Default access for agents</span>
+                          <RepoDefaultPolicySelect
+                            value={draftPolicies.get(index) ?? "ask"}
+                            onChange={(v) => setDraftPolicies(new Map(draftPolicies).set(index, v))}
+                            disabled={saving}
+                          />
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="flex-1 min-w-0 rounded-md border bg-muted/50 px-3 py-2">
@@ -161,10 +206,18 @@ export function RepositoriesTab() {
                       )}
                     </div>
                   )}
-                  {/* CEREBRO-PATCH(repo-default-policy-mount): FIR-2505 — owner picks default allow/ask/deny per repo */}
-                  {!isEditing && canManageWorkspace && repo.url && (
+                  {/* CEREBRO-PATCH(repo-default-policy-mount): FIR-2505 — show current default + link to Permissions to manage */}
+                  {!isEditing && toolPolicyEnabled && repo.url && (
                     <div className="shrink-0 pt-1">
-                      <RepoDefaultPolicy wsId={wsId} repoUrl={repo.url} />
+                      <RepoPolicyBadge
+                        wsId={wsId}
+                        repoUrl={repo.url}
+                        onManage={() => {
+                          const params = new URLSearchParams(navigation.searchParams);
+                          params.set("tab", "permissions");
+                          navigation.replace(`${navigation.pathname}?${params.toString()}`);
+                        }}
+                      />
                     </div>
                   )}
                   {canManageWorkspace && (

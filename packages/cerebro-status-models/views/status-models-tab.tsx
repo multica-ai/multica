@@ -80,21 +80,21 @@ export function StatusModelsTab() {
   const handleDelete = (model: CerebroStatusModel) => {
     if (model.project_count > 0) {
       toast.error(
-        `"${model.name}" bruges af ${model.project_count} projekt(er) — fjern den der først.`,
+        `"${model.name}" is used by ${model.project_count} project(s) — remove it from those first.`,
       );
       return;
     }
     deleteMutation.mutate(model.id, {
       onError: (err) =>
-        toast.error(err instanceof Error ? err.message : "Kunne ikke slette modellen."),
-      onSuccess: () => toast.success(`"${model.name}" slettet.`),
+        toast.error(err instanceof Error ? err.message : "Could not delete the model."),
+      onSuccess: () => toast.success(`"${model.name}" deleted.`),
     });
   };
 
   const handleAssign = (projectId: string, value: string) => {
     if (value === DEFAULT_VALUE) {
       clearMutation.mutate(projectId, {
-        onError: () => toast.error("Kunne ikke nulstille projektets statusmodel."),
+        onError: () => toast.error("Could not reset the project's status model."),
       });
       return;
     }
@@ -104,7 +104,7 @@ export function StatusModelsTab() {
     const project = projects?.find((p) => p.id === projectId);
     setAssigning({
       projectId,
-      projectName: project?.title ?? "projekt",
+      projectName: project?.title ?? "project",
       modelId: value,
     });
   };
@@ -113,24 +113,24 @@ export function StatusModelsTab() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold">Statusmodeller</h2>
+          <h2 className="text-lg font-semibold">Status models</h2>
           <p className="text-sm text-muted-foreground">
-            Genbrugelige status-pipelines. Vælg én pr. projekt — projektets board
-            bruger så modellens statusser i stedet for standarderne.
+            Reusable status pipelines. Pick one per project — the project's board
+            then uses the model's statuses instead of the defaults.
           </p>
         </div>
         <Button onClick={openCreate}>
           <Plus className="mr-1.5 size-3.5" />
-          Ny model
+          New model
         </Button>
       </div>
 
       <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
         <GitBranch className="size-4 text-muted-foreground" />
         <span>
-          <span className="font-medium">{projectsWithModel}</span> projekt(er)
-          bruger et custom workflow ·{" "}
-          <span className="font-medium">{models.length}</span> model(ler) defineret
+          <span className="font-medium">{projectsWithModel}</span> project(s) use
+          a custom workflow ·{" "}
+          <span className="font-medium">{models.length}</span> model(s) defined
         </span>
       </div>
 
@@ -138,7 +138,7 @@ export function StatusModelsTab() {
       <div className="space-y-3">
         {models.length === 0 ? (
           <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-            Ingen statusmodeller endnu. Opret den første med "Ny model".
+            No status models yet. Create the first one with "New model".
           </p>
         ) : (
           models.map((model) => (
@@ -148,7 +148,7 @@ export function StatusModelsTab() {
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{model.name}</span>
                     <Badge variant="secondary">
-                      {model.project_count} projekt(er)
+                      {model.project_count} project(s)
                     </Badge>
                   </div>
                   {model.description && (
@@ -195,10 +195,10 @@ export function StatusModelsTab() {
 
       {/* Per-project assignment + overview */}
       <div className="space-y-2">
-        <h3 className="text-sm font-semibold">Projekter</h3>
+        <h3 className="text-sm font-semibold">Projects</h3>
         <p className="text-sm text-muted-foreground">
-          Vælg hvilken statusmodel hvert projekt bruger. "Default" giver de 7
-          standardstatusser.
+          Choose which status model each project uses. "Default" gives the 7
+          standard statuses.
         </p>
         <div className="divide-y rounded-lg border">
           {(projects ?? []).map((project) => (
@@ -223,7 +223,7 @@ export function StatusModelsTab() {
           ))}
           {(projects ?? []).length === 0 && (
             <p className="px-3 py-4 text-center text-sm text-muted-foreground">
-              Ingen projekter i dette workspace endnu.
+              No projects in this workspace yet.
             </p>
           )}
         </div>

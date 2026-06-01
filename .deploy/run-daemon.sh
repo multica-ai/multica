@@ -21,10 +21,20 @@ set +a
 # fails if no runtime resolves at start, rather than silently degrading.
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-# Claude-agenter spawned af denne daemon bruger Max-kontoen jesperhvejsel@gmail.com.
-# Per-host overridable; defaults under the running user's home rather than a
-# hardcoded /Users/sara path (FIR-2049).
-export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude-accounts/jesperhvejsel@gmail.com}"
+# Claude-agenter bruger default config dir ($HOME/.claude) saa de arver
+# den interaktive Claude Code session's login paa hosten.
+#
+# Hvis CLAUDE_CONFIG_DIR saettes eksplicit — selv til samme vaerdi som default
+# — bruger Claude Code en sti-hashet keychain entry ("Claude Code-credentials-
+# <sha8>") i stedet for den unsuffixede entry som /login skriver til naar
+# CLAUDE_CONFIG_DIR er unset. Det betyder: en eksplicit export pegende paa
+# en bestemt brugers account-mappe under .claude-accounts/ binder daemonen
+# haardt til den brugers login og lader spawnede agents fejle med "Not
+# logged in" paa hosts hvor den keychain entry ikke findes.
+#
+# Per-host override: sat den i $REPO/.env hvis daemonen skal koere mod et
+# specifikt account. Per-agent override via Multica CustomEnv.
+unset CLAUDE_CONFIG_DIR
 
 # FIR-2192: the daemon no longer talks to Infisical. Per-agent secrets are
 # resolved server-side via the scoped-per-user Infisical machine identity and

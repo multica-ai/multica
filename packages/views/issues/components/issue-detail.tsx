@@ -100,6 +100,8 @@ import { CerebroIssueDetailStatusSubmenu } from "./cerebro-issue-detail-status-s
 import { useMoveCommentToSubIssue, useMoveCommentsToNewThread, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
+// CEREBRO-PATCH(issue-detail-sprint-picker): FIR-2666 assign issue to a sprint from the sidebar, gated on cerebro_sprints.
+import { SprintPicker } from "@multica/cerebro-sprints/views";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
 import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
@@ -631,6 +633,8 @@ interface IssueDetailProps {
   highlightCommentId?: string;
   /** When true, the issue identifier+title in the breadcrumb links to the issue detail page. Used when this view is embedded (e.g. inbox) so users can navigate to the dedicated issue page. */
   linkSelfInBreadcrumb?: boolean;
+  // CEREBRO-PATCH(issue-detail-seed-from-list): FIR-2684 — embedded hosts (inbox) pass false so opening a message doesn't cold-load the whole board issue-list just to seed parent/self from cache. Default true keeps issues-page behavior.
+  seedFromIssueList?: boolean;
   // CEREBRO-PATCH(issue-detail-extensions-slot): JEH-838b — cerebro slot for issue-attached panels (references) rendered after attachments/artifacts. Apps supply the node.
   extensions?: ReactNode;
 }
@@ -640,7 +644,7 @@ interface IssueDetailProps {
 // ---------------------------------------------------------------------------
 
 // CEREBRO-PATCH(issue-detail-unarchive-toolbar): JEH-1321 — accept onUnarchive from host.
-export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, linkSelfInBreadcrumb = false, extensions }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, linkSelfInBreadcrumb = false, extensions, seedFromIssueList = true }: IssueDetailProps) { // CEREBRO-PATCH(issue-detail-seed-from-list): FIR-2684
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const id = issueId;
@@ -665,7 +669,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     members.find((m) => m.user_id === user?.id)?.role ?? null;
   const canModerateComments =
     currentUserRole === "owner" || currentUserRole === "admin";
-  const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
+  // CEREBRO-PATCH(issue-detail-seed-from-list): FIR-2684 — only seed from the board issue-list when it's already loaded; embedded hosts (inbox) pass seedFromIssueList=false so opening a message never cold-fetches the 6-status board list (self/parent still load via their own queries).
+  const { data: allIssues = [] } = useQuery({ ...issueListOptions(wsId), enabled: seedFromIssueList });
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -1067,6 +1072,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const moveCommentToSubIssueEnabled = useFeatureFlag("cerebro_move_comment_to_subissue");
   // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 gate the new-thread action.
   const moveCommentToThreadEnabled = useFeatureFlag("cerebro_move_comment_to_thread");
+  // CEREBRO-PATCH(issue-detail-sprint-picker): FIR-2666 gate the sidebar sprint picker.
+  const sprintsEnabled = useFeatureFlag("cerebro_sprints");
   const issueKind = issue?.kind ?? "issue";
   // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — resolve the
   // agent the backend trigger logic will wake when a member posts a
@@ -1365,6 +1372,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
           </PropRow>
+          {/* CEREBRO-PATCH(issue-detail-sprint-picker): FIR-2666 sprint picker; renders only with the flag on and the issue in a project (the picker self-hides when the project has no sprints). */}
+          {sprintsEnabled && issue.project_id && (
+            <PropRow label="Sprint">
+              <SprintPicker workspaceId={wsId} projectId={issue.project_id} issueId={issue.id} />
+            </PropRow>
+          )}
           {/* CEREBRO-PATCH(issue-on-behalf-of): MUL-2553 — show the human an agent created this issue for, so it traces back to a member. */}
           {issue.on_behalf_of ? (
             <PropRow label="På vegne af" interactive={false}>

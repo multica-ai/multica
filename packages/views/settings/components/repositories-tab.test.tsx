@@ -32,10 +32,25 @@ vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => workspaceRef.current,
 }));
 
-// The per-repo default-policy control is a cerebro add-on with its own tests
-// (repo-default-policy.test.tsx); stub it here so the tab test stays isolated.
+// The per-repo default-policy controls are a cerebro add-on with their own tests
+// (repo-default-policy.test.tsx); stub them here so the tab test stays isolated.
 vi.mock("@multica/cerebro-tool-policy/views", () => ({
-  RepoDefaultPolicy: () => null,
+  RepoDefaultPolicySelect: () => null,
+  RepoPolicyBadge: () => null,
+  useWriteRepoDefaultPolicy: () => vi.fn(),
+}));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => true,
+}));
+
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({
+    searchParams: new URLSearchParams(),
+    pathname: "/settings",
+    replace: vi.fn(),
+    push: vi.fn(),
+  }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({

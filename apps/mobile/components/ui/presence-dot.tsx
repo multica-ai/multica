@@ -8,8 +8,8 @@
  * Color mapping is identical to the web `availabilityConfig`
  * (`packages/views/agents/presence.ts:46`):
  *   online   → success         (green)
+ *   paused   → brand           (brand tone) — runtime intentionally paused
  *   unstable → warning         (amber) — runtime offline < 5 min
- *   paused   → muted           (gray) — runtime intentionally paused
  *   offline  → muted/40        (gray)
  *
  * Pure presentation. Caller passes the already-derived `AgentAvailability`
@@ -28,8 +28,8 @@ interface Props {
 
 const DOT_CLASS: Record<AgentAvailability, string> = {
   online: "bg-success",
+  paused: "bg-brand",
   unstable: "bg-warning",
-  paused: "bg-muted-foreground",
   offline: "bg-muted-foreground/40",
 };
 

@@ -46,3 +46,25 @@ func TestCostOptimizationRoutesAreMounted(t *testing.T) {
 		}
 	}
 }
+
+// CEREBRO-PATCH(runtime-setup-routes): FIR-2672 setup-token mint and exchange
+// routes must be mounted; otherwise the permission gate cannot be exercised.
+func TestRuntimeSetupRoutesAreMounted(t *testing.T) {
+	router := NewRouter(nil, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil, nil)
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{"POST", "/api/runtime-setup/tokens"},
+		{"POST", "/api/workspaces/11111111-1111-1111-1111-111111111111/runtime-setup-token"},
+		{"POST", "/api/runtime-setup/exchange"},
+		{"GET", "/install-runtime.sh"},
+	}
+	for _, c := range cases {
+		rctx := chi.NewRouteContext()
+		if !router.Match(rctx, c.method, c.path) {
+			t.Fatalf("expected %s %s to match a mounted route", c.method, c.path)
+		}
+	}
+}

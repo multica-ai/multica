@@ -65,12 +65,16 @@ func (s *Sweeper) Run(ctx context.Context, interval time.Duration) {
 
 // Tick runs one pass: for every project with auto-create enabled, advance
 // active → done where overdue, activate planned where due, and create the
-// next sprint when within the lead-days window.
+// next sprint when within the lead-days window. Workspaces where the
+// cerebro_sprints feature flag is OFF are skipped — the flag defaults OFF,
+// so a fresh workspace whose owner has never visited Feature Flags gets no
+// sprint activity.
 func (s *Sweeper) Tick(ctx context.Context) error {
 	settings, err := s.Cerebro.ListCerebroSprintSettingsForAutoCreate(ctx)
 	if err != nil {
 		return fmt.Errorf("list auto-create settings: %w", err)
 	}
+	flagCache := make(map[[16]byte]bool, 4)
 	for _, row := range settings {
 		full := cerebrodb.CerebroSprintSetting{
 			ProjectID:             row.ProjectID,
@@ -85,6 +89,17 @@ func (s *Sweeper) Tick(ctx context.Context) error {
 			MoveIncompleteEnabled: row.MoveIncompleteEnabled,
 			Timezone:              row.Timezone,
 		}
+		enabled, err := s.isSprintsFlagEnabled(ctx, full.WorkspaceID, flagCache)
+		if err != nil {
+			slog.Warn("cerebro sprint sweeper: flag check failed",
+				"workspace_id", util.UUIDToString(full.WorkspaceID),
+				"error", err,
+			)
+			continue
+		}
+		if !enabled {
+			continue
+		}
 		if err := s.handleProject(ctx, full); err != nil {
 			slog.Warn("cerebro sprint sweeper: project failed",
 				"project_id", util.UUIDToString(full.ProjectID),
@@ -93,6 +108,28 @@ func (s *Sweeper) Tick(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// isSprintsFlagEnabled reports whether the cerebro_sprints workspace-level
+// flag is ON. The lookup is cached per Tick so a workspace with several
+// projects pays one DB round-trip, not N.
+func (s *Sweeper) isSprintsFlagEnabled(ctx context.Context, workspaceID pgtype.UUID, cache map[[16]byte]bool) (bool, error) {
+	if !workspaceID.Valid {
+		return false, nil
+	}
+	if v, ok := cache[workspaceID.Bytes]; ok {
+		return v, nil
+	}
+	enabled, err := s.Cerebro.GetCerebroSprintsFlagForWorkspace(ctx, workspaceID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			cache[workspaceID.Bytes] = false
+			return false, nil
+		}
+		return false, err
+	}
+	cache[workspaceID.Bytes] = enabled
+	return enabled, nil
 }
 
 func (s *Sweeper) handleProject(ctx context.Context, settings cerebrodb.CerebroSprintSetting) error {
@@ -251,6 +288,19 @@ func (s *Sweeper) cloneRecurringTasks(ctx context.Context, tx pgx.Tx, cqtx *cere
 	if err != nil {
 		return err
 	}
+	if len(templates) == 0 {
+		return nil
+	}
+	// The sweeper has no user session, so we attribute the cloned issues
+	// to the workspace owner (or oldest admin). issue.creator_id is NOT
+	// NULL; an empty UUID hits the constraint and aborts the whole tick.
+	creatorID, err := cqtx.GetCerebroSprintRecurringIssueCreator(ctx, settings.WorkspaceID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("workspace %s has no owner/admin to attribute recurring issue to", util.UUIDToString(settings.WorkspaceID))
+		}
+		return fmt.Errorf("resolve recurring issue creator: %w", err)
+	}
 	for _, t := range templates {
 		number, err := dqtx.IncrementIssueCounter(ctx, settings.WorkspaceID)
 		if err != nil {
@@ -272,8 +322,8 @@ func (s *Sweeper) cloneRecurringTasks(ctx context.Context, tx pgx.Tx, cqtx *cere
 			Priority:     priority,
 			AssigneeType: t.AssigneeType,
 			AssigneeID:   t.AssigneeID,
-			CreatorType:  "agent",
-			CreatorID:    pgtype.UUID{},
+			CreatorType:  "member",
+			CreatorID:    creatorID,
 			Position:     position,
 			Number:       number,
 			ProjectID:    settings.ProjectID,

@@ -93,13 +93,13 @@ export function StatusModelAssignModal({
         mapping: resolvedMapping,
       });
       toast.success(
-        `Statusmodel anvendt på ${projectName}. Eksisterende issues er flyttet til den valgte status.`,
+        `Status model applied to ${projectName}. Existing issues have been moved to the selected status.`,
       );
       onApplied?.();
       onClose();
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Kunne ikke anvende statusmodellen.",
+        err instanceof Error ? err.message : "Could not apply the status model.",
       );
     }
   };
@@ -112,32 +112,32 @@ export function StatusModelAssignModal({
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label={`Anvend statusmodel på ${projectName}`}
+      aria-label={`Apply status model to ${projectName}`}
     >
       <div
-        className="w-full max-w-2xl rounded-xl border bg-card p-6 shadow-2xl"
+        className="w-full max-w-4xl rounded-xl border bg-card p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4">
           <h3 className="text-base font-semibold">
-            Anvend statusmodel på {projectName}
+            Apply status model to {projectName}
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Eksisterende issues placeres i den valgte custom-status under hver
-            grundtilstand. Du kan justere mappings før du bekræfter.
+            Existing issues are placed in the selected custom status under each
+            core status. You can adjust the mappings before you confirm.
           </p>
         </div>
 
         {visibleRows.length === 0 ? (
           <p className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-            Modellen indeholder endnu ingen custom statusser at mappe til.
-            Tilføj statusser før du tildeler modellen.
+            This model has no custom statuses to map to yet. Add statuses before
+            you assign the model.
           </p>
         ) : (
           <div className="rounded-lg border">
             <div className="grid grid-cols-[1fr_2fr] items-center gap-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <span>Grundstatus</span>
-              <span>Lander i</span>
+              <span>Core status</span>
+              <span>Lands in</span>
             </div>
             {visibleRows.map((base) => {
               const candidates = candidatesByBase.get(base) ?? [];
@@ -150,7 +150,7 @@ export function StatusModelAssignModal({
                   <span className="font-medium">{base}</span>
                   {candidates.length === 0 ? (
                     <span className="text-muted-foreground">
-                      Ingen custom status — falder tilbage til grundstatus
+                      No custom status — falls back to the core status
                     </span>
                   ) : (
                     <NativeSelect
@@ -178,7 +178,7 @@ export function StatusModelAssignModal({
             onClick={onClose}
             disabled={assignMutation.isPending}
           >
-            Annullér
+            Cancel
           </Button>
           <Button
             onClick={handleConfirm}
@@ -186,7 +186,7 @@ export function StatusModelAssignModal({
               assignMutation.isPending || !model || visibleRows.length === 0
             }
           >
-            {assignMutation.isPending ? "Anvender…" : "Anvend statusmodel"}
+            {assignMutation.isPending ? "Applying…" : "Apply status model"}
           </Button>
         </div>
       </div>

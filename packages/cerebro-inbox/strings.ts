@@ -52,6 +52,14 @@ type StringTable = {
   reminder_overdue_prefix: string;
   /** Badge label on the dedicated reminder row (FIR-2364). */
   reminder_label: string;
+  // FIR-2643 — "Remind me" on a specific comment (comment menu + picker).
+  comment_remind_action: string;
+  comment_remind_text_label: string;
+  comment_remind_text_placeholder: string;
+  /** Fallback reminder text when the comment body is empty. */
+  comment_remind_default_text: string;
+  comment_remind_created: string;
+  comment_remind_failed: string;
   // FIR-2115 — "Group by → Action" bucket headers. English in every locale by
   // product decision. Names follow the agreed product wording: Unread,
   // Reminders, Running, Done, Waiting.
@@ -110,6 +118,12 @@ const en: StringTable = {
   planned_for_prefix: "Planned for",
   reminder_overdue_prefix: "Overdue since",
   reminder_label: "Reminder",
+  comment_remind_action: "Remind me",
+  comment_remind_text_label: "Reminder",
+  comment_remind_text_placeholder: "What should we remind you about?",
+  comment_remind_default_text: "Reminder about this comment",
+  comment_remind_created: "Reminder set",
+  comment_remind_failed: "Couldn't set the reminder",
   run_request_label: "Run request",
   run_request_by_prefix: "Requested by",
   run_request_run: "Run",
@@ -151,6 +165,12 @@ const da: StringTable = {
   planned_for_prefix: "Planlagt til",
   reminder_overdue_prefix: "Forfalden siden",
   reminder_label: "Påmindelse",
+  comment_remind_action: "Påmind mig",
+  comment_remind_text_label: "Påmindelse",
+  comment_remind_text_placeholder: "Hvad skal vi minde dig om?",
+  comment_remind_default_text: "Påmindelse om denne kommentar",
+  comment_remind_created: "Påmindelse sat",
+  comment_remind_failed: "Kunne ikke sætte påmindelsen",
   run_request_label: "Kør-anmodning",
   run_request_by_prefix: "Anmodet af",
   run_request_run: "Kør",
@@ -196,6 +216,12 @@ const zhHans: StringTable = {
   planned_for_prefix: "计划于",
   reminder_overdue_prefix: "已逾期",
   reminder_label: "提醒",
+  comment_remind_action: "提醒我",
+  comment_remind_text_label: "提醒内容",
+  comment_remind_text_placeholder: "需要提醒你什么？",
+  comment_remind_default_text: "关于这条评论的提醒",
+  comment_remind_created: "提醒已设置",
+  comment_remind_failed: "无法设置提醒",
   run_request_label: "运行请求",
   run_request_by_prefix: "请求者",
   run_request_run: "运行",

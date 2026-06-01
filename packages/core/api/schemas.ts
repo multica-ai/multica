@@ -156,6 +156,8 @@ export const IssueSchema = z.object({
   workspace_id: z.string(),
   number: z.number(),
   identifier: z.string(),
+  // CEREBRO-PATCH(core-issue-kind-schema): core Issue now carries channel/dm kind.
+  kind: z.enum(["issue", "channel", "dm"]).catch("issue"),
   title: z.string(),
   description: z.string().nullable(),
   status: z.string(),

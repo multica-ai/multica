@@ -257,3 +257,27 @@ RETURNING id, workspace_id, project_id,
 
 -- name: DeleteCerebroSprintRecurringTask :exec
 DELETE FROM cerebro_sprint_recurring_task WHERE id = $1;
+
+-- ===========================================================================
+-- sweeper helpers
+-- ===========================================================================
+
+-- name: GetCerebroSprintsFlagForWorkspace :one
+-- Returns the workspace-level value of the cerebro_sprints feature flag.
+-- pgx.ErrNoRows means the flag has never been set and the default (OFF)
+-- applies — the sweeper treats that as "skip this workspace".
+SELECT enabled FROM cerebro_feature_flags
+WHERE workspace_id = $1
+  AND user_id = '00000000-0000-0000-0000-000000000000'
+  AND flag_key = 'cerebro_sprints';
+
+-- name: GetCerebroSprintRecurringIssueCreator :one
+-- Returns a stable user_id to use as creator on issues the sweeper clones
+-- from a recurring task. The sweeper runs without a user session, so we
+-- attribute creation to the oldest workspace owner. Falls back to any
+-- admin if no owner exists.
+SELECT user_id FROM member
+WHERE workspace_id = $1
+  AND role IN ('owner', 'admin')
+ORDER BY (role = 'owner') DESC, created_at ASC
+LIMIT 1;
