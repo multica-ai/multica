@@ -152,10 +152,14 @@ fi
 
 install_arb() {
   if command -v arb >/dev/null 2>&1; then return; fi
-  if [ -z "${GH_TOKEN:-}" ]; then return; fi
+  if ! gh auth status >/dev/null 2>&1; then return; fi
   echo "@g2crowd:registry=https://npm.pkg.github.com" > /tmp/.npmrc
-  echo "//npm.pkg.github.com/:_authToken=${GH_TOKEN}" >> /tmp/.npmrc
-  HOME=/tmp npm install -g @g2crowd/arb-cli@latest 2>/dev/null
+  echo "//npm.pkg.github.com/:_authToken=$(gh auth token)" >> /tmp/.npmrc
+  HOME=/tmp npm install -g @g2crowd/arb-cli@latest 2>/dev/null || {
+    echo "[entrypoint] WARNING: Failed to install arb (non-fatal)"
+    rm -f /tmp/.npmrc
+    return
+  }
   rm -f /tmp/.npmrc
   echo "[entrypoint] Installed arb"
 }
