@@ -44,6 +44,15 @@ type ExecOptions struct {
 	// field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
+	InitialImages []InputImage // image blocks to include in Claude's initial user message; ignored by text-only backends
+}
+
+// InputImage is an image attachment that a backend can embed directly in the
+// initial user message instead of relying on an agent-side file Read tool.
+type InputImage struct {
+	Filename  string
+	MediaType string
+	Data      []byte
 }
 
 // Session represents a running agent execution.
