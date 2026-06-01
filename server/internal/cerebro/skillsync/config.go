@@ -35,16 +35,20 @@ var archiveDomains = map[string]bool{
 }
 
 // Config is the env-driven configuration for the nightly sync worker. The
-// worker is disabled (Enabled=false) unless both Repo and Token are set, so a
-// self-host install that never configures the archive simply never runs it.
+// worker is disabled (Enabled=false) unless the archive Repo is configured for
+// this environment, so a self-host install (and dev/staging) that never points
+// at an archive simply never runs it. Setting Repo is the per-environment
+// opt-in switch — the credential reuses the GitHub access the runtime already
+// has (GITHUB_TOKEN), so no dedicated sync token has to be provisioned.
 type Config struct {
 	Enabled bool
 
 	// Repo is the https git URL of the archive, e.g.
 	// https://github.com/firtal-group/firtal-skills.git
 	Repo string
-	// Token is a GitHub token with write access to Repo. Injected into the
-	// remote URL as x-access-token; never logged.
+	// Token is the GitHub token used to push. It reuses the access the runtime
+	// already holds: CEREBRO_SKILLS_SYNC_TOKEN when set, otherwise the shared
+	// GITHUB_TOKEN. Injected into the remote URL as x-access-token; never logged.
 	Token string
 	// Branch is the branch to push to. Default "main".
 	Branch string
@@ -64,10 +68,13 @@ type Config struct {
 }
 
 // LoadConfig reads CEREBRO_SKILLS_SYNC_* from the environment. Returns
-// Config{Enabled:false} when the repo or token is unset.
+// Config{Enabled:false} when the archive repo is unconfigured or no GitHub
+// credential is available. The push credential falls back to the shared
+// GITHUB_TOKEN so the sync reuses the access the runtime already has — no
+// dedicated CEREBRO_SKILLS_SYNC_TOKEN needs to be provisioned.
 func LoadConfig() Config {
 	repo := strings.TrimSpace(os.Getenv("CEREBRO_SKILLS_SYNC_REPO"))
-	token := strings.TrimSpace(os.Getenv("CEREBRO_SKILLS_SYNC_TOKEN"))
+	token := firstNonEmpty(os.Getenv("CEREBRO_SKILLS_SYNC_TOKEN"), os.Getenv("GITHUB_TOKEN"))
 	if repo == "" || token == "" {
 		return Config{Enabled: false}
 	}

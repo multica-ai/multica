@@ -13,14 +13,15 @@ import (
 )
 
 // StartWorker launches the FIR-2656 nightly skill-archive sync in a goroutine
-// and returns immediately. It is disabled (and logs why) when the archive is
-// not configured (CEREBRO_SKILLS_SYNC_REPO / _TOKEN unset) or when no git
-// binary is available, so a self-host install without the archive never runs
-// it.
+// and returns immediately. It is disabled (and logs why) when the archive repo
+// is not configured for this environment (CEREBRO_SKILLS_SYNC_REPO unset), when
+// no GitHub credential is available (neither CEREBRO_SKILLS_SYNC_TOKEN nor
+// GITHUB_TOKEN), or when no git binary is available — so a self-host or
+// dev/staging install without the archive never runs it.
 func StartWorker(ctx context.Context, cerebro *cerebrodb.Queries, upstream *db.Queries) {
 	cfg := LoadConfig()
 	if !cfg.Enabled {
-		slog.Info("skill archive sync disabled: CEREBRO_SKILLS_SYNC_REPO/_TOKEN unset")
+		slog.Info("skill archive sync disabled: set CEREBRO_SKILLS_SYNC_REPO and ensure a GitHub credential (CEREBRO_SKILLS_SYNC_TOKEN or GITHUB_TOKEN) is present")
 		return
 	}
 	if !gitAvailable() {
