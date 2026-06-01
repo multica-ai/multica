@@ -50,7 +50,9 @@ export type CerebroFlagKey =
   // FIR-2504: show similar open issues + LLM verdict when creating an issue.
   | "cerebro_duplicate_check_on_create"
   // FIR-2523: Auth & Permissions settings tab + Google Workspace auto-membership hook.
-  | "cerebro_google_identity";
+  | "cerebro_google_identity"
+  // FIR-2641: "Remind me" on a specific comment — reuses the personal reminder engine.
+  | "cerebro_comment_reminders";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -129,6 +131,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // signup is the launch feature, and the table starts empty so a fresh
   // workspace with no configured domains is still a no-op.
   cerebro_google_identity: true,
+  // FIR-2641: ON by default. Adds "Remind me" to the comment menu — a personal
+  // reminder that points at one comment and, when it fires, deep-links the
+  // inbox back to that comment. Reuses the existing reminder engine (inbox-only
+  // by default; per-channel push stays opt-in). Off hides the menu action and
+  // the server rejects comment-referencing reminders.
+  cerebro_comment_reminders: true,
 };
 
 /**
@@ -444,6 +452,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Notify the assignee when an issue's start or due date arrives (the day-of, in their timezone). Delivery follows each user's per-channel notification preferences (inbox / mobile push / desktop). Off hides the settings rows. FIR-2412.",
+  },
+  {
+    key: "cerebro_comment_reminders",
+    label: "Comment reminders",
+    group: "issues",
+    description:
+      "Add a 'Remind me' action to the comment menu. Sets a personal reminder that points at that specific comment; when it fires, the inbox opens the issue and scrolls straight to the comment. The reminder text is suggested from the comment and editable before saving. Inbox-only by default (per-channel push stays opt-in). Off hides the action and the server rejects comment-referencing reminders. FIR-2641.",
   },
   {
     key: "cerebro_firtal_welcome",
