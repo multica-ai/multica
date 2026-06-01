@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -13,6 +13,7 @@ import {
   FolderKanban,
   FolderMinus,
   List,
+  ListTree,
   SignalHigh,
   X,
   Tag,
@@ -651,6 +652,21 @@ export function IssueDisplayControls({
   const sortLabel = t(($) => $.display[SORT_LABEL_KEY[sortBy]]);
   const groupingLabel = t(($) => $.display[GROUPING_LABEL_KEY[grouping]]);
   const swimlaneGroupingLabel = t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[swimlaneGrouping]]);
+  const effectiveViewMode: ViewMode = viewMode === "gantt" && !allowGantt ? "list" : viewMode;
+  const VIEW_TOOLTIP_KEY: Record<ViewMode, "tooltip_board" | "tooltip_swimlane" | "tooltip_list" | "tooltip_tree" | "tooltip_gantt"> = {
+    board: "tooltip_board",
+    swimlane: "tooltip_swimlane",
+    list: "tooltip_list",
+    tree: "tooltip_tree",
+    gantt: "tooltip_gantt",
+  };
+  const viewIcon = {
+    board: <Columns3 className="size-4" />,
+    swimlane: <Waves className="size-4" />,
+    list: <List className="size-4" />,
+    tree: <ListTree className="size-4" />,
+    gantt: <ChartGantt className="size-4" />,
+  } satisfies Record<ViewMode, ReactNode>;
 
   return (
     <div className="flex items-center gap-1">
@@ -1035,36 +1051,15 @@ export function IssueDisplayControls({
                 render={
                   <TooltipTrigger
                     render={
-                      <Button variant="outline" size="sm" className="gap-1 text-muted-foreground">
-                        {viewMode === "board" ? (
-                          <Columns3 className="size-3.5" />
-                        ) : viewMode === "swimlane" ? (
-                          <Waves className="size-3.5" />
-                        ) : viewMode === "gantt" && allowGantt ? (
-                          <ChartGantt className="size-3.5" />
-                        ) : (
-                          <List className="size-3.5" />
-                        )}
-                        {viewMode === "board"
-                          ? t(($) => $.view.board)
-                          : viewMode === "swimlane"
-                          ? t(($) => $.view.swimlane)
-                          : viewMode === "gantt" && allowGantt
-                          ? t(($) => $.view.gantt)
-                          : t(($) => $.view.list)}
+                      <Button variant="outline" size="icon-sm" className="text-muted-foreground">
+                        {viewIcon[effectiveViewMode]}
                       </Button>
                     }
                   />
                 }
               />
               <TooltipContent side="bottom">
-                {viewMode === "board"
-                  ? t(($) => $.view.tooltip_board)
-                  : viewMode === "swimlane"
-                  ? t(($) => $.view.tooltip_swimlane)
-                  : viewMode === "gantt" && allowGantt
-                  ? t(($) => $.view.tooltip_gantt)
-                  : t(($) => $.view.tooltip_list)}
+                {t(($) => $.view[VIEW_TOOLTIP_KEY[effectiveViewMode]])}
               </TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="end" className="w-auto">
@@ -1083,6 +1078,10 @@ export function IssueDisplayControls({
                 <DropdownMenuRadioItem value="swimlane">
                   <Waves />
                   {t(($) => $.view.swimlane)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="tree">
+                  <ListTree />
+                  {t(($) => $.view.tree)}
                 </DropdownMenuRadioItem>
                 {allowGantt && (
                   <DropdownMenuRadioItem value="gantt">

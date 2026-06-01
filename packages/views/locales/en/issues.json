@@ -81,13 +81,15 @@
   "view": {
     "tooltip_board": "Board view",
     "tooltip_list": "List view",
+    "tooltip_tree": "Tree view",
     "tooltip_gantt": "Gantt view",
     "tooltip_swimlane": "Swimlane view",
     "section": "View",
     "board": "Board",
+    "swimlane": "Swimlane",
     "list": "List",
-    "gantt": "Gantt",
-    "swimlane": "Swimlane"
+    "tree": "Tree",
+    "gantt": "Gantt"
   },
   "gantt": {
     "header_issue": "Issue",
@@ -141,7 +143,9 @@
     "add_issue_tooltip": "Add issue",
     "empty_column": "No issues",
     "empty_grouping": "No matching issues",
-    "ordered_by": "Board ordered by {{field}}"
+    "ordered_by": "Board ordered by {{field}}",
+    "unparented_lane": "No parent",
+    "missing_parent_lane": "Parent outside this page"
   },
   "detail": {
     "not_found": "This issue does not exist or has been deleted in this workspace.",
@@ -277,6 +281,8 @@
     "send_tooltip": "Send",
     "expand_tooltip": "Expand",
     "collapse_tooltip": "Collapse",
+    "show_more": "Show more",
+    "show_less": "Show less",
     "resolve": {
       "resolve_action": "Resolve thread",
       "unresolve_action": "Unresolve thread",

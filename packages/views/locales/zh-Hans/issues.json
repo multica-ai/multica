@@ -79,13 +79,15 @@
   "view": {
     "tooltip_board": "看板视图",
     "tooltip_list": "列表视图",
+    "tooltip_tree": "树形视图",
     "tooltip_gantt": "甘特图",
     "tooltip_swimlane": "泳道视图",
     "section": "视图",
     "board": "看板",
+    "swimlane": "泳道",
     "list": "列表",
-    "gantt": "甘特图",
-    "swimlane": "泳道"
+    "tree": "树形",
+    "gantt": "甘特图"
   },
   "gantt": {
     "header_issue": "Issue",
@@ -139,7 +141,9 @@
     "add_issue_tooltip": "新建 issue",
     "empty_column": "无 issue",
     "empty_grouping": "没有匹配的 issue",
-    "ordered_by": "按{{field}}排序"
+    "ordered_by": "按{{field}}排序",
+    "unparented_lane": "无父 issue",
+    "missing_parent_lane": "父 issue 不在当前页"
   },
   "detail": {
     "not_found": "这个 issue 不存在或已在该工作区被删除。",
@@ -274,6 +278,8 @@
     "send_tooltip": "发送",
     "expand_tooltip": "展开",
     "collapse_tooltip": "收起",
+    "show_more": "展开全文",
+    "show_less": "收起",
     "resolve": {
       "resolve_action": "标记为已解决",
       "unresolve_action": "重新打开",

@@ -43,6 +43,7 @@ import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
 import { GanttView } from "../../issues/components/gantt-view";
 import { SwimLaneView } from "../../issues/components/swimlane-view";
+import { TreeView } from "../../issues/components/tree-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -219,7 +220,7 @@ function ProjectIssuesContent({
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {viewMode === "board" && (
+      {viewMode === "board" ? (
         <BoardView
           issues={assigneeGroups ? projectIssues : issues}
           assigneeGroups={assigneeGroups}
@@ -234,21 +235,7 @@ function ProjectIssuesContent({
           sort={sort}
           projectId={projectId}
         />
-      )}
-      {viewMode === "list" && (
-        <ListView
-          issues={issues}
-          visibleStatuses={visibleStatuses}
-          childProgressMap={childProgressMap}
-          myIssuesScope={scope}
-          myIssuesFilter={filter}
-          sort={sort}
-          projectId={projectId}
-          onMoveIssue={handleMoveIssue}
-        />
-      )}
-      {viewMode === "gantt" && <GanttView issues={filteredGanttIssues} />}
-      {viewMode === "swimlane" && (
+      ) : viewMode === "swimlane" ? (
         <SwimLaneView
           issues={issues}
           unfilteredIssues={swimlaneIssues}
@@ -260,6 +247,28 @@ function ProjectIssuesContent({
           myIssuesFilter={filter}
           sort={sort}
           projectId={projectId}
+        />
+      ) : viewMode === "tree" ? (
+        <TreeView
+          issues={issues}
+          visibleStatuses={visibleStatuses}
+          childProgressMap={childProgressMap}
+          myIssuesScope={scope}
+          myIssuesFilter={filter}
+          projectId={projectId}
+        />
+      ) : viewMode === "gantt" ? (
+        <GanttView issues={filteredGanttIssues} />
+      ) : (
+        <ListView
+          issues={issues}
+          visibleStatuses={visibleStatuses}
+          childProgressMap={childProgressMap}
+          myIssuesScope={scope}
+          myIssuesFilter={filter}
+          sort={sort}
+          projectId={projectId}
+          onMoveIssue={handleMoveIssue}
         />
       )}
     </div>

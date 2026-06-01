@@ -21,6 +21,7 @@ import { IssuesHeader } from "./issues-header";
 import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
 import { SwimLaneView } from "./swimlane-view";
+import { TreeView } from "./tree-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
@@ -46,6 +47,7 @@ export function IssuesPage() {
   const sortDirection = useIssueViewStore((s) => s.sortDirection);
   const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
+  const usesListLayout = viewMode === "list" || viewMode === "tree";
 
   const sort = useMemo(
     () => ({
@@ -170,7 +172,7 @@ export function IssuesPage() {
     [updateIssueMutation, t],
   );
 
-  const contentSkeleton = viewMode === "list" ? (
+  const contentSkeleton = usesListLayout ? (
     <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
       {Array.from({ length: 4 }).map((_, i) => (
         <Skeleton key={i} className="h-10 w-full rounded-lg" />
@@ -228,12 +230,14 @@ export function IssuesPage() {
                 childProgressMap={childProgressMap}
                 sort={sort}
               />
+            ) : viewMode === "tree" ? (
+              <TreeView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} />
             ) : (
               <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} sort={sort} onMoveIssue={handleMoveIssue} />
             )}
           </div>
         )}
-        {viewMode === "list" && <BatchActionToolbar />}
+        {usesListLayout && <BatchActionToolbar />}
       </ViewStoreProvider>
     </div>
   );
