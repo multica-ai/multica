@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/skillbundle"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -712,9 +713,11 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 
 	files := make([]CreateSkillFileRequest, 0, len(body.Skill.Files))
 	for _, f := range body.Skill.Files {
-		if !validateFilePath(f.Path) {
+		path, ok := skillbundle.NormalizePath(f.Path)
+		if !ok || skillbundle.ShouldSkipFile(path) {
 			continue
 		}
+		f.Path = path
 		files = append(files, f)
 	}
 

@@ -434,6 +434,9 @@ func TestLoadRuntimeLocalSkillBundle_OpenClawPrefersWorkspaceSkills(t *testing.T
 		"references/guide.md":  "guide",
 		"scripts/bootstrap.sh": "bootstrap",
 		"LICENSE":              "ignored",
+		"scripts/__pycache__/bootstrap.cpython-312.pyc": "compiled",
+		"node_modules/pkg/index.js":                     "dependency",
+		"assets/logo.png":                               "png",
 	})
 
 	skills, supported, err := listRuntimeLocalSkills("openclaw")

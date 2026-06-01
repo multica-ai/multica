@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/skillbundle"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -467,9 +468,9 @@ type ImportSkillRequest struct {
 // reject. fetchRawFile enforces the per-file cap; importedSkill.addFile
 // enforces the bundle-wide caps.
 const (
-	maxImportFileSize  = 1 << 20 // 1 MiB per file
-	maxImportTotalSize = 8 << 20 // 8 MiB per import bundle (sum of supporting files)
-	maxImportFileCount = 128     // max number of supporting files
+	maxImportFileSize  = skillbundle.MaxFileSize
+	maxImportTotalSize = skillbundle.MaxBundleSize
+	maxImportFileCount = skillbundle.MaxFileCount
 )
 
 // importedSkill holds the data extracted from an external source.
@@ -506,8 +507,9 @@ func isCapError(err error) bool {
 // assets the agent never reads as text anyway. Logging the skip leaves a
 // breadcrumb if a user expected one of these to import.
 func (s *importedSkill) addFile(path, content string) error {
-	if isLikelyBinaryFilePath(path) {
-		slog.Info("skill import: skipping binary file", "path", path, "size", len(content))
+	normalized, ok := skillbundle.NormalizePath(path)
+	if !ok || skillbundle.ShouldSkipFile(normalized) {
+		slog.Info("skill import: skipping supporting file", "path", path, "size", len(content))
 		return nil
 	}
 	if len(s.files) >= maxImportFileCount {
@@ -517,36 +519,8 @@ func (s *importedSkill) addFile(path, content string) error {
 		return fmt.Errorf("%w: import bundle exceeds %d byte limit", errImportCapExceeded, maxImportTotalSize)
 	}
 	s.bundleSize += len(content)
-	s.files = append(s.files, importedFile{path: path, content: content})
+	s.files = append(s.files, importedFile{path: normalized, content: content})
 	return nil
-}
-
-// isLikelyBinaryFilePath reports whether the file's extension indicates a
-// non-text payload. Conservative blacklist — extensions not on the list
-// are assumed text and pass through. `sanitizeNullBytes` (called at PG
-// insert time) is the second-line defence against any text file that
-// turns out to have stray invalid-UTF-8 bytes.
-func isLikelyBinaryFilePath(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case
-		// images
-		".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".ico", ".heic",
-		// fonts
-		".ttf", ".otf", ".woff", ".woff2", ".eot",
-		// archives
-		".zip", ".gz", ".tar", ".bz2", ".7z", ".rar",
-		// documents (binary office)
-		".pdf", ".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt",
-		// media
-		".mp3", ".mp4", ".wav", ".avi", ".mov", ".webm", ".m4a", ".flac",
-		// compiled / executable
-		".exe", ".dll", ".so", ".dylib", ".class", ".jar", ".wasm",
-		// db / cache
-		".db", ".sqlite", ".sqlite3", ".pyc":
-		return true
-	}
-	return false
 }
 
 // --- ClawHub types ---
@@ -1016,13 +990,15 @@ func resolveGitHubSkillDirByName(httpClient *http.Client, owner, repo, defaultBr
 // collectGitHubFiles recursively collects file entries from a GitHub directory listing.
 func collectGitHubFiles(httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, parentURL string) {
 	for _, entry := range entries {
-		lower := strings.ToLower(entry.Name)
-		if lower == "skill.md" || lower == "license" || lower == "license.txt" || lower == "license.md" {
-			continue
-		}
 		if entry.Type == "file" {
+			if skillbundle.ShouldSkipFile(entry.Name) {
+				continue
+			}
 			*out = append(*out, entry)
 		} else if entry.Type == "dir" {
+			if skillbundle.ShouldSkipDir(entry.Name) {
+				continue
+			}
 			// Fetch subdirectory contents
 			subURL := entry.URL
 			if subURL == "" {
@@ -1856,10 +1832,14 @@ func collectGiteeFiles(httpClient *http.Client, entries []githubContentEntry, ou
 	for _, entry := range entries {
 		switch entry.Type {
 		case "file":
-			if !strings.EqualFold(entry.Name, "SKILL.md") {
-				*out = append(*out, entry)
+			if skillbundle.ShouldSkipFile(entry.Name) {
+				continue
 			}
+			*out = append(*out, entry)
 		case "dir":
+			if skillbundle.ShouldSkipDir(entry.Name) {
+				continue
+			}
 			subURL := buildGiteeContentsURL(owner, repo, entry.Path, ref)
 			subResp, err := doGiteeAPIGet(httpClient, subURL, giteeToken)
 			if err != nil || subResp.StatusCode != http.StatusOK {
@@ -2081,11 +2061,12 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 
 	files := make([]CreateSkillFileRequest, 0, len(imported.files))
 	for _, f := range imported.files {
-		if !validateFilePath(f.path) {
+		path, ok := skillbundle.NormalizePath(f.path)
+		if !ok || skillbundle.ShouldSkipFile(path) {
 			continue
 		}
 		files = append(files, CreateSkillFileRequest{
-			Path:    f.path,
+			Path:    path,
 			Content: f.content,
 		})
 	}
@@ -2184,11 +2165,18 @@ func (h *Handler) BatchImportSkills(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		files := make([]CreateSkillFileRequest, 0, len(s.Files))
 		for _, f := range s.Files {
-			if !validateFilePath(f.Path) {
+			path, ok := skillbundle.NormalizePath(f.Path)
+			if !ok {
 				writeError(w, http.StatusBadRequest, "invalid file path: "+f.Path)
 				return
 			}
+			if skillbundle.ShouldSkipFile(path) {
+				continue
+			}
+			f.Path = path
+			files = append(files, f)
 		}
 
 		input := skillCreateInput{
@@ -2198,7 +2186,7 @@ func (h *Handler) BatchImportSkills(w http.ResponseWriter, r *http.Request) {
 			Description: s.Description,
 			Content:     s.Content,
 			Config:      s.Config,
-			Files:       s.Files,
+			Files:       files,
 		}
 		overwroteExisting := false
 		resp, err := h.createSkillWithFiles(r.Context(), input)

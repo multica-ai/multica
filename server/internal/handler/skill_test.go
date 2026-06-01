@@ -777,6 +777,57 @@ func TestFetchFromGitHub_RepoRootResolvesDefaultBranch(t *testing.T) {
 	}
 }
 
+func TestFetchFromGitHub_SkipsIgnoredSupportingFilesAndDirs(t *testing.T) {
+	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/alice/skill":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/alice/skill/contents":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{Name: "references", Path: "references", Type: "dir", URL: "https://api.github.com/repos/alice/skill/contents/references?ref=main"},
+					{Name: "__pycache__", Path: "__pycache__", Type: "dir", URL: "https://api.github.com/repos/alice/skill/contents/__pycache__?ref=main"},
+					{Name: "node_modules", Path: "node_modules", Type: "dir", URL: "https://api.github.com/repos/alice/skill/contents/node_modules?ref=main"},
+					{Name: "logo.png", Path: "logo.png", Type: "file", DownloadURL: "https://raw.githubusercontent.com/alice/skill/main/logo.png"},
+				})
+			case "/repos/alice/skill/contents/references":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{Name: "guide.md", Path: "references/guide.md", Type: "file", DownloadURL: "https://raw.githubusercontent.com/alice/skill/main/references/guide.md"},
+				})
+			case "/repos/alice/skill/contents/__pycache__", "/repos/alice/skill/contents/node_modules":
+				t.Fatalf("ignored directory was fetched: %s", r.URL.Path)
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/alice/skill/main/SKILL.md":
+				w.Write([]byte("---\nname: skill\n---\nbody"))
+			case "/alice/skill/main/references/guide.md":
+				w.Write([]byte("guide"))
+			case "/alice/skill/main/logo.png":
+				t.Fatalf("ignored binary file was fetched")
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromGitHub(client, "https://github.com/alice/skill")
+	if err != nil {
+		t.Fatalf("fetchFromGitHub: %v", err)
+	}
+	if got := importedFilePaths(result.files); !equalStrings(got, []string{"references/guide.md"}) {
+		t.Fatalf("files = %v, want [references/guide.md]", got)
+	}
+	if containsString(*requests, "__pycache__") || containsString(*requests, "node_modules") {
+		t.Fatalf("ignored dirs should not be requested, got %v", *requests)
+	}
+}
+
 func TestFetchFromGitHub_RepoRootMissingSKILLmdReturnsActionableError(t *testing.T) {
 	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Header.Get("X-Test-Original-Host") {
@@ -1380,6 +1431,52 @@ func TestFetchFromGitee_TreeURLImportsSkillDirectory(t *testing.T) {
 	}
 }
 
+func TestFetchFromGitee_SkipsIgnoredSupportingFilesAndDirs(t *testing.T) {
+	client, requests := newGiteeFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Test-Original-Host") != "gitee.com" {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v5/repos/alice/skill":
+			writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+		case "/alice/skill/raw/main/SKILL.md":
+			w.Write([]byte("---\nname: skill\n---\nbody"))
+		case "/api/v5/repos/alice/skill/contents":
+			writeJSON(w, http.StatusOK, []githubContentEntry{
+				{Name: "references", Path: "references", Type: "dir"},
+				{Name: "__pycache__", Path: "__pycache__", Type: "dir"},
+				{Name: "node_modules", Path: "node_modules", Type: "dir"},
+				{Name: "logo.png", Path: "logo.png", Type: "file"},
+			})
+		case "/api/v5/repos/alice/skill/contents/references":
+			writeJSON(w, http.StatusOK, []githubContentEntry{
+				{Name: "guide.md", Path: "references/guide.md", Type: "file"},
+			})
+		case "/alice/skill/raw/main/references/guide.md":
+			w.Write([]byte("guide"))
+		case "/api/v5/repos/alice/skill/contents/__pycache__", "/api/v5/repos/alice/skill/contents/node_modules":
+			t.Fatalf("ignored directory was fetched: %s", r.URL.Path)
+		case "/alice/skill/raw/main/logo.png":
+			t.Fatal("ignored binary file was fetched")
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromGitee(client, "https://gitee.com/alice/skill", "")
+	if err != nil {
+		t.Fatalf("fetchFromGitee: %v", err)
+	}
+	if got := importedFilePaths(result.files); !equalStrings(got, []string{"references/guide.md"}) {
+		t.Fatalf("files = %v, want [references/guide.md]", got)
+	}
+	if containsString(*requests, "gitee.com /api/v5/repos/alice/skill/contents/__pycache__?ref=main") ||
+		containsString(*requests, "gitee.com /api/v5/repos/alice/skill/contents/node_modules?ref=main") {
+		t.Fatalf("ignored dirs should not be requested, got %v", *requests)
+	}
+}
+
 func TestFetchFromGitee_RepoRootResolvesDefaultBranch(t *testing.T) {
 	client, requests := newGiteeFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
 		host := r.Header.Get("X-Test-Original-Host")
@@ -1742,5 +1839,56 @@ func TestBatchImportSkillsOverwrite_PreservesSkillIDAndAgentAssociation(t *testi
 	}
 	if count := countSkillFiles(t, existingSkillID); count != 1 {
 		t.Fatalf("expected one replacement file, got %d", count)
+	}
+}
+
+func TestBatchImportSkills_FiltersIgnoredSupportingFiles(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	skillName := "Filtered Supporting Files " + time.Now().Format("20060102150405.000000000")
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM skill WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, skillName)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequestAsUser(testUserID, http.MethodPost, "/api/skills/batch-import", map[string]any{
+		"skills": []map[string]any{
+			{
+				"name":        skillName,
+				"description": "filters cache files",
+				"content":     "# Filtered",
+				"files": []map[string]any{
+					{"path": "references/guide.md", "content": "guide"},
+					{"path": "scripts/__pycache__/tool.cpython-312.pyc", "content": "compiled"},
+					{"path": "node_modules/pkg/index.js", "content": "dependency"},
+					{"path": "assets/logo.png", "content": "png"},
+				},
+			},
+		},
+	})
+	testHandler.BatchImportSkills(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("BatchImportSkills: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp BatchImportSkillsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Created) != 1 {
+		t.Fatalf("created = %d, want 1", len(resp.Created))
+	}
+	if resp.Created[0].Name != skillName {
+		t.Fatalf("name = %q, want %q", resp.Created[0].Name, skillName)
+	}
+	gotPaths := make([]string, 0, len(resp.Created[0].Files))
+	for _, f := range resp.Created[0].Files {
+		gotPaths = append(gotPaths, f.Path)
+	}
+	if !equalStrings(gotPaths, []string{"references/guide.md"}) {
+		t.Fatalf("files = %v, want [references/guide.md]", gotPaths)
 	}
 }

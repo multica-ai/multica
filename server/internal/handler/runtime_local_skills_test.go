@@ -349,6 +349,18 @@ func TestRuntimeLocalSkillImportFlow_EndToEnd(t *testing.T) {
 						"path":    "templates/check.md",
 						"content": "body",
 					},
+					{
+						"path":    "scripts/__pycache__/tool.cpython-312.pyc",
+						"content": "compiled",
+					},
+					{
+						"path":    "node_modules/pkg/index.js",
+						"content": "dependency",
+					},
+					{
+						"path":    "assets/logo.png",
+						"content": "png",
+					},
 				},
 			},
 		}, testWorkspaceID, "runtime-local-skills-daemon"),
