@@ -306,6 +306,8 @@ func anyFilterMissNarrowed(parsed cerebrosearch.Parsed, active []ActiveFilter) b
 		cerebrosearch.FilterAssignee,
 		cerebrosearch.FilterProject,
 		cerebrosearch.FilterStatus,
+		// CEREBRO-PATCH(search-has-miss-narrows): has:<invalid> must narrow to empty like other filter misses, not return all rows (FIR-2571)
+		cerebrosearch.FilterHas,
 	} {
 		raw := parsed.Values(key)
 		if len(raw) == 0 {
@@ -415,4 +417,3 @@ func (h *Handler) cerebroResolveProjectName(ctx context.Context, wsUUID pgtype.U
 	}
 	return out
 }
-

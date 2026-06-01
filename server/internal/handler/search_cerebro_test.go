@@ -185,3 +185,25 @@ func TestSearchIssues_ParserIsReachable(t *testing.T) {
 		t.Fatalf("parser drift — got text=%q filters=%+v", p.Text, p.Filters)
 	}
 }
+
+// TestSearchIssues_FilterChips_UnknownHasMiss reproduces FIR-2571: an invalid
+// has:<value> filter (only "attachment" is valid) used to echo a "miss" chip
+// but still return every row, because anyFilterMissNarrowed omitted FilterHas.
+// It must now narrow to zero results like other filter misses do.
+func TestSearchIssues_FilterChips_UnknownHasMiss(t *testing.T) {
+	_ = seedIssueWithComment(t, "Some unrelated kanban issue", "", "")
+	env := callSearchIssues(t, "has:banana", false)
+	gotMiss := false
+	for _, f := range env.Filters {
+		if f.Key == "has" && f.Value == "banana" && f.Match == "miss" {
+			gotMiss = true
+		}
+	}
+	if !gotMiss {
+		t.Errorf("expected has:banana echoed back as miss, got %+v", env.Filters)
+	}
+	if env.Total != 0 || len(env.Issues) != 0 {
+		t.Errorf("invalid has-filter must short-circuit to zero results, got total=%d issues=%d",
+			env.Total, len(env.Issues))
+	}
+}
