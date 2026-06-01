@@ -710,6 +710,373 @@ jobs:
           docker buildx imagetools inspect \
             ghcr.io/${{ github.repository_owner }}/multica-runtime-claude:${{ steps.meta.outputs.version }}
 
+  # Multica K8s controller. Distroless Go binary that polls Multica for
+  # claimed tasks and dispatches them as worker Jobs. Shipped on the same
+  # release cadence as the backend it talks to so the daemon protocol
+  # version stays aligned.
+  docker-controller-build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runs-on: ubuntu-latest
+          - platform: linux/arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute controller image labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/multica-controller
+          labels: |
+            org.opencontainers.image.title=Multica K8s Controller
+            org.opencontainers.image.description=In-cluster controller that dispatches Multica tasks as worker Jobs
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          # Personal-fork GHCR push needs a PAT — GITHUB_TOKEN can't create
+          # new packages in a user namespace. Falls back to GITHUB_TOKEN for
+          # the org repo where the auto-issued token works.
+          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packaging/docker/controller/Dockerfile
+          pull: true
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=release-controller-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=release-controller-${{ env.PLATFORM_PAIR }}
+          build-args: |
+            VERSION=${{ needs.verify.outputs.tag_name }}
+            COMMIT=${{ github.sha }}
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/multica-controller,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-controller-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-controller-merge:
+    needs: [verify, docker-controller-build]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-docker-controller-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-controller-*
+          merge-multiple: true
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute controller image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/multica-controller
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest,enable=${{ needs.verify.outputs.is_stable == 'true' }}
+            type=raw,value=${{ needs.verify.outputs.tag_name }}
+            type=sha,prefix=sha-
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/${{ github.repository_owner }}/multica-controller@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect \
+            ghcr.io/${{ github.repository_owner }}/multica-controller:${{ steps.meta.outputs.version }}
+
+  # Multica Claude OAuth broker. Distroless Go binary that owns the
+  # Anthropic OAuth refresh token in a Kubernetes Secret and serves the
+  # current access_token to worker pods via secretKeyRef. See
+  # packaging/README.md for the operator runbook.
+  docker-claude-broker-build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runs-on: ubuntu-latest
+          - platform: linux/arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute claude-broker image labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/multica-claude-broker
+          labels: |
+            org.opencontainers.image.title=Multica Claude OAuth Broker
+            org.opencontainers.image.description=In-cluster Anthropic OAuth refresh-token holder
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packaging/docker/claude-broker/Dockerfile
+          pull: true
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=release-claude-broker-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=release-claude-broker-${{ env.PLATFORM_PAIR }}
+          build-args: |
+            VERSION=${{ needs.verify.outputs.tag_name }}
+            COMMIT=${{ github.sha }}
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/multica-claude-broker,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-claude-broker-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-claude-broker-merge:
+    needs: [verify, docker-claude-broker-build]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-docker-claude-broker-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-claude-broker-*
+          merge-multiple: true
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute claude-broker image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/multica-claude-broker
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest,enable=${{ needs.verify.outputs.is_stable == 'true' }}
+            type=raw,value=${{ needs.verify.outputs.tag_name }}
+            type=sha,prefix=sha-
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/${{ github.repository_owner }}/multica-claude-broker@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect \
+            ghcr.io/${{ github.repository_owner }}/multica-claude-broker:${{ steps.meta.outputs.version }}
+
+  # Multica in-cluster repo cache. Maintains bare clones of every workspace
+  # repo on an RWX PVC; worker Job pods mount the PVC RO and clone via
+  # file:// URLs rewritten through a per-task gitconfig. Unlike the other
+  # Go images this is bookworm-slim, not distroless, because it forks the
+  # git CLI at runtime.
+  docker-repocache-build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runs-on: ubuntu-latest
+          - platform: linux/arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute repocache image labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/multica-repocache
+          labels: |
+            org.opencontainers.image.title=Multica Repo Cache
+            org.opencontainers.image.description=In-cluster bare-clone mirror of workspace repos
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packaging/docker/repocache/Dockerfile
+          pull: true
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=release-repocache-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=release-repocache-${{ env.PLATFORM_PAIR }}
+          build-args: |
+            VERSION=${{ needs.verify.outputs.tag_name }}
+            COMMIT=${{ github.sha }}
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/multica-repocache,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-repocache-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-repocache-merge:
+    needs: [verify, docker-repocache-build]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-docker-repocache-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-repocache-*
+          merge-multiple: true
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute repocache image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/multica-repocache
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest,enable=${{ needs.verify.outputs.is_stable == 'true' }}
+            type=raw,value=${{ needs.verify.outputs.tag_name }}
+            type=sha,prefix=sha-
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/${{ github.repository_owner }}/multica-repocache@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect \
+            ghcr.io/${{ github.repository_owner }}/multica-repocache:${{ steps.meta.outputs.version }}
+
   # Build the Desktop installers for Linux and Windows and upload them to
   # the GitHub Release that the `release` job above just published. macOS
   # Desktop continues to ship via the manual `release-desktop` skill so it
