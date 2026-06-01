@@ -35,6 +35,18 @@ const MANIFESTS = ["latest-mac.yml", "latest.yml", "latest-linux.yml"];
 
 const REVALIDATE_SECONDS = 300;
 
+// Manifests are read server-side, so the request must hit an endpoint
+// the web pod can actually reach. The public download host sits behind
+// an ALB whose IP-whitelist ACL blocks in-cluster egress, so we fetch
+// the manifests through the in-cluster backend (REMOTE_API_URL). The
+// download links handed to the browser still use the public
+// DOWNLOAD_BASE_URL — the browser reaches that fine. Falls back to the
+// public host for local dev, where there's no backend service.
+function manifestBaseUrl(): string {
+  const api = process.env.REMOTE_API_URL;
+  return api ? `${api.replace(/\/+$/, "")}/api/downloads` : DOWNLOAD_BASE_URL;
+}
+
 export async function fetchLatestRelease(): Promise<LatestRelease> {
   const manifests = await Promise.all(MANIFESTS.map(fetchManifest));
 
@@ -70,7 +82,7 @@ interface Manifest {
 
 async function fetchManifest(name: string): Promise<Manifest | null> {
   try {
-    const res = await fetch(`${DOWNLOAD_BASE_URL}/${name}`, {
+    const res = await fetch(`${manifestBaseUrl()}/${name}`, {
       next: { revalidate: REVALIDATE_SECONDS },
     });
     // A 404 just means that platform isn't published — not an error.

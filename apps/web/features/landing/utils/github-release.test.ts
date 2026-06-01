@@ -57,6 +57,7 @@ function mockManifests(map: Record<string, string | number>) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("fetchLatestRelease", () => {
@@ -87,6 +88,29 @@ describe("fetchLatestRelease", () => {
     );
     expect(r.assets.linuxAmd64Rpm).toBe(
       `${BASE}/multica-desktop-0.2.53-linux-x86_64.rpm`,
+    );
+  });
+
+  it("reads manifests from the in-cluster backend when REMOTE_API_URL is set, but keeps public download links", async () => {
+    vi.stubEnv("REMOTE_API_URL", "http://multica-server:8080");
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const u = String(url);
+      if (u === "http://multica-server:8080/api/downloads/latest-mac.yml") {
+        return new Response(MAC_YML, { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const r = await fetchLatestRelease();
+    // Manifest fetched from the in-cluster backend, not the public host.
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://multica-server:8080/api/downloads/latest-mac.yml",
+      expect.anything(),
+    );
+    // ...but the download link the browser gets stays on the public host.
+    expect(r.assets.macArm64Dmg).toBe(
+      `${BASE}/multica-desktop-0.2.53-mac-arm64.dmg`,
     );
   });
 
