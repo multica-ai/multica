@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -12,10 +11,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type RuntimeLocalSkillRequestStatus string
@@ -742,7 +739,7 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 	resp, err := h.createSkillWithFiles(r.Context(), input)
 	if err != nil {
 		if req.Overwrite && isUniqueViolation(err) {
-			resp, err = h.overwriteRuntimeLocalSkill(r.Context(), input)
+			resp, err = h.overwriteSkillWithFiles(r.Context(), input)
 			overwroteExisting = err == nil
 		}
 	}
@@ -786,85 +783,7 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "failed to persist import completion")
 		return
 	}
-	h.publish(runtimeLocalSkillImportEvent(overwroteExisting), uuidToString(rt.WorkspaceID), "member", req.CreatorID, map[string]any{"skill": resp})
+	h.publish(skillImportEvent(overwroteExisting), uuidToString(rt.WorkspaceID), "member", req.CreatorID, map[string]any{"skill": resp})
 	slog.Debug("runtime local skill imported", "runtime_id", runtimeID, "request_id", requestID, "skill_id", resp.ID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func (h *Handler) overwriteRuntimeLocalSkill(ctx context.Context, input skillCreateInput) (SkillWithFilesResponse, error) {
-	existing, err := h.Queries.GetSkillByWorkspaceAndName(ctx, db.GetSkillByWorkspaceAndNameParams{
-		WorkspaceID: input.WorkspaceID,
-		Name:        input.Name,
-	})
-	if err != nil {
-		return SkillWithFilesResponse{}, err
-	}
-	member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      input.CreatorID,
-		WorkspaceID: input.WorkspaceID,
-	})
-	if err != nil {
-		return SkillWithFilesResponse{}, err
-	}
-	if !roleAllowed(member.Role, "owner", "admin") && (!existing.CreatedBy.Valid || existing.CreatedBy != input.CreatorID) {
-		return SkillWithFilesResponse{}, errors.New("only the skill creator can manage this skill")
-	}
-
-	tx, err := h.TxStarter.Begin(ctx)
-	if err != nil {
-		return SkillWithFilesResponse{}, err
-	}
-	defer tx.Rollback(ctx)
-
-	qtx := h.Queries.WithTx(tx)
-	config, err := json.Marshal(input.Config)
-	if err != nil {
-		return SkillWithFilesResponse{}, err
-	}
-	if input.Config == nil {
-		config = []byte("{}")
-	}
-
-	skill, err := qtx.UpdateSkill(ctx, db.UpdateSkillParams{
-		ID:          existing.ID,
-		Name:        pgtype.Text{String: sanitizeNullBytes(input.Name), Valid: true},
-		Description: pgtype.Text{String: sanitizeNullBytes(input.Description), Valid: true},
-		Content:     pgtype.Text{String: sanitizeNullBytes(input.Content), Valid: true},
-		Config:      config,
-	})
-	if err != nil {
-		return SkillWithFilesResponse{}, err
-	}
-
-	if err := qtx.DeleteSkillFilesBySkill(ctx, skill.ID); err != nil {
-		return SkillWithFilesResponse{}, err
-	}
-	fileResps := make([]SkillFileResponse, 0, len(input.Files))
-	for _, f := range input.Files {
-		sf, err := qtx.UpsertSkillFile(ctx, db.UpsertSkillFileParams{
-			SkillID: skill.ID,
-			Path:    sanitizeNullBytes(f.Path),
-			Content: sanitizeNullBytes(f.Content),
-		})
-		if err != nil {
-			return SkillWithFilesResponse{}, err
-		}
-		fileResps = append(fileResps, skillFileToResponse(sf))
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return SkillWithFilesResponse{}, err
-	}
-
-	return SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
-		Files:         fileResps,
-	}, nil
-}
-
-func runtimeLocalSkillImportEvent(overwroteExisting bool) string {
-	if overwroteExisting {
-		return protocol.EventSkillUpdated
-	}
-	return protocol.EventSkillCreated
 }

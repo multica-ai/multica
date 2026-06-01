@@ -2,7 +2,9 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -1645,5 +1647,100 @@ func TestFetchFromGitee_DefaultBranchFallsBackToMaster(t *testing.T) {
 	}
 	if result.name != "repo" {
 		t.Fatalf("name = %q, want repo", result.name)
+	}
+}
+
+func TestBatchImportSkillsOverwrite_PreservesSkillIDAndAgentAssociation(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	var existingSkillID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+		VALUES ($1, 'Batch Import Overwrite', 'Old description', '# Old', '{}'::jsonb, $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&existingSkillID); err != nil {
+		t.Fatalf("create existing skill: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM skill WHERE id = $1`, existingSkillID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO skill_file (skill_id, path, content)
+		VALUES ($1, 'old.md', 'old file')
+	`, existingSkillID); err != nil {
+		t.Fatalf("create existing skill file: %v", err)
+	}
+	agentID := createHandlerTestAgent(t, "Batch Import Overwrite Agent", []byte("[]"))
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_skill (agent_id, skill_id)
+		VALUES ($1, $2)
+	`, agentID, existingSkillID); err != nil {
+		t.Fatalf("attach skill to agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPost, "/api/skills/batch-import", map[string]any{
+		"skills": []map[string]any{
+			{
+				"name":        "Batch Import Overwrite",
+				"description": "Updated description",
+				"content":     "# Updated",
+				"overwrite":   true,
+				"files": []map[string]any{
+					{"path": "new.md", "content": "new file"},
+				},
+			},
+		},
+	})
+	testHandler.BatchImportSkills(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("BatchImportSkills: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp BatchImportSkillsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Created) != 1 {
+		t.Fatalf("created len = %d, want 1", len(resp.Created))
+	}
+	if len(resp.Skipped) != 0 {
+		t.Fatalf("skipped = %v, want empty", resp.Skipped)
+	}
+	if resp.Created[0].ID != existingSkillID {
+		t.Fatalf("skill id changed: got %s, want %s", resp.Created[0].ID, existingSkillID)
+	}
+	if resp.Created[0].Description != "Updated description" {
+		t.Fatalf("description = %q", resp.Created[0].Description)
+	}
+
+	var attachedCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM agent_skill
+		WHERE agent_id = $1 AND skill_id = $2
+	`, agentID, existingSkillID).Scan(&attachedCount); err != nil {
+		t.Fatalf("count agent_skill rows: %v", err)
+	}
+	if attachedCount != 1 {
+		t.Fatalf("agent_skill association was not preserved")
+	}
+
+	var fileContent string
+	if err := testPool.QueryRow(ctx, `
+		SELECT content
+		FROM skill_file
+		WHERE skill_id = $1 AND path = 'new.md'
+	`, existingSkillID).Scan(&fileContent); err != nil {
+		t.Fatalf("load replacement file: %v", err)
+	}
+	if fileContent != "new file" {
+		t.Fatalf("replacement file content = %q", fileContent)
+	}
+	if count := countSkillFiles(t, existingSkillID); count != 1 {
+		t.Fatalf("expected one replacement file, got %d", count)
 	}
 }

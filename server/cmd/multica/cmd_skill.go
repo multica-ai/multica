@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -125,6 +127,7 @@ func init() {
 	// skill import
 	skillImportCmd.Flags().String("url", "", "URL to import from (required)")
 	skillImportCmd.Flags().String("gitee-token", "", "Gitee personal access token for private Gitee repository imports")
+	skillImportCmd.Flags().Bool("overwrite", false, "Overwrite an existing skill with the same name")
 	skillImportCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// skill files list
@@ -344,21 +347,102 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 	if token, _ := cmd.Flags().GetString("gitee-token"); strings.TrimSpace(token) != "" {
 		body["gitee_token"] = strings.TrimSpace(token)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+	if overwrite, _ := cmd.Flags().GetBool("overwrite"); overwrite {
+		body["overwrite"] = true
+	}
 
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/skills/import", body, &result); err != nil {
-		return fmt.Errorf("import skill: %w", err)
+	if err := postSkillImport(client, body, &result); err != nil {
+		if _, forced := body["overwrite"]; forced {
+			return fmt.Errorf("import skill: %w", err)
+		}
+		conflict, ok := skillImportConflictFromError(err)
+		if !ok {
+			return fmt.Errorf("import skill: %w", err)
+		}
+		overwrite, promptErr := promptSkillImportConflict(cmd, conflict)
+		if promptErr != nil {
+			return promptErr
+		}
+		if !overwrite {
+			output, _ := cmd.Flags().GetString("output")
+			return printSkillImportSkipped(cmd, output, conflict)
+		}
+		body["overwrite"] = true
+		if err := postSkillImport(client, body, &result); err != nil {
+			return fmt.Errorf("import skill: %w", err)
+		}
 	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
-		return cli.PrintJSON(os.Stdout, result)
+		return cli.PrintJSON(cmd.OutOrStdout(), result)
 	}
 
-	fmt.Printf("Skill imported: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
+	fmt.Fprintf(cmd.OutOrStdout(), "Skill imported: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
+	return nil
+}
+
+type skillImportConflict struct {
+	Error       string `json:"error"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+func postSkillImport(client *cli.APIClient, body map[string]any, result *map[string]any) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	return client.PostJSON(ctx, "/api/skills/import", body, result)
+}
+
+func skillImportConflictFromError(err error) (skillImportConflict, bool) {
+	var httpErr *cli.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
+		return skillImportConflict{}, false
+	}
+	var conflict skillImportConflict
+	if json.Unmarshal([]byte(httpErr.Body), &conflict) != nil {
+		return skillImportConflict{}, false
+	}
+	if strings.TrimSpace(conflict.Name) == "" {
+		return skillImportConflict{}, false
+	}
+	return conflict, true
+}
+
+func promptSkillImportConflict(cmd *cobra.Command, conflict skillImportConflict) (bool, error) {
+	fmt.Fprintf(cmd.ErrOrStderr(), "Skill %q already exists.\n", conflict.Name)
+	if strings.TrimSpace(conflict.Description) != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Imported description: %s\n", strings.TrimSpace(conflict.Description))
+	}
+	fmt.Fprint(cmd.ErrOrStderr(), "Choose action: [s]kip/[o]verwrite (default: skip): ")
+
+	reader := bufio.NewReader(cmd.InOrStdin())
+	answer, err := reader.ReadString('\n')
+	if err != nil && strings.TrimSpace(answer) == "" {
+		fmt.Fprintln(cmd.ErrOrStderr())
+		return false, nil
+	}
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	switch answer {
+	case "o", "overwrite", "y", "yes":
+		return true, nil
+	case "", "s", "skip", "n", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid action %q; expected skip or overwrite", answer)
+	}
+}
+
+func printSkillImportSkipped(cmd *cobra.Command, output string, conflict skillImportConflict) error {
+	if output == "json" {
+		return cli.PrintJSON(cmd.OutOrStdout(), map[string]any{
+			"skipped":     true,
+			"name":        conflict.Name,
+			"description": conflict.Description,
+		})
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Skill import skipped: %s\n", conflict.Name)
 	return nil
 }
 

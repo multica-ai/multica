@@ -14,21 +14,26 @@ import {
   X as XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
-import { api } from "@multica/core/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, ApiError } from "@multica/core/api";
 import type { BatchImportSkillsResponse, CreateSkillRequest, Skill } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { isImeComposing } from "@multica/core/utils";
 import {
+  skillListOptions,
   skillDetailOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import {
   Dialog,
+  DialogDescription,
   DialogContent,
+  DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
   Tooltip,
   TooltipContent,
@@ -56,6 +61,119 @@ function seedAfterCreate(
   qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, skill);
   qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
   qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+}
+
+function buildConflictKey(name: string): string {
+  return name.trim();
+}
+
+type SkillConflictItem = {
+  key: string;
+  name: string;
+  description?: string;
+};
+
+type ExistingSkillConflict = {
+  name: string;
+  description?: string;
+};
+
+function SkillConflictDialog({
+  open,
+  title,
+  description,
+  skills,
+  existingByName,
+  overwriteKeys,
+  onToggle,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  skills: SkillConflictItem[];
+  existingByName: Map<string, ExistingSkillConflict>;
+  overwriteKeys: Set<string>;
+  onToggle: (key: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useT("skills");
+
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onCancel()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+
+        <div className="max-h-72 space-y-2 overflow-y-auto">
+          {skills.map((skill) => {
+            const checked = overwriteKeys.has(skill.key);
+            const existing = existingByName.get(buildConflictKey(skill.name));
+
+            return (
+              <label
+                key={skill.key}
+                className="flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 transition-colors hover:bg-accent/40"
+              >
+                <Checkbox
+                  checked={checked}
+                  onCheckedChange={() => onToggle(skill.key)}
+                  className="mt-0.5"
+                />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium">{skill.name}</span>
+                    <Badge variant={checked ? "secondary" : "outline"}>
+                      {checked
+                        ? t(($) => $.runtime_import.conflict_overwrite_badge)
+                        : t(($) => $.runtime_import.conflict_skip_badge)}
+                    </Badge>
+                  </div>
+                  <div className="grid gap-1 text-xs text-muted-foreground">
+                    <span className="truncate">
+                      {t(($) => $.runtime_import.conflict_local_label)}:{" "}
+                      {skill.description ||
+                        t(($) => $.runtime_import.conflict_no_description)}
+                    </span>
+                    <span className="truncate">
+                      {t(($) => $.runtime_import.conflict_existing_label)}:{" "}
+                      {existing?.description ||
+                        t(($) => $.runtime_import.conflict_no_description)}
+                    </span>
+                  </div>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onCancel}>
+            {t(($) => $.runtime_import.conflict_cancel_button)}
+          </Button>
+          <Button type="button" onClick={onConfirm}>
+            {t(($) => $.runtime_import.conflict_confirm_button)}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function getImportConflict(body: unknown): SkillConflictItem | null {
+  if (!body || typeof body !== "object") return null;
+  const record = body as Record<string, unknown>;
+  if (typeof record.name !== "string" || !record.name.trim()) return null;
+  return {
+    key: "url-import",
+    name: record.name,
+    description:
+      typeof record.description === "string" ? record.description : undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +379,13 @@ function LocalDirectoryForm({
   const [batchResult, setBatchResult] = useState<BatchImportSkillsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [conflicts, setConflicts] = useState<SkillConflictItem[]>([]);
+  const [overwriteKeys, setOverwriteKeys] = useState<Set<string>>(new Set());
+  const workspaceSkillsQuery = useQuery(skillListOptions(wsId));
+  const workspaceSkillsByName = new Map<string, ExistingSkillConflict>();
+  for (const skill of workspaceSkillsQuery.data ?? []) {
+    workspaceSkillsByName.set(buildConflictKey(skill.name), skill);
+  }
 
   const handleDirectorySelect = async (e: ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
@@ -277,6 +402,8 @@ function LocalDirectoryForm({
         return;
       }
       setParsedSkills(skills);
+      setConflicts([]);
+      setOverwriteKeys(new Set());
     } catch (err) {
       setParsedSkills([]);
       setError(err instanceof Error ? err.message : t(($) => $.create.local.parse_failed));
@@ -286,25 +413,61 @@ function LocalDirectoryForm({
     }
   };
 
+  const runImportParsedSkills = async (
+    skillsToImport: CreateSkillRequest[],
+    skippedConflicts: SkillConflictItem[],
+  ) => {
+    const skippedNames = skippedConflicts.map((skill) => skill.name);
+    if (skillsToImport.length === 0) {
+      setBatchResult({
+        created: [],
+        skipped: skippedNames,
+      });
+      await qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+      toast.success(
+        t(($) => $.create.local.toast_imported, {
+          count: 0,
+        }),
+      );
+      return;
+    }
+    const result = await api.batchImportSkills({ skills: skillsToImport });
+    setBatchResult({
+      created: result.created,
+      skipped: [...skippedNames, ...result.skipped],
+    });
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) }),
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) }),
+    ]);
+    for (const skill of result.created) {
+      qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, skill);
+    }
+    toast.success(
+      t(($) => $.create.local.toast_imported, {
+        count: result.created.length,
+      }),
+    );
+  };
+
   const importParsedSkills = async () => {
     if (parsedSkills.length === 0) return;
     setLoading(true);
     setError("");
     try {
-      const result = await api.batchImportSkills({ skills: parsedSkills });
-      setBatchResult(result);
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) }),
-        qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) }),
-      ]);
-      for (const skill of result.created) {
-        qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, skill);
+      const detectedConflicts = parsedSkills
+        .map((skill, index) => ({
+          key: `${skill.name}-${index}`,
+          name: skill.name,
+          description: skill.description,
+        }))
+        .filter((skill) => workspaceSkillsByName.has(buildConflictKey(skill.name)));
+      if (detectedConflicts.length > 0) {
+        setConflicts(detectedConflicts);
+        setOverwriteKeys(new Set());
+        return;
       }
-      toast.success(
-        t(($) => $.create.local.toast_imported, {
-          count: result.created.length,
-        }),
-      );
+      await runImportParsedSkills(parsedSkills, []);
     } catch (err) {
       setError(err instanceof Error ? err.message : t(($) => $.create.local.import_failed));
     } finally {
@@ -320,8 +483,58 @@ function LocalDirectoryForm({
     onBulkDone();
   };
 
+  const toggleConflictOverwrite = (key: string) => {
+    setOverwriteKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleConfirmConflicts = async () => {
+    const conflictKeys = new Set(conflicts.map((skill) => skill.key));
+    const skillsToImport = parsedSkills
+      .map((skill, index) => ({ skill, key: `${skill.name}-${index}` }))
+      .filter(({ key }) => !conflictKeys.has(key) || overwriteKeys.has(key))
+      .map(({ skill, key }) => ({
+        ...skill,
+        overwrite: overwriteKeys.has(key) || undefined,
+      }));
+    const skippedConflicts = conflicts.filter((skill) => !overwriteKeys.has(skill.key));
+
+    setConflicts([]);
+    setOverwriteKeys(new Set());
+    setLoading(true);
+    setError("");
+    try {
+      await runImportParsedSkills(skillsToImport, skippedConflicts);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(($) => $.create.local.import_failed));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelConflicts = () => {
+    setConflicts([]);
+    setOverwriteKeys(new Set());
+  };
+
   return (
     <>
+      <SkillConflictDialog
+        open={conflicts.length > 0}
+        title={t(($) => $.runtime_import.conflict_dialog_title)}
+        description={t(($) => $.create.local.conflict_dialog_description)}
+        skills={conflicts}
+        existingByName={workspaceSkillsByName}
+        overwriteKeys={overwriteKeys}
+        onToggle={toggleConflictOverwrite}
+        onCancel={handleCancelConflicts}
+        onConfirm={handleConfirmConflicts}
+      />
+
       <input
         ref={inputRef}
         type="file"
@@ -537,11 +750,18 @@ function UrlForm({
   const [giteeToken, setGiteeToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [conflict, setConflict] = useState<SkillConflictItem | null>(null);
+  const [overwriteKeys, setOverwriteKeys] = useState<Set<string>>(new Set());
   const source = detectUrlSource(url);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
+  const workspaceSkillsQuery = useQuery(skillListOptions(wsId));
+  const workspaceSkillsByName = new Map<string, ExistingSkillConflict>();
+  for (const skill of workspaceSkillsQuery.data ?? []) {
+    workspaceSkillsByName.set(buildConflictKey(skill.name), skill);
+  }
 
-  const submit = async () => {
+  const submit = async (overwrite = false) => {
     const trimmed = url.trim();
     if (!trimmed) return;
     setLoading(true);
@@ -551,14 +771,41 @@ function UrlForm({
       const skill = await api.importSkill({
         url: trimmed,
         ...(source === "gitee" && token ? { gitee_token: token } : {}),
+        overwrite: overwrite || undefined,
       });
       seedAfterCreate(qc, wsId, skill);
       toast.success(t(($) => $.create.url.toast_imported));
       onCreated(skill);
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const importConflict = getImportConflict(err.body);
+        if (importConflict) {
+          setConflict(importConflict);
+          setOverwriteKeys(new Set());
+          return;
+        }
+      }
       setError(err instanceof Error ? err.message : t(($) => $.create.url.fallback_error));
       setLoading(false);
     }
+  };
+
+  const handleConfirmConflict = async () => {
+    if (!conflict) return;
+    const shouldOverwrite = overwriteKeys.has(conflict.key);
+    setConflict(null);
+    if (!shouldOverwrite) {
+      setLoading(false);
+      setError(t(($) => $.runtime_import.conflict_skipped));
+      return;
+    }
+    await submit(true);
+  };
+
+  const handleCancelConflict = () => {
+    setConflict(null);
+    setOverwriteKeys(new Set());
+    setLoading(false);
   };
 
   const submittingLabel = (() => {
@@ -572,6 +819,25 @@ function UrlForm({
 
   return (
     <>
+      <SkillConflictDialog
+        open={conflict != null}
+        title={t(($) => $.runtime_import.conflict_dialog_title)}
+        description={t(($) => $.create.url.conflict_dialog_description)}
+        skills={conflict ? [conflict] : []}
+        existingByName={workspaceSkillsByName}
+        overwriteKeys={overwriteKeys}
+        onToggle={(key) =>
+          setOverwriteKeys((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+          })
+        }
+        onCancel={handleCancelConflict}
+        onConfirm={handleConfirmConflict}
+      />
+
       <div
         ref={scrollRef}
         style={fadeStyle}
@@ -684,7 +950,7 @@ function UrlForm({
         <Button
           type="button"
           size="sm"
-          onClick={submit}
+          onClick={() => submit()}
           disabled={!url.trim() || loading}
         >
           {loading ? (

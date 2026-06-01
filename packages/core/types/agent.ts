@@ -420,6 +420,7 @@ export interface CreateSkillRequest {
   content?: string;
   config?: Record<string, unknown>;
   files?: { path: string; content: string }[];
+  overwrite?: boolean;
 }
 
 export interface UpdateSkillRequest {

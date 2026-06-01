@@ -154,6 +154,7 @@ type CreateSkillRequest struct {
 	Content     string                   `json:"content"`
 	Config      any                      `json:"config"`
 	Files       []CreateSkillFileRequest `json:"files,omitempty"`
+	Overwrite   bool                     `json:"overwrite,omitempty"`
 }
 
 type CreateSkillFileRequest struct {
@@ -458,6 +459,7 @@ func (h *Handler) DeleteSkill(w http.ResponseWriter, r *http.Request) {
 type ImportSkillRequest struct {
 	URL        string `json:"url"`
 	GiteeToken string `json:"gitee_token,omitempty"`
+	Overwrite  bool   `json:"overwrite,omitempty"`
 }
 
 // Per-import bundle limits. These mirror the local-runtime importer so that
@@ -2095,7 +2097,7 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		config["origin"] = imported.origin
 	}
 
-	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
+	input := skillCreateInput{
 		WorkspaceID: workspaceUUID,
 		CreatorID:   creatorUUID,
 		Name:        imported.name,
@@ -2103,18 +2105,36 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		Content:     imported.content,
 		Config:      config,
 		Files:       files,
-	})
+	}
+	overwroteExisting := false
+	resp, err := h.createSkillWithFiles(r.Context(), input)
+	if err != nil && req.Overwrite && isUniqueViolation(err) {
+		resp, err = h.overwriteSkillWithFiles(r.Context(), input)
+		overwroteExisting = err == nil
+	}
 	if err != nil {
 		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "a skill with this name already exists")
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":       "a skill with this name already exists",
+				"name":        imported.name,
+				"description": imported.description,
+			})
+			return
+		}
+		if errors.Is(err, errSkillOverwriteForbidden) {
+			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())
 		return
 	}
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
-	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
-	writeJSON(w, http.StatusCreated, resp)
+	h.publish(skillImportEvent(overwroteExisting), workspaceID, actorType, actorID, map[string]any{"skill": resp})
+	status := http.StatusCreated
+	if overwroteExisting {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, resp)
 }
 
 // --- Batch import ---
@@ -2154,6 +2174,9 @@ func (h *Handler) BatchImportSkills(w http.ResponseWriter, r *http.Request) {
 
 	created := make([]SkillWithFilesResponse, 0)
 	skipped := make([]string, 0)
+	workspaceUUID := parseUUID(workspaceID)
+	creatorUUID := parseUUID(creatorID)
+	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
 
 	for _, s := range req.Skills {
 		if s.Name == "" {
@@ -2168,62 +2191,41 @@ func (h *Handler) BatchImportSkills(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		config, _ := json.Marshal(s.Config)
-		if s.Config == nil {
-			config = []byte("{}")
-		}
-
-		tx, err := h.TxStarter.Begin(r.Context())
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to start transaction")
-			return
-		}
-
-		qtx := h.Queries.WithTx(tx)
-
-		skill, err := qtx.CreateSkill(r.Context(), db.CreateSkillParams{
-			WorkspaceID: parseUUID(workspaceID),
+		input := skillCreateInput{
+			WorkspaceID: workspaceUUID,
+			CreatorID:   creatorUUID,
 			Name:        s.Name,
 			Description: s.Description,
 			Content:     s.Content,
-			Config:      config,
-			CreatedBy:   parseUUID(creatorID),
-		})
+			Config:      s.Config,
+			Files:       s.Files,
+		}
+		overwroteExisting := false
+		resp, err := h.createSkillWithFiles(r.Context(), input)
+		if err != nil && isUniqueViolation(err) {
+			if s.Overwrite {
+				resp, err = h.overwriteSkillWithFiles(r.Context(), input)
+				overwroteExisting = err == nil
+			} else {
+				skipped = append(skipped, s.Name)
+				continue
+			}
+		}
 		if err != nil {
-			tx.Rollback(r.Context())
 			if isUniqueViolation(err) {
 				skipped = append(skipped, s.Name)
 				continue
 			}
-			writeError(w, http.StatusInternalServerError, "failed to create skill "+s.Name+": "+err.Error())
-			return
-		}
-
-		fileResps := make([]SkillFileResponse, 0, len(s.Files))
-		for _, f := range s.Files {
-			sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
-				SkillID: skill.ID,
-				Path:    f.Path,
-				Content: f.Content,
-			})
-			if err != nil {
-				continue
+			if errors.Is(err, errSkillOverwriteForbidden) {
+				writeError(w, http.StatusForbidden, err.Error())
+				return
 			}
-			fileResps = append(fileResps, skillFileToResponse(sf))
-		}
-
-		if err := tx.Commit(r.Context()); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to commit")
+			writeError(w, http.StatusInternalServerError, "failed to import skill "+s.Name+": "+err.Error())
 			return
 		}
 
-		resp := SkillWithFilesResponse{
-			SkillResponse: skillToResponse(skill),
-			Files:         fileResps,
-		}
 		created = append(created, resp)
-		actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
-		h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
+		h.publish(skillImportEvent(overwroteExisting), workspaceID, actorType, actorID, map[string]any{"skill": resp})
 	}
 
 	writeJSON(w, http.StatusCreated, BatchImportSkillsResponse{

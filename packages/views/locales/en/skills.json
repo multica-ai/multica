@@ -207,6 +207,7 @@
       "importing_github": "Importing from GitHub…",
       "importing_gitee": "Importing from Gitee…",
       "name_conflict_hint": " The imported skill's name already exists — delete the existing one before retrying.",
+      "conflict_dialog_description": "This imported skill matches an existing workspace skill. Choose overwrite to update it; leave it unchecked to skip.",
       "fallback_error": "Import failed",
       "cancel": "Cancel",
       "toast_imported": "Skill imported"
@@ -225,6 +226,7 @@
       "import_complete": "Import complete",
       "import_summary": "{{created}} imported, {{skipped}} skipped.",
       "skipped_names": "Skipped duplicates: {{names}}",
+      "conflict_dialog_description": "These uploaded skills match existing workspace skills. Choose which ones to overwrite; unchecked skills will be skipped.",
       "no_skills_error": "No skill files found. Supported: .claude/commands/*.md, AGENTS.md, codex.md, or directories containing SKILL.md.",
       "parse_failed": "Failed to parse directory",
       "import_failed": "Failed to import skills",

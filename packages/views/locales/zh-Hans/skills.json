@@ -219,6 +219,7 @@
       "importing_github": "正在从 GitHub 导入...",
       "importing_gitee": "正在从 Gitee 导入...",
       "name_conflict_hint": "导入的 skill 名称已存在——请先删除已有的再重试。",
+      "conflict_dialog_description": "这个导入的 skill 与工作区中已有 skill 重名。勾选覆盖会更新已有 skill；不勾选则跳过。",
       "fallback_error": "导入失败",
       "cancel": "取消",
       "toast_imported": "已导入 skill"
@@ -237,6 +238,7 @@
       "import_complete": "导入完成",
       "import_summary": "已导入 {{created}} 个，跳过 {{skipped}} 个。",
       "skipped_names": "已跳过重复项：{{names}}",
+      "conflict_dialog_description": "这些上传的 skill 与工作区中已有 skill 重名。请选择要覆盖的项目，未勾选的项目会跳过。",
       "no_skills_error": "未找到 skill 文件。支持：.claude/commands/*.md、AGENTS.md、codex.md，或包含 SKILL.md 的目录。",
       "parse_failed": "解析目录失败",
       "import_failed": "导入 skill 失败",
