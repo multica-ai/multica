@@ -579,6 +579,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `project-detail-access` | packages/views/projects/components/project-detail.tsx | 0 | Access-tab integration in project-detail |
 | `project-detail-tabs` | packages/views/projects/components/project-detail.tsx | 0 | Project-detail tab/access additions |
 | `project-detail-sprints` | packages/views/projects/components/project-detail.tsx | 0 | FIR-2666 — adds the Sprints tab to the project page (TabsTrigger + TabsContent) gated on the `cerebro_sprints` feature flag. Imports `SprintsTab` from `@multica/cerebro-sprints/views` and `useFeatureFlag`. |
+| `issue-detail-sprint-picker` | packages/views/issues/components/issue-detail.tsx | 3 inline | FIR-2666 — adds the sidebar "Sprint" picker so a user can assign an issue to a sprint. Imports `SprintPicker` from `@multica/cerebro-sprints/views`, reads `useFeatureFlag("cerebro_sprints")`, and renders a `PropRow` gated on the flag + `issue.project_id`. The picker self-hides when the project has no sprints, so it adds nothing for non-sprint projects even with the flag on. |
 | `project-handler` | server/internal/handler/project.go | 83 | Server handler additions |
 | `projects-page-cerebro` | packages/views/projects/components/projects-page.tsx | 19 | Projects page/access-tab cerebro additions |
 | `protocol-events` | server/pkg/protocol/events.go | 7 | Protocol event additions |
