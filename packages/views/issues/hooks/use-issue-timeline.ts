@@ -269,7 +269,7 @@ export function useIssueTimeline(
       if (!content.trim()) return;
       if (submitting) throw new Error("Comment submission already in progress");
       if (!userId) {
-        toast.error("Failed to send comment");
+        toast.error(t(($) => $.comment.login_required));
         throw new Error("Cannot submit comment without an authenticated user");
       }
       setSubmitting(true);
@@ -290,7 +290,7 @@ export function useIssueTimeline(
     async (parentId: string, content: string, attachmentIds?: string[]) => {
       if (!content.trim()) return;
       if (!userId) {
-        toast.error("Failed to send reply");
+        toast.error(t(($) => $.comment.login_required));
         throw new Error("Cannot submit reply without an authenticated user");
       }
       try {

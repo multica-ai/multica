@@ -125,8 +125,8 @@ export function SettingsTab({
         runtime_config: runtimeConfig,
       });
       toast.success("Settings saved");
-    } catch {
-      toast.error("Failed to save settings");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save settings");
     } finally {
       setSaving(false);
     }
