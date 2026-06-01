@@ -423,6 +423,11 @@
       "cancel_task_tooltip": "작업 취소",
       "cancelling_tooltip": "취소하는 중...",
       "cancel_failed_toast": "작업을 취소하지 못했습니다",
+      "_comment_retry": "CEREBRO-PATCH(activity-tab-retry): FIR-2592 — retry affordance on failed/cancelled runs in Recent Work.",
+      "retry_task_aria": "실행 재시도",
+      "retry_task_tooltip": "실행 재시도",
+      "retrying_tooltip": "재시도하는 중...",
+      "retry_failed_toast": "실행을 재시도하지 못했습니다",
       "started_prefix": "{{when}} 시작됨",
       "dispatched_prefix": "{{when}} 디스패치됨",
       "queued_prefix": "{{when}} 대기 시작"
