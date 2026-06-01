@@ -6,11 +6,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
-	"github.com/multica-ai/multica/server/internal/cerebro/identitysync"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -176,15 +174,6 @@ func groupMemberCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, gro
 	return n
 }
 
-type recordingGroupSyncer struct {
-	workspaceIDs []pgtype.UUID
-}
-
-func (s *recordingGroupSyncer) SyncWorkspaceNow(ctx context.Context, workspaceID pgtype.UUID) (identitysync.SyncResult, error) {
-	s.workspaceIDs = append(s.workspaceIDs, workspaceID)
-	return identitysync.SyncResult{GroupsProcessed: len(identitysync.SyncedGroups)}, nil
-}
-
 // TestProvisionMembership_PlacesUserInDefaultGroup proves that auto-provisioning
 // puts the user in the workspace's configured default group (FIR-2523 +
 // onboarding: "automatically placed in a group"), and is idempotent on a
@@ -260,33 +249,5 @@ func TestProvisionMembership_PlacesUserInDefaultGroup(t *testing.T) {
 	}
 	if got := groupMemberCount(t, ctx, pool, groupID, uuidString(user.ID)); got != 1 {
 		t.Fatalf("idempotency broken: expected 1 group member row, got %d", got)
-	}
-}
-
-func TestProvisionMembership_TriggersGoogleWorkspaceGroupSyncWhenEnabled(t *testing.T) {
-	pool := provisionTestPool(t)
-	ctx := context.Background()
-
-	syncer := &recordingGroupSyncer{}
-	svc := NewWithGroupSyncer(cerebrodb.New(pool), db.New(pool), syncer)
-	wsID := seedWorkspace(t, ctx, pool, fmt.Sprintf("prov-sync-%d", os.Getpid()))
-	domain := fmt.Sprintf("syncdom-%d.example", os.Getpid())
-	user := seedUser(t, ctx, pool, fmt.Sprintf("syncuser-%d@%s", os.Getpid(), domain))
-
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO cerebro_workspace_auth_settings (workspace_id, google_signup_domains, default_role, google_workspace_sync_enabled)
-		VALUES ($1, ARRAY[$2], 'member', true)
-	`, wsID, domain); err != nil {
-		t.Fatalf("seed auth settings: %v", err)
-	}
-
-	if _, err := svc.ProvisionMembershipForNewUser(ctx, user, "google"); err != nil {
-		t.Fatalf("provision returned error: %v", err)
-	}
-	if len(syncer.workspaceIDs) != 1 {
-		t.Fatalf("expected one on-demand group sync, got %d", len(syncer.workspaceIDs))
-	}
-	if got := uuidString(syncer.workspaceIDs[0]); got != wsID {
-		t.Fatalf("sync workspace = %s, want %s", got, wsID)
 	}
 }

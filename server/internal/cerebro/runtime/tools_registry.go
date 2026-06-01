@@ -360,6 +360,7 @@ func AllBuiltinToolMeta() []ToolMeta {
 	out := make([]ToolMeta, 0, len(legacyGatewayToolMeta)+len(multicaMCPToolMatrix))
 	out = append(out, legacyGatewayToolMeta...)
 	out = append(out, multicaMCPToolMatrix...)
+	out = append(out, customerServiceMCPToolMeta()...)
 	return out
 }
 

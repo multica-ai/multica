@@ -53,6 +53,13 @@ export {
   type InboxActionEntry,
 } from "./action-groups";
 export { useInboxActionGroupLabels } from "./strings";
+// FIR-2653 — "Pinned" inbox view: only items tied to a pinned issue/parent/project.
+export {
+  useInboxPinnedMatcher,
+  entryMatchesPins,
+  type PinnableEntry,
+  type PinnedContext,
+} from "./pinned-view";
 // FIR-2474 — pin the open inbox row in place until the message is closed.
 export { sortInboxEntriesPinned, type PinnedSelection } from "./pin-selected";
 export { pinnedBucketizer, type PinnedGroup, type InboxBucket } from "./pin-selected-group";

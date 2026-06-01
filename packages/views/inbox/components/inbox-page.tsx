@@ -48,6 +48,7 @@ import {
   sortInboxEntriesPinned,
   pinnedBucketizer, // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — freeze open row's group
   type PinnedGroup, // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — frozen-group ref type
+  useInboxPinnedMatcher, // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — "Pinned" view predicate
   useInboxMessageRefresh, // CEREBRO-PATCH(inbox-message-refresh): FIR-2684 — always refetch opened message
 } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
@@ -336,18 +337,27 @@ export function InboxPage() {
   // CEREBRO-PATCH(channels-flag-gate): hide channel/dm view options when disabled,
   // and snap any persisted "channels"/"dms" view back to "all" when the user toggles off.
   const channelsEnabled = useFeatureFlag("cerebro_channels");
+  // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — gate the "Pinned" view option.
+  const pinnedFilterEnabled = useFeatureFlag("cerebro_inbox_pinned_filter");
   const inboxViewOptions = useMemo(
     () =>
-      channelsEnabled
-        ? INBOX_VIEW_OPTIONS
-        : INBOX_VIEW_OPTIONS.filter((o) => o.value !== "channels" && o.value !== "dms"),
-    [channelsEnabled],
+      INBOX_VIEW_OPTIONS.filter(
+        (o) =>
+          (channelsEnabled || (o.value !== "channels" && o.value !== "dms")) &&
+          // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — hide "Pinned" when off.
+          (pinnedFilterEnabled || o.value !== "pinned"),
+      ),
+    [channelsEnabled, pinnedFilterEnabled],
   );
   useEffect(() => {
     if (!channelsEnabled && (view === "channels" || view === "dms")) {
       setView("all");
     }
-  }, [channelsEnabled, view, setView]);
+    // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — snap persisted "pinned" back when off.
+    if (!pinnedFilterEnabled && view === "pinned") setView("all");
+  }, [channelsEnabled, pinnedFilterEnabled, view, setView]);
+  // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — predicate for the "Pinned" view.
+  const matchesPinnedView = useInboxPinnedMatcher(wsId, userId);
 
   const selectedChatSession =
     chatSessions.find((s) => s.id === selectedKey) ??
@@ -842,8 +852,12 @@ export function InboxPage() {
   }, [chatSessions, items, channels, channelMap, selectedKey]); // CEREBRO-PATCH(inbox-pin-selected): re-pin on selection change
 
   const filteredEntries = useMemo<MergedEntry[]>(
-    () => mergedEntries.filter((entry) => matchesView(entry, view)),
-    [mergedEntries, view],
+    () =>
+      // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — "Pinned" needs pin/parent context.
+      view === "pinned"
+        ? mergedEntries.filter(matchesPinnedView)
+        : mergedEntries.filter((entry) => matchesView(entry, view)),
+    [mergedEntries, view, matchesPinnedView],
   );
 
   const renderEntry = (entry: MergedEntry) => {
@@ -1565,5 +1579,8 @@ function matchesView(
     case "muted":
       // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — only notifs have muted_until.
       return entry.kind === "notif" && isMuted(entry.item.muted_until);
+    // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — handled in filteredEntries via the pin matcher.
+    case "pinned":
+      return false;
   }
 }

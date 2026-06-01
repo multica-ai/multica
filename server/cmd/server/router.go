@@ -49,8 +49,6 @@ import (
 	cerebroroles "github.com/multica-ai/multica/server/internal/cerebro/roles"
 	// CEREBRO-PATCH(cerebro-identity-routes): FIR-2523 Google Workspace identity-source handler import
 	cerebroidentity "github.com/multica-ai/multica/server/internal/cerebro/identity"
-	// CEREBRO-PATCH(cerebro-identity-login-sync): FIR-2662 on-demand Google Workspace group sync after login auto-provisioning.
-	cerebroidentitysync "github.com/multica-ai/multica/server/internal/cerebro/identitysync"
 	// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox handler import
 	cerebroapprovals "github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 permission model handler import
@@ -305,13 +303,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroGrantsHandler := cerebrogrants.NewHandler(cerebrogrants.New(cerebroQueries, queries, pool, bus)) // CEREBRO-PATCH(cerebro-grants-routes): JEH-1213
 	cerebroRolesHandler := cerebroroles.New(cerebroQueries, queries, bus)                                   // CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject handler
 	// CEREBRO-PATCH(cerebro-identity-handler): FIR-2523 Google Workspace identity-source handler + provisioner seam.
-	var cerebroIdentityGroupSyncer *cerebroidentitysync.Syncer
-	if syncer, ok, err := cerebroidentitysync.NewSyncerFromEnv(context.Background(), cerebroQueries, queries); err != nil {
-		slog.Warn("cerebro identity login group sync disabled: BigQuery init failed", "error", err)
-	} else if ok {
-		cerebroIdentityGroupSyncer = syncer
-	}
-	cerebroIdentityService := cerebroidentity.NewWithGroupSyncer(cerebroQueries, queries, cerebroIdentityGroupSyncer)
+	cerebroIdentityService := cerebroidentity.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-identity-login-sync-rollback): FIR-2724 keep BigQuery group sync out of login.
 	cerebroIdentityHandler := cerebroidentity.NewHandler(cerebroIdentityService)
 	h.IdentityProvisioner = cerebroIdentityService
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler (data layer the permission screen reads from).

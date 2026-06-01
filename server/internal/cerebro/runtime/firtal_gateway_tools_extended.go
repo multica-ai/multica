@@ -1319,4 +1319,7 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 	r.Register(&FirtalBQQueryTool{queries: queries, tctx: tctx})
 	r.Register(&WebFetchTool{})
 	r.Register(&SheetsWriteTool{queries: queries, tctx: tctx})
+	for _, tool := range customerServiceMCPTools() {
+		r.Register(tool)
+	}
 }
