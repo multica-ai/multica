@@ -61,9 +61,10 @@ const (
 //
 // "Duplicate" is a *response* status, not a delivery status — duplicates
 // don't get their own row; they bump attempt_count on the existing dedupe
-// target. Likewise "skipped" is a *response* status reported when the
-// autopilot service skipped the run (e.g. runtime offline); the delivery
-// row itself records `dispatched` and links the skipped run via
+// target. Likewise "skipped" and "pending_runtime" (MUL-2863) are
+// *response* statuses reported when the autopilot service declined or
+// parked the run (e.g. runtime offline, agent hard-deleted); the delivery
+// row itself records `dispatched` and links the affected run via
 // autopilot_run_id, because from the ingress's perspective we DID hand
 // the payload to the autopilot machinery.
 const (
