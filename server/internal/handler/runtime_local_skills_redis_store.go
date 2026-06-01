@@ -481,7 +481,7 @@ func (s *RedisLocalSkillImportStore) PopPendingBatch(ctx context.Context, runtim
 	return result, nil
 }
 
-func (s *RedisLocalSkillImportStore) Complete(ctx context.Context, id string, skill SkillResponse) error {
+func (s *RedisLocalSkillImportStore) Complete(ctx context.Context, id string, skill SkillWithFilesResponse) error {
 	req, err := s.loadImportRequest(ctx, id)
 	if err != nil {
 		return err

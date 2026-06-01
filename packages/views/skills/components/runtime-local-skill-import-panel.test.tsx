@@ -156,13 +156,14 @@ function renderPanel(props: { onImported?: (skill: unknown) => void; onBulkDone?
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  const result = render(
     <I18nWrapper>
       <QueryClientProvider client={queryClient}>
         <RuntimeLocalSkillImportPanel {...props} />
       </QueryClientProvider>
     </I18nWrapper>,
   );
+  return { ...result, queryClient };
 }
 
 describe("RuntimeLocalSkillImportPanel", () => {
@@ -370,6 +371,51 @@ describe("RuntimeLocalSkillImportPanel", () => {
     // Click Done — should call onImported with the single skill
     fireEvent.click(screen.getByRole("button", { name: /Done/i }));
     expect(onImported).toHaveBeenCalledWith(MOCK_IMPORTED_SKILL_A);
+  });
+
+  it("seeds imported skill detail cache with supporting files", async () => {
+    const importedWithFiles = {
+      ...MOCK_IMPORTED_SKILL_A,
+      files: [
+        {
+          id: "file-1",
+          skill_id: "skill-1",
+          path: "templates/check.md",
+          content: "checklist",
+          created_at: "2026-04-16T00:00:00Z",
+          updated_at: "2026-04-16T00:00:00Z",
+        },
+      ],
+    };
+    mockResolveRuntimeLocalSkillImport.mockResolvedValueOnce({
+      skill: importedWithFiles,
+    });
+
+    const { queryClient } = renderPanel();
+
+    expect(
+      await screen.findByText("Review Helper", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Review Helper/i }));
+    const importButton = screen.getByRole("button", {
+      name: /Import to Workspace/i,
+    });
+    await waitFor(
+      () => {
+        expect(importButton).not.toBeDisabled();
+      },
+      { timeout: 5000 },
+    );
+    fireEvent.click(importButton);
+
+    await waitFor(
+      () => {
+        expect(queryClient.getQueryData(["workspaces", "ws-1", "skills", "skill-1"]))
+          .toEqual(importedWithFiles);
+      },
+      { timeout: 10000 },
+    );
   });
 
   it("calls onBulkDone when multiple skills succeed", async () => {

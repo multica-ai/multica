@@ -73,7 +73,7 @@ type LocalSkillImportStore interface {
 	// transitions them to running. Used by the heartbeat handler to deliver
 	// multiple imports per heartbeat cycle.
 	PopPendingBatch(ctx context.Context, runtimeID string, limit int) ([]*RuntimeLocalSkillImportRequest, error)
-	Complete(ctx context.Context, id string, skill SkillResponse) error
+	Complete(ctx context.Context, id string, skill SkillWithFilesResponse) error
 	Fail(ctx context.Context, id string, errMsg string) error
 }
 
@@ -149,7 +149,7 @@ type RuntimeLocalSkillImportRequest struct {
 	Description  *string                        `json:"description,omitempty"`
 	Overwrite    bool                           `json:"overwrite,omitempty"`
 	Status       RuntimeLocalSkillRequestStatus `json:"status"`
-	Skill        *SkillResponse                 `json:"skill,omitempty"`
+	Skill        *SkillWithFilesResponse        `json:"skill,omitempty"`
 	Error        string                         `json:"error,omitempty"`
 	CreatedAt    time.Time                      `json:"created_at"`
 	UpdatedAt    time.Time                      `json:"updated_at"`
@@ -385,7 +385,7 @@ func (s *InMemoryLocalSkillImportStore) PopPendingBatch(_ context.Context, runti
 	return result, nil
 }
 
-func (s *InMemoryLocalSkillImportStore) Complete(_ context.Context, id string, skill SkillResponse) error {
+func (s *InMemoryLocalSkillImportStore) Complete(_ context.Context, id string, skill SkillWithFilesResponse) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -757,7 +757,7 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp.SkillResponse); err != nil {
+	if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp); err != nil {
 		if overwroteExisting {
 			// The Skill UUID is intentionally preserved for overwrites. If the
 			// async store update fails, let the daemon retry the same idempotent

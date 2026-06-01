@@ -422,6 +422,64 @@ func TestListRuntimeLocalSkills_OpenClaw(t *testing.T) {
 	}
 }
 
+func TestLoadRuntimeLocalSkillBundle_OpenClawPrefersWorkspaceSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".openclaw", "skills"), "planner", map[string]string{
+		"SKILL.md": "---\nname: Global Planner\n---\n# Global Planner\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".openclaw", "workspace", "skills"), "planner", map[string]string{
+		"SKILL.md":             "---\nname: Workspace Planner\n---\n# Workspace Planner\n",
+		"references/guide.md":  "guide",
+		"scripts/bootstrap.sh": "bootstrap",
+		"LICENSE":              "ignored",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("openclaw")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("openclaw should be supported")
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d (%v)", len(skills), skills)
+	}
+	if skills[0].Name != "Workspace Planner" {
+		t.Fatalf("name = %q, want Workspace Planner", skills[0].Name)
+	}
+	if skills[0].SourcePath != "~/.openclaw/workspace/skills/planner" {
+		t.Fatalf("source_path = %q", skills[0].SourcePath)
+	}
+	if skills[0].FileCount != 3 {
+		t.Fatalf("file_count = %d, want 3", skills[0].FileCount)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("openclaw", "planner")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported {
+		t.Fatal("openclaw should be supported")
+	}
+	if bundle.Name != "Workspace Planner" {
+		t.Fatalf("bundle name = %q, want Workspace Planner", bundle.Name)
+	}
+	if bundle.SourcePath != "~/.openclaw/workspace/skills/planner" {
+		t.Fatalf("bundle source_path = %q", bundle.SourcePath)
+	}
+	if len(bundle.Files) != 2 {
+		t.Fatalf("expected 2 supporting files, got %d", len(bundle.Files))
+	}
+	if bundle.Files[0].Path != "references/guide.md" || bundle.Files[0].Content != "guide" {
+		t.Fatalf("unexpected first file: %+v", bundle.Files[0])
+	}
+	if bundle.Files[1].Path != "scripts/bootstrap.sh" || bundle.Files[1].Content != "bootstrap" {
+		t.Fatalf("unexpected second file: %+v", bundle.Files[1])
+	}
+}
+
 func TestLoadRuntimeLocalSkillBundle_Cursor(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
