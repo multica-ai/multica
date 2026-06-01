@@ -707,6 +707,10 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     listRef.current?.scrollToEnd({ animated: true });
   }, []);
 
+  const scrollToTop = useCallback(() => {
+    listRef.current?.scrollToOffset({ animated: true, offset: 0 });
+  }, []);
+
   const listHeader = useMemo(() => {
     if (!issue) return null;
     return (
@@ -981,6 +985,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     <Screen padded={false} safeArea={false}>
       <ScreenTitleBar
         onBack={() => navigation.goBack()}
+        onTitleDoublePress={scrollToTop}
         right={(
           <HeaderIconButton
             label={t("issues.issue_actions")}
