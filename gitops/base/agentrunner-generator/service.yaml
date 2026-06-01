@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentrunner-generator
+spec:
+  selector:
+    app.kubernetes.io/name: agentrunner-generator
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  type: ClusterIP

@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentrunner-generator
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentrunner-generator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentrunner-generator
+        app.kubernetes.io/instance: agentrunner-generator
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        - name: plugin
+          image: ghcr.io/g2crowd/applicationset-fs-plugin
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PARAM_NAME
+              value: "slug"
+            - name: ID_REGEX
+              value: "^[a-z0-9-]+$"
+            - name: REGISTRY_DIR
+              value: /run/registry
+            - name: TOKEN_FILE
+              value: /var/run/argo/token
+          volumeMounts:
+            - name: registry
+              mountPath: /run/registry
+              readOnly: true
+            - name: token
+              mountPath: /var/run/argo
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+      volumes:
+        - name: registry
+          secret:
+            secretName: agentrunner-registry
+        - name: token
+          secret:
+            secretName: agentrunner-generator-token
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: eks.amazonaws.com/compute-type
+                    operator: NotIn
+                    values:
+                      - auto
+                      - fargate
+      tolerations:
+        - key: CostCenter
+          operator: Equal
+          value: shared
+          effect: NoSchedule
+        - key: CostCenter
+          operator: Equal
+          value: Devops
+          effect: NoSchedule

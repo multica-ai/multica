@@ -120,3 +120,176 @@ Tracking: PE-865.
 - `g2crowd/gandalf` — canonical publish.yml + gitops-deploy flow
 - `g2crowd/configuration/kustomize/Platform/user-mapping-db` — canonical upbound RDS reference
 - `g2crowd/configuration/kustomize/Platform/optio` — canonical upbound RDS + deployment consumption reference (the `$(VAR)` inline `DATABASE_URL` pattern used here)
+
+---
+
+# agentrunner — Operator Runbook
+
+Per-workspace cloud runner workload deployed via the `agentrunner-appset` ApplicationSet
+(defined in `g2crowd/configuration`). Each workspace gets one pod in its own
+`agentrunner-<workspace_id>` namespace on the development cluster.
+
+## Architecture
+
+```
+SSM /agentfarm/tools/agentrunner/<workspace_id>   ← enabled flag (value=any)
+         │
+         │  ESO dataFrom.find (5 min)
+         ▼
+  Secret: agentrunner-registry (tools cluster, agentrunner-generator ns)
+         │
+         │  mounted at /run/registry
+         ▼
+  applicationset-fs-plugin → emits [{slug: "<slug>"}, ...]
+         │
+         │  plugin generator (ArgoCD, tools cluster)
+         ▼
+  ApplicationSet agentrunner-appset → one Application per slug
+         │
+         │  ArgoCD sync (dev cluster)
+         ▼
+  Namespace: agentrunner-<slug>
+    ├── ExternalSecret agentrunner-secrets → Secret (per-ws keys + shared keys fused:
+    │     MULTICA_WORKSPACE_ID, LITELLM_API_KEY, MULTICA_PAT, etc.)
+    └── Deployment agentrunner (ghcr.io/g2crowd/agentrunner-runtime, single opencode container;
+          ATLASSIAN_SITE set as static env var)
+```
+
+## SSM Contract
+
+All SSM parameters live in AWS account `637423279283`, region `us-east-1`.
+
+| SSM Path | Type | Writer | Purpose |
+|---|---|---|---|
+| `/agentfarm/tools/plugin-token` | SecureString | one-shot bootstrap | Plugin bearer token (shared between generator pod and ArgoCD ConfigMap) |
+| `/agentfarm/development/agentrunner/shared/MULTICA_PAT` | SecureString | one-shot bootstrap | Bot PAT shared across all workspace runners; swept into `agentrunner-secrets` by the shared `dataFrom.find` entry |
+| `/agentfarm/tools/agentrunner/<slug>` | String | gandalf (PLA-383) | Registry entry — existence = workspace enabled |
+| `/agentfarm/development/agentrunner/<slug>/MULTICA_WORKSPACE_ID` | SecureString | gandalf (PLA-383) | Workspace UUID — written by gandalf at workspace-create time; flows into the pod via `agentrunner-secrets` ESO + `envFrom` |
+| `/agentfarm/development/agentrunner/<slug>/LITELLM_API_KEY` | SecureString | gandalf (PLA-383) | LiteLLM API key for this workspace |
+| `/agentfarm/development/agentrunner/<slug>/GIT_USER_EMAIL` | String (optional) | gandalf (PLA-383) | Git user email; triggers acli Jira auth when paired with JIRA_PAT |
+| `/agentfarm/development/agentrunner/<slug>/JIRA_PAT` | SecureString (optional) | gandalf (PLA-383) | Jira PAT; triggers acli auth when paired with GIT_USER_EMAIL |
+
+Gandalf SSM automation is tracked in PLA-383 and has landed in [g2crowd/gandalf#138](https://github.com/g2crowd/gandalf/pull/138). For smoke tests, put keys manually.
+
+## Smoke Test Procedure
+
+```bash
+SLUG=smoke-test-1
+WORKSPACE_UUID=<the-workspace-uuid>
+AWS_PROFILE=development
+AWS_REGION=us-east-1
+
+# 1. Register the workspace in the registry (triggers ApplicationSet)
+aws ssm put-parameter --profile tools --region $AWS_REGION \
+  --name "/agentfarm/tools/agentrunner/$SLUG" \
+  --type String --value "enabled" --overwrite
+
+# 2. Seed per-workspace secrets (normally written by gandalf at workspace-create time)
+aws ssm put-parameter --profile $AWS_PROFILE --region $AWS_REGION \
+  --name "/agentfarm/development/agentrunner/$SLUG/MULTICA_WORKSPACE_ID" \
+  --type SecureString --value "$WORKSPACE_UUID" --overwrite
+
+aws ssm put-parameter --profile $AWS_PROFILE --region $AWS_REGION \
+  --name "/agentfarm/development/agentrunner/$SLUG/LITELLM_API_KEY" \
+  --type SecureString --value "<test-key>" --overwrite
+
+# 3. Wait ~2 minutes for ArgoCD to reconcile, then verify
+# On tools cluster:
+kubectl --context arn:aws:eks:us-east-1:637423279283:cluster/tools -n argocd \
+  get application "agentrunner-$SLUG"
+
+# On dev cluster:
+kubectl --context arn:aws:eks:us-east-1:975049976121:cluster/development \
+  -n "agentrunner-$SLUG" get pods
+
+# 4. Verify MULTICA_WORKSPACE_ID is present in the rendered Secret
+kubectl --context arn:aws:eks:us-east-1:975049976121:cluster/development \
+  -n "agentrunner-$SLUG" get secret agentrunner-secrets -o jsonpath='{.data.MULTICA_WORKSPACE_ID}' \
+  | base64 -d && echo
+# Expected: the workspace UUID
+
+# 5. Verify MULTICA_WORKSPACE_ID appears in the running pod's environment
+kubectl --context arn:aws:eks:us-east-1:975049976121:cluster/development \
+  -n "agentrunner-$SLUG" exec deploy/agentrunner -- printenv MULTICA_WORKSPACE_ID
+# Expected: the workspace UUID
+
+# 6. Rollback / deregister
+aws ssm delete-parameter --profile tools --region $AWS_REGION \
+  --name "/agentfarm/tools/agentrunner/$SLUG"
+aws ssm delete-parameters --profile $AWS_PROFILE --region $AWS_REGION \
+  --names \
+    "/agentfarm/development/agentrunner/$SLUG/MULTICA_WORKSPACE_ID" \
+    "/agentfarm/development/agentrunner/$SLUG/LITELLM_API_KEY"
+# Application and namespace are pruned by ArgoCD within ~2 minutes.
+```
+
+## Troubleshooting
+
+### ApplicationSet stuck / no Application generated
+
+```bash
+# Check the generator pod is healthy
+kubectl -n agentrunner-generator logs deploy/agentrunner-generator
+
+# Check the registry ESO synced
+kubectl -n agentrunner-generator get externalsecret agentrunner-registry
+kubectl -n agentrunner-generator get secret agentrunner-registry -o jsonpath='{.data}' | jq 'keys'
+
+# Verify the SSM registry key exists
+aws ssm get-parameter --name "/agentfarm/tools/agentrunner/$SLUG"
+```
+
+### Pod in CrashLoopBackOff
+
+```bash
+kubectl -n "agentrunner-$SLUG" logs deploy/agentrunner --previous
+
+# Common causes:
+# - Missing MULTICA_PAT or MULTICA_WORKSPACE_ID: check agentrunner-secrets ESO
+#   (MULTICA_WORKSPACE_ID written by gandalf to /agentfarm/development/agentrunner/<slug>/MULTICA_WORKSPACE_ID;
+#    MULTICA_PAT from /agentfarm/development/agentrunner/shared/MULTICA_PAT — both fused into agentrunner-secrets)
+# - Missing LITELLM_API_KEY: check agentrunner-secrets ESO
+#   (written by gandalf to /agentfarm/development/agentrunner/<slug>/*)
+```
+
+### ESO not syncing
+
+```bash
+# Check the single fused per-workspace ESO
+kubectl -n "agentrunner-$SLUG" describe externalsecret agentrunner-secrets
+
+# Verify SSM paths are correct and the runner's IAM role has SSM read access
+aws ssm get-parameters-by-path \
+  --path "/agentfarm/development/agentrunner/$SLUG/" \
+  --with-decryption
+
+aws ssm get-parameters-by-path \
+  --path "/agentfarm/development/agentrunner/shared/" \
+  --with-decryption
+```
+
+## Rollback
+
+To deregister a workspace and destroy its runner:
+
+```bash
+# Delete the registry key — ApplicationSet prunes the Application → namespace → pod
+aws ssm delete-parameter --profile tools --region us-east-1 \
+  --name "/agentfarm/tools/agentrunner/$SLUG"
+
+# Optionally clean up per-workspace SSM secrets
+aws ssm delete-parameters --profile development --region us-east-1 \
+  --names \
+    "/agentfarm/development/agentrunner/$SLUG/MULTICA_WORKSPACE_ID" \
+    "/agentfarm/development/agentrunner/$SLUG/LITELLM_API_KEY" \
+    "/agentfarm/development/agentrunner/$SLUG/GIT_USER_EMAIL" \
+    "/agentfarm/development/agentrunner/$SLUG/JIRA_PAT"
+```
+
+To roll back a bad `agentrunner-runtime` image tag:
+
+```bash
+# Revert the tag commit in gitops/environments/development/agent-runtime/kustomization.yaml
+git revert <commit-sha>
+git push
+```

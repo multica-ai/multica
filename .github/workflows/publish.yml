@@ -124,13 +124,25 @@ jobs:
       runs-on: ubicloud-standard-4-arm
     secrets: inherit
 
+  bake-build-agentrunner-runtime:
+    # FROMs devenv-runtime until the agentrunner image is dissociated.
+    needs: [bake-build-devenv-runtime]
+    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
+    with:
+      environment: prod
+      branch: ${{ github.head_ref || github.ref_name }}
+      bakefile: docker/agentrunner-runtime/docker-bake.hcl
+      runs-on: ubicloud-standard-4-arm
+    secrets: inherit
+
   extract-tags:
-    needs: [bake-build-backend, bake-build-web, bake-build-devenv-runtime]
+    needs: [bake-build-backend, bake-build-web, bake-build-devenv-runtime, bake-build-agentrunner-runtime]
     runs-on: ubuntu-latest
     outputs:
       backend_tag: ${{ steps.extract.outputs.backend_tag }}
       web_tag: ${{ steps.extract.outputs.web_tag }}
       devenv_runtime_tag: ${{ steps.extract.outputs.devenv_runtime_tag }}
+      agentrunner_runtime_tag: ${{ steps.extract.outputs.agentrunner_runtime_tag }}
     steps:
       - name: Extract tags from image_name
         id: extract
@@ -138,10 +150,12 @@ jobs:
           BACKEND_IMAGE: ${{ needs.bake-build-backend.outputs.image_name }}
           WEB_IMAGE: ${{ needs.bake-build-web.outputs.image_name }}
           DEVENV_RUNTIME_IMAGE: ${{ needs.bake-build-devenv-runtime.outputs.image_name }}
+          AGENTRUNNER_RUNTIME_IMAGE: ${{ needs.bake-build-agentrunner-runtime.outputs.image_name }}
         run: |
           echo "backend_tag=${BACKEND_IMAGE##*:}" >> "$GITHUB_OUTPUT"
           echo "web_tag=${WEB_IMAGE##*:}" >> "$GITHUB_OUTPUT"
           echo "devenv_runtime_tag=${DEVENV_RUNTIME_IMAGE##*:}" >> "$GITHUB_OUTPUT"
+          echo "agentrunner_runtime_tag=${AGENTRUNNER_RUNTIME_IMAGE##*:}" >> "$GITHUB_OUTPUT"
 
   commit-to-gitops-backend:
     needs: [bake-build-backend, bake-build-web, extract-tags]
@@ -175,4 +189,15 @@ jobs:
       app_repo_branch: ${{ github.head_ref || github.ref_name }}
       path_to_kustomization: kustomize/DevOps/devenv/environments/development/kustomization.yaml
       image_yq_matcher: .images[1].newTag
+
+  commit-to-gitops-agent-runtime:
+    needs: [bake-build-agentrunner-runtime, extract-tags, commit-to-gitops-devenv-runtime]
+    uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
+    secrets: inherit
+    with:
+      gitops_repository: g2crowd/agentfarm
+      image_tag: ${{ needs.extract-tags.outputs.agentrunner_runtime_tag }}
+      app_repo_branch: ${{ github.head_ref || github.ref_name }}
+      path_to_kustomization: gitops/environments/development/agent-runtime/kustomization.yaml
+      image_yq_matcher: .images[0].newTag
 

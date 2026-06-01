@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentrunner
+  annotations:
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentrunner
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentrunner
+    spec:
+      serviceAccountName: agentrunner
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        - name: opencode
+          image: ghcr.io/g2crowd/agentrunner-runtime
+          imagePullPolicy: Always
+          env:
+            - name: WORKSPACE_SLUG
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: ATLASSIAN_SITE
+              value: https://g2crowd.atlassian.net
+          envFrom:
+            - secretRef:
+                name: agentrunner-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: eks.amazonaws.com/compute-type
+                    operator: NotIn
+                    values:
+                      - auto
+                      - fargate
+      tolerations:
+        - key: CostCenter
+          operator: Equal
+          value: shared
+          effect: NoSchedule
+        - key: CostCenter
+          operator: Equal
+          value: Devops
+          effect: NoSchedule
