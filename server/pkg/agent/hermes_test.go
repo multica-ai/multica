@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -149,7 +150,7 @@ func TestResolveResumedSessionIDEmptyResponse(t *testing.T) {
 
 func TestBuildHermesSessionParamsIncludesModel(t *testing.T) {
 	t.Parallel()
-	params := buildHermesSessionParams("/tmp/work", "gpt-4o")
+	params := buildHermesSessionParams("/tmp/work", "gpt-4o", nil)
 	if params["cwd"] != "/tmp/work" {
 		t.Errorf("cwd: got %v, want /tmp/work", params["cwd"])
 	}
@@ -163,9 +164,236 @@ func TestBuildHermesSessionParamsIncludesModel(t *testing.T) {
 
 func TestBuildHermesSessionParamsOmitsEmptyModel(t *testing.T) {
 	t.Parallel()
-	params := buildHermesSessionParams("/tmp/work", "")
+	params := buildHermesSessionParams("/tmp/work", "", nil)
 	if _, present := params["model"]; present {
 		t.Error("expected model key to be omitted when model is empty")
+	}
+}
+
+func TestBuildHermesSessionParamsPassesThroughMcpServers(t *testing.T) {
+	t.Parallel()
+	servers := []any{map[string]any{"name": "fetch", "command": "uvx", "args": []string{}, "env": []map[string]any{}}}
+	params := buildHermesSessionParams("/tmp/work", "", servers)
+	got, ok := params["mcpServers"].([]any)
+	if !ok {
+		t.Fatalf("mcpServers: got %T, want []any", params["mcpServers"])
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(mcpServers): got %d, want 1", len(got))
+	}
+}
+
+func TestBuildHermesSessionParamsNilMcpServersBecomesEmptyArray(t *testing.T) {
+	t.Parallel()
+	// ACP requires the field; nil must surface as `[]` so the wire request
+	// stays well-formed even when no MCP servers are configured.
+	params := buildHermesSessionParams("/tmp/work", "", nil)
+	got, ok := params["mcpServers"].([]any)
+	if !ok {
+		t.Fatalf("mcpServers: got %T, want []any", params["mcpServers"])
+	}
+	if len(got) != 0 {
+		t.Errorf("len(mcpServers): got %d, want 0", len(got))
+	}
+}
+
+// ── buildACPMcpServers ──
+
+func TestBuildACPMcpServersEmptyInputReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []json.RawMessage{nil, {}, json.RawMessage("null"), json.RawMessage(" null "), json.RawMessage("{}"), json.RawMessage(`{"mcpServers":{}}`)} {
+		got, err := buildACPMcpServers(raw, slog.Default())
+		if err != nil {
+			t.Fatalf("raw=%q: unexpected error: %v", string(raw), err)
+		}
+		if got == nil {
+			t.Errorf("raw=%q: got nil, want non-nil empty slice", string(raw))
+		}
+		if len(got) != 0 {
+			t.Errorf("raw=%q: got %d entries, want 0", string(raw), len(got))
+		}
+	}
+}
+
+func TestBuildACPMcpServersTranslatesStdioEntry(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"],"env":{"API_KEY":"secret","HOME":"/tmp"}}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len: got %d, want 1", len(got))
+	}
+	entry, ok := got[0].(map[string]any)
+	if !ok {
+		t.Fatalf("entry type: got %T, want map[string]any", got[0])
+	}
+	if entry["name"] != "fetch" {
+		t.Errorf("name: got %v, want fetch", entry["name"])
+	}
+	if entry["command"] != "uvx" {
+		t.Errorf("command: got %v, want uvx", entry["command"])
+	}
+	if _, hasType := entry["type"]; hasType {
+		t.Errorf("stdio entry should not include type field, got %v", entry["type"])
+	}
+	args, ok := entry["args"].([]string)
+	if !ok || len(args) != 1 || args[0] != "mcp-server-fetch" {
+		t.Errorf("args: got %v, want [mcp-server-fetch]", entry["args"])
+	}
+	envArr, ok := entry["env"].([]map[string]any)
+	if !ok {
+		t.Fatalf("env type: got %T, want []map[string]any", entry["env"])
+	}
+	// Env entries sorted by key for determinism.
+	if len(envArr) != 2 {
+		t.Fatalf("len(env): got %d, want 2", len(envArr))
+	}
+	if envArr[0]["name"] != "API_KEY" || envArr[0]["value"] != "secret" {
+		t.Errorf("env[0]: got %v, want {name:API_KEY,value:secret}", envArr[0])
+	}
+	if envArr[1]["name"] != "HOME" || envArr[1]["value"] != "/tmp" {
+		t.Errorf("env[1]: got %v, want {name:HOME,value:/tmp}", envArr[1])
+	}
+}
+
+func TestBuildACPMcpServersStdioWithoutArgsOrEnvUsesEmptyArrays(t *testing.T) {
+	t.Parallel()
+	// ACP requires args and env to be arrays; missing fields must become
+	// `[]` rather than null so the wire shape passes server-side validation.
+	raw := json.RawMessage(`{"mcpServers":{"minimal":{"command":"echo"}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	entry := got[0].(map[string]any)
+	if args, ok := entry["args"].([]string); !ok || len(args) != 0 {
+		t.Errorf("args: got %v, want []", entry["args"])
+	}
+	if env, ok := entry["env"].([]map[string]any); !ok || len(env) != 0 {
+		t.Errorf("env: got %v, want []", entry["env"])
+	}
+}
+
+func TestBuildACPMcpServersTranslatesHttpEntry(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"mcpServers":{"remote":{"type":"http","url":"https://example.com/mcp","headers":{"Authorization":"Bearer x","X-Trace":"abc"}}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len: got %d, want 1", len(got))
+	}
+	entry := got[0].(map[string]any)
+	if entry["type"] != "http" {
+		t.Errorf("type: got %v, want http", entry["type"])
+	}
+	if entry["name"] != "remote" {
+		t.Errorf("name: got %v, want remote", entry["name"])
+	}
+	if entry["url"] != "https://example.com/mcp" {
+		t.Errorf("url: got %v, want https://example.com/mcp", entry["url"])
+	}
+	headers, ok := entry["headers"].([]map[string]any)
+	if !ok || len(headers) != 2 {
+		t.Fatalf("headers: got %v, want 2 entries", entry["headers"])
+	}
+	if headers[0]["name"] != "Authorization" {
+		t.Errorf("headers[0].name: got %v, want Authorization", headers[0]["name"])
+	}
+}
+
+func TestBuildACPMcpServersDefaultsRemoteTypeToHttp(t *testing.T) {
+	t.Parallel()
+	// A `url` without `type` should default to "http" rather than be classified
+	// as stdio or get dropped.
+	raw := json.RawMessage(`{"mcpServers":{"remote":{"url":"https://example.com/mcp"}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	entry := got[0].(map[string]any)
+	if entry["type"] != "http" {
+		t.Errorf("type: got %v, want http (default)", entry["type"])
+	}
+}
+
+func TestBuildACPMcpServersSupportsSseTransport(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"mcpServers":{"remote":{"type":"sse","url":"https://example.com/sse"}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	entry := got[0].(map[string]any)
+	if entry["type"] != "sse" {
+		t.Errorf("type: got %v, want sse", entry["type"])
+	}
+}
+
+func TestBuildACPMcpServersAcceptsStreamableHttpAlias(t *testing.T) {
+	t.Parallel()
+	// Claude's MCP CLI uses "streamable-http" / "http_streamable" as
+	// aliases for the http transport; ACP only knows "http", so the
+	// translator must collapse the alias.
+	for _, alias := range []string{"streamable-http", "http_streamable", "Streamable-HTTP"} {
+		raw := json.RawMessage(`{"mcpServers":{"remote":{"type":"` + alias + `","url":"https://example.com/mcp"}}}`)
+		got, err := buildACPMcpServers(raw, slog.Default())
+		if err != nil {
+			t.Fatalf("alias=%s: unexpected error: %v", alias, err)
+		}
+		entry := got[0].(map[string]any)
+		if entry["type"] != "http" {
+			t.Errorf("alias=%s: type got %v, want http", alias, entry["type"])
+		}
+	}
+}
+
+func TestBuildACPMcpServersSortsEntriesByName(t *testing.T) {
+	t.Parallel()
+	// Map iteration is randomized in Go; the translator sorts by name so
+	// the wire request and test assertions are deterministic.
+	raw := json.RawMessage(`{"mcpServers":{"zeta":{"command":"z"},"alpha":{"command":"a"},"mid":{"command":"m"}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"alpha", "mid", "zeta"}
+	for i, w := range want {
+		if got[i].(map[string]any)["name"] != w {
+			t.Errorf("position %d: got %v, want %s", i, got[i].(map[string]any)["name"], w)
+		}
+	}
+}
+
+func TestBuildACPMcpServersSkipsInvalidEntriesAndContinues(t *testing.T) {
+	t.Parallel()
+	// An entry with neither command nor url is invalid — drop it with a
+	// warning rather than failing the whole launch, so a single bad entry
+	// in the agent UI doesn't take MCP down for the rest of the agent.
+	raw := json.RawMessage(`{"mcpServers":{"bad":{"args":["nothing"]},"good":{"command":"uvx"}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len: got %d, want 1 (bad entry should be skipped)", len(got))
+	}
+	if got[0].(map[string]any)["name"] != "good" {
+		t.Errorf("kept the wrong entry: %v", got[0])
+	}
+}
+
+func TestBuildACPMcpServersReturnsErrorOnMalformedJSON(t *testing.T) {
+	t.Parallel()
+	_, err := buildACPMcpServers(json.RawMessage(`not json`), slog.Default())
+	if err == nil {
+		t.Fatal("expected error for malformed JSON, got nil")
+	}
+	if !strings.Contains(err.Error(), "parse mcp_config json") {
+		t.Errorf("error message: got %q, want it to mention parsing", err.Error())
 	}
 }
 
@@ -1360,5 +1588,375 @@ func TestHermesBackendDoesNotPromoteOnTransientRetry(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+// ── extractACPMcpCapabilities ──
+
+func TestExtractACPMcpCapabilities(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		raw      string
+		wantHTTP bool
+		wantSSE  bool
+	}{
+		{
+			name:     "both true",
+			raw:      `{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true,"sse":true}}}`,
+			wantHTTP: true,
+			wantSSE:  true,
+		},
+		{
+			name:     "http only",
+			raw:      `{"agentCapabilities":{"mcpCapabilities":{"http":true}}}`,
+			wantHTTP: true,
+			wantSSE:  false,
+		},
+		{
+			name:     "sse only",
+			raw:      `{"agentCapabilities":{"mcpCapabilities":{"sse":true}}}`,
+			wantHTTP: false,
+			wantSSE:  true,
+		},
+		{
+			name:     "block missing",
+			raw:      `{"agentCapabilities":{}}`,
+			wantHTTP: false,
+			wantSSE:  false,
+		},
+		{
+			name:     "agentCapabilities missing",
+			raw:      `{"protocolVersion":1}`,
+			wantHTTP: false,
+			wantSSE:  false,
+		},
+		{
+			name:     "malformed json",
+			raw:      `not json`,
+			wantHTTP: false,
+			wantSSE:  false,
+		},
+	}
+	for _, tc := range tests {
+		got := extractACPMcpCapabilities(json.RawMessage(tc.raw))
+		if got.HTTP != tc.wantHTTP || got.SSE != tc.wantSSE {
+			t.Errorf("%s: got {HTTP:%v SSE:%v}, want {HTTP:%v SSE:%v}", tc.name, got.HTTP, got.SSE, tc.wantHTTP, tc.wantSSE)
+		}
+	}
+}
+
+// ── filterACPMcpServersByCapability ──
+
+func TestFilterACPMcpServersByCapabilityStdioAlwaysPassesThrough(t *testing.T) {
+	t.Parallel()
+	// Stdio entries have no `type` field — the ACP spec doesn't gate stdio,
+	// so the filter must pass them through regardless of capabilities.
+	servers := []any{
+		map[string]any{"name": "fetch", "command": "uvx"},
+	}
+	got := filterACPMcpServersByCapability(servers, acpMcpTransportCapabilities{}, "hermes", slog.Default())
+	if len(got) != 1 {
+		t.Fatalf("len: got %d, want 1", len(got))
+	}
+}
+
+func TestFilterACPMcpServersByCapabilityDropsUnsupportedHttp(t *testing.T) {
+	t.Parallel()
+	servers := []any{
+		map[string]any{"name": "stdio-ok", "command": "uvx"},
+		map[string]any{"type": "http", "name": "http-drop", "url": "https://x/mcp"},
+		map[string]any{"type": "sse", "name": "sse-keep", "url": "https://x/sse"},
+	}
+	got := filterACPMcpServersByCapability(servers, acpMcpTransportCapabilities{SSE: true}, "hermes", slog.Default())
+	if len(got) != 2 {
+		t.Fatalf("len: got %d, want 2 (http should be dropped, sse kept)", len(got))
+	}
+	names := []string{got[0].(map[string]any)["name"].(string), got[1].(map[string]any)["name"].(string)}
+	wantNames := map[string]bool{"stdio-ok": true, "sse-keep": true}
+	for _, n := range names {
+		if !wantNames[n] {
+			t.Errorf("unexpected entry kept: %q", n)
+		}
+	}
+}
+
+func TestFilterACPMcpServersByCapabilityDropsUnsupportedSse(t *testing.T) {
+	t.Parallel()
+	servers := []any{
+		map[string]any{"type": "sse", "name": "sse-drop", "url": "https://x/sse"},
+		map[string]any{"type": "http", "name": "http-keep", "url": "https://x/mcp"},
+	}
+	got := filterACPMcpServersByCapability(servers, acpMcpTransportCapabilities{HTTP: true}, "kimi", slog.Default())
+	if len(got) != 1 {
+		t.Fatalf("len: got %d, want 1", len(got))
+	}
+	if got[0].(map[string]any)["name"] != "http-keep" {
+		t.Errorf("kept wrong entry: %v", got[0])
+	}
+}
+
+func TestFilterACPMcpServersByCapabilityKeepsAllWhenBothSupported(t *testing.T) {
+	t.Parallel()
+	servers := []any{
+		map[string]any{"name": "stdio", "command": "uvx"},
+		map[string]any{"type": "http", "name": "http", "url": "https://x/mcp"},
+		map[string]any{"type": "sse", "name": "sse", "url": "https://x/sse"},
+	}
+	got := filterACPMcpServersByCapability(servers, acpMcpTransportCapabilities{HTTP: true, SSE: true}, "kiro", slog.Default())
+	if len(got) != 3 {
+		t.Fatalf("len: got %d, want 3", len(got))
+	}
+}
+
+func TestFilterACPMcpServersByCapabilityEmptyInputReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	got := filterACPMcpServersByCapability(nil, acpMcpTransportCapabilities{HTTP: true, SSE: true}, "hermes", slog.Default())
+	if len(got) != 0 {
+		t.Errorf("len: got %d, want 0", len(got))
+	}
+}
+
+// TestHermesExecuteFailsClosedOnMalformedMcpConfig pins the contract that
+// a malformed mcp_config aborts the launch *before* the child is spawned.
+// Silently launching with no MCP servers would look indistinguishable
+// from "the saved config was applied" and is exactly the surprise the
+// MCP Tab is meant to remove.
+func TestHermesExecuteFailsClosedOnMalformedMcpConfig(t *testing.T) {
+	t.Parallel()
+
+	// Any existing executable is fine — Execute returns before the spawn.
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte("#!/bin/sh\nexit 0\n"))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = backend.Execute(ctx, "prompt", ExecOptions{
+		Timeout:   2 * time.Second,
+		McpConfig: json.RawMessage(`not json`),
+	})
+	if err == nil {
+		t.Fatal("expected Execute to fail closed on malformed mcp_config, got nil error")
+	}
+	if !strings.Contains(err.Error(), "mcp_config") {
+		t.Fatalf("expected error to mention mcp_config, got %q", err)
+	}
+}
+
+// fakeACPRecordingScript impersonates an ACP agent that records every
+// JSON-RPC frame it receives to a file (one per line) before responding.
+// The runtime name parameter lets the same script drive Hermes / Kimi /
+// Kiro fakes — only the session/load vs session/resume method differs.
+//
+// `caps` is the JSON for `agentCapabilities` returned from initialize so
+// tests can pin the capability gate (e.g. `{"mcpCapabilities":{"http":false}}`).
+//
+// session/new / session/resume both echo back the requested sessionId so
+// tests don't need to thread one through; session/prompt returns
+// end_turn so Execute completes cleanly.
+func fakeACPRecordingScript(recordPath, sessionID, caps string) string {
+	return `#!/bin/sh
+RECORD_PATH=` + recordPath + `
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$RECORD_PATH"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":` + caps + `}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*|*'"method":"session/resume"'*|*'"method":"session/load"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"` + sessionID + `"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// findRecordedFrame returns the first recorded JSON-RPC frame whose
+// `method` matches the requested one. Used by the resume / capability
+// tests below to inspect what we actually sent on the wire.
+func findRecordedFrame(t *testing.T, recordPath, method string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read record file: %v", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			continue
+		}
+		if frame["method"] == method {
+			return frame
+		}
+	}
+	t.Fatalf("no recorded frame for method %q in %s", method, string(data))
+	return nil
+}
+
+// TestHermesResumeIncludesMcpServers pins the contract that
+// session/resume carries the managed MCP set. Without this, a resumed
+// Hermes task lost access to MCP tools that a fresh task on the same
+// agent would have — which is the inconsistency Elon's review flagged.
+func TestHermesResumeIncludesMcpServers(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_resume", `{}`)))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_resume",
+		McpConfig:       json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx"}}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/resume")
+	params, ok := frame["params"].(map[string]any)
+	if !ok {
+		t.Fatalf("session/resume params: got %T, want map", frame["params"])
+	}
+	servers, ok := params["mcpServers"].([]any)
+	if !ok {
+		t.Fatalf("session/resume.mcpServers: got %T, want []any", params["mcpServers"])
+	}
+	if len(servers) != 1 {
+		t.Fatalf("session/resume.mcpServers: got %d entries, want 1", len(servers))
+	}
+	entry := servers[0].(map[string]any)
+	if entry["name"] != "fetch" || entry["command"] != "uvx" {
+		t.Errorf("session/resume.mcpServers[0]: got %v, want {name:fetch,command:uvx,...}", entry)
+	}
+}
+
+// TestHermesDropsRemoteMcpWhenCapabilityNotAdvertised pins the contract
+// that when the runtime's initialize response advertises no http/sse
+// support, those entries are filtered out of session/new — sending them
+// anyway is a protocol violation that reliably tanks the request.
+func TestHermesDropsRemoteMcpWhenCapabilityNotAdvertised(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	// agentCapabilities = {} → neither http nor sse advertised.
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_new", `{}`)))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+		McpConfig: json.RawMessage(`{"mcpServers":{
+			"local":{"command":"uvx"},
+			"remote-http":{"type":"http","url":"https://x/mcp"},
+			"remote-sse":{"type":"sse","url":"https://x/sse"}
+		}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/new")
+	params := frame["params"].(map[string]any)
+	servers, ok := params["mcpServers"].([]any)
+	if !ok {
+		t.Fatalf("session/new.mcpServers: got %T, want []any", params["mcpServers"])
+	}
+	if len(servers) != 1 {
+		t.Fatalf("session/new.mcpServers: got %d entries, want 1 (only stdio should remain)", len(servers))
+	}
+	if servers[0].(map[string]any)["name"] != "local" {
+		t.Errorf("kept the wrong entry: %v", servers[0])
+	}
+}
+
+// TestHermesKeepsRemoteMcpWhenCapabilityAdvertised confirms the gate
+// doesn't over-filter: when the runtime advertises http+sse, all entries
+// must pass through to session/new.
+func TestHermesKeepsRemoteMcpWhenCapabilityAdvertised(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_new", `{"mcpCapabilities":{"http":true,"sse":true}}`)))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+		McpConfig: json.RawMessage(`{"mcpServers":{
+			"local":{"command":"uvx"},
+			"remote-http":{"type":"http","url":"https://x/mcp"},
+			"remote-sse":{"type":"sse","url":"https://x/sse"}
+		}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/new")
+	params := frame["params"].(map[string]any)
+	servers := params["mcpServers"].([]any)
+	if len(servers) != 3 {
+		t.Fatalf("session/new.mcpServers: got %d entries, want 3", len(servers))
 	}
 }

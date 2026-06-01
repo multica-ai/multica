@@ -20,13 +20,14 @@ import {
 import type { AgentTask, Issue } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import {
-  ALL_STATUSES,
   PRIORITY_ORDER,
   PRIORITY_CONFIG,
 } from "@multica/core/issues/config";
 import { issueKeys } from "@multica/core/issues/queries";
 import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
+// CEREBRO-PATCH(status-menu-model): FIR-1550 v2b — model-aware status rows so the 3-dot/right-click menu matches the shared picker.
+import { useStatusMenuRows } from "@multica/cerebro-status-models/views";
 import {
   DropdownMenuItem,
   DropdownMenuSub,
@@ -127,6 +128,10 @@ export function IssueActionsMenuItems({
     staleTime: 30_000,
   });
 
+  // CEREBRO-PATCH(status-menu-model): FIR-1550 v2b — model statuses when the
+  // project has one, the 7 base statuses otherwise (upstream behavior).
+  const statusRows = useStatusMenuRows(issue.status, issue.custom_status?.custom_status_key);
+
   // Synchronous click handler — the awaited fetch in the previous version
   // dropped the browser's transient user activation, which made
   // navigator.clipboard.writeText() reject from the menu when the cache
@@ -153,11 +158,29 @@ export function IssueActionsMenuItems({
           {t(($) => $.actions.status)}
         </P.SubTrigger>
         <P.SubContent>
-          {ALL_STATUSES.map((s) => (
-            <P.Item key={s} onClick={() => updateField({ status: s })}>
-              <StatusIcon status={s} className="h-3.5 w-3.5" />
-              {t(($) => $.status[s])}
-              {issue.status === s && (
+          {/* CEREBRO-PATCH(status-menu-model): FIR-1550 v2b — render model-aware
+              rows; picking a custom row sends custom_status_key so the backend
+              pins the sidecar, matching the shared status picker. */}
+          {statusRows.map((row) => (
+            <P.Item
+              key={row.id}
+              onClick={() =>
+                updateField(
+                  row.customStatusKey
+                    ? { status: row.baseStatus, custom_status_key: row.customStatusKey }
+                    : { status: row.baseStatus },
+                )
+              }
+            >
+              <span style={row.color ? { color: row.color } : undefined}>
+                <StatusIcon
+                  status={row.baseStatus}
+                  className="h-3.5 w-3.5"
+                  inheritColor={!!row.color}
+                />
+              </span>
+              {row.label ?? t(($) => $.status[row.baseStatus])}
+              {row.selected && (
                 <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
               )}
             </P.Item>

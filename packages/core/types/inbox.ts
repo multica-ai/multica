@@ -28,7 +28,10 @@ export type InboxItemType =
   | "due_date_reminder"
   | "start_date_reminder"
   // CEREBRO-PATCH(core-types-inbox): FIR-2385 — a non-owner tagged a private agent; the owner can run it.
-  | "private_agent_run_request";
+  | "private_agent_run_request"
+  // CEREBRO-PATCH(inbox-skill-change-request): FIR-2627/FIR-2629 — a skill change request was opened (owner/approvers notified) or reviewed (proposer notified). Clicking deep-links to the skill detail with the proposal focused.
+  | "skill_change_request_created"
+  | "skill_change_request_reviewed";
 
 // Where the item is rendered in the UI. 'inbox' = persistent inbox queue.
 // 'notifications' = lightweight notifications page anchored in the bottom of

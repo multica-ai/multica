@@ -1,3 +1,4 @@
+{{- $backendImageTag := default .Chart.AppVersion .Values.images.backend.tag -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -52,7 +53,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          image: "{{ .Values.images.backend.repository }}:{{ $backendImageTag }}"
           imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
           ports:
             - containerPort: 8080

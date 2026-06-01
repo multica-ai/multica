@@ -16,7 +16,10 @@ import {
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
 // CEREBRO-PATCH(runtime-list-account-column): swap upstream CLI column for the cerebro Account column (FIR-2308).
-import { RuntimeAccountCell } from "@multica/cerebro-runtime/views";
+import {
+  RuntimeAccountCell,
+  formatPauseReason,
+} from "@multica/cerebro-runtime/views";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -302,7 +305,7 @@ function HealthCell({
   // opening the detail page.
   // CEREBRO-PATCH(runtime-pause-reason-display): show actual pause_reason slug instead of collapsing to auto/manual (JEH-1520)
   if (health === "paused") {
-    const reason = runtime.pause_reason || "manual";
+    const reason = formatPauseReason(runtime.pause_reason);
     const until = runtime.unpause_at ? formatLastSeen(runtime.unpause_at) : null;
     return (
       <div className="flex min-w-0 items-center gap-1.5">

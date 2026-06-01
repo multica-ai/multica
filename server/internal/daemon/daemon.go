@@ -1069,9 +1069,18 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL, agen
 	// CEREBRO-PATCH(daemon-repo-grants): FIR-2512 — when grants are enabled,
 	// use the server-side grants resolver instead of the flat workspace allowlist.
 	if d.repoGrantsEnabled(workspaceID) {
-		allowed, reason, grantErr := d.client.CheckRepoCapability(ctx, workspaceID, agentID, projectID, repoURL, "repo.checkout")
+		allowed, decision, reason, approvalID, grantErr := d.client.CheckRepoCapability(ctx, workspaceID, agentID, projectID, repoURL, "repo.checkout")
 		if grantErr != nil {
 			return fmt.Errorf("repo permission check: %w", grantErr)
+		}
+		// CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 — an "Ask" verdict on a
+		// real checkout returns a pending approval in the shared inbox; wait for the
+		// human decision instead of failing outright.
+		if decision == "pending" && approvalID != "" {
+			allowed, reason, grantErr = d.awaitRepoApproval(ctx, workspaceID, repoURL, approvalID)
+			if grantErr != nil {
+				return fmt.Errorf("repo approval wait: %w", grantErr)
+			}
 		}
 		if !allowed {
 			if reason == "" {
@@ -1098,6 +1107,43 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL, agen
 	}
 
 	return fmt.Errorf("repo is configured but not synced")
+}
+
+// CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 — long-poll a pending repo
+// checkout approval until a human decides. repoApprovalWaitBudget stays under
+// the CLI→daemon checkout HTTP timeout (5 min) so the CLI gets a clean
+// pending/denied answer rather than a transport timeout.
+const (
+	repoApprovalPollInterval = 3 * time.Second
+	repoApprovalWaitBudget   = 4 * time.Minute
+)
+
+// awaitRepoApproval long-polls a pending repo-checkout approval until a human
+// decides or the wait budget elapses. Returns (allowed, reason, error). A still-
+// pending ask at the deadline is reported as not-allowed with a clear reason —
+// the ask stays open in the inbox so the agent can retry once it is approved.
+func (d *Daemon) awaitRepoApproval(ctx context.Context, workspaceID, repoURL, approvalID string) (bool, string, error) {
+	slog.Info("repo checkout awaiting approval", "workspace_id", workspaceID, "repo", repoURL, "approval_id", approvalID)
+	deadline := time.Now().Add(repoApprovalWaitBudget)
+	ticker := time.NewTicker(repoApprovalPollInterval)
+	defer ticker.Stop()
+	for {
+		allowed, decision, reason, err := d.client.PollRepoApproval(ctx, workspaceID, approvalID)
+		if err != nil {
+			return false, "", err
+		}
+		if decision != "pending" {
+			return allowed, reason, nil
+		}
+		if time.Now().After(deadline) {
+			return false, "approval still pending — request is in your inbox, retry the checkout once approved", nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, "", ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 // DefaultTokenRenewalInterval is how often the daemon asks the server to
@@ -2595,11 +2641,28 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
-		if err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
-			taskLog.Error("complete task failed, falling back to fail", "error", err)
-			if failErr := d.client.FailTask(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
-				taskLog.Error("fail task fallback also failed", "error", failErr)
-			}
+		err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir)
+		if err == nil {
+			return
+		}
+		// CompleteTask retries transient errors internally. A transient
+		// error reaching us here means the schedule was exhausted while
+		// the upstream was still 5xx / unreachable. Converting that into
+		// a fail would lose the agent's actual result and surface a
+		// misleading red badge in the UI — leave the task in running
+		// instead so a future fix (server-side stuck-task reaper, or a
+		// daemon-side persistent pending queue) can recover it. Only
+		// permanent server-side rejections (4xx other than 408/429)
+		// warrant the legacy fallback, because at that point the server
+		// has already refused this task and the only useful UI signal
+		// left is a concrete failure.
+		if isTransientError(err) {
+			taskLog.Error("complete task failed after retries; leaving task in running rather than falling back to fail", "error", err)
+			return
+		}
+		taskLog.Error("complete task rejected by server, falling back to fail", "error", err)
+		if failErr := d.client.FailTask(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
+			taskLog.Error("fail task fallback also failed", "error", failErr)
 		}
 	default:
 		failureReason := result.FailureReason
@@ -2699,6 +2762,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:                          task.IssueID,
 		TriggerCommentID:                 task.TriggerCommentID,
+		NewCommentCount:                  task.NewCommentCount,
+		NewCommentsSince:                 task.NewCommentsSince,
+		PriorSessionResumed:              task.PriorSessionID != "",
 		AgentID:                          agentID,
 		AgentName:                        agentName,
 		AgentInstructions:                instructions,
@@ -2754,12 +2820,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running
 	// Prepare against a stable user path is cheap (no clone, no copy).
+	var agentMcpConfig json.RawMessage
+	if task.Agent != nil {
+		agentMcpConfig = task.Agent.McpConfig
+	}
 	if task.PriorWorkDir != "" && localAssignment == nil {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkDir:      task.PriorWorkDir,
 			Provider:     provider,
 			CodexVersion: codexVersion,
 			OpenclawBin:  openclawBin,
+			McpConfig:    agentMcpConfig,
 			Task:         taskCtx,
 		}, d.logger)
 	}
@@ -2773,6 +2844,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Provider:       provider,
 			CodexVersion:   codexVersion,
 			OpenclawBin:    openclawBin,
+			McpConfig:      agentMcpConfig,
 			Task:           taskCtx,
 		}
 		if localAssignment != nil {
@@ -2795,9 +2867,36 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
-	// NOTE: No cleanup — workdir is preserved for reuse by future tasks on
-	// the same (agent, issue) pair. The work_dir path is stored in DB on
-	// task completion and passed back via PriorWorkDir on the next claim.
+	// Workdir is preserved for reuse by future tasks on the same (agent,
+	// issue) pair in cloud mode; the work_dir path is stored in DB on task
+	// completion and passed back via PriorWorkDir on the next claim, so
+	// rewriting the marker block in place is the right behavior.
+	//
+	// In local_directory mode the workdir is the user's own repo, reuse is
+	// already disabled above (see localAssignment == nil), and the brief
+	// would otherwise live on inside the user's repository — a subsequent
+	// manual `claude` / `codex` / `gemini` run in that directory would pick
+	// up stale Multica instructions (issue id, trigger comment id, reply
+	// rules) and start acting on the previous task's context. Excise the
+	// marker block on the way out instead.
+	if env.LocalDirectory {
+		defer func() {
+			if cerr := execenv.CleanupRuntimeConfig(env.WorkDir, provider); cerr != nil {
+				d.logger.Warn("execenv: cleanup runtime config failed (non-fatal)", "error", cerr)
+			}
+			// Excise the sidecar tree (.agent_context/, .multica/,
+			// provider-specific .claude/skills/ etc.) that Prepare wrote
+			// into the user's repo. Without this pass the user's tree
+			// accumulates one directory layer per task — see MUL-2784.
+			// CleanupRuntimeConfig handles the runtime brief inside
+			// CLAUDE.md / AGENTS.md / GEMINI.md; CleanupSidecars handles
+			// every other file Prepare placed under WorkDir. Together
+			// they round-trip the workdir to its exact pre-task bytes.
+			if cerr := execenv.CleanupSidecars(env.RootDir); cerr != nil {
+				d.logger.Warn("execenv: cleanup sidecars failed (non-fatal)", "error", cerr)
+			}
+		}()
+	}
 
 	prompt := BuildPrompt(task, provider)
 

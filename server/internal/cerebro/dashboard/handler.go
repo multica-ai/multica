@@ -125,26 +125,27 @@ type recentTask struct {
 }
 
 type overviewResponse struct {
-	Range            string          `json:"range"`
-	PeriodStart      string          `json:"period_start"`
-	PeriodEnd        string          `json:"period_end"`
-	IssuesCreated    kpi             `json:"issues_created"`
-	IssuesCompleted  kpi             `json:"issues_completed"`
-	ChatMessages     kpi             `json:"chat_messages"`
-	ChannelMessages  kpi             `json:"channel_messages"`
-	ChannelsActive   kpi             `json:"channels_active"`
-	TasksCompleted   kpi             `json:"tasks_completed"`
-	TasksFailed      kpi             `json:"tasks_failed"`
-	AgentsActive     kpi             `json:"agents_active"`
-	MembersActive    kpi             `json:"members_active"`
-	SpendCents       kpi             `json:"spend_cents"`
-	IssuesByStatus   []bucket        `json:"issues_by_status"`
-	IssuesByPriority []bucket        `json:"issues_by_priority"`
-	Timeline         []dayBucket     `json:"timeline"`
-	TopAgents        []topActor      `json:"top_agents"`
-	TopMembers       []topActor      `json:"top_members"`
-	ActivityFeed     []activityEntry `json:"activity_feed"`
-	RecentTasks      []recentTask    `json:"recent_tasks"`
+	Range              string          `json:"range"`
+	PeriodStart        string          `json:"period_start"`
+	PeriodEnd          string          `json:"period_end"`
+	IssuesCreated      kpi             `json:"issues_created"`
+	IssuesCompleted    kpi             `json:"issues_completed"`
+	ChatMessages       kpi             `json:"chat_messages"`
+	ChannelMessages    kpi             `json:"channel_messages"`
+	ChannelsActive     kpi             `json:"channels_active"`
+	TasksCompleted     kpi             `json:"tasks_completed"`
+	TasksFailed        kpi             `json:"tasks_failed"`
+	AgentsActive       kpi             `json:"agents_active"`
+	MembersActive      kpi             `json:"members_active"`
+	SpendCents         kpi             `json:"spend_cents"`
+	IssuesByStatus     []bucket        `json:"issues_by_status"`
+	IssuesByPriority   []bucket        `json:"issues_by_priority"`
+	IssuesByOnBehalfOf []topActor      `json:"issues_by_on_behalf_of"`
+	Timeline           []dayBucket     `json:"timeline"`
+	TopAgents          []topActor      `json:"top_agents"`
+	TopMembers         []topActor      `json:"top_members"`
+	ActivityFeed       []activityEntry `json:"activity_feed"`
+	RecentTasks        []recentTask    `json:"recent_tasks"`
 }
 
 // Overview returns the full dashboard payload for the current workspace.
@@ -369,6 +370,24 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		for _, row := range rows {
 			out.IssuesByPriority = append(out.IssuesByPriority, bucket{Key: row.Priority, Count: int(row.Count)})
+		}
+		mu.Unlock()
+		return nil
+	})
+
+	// --- Issues by "on behalf of" member (MUL-2553): who is generating agent work ---
+	runOne(func(c context.Context) error {
+		rows, err := h.Cerebro.DashboardCountIssuesByOnBehalfOf(c, wsUUID)
+		if err != nil {
+			return err
+		}
+		mu.Lock()
+		for _, row := range rows {
+			out.IssuesByOnBehalfOf = append(out.IssuesByOnBehalfOf, topActor{
+				ID:    util.UUIDToString(row.UserID),
+				Name:  row.Name,
+				Count: int(row.Count),
+			})
 		}
 		mu.Unlock()
 		return nil

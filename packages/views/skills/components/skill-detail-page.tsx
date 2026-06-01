@@ -67,6 +67,8 @@ import { useCanEditSkill } from "../hooks/use-can-edit-skill";
 import { useSkillPermissions } from "@multica/core/permissions";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
 import { readOrigin, totalFileCount, type OriginInfo } from "../lib/origin";
+// CEREBRO-PATCH(skill-ownership-ui): JEH-216 ownership/versions/CR/forks panel + fork action.
+import { SkillOwnershipPanel, ForkSkillButton } from "@multica/cerebro-skill-ownership/views";
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";
 import { useT } from "../../i18n";
@@ -714,6 +716,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               : t(($) => $.detail.sidebar.permissions_locked)}
         </p>
       </div>
+
+      {/* CEREBRO-PATCH(skill-ownership-ui): JEH-216 ownership/versions/CR/forks panel */}
+      <SkillOwnershipPanel skill={skill} />
     </div>
   );
 
@@ -758,6 +763,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           {skill.name}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          {/* CEREBRO-PATCH(skill-ownership-ui): JEH-216 fork action in skill header */}
+          <ForkSkillButton skill={skill} />
           {!canEdit && (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Lock className="h-3 w-3" />

@@ -1640,7 +1640,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// fallback is just noise stacked on top of the real answer.
 	if errMsg != "" && task.IssueID.Valid && retried == nil && !autoPaused && s.shouldPostTimeoutFailureComment(ctx, task) { // CEREBRO-PATCH(auto-pause-on-failure)
 		if failureReason == "timeout" {
-			s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(s.timeoutFailureCommentBody(ctx, task, errMsg)), "comment", task.TriggerCommentID)
+			// CEREBRO-PATCH(suppress-serverside-timeout-blocked): FIR-2609 — skip BLOCKED for an unstarted serverside dispatch-timeout; see isUnstartedServersideTimeout.
+			if !isUnstartedServersideTimeout(task, errMsg) {
+				s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(s.timeoutFailureCommentBody(ctx, task, errMsg)), "comment", task.TriggerCommentID)
+			}
 		} else {
 			s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
 		}
@@ -1998,7 +2001,10 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 			if t.Error.Valid && strings.TrimSpace(t.Error.String) != "" {
 				errMsg = t.Error.String
 			}
-			s.createAgentComment(ctx, t.IssueID, t.AgentID, redact.Text(s.timeoutFailureCommentBody(ctx, t, errMsg)), "comment", t.TriggerCommentID)
+			// CEREBRO-PATCH(suppress-serverside-timeout-blocked): FIR-2609 — skip BLOCKED for an unstarted serverside dispatch-timeout; see FailTask path.
+			if !isUnstartedServersideTimeout(t, errMsg) {
+				s.createAgentComment(ctx, t.IssueID, t.AgentID, redact.Text(s.timeoutFailureCommentBody(ctx, t, errMsg)), "comment", t.TriggerCommentID)
+			}
 		}
 		if workspaceID == "" {
 			workspaceID = s.ResolveTaskWorkspaceID(ctx, t)
@@ -2071,6 +2077,19 @@ func (s *TaskService) shouldPostTimeoutFailureComment(ctx context.Context, task 
 		return false
 	}
 	return true
+}
+
+// CEREBRO-PATCH(suppress-serverside-timeout-blocked): FIR-2609 — the
+// server-side stale-task sweeper (FailStaleTasks) sets error="task timed out"
+// for two situations: a still-'dispatched' task that a paused/offline/busy
+// runtime never started, and a 'running' task that started but stalled. Only
+// the first is bookkeeping noise (the runtime was simply away — the agent
+// never ran), identified by a missing started_at. Suppress BLOCKED for that
+// case; a genuinely started-then-stalled run still surfaces BLOCKED (subject
+// to the FIR-2395 already-replied gate), as do agent-internal timeouts
+// ("<agent> timed out after <dur>").
+func isUnstartedServersideTimeout(task db.AgentTaskQueue, errMsg string) bool {
+	return strings.TrimSpace(errMsg) == "task timed out" && !task.StartedAt.Valid
 }
 
 func (s *TaskService) timeoutFailureCommentBody(ctx context.Context, task db.AgentTaskQueue, errMsg string) string {
@@ -2438,21 +2457,20 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	if err != nil {
 		return
 	}
-	// Resolve thread root: if parentID points to a reply (has its own parent),
-	// use that parent instead so the comment lands in the top-level thread.
-	// rootComment captures the root row so we can auto-unresolve it after the
-	// reply is committed (see AutoUnresolveThreadOnReply).
+	// Resolve thread root: collapse parentID to the top-level thread root so the
+	// comment tree never exceeds depth 1 (the 2-level model the product and UI
+	// assume — see GetThreadRoot). GetThreadRoot walks parent_id all the way to
+	// the root, so this stays correct even if a reply-to-a-reply ever reached the
+	// store. rootComment captures the root row so we can auto-unresolve it after
+	// the reply is committed (see AutoUnresolveThreadOnReply).
 	var rootComment *db.Comment
 	if parentID.Valid {
-		if parent, err := s.Queries.GetComment(ctx, parentID); err == nil {
-			if parent.ParentID.Valid {
-				if root, err := s.Queries.GetComment(ctx, parent.ParentID); err == nil {
-					rootComment = &root
-					parentID = root.ID
-				}
-			} else {
-				rootComment = &parent
-			}
+		if root, err := s.Queries.GetThreadRoot(ctx, db.GetThreadRootParams{
+			CommentID:   parentID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			rootComment = &root
+			parentID = root.ID
 		}
 	}
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.

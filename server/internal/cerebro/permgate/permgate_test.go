@@ -37,6 +37,13 @@ type fakeApprovals struct {
 	getErr     error
 	getCalls   int
 	lastIntake approvals.IntakeParams
+
+	// reuse* drive FindReusable: when reuseOK is true the stored reuseRow is
+	// returned as a match; reuseErr forces a lookup failure.
+	reuseRow         cerebrodb.CerebroApprovalRequest
+	reuseOK          bool
+	reuseErr         error
+	findReusableCall int
 }
 
 func (f *fakeApprovals) Intake(ctx context.Context, p approvals.IntakeParams) (cerebrodb.CerebroApprovalRequest, error) {
@@ -65,6 +72,19 @@ func (f *fakeApprovals) Get(ctx context.Context, id, workspaceID pgtype.UUID) (c
 		return cerebrodb.CerebroApprovalRequest{}, f.getErr
 	}
 	return f.row, nil
+}
+
+func (f *fakeApprovals) FindReusable(ctx context.Context, q approvals.ReusableQuery) (cerebrodb.CerebroApprovalRequest, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.findReusableCall++
+	if f.reuseErr != nil {
+		return cerebrodb.CerebroApprovalRequest{}, false, f.reuseErr
+	}
+	if !f.reuseOK {
+		return cerebrodb.CerebroApprovalRequest{}, false, nil
+	}
+	return f.reuseRow, true, nil
 }
 
 func (f *fakeApprovals) setStatus(s string) {
@@ -448,5 +468,112 @@ func TestEvaluate_NilGateFailsClosed(t *testing.T) {
 	}
 	if out.Outcome != OutcomeDenied {
 		t.Fatalf("got %q, want denied", out.Outcome)
+	}
+}
+
+// --- EvaluateDecisionReusing (FIR-2586 dedup) -------------------------------
+
+func needsApproval() permissions.Decision {
+	return permissions.Decision{Kind: permissions.DecisionNeedsApproval, Reason: "approval required"}
+}
+
+// No reusable ask exists → behaves exactly like EvaluateDecision: create one.
+func TestEvaluateDecisionReusing_NoMatchCreatesAsk(t *testing.T) {
+	ap := &fakeApprovals{reuseOK: false}
+	g := &Gate{Approvals: ap}
+
+	out, err := g.EvaluateDecisionReusing(context.Background(), baseReq(), needsApproval())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Outcome != OutcomePending {
+		t.Fatalf("got %q, want pending", out.Outcome)
+	}
+	if ap.findReusableCall != 1 {
+		t.Fatalf("must consult FindReusable once, got %d", ap.findReusableCall)
+	}
+	if ap.intakes != 1 {
+		t.Fatalf("no reusable match must create exactly one ask, got %d", ap.intakes)
+	}
+}
+
+// A still-pending ask for the same request → rejoin it, do NOT create a new one.
+func TestEvaluateDecisionReusing_PendingMatchRejoinsNoDuplicate(t *testing.T) {
+	existing := cerebrodb.CerebroApprovalRequest{ID: newUUID(), Status: approvals.StatusPending, Reason: "already asked"}
+	ap := &fakeApprovals{reuseOK: true, reuseRow: existing}
+	g := &Gate{Approvals: ap}
+
+	out, err := g.EvaluateDecisionReusing(context.Background(), baseReq(), needsApproval())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Outcome != OutcomePending {
+		t.Fatalf("got %q, want pending", out.Outcome)
+	}
+	if out.ApprovalID != existing.ID {
+		t.Fatal("must return the existing ask id, not a fresh one")
+	}
+	if ap.intakes != 0 {
+		t.Fatalf("a pending match must NOT create a duplicate ask, got %d intakes", ap.intakes)
+	}
+}
+
+// An ask approved after the daemon's earlier poll budget → the retry is
+// honoured (allowed) instead of raising yet another ask.
+func TestEvaluateDecisionReusing_ApprovedMatchAllowsRetry(t *testing.T) {
+	existing := cerebrodb.CerebroApprovalRequest{ID: newUUID(), Status: approvals.StatusApproved, Reason: "granted"}
+	ap := &fakeApprovals{reuseOK: true, reuseRow: existing}
+	g := &Gate{Approvals: ap}
+
+	out, err := g.EvaluateDecisionReusing(context.Background(), baseReq(), needsApproval())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Outcome != OutcomeApproved {
+		t.Fatalf("got %q, want approved", out.Outcome)
+	}
+	if out.ApprovalID != existing.ID {
+		t.Fatal("must return the approved ask id")
+	}
+	if ap.intakes != 0 {
+		t.Fatalf("an approved match must NOT create a new ask, got %d intakes", ap.intakes)
+	}
+}
+
+// A lookup failure must fail closed and loud, never silently deny or duplicate.
+func TestEvaluateDecisionReusing_LookupErrorFailsClosed(t *testing.T) {
+	ap := &fakeApprovals{reuseErr: errors.New("db down")}
+	g := &Gate{Approvals: ap}
+
+	out, err := g.EvaluateDecisionReusing(context.Background(), baseReq(), needsApproval())
+	if err == nil {
+		t.Fatal("lookup error must surface")
+	}
+	if out.Outcome != OutcomeDenied {
+		t.Fatalf("got %q, want denied", out.Outcome)
+	}
+	if ap.intakes != 0 {
+		t.Fatalf("must not create an ask on lookup failure, got %d", ap.intakes)
+	}
+}
+
+// Allow/Deny decisions skip the reuse lookup entirely (no needs_approval, no ask).
+func TestEvaluateDecisionReusing_AllowSkipsLookup(t *testing.T) {
+	ap := &fakeApprovals{}
+	g := &Gate{Approvals: ap}
+
+	out, err := g.EvaluateDecisionReusing(context.Background(), baseReq(),
+		permissions.Decision{Kind: permissions.DecisionAllow, Reason: "ok"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Outcome != OutcomeAllowed {
+		t.Fatalf("got %q, want allowed", out.Outcome)
+	}
+	if ap.findReusableCall != 0 {
+		t.Fatalf("allow must not consult FindReusable, got %d", ap.findReusableCall)
+	}
+	if ap.intakes != 0 {
+		t.Fatalf("allow must not create an ask, got %d", ap.intakes)
 	}
 }

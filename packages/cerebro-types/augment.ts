@@ -5,6 +5,42 @@
 
 import type {} from "@multica/core/types/agent";
 import type {} from "@multica/core/types/autopilot";
+import type {} from "@multica/core/types/issue";
+
+// FIR-1550 v2b: per-issue custom_status pin joined onto the upstream Issue
+// response. Server returns it via the cerebro-issue-custom-status enricher;
+// older servers omit the field. Frontend pickers read this to show which
+// specific custom status is currently selected (vs. the base status alone).
+declare module "@multica/core/types/issue" {
+  interface IssueCustomStatus {
+    status_model_id: string;
+    custom_status_key: string;
+    base_status: string;
+    label?: string;
+    description?: string;
+  }
+  interface Issue {
+    custom_status?: IssueCustomStatus | null;
+  }
+}
+
+// MUL-2553: on-behalf-of provenance joined onto the upstream Issue response.
+// When an agent creates an issue while acting for a human (origin_type=
+// 'agent_task'), the server resolves agent_task_queue.original_user_id and
+// returns the member here so the sidebar can show "På vegne af [member]" and
+// every agent-created issue traces back to a human. Older servers omit it.
+declare module "@multica/core/types/issue" {
+  interface IssueOnBehalfOf {
+    user_id: string;
+    name: string;
+    avatar_url?: string | null;
+  }
+  interface Issue {
+    origin_type?: string | null;
+    origin_id?: string | null;
+    on_behalf_of?: IssueOnBehalfOf | null;
+  }
+}
 
 // JEH-848 runtime pause/unpause fields on the upstream RuntimeDevice
 // interface. Server adds the columns via 9016_cerebro_runtime_pause and

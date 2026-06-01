@@ -22,6 +22,7 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/duplicatecheck"
 	cerebroinfisical "github.com/multica-ai/multica/server/internal/cerebro/infisical"
+	"github.com/multica-ai/multica/server/internal/cerebro/permgate" // CEREBRO-PATCH(handler-approval-gate): FIR-2586 shared approval seam.
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -55,6 +56,13 @@ type Config struct {
 	AllowSignup         bool
 	AllowedEmails       []string
 	AllowedEmailDomains []string
+	// DisableWorkspaceCreation, when true, makes POST /api/workspaces return
+	// 403 for every caller. There is no role/owner exception because the repo
+	// has no platform-admin concept; operators bootstrap the workspace with
+	// the flag off, then flip it on and restart so subsequent users join via
+	// invitation only. The public /api/config endpoint mirrors this flag so
+	// the UI can hide every "Create workspace" affordance — see #3433.
+	DisableWorkspaceCreation bool
 	// PublicURL is the absolute base URL the API is reachable at from the
 	// public internet, with no trailing slash (e.g. "https://app.multica.ai").
 	// Used only to build webhook_url responses for autopilot webhook triggers
@@ -168,7 +176,55 @@ type Handler struct {
 	// (test fake or workspace-aware gateway) into CheckSimilarIssues; nil
 	// means the default env-resolved gateway is used.
 	DuplicateCheckJudger *duplicatecheck.Judger
+	// CEREBRO-PATCH(handler-custom-status-resolver): FIR-1550 v2b — resolver invoked from UpdateIssue.
+	CustomStatusResolver CustomStatusResolver
+	// CEREBRO-PATCH(handler-identity-provisioner): FIR-2523 Google Workspace
+	// auto-membership hook. Wired by the router; nil = no auto-provisioning.
+	IdentityProvisioner IdentityProvisionerInvoker
+	// CEREBRO-PATCH(handler-approval-gate): FIR-2586 shared approval seam for
+	// daemon repo checkout. nil when CEREBRO_APPROVAL_GATE_ENABLED is off, so an
+	// "Ask" verdict keeps its prior block; non-nil routes it to the one /approvals
+	// inbox (CheckDaemonRepoCapability creates the ask, the daemon long-polls it).
+	ApprovalGate *permgate.Gate
+	// CEREBRO-PATCH(handler-semantic-search): FIR-2604 hybrid (FTS+vector) seam.
+	SemanticSearch SemanticSearchInvoker
 }
+
+// CustomStatusResolver is the upstream-side seam for the cerebro status-model
+// sidecar. UpdateIssue invokes it after the upstream base-status write so a
+// project's custom_status pin stays in sync with the new base — and so the
+// status-picker can pass an explicit custom_status_key end-to-end through the
+// normal upstream update path (boards/live updates/activity log/triggers all
+// fire on the same event). requestedKey == "" means "auto-resolve to the
+// first matching custom status under newBase".
+//
+// CEREBRO-PATCH(handler-custom-status-resolver-iface): FIR-1550 v2b seam.
+type CustomStatusResolver interface {
+	ResolveCustomStatusAfterBaseChange(
+		ctx context.Context,
+		issueID, projectID, workspaceID pgtype.UUID,
+		newBase, actorID, actorType, requestedKey string,
+	) error
+	// ValidateCustomStatusKey is the read-only pre-commit guard: UpdateIssue
+	// calls it before committing the base-status change so an invalid explicit
+	// key returns 400 without half-applying the base status. It returns non-nil
+	// ONLY for a genuine key mismatch (the 400 case); empty key, no model, and
+	// infra hiccups all return nil so the normal update proceeds.
+	ValidateCustomStatusKey(
+		ctx context.Context,
+		projectID pgtype.UUID,
+		newBase, requestedKey string,
+	) error
+}
+
+// ErrCustomStatusKeyMismatch is the sentinel returned by a
+// CustomStatusResolver implementation when the caller's explicit
+// custom_status_key cannot be applied (key missing, or its base does not
+// match the resulting base). UpdateIssue maps this to a 400 so the client
+// knows the picker payload itself is the problem.
+//
+// CEREBRO-PATCH(handler-custom-status-resolver-err): FIR-1550 v2b error sentinel.
+var ErrCustomStatusKeyMismatch = errors.New("custom_status_key is not valid for the resulting base status in this project's model")
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime
 // pause service plugs into. Methods on *Handler in runtime_pause_cerebro.go

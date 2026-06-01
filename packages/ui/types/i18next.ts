@@ -11,7 +11,7 @@ import "i18next";
 // the two augmentations compose: views contributes common/auth/... and ui
 // contributes `ui`. No properties overlap, so the merge is conflict-free.
 //
-// The resource shape is mirrored from packages/views/locales/{en,zh-Hans}/ui.json.
+// The resource shape is mirrored from packages/views/locales/{en,zh-Hans,ko}/ui.json.
 // Drift between the JSON and these types is not caught by the locale parity
 // test — if you add a key to ui.json, mirror it here.
 declare global {

@@ -5,4 +5,6 @@ export {
   useCostOptimizationQuery,
   useSetSavingModeMutation,
   useCostOptimizationDashboardQuery,
+  useCostOptimizationHoldoutQuery,
+  useSetHoldoutMutation,
 } from "./api";

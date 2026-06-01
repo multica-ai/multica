@@ -77,3 +77,15 @@ JOIN issue_to_label il ON il.label_id = l.id
 WHERE il.issue_id = ANY(sqlc.arg('issue_ids')::uuid[])
   AND l.workspace_id = sqlc.arg('workspace_id')::uuid
 ORDER BY il.issue_id, LOWER(l.name) ASC;
+
+-- name: ListNonTerminalIssuesWithLabelName :many
+-- CEREBRO-PATCH(orchestration-watchdog): FIR-2564 — the orchestration stall
+-- watchdog scans every non-terminal issue carrying a label with this name
+-- (e.g. `orchestrate`) across all workspaces, to detect stalled waves.
+SELECT i.*
+FROM issue i
+JOIN issue_to_label il ON il.issue_id = i.id
+JOIN issue_label l ON l.id = il.label_id
+WHERE LOWER(l.name) = LOWER(sqlc.arg('label_name')::text)
+  AND i.status NOT IN ('done', 'cancelled')
+ORDER BY i.updated_at ASC;

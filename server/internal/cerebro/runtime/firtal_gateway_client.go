@@ -67,8 +67,25 @@ type GatewayCompletion struct {
 	// actually dropped from the transcript mid-run when the prune_tool_results
 	// saving is "on" (FIR-2325). 0 when the saving is off/shadow or when no round
 	// was ever superseded. This is the *measured* saving, as opposed to
-	// ToolResultChars which is the would-save estimate.
+	// ToolResultChars which is the would-save estimate. It counts each pruned
+	// character ONCE — see PrunedContextCharsCompounded for the real saving.
 	PrunedToolResultChars int64
+	// PrunedContextCharsCompounded is the COMPOUNDING saving from pruning: each
+	// character pruned at round i would otherwise have been resent in every model
+	// call after round i (the rest of this run), so it is counted once per
+	// subsequent call, not once total. Pruning early in a run therefore saves more
+	// than pruning in the last round. This is the honest measure of context the
+	// run avoided sending — PrunedToolResultChars undercounts it (FIR-2639). It is
+	// always >= PrunedToolResultChars (every pruned round is followed by at least
+	// the final model call).
+	PrunedContextCharsCompounded int64
+	// PromptInputChars is the total characters of prompt content actually sent to
+	// the model across every request in the run (the full transcript on each
+	// round, summed). Paired with Usage.InputTokens (+ cache tokens) it yields a
+	// real per-run chars-per-token ratio for THIS model, so prune_tool_results
+	// can report an accurate saved-token count without a holdout control arm
+	// (FIR-2572). 0 when nothing was sent / not instrumented.
+	PromptInputChars int64
 }
 
 type GatewayRequestMeta struct {

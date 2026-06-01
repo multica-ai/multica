@@ -68,7 +68,7 @@ func (q *Queries) AddCerebroGroupMember(ctx context.Context, arg AddCerebroGroup
 const createCerebroGroup = `-- name: CreateCerebroGroup :one
 INSERT INTO cerebro_group (workspace_id, name, description, created_by)
 VALUES ($1, $2, $3, $4)
-RETURNING id, workspace_id, name, description, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, description, created_by, created_at, updated_at, google_group_email
 `
 
 type CreateCerebroGroupParams struct {
@@ -94,6 +94,7 @@ func (q *Queries) CreateCerebroGroup(ctx context.Context, arg CreateCerebroGroup
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GoogleGroupEmail,
 	)
 	return i, err
 }
@@ -109,7 +110,7 @@ func (q *Queries) DeleteCerebroGroup(ctx context.Context, id pgtype.UUID) error 
 }
 
 const getCerebroGroup = `-- name: GetCerebroGroup :one
-SELECT id, workspace_id, name, description, created_by, created_at, updated_at
+SELECT id, workspace_id, name, description, created_by, created_at, updated_at, google_group_email
 FROM cerebro_group
 WHERE id = $1
 `
@@ -125,6 +126,7 @@ func (q *Queries) GetCerebroGroup(ctx context.Context, id pgtype.UUID) (CerebroG
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GoogleGroupEmail,
 	)
 	return i, err
 }
@@ -177,7 +179,7 @@ func (q *Queries) ListCerebroGroupMembers(ctx context.Context, groupID pgtype.UU
 }
 
 const listCerebroGroups = `-- name: ListCerebroGroups :many
-SELECT id, workspace_id, name, description, created_by, created_at, updated_at
+SELECT id, workspace_id, name, description, created_by, created_at, updated_at, google_group_email
 FROM cerebro_group
 WHERE workspace_id = $1
 ORDER BY lower(name), created_at ASC
@@ -200,6 +202,7 @@ func (q *Queries) ListCerebroGroups(ctx context.Context, workspaceID pgtype.UUID
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.GoogleGroupEmail,
 		); err != nil {
 			return nil, err
 		}
@@ -212,7 +215,7 @@ func (q *Queries) ListCerebroGroups(ctx context.Context, workspaceID pgtype.UUID
 }
 
 const listCerebroGroupsForUser = `-- name: ListCerebroGroupsForUser :many
-SELECT g.id, g.workspace_id, g.name, g.description, g.created_by, g.created_at, g.updated_at
+SELECT g.id, g.workspace_id, g.name, g.description, g.created_by, g.created_at, g.updated_at, g.google_group_email
 FROM cerebro_group g
 JOIN cerebro_group_member gm ON gm.group_id = g.id
 WHERE g.workspace_id = $1
@@ -242,6 +245,7 @@ func (q *Queries) ListCerebroGroupsForUser(ctx context.Context, arg ListCerebroG
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.GoogleGroupEmail,
 		); err != nil {
 			return nil, err
 		}
@@ -302,7 +306,7 @@ SET
     description = COALESCE($2, description),
     updated_at = now()
 WHERE id = $3
-RETURNING id, workspace_id, name, description, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, description, created_by, created_at, updated_at, google_group_email
 `
 
 type UpdateCerebroGroupParams struct {
@@ -322,6 +326,7 @@ func (q *Queries) UpdateCerebroGroup(ctx context.Context, arg UpdateCerebroGroup
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GoogleGroupEmail,
 	)
 	return i, err
 }

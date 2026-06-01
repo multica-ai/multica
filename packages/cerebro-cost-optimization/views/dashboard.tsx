@@ -8,6 +8,7 @@ import {
   runtimeScopeBadge,
 } from "../registry";
 import {
+  appliedValue,
   estimatedValue,
   formatUsd,
   type DashboardSaving,
@@ -38,6 +39,12 @@ function SavingCard({
     ? saving.treatmentRunCount + saving.controlRunCount
     : 0;
   const totalRuns = saving ? measuredRuns + saving.shadowRunCount : 0;
+  // "Estimated" only means something when there are non-applied runs to estimate
+  // from (measure-only or held-out control). At 100% On with no holdout there are
+  // none, so show "—" there instead of a misleading $0.00 next to the real saving.
+  const hasEstimate = saving
+    ? saving.shadowRunCount > 0 || saving.controlRunCount > 0
+    : false;
   const scopeBadge = runtimeScopeBadge(def.runtimeScope);
 
   return (
@@ -59,19 +66,16 @@ function SavingCard({
         ) : (
           <>
             <div className="grid grid-cols-2 gap-4">
-              <Stat label="Estimated would-save" value={estimatedValue(saving)} />
+              <Stat label="Measured saved (On)" value={appliedValue(saving)} />
               <Stat
-                label="Measured (holdout A/B)"
-                value={
-                  saving.measured
-                    ? formatUsd(saving.measured.totalSavedCents)
-                    : "—"
-                }
+                label="Estimated would-save"
+                value={hasEstimate ? estimatedValue(saving) : "—"}
               />
             </div>
 
             {saving.measured && (
               <p className="text-xs text-muted-foreground">
+                Holdout A/B: {formatUsd(saving.measured.totalSavedCents)} total ·{" "}
                 {formatUsd(saving.measured.savedPerRunCents)} per run ·{" "}
                 {formatUsd(saving.measured.treatmentAvgCostCents)} with saving vs{" "}
                 {formatUsd(saving.measured.controlAvgCostCents)} held out
@@ -90,11 +94,12 @@ function SavingCard({
 }
 
 /**
- * Per-saving dashboard: estimated would-save vs. measured actually-saved. The
- * measured number is the random-holdout A/B (control runs with the saving
- * withheld vs. treatment runs with it applied) and only appears for model
- * routing, where a run's real cost reflects the saving. The estimate is the
- * shadow/hypothetical figure and is always shown.
+ * Per-saving dashboard. "Measured saved (On)" is the real saving accrued on runs
+ * that applied the saving, calibrated per run from each run's own usage — so it
+ * shows a real number even at 100% rollout with no control arm. "Estimated
+ * would-save" is the hypothetical for runs where the saving was not applied
+ * (measure-only or held-out). When a holdout fraction is configured, the more
+ * rigorous control-vs-treatment A/B is shown underneath.
  */
 export function CostOptimizationDashboard() {
   const query = useCostOptimizationDashboardQuery();
@@ -105,9 +110,11 @@ export function CostOptimizationDashboard() {
       <div className="space-y-1">
         <h2 className="text-sm font-semibold">Savings dashboard</h2>
         <p className="text-xs text-muted-foreground">
-          Estimated would-save is the per-run hypothetical. Measured (holdout A/B)
-          compares a random share of On runs that ran without the saving (control)
-          against the runs that applied it. All amounts in US dollars.
+          Measured saved (On) is what runs actually saved by applying the saving —
+          a real figure even at 100% rollout. Estimated would-save is the
+          hypothetical for runs that did not apply it. When a holdout is
+          configured, a control-vs-treatment A/B is shown too. All amounts in US
+          dollars.
         </p>
       </div>
 

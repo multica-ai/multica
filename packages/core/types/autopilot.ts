@@ -39,6 +39,11 @@ export interface WebhookEventFilter {
   actions?: string[];
 }
 
+export interface WebhookEventFilter {
+  event: string;
+  actions?: string[];
+}
+
 export interface AutopilotTrigger {
   id: string;
   autopilot_id: string;

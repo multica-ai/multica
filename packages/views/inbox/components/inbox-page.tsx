@@ -141,7 +141,8 @@ function isGroupByMode(s: string | null): s is GroupByMode {
 
 export function InboxPage() {
   const { t } = useT("inbox");
-  const { searchParams, replace } = useNavigation();
+  // CEREBRO-PATCH(inbox-skill-change-request): FIR-2629 pull `push` to deep-link skill-CR items to the skill detail.
+  const { searchParams, replace, push } = useNavigation();
   // ?chat=<id> selects a chat session (preferred). ?issue=<id> selects a
   // notification or issue. Both are also accepted as legacy aliases for
   // each other so old bookmarks of `?issue=<chat-id>` keep landing on the
@@ -477,6 +478,20 @@ export function InboxPage() {
   }, [selectedId, selectedRead, markReadMutate, t]);
 
   const handleSelect = (item: InboxItem) => {
+    // CEREBRO-PATCH(inbox-skill-change-request): FIR-2629 — skill change-request
+    // items have no issue_id; deep-link to the skill detail with the proposal
+    // focused (?cr=) so "click the inbox message → see the proposal in the UI".
+    if (
+      (item.type === "skill_change_request_created" ||
+        item.type === "skill_change_request_reviewed") &&
+      item.details?.skill_id
+    ) {
+      const cr = item.details.change_request_id;
+      push(
+        `${wsPaths.skillDetail(item.details.skill_id)}${cr ? `?cr=${cr}` : ""}`,
+      );
+      return;
+    }
     setSelectedKey("issue", item.issue_id ?? item.id);
   };
 

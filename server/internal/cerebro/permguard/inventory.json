@@ -193,7 +193,15 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "DELETE /api/workspaces/{id}/cost-optimization/holdout/{key}",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "DELETE /api/workspaces/{id}/cost-optimization/{key}",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "DELETE /api/workspaces/{id}/feature-flags/{key}/workspace",
       "gate": "workspace_admin"
     },
     {
@@ -445,6 +453,14 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "PUT /api/cerebro/issues/{issueId}/custom-status/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/cerebro/issues/{issueId}/custom-status/",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/channels/",
       "gate": "workspace_member"
     },
@@ -475,6 +491,14 @@
     {
       "id": "POST /api/cli-token",
       "gate": "self_only"
+    },
+    {
+      "id": "POST /api/cloud-billing/checkout-sessions",
+      "gate": "human_actor"
+    },
+    {
+      "id": "POST /api/cloud-billing/portal-sessions",
+      "gate": "human_actor"
     },
     {
       "id": "POST /api/cloud-runtime/nodes",
@@ -905,6 +929,10 @@
       "exempt": "pre-auth signed webhook \u2014 GitHub HMAC signature authorises delivery before any user JWT exists"
     },
     {
+      "id": "POST /api/webhooks/stripe",
+      "exempt": "pre-auth signed webhook \u2014 Stripe HMAC signature (Stripe-Signature header) authorises delivery; multica-cloud upstream verifies the raw body before processing"
+    },
+    {
       "id": "POST /api/work-sessions/",
       "gate": "workspace_member"
     },
@@ -1053,6 +1081,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/cerebro/workspaces/{id}/auth-settings/",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "PUT /api/channels/{id}/agents/{agentId}/listen-mode",
       "gate": "workspace_member"
     },
@@ -1125,11 +1157,19 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "PUT /api/workspaces/{id}/cost-optimization/holdout/{key}",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "PUT /api/workspaces/{id}/cost-optimization/{key}",
       "gate": "workspace_admin"
     },
     {
       "id": "PUT /api/workspaces/{id}/feature-flags/{key}",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "PUT /api/workspaces/{id}/feature-flags/{key}/workspace",
       "gate": "workspace_admin"
     },
     {
@@ -1361,6 +1401,38 @@
     {
       "id": "set_group_capability",
       "gate": "via:POST /api/groups/{id}/capabilities"
+    },
+    {
+      "id": "skill_fork",
+      "gate": "via:POST /api/skills/{id}/forks"
+    },
+    {
+      "id": "skill_get",
+      "exempt": "read-only — GET /api/skills/{id} (+ /files) carry their own auth, no mutation"
+    },
+    {
+      "id": "skill_list",
+      "exempt": "read-only — GET /api/skills, no mutation"
+    },
+    {
+      "id": "skill_list_change_requests",
+      "exempt": "read-only — GET /api/skills/change-requests (+ per-skill), no mutation"
+    },
+    {
+      "id": "skill_list_forks",
+      "exempt": "read-only — GET /api/skills/{id}/forks, no mutation"
+    },
+    {
+      "id": "skill_list_versions",
+      "exempt": "read-only — GET /api/skills/{id}/versions, no mutation"
+    },
+    {
+      "id": "skill_propose_change",
+      "gate": "via:POST /api/skills/{id}/change-requests"
+    },
+    {
+      "id": "skill_review_change_request",
+      "gate": "via:POST /api/skills/change-requests/{crId}/review"
     },
     {
       "id": "update_artifact",
@@ -1853,6 +1925,18 @@
       "exempt": "local-only \u2014 runs the MCP stdio server in this process"
     },
     {
+      "id": "orchestrate run",
+      "exempt": "local-only \u2014 simulates a plan locally; live agent dispatch is server-side and gated"
+    },
+    {
+      "id": "orchestrate validate",
+      "exempt": "local-only \u2014 reads a plan file and reports validation issues"
+    },
+    {
+      "id": "orchestrate waves",
+      "exempt": "local-only \u2014 reads a plan file and prints the computed execution waves"
+    },
+    {
       "id": "project create",
       "gate": "via:POST /api/projects/"
     },
@@ -1929,12 +2013,20 @@
       "exempt": "bootstrap \u2014 uses runtime-setup token before any user session exists"
     },
     {
+      "id": "skill change-requests",
+      "exempt": "read-only \u2014 wraps GET /api/skills/[{id}/]change-requests"
+    },
+    {
       "id": "skill create",
       "gate": "via:POST /api/skills/"
     },
     {
       "id": "skill delete",
       "gate": "via:DELETE /api/skills/{id}/"
+    },
+    {
+      "id": "skill diff",
+      "exempt": "read-only \u2014 wraps GET /api/skills/{id}/versions"
     },
     {
       "id": "skill files delete",
@@ -1949,6 +2041,10 @@
       "gate": "via:PUT /api/skills/{id}/files"
     },
     {
+      "id": "skill fork",
+      "gate": "via:POST /api/skills/{id}/forks"
+    },
+    {
       "id": "skill get",
       "exempt": "read-only \u2014 wraps GET /api/skills/{id}"
     },
@@ -1961,8 +2057,24 @@
       "exempt": "read-only \u2014 wraps GET /api/skills/"
     },
     {
+      "id": "skill ownership",
+      "gate": "via:PUT /api/skills/{id}/ownership"
+    },
+    {
+      "id": "skill propose",
+      "gate": "via:POST /api/skills/{id}/change-requests"
+    },
+    {
+      "id": "skill review",
+      "gate": "via:POST /api/skills/change-requests/{crId}/review"
+    },
+    {
       "id": "skill update",
       "gate": "via:PUT /api/skills/{id}/"
+    },
+    {
+      "id": "skill versions",
+      "exempt": "read-only \u2014 wraps GET /api/skills/{id}/versions"
     },
     {
       "id": "squad activity",

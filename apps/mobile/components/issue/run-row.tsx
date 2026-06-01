@@ -157,4 +157,10 @@ const FAILURE_REASON_LABEL: Record<TaskFailureReason, string> = {
   runtime_offline: "Runtime offline",
   runtime_recovery: "Runtime recovery",
   manual: "Manual",
+  rate_limit: "Rate limit",
+  runtime_paused: "Runtime paused",
+  queued_expired: "Queued expired",
+  iteration_limit: "Iteration limit",
+  agent_fallback_message: "Fallback message",
+  api_invalid_request: "Invalid request",
 };

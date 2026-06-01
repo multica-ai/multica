@@ -264,6 +264,46 @@ func (q *Queries) DashboardCountChatMessagesInPeriod(ctx context.Context, arg Da
 	return column_1, err
 }
 
+const dashboardCountIssuesByOnBehalfOf = `-- name: DashboardCountIssuesByOnBehalfOf :many
+SELECT u.id::uuid AS user_id, u.name AS name, COUNT(*)::int AS count
+FROM issue i
+JOIN agent_task_queue atq ON atq.id = i.origin_id
+JOIN "user" u ON u.id = atq.original_user_id
+WHERE i.workspace_id = $1 AND i.kind = 'issue' AND i.origin_type = 'agent_task'
+GROUP BY u.id, u.name
+ORDER BY COUNT(*) DESC
+LIMIT 20
+`
+
+type DashboardCountIssuesByOnBehalfOfRow struct {
+	UserID pgtype.UUID `json:"user_id"`
+	Name   string      `json:"name"`
+	Count  int32       `json:"count"`
+}
+
+// Distribution of agent-created issues grouped by the human they were created
+// on behalf of: issue.origin_type='agent_task' → agent_task_queue.original_user_id
+// → user. Lets the dashboard show who is generating agent work (MUL-2553).
+func (q *Queries) DashboardCountIssuesByOnBehalfOf(ctx context.Context, workspaceID pgtype.UUID) ([]DashboardCountIssuesByOnBehalfOfRow, error) {
+	rows, err := q.db.Query(ctx, dashboardCountIssuesByOnBehalfOf, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DashboardCountIssuesByOnBehalfOfRow{}
+	for rows.Next() {
+		var i DashboardCountIssuesByOnBehalfOfRow
+		if err := rows.Scan(&i.UserID, &i.Name, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const dashboardCountIssuesByPriority = `-- name: DashboardCountIssuesByPriority :many
 SELECT i.priority, COUNT(*)::int AS count
 FROM issue i

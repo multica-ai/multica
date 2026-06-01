@@ -64,7 +64,7 @@ interface ThreadSidePanelProps {
   backLabel?: string;
   onClose: () => void;
   onSubmit: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
-  onEdit: (commentId: string, content: string) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   currentUserId?: string;
@@ -195,7 +195,7 @@ interface ThreadEntryProps {
   entry: TimelineEntry;
   isRoot: boolean;
   currentUserId?: string;
-  onEdit: (commentId: string, content: string) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
 }

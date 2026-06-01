@@ -87,7 +87,7 @@ import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar"
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
 import type { Issue, IssueStatus, IssuePriority, TimelineEntry, IssueSubscriber, UpdateIssueRequest } from "@multica/core/types";
-import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { PriorityIcon } from "./priority-icon";
 import { StatusIcon } from "./status-icon";
 // CEREBRO-PATCH(issue-dependencies): FIR-823 blocks/blocked-by/related sidebar section.
@@ -95,6 +95,8 @@ import { DependenciesSection } from "./dependencies-section";
 import { AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker, PriorityPicker, StartDatePicker, StatusPicker } from "./pickers";
 // CEREBRO-PATCH(issue-detail-status-model): FIR-1550 provide the issue's project status-model presentation to status surfaces
 import { CerebroStatusModelProvider } from "@multica/cerebro-status-models/views";
+// CEREBRO-PATCH(issue-detail-status-submenu-model): FIR-1550 v2b — model-aware 3-dot Status submenu.
+import { CerebroIssueDetailStatusSubmenu } from "./cerebro-issue-detail-status-submenu";
 import { useMoveCommentToSubIssue, useMoveCommentsToNewThread, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
@@ -117,9 +119,10 @@ import { collectThreadReplies } from "./thread-utils";
 import { ExecutionLogSection } from "./execution-log-section";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
 import { useDeleteIssue } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
@@ -557,6 +560,8 @@ function SubIssueRow({ child }: { child: Issue }) {
       </div>
       <StatusPicker
         status={child.status}
+        // CEREBRO-PATCH(issue-detail-children-status-picker-v2b): FIR-1550 sub-issue rows pass pin.
+        customStatusKey={child.custom_status?.custom_status_key}
         onUpdate={handleUpdate}
         align="start"
         trigger={
@@ -641,8 +646,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
-  const workspace = useCurrentWorkspace();
   const paths = useWorkspacePaths();
+  const workspace = useCurrentWorkspace();
 
   // Issue navigation — read from TQ list cache
   const wsId = useWorkspaceId();
@@ -1351,7 +1356,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           {/* Core props — always rendered. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
-            <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
+            {/* CEREBRO-PATCH(issue-detail-status-picker-v2b): FIR-1550 pass custom_status pin */}
+            <StatusPicker status={issue.status} customStatusKey={issue.custom_status?.custom_status_key} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
@@ -1359,6 +1365,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
           </PropRow>
+          {/* CEREBRO-PATCH(issue-on-behalf-of): MUL-2553 — show the human an agent created this issue for, so it traces back to a member. */}
+          {issue.on_behalf_of ? (
+            <PropRow label="På vegne af" interactive={false}>
+              <ActorAvatar actorType="member" actorId={issue.on_behalf_of.user_id} size={16} />
+              <span className="truncate">{issue.on_behalf_of.name}</span>
+            </PropRow>
+          ) : null}
           {/* CEREBRO-PATCH(issue-privacy-toggle): per-issue visibility when no project parent */}
           {!issue.project_id && (
             <PropRow label="Visibility">
@@ -1827,24 +1840,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 {!isChat && (
                   <>
                     {/* Status */}
-                    <DropdownMenuSub>
-                      <DropdownMenuSubTrigger>
-                        <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-                        Status
-                      </DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent>
-                        {ALL_STATUSES.map((s) => (
-                          <DropdownMenuItem
-                            key={s}
-                            onClick={() => handleUpdateField({ status: s })}
-                          >
-                            <StatusIcon status={s} className="h-3.5 w-3.5" />
-                            {STATUS_CONFIG[s].label}
-                            {issue.status === s && <span className="ml-auto text-xs text-muted-foreground">✓</span>}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
+                    {/* CEREBRO-PATCH(issue-detail-status-submenu-model): FIR-1550 v2b — model-aware status rows (the upstream ALL_STATUSES list ignored the project's status model). */}
+                    <CerebroIssueDetailStatusSubmenu issue={issue} onUpdate={handleUpdateField} />
 
                     {/* Priority */}
                     <DropdownMenuSub>

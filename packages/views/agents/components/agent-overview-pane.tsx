@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Activity,
   BookOpenText,
@@ -9,10 +9,12 @@ import {
   KeySquare,
   Shield,
   ListTodo,
+  Plug,
   Terminal,
 } from "lucide-react";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { createAgentToolsTabs } from "@multica/cerebro-agent-tools/views"; // CEREBRO-PATCH(agent-tools-tab): tab extension
+import { providerSupportsMcpConfig } from "@multica/core/agents";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,6 +34,7 @@ import { InfisicalFoldersTab } from "./tabs/infisical-folders-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 // CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — persona sandbox tab (cerebro-only)
 import { SandboxTab } from "./tabs/sandbox-tab";
+import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 
@@ -43,7 +46,8 @@ type DetailTab =
   | "env"
   | "infisical"
   | "custom_args"
-  | "sandbox";
+  | "sandbox"
+  | "mcp_config";
 
 type TabLabelKey =
   | "activity"
@@ -54,7 +58,8 @@ type TabLabelKey =
   | "infisical"
   | "custom_args"
   | "sandbox"
-  | "tools";
+  | "tools"
+  | "mcp_config";
 
 const TAB_LABEL_KEY: Record<DetailTab, TabLabelKey> = {
   activity: "activity",
@@ -65,6 +70,7 @@ const TAB_LABEL_KEY: Record<DetailTab, TabLabelKey> = {
   infisical: "infisical",
   custom_args: "custom_args",
   sandbox: "sandbox",
+  mcp_config: "mcp_config",
 };
 
 const coreDetailTabs: {
@@ -80,6 +86,7 @@ const coreDetailTabs: {
   { id: "infisical", icon: KeySquare, labelKey: TAB_LABEL_KEY.infisical },
   { id: "custom_args", icon: Terminal, labelKey: TAB_LABEL_KEY.custom_args },
   { id: "sandbox", icon: Shield, labelKey: TAB_LABEL_KEY.sandbox },
+  { id: "mcp_config", icon: Plug, labelKey: TAB_LABEL_KEY.mcp_config },
 ];
 
 const detailTabs = [
@@ -135,6 +142,24 @@ export function AgentOverviewPane({
     ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
     : null;
 
+  // The MCP tab is only shown when the agent's runtime backend actually
+  // consumes mcp_config — see providerSupportsMcpConfig. We default to
+  // showing it when the runtime row hasn't loaded yet so a slow fetch
+  // can't transiently flicker the tab off and then on.
+  const visibleTabs = useMemo(() => {
+    const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
+    return detailTabs.filter((tab) => tab.id !== "mcp_config" || showMcp);
+  }, [runtime]);
+
+  // If the active tab disappears (e.g. user just switched the agent's
+  // runtime to one that doesn't read mcp_config), fall back to Activity
+  // for this render so the pane is never empty. The user's stored
+  // activeTab is left alone — switching back to a supporting runtime
+  // brings their selection back.
+  const effectiveTab: string = visibleTabs.some((tab) => tab.id === activeTab)
+    ? activeTab
+    : "activity";
+
   const requestTabChange = (next: string) => {
     if (next === activeTab) return;
     if (activeDirty) {
@@ -161,13 +186,13 @@ export function AgentOverviewPane({
     // the grid-driven full-height behavior on tablet and up.
     <div className="flex min-h-[60vh] flex-col overflow-hidden rounded-lg border bg-background md:h-full md:min-h-0">
       <div className="flex shrink-0 items-center gap-0 overflow-x-auto border-b px-2 md:px-4">
-        {detailTabs.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => requestTabChange(tab.id)}
             className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
-              activeTab === tab.id
+              effectiveTab === tab.id
                 ? "border-foreground text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
@@ -179,13 +204,13 @@ export function AgentOverviewPane({
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {activeTab === "activity" && <ActivityTab agent={agent} />}
-        {activeTab === "tasks" && (
+        {effectiveTab === "activity" && <ActivityTab agent={agent} />}
+        {effectiveTab === "tasks" && (
           <div className="flex h-full min-h-[520px] flex-col">
             <ActorIssuesPanel actorType="agent" actorId={agent.id} />
           </div>
         )}
-        {activeTab === "instructions" && (
+        {effectiveTab === "instructions" && (
           <TabContent>
             <InstructionsTab
               agent={agent}
@@ -195,12 +220,12 @@ export function AgentOverviewPane({
             />
           </TabContent>
         )}
-        {activeTab === "skills" && (
+        {effectiveTab === "skills" && (
           <TabContent>
             <SkillsTab agent={agent} canEdit={canEdit} />
           </TabContent>
         )}
-        {activeTab === "env" && (
+        {effectiveTab === "env" && (
           <TabContent>
             <EnvTab
               agent={agent}
@@ -219,7 +244,7 @@ export function AgentOverviewPane({
             />
           </TabContent>
         )}
-        {activeTab === "custom_args" && (
+        {effectiveTab === "custom_args" && (
           <TabContent>
             <CustomArgsTab
               agent={agent}
@@ -230,7 +255,7 @@ export function AgentOverviewPane({
             />
           </TabContent>
         )}
-        {activeTab === "sandbox" && (
+        {effectiveTab === "sandbox" && (
           <TabContent>
             {/* CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — sandbox tab body */}
             <SandboxTab
@@ -240,8 +265,17 @@ export function AgentOverviewPane({
             />
           </TabContent>
         )}
+        {effectiveTab === "mcp_config" && (
+          <TabContent>
+            <McpConfigTab
+              agent={agent}
+              onSave={(updates) => onUpdate(agent.id, updates)}
+              onDirtyChange={setActiveDirty}
+            />
+          </TabContent>
+        )}
         {detailTabs.map((tab) =>
-          "render" in tab && activeTab === tab.id ? (
+          "render" in tab && effectiveTab === tab.id ? (
             <TabContent key={tab.id}>
               {tab.render({ agent, runtimes, canEdit })}
             </TabContent>

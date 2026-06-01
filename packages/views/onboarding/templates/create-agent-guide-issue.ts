@@ -17,15 +17,16 @@ const HELPER_AGENT_NAME = "Multica Helper";
  */
 
 /**
- * Step 2 of the skip-path bundle. Bilingual title.
+ * Step 2 of the skip-path bundle. Localized title for supported locales.
  */
 export const CREATE_AGENT_GUIDE_ISSUE_TITLE = {
   en: "Step 2 — Create your first Multica Agent",
   zh: "第 2 步 —— 创建你的第一个 Multica Agent",
+  ko: "2단계 — 첫 Multica Agent 만들기",
 } as const;
 
 interface BodyOpts {
-  lang: "en" | "zh";
+  lang: "en" | "zh" | "ko";
   installRuntimeIdentifier: string;
   installRuntimeId: string;
 }
@@ -34,6 +35,9 @@ export function getCreateAgentGuideBody(opts: BodyOpts): string {
   const mention = `[${opts.installRuntimeIdentifier}](mention://issue/${opts.installRuntimeId})`;
   if (opts.lang === "zh") {
     return zhBody(mention);
+  }
+  if (opts.lang === "ko") {
+    return koBody(mention);
   }
   return enBody(mention);
 }
@@ -120,4 +124,46 @@ ${HELPER_INSTRUCTIONS.zh}
 - **Squads** —— 可一起被分派的一组 agent。
 - **Autopilots** —— 定时或 webhook 触发的运行。
 - **文档** —— https://multica.ai/docs。`;
+}
+
+function koBody(installRuntimeMention: string): string {
+  return `runtime이 online 상태가 되면(${installRuntimeMention} 참고), 첫 agent인 Multica Helper를 만드세요. 아래 prompt는 미리 작성되어 있으니 그대로 복사하면 됩니다.
+
+## 1. 새 agent 화면 열기
+
+사이드바에서 **Agents**를 열고 **New Agent**를 클릭합니다.
+
+## 2. 방금 설치한 runtime 선택
+
+"Runtime"에서 해당 runtime을 선택합니다. 아무것도 보이지 않는다면 runtime이 아직 online이 아닙니다. ${installRuntimeMention}의 설치 단계를 먼저 끝내세요.
+
+## 3. 각 블록을 맞는 필드에 복사
+
+**Name**
+\`\`\`md
+${HELPER_AGENT_NAME}
+\`\`\`
+
+**Description**
+\`\`\`md
+${HELPER_DESCRIPTION.ko}
+\`\`\`
+
+**Instructions**
+\`\`\`md
+${HELPER_INSTRUCTIONS.ko}
+\`\`\`
+
+## 4. 저장 → issue 배정
+
+**Create**를 누릅니다. 새 agent가 워크스페이스 agent 목록에 표시됩니다.
+
+이제 issue를 만들거나 기존 issue를 다시 배정한 뒤 assignee를 Multica Helper로 설정하고 status를 **todo**로 바꾸세요. runtime이 몇 초 안에 작업을 가져가 실행을 시작합니다. 진행 상황은 issue의 task panel에서 볼 수 있습니다.
+
+## 다음에 볼 곳
+
+- **Skills** — 어떤 agent에도 붙일 수 있는 재사용 instruction pack입니다.
+- **Squads** — 함께 배정할 수 있는 agent 그룹입니다.
+- **Autopilots** — 예약 또는 webhook으로 실행되는 작업입니다.
+- **Docs** — https://multica.ai/docs.`;
 }

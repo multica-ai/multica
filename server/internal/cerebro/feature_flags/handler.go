@@ -34,21 +34,46 @@ func New(queries *cerebrodb.Queries, bus *events.Bus) *Handler {
 	return &Handler{Queries: queries, Bus: bus}
 }
 
-// listResponse is the GET response shape: a flat map of overrides. Defaults
-// live on the frontend; missing rows return an empty map (not 404).
+// listResponse is the GET response shape. `overrides` are the signed-in
+// member's personal overrides. `workspace_overrides` are the owner-set
+// workspace-level values that apply to everyone, and `locked` marks the flag
+// keys whose workspace value members may NOT override. Defaults live on the
+// frontend; missing rows return empty maps (not 404).
 type listResponse struct {
-	Overrides map[string]bool `json:"overrides"`
+	Overrides          map[string]bool `json:"overrides"`
+	WorkspaceOverrides map[string]bool `json:"workspace_overrides"`
+	Locked             map[string]bool `json:"locked"`
 }
 
-// upsertRequest is the PUT body shape.
+// upsertRequest is the per-user PUT body shape.
 type upsertRequest struct {
 	Enabled bool `json:"enabled"`
+}
+
+// upsertWorkspaceRequest is the owner/admin PUT body shape for the
+// workspace-level override. `locked=true` forbids members from overriding.
+type upsertWorkspaceRequest struct {
+	Enabled bool `json:"enabled"`
+	Locked  bool `json:"locked"`
 }
 
 // upsertPayload is the WS event payload shape for feature_flag:changed.
 type upsertPayload struct {
 	Key     string `json:"key"`
 	Enabled bool   `json:"enabled"`
+}
+
+// workspaceFlagPayload is the WS event payload for a workspace-level change.
+// It is broadcast to the whole workspace (not a single user) because it
+// affects every member's effective flag value.
+//
+// Workspace-level rows are stored under the all-zero sentinel user_id; that
+// literal lives in the SQL queries (feature_flags.sql).
+type workspaceFlagPayload struct {
+	Key     string `json:"key"`
+	Enabled bool   `json:"enabled"`
+	Locked  bool   `json:"locked"`
+	Scope   string `json:"scope"` // always "workspace"
 }
 
 // List returns all per-user overrides for the authenticated user in the
@@ -89,7 +114,30 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		overrides[row.FlagKey] = row.Enabled
 	}
-	writeJSON(w, http.StatusOK, listResponse{Overrides: overrides})
+
+	// Workspace-level overrides apply to every member; fetch them too so the
+	// frontend can resolve precedence (locked workspace value > personal >
+	// default) and disable the personal toggle where the owner locked it.
+	wsRows, err := h.Queries.ListCerebroWorkspaceFeatureFlags(r.Context(), wsUUID)
+	if err != nil {
+		slog.Error("list cerebro workspace feature flags failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load feature flags")
+		return
+	}
+	workspaceOverrides := make(map[string]bool, len(wsRows))
+	locked := make(map[string]bool, len(wsRows))
+	for _, row := range wsRows {
+		workspaceOverrides[row.FlagKey] = row.Enabled
+		if row.Locked {
+			locked[row.FlagKey] = true
+		}
+	}
+
+	writeJSON(w, http.StatusOK, listResponse{
+		Overrides:          overrides,
+		WorkspaceOverrides: workspaceOverrides,
+		Locked:             locked,
+	})
 }
 
 // Upsert sets the enabled state for a single per-user flag. Broadcasts
@@ -154,6 +202,93 @@ func (h *Handler) Upsert(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, upsertPayload{Key: key, Enabled: req.Enabled})
+}
+
+// UpsertWorkspace sets the workspace-level override for a flag. The route is
+// gated to owner/admin in the router, so any caller reaching here is
+// authorised. Broadcasts feature_flag:changed to the WHOLE workspace because
+// the change affects every member's effective value.
+func (h *Handler) UpsertWorkspace(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace id required")
+		return
+	}
+	key := chi.URLParam(r, "key")
+	if key == "" {
+		writeError(w, http.StatusBadRequest, "flag key required")
+		return
+	}
+
+	var req upsertWorkspaceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return
+	}
+	if err := h.Queries.UpsertCerebroWorkspaceFeatureFlag(r.Context(), cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: wsUUID,
+		FlagKey:     key,
+		Enabled:     req.Enabled,
+		Locked:      req.Locked,
+	}); err != nil {
+		slog.Error("upsert cerebro workspace feature flag failed", append(logger.RequestAttrs(r), "error", err, "flag_key", key)...)
+		writeError(w, http.StatusInternalServerError, "failed to update feature flag")
+		return
+	}
+
+	h.Bus.Publish(events.Event{
+		Type:        EventFeatureFlagChanged,
+		WorkspaceID: workspaceID,
+		ActorType:   "member",
+		Payload:     workspaceFlagPayload{Key: key, Enabled: req.Enabled, Locked: req.Locked, Scope: "workspace"},
+	})
+
+	writeJSON(w, http.StatusOK, workspaceFlagPayload{Key: key, Enabled: req.Enabled, Locked: req.Locked, Scope: "workspace"})
+}
+
+// DeleteWorkspace clears the workspace-level override for a flag, reverting
+// every member to their personal override or the registry default. Owner/admin
+// only (gated in the router).
+func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace id required")
+		return
+	}
+	key := chi.URLParam(r, "key")
+	if key == "" {
+		writeError(w, http.StatusBadRequest, "flag key required")
+		return
+	}
+
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return
+	}
+	if err := h.Queries.DeleteCerebroWorkspaceFeatureFlag(r.Context(), cerebrodb.DeleteCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: wsUUID,
+		FlagKey:     key,
+	}); err != nil {
+		slog.Error("delete cerebro workspace feature flag failed", append(logger.RequestAttrs(r), "error", err, "flag_key", key)...)
+		writeError(w, http.StatusInternalServerError, "failed to clear feature flag")
+		return
+	}
+
+	h.Bus.Publish(events.Event{
+		Type:        EventFeatureFlagChanged,
+		WorkspaceID: workspaceID,
+		ActorType:   "member",
+		Payload:     workspaceFlagPayload{Key: key, Enabled: false, Locked: false, Scope: "workspace"},
+	})
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // requireUserID mirrors handler.requireUserID — kept private here so the

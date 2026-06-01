@@ -36,6 +36,9 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     // CEREBRO-PATCH(issue-date-reminders): FIR-2412 start/due date reminder labels.
     due_date_reminder: t(($) => $.types.due_date_reminder),
     start_date_reminder: t(($) => $.types.start_date_reminder),
+    // CEREBRO-PATCH(inbox-skill-change-request): FIR-2629 inline Danish labels (cerebro feature) — keeps en/ko/zh-Hans parity untouched.
+    skill_change_request_created: "Foreslået ændring til skill",
+    skill_change_request_reviewed: "Dit skill-forslag er behandlet",
   };
 }
 

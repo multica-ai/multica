@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -14,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 // Auto-pause circuit-breaker tuning (FIR-2476). The pre-FIR-2476 behaviour
@@ -74,7 +76,7 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 	circuitOpen := count >= autoPauseCircuitLimit
 	unpauseAt := nextUnpauseAt(count, resetAt, hasReset, now)
 
-	opts := handler.RuntimePauseOptions{Reason: "auto"}
+	opts := handler.RuntimePauseOptions{Reason: "rate_limit"}
 	if !circuitOpen {
 		opts.UnpauseAt = unpauseAt
 	}
@@ -103,11 +105,12 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 		)
 	}
 
-	// Post the circuit-breaker notice exactly once — on the failure whose
-	// increment hit the limit. Bursts can't double-post: the atomic counter
-	// hands a distinct value to each caller, so only one sees == limit.
-	if count == autoPauseCircuitLimit {
-		s.notifyAutoPauseCircuitOpen(ctx, task, count)
+	// Post a human-facing issue notice for each scheduled auto-resume pause,
+	// and exactly once when the circuit opens. Past the circuit limit the
+	// runtime is already paused/manual-only, so repeating the same notice
+	// would just bury the useful failure detail.
+	if !circuitOpen || count == autoPauseCircuitLimit {
+		s.notifyAutoPause(ctx, task, count, unpauseAt, circuitOpen)
 	}
 
 	slog.Info("auto-paused runtime on task failure",
@@ -183,30 +186,22 @@ func growingBackoff(count int32) time.Duration {
 	return d
 }
 
-// notifyAutoPauseCircuitOpen posts the single human-facing notice when the
-// circuit breaker trips. Best-effort and deliberately mention-free: an
-// @mention here would re-trigger the agent loop the breaker just stopped.
+// notifyAutoPause posts the human-facing issue notice when an agent failure
+// pauses its runtime. Best-effort and deliberately mention-free: an @mention
+// here would re-trigger the same agent loop that just hit the external limit.
 // Skipped for tasks with no issue (e.g. chat tasks) — there is nowhere to post.
-func (s *Service) notifyAutoPauseCircuitOpen(ctx context.Context, task db.AgentTaskQueue, count int32) {
+func (s *Service) notifyAutoPause(ctx context.Context, task db.AgentTaskQueue, count int32, unpauseAt time.Time, circuitOpen bool) {
 	if !task.IssueID.Valid || !task.AgentID.Valid {
 		return
 	}
-	body := fmt.Sprintf(
-		"⚠️ Auto-genoptagelse er stoppet for denne runtime.\n\n"+
-			"Runtimen er blevet automatisk sat på pause %d gange i træk uden en succesfuld kørsel "+
-			"(typisk \"usage limit\" eller \"runtime paused\"). For ikke at brænde flere kreditter på "+
-			"forsøg der alligevel fejler, genoptager systemet ikke længere automatisk.\n\n"+
-			"Et menneske skal gribe ind: vent til runtimens loft er nulstillet og genoptag den manuelt, "+
-			"eller skift den fejlende konto/nøgle ud. Tælleren nulstilles automatisk ved første succesfulde kørsel.",
-		count,
-	)
+	body := autoPauseCommentBody(task, count, unpauseAt, circuitOpen)
 	comment, err := s.Cerebro.CreateAutoPauseAlertComment(ctx, cerebrodb.CreateAutoPauseAlertCommentParams{
 		AuthorID: task.AgentID,
 		Content:  body,
 		IssueID:  task.IssueID,
 	})
 	if err != nil {
-		slog.Warn("auto-pause circuit breaker: post notice failed",
+		slog.Warn("auto-pause: post notice failed",
 			"runtime_id", util.UUIDToString(task.RuntimeID),
 			"issue_id", util.UUIDToString(task.IssueID),
 			"error", err,
@@ -214,6 +209,47 @@ func (s *Service) notifyAutoPauseCircuitOpen(ctx context.Context, task db.AgentT
 		return
 	}
 	s.publishCommentCreated(comment)
+}
+
+func autoPauseCommentBody(task db.AgentTaskQueue, count int32, unpauseAt time.Time, circuitOpen bool) string {
+	taskID := util.UUIDToString(task.ID)
+	errText := ""
+	if task.Error.Valid {
+		errText = strings.TrimSpace(redact.Text(task.Error.String))
+	}
+	if errText == "" {
+		errText = "Runtimen ramte en rate-limit eller usage-limit."
+	}
+	if len([]rune(errText)) > 900 {
+		rs := []rune(errText)
+		errText = string(rs[:900]) + "..."
+	}
+
+	if circuitOpen {
+		return fmt.Sprintf(
+			"⚠️ Auto-genoptagelse er stoppet for denne runtime.\n\n"+
+				"Runtimen er blevet automatisk sat på pause %d gange i træk uden en succesfuld kørsel "+
+				"(typisk \"usage limit\" eller \"runtime paused\"). For ikke at brænde flere kreditter på "+
+				"forsøg der alligevel fejler, genoptager systemet ikke længere automatisk.\n\n"+
+				"Fejlen var:\n\n> %s\n\n"+
+				"Run: `%s`\n\n"+
+				"Et menneske skal gribe ind: vent til runtimens loft er nulstillet og genoptag den manuelt, "+
+				"eller skift den fejlende konto/nøgle ud. Tælleren nulstilles automatisk ved første succesfulde kørsel.",
+			count,
+			errText,
+			taskID,
+		)
+	}
+
+	return fmt.Sprintf(
+		"⏸️ Runtimen er sat på pause, fordi agent-runnet fejlede på en rate-limit eller usage-limit.\n\n"+
+			"Fejlen var:\n\n> %s\n\n"+
+			"Run: `%s`\n\n"+
+			"Systemet prøver automatisk igen omkring `%s`.",
+		errText,
+		taskID,
+		unpauseAt.UTC().Format(time.RFC3339),
+	)
 }
 
 // unpauseAtLog renders the unpause_at value for structured logging — "circuit

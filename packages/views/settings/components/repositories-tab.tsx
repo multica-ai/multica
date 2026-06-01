@@ -13,6 +13,7 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import type { Workspace, WorkspaceRepo } from "@multica/core/types";
+import { RepoDefaultPolicy } from "@multica/cerebro-tool-policy/views"; // CEREBRO-PATCH(repo-default-policy-import): FIR-2505 per-repo default access control
 import { useT } from "../../i18n";
 
 function dropAndShiftIndex(set: Set<number>, removed: number): Set<number> {
@@ -158,6 +159,12 @@ export function RepositoriesTab() {
                           {repo.description}
                         </div>
                       )}
+                    </div>
+                  )}
+                  {/* CEREBRO-PATCH(repo-default-policy-mount): FIR-2505 — owner picks default allow/ask/deny per repo */}
+                  {!isEditing && canManageWorkspace && repo.url && (
+                    <div className="shrink-0 pt-1">
+                      <RepoDefaultPolicy wsId={wsId} repoUrl={repo.url} />
                     </div>
                   )}
                   {canManageWorkspace && (

@@ -8,9 +8,11 @@ function row(
 ): ToolPolicyRow {
   return {
     tool_key,
+    resource_pattern: "",
     title: opts.title ?? "",
     category: opts.category ?? "",
     source: "scan",
+    managed_externally: false,
     layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
     effective: {
       setting: opts.effective ?? "allow",

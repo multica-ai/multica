@@ -20,16 +20,18 @@ describe("matchLocale", () => {
 
   it("matches a clean supported tag", () => {
     expect(matchLocale(["zh-Hans"])).toBe("zh-Hans");
+    expect(matchLocale(["ko"])).toBe("ko");
     expect(matchLocale(["en"])).toBe("en");
   });
 
   it("collapses region-tagged BCP-47 to the supported base", () => {
     expect(matchLocale(["en-US"])).toBe("en");
     expect(matchLocale(["zh-Hans-CN"])).toBe("zh-Hans");
+    expect(matchLocale(["ko-KR"])).toBe("ko");
   });
 
   it("falls back to DEFAULT_LOCALE when no candidate matches", () => {
-    expect(matchLocale(["fr", "ja", "ko"])).toBe("en");
+    expect(matchLocale(["fr", "ja"])).toBe("en");
   });
 
   it("zh-Hant (traditional) collapses to zh-Hans — same base subtag, better UX than English fallback", () => {
@@ -38,6 +40,7 @@ describe("matchLocale", () => {
 
   it("uses the first supported candidate when multiple appear", () => {
     expect(matchLocale(["fr", "zh-Hans", "en"])).toBe("zh-Hans");
+    expect(matchLocale(["fr", "ko-KR", "en"])).toBe("ko");
   });
 
   it("returns DEFAULT_LOCALE for malformed BCP-47 tags rather than throwing", () => {

@@ -1,0 +1,7 @@
+{
+  "title": "impossible plan",
+  "nodes": [
+    { "id": "a", "kind": "agent", "prompt": "x", "dependsOn": ["b"] },
+    { "id": "b", "kind": "agent", "prompt": "y", "dependsOn": ["a"] }
+  ]
+}

@@ -86,8 +86,7 @@ import { WorkflowsNavItem } from "@multica/cerebro-workflows/views/workflows-nav
 // CEREBRO-PATCH(cerebro-permissions-sidebar): FIR-2230 phase 7 — removed; the standalone Permissions page was merged into the single Access page (see cerebro-access-sidebar below).
 // CEREBRO-PATCH(cerebro-approvals-sidebar): FIR-2131 sidebar entry for cerebro approval inbox
 import { ApprovalsNavItem } from "@multica/cerebro-approvals/views/approvals-nav-item";
-// CEREBRO-PATCH(cerebro-access-sidebar): FIR-2133 sidebar entry for unified access + audit page
-import { AccessNavItem } from "@multica/cerebro-permissions/views/access-nav-item";
+// CEREBRO-PATCH(cerebro-access-sidebar): FIR-2284 Bite 3 — removed; the old grant-based Access page was retired so per-tool Permissions (Settings) is the single access surface.
 // CEREBRO-PATCH(cerebro-agent-passes-sidebar): JEH-1731 sidebar entry for cerebro agent-passes admin page
 import { AgentPassesNavItem } from "@multica/cerebro-agent-passes/views/agent-passes-nav-item";
 import { useAuthStore } from "@multica/core/auth";
@@ -100,6 +99,7 @@ import { notificationsListOptions } from "@multica/cerebro-notifications/core/qu
 import { useArchiveAllNotifications } from "@multica/cerebro-notifications/core/mutations";
 import { api, ApiError } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
+import { useConfigStore } from "@multica/core/config";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
 import { pinListOptions } from "@multica/core/pins/queries";
 // CEREBRO-PATCH(nested-projects): sidebar renders project hierarchy from fork nesting hooks.
@@ -450,6 +450,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const p = useWorkspacePaths();
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
   const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
+  const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
 
   const wsId = workspace?.id;
   const { data: inboxItems = EMPTY_INBOX } = useQuery({
@@ -661,14 +662,16 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         )}
                       </DropdownMenuItem>
                     ))}
-                    <DropdownMenuItem
-                      onClick={() =>
-                        useModalStore.getState().open("create-workspace")
-                      }
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      {t(($) => $.sidebar.create_workspace)}
-                    </DropdownMenuItem>
+                    {!workspaceCreationDisabled && (
+                      <DropdownMenuItem
+                        onClick={() =>
+                          useModalStore.getState().open("create-workspace")
+                        }
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        {t(($) => $.sidebar.create_workspace)}
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuGroup>
                   {myInvitations.length > 0 && (
                     <>
@@ -843,8 +846,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 })}
                 {/* CEREBRO-PATCH(cerebro-approvals-sidebar): FIR-2131 cerebro approval inbox entry in workspace group */}
                 <ApprovalsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
-                {/* CEREBRO-PATCH(cerebro-access-sidebar): FIR-2133 unified access + audit page entry */}
-                <AccessNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-agent-passes-sidebar): JEH-1731 cerebro agent-passes entry in workspace group */}
                 <AgentPassesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* Projects — collapsible nav item with sub-items */}

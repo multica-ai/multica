@@ -26,11 +26,12 @@ import { taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
 import { copyMarkdown } from "../../editor";
 import type { AgentAvailability } from "@multica/core/agents";
-import type { ChatMessage, ChatPendingTask, TaskMessagePayload, TaskFailureReason } from "@multica/core/types";
+import type { ChatMessage, ChatPendingTask, TaskFailureReason } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
 // CEREBRO-PATCH(chat-message-list-cerebro): import from cerebro-chat after Phase 6 relocation
 import { getToolSummary } from "@multica/cerebro-chat/views";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { buildTimeline } from "../../common/task-transcript";
 import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
@@ -89,7 +90,7 @@ export function ChatMessageList({
     ...taskMessagesOptions(pendingTaskId ?? ""),
     enabled: showLiveTimeline,
   });
-  const liveTimeline: ChatTimelineItem[] = (liveTaskMessages ?? []).map(toTimelineItem);
+  const liveTimeline: ChatTimelineItem[] = buildTimeline(liveTaskMessages ?? []);
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
   // CEREBRO-PATCH(chat-message-id-claim): pill stays visible until the row finalizes; the bubble's own timeline already covers the streaming view.
   const showStatusPill = !!pendingTaskId && !pendingAssistantFinalized && !!pendingTask;
@@ -162,17 +163,6 @@ export function ChatMessageSkeleton() {
   );
 }
 
-function toTimelineItem(m: TaskMessagePayload): ChatTimelineItem {
-  return {
-    seq: m.seq,
-    type: m.type,
-    tool: m.tool,
-    content: m.content,
-    input: m.input,
-    output: m.output,
-  };
-}
-
 // ─── Message bubbles ─────────────────────────────────────────────────────
 
 function MessageBubble({ message, isPending }: { message: ChatMessage; isPending: boolean }) {
@@ -185,13 +175,15 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
     const waiting = message.responded_at == null;
     return (
       <div className="flex justify-end">
+        {/* CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — min-w-0 lets the flex item shrink below intrinsic content width so the bubble respects max-w-[80%] when a single unbreakable token (long URL) lives inside. */}
         <div
           className={cn(
-            "flex items-end gap-1.5 max-w-[80%]",
+            "flex items-end gap-1.5 max-w-[80%] min-w-0",
             waiting && "opacity-60",
           )}
         >
-          <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm break-words">
+          {/* CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — overflow-wrap:anywhere (not break-word) so a long URL also lowers min-content and breaks inside the bubble instead of forcing horizontal scroll. */}
+          <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm wrap-anywhere">
             {/* User messages are authored as markdown in ContentEditor, so
              * render them through the same pipeline as assistant replies.
              * Neutralise prose's leading/trailing margin so single-line
@@ -233,7 +225,7 @@ function AssistantMessage({
     enabled: !!taskId,
   });
 
-  const timeline: ChatTimelineItem[] = (taskMessages ?? []).map(toTimelineItem);
+  const timeline: ChatTimelineItem[] = buildTimeline(taskMessages ?? []);
 
   // Failure bubble path: when the server's FailTask wrote a failure
   // chat_message (failure_reason set), render a destructive bubble with the
@@ -256,7 +248,8 @@ function AssistantMessage({
         <TimelineView items={timeline} />
       ) : (
         // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch]">
+        // CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — wrap-anywhere so long URLs in assistant output break instead of forcing horizontal scroll
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch] wrap-anywhere">
           <Markdown>{message.content}</Markdown>
         </div>
       )}
@@ -444,7 +437,8 @@ function TimelineView({
     <>
       {preface.length > 0 && (
         // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch]">
+        // CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — wrap-anywhere so long URLs in assistant output break instead of forcing horizontal scroll
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch] wrap-anywhere">
           <Markdown>{preface.map((t) => t.content ?? "").join("")}</Markdown>
         </div>
       )}
@@ -453,7 +447,8 @@ function TimelineView({
       )}
       {final.length > 0 && (
         // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch]">
+        // CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — wrap-anywhere so long URLs in assistant output break instead of forcing horizontal scroll
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-[70ch] wrap-anywhere">
           <Markdown>{final.map((t) => t.content ?? "").join("")}</Markdown>
         </div>
       )}
@@ -505,7 +500,8 @@ function OuterProcessFold({
 function MiddleTextRow({ item }: { item: ChatTimelineItem }) {
   return (
     // CEREBRO-PATCH(chat-message-readable-width): FIR-2114 — cap rendered chat Markdown at 70ch
-    <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-[70ch] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+    // CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — wrap-anywhere so long URLs inside the process-fold also break instead of forcing horizontal scroll
+    <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-[70ch] wrap-anywhere [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <Markdown>{item.content ?? ""}</Markdown>
     </div>
   );

@@ -77,6 +77,7 @@ export function RuntimesPage({
   cloudRuntimeEnabled = false,
 }: RuntimesPageProps = {}) {
   const isLoading = useAuthStore((s) => s.isLoading);
+  const currentUserId = useAuthStore((s) => s.user?.id);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const [scope, setScope] = useState<RuntimeFilter>("mine");
@@ -92,7 +93,6 @@ export function RuntimesPage({
   const { data: runtimes = [], isLoading: fetching } = useQuery(
     runtimeListOptions(wsId),
   );
-  const currentUserId = useAuthStore((s) => s.user?.id);
 
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });

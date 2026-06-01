@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { toast } from "sonner";
-import { ChevronRight, ListTodo } from "lucide-react";
+import { ListTodo } from "lucide-react";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
@@ -13,8 +13,6 @@ import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-st
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../utils/filter";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
-import { useCurrentWorkspace } from "@multica/core/paths";
-import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
@@ -50,7 +48,6 @@ export function IssuesPage({
   const wsId = useWorkspaceId();
   const navigation = useNavigation();
 
-  const workspace = useCurrentWorkspace();
   const scope = useIssuesScopeStore((s) => s.scope);
   const viewMode = useIssueViewStore((s) => s.viewMode);
   const grouping = useIssueViewStore((s) => s.grouping);
@@ -63,6 +60,8 @@ export function IssuesPage({
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
   const subIssueDisplay = useIssueViewStore((s) => s.subIssueDisplay);
   const labelFilters = useIssueViewStore((s) => s.labelFilters);
+  // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 on-behalf-of member filter.
+  const onBehalfOfFilters = useIssueViewStore((s) => s.onBehalfOfFilters);
   const referenceFilter = useMemo(
     () => parseReferenceFilter(navigation.searchParams.get("reference")),
     [navigation.searchParams],
@@ -106,15 +105,18 @@ export function IssuesPage({
       include_no_project: includeNoProject,
       label_ids: labelFilters,
       reference: referenceFilter,
+      // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 board view on-behalf-of filter.
+      on_behalf_of_ids: onBehalfOfFilters,
     };
     if (scope === "members") filter.assignee_types = ["member"];
     if (scope === "agents") filter.assignee_types = ["agent", "squad"];
     return filter;
-  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, referenceFilter, scope, statusFilters]);
+  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, onBehalfOfFilters, priorityFilters, projectFilters, referenceFilter, scope, statusFilters]);
 
   const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, sort);
   const statusIssuesQuery = useQuery({
-    ...issueListOptions(wsId, { reference: referenceFilter }, sort),
+    // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 list view on-behalf-of filter.
+    ...issueListOptions(wsId, { reference: referenceFilter, on_behalf_of_ids: onBehalfOfFilters }, sort),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({
@@ -238,13 +240,9 @@ export function IssuesPage({
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="gap-1.5">
-        <WorkspaceAvatar name={workspace?.name ?? "W"} size="sm" />
-        <span className="text-sm text-muted-foreground">
-          {workspace?.name ?? t(($) => $.page.breadcrumb_workspace_fallback)}
-        </span>
-        <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className="text-sm font-medium">{t(($) => $.page.breadcrumb_title)}</span>
+      <PageHeader className="gap-2">
+        <ListTodo className="h-4 w-4 text-muted-foreground" />
+        <h1 className="text-sm font-medium">{t(($) => $.page.breadcrumb_title)}</h1>
       </PageHeader>
 
       <ViewStoreProvider store={useIssueViewStore}>

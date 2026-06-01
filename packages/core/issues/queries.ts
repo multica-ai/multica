@@ -91,7 +91,8 @@ export type MyIssuesFilter = Pick<
   "assignee_id" | "assignee_ids" | "creator_id" | "project_id" | "involves_user_id"
 >;
 
-export type IssueListFilter = Pick<ListIssuesParams, "reference">;
+// CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 allow filtering the list view by on-behalf-of member.
+export type IssueListFilter = Pick<ListIssuesParams, "reference" | "on_behalf_of_ids">;
 
 export type AssigneeGroupedIssuesFilter = Omit<
   ListGroupedIssuesParams,
@@ -282,7 +283,8 @@ export function issueAssigneeGroupsOptions(
 export function myIssueListOptions(
   wsId: string,
   scope: string,
-  filter: MyIssuesFilter,
+  // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 allow on_behalf_of_ids on project list view.
+  filter: MyIssuesFilter & IssueListFilter,
   // Required when scope === "all" — the user id whose three relations
   // (assignee, creator, agents+squads) we union over. For every other
   // scope the filter object already carries the relevant id and userId

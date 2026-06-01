@@ -25,6 +25,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
+  ChevronRight,
+  FolderGit2,
   Lock,
   Search,
   ShieldAlert,
@@ -105,6 +107,12 @@ const VIEW_EDIT_LAYER: Record<ToolPolicyView, ToolLayer> = {
   member: "user",
 };
 
+// Repo rows carry a non-empty resource_pattern (the repo URL) and render as
+// collapsible groups, not as flat rows in the tool catalog (FIR-2505 slice 3).
+// The order the three repo capabilities render inside a group, regardless of the
+// order the server emitted them.
+const REPO_CAP_ORDER = ["repo.read", "repo.checkout", "repo.push"];
+
 const SETTING_CHOICES: ToolSetting[] = ["allow", "ask", "deny", "inherit"];
 const SETTING_LABEL: Record<ToolSetting, string> = {
   allow: "Allow",
@@ -177,20 +185,37 @@ export function ToolPolicyTable({
   const editLayer: ToolLayer = VIEW_EDIT_LAYER[view];
 
   const rows = query.data ?? [];
-  const facets = useMemo(() => classFacets(rows), [rows]);
+  // Capability-wide rows (the flat catalog) vs. per-repo rows (collapsible
+  // groups). A repo row is any row scoped to a resource (non-empty pattern).
+  const capRows = useMemo(() => rows.filter((r) => !r.resource_pattern), [rows]);
+  const repoRows = useMemo(() => rows.filter((r) => r.resource_pattern), [rows]);
+
+  const facets = useMemo(() => classFacets(capRows), [capRows]);
   const filtered = useMemo(
-    () => filterRows(rows, { search, classes, effects, decisions, showInherited, editLayer }),
-    [rows, search, classes, effects, decisions, showInherited, editLayer],
+    () => filterRows(capRows, { search, classes, effects, decisions, showInherited, editLayer }),
+    [capRows, search, classes, effects, decisions, showInherited, editLayer],
   );
+  // Repo groups are keyed by URL and narrowed only by the free-text search — the
+  // class/side-effect/decision facets describe capabilities, not repos.
+  const repoGroups = useMemo(() => groupRepoRows(repoRows, search), [repoRows, search]);
 
   const busy = setPolicy.isPending || clearPolicy.isPending;
 
-  function applySetting(toolKey: string, setting: ToolSetting) {
+  function applySetting(toolKey: string, setting: ToolSetting, resourcePattern?: string) {
+    const scope = resourcePattern ? { resource_pattern: resourcePattern } : {};
     if (setting === "inherit") {
-      clearPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId });
+      clearPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, ...scope });
       return;
     }
-    setPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, setting });
+    setPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, setting, ...scope });
+  }
+
+  // Cascade one choice onto every capability of a repo (the group header
+  // control): "set the repo to Allow and every row under it follows."
+  function applyRepoGroup(group: RepoGroupData, setting: ToolSetting) {
+    for (const row of group.rows) {
+      applySetting(row.tool_key, setting, group.url);
+    }
   }
 
   function bulkSet(setting: Exclude<ToolSetting, "inherit">) {
@@ -225,12 +250,24 @@ export function ToolPolicyTable({
 
       {query.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading tools…</p>
-      ) : filtered.length === 0 ? (
+      ) : repoGroups.length === 0 && filtered.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {rows.length === 0 ? "No tools reported yet." : "No tools match these filters."}
         </p>
       ) : (
         <>
+          {repoGroups.length > 0 && (
+            <RepoSection
+              groups={repoGroups}
+              editLayer={editLayer}
+              busy={busy}
+              onSetCapability={(url, toolKey, s) => applySetting(toolKey, s, url)}
+              onSetGroup={applyRepoGroup}
+            />
+          )}
+
+          {filtered.length > 0 && (
+          <>
           {/* Desktop: the full sortable catalog table. */}
           <div className="hidden overflow-hidden rounded-lg border md:block">
             <Table>
@@ -255,9 +292,12 @@ export function ToolPolicyTable({
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="font-normal">
-                        {row.category || "Uncategorised"}
-                      </Badge>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant="outline" className="font-normal">
+                          {row.category || "Uncategorised"}
+                        </Badge>
+                        {row.managed_externally && <ManagedExternallyTag />}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <SideEffectTag effect={classifySideEffect(row)} />
@@ -307,12 +347,15 @@ export function ToolPolicyTable({
                   <Badge variant="outline" className="font-normal">
                     {row.category || "Uncategorised"}
                   </Badge>
+                  {row.managed_externally && <ManagedExternallyTag />}
                   <SideEffectTag effect={classifySideEffect(row)} />
                   <OriginTag row={row} editLayer={editLayer} />
                 </div>
               </div>
             ))}
           </div>
+          </>
+          )}
         </>
       )}
     </div>
@@ -551,6 +594,22 @@ function SideEffectTag({ effect }: { effect: SideEffect }) {
   );
 }
 
+// ManagedExternallyTag marks a platform action whose access is decided by
+// another mechanism (membership ACL, daemon token, webhook secret), so its
+// Allow/Ask/Deny choice here is advisory rather than the enforcement point
+// (FIR-2594). Shown so an admin sees the platform exposes the action.
+function ManagedExternallyTag() {
+  return (
+    <Badge
+      variant="outline"
+      className="border-dashed font-normal text-muted-foreground"
+      title="Access is governed outside the tool-policy gate (membership, daemon token, or webhook secret). Listed for visibility."
+    >
+      Managed externally
+    </Badge>
+  );
+}
+
 // originOf frames one row relative to the level THIS page authors (editLayer):
 // either the rule is an override set right here, or it is inherited and we name
 // the level it actually comes from. This is the FIR-2284 "override vs. arv per
@@ -650,6 +709,205 @@ function DecisionControl({
             {choice === "inherit" && (
               <span className="ml-auto text-xs text-muted-foreground">clears {LAYER_LABEL[editLayer]}</span>
             )}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// --- repo groups (FIR-2505 slice 3) -----------------------------------------
+
+// RepoGroupData is one repo's collapsible group: the repo URL plus its (up to
+// three) capability rows in read → checkout → push order.
+interface RepoGroupData {
+  url: string;
+  rows: ToolPolicyRow[];
+}
+
+// groupRepoRows buckets the per-repo rows by URL, orders each group's rows by
+// REPO_CAP_ORDER, and narrows by the free-text search on the URL. Groups are
+// sorted by URL so the list is stable.
+export function groupRepoRows(rows: ToolPolicyRow[], search: string): RepoGroupData[] {
+  const q = search.trim().toLowerCase();
+  const byUrl = new Map<string, ToolPolicyRow[]>();
+  for (const r of rows) {
+    if (q && !r.resource_pattern.toLowerCase().includes(q)) continue;
+    const list = byUrl.get(r.resource_pattern);
+    if (list) list.push(r);
+    else byUrl.set(r.resource_pattern, [r]);
+  }
+  const rank = (key: string) => {
+    const i = REPO_CAP_ORDER.indexOf(key);
+    return i === -1 ? REPO_CAP_ORDER.length : i;
+  };
+  return [...byUrl.entries()]
+    .map(([url, rs]) => ({
+      url,
+      rows: [...rs].sort((a, b) => rank(a.tool_key) - rank(b.tool_key)),
+    }))
+    .sort((a, b) => a.url.localeCompare(b.url));
+}
+
+// repoGroupVerdict folds a group's rows into one header value: the shared
+// Effective when all three agree, else "mixed". `overridden` is true when any
+// capability carries an explicit setting at the page's own layer.
+function repoGroupVerdict(
+  group: RepoGroupData,
+  editLayer: ToolLayer,
+): { setting: ToolEffectiveSetting | "mixed"; overridden: boolean } {
+  const settings = new Set(group.rows.map((r) => r.effective.setting));
+  const overridden = group.rows.some((r) => !!r.layers[editLayer]);
+  const only = settings.size === 1 ? [...settings][0] : undefined;
+  return { setting: only ?? "mixed", overridden };
+}
+
+function RepoSection({
+  groups,
+  editLayer,
+  busy,
+  onSetCapability,
+  onSetGroup,
+}: {
+  groups: RepoGroupData[];
+  editLayer: ToolLayer;
+  busy: boolean;
+  onSetCapability: (url: string, toolKey: string, setting: ToolSetting) => void;
+  onSetGroup: (group: RepoGroupData, setting: ToolSetting) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2" data-testid="repo-policy-section">
+      <div className="flex items-center gap-2">
+        <FolderGit2 className="size-4 text-muted-foreground" />
+        <h3 className="text-base font-semibold">Repositories</h3>
+        <span className="font-mono text-xs text-muted-foreground">
+          {groups.length === 1 ? "1 repo" : `${groups.length} repos`}
+        </span>
+      </div>
+      <p className="max-w-xl text-sm text-muted-foreground">
+        Set a whole repository, or expand it to decide read, check out and push
+        separately. Setting the repository cascades to all three.
+      </p>
+      <div className="flex flex-col gap-2">
+        {groups.map((group) => (
+          <RepoGroup
+            key={group.url}
+            group={group}
+            editLayer={editLayer}
+            busy={busy}
+            onSetCapability={onSetCapability}
+            onSetGroup={onSetGroup}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RepoGroup({
+  group,
+  editLayer,
+  busy,
+  onSetCapability,
+  onSetGroup,
+}: {
+  group: RepoGroupData;
+  editLayer: ToolLayer;
+  busy: boolean;
+  onSetCapability: (url: string, toolKey: string, setting: ToolSetting) => void;
+  onSetGroup: (group: RepoGroupData, setting: ToolSetting) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const verdict = repoGroupVerdict(group, editLayer);
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return (
+    <div className="rounded-lg border" data-testid={`repo-group-${group.url}`}>
+      <div className="flex items-center justify-between gap-3 p-3">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="flex min-w-0 items-center gap-2 text-left"
+        >
+          <Chevron className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate font-mono text-sm">{group.url}</span>
+        </button>
+        <RepoGroupControl
+          verdict={verdict}
+          disabled={busy}
+          onChange={(s) => onSetGroup(group, s)}
+        />
+      </div>
+      {open && (
+        <div className="border-t">
+          {group.rows.map((row) => (
+            <div
+              key={`${row.tool_key}:${row.resource_pattern}`}
+              data-testid={`repo-cap-${row.tool_key}-${row.resource_pattern}`}
+              className="flex items-center justify-between gap-3 py-2 pl-9 pr-3"
+            >
+              <div className="flex min-w-0 flex-col">
+                <span className="text-sm">{row.title || row.tool_key}</span>
+                <span className="font-mono text-xs text-muted-foreground">{row.tool_key}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <OriginTag row={row} editLayer={editLayer} />
+                <DecisionControl
+                  row={row}
+                  editLayer={editLayer}
+                  disabled={busy}
+                  onChange={(s) => onSetCapability(group.url, row.tool_key, s)}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// RepoGroupControl is the header pill that cascades one choice to every
+// capability of the repo. It shows the shared verdict, or a neutral "Mixed" when
+// the three capabilities disagree.
+function RepoGroupControl({
+  verdict,
+  disabled,
+  onChange,
+}: {
+  verdict: { setting: ToolEffectiveSetting | "mixed"; overridden: boolean };
+  disabled?: boolean;
+  onChange: (setting: ToolSetting) => void;
+}) {
+  const concrete = verdict.setting === "mixed" ? undefined : verdict.setting;
+  const Icon = concrete ? VERDICT_ICON[concrete] : FolderGit2;
+  const label = concrete ? SETTING_LABEL[concrete] : "Mixed";
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        disabled={disabled}
+        aria-label={`Repository decision: ${label}`}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50",
+          concrete ? VERDICT_PILL[concrete] : "border-border bg-muted text-muted-foreground",
+          verdict.overridden && "ring-1 ring-primary/40",
+        )}
+      >
+        <Icon className="size-3.5" />
+        {label}
+        <ChevronDown className="size-3 opacity-60" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-40">
+        {SETTING_CHOICES.map((choice) => (
+          <DropdownMenuItem
+            key={choice}
+            onClick={() => onChange(choice)}
+            className={cn("text-sm", choice === "inherit" && "text-muted-foreground")}
+          >
+            {SETTING_LABEL[choice]}
+            <span className="ml-auto text-xs text-muted-foreground">
+              {choice === "inherit" ? "clears all" : "all three"}
+            </span>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -313,5 +314,52 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	}
 	if !strings.Contains(requests, `"prompt":[`) {
 		t.Fatalf("session/prompt must send standard ACP prompt field for Kiro 2.1.1 compatibility, got:\n%s", requests)
+	}
+}
+
+// TestKiroLoadIncludesMcpServersFromConfig pins that the agent's managed
+// MCP set actually reaches the wire on session/load — the resume path is
+// otherwise indistinguishable from the no-config case, which is how the
+// missing-on-resume bug got past the first round of review.
+func TestKiroLoadIncludesMcpServersFromConfig(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_load", `{}`)))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_load",
+		McpConfig:       json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx"}}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/load")
+	params := frame["params"].(map[string]any)
+	servers, ok := params["mcpServers"].([]any)
+	if !ok {
+		t.Fatalf("session/load.mcpServers: got %T, want []any", params["mcpServers"])
+	}
+	if len(servers) != 1 || servers[0].(map[string]any)["name"] != "fetch" {
+		t.Fatalf("session/load.mcpServers: got %v, want one entry named fetch", servers)
 	}
 }

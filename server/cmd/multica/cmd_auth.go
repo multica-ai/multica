@@ -17,8 +17,28 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cli"
 )
+
+// loginTokenPrefixes are the token prefixes `multica login --token` accepts.
+// The CLI used to hardcode `mul_` only, which made it impossible to log in
+// with a Multica Cloud Node PAT (`mcn_`) even though the server happily
+// authenticates both kinds. Keep this list in sync with the prefix branches
+// in server/internal/middleware/auth.go.
+var loginTokenPrefixes = []string{"mul_", auth.CloudPATPrefix}
+
+// validateLoginTokenPrefix returns nil if token starts with one of the
+// CLI-recognised PAT prefixes, or an error describing the accepted set.
+// Extracted so the prefix list has one obvious test surface.
+func validateLoginTokenPrefix(token string) error {
+	for _, p := range loginTokenPrefixes {
+		if strings.HasPrefix(token, p) {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid token format: must start with %s", strings.Join(loginTokenPrefixes, " or "))
+}
 
 var authCmd = &cobra.Command{
 	Use:   "auth",
@@ -346,8 +366,8 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 	if token == "" {
 		return fmt.Errorf("token is required")
 	}
-	if !strings.HasPrefix(token, "mul_") {
-		return fmt.Errorf("invalid token format: must start with mul_")
+	if err := validateLoginTokenPrefix(token); err != nil {
+		return err
 	}
 
 	serverURL := resolveServerURL(cmd)

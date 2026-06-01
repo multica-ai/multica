@@ -1,14 +1,19 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // Fork-specific endpoints implementing the ownership / approval / versioning /
@@ -49,6 +54,9 @@ type SkillChangeRequestResponse struct {
 	ReviewComment   string             `json:"review_comment"`
 	CreatedAt       string             `json:"created_at"`
 	UpdatedAt       string             `json:"updated_at"`
+	// CEREBRO-PATCH(skill-change-request-session): FIR-2627 link back to the
+	// agent run that proposed this change so the inbox can deep-link to it.
+	WorkSessionID *string `json:"work_session_id"`
 }
 
 type SkillForkResponse struct {
@@ -72,6 +80,9 @@ type CreateSkillChangeRequestRequest struct {
 	ProposedVersion string                   `json:"proposed_version"`
 	ProposedContent string                   `json:"proposed_content"`
 	ProposedFiles   []CreateSkillFileRequest `json:"proposed_files"`
+	// CEREBRO-PATCH(skill-change-request-session): FIR-2627 optional pointer to
+	// the agent work_session that produced this proposal.
+	WorkSessionID *string `json:"work_session_id"`
 }
 
 type ReviewSkillChangeRequestRequest struct {
@@ -118,6 +129,8 @@ func skillChangeRequestToResponse(c db.SkillChangeRequest) SkillChangeRequestRes
 		ReviewComment:   c.ReviewComment,
 		CreatedAt:       timestampToString(c.CreatedAt),
 		UpdatedAt:       timestampToString(c.UpdatedAt),
+		// CEREBRO-PATCH(skill-change-request-session): FIR-2627 session link.
+		WorkSessionID: uuidToPtr(c.WorkSessionID),
 	}
 }
 
@@ -323,6 +336,23 @@ func (h *Handler) CreateSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	// CEREBRO-PATCH(skill-change-request-session): FIR-2627 — accept optional
+	// work_session_id, validate it points at a real session in this workspace
+	// before persisting so the link in the inbox never resolves to a stranded id.
+	var sessionUUID pgtype.UUID
+	if req.WorkSessionID != nil && *req.WorkSessionID != "" {
+		parsed, ok := parseUUIDOrBadRequest(w, *req.WorkSessionID, "work_session_id")
+		if !ok {
+			return
+		}
+		session, err := h.Queries.GetWorkSession(r.Context(), parsed)
+		if err != nil || uuidToString(session.WorkspaceID) != uuidToString(skill.WorkspaceID) {
+			writeError(w, http.StatusBadRequest, "work_session_id not found in this workspace")
+			return
+		}
+		sessionUUID = parsed
+	}
+
 	cr, err := h.Queries.CreateSkillChangeRequest(r.Context(), db.CreateSkillChangeRequestParams{
 		SkillID:         skill.ID,
 		Title:           req.Title,
@@ -332,11 +362,16 @@ func (h *Handler) CreateSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 		ProposedContent: req.ProposedContent,
 		ProposedFiles:   encodeVersionFiles(req.ProposedFiles),
 		ProposedBy:      parseUUID(userID),
+		WorkSessionID:   sessionUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create change request: "+err.Error())
 		return
 	}
+
+	// CEREBRO-PATCH(skill-change-request-inbox): FIR-2627 — notify owner +
+	// approvers so the proposal lands in their inbox with diff + reason + link.
+	h.notifySkillChangeRequestCreated(r.Context(), skill, cr)
 
 	writeJSON(w, http.StatusCreated, skillChangeRequestToResponse(cr))
 }
@@ -463,6 +498,8 @@ func (h *Handler) ReviewSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusInternalServerError, "failed to commit: "+err.Error())
 			return
 		}
+		// CEREBRO-PATCH(skill-change-request-inbox): FIR-2627 — proposer inbox.
+		h.notifySkillChangeRequestReviewed(r.Context(), skill, updatedCR, parseUUID(userID))
 		writeJSON(w, http.StatusOK, skillChangeRequestToResponse(updatedCR))
 
 	case "reject":
@@ -476,6 +513,8 @@ func (h *Handler) ReviewSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusInternalServerError, "failed to reject: "+err.Error())
 			return
 		}
+		// CEREBRO-PATCH(skill-change-request-inbox): FIR-2627 — proposer inbox.
+		h.notifySkillChangeRequestReviewed(r.Context(), skill, updatedCR, parseUUID(userID))
 		writeJSON(w, http.StatusOK, skillChangeRequestToResponse(updatedCR))
 
 	default:
@@ -484,6 +523,40 @@ func (h *Handler) ReviewSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 }
 
 // --- Fork endpoints ---
+
+// GetSkillForkParent returns the lineage link for a skill that is itself a fork
+// — i.e. the parent it was forked from. Returns 404 when the skill is not a
+// fork (no parent link), which the UI treats as "this is an original skill".
+// CEREBRO-PATCH(skill-fork-parent-lineage): FIR-2629 expose "forked from" so the web UI can show both lineage directions.
+func (h *Handler) GetSkillForkParent(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	skill, ok := h.loadSkillForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	row, err := h.Queries.GetSkillForkParent(r.Context(), skill.ID)
+	if err != nil {
+		// No parent link → not a fork. 404 is the "no lineage" signal the
+		// frontend query treats as null rather than an error.
+		writeError(w, http.StatusNotFound, "skill is not a fork")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, struct {
+		SkillForkResponse
+		ParentName string `json:"parent_name"`
+	}{
+		SkillForkResponse: SkillForkResponse{
+			ID:            uuidToString(row.ID),
+			ParentSkillID: uuidToString(row.ParentSkillID),
+			ForkedSkillID: uuidToString(row.ForkedSkillID),
+			ForkedBy:      uuidToPtr(row.ForkedBy),
+			CreatedAt:     timestampToString(row.CreatedAt),
+		},
+		ParentName: row.ParentName,
+	})
+}
 
 func (h *Handler) ListSkillForks(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -640,3 +713,317 @@ func (h *Handler) CreateSkillFork(w http.ResponseWriter, r *http.Request) {
 		Files:         fileResps,
 	})
 }
+
+// CEREBRO-PATCH(skill-change-request-inbox): FIR-2627 notification + diff
+// helpers. Fan out one inbox_item per recipient — the owner first, then every
+// approver — skipping the proposer themselves so an owner-self-proposal does
+// not page anyone. Errors are logged, not returned: a failed notification must
+// never roll back the change request itself.
+
+const (
+	inboxTypeSkillChangeRequestCreated  = "skill_change_request_created"
+	inboxTypeSkillChangeRequestReviewed = "skill_change_request_reviewed"
+	maxSkillDiffChars                   = 8 * 1024
+)
+
+func (h *Handler) notifySkillChangeRequestCreated(ctx context.Context, skill db.Skill, cr db.SkillChangeRequest) {
+	recipients := skillChangeRequestRecipients(skill, cr.ProposedBy)
+	if len(recipients) == 0 {
+		return
+	}
+	details := h.buildSkillChangeRequestDetails(ctx, skill, cr)
+	body := fmt.Sprintf("%s proposed %s → %s on %s",
+		shortUUID(cr.ProposedBy), cr.BaseVersion, cr.ProposedVersion, skill.Name)
+	title := fmt.Sprintf("Change request on %s", skill.Name)
+	for _, rid := range recipients {
+		h.writeSkillInboxItem(ctx, skill.WorkspaceID, rid, inboxTypeSkillChangeRequestCreated,
+			"action_required", title, body, "member", cr.ProposedBy, details)
+	}
+}
+
+func (h *Handler) notifySkillChangeRequestReviewed(ctx context.Context, skill db.Skill, cr db.SkillChangeRequest, reviewerID pgtype.UUID) {
+	if !cr.ProposedBy.Valid {
+		return
+	}
+	if reviewerID.Valid && uuidToString(cr.ProposedBy) == uuidToString(reviewerID) {
+		// Reviewer == proposer (owner self-merge). Skipping keeps the
+		// inbox clean — they already see the action they just took.
+		return
+	}
+	details := h.buildSkillChangeRequestDetails(ctx, skill, cr)
+	details["review_status"] = cr.Status
+	details["review_comment"] = cr.ReviewComment
+	if reviewerID.Valid {
+		details["reviewed_by"] = uuidToString(reviewerID)
+	}
+	action := "rejected"
+	severity := "info"
+	if cr.Status == "merged" || cr.Status == "approved" {
+		action = "approved"
+	}
+	title := fmt.Sprintf("Change request %s on %s", action, skill.Name)
+	body := fmt.Sprintf("%s → %s on %s", cr.BaseVersion, cr.ProposedVersion, skill.Name)
+	if cr.ReviewComment != "" {
+		body = body + ": " + cr.ReviewComment
+	}
+	h.writeSkillInboxItem(ctx, skill.WorkspaceID, cr.ProposedBy, inboxTypeSkillChangeRequestReviewed,
+		severity, title, body, "member", reviewerID, details)
+}
+
+// skillChangeRequestRecipients returns the deduplicated set of users who should
+// see a proposal in their inbox: the owner and every approver, minus the
+// proposer themselves.
+func skillChangeRequestRecipients(skill db.Skill, proposer pgtype.UUID) []pgtype.UUID {
+	seen := map[string]struct{}{}
+	if proposer.Valid {
+		seen[uuidToString(proposer)] = struct{}{}
+	}
+	out := make([]pgtype.UUID, 0, 1+len(skill.ApproverIds))
+	add := func(u pgtype.UUID) {
+		if !u.Valid {
+			return
+		}
+		key := uuidToString(u)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, u)
+	}
+	add(skill.OwnerID)
+	for _, a := range skill.ApproverIds {
+		add(a)
+	}
+	return out
+}
+
+// buildSkillChangeRequestDetails composes the JSONB payload attached to the
+// inbox_item. The frontend uses these fields to render the proposal — full
+// content (so it can mount a rich diff viewer) plus a precomputed text diff
+// for terminal / push surfaces.
+func (h *Handler) buildSkillChangeRequestDetails(ctx context.Context, skill db.Skill, cr db.SkillChangeRequest) map[string]any {
+	baseFiles, err := h.Queries.ListSkillFiles(ctx, skill.ID)
+	if err != nil {
+		slog.Warn("skill change request: failed to load base files for diff",
+			"skill_id", uuidToString(skill.ID), "error", err)
+	}
+	baseFileSnapshots := make([]skillVersionFile, 0, len(baseFiles))
+	for _, f := range baseFiles {
+		baseFileSnapshots = append(baseFileSnapshots, skillVersionFile{Path: f.Path, Content: f.Content})
+	}
+	details := map[string]any{
+		"change_request_id": uuidToString(cr.ID),
+		"skill_id":          uuidToString(skill.ID),
+		"skill_name":        skill.Name,
+		"proposer_id":       uuidToString(cr.ProposedBy),
+		"title":             cr.Title,
+		"description":       cr.Description,
+		"base_version":      cr.BaseVersion,
+		"proposed_version":  cr.ProposedVersion,
+		"base_content":      skill.Content,
+		"proposed_content":  cr.ProposedContent,
+		"base_files":        baseFileSnapshots,
+		"proposed_files":    decodeVersionFiles(cr.ProposedFiles),
+		"diff":              truncateForInbox(computeUnifiedDiff(skill.Content, cr.ProposedContent, "SKILL.md")),
+	}
+	if cr.WorkSessionID.Valid {
+		details["work_session_id"] = uuidToString(cr.WorkSessionID)
+		details["session_url"] = fmt.Sprintf("/sessions/%s", uuidToString(cr.WorkSessionID))
+	}
+	return details
+}
+
+func (h *Handler) writeSkillInboxItem(
+	ctx context.Context,
+	workspaceID, recipientID pgtype.UUID,
+	itemType, severity, title, body, actorType string,
+	actorID pgtype.UUID,
+	details map[string]any,
+) {
+	payload, err := json.Marshal(details)
+	if err != nil {
+		slog.Warn("skill change request: failed to encode inbox details",
+			"workspace_id", uuidToString(workspaceID), "recipient_id", uuidToString(recipientID), "error", err)
+		return
+	}
+	item, err := h.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		WorkspaceID:   workspaceID,
+		RecipientType: "member",
+		RecipientID:   recipientID,
+		Type:          itemType,
+		Severity:      severity,
+		IssueID:       pgtype.UUID{},
+		Title:         title,
+		Body:          pgtype.Text{String: body, Valid: body != ""},
+		ActorType:     pgtype.Text{String: actorType, Valid: actorType != ""},
+		ActorID:       actorID,
+		Details:       payload,
+		Route:         "inbox",
+	})
+	if err != nil {
+		slog.Warn("skill change request: inbox write failed",
+			"workspace_id", uuidToString(workspaceID), "recipient_id", uuidToString(recipientID), "error", err)
+		return
+	}
+	if h.Bus == nil {
+		return
+	}
+	h.Bus.Publish(events.Event{
+		Type:        protocol.EventInboxNew,
+		WorkspaceID: uuidToString(workspaceID),
+		ActorType:   actorType,
+		ActorID:     uuidToString(actorID),
+		Payload: map[string]any{"item": map[string]any{
+			"id":             uuidToString(item.ID),
+			"workspace_id":   uuidToString(item.WorkspaceID),
+			"recipient_type": item.RecipientType,
+			"recipient_id":   uuidToString(item.RecipientID),
+			"type":           item.Type,
+			"severity":       item.Severity,
+			"title":          item.Title,
+			"body":           textToPtr(item.Body),
+			"read":           item.Read,
+			"archived":       item.Archived,
+			"created_at":     timestampToString(item.CreatedAt),
+			"actor_type":     textToPtr(item.ActorType),
+			"actor_id":       uuidToPtr(item.ActorID),
+			"details":        json.RawMessage(item.Details),
+		}},
+	})
+}
+
+// shortUUID returns the first 8 hex chars of a UUID for use in inbox titles
+// when we don't have the user's display name on hand. The frontend resolves
+// the full name from proposer_id in details; the body is the push / terminal
+// fallback only.
+func shortUUID(u pgtype.UUID) string {
+	if !u.Valid {
+		return "someone"
+	}
+	s := uuidToString(u)
+	if len(s) >= 8 {
+		return s[:8]
+	}
+	return s
+}
+
+// computeUnifiedDiff produces a small unified-diff-style string for SKILL.md
+// content. This is not a real Myers diff — it's a line-by-line LCS scan that's
+// small (~50 LOC, no external deps) and exact for the only shape that matters
+// here: humans tweaking prose. The full base/proposed content is also shipped
+// in details, so the frontend can swap in a richer viewer when it wants.
+func computeUnifiedDiff(base, proposed, label string) string {
+	if base == proposed {
+		return ""
+	}
+	baseLines := splitLines(base)
+	proposedLines := splitLines(proposed)
+	ops := diffLines(baseLines, proposedLines)
+	var b strings.Builder
+	fmt.Fprintf(&b, "--- %s (v base)\n+++ %s (v proposed)\n", label, label)
+	for _, op := range ops {
+		switch op.kind {
+		case diffEqual:
+			fmt.Fprintf(&b, " %s\n", op.line)
+		case diffDel:
+			fmt.Fprintf(&b, "-%s\n", op.line)
+		case diffAdd:
+			fmt.Fprintf(&b, "+%s\n", op.line)
+		}
+	}
+	return b.String()
+}
+
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	out := strings.Split(s, "\n")
+	if len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return out
+}
+
+const (
+	diffEqual = iota
+	diffAdd
+	diffDel
+)
+
+type diffOp struct {
+	kind int
+	line string
+}
+
+// diffLines is a textbook LCS-based diff. Sufficient for SKILL.md-sized inputs
+// (rarely over a few hundred lines); the O(N*M) memory cost is bounded by the
+// truncation we apply before storage.
+func diffLines(a, b []string) []diffOp {
+	n, m := len(a), len(b)
+	if n == 0 {
+		out := make([]diffOp, m)
+		for i, line := range b {
+			out[i] = diffOp{kind: diffAdd, line: line}
+		}
+		return out
+	}
+	if m == 0 {
+		out := make([]diffOp, n)
+		for i, line := range a {
+			out[i] = diffOp{kind: diffDel, line: line}
+		}
+		return out
+	}
+	dp := make([][]int, n+1)
+	for i := range dp {
+		dp[i] = make([]int, m+1)
+	}
+	for i := 1; i <= n; i++ {
+		for j := 1; j <= m; j++ {
+			if a[i-1] == b[j-1] {
+				dp[i][j] = dp[i-1][j-1] + 1
+			} else if dp[i-1][j] >= dp[i][j-1] {
+				dp[i][j] = dp[i-1][j]
+			} else {
+				dp[i][j] = dp[i][j-1]
+			}
+		}
+	}
+	var ops []diffOp
+	i, j := n, m
+	for i > 0 && j > 0 {
+		if a[i-1] == b[j-1] {
+			ops = append([]diffOp{{kind: diffEqual, line: a[i-1]}}, ops...)
+			i--
+			j--
+		} else if dp[i-1][j] >= dp[i][j-1] {
+			ops = append([]diffOp{{kind: diffDel, line: a[i-1]}}, ops...)
+			i--
+		} else {
+			ops = append([]diffOp{{kind: diffAdd, line: b[j-1]}}, ops...)
+			j--
+		}
+	}
+	for i > 0 {
+		ops = append([]diffOp{{kind: diffDel, line: a[i-1]}}, ops...)
+		i--
+	}
+	for j > 0 {
+		ops = append([]diffOp{{kind: diffAdd, line: b[j-1]}}, ops...)
+		j--
+	}
+	return ops
+}
+
+// truncateForInbox keeps the precomputed diff under the soft cap so we do not
+// store giant text blobs in the inbox_item.details JSONB. The full base /
+// proposed content is also stored, so a frontend that wants the real thing
+// can re-diff client-side without hitting this ceiling.
+func truncateForInbox(s string) string {
+	if len(s) <= maxSkillDiffChars {
+		return s
+	}
+	return s[:maxSkillDiffChars] + "\n... (truncated)"
+}
+

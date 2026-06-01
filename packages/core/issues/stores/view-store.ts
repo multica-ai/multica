@@ -73,6 +73,8 @@ export interface IssueViewState {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 selected on-behalf-of member user UUIDs.
+  onBehalfOfFilters: string[];
   // When true, the list only shows issues that currently have at least one
   // agent task in `running` status. Drives the workspace "agents working"
   // quick filter chip in the issues header. Not persisted across reloads —
@@ -107,6 +109,8 @@ export interface IssueViewState {
   toggleProjectFilter: (projectId: string) => void;
   toggleNoProject: () => void;
   toggleLabelFilter: (labelId: string) => void;
+  // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 toggle one on-behalf-of member.
+  toggleOnBehalfOfFilter: (userId: string) => void;
   toggleAgentRunningFilter: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
@@ -135,6 +139,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   projectFilters: [],
   includeNoProject: false,
   labelFilters: [],
+  // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 default empty.
+  onBehalfOfFilters: [],
   agentRunningFilter: false,
   sortBy: "position",
   sortDirection: "asc",
@@ -215,6 +221,13 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.labelFilters.filter((id) => id !== labelId)
         : [...state.labelFilters, labelId],
     })),
+  // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 toggle on-behalf-of member.
+  toggleOnBehalfOfFilter: (userId) =>
+    set((state) => ({
+      onBehalfOfFilters: state.onBehalfOfFilters.includes(userId)
+        ? state.onBehalfOfFilters.filter((id) => id !== userId)
+        : [...state.onBehalfOfFilters, userId],
+    })),
   toggleAgentRunningFilter: () =>
     set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
   hideStatus: (status) =>
@@ -243,6 +256,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       projectFilters: [],
       includeNoProject: false,
       labelFilters: [],
+      // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 reset on clear.
+      onBehalfOfFilters: [],
       agentRunningFilter: false,
     }),
   setSortBy: (field) => set({ sortBy: field }),
@@ -298,6 +313,8 @@ export const viewStorePersistOptions = (name: string) => ({
     projectFilters: state.projectFilters,
     includeNoProject: state.includeNoProject,
     labelFilters: state.labelFilters,
+    // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 persist across reloads.
+    onBehalfOfFilters: state.onBehalfOfFilters,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,

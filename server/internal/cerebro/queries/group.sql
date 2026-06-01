@@ -1,18 +1,18 @@
 -- name: ListCerebroGroups :many
-SELECT id, workspace_id, name, description, created_by, created_at, updated_at
+SELECT id, workspace_id, name, description, created_by, created_at, updated_at, google_group_email
 FROM cerebro_group
 WHERE workspace_id = $1
 ORDER BY lower(name), created_at ASC;
 
 -- name: GetCerebroGroup :one
-SELECT id, workspace_id, name, description, created_by, created_at, updated_at
+SELECT id, workspace_id, name, description, created_by, created_at, updated_at, google_group_email
 FROM cerebro_group
 WHERE id = $1;
 
 -- name: CreateCerebroGroup :one
 INSERT INTO cerebro_group (workspace_id, name, description, created_by)
 VALUES ($1, $2, $3, $4)
-RETURNING id, workspace_id, name, description, created_by, created_at, updated_at;
+RETURNING id, workspace_id, name, description, created_by, created_at, updated_at, google_group_email;
 
 -- name: UpdateCerebroGroup :one
 UPDATE cerebro_group
@@ -21,7 +21,7 @@ SET
     description = COALESCE(sqlc.narg('description'), description),
     updated_at = now()
 WHERE id = sqlc.arg('id')
-RETURNING id, workspace_id, name, description, created_by, created_at, updated_at;
+RETURNING id, workspace_id, name, description, created_by, created_at, updated_at, google_group_email;
 
 -- name: DeleteCerebroGroup :exec
 DELETE FROM cerebro_group
@@ -69,7 +69,7 @@ WHERE gm.group_id = $1
 ORDER BY u.name ASC, gm.added_at ASC;
 
 -- name: ListCerebroGroupsForUser :many
-SELECT g.id, g.workspace_id, g.name, g.description, g.created_by, g.created_at, g.updated_at
+SELECT g.id, g.workspace_id, g.name, g.description, g.created_by, g.created_at, g.updated_at, g.google_group_email
 FROM cerebro_group g
 JOIN cerebro_group_member gm ON gm.group_id = g.id
 WHERE g.workspace_id = $1

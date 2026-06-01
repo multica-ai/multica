@@ -19,6 +19,12 @@ const LABELS: Record<TaskFailureReason, string> = {
   runtime_offline: "Daemon offline",
   runtime_recovery: "Daemon restarted",
   manual: "Cancelled by user",
+  rate_limit: "Rate limit or usage limit",
+  runtime_paused: "Runtime paused",
+  queued_expired: "Queued task expired",
+  iteration_limit: "Agent hit its iteration limit",
+  agent_fallback_message: "Agent stopped with a fallback message",
+  api_invalid_request: "Invalid model request",
 };
 
 export function failureReasonLabel(

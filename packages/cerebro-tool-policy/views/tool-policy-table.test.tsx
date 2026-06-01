@@ -298,3 +298,114 @@ describe("ToolPolicyTable (capability catalog)", () => {
     });
   });
 });
+
+// FIR-2505 slice 3 — repos render as collapsible groups, not flat tool rows, and
+// the group header cascades one choice to read/checkout/push.
+describe("ToolPolicyTable (repo groups)", () => {
+  const REPO_URL = "github.com/firtal-group/repo-a";
+  const repoCap = (
+    tool_key: string,
+    title: string,
+    setting: "allow" | "ask" | "deny" = "allow",
+    layers: Partial<Record<string, string | null>> = {},
+  ) => ({
+    tool_key,
+    resource_pattern: REPO_URL,
+    title,
+    category: "repo",
+    source: "repo",
+    layers: { workspace: null, runtime: null, agent: null, group: null, user: null, ...layers },
+    effective: { setting, decided_by: "", capped_by: "", reason: "" },
+  });
+
+  const REPO_TABLE = {
+    tools: [
+      {
+        tool_key: "add_comment",
+        resource_pattern: "",
+        title: "Add comment",
+        category: "Issues",
+        source: "builtin",
+        layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
+        effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+      },
+      repoCap("repo.read", "Read code"),
+      repoCap("repo.checkout", "Check out"),
+      repoCap("repo.push", "Push changes"),
+    ],
+  };
+
+  beforeEach(() => {
+    mockCerebroRequest.mockReset();
+    mockCerebroRequest.mockResolvedValue(REPO_TABLE);
+  });
+
+  function renderRepoTable(view: "agent" | "workspace" = "agent", subjectId = "agent-1") {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <ToolPolicyTable wsId="ws-1" view={view} subjectId={subjectId} runtimeId="rt-1" userId="user-1" />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("renders repos as a collapsible group, not as flat rows in the tool table", async () => {
+    renderRepoTable();
+    expect(await screen.findByTestId("repo-policy-section")).toBeInTheDocument();
+    expect(screen.getByTestId(`repo-group-${REPO_URL}`)).toBeInTheDocument();
+    // The capability-wide tool is still in the flat catalog…
+    expect(await screen.findByTestId("tool-row-add_comment")).toBeInTheDocument();
+    // …but the repo capabilities never appear as flat tool rows.
+    expect(screen.queryByTestId("tool-row-repo.checkout")).not.toBeInTheDocument();
+  });
+
+  it("expanding a repo reveals its read / checkout / push capabilities", async () => {
+    const user = userEvent.setup();
+    renderRepoTable();
+    const group = await screen.findByTestId(`repo-group-${REPO_URL}`);
+    // Collapsed by default: capability rows are not rendered yet.
+    expect(screen.queryByTestId(`repo-cap-repo.read-${REPO_URL}`)).not.toBeInTheDocument();
+    await user.click(within(group).getByRole("button", { expanded: false }));
+    expect(screen.getByTestId(`repo-cap-repo.read-${REPO_URL}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`repo-cap-repo.checkout-${REPO_URL}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`repo-cap-repo.push-${REPO_URL}`)).toBeInTheDocument();
+  });
+
+  it("setting the repo group cascades the choice to all three capabilities with the repo as resource", async () => {
+    const user = userEvent.setup();
+    renderRepoTable();
+    const group = await screen.findByTestId(`repo-group-${REPO_URL}`);
+    // Header pill shows the shared verdict (all allow) and cascades on change.
+    await user.click(within(group).getByLabelText(/^Repository decision:/));
+    await user.click(within(group).getByRole("menuitem", { name: /Deny/ }));
+    await waitFor(() => {
+      const puts = findPutCalls().map((c) => JSON.parse((c[1] as RequestInit).body as string));
+      const forRepo = puts.filter((b) => b.resource_pattern === REPO_URL && b.setting === "deny");
+      const tools = new Set(forRepo.map((b) => b.tool_key));
+      expect(tools).toEqual(new Set(["repo.read", "repo.checkout", "repo.push"]));
+      for (const b of forRepo) {
+        expect(b).toMatchObject({ layer: "agent", subject_id: "agent-1" });
+      }
+    });
+  });
+
+  it("a single repo capability writes with its repo as the resource_pattern", async () => {
+    const user = userEvent.setup();
+    renderRepoTable();
+    const group = await screen.findByTestId(`repo-group-${REPO_URL}`);
+    await user.click(within(group).getByRole("button", { expanded: false }));
+    const checkout = screen.getByTestId(`repo-cap-repo.checkout-${REPO_URL}`);
+    await user.click(within(checkout).getByLabelText(/^Decision:/));
+    await user.click(within(checkout).getByRole("menuitem", { name: "Ask" }));
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      expect(JSON.parse((put![1] as RequestInit).body as string)).toEqual({
+        tool_key: "repo.checkout",
+        layer: "agent",
+        subject_id: "agent-1",
+        setting: "ask",
+        resource_pattern: REPO_URL,
+      });
+    });
+  });
+});

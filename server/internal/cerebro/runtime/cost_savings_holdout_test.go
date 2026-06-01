@@ -15,6 +15,31 @@ func uuidFromByte(b byte) pgtype.UUID {
 	return u
 }
 
+func TestChooseHoldoutPct(t *testing.T) {
+	pct := func(v int) *int { return &v }
+	cases := []struct {
+		name     string
+		override *int
+		fallback int
+		want     int
+	}{
+		{"no override uses fallback", nil, 20, 20},
+		{"override wins over fallback", pct(0), 20, 0},
+		{"override 100 (full holdout)", pct(100), 20, 100},
+		{"negative override clamps to 0", pct(-5), 20, 0},
+		{"over-100 override clamps to 100", pct(150), 20, 100},
+		{"negative fallback clamps to 0", nil, -5, 0},
+		{"over-100 fallback clamps to 100", nil, 150, 100},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := chooseHoldoutPct(tc.override, tc.fallback); got != tc.want {
+				t.Errorf("chooseHoldoutPct(%v, %d) = %d, want %d", tc.override, tc.fallback, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCostSavingHeldOut_BoundsAndDisabled(t *testing.T) {
 	id := uuidFromByte(1)
 	if costSavingHeldOut(id, savingModelRouting, 0) {

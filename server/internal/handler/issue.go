@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -67,6 +68,75 @@ type IssueResponse struct {
 	// Pointer + omitempty, same contract as Labels: nil = "field absent, don't touch cache".
 	Blocks    *[]IssueDependencyRef `json:"blocks,omitempty"`
 	BlockedBy *[]IssueDependencyRef `json:"blocked_by,omitempty"`
+	// CEREBRO-PATCH(issue-custom-status): FIR-1550 v2b — joined sidecar pin so agents see custom_status.label/.description alongside the base status.
+	CustomStatus *IssueCustomStatusPayload `json:"custom_status,omitempty"`
+	// CEREBRO-PATCH(issue-on-behalf-of): MUL-2553 — origin + the human an agent acted for, for the sidebar "På vegne af" row.
+	OriginType *string        `json:"origin_type,omitempty"`
+	OriginID   *string        `json:"origin_id,omitempty"`
+	OnBehalfOf *OnBehalfOfRef `json:"on_behalf_of,omitempty"`
+}
+
+// OnBehalfOfRef identifies the human a system/agent acted for, resolved from an
+// issue's origin (origin_type='agent_task' → agent_task_queue.original_user_id).
+// MUL-2553: lets every agent-created issue trace back to the member behind it.
+type OnBehalfOfRef struct {
+	UserID    string  `json:"user_id"`
+	Name      string  `json:"name"`
+	AvatarURL *string `json:"avatar_url,omitempty"`
+}
+
+// resolveOnBehalfOf returns the human an agent acted for, or nil when the issue
+// has no agent_task origin / the chain can't be resolved.
+func (h *Handler) resolveOnBehalfOf(ctx context.Context, issue db.Issue) *OnBehalfOfRef {
+	if !issue.OriginType.Valid || issue.OriginType.String != "agent_task" || !issue.OriginID.Valid {
+		return nil
+	}
+	task, err := h.Queries.GetAgentTask(ctx, issue.OriginID)
+	if err != nil || !task.OriginalUserID.Valid {
+		return nil
+	}
+	user, err := h.Queries.GetUser(ctx, task.OriginalUserID)
+	if err != nil {
+		return nil
+	}
+	return &OnBehalfOfRef{
+		UserID:    uuidToString(task.OriginalUserID),
+		Name:      user.Name,
+		AvatarURL: textToPtr(user.AvatarUrl),
+	}
+}
+
+// parseOnBehalfOfIDs reads the comma-separated on_behalf_of_ids query param
+// (user UUIDs) used to filter issues by the human their originating agent task
+// acted for. Returns ok=false (after writing 400) on a malformed UUID.
+// CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 list filter param.
+func parseOnBehalfOfIDs(w http.ResponseWriter, r *http.Request) ([]pgtype.UUID, bool) {
+	raw := r.URL.Query().Get("on_behalf_of_ids")
+	if raw == "" {
+		return nil, true
+	}
+	var ids []pgtype.UUID
+	for _, s := range strings.Split(raw, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			id, ok := parseUUIDOrBadRequest(w, s, "on_behalf_of_ids")
+			if !ok {
+				return nil, false
+			}
+			ids = append(ids, id)
+		}
+	}
+	return ids, true
+}
+
+// onBehalfOfWhere returns a WHERE predicate (added via addArg) matching issues
+// whose agent_task origin was started on behalf of one of the given users.
+// CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 shared SQL for both list handlers.
+func onBehalfOfWhere(ids []pgtype.UUID, addArg func(any) string) string {
+	return fmt.Sprintf(`i.origin_type = 'agent_task' AND EXISTS (
+    SELECT 1 FROM agent_task_queue atq
+     WHERE atq.id = i.origin_id
+       AND atq.original_user_id = ANY(%s::uuid[])
+)`, addArg(ids))
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -581,145 +651,16 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	return query, args
 }
 
+// SearchIssues delegates to the FIR-2595 FTS-based implementation. The old
+// LIKE-driven pipeline (buildSearchQuery / splitSearchTerms / parseQueryNumber
+// in this file) is retained because duplicate_check_cerebro.go still reuses
+// it for create-time similarity ranking — a different use case where the
+// stronger relevance signal of FTS would change behaviour.
+//
+// CEREBRO-PATCH(search-fts-fir-2595): redirect issue-search to Postgres FTS +
+// inline-filter parser. Implementation lives in search_cerebro.go.
 func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	workspaceID := h.resolveWorkspaceID(r)
-
-	q := r.URL.Query().Get("q")
-	if q == "" {
-		writeError(w, http.StatusBadRequest, "q parameter is required")
-		return
-	}
-
-	limit := 20
-	offset := 0
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 {
-			limit = v
-		}
-	}
-	if limit > 50 {
-		limit = 50
-	}
-	if o := r.URL.Query().Get("offset"); o != "" {
-		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
-			offset = v
-		}
-	}
-
-	includeClosed := r.URL.Query().Get("include_closed") == "true"
-
-	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
-	if !ok {
-		return
-	}
-	terms := splitSearchTerms(q)
-	queryNum, hasNum := parseQueryNumber(q)
-
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed)
-	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
-	args[3] = wsUUID
-	args[len(args)-2] = limit
-	args[len(args)-1] = offset
-
-	rows, err := h.DB.Query(ctx, sqlQuery, args...)
-	if err != nil {
-		slog.Warn("search issues failed", "error", err, "workspace_id", workspaceID, "query", q)
-		writeError(w, http.StatusInternalServerError, "failed to search issues")
-		return
-	}
-	defer rows.Close()
-
-	var results []searchResult
-	for rows.Next() {
-		var sr searchResult
-		if err := rows.Scan(
-			&sr.issue.ID,
-			&sr.issue.WorkspaceID,
-			&sr.issue.Title,
-			&sr.issue.Description,
-			&sr.issue.Status,
-			&sr.issue.Priority,
-			&sr.issue.AssigneeType,
-			&sr.issue.AssigneeID,
-			&sr.issue.CreatorType,
-			&sr.issue.CreatorID,
-			&sr.issue.ParentIssueID,
-			&sr.issue.AcceptanceCriteria,
-			&sr.issue.ContextRefs,
-			&sr.issue.Position,
-			&sr.issue.StartDate,
-			&sr.issue.DueDate,
-			&sr.issue.CreatedAt,
-			&sr.issue.UpdatedAt,
-			&sr.issue.Number,
-			&sr.issue.ProjectID,
-			&sr.totalCount,
-			&sr.matchSource,
-			&sr.matchedCommentContent,
-		); err != nil {
-			slog.Warn("search issues scan failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to search issues")
-			return
-		}
-		results = append(results, sr)
-	}
-	if err := rows.Err(); err != nil {
-		slog.Warn("search issues rows error", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to search issues")
-		return
-	}
-
-	// Locked decision: restricted matches are hidden entirely, not shown
-	// as redacted. A user who can't access an issue must never know it
-	// matched their search.
-	member, hasMember := ctxMember(ctx)
-	if hasMember && !isWorkspaceAdmin(member) {
-		filtered := results[:0]
-		for _, sr := range results {
-			if h.canAccessIssue(ctx, member, sr.issue) {
-				filtered = append(filtered, sr)
-			}
-		}
-		results = filtered
-	}
-
-	var total int64
-	if len(results) > 0 {
-		total = results[0].totalCount
-	}
-
-	prefix := h.getIssuePrefix(ctx, wsUUID)
-	resp := make([]SearchIssueResponse, len(results))
-	for i, sr := range results {
-		sir := SearchIssueResponse{
-			IssueResponse: issueToResponse(sr.issue, prefix),
-			MatchSource:   sr.matchSource,
-		}
-		// Always populate comment snippet when a matching comment exists
-		if sr.matchedCommentContent != "" {
-			snippet := extractSnippet(sr.matchedCommentContent, q)
-			sir.MatchedCommentSnippet = &snippet
-			// Keep backward compat: also set MatchedSnippet for comment-source matches
-			if sr.matchSource == "comment" {
-				sir.MatchedSnippet = &snippet
-			}
-		}
-		// Populate description snippet when description matches
-		if sr.matchSource == "description" || descriptionContains(sr.issue.Description, q, terms) {
-			if sr.issue.Description.Valid && sr.issue.Description.String != "" {
-				snippet := extractSnippet(sr.issue.Description.String, q)
-				sir.MatchedDescriptionSnippet = &snippet
-			}
-		}
-		resp[i] = sir
-	}
-
-	w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
-	writeJSON(w, http.StatusOK, map[string]any{
-		"issues": resp,
-		"total":  total,
-	})
+	h.SearchIssuesCerebro(w, r)
 }
 
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
@@ -757,6 +698,11 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 				assigneeIdsFilter = append(assigneeIdsFilter, id)
 			}
 		}
+	}
+	// CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 filter by the human an agent acted for.
+	onBehalfOfFilter, ok := parseOnBehalfOfIDs(w, r)
+	if !ok {
+		return
 	}
 	var creatorFilter pgtype.UUID
 	if c := r.URL.Query().Get("creator_id"); c != "" {
@@ -959,6 +905,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(assigneeIdsFilter) > 0 {
 		where = append(where, fmt.Sprintf("i.assignee_id = ANY(%s::uuid[])", addArg(assigneeIdsFilter)))
+	}
+	// CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 filter by on-behalf-of member.
+	if len(onBehalfOfFilter) > 0 {
+		where = append(where, onBehalfOfWhere(onBehalfOfFilter, addArg))
 	}
 	if creatorFilter.Valid {
 		where = append(where, fmt.Sprintf("i.creator_id = %s::uuid", addArg(creatorFilter)))
@@ -1293,6 +1243,12 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		if len(ids) > 0 {
 			where = append(where, fmt.Sprintf("i.assignee_id = ANY(%s::uuid[])", addArg(ids)))
 		}
+	}
+	// CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 filter grouped issues by on-behalf-of member.
+	if ids, ok := parseOnBehalfOfIDs(w, r); !ok {
+		return
+	} else if len(ids) > 0 {
+		where = append(where, onBehalfOfWhere(ids, addArg))
 	}
 	if raw := r.URL.Query().Get("creator_id"); raw != "" {
 		id, ok := parseUUIDOrBadRequest(w, raw, "creator_id")
@@ -1654,6 +1610,14 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	deps := h.loadDependencies(r, issue, prefix)
 	resp.Blocks = &deps.Blocks
 	resp.BlockedBy = &deps.BlockedBy
+
+	// CEREBRO-PATCH(cerebro-issue-custom-status-enricher): FIR-1550 v2b — join sidecar custom_status so agents read the description.
+	resp.CustomStatus = h.cerebroLoadIssueCustomStatus(r.Context(), issue.ID)
+
+	// CEREBRO-PATCH(issue-on-behalf-of): MUL-2553 — surface origin + the human an agent acted for, for the detail sidebar.
+	resp.OriginType = textToPtr(issue.OriginType)
+	resp.OriginID = uuidToPtr(issue.OriginID)
+	resp.OnBehalfOf = h.resolveOnBehalfOf(r.Context(), issue)
 
 	// Fetch issue reactions.
 	reactions, err := h.Queries.ListIssueReactions(r.Context(), issue.ID)
@@ -2296,6 +2260,23 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		originID = oid
 	}
 
+	// CEREBRO-PATCH(issue-origin-agent-task): MUL-2553 — stamp agent-created issues
+	// with origin_type='agent_task' so the subscriber listener can resolve the
+	// triggering human via agent_task_queue.original_user_id and keep them in the inbox.
+	if !originType.Valid && creatorType == "agent" {
+		if oid, perr := util.ParseUUID(r.Header.Get("X-Task-ID")); perr == nil {
+			originType = pgtype.Text{String: "agent_task", Valid: true}
+			originID = oid
+		}
+	}
+
+	newPosition, err := issueposition.NextTopPosition(r.Context(), tx, wsUUID, status)
+	if err != nil {
+		slog.Warn("get next issue position failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "status", status)...)
+		writeError(w, http.StatusInternalServerError, "failed to create issue")
+		return
+	}
+
 	var issue db.Issue
 	if originType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(r.Context(), db.CreateIssueWithOriginParams{
@@ -2309,7 +2290,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorType:   creatorType,
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
-			Position:      0,
+			Position:      newPosition,
 			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
@@ -2329,7 +2310,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			CreatorType:   creatorType,
 			CreatorID:     parseUUID(actualCreatorID),
 			ParentIssueID: parentIssueID,
-			Position:      0,
+			Position:      newPosition,
 			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
@@ -2370,7 +2351,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
-	h.publishToAudience(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp}, h.audienceForIssue(r.Context(), issue))
+	// CEREBRO-PATCH(issue-created-triggering-task): MUL-2553 — include the triggering task_id
+	// in the event payload so the subscriber listener resolves agent_task_queue.original_user_id
+	// and auto-subscribes the human who started the chain.
+	createdPayload := map[string]any{"issue": resp}
+	if originType.Valid && originType.String == "agent_task" {
+		createdPayload["triggering_task_id"] = uuidToString(originID)
+	}
+	h.publishToAudience(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, createdPayload, h.audienceForIssue(r.Context(), issue))
 	analyticsActorID := actualCreatorID
 	analyticsAgentID := ""
 	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" {
@@ -2443,6 +2431,8 @@ type UpdateIssueRequest struct {
 	// editor's preview Eye keeps working past a refresh. Existing bindings
 	// are idempotent — re-sending the same id is a no-op.
 	AttachmentIDs []string `json:"attachment_ids"`
+	// CEREBRO-PATCH(update-issue-custom-status-key): FIR-1550 v2b — status-picker pin.
+	CustomStatusKey *string `json:"custom_status_key,omitempty"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -2661,8 +2651,22 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
+	// CEREBRO-PATCH(custom-status-prevalidate): FIR-1550 v2b — reject a bad explicit custom_status_key BEFORE commit so the base status never half-applies.
+	if h.CustomStatusResolver != nil && req.CustomStatusKey != nil && *req.CustomStatusKey != "" {
+		if err := h.CustomStatusResolver.ValidateCustomStatusKey(r.Context(), issue.ProjectID, issue.Status, *req.CustomStatusKey); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update issue")
+		return
+	}
+
+	// CEREBRO-PATCH(update-issue-custom-status-hook): FIR-1550 v2b — sync sidecar after commit.
+	_, projectChanged := rawFields["project_id"]
+	if !h.cerebroApplyCustomStatusAfterUpdate(r.Context(), w, r, issue.ID, issue.ProjectID, issue.WorkspaceID, issue.Status, actorType, actorID, statusChanged, projectChanged, req.CustomStatusKey, &resp) {
 		return
 	}
 
@@ -2743,6 +2747,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// fails best-effort.
 	if statusChanged {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		// CEREBRO-PATCH(child-status-notify): FIR-2601 — also notify+wake parent on in_review/blocked.
+		h.notifyParentOfChildStatus(r.Context(), prevIssue, issue)
+		// CEREBRO-PATCH(orchestrate-advance): FIR-2564 — advance sub-issue waves.
+		h.advanceOrchestrationOnChildDone(r.Context(), prevIssue, issue)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -3252,6 +3260,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// (MUL-2538). Best-effort; failure does not abort the batch.
 		if statusChanged {
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+			// CEREBRO-PATCH(child-status-notify): FIR-2601 — also notify+wake parent on in_review/blocked.
+			h.notifyParentOfChildStatus(r.Context(), prevIssue, issue)
 		}
 
 		updated++

@@ -12,3 +12,4 @@ export {
   useCerebroToolPolicySettingsTabs,
   type ExtraSettingsTab,
 } from "./workspace-settings-tab";
+export { RepoDefaultPolicy } from "./repo-default-policy";

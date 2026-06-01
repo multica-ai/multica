@@ -21,8 +21,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
-	cerebropermissions "github.com/multica-ai/multica/server/internal/cerebro/permissions" // CEREBRO-PATCH(daemon-repo-grants): FIR-2512 repo-capability resolver
 	cerebropersona "github.com/multica-ai/multica/server/internal/cerebro/persona"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy" // CEREBRO-PATCH(daemon-repo-toolpolicy): FIR-2505 repo-capability resolved via tool-policy chain
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/profile"
@@ -156,9 +156,21 @@ func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Requ
 
 // requireDaemonTaskAccess looks up a task and verifies the caller owns its workspace.
 func (h *Handler) requireDaemonTaskAccess(w http.ResponseWriter, r *http.Request, taskID string) (db.AgentTaskQueue, bool) {
+	task, _, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	return task, ok
+}
+
+// requireDaemonTaskAccessWithWorkspace is the workspace-aware variant of
+// requireDaemonTaskAccess. It returns the resolved workspace ID alongside
+// the task row so callers that need to forward workspace_id into
+// taskToResponse (powering RelativeWorkDir) don't have to repeat the
+// ResolveTaskWorkspaceID lookup. The two helpers share their entire
+// implementation; the simpler one is preserved for ergonomic call sites
+// that genuinely don't need workspace_id.
+func (h *Handler) requireDaemonTaskAccessWithWorkspace(w http.ResponseWriter, r *http.Request, taskID string) (db.AgentTaskQueue, string, bool) {
 	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
 	if !ok {
-		return db.AgentTaskQueue{}, false
+		return db.AgentTaskQueue{}, "", false
 	}
 	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 	if err != nil {
@@ -167,23 +179,23 @@ func (h *Handler) requireDaemonTaskAccess(w http.ResponseWriter, r *http.Request
 		// error must not be reported as a deletion.
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "task not found")
-			return db.AgentTaskQueue{}, false
+			return db.AgentTaskQueue{}, "", false
 		}
 		slog.Warn("get agent task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to load task")
-		return db.AgentTaskQueue{}, false
+		return db.AgentTaskQueue{}, "", false
 	}
 
 	wsID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
 	if wsID == "" {
 		writeError(w, http.StatusNotFound, "task not found")
-		return db.AgentTaskQueue{}, false
+		return db.AgentTaskQueue{}, "", false
 	}
 
 	if !h.requireDaemonWorkspaceAccess(w, r, wsID) {
-		return db.AgentTaskQueue{}, false
+		return db.AgentTaskQueue{}, "", false
 	}
-	return task, true
+	return task, wsID, true
 }
 
 // verifyDaemonWorkspaceAccess checks workspace access without writing an HTTP error.
@@ -1457,13 +1469,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	buildStart = time.Now()
 
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
-	resp := taskToResponse(*task)
+	resp := taskToResponse(*task, runtimeWorkspaceID)
 
-	// Surface the runtime's per-runtime sandbox override (JEH-418) so the
-	// daemon can honour it on the next buildSandboxConfig without needing a
-	// restart. nil here is meaningful: it tells the daemon to fall back to
-	// its env-var default. We keep going even if the lookup fails — losing
-	// the override defaults to safe-by-default sandboxing.
+	// CEREBRO-PATCH(runtime-sandbox-override-claim): JEH-418 — surface the runtime's
+	// per-runtime sandbox override so the daemon can honour it on the next
+	// buildSandboxConfig without needing a restart. nil here is meaningful: it
+	// tells the daemon to fall back to its env-var default. We keep going even
+	// if the lookup fails — losing the override defaults to safe-by-default sandboxing.
 	if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
 		resp.SandboxEnabled = boolToPtr(rt.SandboxEnabled)
 		if len(rt.SandboxPolicy) > 0 {
@@ -1558,6 +1570,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+			resp.IssueKind = issue.Kind // CEREBRO-PATCH(agent-task-issue-kind): surface issue.kind so trace upload labels channel/dm runs (FIR-2438)
 			// CEREBRO-PATCH(persona-spawn-subject): JEH-1080 — resolve the spawning user + groups for the persona-hook facts.
 			sub := cerebropersona.ResolveSpawnSubject(r.Context(), h.GroupPermissions, issue)
 			resp.PersonaSpawnUserID = sub.UserID
@@ -1647,6 +1660,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
 				resp.TriggerCommentContent = comment.Content
 				resp.TriggerAuthorType = comment.AuthorType
+				resp.TriggerUserID = uuidToString(comment.AuthorID) // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggerer for the trace user-label (FIR-2438)
 				switch comment.AuthorType {
 				case "agent":
 					if comment.AuthorID.Valid {
@@ -1669,22 +1683,52 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						resp.UserProfilePrompt = h.compileProfileForUser(r.Context(), comment.AuthorID)
 					}
 				}
+				// Count comments that arrived issue-wide since this agent's last
+				// run, so the daemon can tell it the full catch-up volume up front
+				// (the prompt then steers it to read the triggering thread first).
+				// Anchor = the prior task's started_at (never completed_at: a long
+				// run would miss comments posted while it ran). Cold start (no prior
+				// task) → no anchor → no hint. Excludes the agent's own comments and
+				// the triggering comment itself because that body is already
+				// injected into the prompt. Best-effort: any DB error or zero count
+				// leaves the hint suppressed.
+				if startedAt, err := h.Queries.GetLastTaskStartedAtForIssueAndAgent(r.Context(), db.GetLastTaskStartedAtForIssueAndAgentParams{
+					AgentID: task.AgentID,
+					IssueID: comment.IssueID,
+				}); err == nil && startedAt.Valid {
+					if cnt, err := h.Queries.CountNewCommentsSince(r.Context(), db.CountNewCommentsSinceParams{
+						AnchorID:    task.TriggerCommentID,
+						IssueID:     comment.IssueID,
+						WorkspaceID: comment.WorkspaceID,
+						Since:       startedAt,
+						AuthorID:    task.AgentID,
+					}); err == nil && cnt > 0 {
+						resp.NewCommentCount = int(cnt)
+						resp.NewCommentsSince = startedAt.Time.UTC().Format(time.RFC3339)
+					}
+				}
 			}
 		}
 
 		// Look up the prior session for this (agent, issue) pair so the daemon
 		// can resume the Claude Code conversation context.
 		//
-		// Skip the lookup when the task was flagged as a manual rerun: the
-		// user just judged the prior output bad, so the daemon must start a
-		// fresh agent session instead of resuming the same conversation that
-		// produced that output.
+		// Skip all prior state when the task was flagged as a manual rerun:
+		// the user just judged the prior output bad, so the daemon must start a
+		// fresh agent session in a fresh workdir instead of resuming anything
+		// from the same conversation that produced that output.
 		if !task.ForceFreshSession {
 			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				if !task.TriggerCommentID.Valid && prior.RuntimeID == task.RuntimeID {
+				// Resume the prior session when it ran on the same runtime —
+				// including comment-triggered follow-ups, so the agent keeps the
+				// issue's conversation context across turns. The "Focus on THIS
+				// comment" guard in prompt.go defends against inheriting the prior
+				// turn's "Done." marker, and GetLastTaskSession already excludes
+				// poisoned sessions.
+				if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 				}
 				if prior.WorkDir.Valid {
@@ -1939,11 +1983,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// CEREBRO-PATCH(orphan-task-fail): if none of the issue/chat/autopilot/
-	// quick-create lookups above resolved a workspace, the task is orphaned.
-	// Mark the task failed inline instead of dispatching it tokenless so the
-	// operator can see why, and return null so the daemon polls for the next
-	// valid task. Predates upstream's workspace isolation check below.
-	if resp.WorkspaceID == "" {
+	// quick-create parents are present, the task is orphaned. Mark it failed
+	// inline instead of dispatching it tokenless so the operator can see why,
+	// and return null so the daemon polls for the next valid task. Predates
+	// upstream's workspace isolation check below. Detection keys on parent FK
+	// validity directly because upstream's taskToResponse eagerly stamps the
+	// runtime workspace_id onto resp regardless of parent presence (ON DELETE
+	// SET NULL leaves the task row valid with every parent FK NULL).
+	if !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid && !hasQuickCreate {
 		slog.Warn("task orphaned: no resolvable workspace, failing instead of dispatching tokenless",
 			"task_id", uuidToString(task.ID),
 			"runtime_id", runtimeID,
@@ -2030,9 +2077,11 @@ func (h *Handler) ListPendingTasksByRuntime(w http.ResponseWriter, r *http.Reque
 	runtimeID := chi.URLParam(r, "runtimeId")
 
 	// Verify the caller owns this runtime's workspace.
-	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
+	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	if !ok {
 		return
 	}
+	workspaceID := uuidToString(runtime.WorkspaceID)
 
 	tasks, err := h.Queries.ListPendingTasksByRuntime(r.Context(), parseUUID(runtimeID))
 	if err != nil {
@@ -2042,7 +2091,7 @@ func (h *Handler) ListPendingTasksByRuntime(w http.ResponseWriter, r *http.Reque
 
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
-		resp[i] = taskToResponse(t)
+		resp[i] = taskToResponse(t, workspaceID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2057,7 +2106,8 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
 	// Verify the caller owns this task's workspace.
-	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+	_, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	if !ok {
 		return
 	}
 
@@ -2069,7 +2119,7 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task started", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
-	writeJSON(w, http.StatusOK, taskToResponse(*task))
+	writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 }
 
 // TaskWaitLocalDirectoryRequest is the body the daemon POSTs when it parks
@@ -2089,7 +2139,8 @@ type TaskWaitLocalDirectoryRequest struct {
 func (h *Handler) MarkTaskWaitingLocalDirectory(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
-	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+	_, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	if !ok {
 		return
 	}
 
@@ -2108,7 +2159,7 @@ func (h *Handler) MarkTaskWaitingLocalDirectory(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	writeJSON(w, http.StatusOK, taskToResponse(*task))
+	writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 }
 
 // ReportTaskProgress broadcasts a progress update.
@@ -2156,7 +2207,8 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
 	// Verify the caller owns this task's workspace.
-	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+	_, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	if !ok {
 		return
 	}
 
@@ -2187,7 +2239,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task completed", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
-	writeJSON(w, http.StatusOK, taskToResponse(*task))
+	writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 }
 
 // emitIssueExecutedOnFirstCompletion atomically flips issue.first_executed_at
@@ -2363,7 +2415,8 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
 	// Verify the caller owns this task's workspace.
-	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+	_, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	if !ok {
 		return
 	}
 
@@ -2388,7 +2441,7 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task failed", "task_id", taskID, "agent_id", uuidToString(task.AgentID), "task_error", req.Error, "failure_reason", req.FailureReason)
-	writeJSON(w, http.StatusOK, taskToResponse(*task))
+	writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 }
 
 // ---------------------------------------------------------------------------
@@ -2546,9 +2599,10 @@ func (h *Handler) GetActiveTaskForIssue(w http.ResponseWriter, r *http.Request) 
 		tasks = nil
 	}
 
+	workspaceID := uuidToString(issue.WorkspaceID)
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
-		resp[i] = taskToResponse(t)
+		resp[i] = taskToResponse(t, workspaceID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": resp})
@@ -2580,7 +2634,7 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task cancelled by user", "task_id", taskID, "issue_id", uuidToString(task.IssueID))
-	writeJSON(w, http.StatusOK, taskToResponse(*task))
+	writeJSON(w, http.StatusOK, taskToResponse(*task, uuidToString(issue.WorkspaceID)))
 }
 
 // ListTasksByIssue returns all tasks (any status) for an issue — used for execution history.
@@ -2597,9 +2651,10 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	workspaceID := uuidToString(issue.WorkspaceID)
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
-		resp[i] = taskToResponse(t)
+		resp[i] = taskToResponse(t, workspaceID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2838,12 +2893,17 @@ type daemonRepoCheckRequest struct {
 	Capability string `json:"capability"`
 	AgentID    string `json:"agent_id,omitempty"`
 	ProjectID  string `json:"project_id,omitempty"`
+	// CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 — set by the real daemon
+	// checkout so an "Ask" verdict raises one shared-inbox approval; left false by
+	// the read-only `repo check` pre-flight, which only reports the decision.
+	RaiseApproval bool `json:"raise_approval,omitempty"`
 }
 
-// CheckDaemonRepoCapability evaluates whether a repo capability is granted for
-// an agent (optionally in a project context) by running the full grants
-// resolver. Called by the daemon before allowing multica repo checkout/push/read
-// when the repo_grants_enabled workspace setting is on.
+// CheckDaemonRepoCapability evaluates whether a repo capability is allowed for an
+// agent by resolving it through the tool-policy chain — the single permission
+// surface repo access lives in (FIR-2505). Called by the daemon before allowing
+// multica repo checkout/push/read when the repo_grants_enabled workspace setting
+// is on.
 //
 // POST /api/daemon/workspaces/{workspaceId}/repo/check
 func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Request) {
@@ -2871,49 +2931,31 @@ func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Build actor: an agent subject when agent_id is set, otherwise
-	// workspace_default grants are the only thing evaluated.
-	//
-	// Scope note (FIR-2512): for an autonomous daemon repo-checkout only the
-	// Workspace, Project and Agent layers of the chain are populated here. The
-	// Group and Role layers are intentionally NOT loaded: groups in this model
-	// hold user members (cerebro_group_member), not agents, and a daemon
-	// checkout has no human in the loop — so a group-scoped grant could only
-	// apply via owner-substitution, the same unresolved decision the autopilot
-	// path defers (see autopilot_cerebro.go, JEH-721). Wiring group/role for
-	// autonomous checkout is tracked as the Spor 4 follow-up rather than guessed
-	// at inside this security path. Project isolation (the headline of this PR)
-	// does not depend on it.
-	actor := cerebropermissions.Actor{Type: "agent"}
-
+	// Resolve through the tool-policy chain. This is an autonomous daemon
+	// checkout — no human in the loop — so only the Workspace-root and Agent
+	// layers carry signal; Runtime, User and Group are absent (Inherit). Project
+	// is deliberately NOT a layer: per the FIR-2505 decision a project is context
+	// (which repos belong to it, resolved at claim time), not a permission level,
+	// so req.ProjectID is not part of this verdict. Base is Allow — a repo with no
+	// explicit policy is reachable, and the admin tightens specific repos in the
+	// tool-policy screen. "Ask" needs a human to approve, which a daemon checkout
+	// has not, so only an explicit Allow passes.
+	agentID := pgtype.UUID{}
 	if req.AgentID != "" {
-		agentUUID, err := util.ParseUUID(req.AgentID)
-		if err != nil {
+		parsed, parseErr := util.ParseUUID(req.AgentID)
+		if parseErr != nil {
 			writeError(w, http.StatusBadRequest, "invalid agent_id")
 			return
 		}
-		actor.ID = agentUUID
+		agentID = parsed
 	}
 
-	// Project scope (FIR-2512): if the task runs in a project, include it so
-	// project-scoped grants are evaluated as part of the chain.
-	if req.ProjectID != "" {
-		projectUUID, err := util.ParseUUID(req.ProjectID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid project_id")
-			return
-		}
-		actor.ProjectIDs = []pgtype.UUID{projectUUID}
-	}
-
-	// The agent is both the actor and the agent in this context (direct-agent
-	// call, no human member in the loop).
-	decision, err := cerebropermissions.New(h.CerebroQueries).Can(r.Context(), cerebropermissions.Request{
-		WorkspaceID: wsUUID,
-		Actor:       actor,
-		Agent:       actor.ID,
-		Capability:  req.Capability,
-		Resource:    req.URL,
+	eff, err := toolpolicy.NewStoreFromQueries(h.CerebroQueries).Resolve(r.Context(), toolpolicy.Query{
+		WorkspaceID:     wsUUID,
+		ToolKey:         req.Capability,
+		ResourcePattern: req.URL,
+		AgentID:         agentID,
+		Base:            toolpolicy.SettingAllow,
 	})
 	if err != nil {
 		slog.Error("repo capability check failed", "workspace_id", workspaceID, "url", req.URL, "error", err)
@@ -2921,9 +2963,33 @@ func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 — on a real checkout an
+	// "Ask" verdict no longer silently blocks: it rejoins or creates one
+	// shared-inbox approval and returns its decision (pending/allow/deny) + id so
+	// the daemon can long-poll or proceed. Rejoining a still-open ask (and
+	// honouring one approved after the daemon's earlier poll budget) is what keeps
+	// a retried checkout from piling up duplicate requests. Gate off
+	// (h.ApprovalGate==nil) or the pre-flight path (raise_approval false) keep the
+	// prior report-only behaviour, so production is unchanged.
+	if req.RaiseApproval && h.ApprovalGate != nil && eff.Setting == toolpolicy.SettingAsk {
+		allowed, decision, approvalID, askErr := h.repoCheckoutAsk(r.Context(), wsUUID, agentID, req.URL, req.Capability, eff.Reason)
+		if askErr != nil {
+			slog.Error("repo approval ask failed", "workspace_id", workspaceID, "url", req.URL, "error", askErr)
+			writeError(w, http.StatusInternalServerError, "could not create approval request")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"allowed":     allowed,
+			"decision":    decision,
+			"approval_id": util.UUIDToString(approvalID),
+			"reason":      eff.Reason,
+		})
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"allowed":  decision.Allowed(),
-		"decision": string(decision.Kind),
-		"reason":   decision.Reason,
+		"allowed":  eff.Setting == toolpolicy.SettingAllow,
+		"decision": string(eff.Setting),
+		"reason":   eff.Reason,
 	})
 }

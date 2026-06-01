@@ -44,9 +44,21 @@ export interface ToolPolicyLayers {
 /** One tool's full row for the admin table. */
 export interface ToolPolicyRow {
   tool_key: string;
+  /**
+   * Per-resource scope (FIR-2505). Empty for a capability-wide row; a repo URL
+   * for a per-repo row, where the same tool_key (repo.read/checkout/push)
+   * appears once per repo. The collapsible "repo group" keys on this.
+   */
+  resource_pattern: string;
   title: string;
   category: string;
   source: string;
+  /**
+   * FIR-2594: true for a platform action whose enforcement point is not the
+   * tool-policy gate (workspace-membership ACL, daemon token, webhook secret).
+   * The row is shown for visibility but its Allow/Ask/Deny choice is advisory.
+   */
+  managed_externally: boolean;
   layers: ToolPolicyLayers;
   effective: ToolPolicyEffective;
 }
@@ -70,12 +82,16 @@ export interface SetToolPolicyRequest {
   layer: ToolLayer;
   subject_id: string;
   setting: ToolSetting;
+  /** Per-resource scope (e.g. a repo URL); omit/empty for a capability-wide write. */
+  resource_pattern?: string;
 }
 
 export interface ClearToolPolicyRequest {
   tool_key: string;
   layer: ToolLayer;
   subject_id: string;
+  /** Per-resource scope to clear; omit/empty for the capability-wide row. */
+  resource_pattern?: string;
 }
 
 // --- schemas (fail closed) --------------------------------------------------
@@ -97,9 +113,14 @@ const effectiveSettingSchema = z.preprocess(
 
 const toolPolicyRowSchema = z.object({
   tool_key: z.string(),
+  resource_pattern: z.string().default(""),
   title: z.string().default(""),
   category: z.string().default(""),
   source: z.string().default(""),
+  // FIR-2594: true for platform actions whose enforcement point is not the
+  // tool-policy gate (membership ACL, daemon token, …). Defaults false so older
+  // backends that omit the field render as a normal, gated row.
+  managed_externally: z.boolean().default(false),
   layers: z
     .object({
       workspace: layerSettingSchema,
@@ -170,6 +191,7 @@ export async function clearToolPolicy(
     layer: body.layer,
     subject_id: body.subject_id,
   });
+  if (body.resource_pattern) params.set("resource_pattern", body.resource_pattern);
   await api.cerebroRequest<void>(
     `/api/workspaces/${wsId}/tool-policy?${params.toString()}`,
     { method: "DELETE" },

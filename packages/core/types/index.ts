@@ -37,6 +37,7 @@ export type {
   SkillChangeRequest,
   SkillChangeRequestStatus,
   SkillFork,
+  SkillForkParent, // CEREBRO-PATCH(skill-fork-parent-lineage): FIR-2629 "forked from" lineage type.
   UpdateSkillOwnershipRequest,
   CreateSkillChangeRequestRequest,
   ReviewSkillChangeRequestRequest,
@@ -187,3 +188,21 @@ export type {
   UpdateSquadMemberRoleRequest,
   CreateSquadActivityLogRequest,
 } from "./squad";
+export type {
+  BillingBalance,
+  BillingTransaction,
+  BillingTransactionsPage,
+  BillingTxType,
+  BillingTxSource,
+  BillingBatch,
+  BillingBatchesPage,
+  BillingBatchSourceType,
+  BillingTopup,
+  BillingTopupsPage,
+  BillingTopupStatus,
+  BillingPriceTier,
+  CreateBillingCheckoutSessionRequest,
+  CreateBillingCheckoutSessionResponse,
+  BillingCheckoutSessionStatus,
+  CreateBillingPortalSessionResponse,
+} from "./billing";

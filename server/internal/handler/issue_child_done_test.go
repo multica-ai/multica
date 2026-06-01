@@ -388,12 +388,16 @@ func TestChildDoneMentionsParentAssignee_Squad(t *testing.T) {
 	}
 }
 
-// TestChildDoneSelfTriggerGuard_SameAgent — when the parent assignee is
-// the same agent that owns the child, the comment still records the
-// completion (so the timeline tells the full story) but no new task is
-// enqueued. Without this guard the agent immediately re-runs on the
-// parent and can post another child, looping.
-func TestChildDoneSelfTriggerGuard_SameAgent(t *testing.T) {
+// TestChildDoneTriggersParentAgentWhenSameAgentOwnsChild — when the parent
+// agent assignee is the SAME agent that owns the just-finished child, the
+// parent agent must still be triggered (MUL-2808). A child finishing and
+// waking its parent is a serial sub-task handoff between two different
+// issues, not a self-loop — and the lone-agent decomposition pattern (one
+// agent owns both the parent and the sub-issues it created) has no other
+// wake path. The comment is created AND exactly one task is enqueued on the
+// parent; runaway re-triggering is bounded by the HasPendingTaskForIssueAndAgent
+// dedup, not by suppressing the trigger.
+func TestChildDoneTriggersParentAgentWhenSameAgentOwnsChild(t *testing.T) {
 	fx := newChildDoneFixture(t, "in_progress")
 
 	var agentID string
@@ -416,26 +420,24 @@ func TestChildDoneSelfTriggerGuard_SameAgent(t *testing.T) {
 
 	updateChildStatus(t, fx.child.ID, "done")
 
-	// The comment should still be created (the human user reading the
-	// timeline still benefits from seeing that the child finished). The
-	// task enqueue is what gets skipped.
 	content := parentSystemCommentContent(t, fx.parent.ID)
 	if !strings.Contains(content, "mention://agent/"+agentID) {
 		t.Errorf("expected parent-assignee mention in system comment, got: %s", content)
 	}
-	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 0 {
-		t.Errorf("expected 0 pending tasks on parent (self-trigger guard), got %d", got)
+	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 1 {
+		t.Errorf("expected 1 pending task on parent (serial sub-task handoff), got %d", got)
 	}
 }
 
-// TestChildDoneSelfTriggerGuard_AgentParentSquadChildSameLeader — the
-// cross-type loop case Elon called out. Parent is assigned to agent A
-// directly; child is assigned to a squad whose leader is also agent A.
-// Without `effectiveChildAgentOwner`, the parent-agent path only checked
-// the child's direct assignee and would happily enqueue agent A on the
-// parent, restarting the loop through the squad. The system comment is
-// still created (timeline parity); only the task enqueue is suppressed.
-func TestChildDoneSelfTriggerGuard_AgentParentSquadChildSameLeader(t *testing.T) {
+// TestChildDoneTriggersParentAgentWhenChildSquadSharesLeader — parent is
+// assigned to agent A directly; the finished child is assigned to a squad
+// whose leader is also agent A. Because the parent is an AGENT, dispatch
+// routes through the agent path, which (post-MUL-2808) has no self-trigger
+// guard: A coordinates the parent and must be woken to advance it when the
+// child completes, regardless of who executed the child. The genuinely
+// loop-prone case — BOTH sides squads sharing a leader — is still guarded on
+// the squad path (see TestChildDoneSelfTriggerGuard_SquadParentDifferentSquadSameLeader).
+func TestChildDoneTriggersParentAgentWhenChildSquadSharesLeader(t *testing.T) {
 	fx := newChildDoneFixture(t, "in_progress")
 	sq := newSquadCommentTriggerFixture(t)
 
@@ -454,8 +456,8 @@ func TestChildDoneSelfTriggerGuard_AgentParentSquadChildSameLeader(t *testing.T)
 	if !strings.Contains(content, "mention://agent/"+sq.LeaderID) {
 		t.Errorf("expected parent-agent mention in system comment, got: %s", content)
 	}
-	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 0 {
-		t.Errorf("expected 0 pending tasks on parent (shared-leader guard), got %d", got)
+	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 1 {
+		t.Errorf("expected 1 pending task on parent (serial sub-task handoff), got %d", got)
 	}
 }
 

@@ -13,6 +13,24 @@ import (
 // via MULTICA_SERVER_FIRTAL_GATEWAY_COST_HOLDOUT_PCT (FIR-2325 phase 5).
 const defaultCostSavingHoldoutPct = 20
 
+// chooseHoldoutPct picks the effective holdout share for a run: the
+// per-workspace UI override (FIR-2640) when present, otherwise the env/default
+// fallback. The result is clamped to [0,100] so a bad override can never push
+// the sampling out of range. override is nil when the workspace has no row.
+func chooseHoldoutPct(override *int, fallback int) int {
+	pct := fallback
+	if override != nil {
+		pct = *override
+	}
+	if pct < 0 {
+		return 0
+	}
+	if pct > 100 {
+		return 100
+	}
+	return pct
+}
+
 // costSavingHeldOut decides, deterministically, whether one run is the control
 // arm for one "on" saving. Deterministic on (task, saving) so a retried task
 // keeps the same arm (it never flips group between attempts) and each saving is

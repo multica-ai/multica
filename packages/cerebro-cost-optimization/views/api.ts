@@ -11,12 +11,15 @@ import {
   type CostSavingMode,
 } from "../registry";
 import { parseDashboardResponse } from "../dashboard";
+import { parseHoldoutResponse, type HoldoutOverrides } from "../holdout";
 import { useCostOptimizationStore } from "../store";
 
 const costOptimizationKeys = {
   all: (wsId: string) => ["cerebro-cost-optimization", wsId] as const,
   dashboard: (wsId: string) =>
     ["cerebro-cost-optimization", wsId, "dashboard"] as const,
+  holdout: (wsId: string) =>
+    ["cerebro-cost-optimization", wsId, "holdout"] as const,
 };
 
 /**
@@ -97,6 +100,61 @@ export function useSetSavingModeMutation() {
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: costOptimizationKeys.all(wsId) });
+    },
+  });
+}
+
+/**
+ * Fetch the workspace's PER-SAVING holdout-share overrides (FIR-2640). The
+ * client returns the body as `unknown`; {@link parseHoldoutResponse} validates
+ * it so a drifted shape degrades to "no overrides" instead of throwing. The
+ * result lives only in the Query cache (no Zustand duplication).
+ */
+export function useCostOptimizationHoldoutQuery() {
+  const wsId = useWorkspaceId();
+  return useQuery({
+    queryKey: costOptimizationKeys.holdout(wsId),
+    queryFn: async (): Promise<HoldoutOverrides> =>
+      parseHoldoutResponse(await api.getCostOptimizationHoldout(wsId)),
+  });
+}
+
+/**
+ * Set a single saving's holdout share, or clear its override (revert to the
+ * server default) when `pct` is null. Optimistic: the cached map updates
+ * immediately and is rolled back on failure, then re-validated on settle.
+ */
+export function useSetHoldoutMutation() {
+  const wsId = useWorkspaceId();
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ key, pct }: { key: CostSavingKey; pct: number | null }) =>
+      pct === null
+        ? api.clearCostOptimizationHoldout(wsId, key)
+        : api.setCostOptimizationHoldout(wsId, key, pct),
+    onMutate: async ({ key, pct }) => {
+      const cacheKey = costOptimizationKeys.holdout(wsId);
+      await qc.cancelQueries({ queryKey: cacheKey });
+      const previous = qc.getQueryData<HoldoutOverrides>(cacheKey);
+      const next: HoldoutOverrides = { ...(previous ?? {}) };
+      if (pct === null) {
+        delete next[key];
+      } else {
+        next[key] = pct;
+      }
+      qc.setQueryData<HoldoutOverrides>(cacheKey, next);
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous !== undefined) {
+        qc.setQueryData(costOptimizationKeys.holdout(wsId), context.previous);
+      }
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({
+        queryKey: costOptimizationKeys.holdout(wsId),
+      });
     },
   });
 }

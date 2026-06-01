@@ -48,6 +48,7 @@ const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
 var supportedLanguages = map[string]struct{}{
 	"en":      {},
 	"zh-Hans": {},
+	"ko":      {},
 }
 
 type UserResponse struct {
@@ -411,6 +412,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	}
 	if isNew {
 		h.Analytics.Capture(analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r)))
+		h.provisionMembershipForNewUser(r.Context(), user, "code") // CEREBRO-PATCH(auth-identity-hook-code): FIR-2523 auto-membership.
 	}
 
 	tokenString, err := h.issueJWT(user)
@@ -587,6 +589,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
 		evt.Properties["auth_method"] = "google"
 		h.Analytics.Capture(evt)
+		h.provisionMembershipForNewUser(r.Context(), user, "google") // CEREBRO-PATCH(auth-identity-hook-google): FIR-2523 auto-membership.
 	}
 
 	// Update name and avatar from Google profile if the user was just created

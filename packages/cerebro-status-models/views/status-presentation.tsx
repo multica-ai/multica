@@ -18,7 +18,7 @@ import {
   cerebroStatusModelAssignmentsOptions,
   cerebroStatusModelsListOptions,
 } from "../core/queries";
-import { buildStatusPresentation } from "../core/presentation";
+import { buildStatusPresentation, type ResolvedCustomStatus } from "../core/presentation";
 
 export interface StatusPresentationOption {
   baseStatus: IssueStatus;
@@ -30,6 +30,7 @@ export interface StatusPresentationValue {
   /** True only when the surrounding project has a usable status model. */
   hasModel: boolean;
   modelName?: string;
+  modelId?: string;
   /** Base statuses to show as board columns, in model order. */
   orderedBaseStatuses?: IssueStatus[];
   /** Model label for a base status, or undefined → caller uses upstream label. */
@@ -38,6 +39,15 @@ export interface StatusPresentationValue {
   getColor: (base: IssueStatus) => string | undefined;
   /** Picker options for covered base statuses, in model order. */
   options?: StatusPresentationOption[];
+  /**
+   * v2b (FIR-1550): every custom status in model order, no deduplication.
+   * Pickers iterate this to render true sub-statuses; pinning a row passes
+   * `custom_status_key` alongside the base `status` so the backend
+   * resolver writes the sidecar.
+   */
+  customStatuses?: ResolvedCustomStatus[];
+  /** v2b key-lookup so the trigger / badge can resolve label + color. */
+  getCustomByKey?: (key: string) => ResolvedCustomStatus | undefined;
 }
 
 const DEFAULT: StatusPresentationValue = {
@@ -84,6 +94,7 @@ export function CerebroStatusModelProvider({
     return {
       hasModel: true,
       modelName: resolved.modelName,
+      modelId: resolved.modelId,
       orderedBaseStatuses: resolved.orderedBaseStatuses,
       getLabel: (base) => resolved.labelByBase[base],
       getColor: (base) => resolved.colorByBase[base],
@@ -92,6 +103,8 @@ export function CerebroStatusModelProvider({
         label: resolved.labelByBase[base]!,
         color: resolved.colorByBase[base],
       })),
+      customStatuses: resolved.customStatuses,
+      getCustomByKey: (key) => resolved.customByKey[key],
     };
   }, [enabled, assignments, models, projectId]);
 

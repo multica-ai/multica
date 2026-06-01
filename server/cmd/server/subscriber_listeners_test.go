@@ -628,6 +628,145 @@ func TestSubscriberIssueCreated_AutopilotMapPayload(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(subscriber-triggered-agent): MUL-2553 — when an agent creates
+// an issue carrying triggering_task_id in the payload, the originating human
+// (agent_task_queue.original_user_id) is auto-subscribed with reason
+// 'triggered_agent'. Without this the human only sees the agent as the creator
+// and the issue silently leaves their inbox.
+func TestSubscriberIssueCreated_TriggeredAgentSubscribesOriginalUser(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	originalEmail := "subscriber-triggered-agent-test@multica.ai"
+	originalUserID := createTestUser(t, originalEmail)
+	t.Cleanup(func() { cleanupTestUser(t, originalEmail) })
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT a.id::text, a.runtime_id::text FROM agent a WHERE a.workspace_id = $1 AND a.runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Skipf("no agent with runtime in test workspace: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, original_user_id)
+		VALUES ($1, $2, 'queued', 0, $3)
+		RETURNING id::text
+	`, agentID, runtimeID, originalUserID).Scan(&taskID); err != nil {
+		t.Fatalf("insert agent task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "agent-created issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "agent",
+				CreatorID:   agentID,
+			},
+			"triggering_task_id": taskID,
+		},
+	})
+
+	if !isSubscribed(t, queries, issueID, "member", originalUserID) {
+		t.Fatal("expected originating human to be auto-subscribed with reason triggered_agent")
+	}
+	if !isSubscribed(t, queries, issueID, "agent", agentID) {
+		t.Fatal("expected the agent creator to remain subscribed")
+	}
+
+	var reason string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT reason FROM issue_subscriber WHERE issue_id = $1 AND user_type = 'member' AND user_id = $2`,
+		issueID, originalUserID,
+	).Scan(&reason); err != nil {
+		t.Fatalf("read subscriber reason: %v", err)
+	}
+	if reason != "triggered_agent" {
+		t.Fatalf("expected reason 'triggered_agent', got %q", reason)
+	}
+}
+
+// MUL-2553 — opt-out: when the originating human has set
+// preferences.auto_subscribe.triggered_agent=false, no subscription is created
+// even though the trigger event arrives. Mirrors the assignee opt-out test.
+func TestSubscriberIssueCreated_TriggeredAgentOptOut(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	originalEmail := "subscriber-triggered-agent-optout-test@multica.ai"
+	originalUserID := createTestUser(t, originalEmail)
+	t.Cleanup(func() { cleanupTestUser(t, originalEmail) })
+
+	setUserAutoSubscribePrefs(t, originalUserID, map[string]bool{"triggered_agent": false})
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT a.id::text, a.runtime_id::text FROM agent a WHERE a.workspace_id = $1 AND a.runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Skipf("no agent with runtime in test workspace: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, original_user_id)
+		VALUES ($1, $2, 'queued', 0, $3)
+		RETURNING id::text
+	`, agentID, runtimeID, originalUserID).Scan(&taskID); err != nil {
+		t.Fatalf("insert agent task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "agent-created issue",
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "agent",
+				CreatorID:   agentID,
+			},
+			"triggering_task_id": taskID,
+		},
+	})
+
+	if isSubscribed(t, queries, issueID, "member", originalUserID) {
+		t.Fatal("expected originating human NOT to be subscribed after opt-out")
+	}
+}
+
 // Verify parseUUID is consistent — the local helper should agree with util.MustParseUUID
 // for valid input, and panic on invalid input (the silent-zero behavior was removed
 // after #1661 to prevent silent SQL writes against a zero UUID).

@@ -48,6 +48,7 @@ import type {
   SkillVersion,
   SkillChangeRequest,
   SkillFork,
+  SkillForkParent,
   UpdateSkillOwnershipRequest,
   CreateSkillChangeRequestRequest,
   ReviewSkillChangeRequestRequest,
@@ -148,6 +149,15 @@ import type {
   CapabilityListResponse,
   CapabilityReportInput,
   CapabilitySubject,
+  BillingBalance,
+  BillingTransactionsPage,
+  BillingBatchesPage,
+  BillingTopupsPage,
+  BillingPriceTier,
+  CreateBillingCheckoutSessionRequest,
+  CreateBillingCheckoutSessionResponse,
+  BillingCheckoutSessionStatus,
+  CreateBillingPortalSessionResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -206,6 +216,22 @@ import {
   TimelineEntriesSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
+  BillingBalanceSchema,
+  BillingTransactionsPageSchema,
+  BillingBatchesPageSchema,
+  BillingTopupsPageSchema,
+  BillingPriceTierListSchema,
+  CreateBillingCheckoutSessionResponseSchema,
+  BillingCheckoutSessionStatusSchema,
+  CreateBillingPortalSessionResponseSchema,
+  EMPTY_BILLING_BALANCE,
+  EMPTY_BILLING_TRANSACTIONS_PAGE,
+  EMPTY_BILLING_BATCHES_PAGE,
+  EMPTY_BILLING_TOPUPS_PAGE,
+  EMPTY_BILLING_PRICE_TIER_LIST,
+  EMPTY_CREATE_BILLING_CHECKOUT_SESSION_RESPONSE,
+  EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
+  EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -657,7 +683,11 @@ export class ApiClient {
   // CEREBRO-PATCH(feature-flags-client): per-(workspace, user) feature flag overrides.
   // Server returns ONLY the overrides — defaults are applied client-side
   // from the cerebro-feature-flags registry.
-  async listFeatureFlags(wsId: string): Promise<{ overrides: Record<string, boolean> }> {
+  async listFeatureFlags(wsId: string): Promise<{
+    overrides: Record<string, boolean>;
+    workspace_overrides?: Record<string, boolean>;
+    locked?: Record<string, boolean>;
+  }> {
     return this.fetch(`/api/workspaces/${wsId}/feature-flags`);
   }
 
@@ -665,6 +695,28 @@ export class ApiClient {
     await this.fetch(`/api/workspaces/${wsId}/feature-flags/${key}`, {
       method: "PUT",
       body: JSON.stringify({ enabled }),
+    });
+  }
+
+  // CEREBRO-PATCH(feature-flags-workspace-overrides): FIR-2505 — workspace-level
+  // override (owner/admin): force a flag on/off for every member. `locked`
+  // forbids members from overriding it personally. listFeatureFlags also gains
+  // the workspace_overrides + locked maps in the same patch.
+  async setWorkspaceFeatureFlag(
+    wsId: string,
+    key: string,
+    enabled: boolean,
+    locked: boolean,
+  ): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/feature-flags/${key}/workspace`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled, locked }),
+    });
+  }
+
+  async clearWorkspaceFeatureFlag(wsId: string, key: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/feature-flags/${key}/workspace`, {
+      method: "DELETE",
     });
   }
 
@@ -694,6 +746,27 @@ export class ApiClient {
   // the cerebro-cost-optimization package validates the shape with a zod schema.
   async getCostOptimizationDashboard(wsId: string): Promise<unknown> {
     return this.fetch(`/api/workspaces/${wsId}/cost-optimization/dashboard`);
+  }
+
+  // CEREBRO-PATCH(cost-optimization-holdout-client): FIR-2640 PER-SAVING holdout
+  // share (percent of a saving's "on" runs withheld as the A/B control arm). GET
+  // returns the raw overrides map; cerebro-cost-optimization validates it. PUT
+  // sets one saving's share; DELETE clears it (reverts to the server default).
+  async getCostOptimizationHoldout(wsId: string): Promise<unknown> {
+    return this.fetch(`/api/workspaces/${wsId}/cost-optimization/holdout`);
+  }
+
+  async setCostOptimizationHoldout(wsId: string, key: string, pct: number): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/cost-optimization/holdout/${key}`, {
+      method: "PUT",
+      body: JSON.stringify({ holdout_pct: pct }),
+    });
+  }
+
+  async clearCostOptimizationHoldout(wsId: string, key: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/cost-optimization/holdout/${key}`, {
+      method: "DELETE",
+    });
   }
 
   // CEREBRO-PATCH(cerebro-account-client): JEH-921 workspace accounts CRUD.
@@ -1121,6 +1194,30 @@ export class ApiClient {
     return this.fetch<T>(`/api/cerebro/references?${params.toString()}`);
   }
 
+  // CEREBRO-PATCH(cerebro-identity-client): FIR-2523 — workspace Google
+  // identity settings. Body is `unknown` so the cerebro-identity package owns
+  // the Zod schema (lenient parsing per API Response Compatibility rules).
+  async getCerebroAuthSettings<T = unknown>(workspaceId: string): Promise<T> {
+    return this.fetch<T>(
+      `/api/cerebro/workspaces/${encodeURIComponent(workspaceId)}/auth-settings`,
+    );
+  }
+
+  async updateCerebroAuthSettings<T = unknown>(
+    workspaceId: string,
+    payload: {
+      google_signup_domains: string[];
+      default_role: string;
+      // CEREBRO-PATCH(cerebro-identity-sync-toggle): FIR-2596 per-workspace Google group sync flag
+      google_workspace_sync_enabled: boolean;
+    },
+  ): Promise<T> {
+    return this.fetch<T>(
+      `/api/cerebro/workspaces/${encodeURIComponent(workspaceId)}/auth-settings`,
+      { method: "PUT", body: JSON.stringify(payload) },
+    );
+  }
+
   // CEREBRO-PATCH(cerebro-duplicate-check-client): FIR-2504 — ask the server
   // for the top similar open issues + LLM verdict when composing a new issue.
   // Body is `unknown` so the cerebro-duplicate-check package owns the schema.
@@ -1155,122 +1252,7 @@ export class ApiClient {
     }
   }
 
-  // CEREBRO-PATCH(cerebro-persona-grants-client): JEH-1180 Persona grant
-  // control plane UI. Endpoints mirror the JEH-1179 description:
-  //   GET    /api/workspaces/{id}/grants[?subject_type=…&subject_id=…&resource_type=…&status=…&classification=…]
-  //   POST   /api/workspaces/{id}/grants
-  //   GET    /api/workspaces/{id}/grants/{grantId}
-  //   PATCH  /api/workspaces/{id}/grants/{grantId}
-  //   DELETE /api/workspaces/{id}/grants/{grantId}
-  //   GET    /api/workspaces/{id}/grants/audit[?subject_id=…&grant_id=…&since=…&limit=…]
-  // Bodies are `unknown` so the cerebro-permissions package owns the
-  // schema; parseWithFallback handles drift if Fætta's final API-shape
-  // lands different.
-  async listPersonaGrants<T = unknown>(
-    wsId: string,
-    filter: {
-      subject_type?: string | null;
-      subject_id?: string | null;
-      resource_type?: string | null;
-      status?: string | null;
-      classification?: string | null;
-      limit?: number;
-      offset?: number;
-    } = {},
-  ): Promise<T> {
-    const params = new URLSearchParams();
-    if (filter.subject_type) params.set("subject_type", filter.subject_type);
-    if (filter.subject_id) params.set("subject_id", filter.subject_id);
-    if (filter.resource_type) params.set("resource_type", filter.resource_type);
-    if (filter.status) params.set("status", filter.status);
-    if (filter.classification) params.set("classification", filter.classification);
-    if (filter.limit !== undefined) params.set("limit", String(filter.limit));
-    if (filter.offset !== undefined) params.set("offset", String(filter.offset));
-    const qs = params.toString();
-    return this.fetch<T>(
-      qs
-        ? `/api/workspaces/${wsId}/grants?${qs}`
-        : `/api/workspaces/${wsId}/grants`,
-    );
-  }
-
-  async getPersonaGrant<T = unknown>(
-    wsId: string,
-    grantId: string,
-  ): Promise<T> {
-    return this.fetch<T>(`/api/workspaces/${wsId}/grants/${grantId}`);
-  }
-
-  async createPersonaGrant<T = unknown>(
-    wsId: string,
-    body: unknown,
-  ): Promise<T> {
-    return this.fetch<T>(`/api/workspaces/${wsId}/grants`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-
-  async updatePersonaGrant<T = unknown>(
-    wsId: string,
-    grantId: string,
-    body: unknown,
-  ): Promise<T> {
-    return this.fetch<T>(`/api/workspaces/${wsId}/grants/${grantId}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    });
-  }
-
-  async deletePersonaGrant(wsId: string, grantId: string): Promise<void> {
-    await this.fetch<void>(`/api/workspaces/${wsId}/grants/${grantId}`, {
-      method: "DELETE",
-    });
-  }
-
-  // CEREBRO-PATCH(permission-engine-evaluate): FIR-2130 effective-permission endpoint
-  // wired through ApiClient so cerebro-permissions can call it without bypassing
-  // schema/typing. Will move into cerebro-permissions/core/api.ts once upstream
-  // exposes a typed grants-evaluate path; until then we live on client.ts.
-  async evaluatePersonaGrant<T = unknown>(
-    wsId: string,
-    body: unknown,
-  ): Promise<T> {
-    return this.fetch<T>(`/api/workspaces/${wsId}/grants/evaluate`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-
-  // CEREBRO-PATCH(grant-audit-capability-until): FIR-2133 — capability + until filter params for audit-UI
-  async listPersonaGrantAudit<T = unknown>(
-    wsId: string,
-    filter: {
-      subject_id?: string | null;
-      grant_id?: string | null;
-      capability?: string | null;
-      since?: string | null;
-      until?: string | null;
-      limit?: number;
-      offset?: number;
-    } = {},
-  ): Promise<T> {
-    const params = new URLSearchParams();
-    if (filter.subject_id) params.set("subject_id", filter.subject_id);
-    if (filter.grant_id) params.set("grant_id", filter.grant_id);
-    if (filter.capability) params.set("capability", filter.capability);
-    if (filter.since) params.set("since", filter.since);
-    if (filter.until) params.set("until", filter.until);
-    if (filter.limit !== undefined) params.set("limit", String(filter.limit));
-    if (filter.offset !== undefined) params.set("offset", String(filter.offset));
-    const qs = params.toString();
-    return this.fetch<T>(
-      qs
-        ? `/api/workspaces/${wsId}/grants/audit?${qs}`
-        : `/api/workspaces/${wsId}/grants/audit`,
-    );
-  }
-
+  // CEREBRO-PATCH(cerebro-persona-grants-client-removed): FIR-2284 Bite 3 — the Persona grant control-plane client methods (listPersonaGrants/getPersonaGrant/createPersonaGrant/updatePersonaGrant/deletePersonaGrant/evaluatePersonaGrant/listPersonaGrantAudit) were removed when the old grant-based Access page was retired. The /grants endpoints still exist for the CLI; no remaining web/desktop caller.
   // CEREBRO-PATCH(approvals-client-removed): FIR-2230 phase 5 — the approval-ask client methods (listPendingApprovalAsks/approveAsk/rejectAsk) were removed when the duplicate "Pending" view was consolidated into the dedicated approvals inbox (which calls cerebroRequest). No remaining caller in the upstream client.
   // Web Push (per-device subscriptions). The server returns enabled=false
   // when VAPID keys aren't configured — callers should hide the subscribe UI
@@ -1312,6 +1294,8 @@ export class ApiClient {
     if (params?.priority) search.set("priority", params.priority);
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
+    // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 forward on-behalf-of member filter.
+    if (params?.on_behalf_of_ids?.length) search.set("on_behalf_of_ids", params.on_behalf_of_ids.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
@@ -1337,6 +1321,8 @@ export class ApiClient {
     if (params.assignee_types?.length) search.set("assignee_types", params.assignee_types.join(","));
     if (params.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
+    // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 forward on-behalf-of member filter (grouped).
+    if (params.on_behalf_of_ids?.length) search.set("on_behalf_of_ids", params.on_behalf_of_ids.join(","));
     if (params.creator_id) search.set("creator_id", params.creator_id);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
@@ -1854,6 +1840,135 @@ export class ApiClient {
       body: JSON.stringify({ instance_id: instanceId }),
       extraHeaders: { "Content-Type": "application/json" },
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // Cloud Billing — proxies to multica-cloud /api/v1/billing/*. The
+  // multica-api server stamps X-User-ID and forwards bytes; everything
+  // here is upstream-shaped. See packages/core/types/billing.ts for the
+  // response field documentation.
+  // ---------------------------------------------------------------------
+
+  async getCloudBillingBalance(): Promise<BillingBalance> {
+    const raw = await this.fetch<unknown>("/api/cloud-billing/balance");
+    return parseWithFallback(raw, BillingBalanceSchema, EMPTY_BILLING_BALANCE, {
+      endpoint: "GET /api/cloud-billing/balance",
+    });
+  }
+
+  async listCloudBillingTransactions(
+    params?: { page?: number; page_size?: number },
+  ): Promise<BillingTransactionsPage> {
+    const search = new URLSearchParams();
+    if (params?.page !== undefined) search.set("page", String(params.page));
+    if (params?.page_size !== undefined) search.set("page_size", String(params.page_size));
+    const query = search.toString();
+    const raw = await this.fetch<unknown>(
+      `/api/cloud-billing/transactions${query ? `?${query}` : ""}`,
+    );
+    return parseWithFallback(
+      raw,
+      BillingTransactionsPageSchema,
+      EMPTY_BILLING_TRANSACTIONS_PAGE,
+      { endpoint: "GET /api/cloud-billing/transactions" },
+    );
+  }
+
+  async listCloudBillingBatches(
+    params?: { page?: number; page_size?: number },
+  ): Promise<BillingBatchesPage> {
+    const search = new URLSearchParams();
+    if (params?.page !== undefined) search.set("page", String(params.page));
+    if (params?.page_size !== undefined) search.set("page_size", String(params.page_size));
+    const query = search.toString();
+    const raw = await this.fetch<unknown>(
+      `/api/cloud-billing/batches${query ? `?${query}` : ""}`,
+    );
+    return parseWithFallback(
+      raw,
+      BillingBatchesPageSchema,
+      EMPTY_BILLING_BATCHES_PAGE,
+      { endpoint: "GET /api/cloud-billing/batches" },
+    );
+  }
+
+  async listCloudBillingTopups(
+    params?: { page?: number; page_size?: number },
+  ): Promise<BillingTopupsPage> {
+    const search = new URLSearchParams();
+    if (params?.page !== undefined) search.set("page", String(params.page));
+    if (params?.page_size !== undefined) search.set("page_size", String(params.page_size));
+    const query = search.toString();
+    const raw = await this.fetch<unknown>(
+      `/api/cloud-billing/topups${query ? `?${query}` : ""}`,
+    );
+    return parseWithFallback(
+      raw,
+      BillingTopupsPageSchema,
+      EMPTY_BILLING_TOPUPS_PAGE,
+      { endpoint: "GET /api/cloud-billing/topups" },
+    );
+  }
+
+  async listCloudBillingPriceTiers(): Promise<BillingPriceTier[]> {
+    const raw = await this.fetch<unknown>("/api/cloud-billing/price-tiers");
+    return parseWithFallback(
+      raw,
+      BillingPriceTierListSchema,
+      EMPTY_BILLING_PRICE_TIER_LIST,
+      { endpoint: "GET /api/cloud-billing/price-tiers" },
+    );
+  }
+
+  async createCloudBillingCheckoutSession(
+    data: CreateBillingCheckoutSessionRequest,
+  ): Promise<CreateBillingCheckoutSessionResponse> {
+    const res = await this.fetchRaw("/api/cloud-billing/checkout-sessions", {
+      method: "POST",
+      body: JSON.stringify(data),
+      extraHeaders: { "Content-Type": "application/json" },
+    });
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback(
+      raw,
+      CreateBillingCheckoutSessionResponseSchema,
+      EMPTY_CREATE_BILLING_CHECKOUT_SESSION_RESPONSE,
+      { endpoint: "POST /api/cloud-billing/checkout-sessions" },
+    );
+  }
+
+  async getCloudBillingCheckoutSession(
+    sessionId: string,
+  ): Promise<BillingCheckoutSessionStatus> {
+    // Stripe session ids are `cs_<base62>` so they're URL-safe by
+    // construction; encodeURIComponent is paranoia for the case where a
+    // future Stripe format change adds a non-alphanumeric character. The
+    // server has its own allow-list rejection for unsafe ids.
+    const raw = await this.fetch<unknown>(
+      `/api/cloud-billing/checkout-sessions/${encodeURIComponent(sessionId)}`,
+    );
+    return parseWithFallback(
+      raw,
+      BillingCheckoutSessionStatusSchema,
+      EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
+      { endpoint: "GET /api/cloud-billing/checkout-sessions/{sessionId}" },
+    );
+  }
+
+  async createCloudBillingPortalSession(): Promise<CreateBillingPortalSessionResponse> {
+    const res = await this.fetchRaw("/api/cloud-billing/portal-sessions", {
+      method: "POST",
+      // Body is intentionally absent — the upstream endpoint requires no
+      // payload today. fetchRaw with no body skips the Content-Type
+      // default; that's fine because there's nothing to declare.
+    });
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback(
+      raw,
+      CreateBillingPortalSessionResponseSchema,
+      EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
+      { endpoint: "POST /api/cloud-billing/portal-sessions" },
+    );
   }
 
   async deleteRuntime(runtimeId: string): Promise<void> {
@@ -2480,6 +2595,9 @@ export class ApiClient {
     posthog_key?: string;
     posthog_host?: string;
     analytics_environment?: string;
+    // Self-host gate (#3433). Optional because older servers omit the field
+    // entirely; consumers must default to false.
+    workspace_creation_disabled?: boolean;
   }> {
     return this.fetch("/api/config");
   }
@@ -2721,6 +2839,15 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // CEREBRO-PATCH(skill-fork-parent-lineage): FIR-2629 — "forked from" lineage; resolves to null when the skill is an original (404).
+  async getSkillForkParent(id: string): Promise<SkillForkParent | null> {
+    try {
+      return await this.fetch(`/api/skills/${id}/fork-parent`);
+    } catch {
+      return null;
+    }
   }
 
   // Personal Access Tokens

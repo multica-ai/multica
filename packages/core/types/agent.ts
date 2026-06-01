@@ -73,7 +73,14 @@ export type TaskFailureReason =
   | "timeout"
   | "runtime_offline"
   | "runtime_recovery"
-  | "manual";
+  | "manual"
+  | "rate_limit"
+  | "runtime_paused"
+  | "queued_expired"
+  | "iteration_limit"
+  | "agent_fallback_message"
+  | "api_invalid_request"
+  | "codex_semantic_inactivity";
 
 // One daily bucket for the Agents-list ACTIVITY sparkline. The back-end
 // only returns days that had at least one completion; the front-end fills
@@ -164,9 +171,24 @@ export interface AgentTask {
   kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
   /**
    * Local working directory pinned for this task by the daemon. Empty until
-   * the daemon reports a work_dir (typically once execution starts).
+   * the daemon reports a work_dir (typically once execution starts). This is
+   * the canonical absolute path the agent runs in; UI surfaces should prefer
+   * `relative_work_dir` to avoid leaking the user's home directory.
    */
   work_dir?: string;
+  /**
+   * Privacy-safe display form of `work_dir`, derived on the server. For
+   * standard tasks the daemon's workspaces root has been stripped off
+   * (`<wsUUID>/<taskShort>/workdir`); for local_directory tasks where the
+   * path lives outside that layout, the server strips recognised home
+   * prefixes (`/Users/<name>/`, `/home/<name>/`, `<drive>:/Users/<name>/`)
+   * and otherwise falls back to the basename so neither the home directory
+   * nor the username leak into the UI. Older backends omit the field —
+   * render it conditionally and never render `work_dir` raw (not even in
+   * a tooltip / `title` / `aria-label`, since the goal is that screen
+   * shares and screenshots also stay safe).
+   */
+  relative_work_dir?: string;
 }
 
 export interface WorkSession {
@@ -215,6 +237,27 @@ export interface Agent {
    * alongside `has_custom_env`. Treat `undefined` as zero. MUL-2600.
    */
   custom_env_key_count?: number;
+  /**
+   * MCP server configuration forwarded to the runtime CLI (Claude's
+   * `--mcp-config`). The shape is opaque to the platform — whatever
+   * JSON the CLI accepts, the daemon writes to disk verbatim. `null`
+   * (or the field omitted on legacy backends) means no config; the
+   * daemon falls back to the CLI's own default. MUL-2764.
+   *
+   * When the caller can't see secrets (an agent actor, or a non-owner
+   * non-admin), the server replaces the value with `null` and sets
+   * `mcp_config_redacted` to true so the UI can render a "configured
+   * but hidden" state without exposing potentially sensitive fields.
+   */
+  mcp_config?: unknown | null;
+  /**
+   * True when the server stripped `mcp_config` from this response
+   * because the caller lacks permission to see secrets. The UI uses
+   * this to distinguish "no config" (`mcp_config === null &&
+   * !mcp_config_redacted`) from "config exists but you can't see it".
+   * Older backends omit this field; treat `undefined` as false.
+   */
+  mcp_config_redacted?: boolean;
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
@@ -396,6 +439,15 @@ export interface UpdateAgentRequest {
    * MUL-2600.
    */
   custom_args?: string[];
+  /**
+   * MCP server configuration. Tri-state semantics (MUL-2764):
+   *   - field omitted → no change
+   *   - `null` → clear the column; the daemon falls back to the CLI's
+   *     built-in default at launch
+   *   - object → replace the stored JSON verbatim; the platform does
+   *     not validate the shape (MCP CLI accepts whatever it accepts)
+   */
+  mcp_config?: unknown | null;
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;
@@ -510,6 +562,10 @@ export interface SkillChangeRequest {
   review_comment: string;
   created_at: string;
   updated_at: string;
+  // CEREBRO-PATCH(skill-change-request-session): FIR-2627/FIR-2629 — the agent
+  // work session that proposed this change, so the review UI can link back to
+  // the run. Null/absent for proposals opened from the web UI by a human.
+  work_session_id?: string | null;
 }
 
 export interface SkillFork {
@@ -522,6 +578,18 @@ export interface SkillFork {
   forked_name?: string;
   forked_description?: string;
   current_version?: string;
+}
+
+// CEREBRO-PATCH(skill-fork-parent-lineage): FIR-2629 — "forked from" lineage
+// returned by GET /api/skills/{id}/fork-parent. Absent (404) when the skill is
+// an original, not a fork.
+export interface SkillForkParent {
+  id: string;
+  parent_skill_id: string;
+  forked_skill_id: string;
+  forked_by: string | null;
+  created_at: string;
+  parent_name: string;
 }
 
 export interface UpdateSkillOwnershipRequest {

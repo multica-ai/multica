@@ -16,6 +16,7 @@ import {
 
 const ALICE = "user-alice";
 const BOB = "user-bob";
+const CAROL = "user-carol";
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -227,6 +228,19 @@ describe("canEditSkill / canDeleteSkill", () => {
       .toBe(true);
     expect(canDeleteSkill(skill, { userId: BOB, role: "member" }).allowed)
       .toBe(false);
+  });
+  // FIR-2629: owner + approvers edit directly, not only the creator.
+  it("allows the explicit owner who is not the creator", () => {
+    const s: Skill = { ...makeSkill(ALICE), owner_id: BOB };
+    expect(canEditSkill(s, { userId: BOB, role: "member" }).allowed).toBe(true);
+  });
+  it("allows an approver to edit directly", () => {
+    const s: Skill = { ...makeSkill(ALICE), owner_id: BOB, approver_ids: [CAROL] };
+    expect(canEditSkill(s, { userId: CAROL, role: "member" }).allowed).toBe(true);
+  });
+  it("denies the creator once a different owner is set", () => {
+    const s: Skill = { ...makeSkill(ALICE), owner_id: BOB };
+    expect(canEditSkill(s, { userId: ALICE, role: "member" }).allowed).toBe(false);
   });
 });
 

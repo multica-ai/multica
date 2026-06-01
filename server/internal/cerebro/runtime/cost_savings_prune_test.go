@@ -86,10 +86,11 @@ func TestPrunedToolResultPlaceholder_IsRecognised(t *testing.T) {
 }
 
 // When prune_tool_results is "on" (applied), the measurement must report the
-// chars ACTUALLY pruned, not the full tool-result surface.
+// COMPOUNDING chars pruned (counted once per subsequent model call), not the
+// full tool-result surface.
 func TestMeasureRun_PruneOnUsesActuallyPrunedChars(t *testing.T) {
 	got := measureRun(map[string]string{savingPruneToolResults: savingModeOn},
-		CostSavingRunFacts{ToolResultChars: 4000, PrunedToolResultChars: 800}, "")
+		CostSavingRunFacts{ToolResultChars: 4000, PrunedContextCharsCompounded: 800}, "")
 	m, ok := findMeasurement(got, savingPruneToolResults)
 	if !ok {
 		t.Fatalf("prune measurement missing: %+v", got)
@@ -143,9 +144,9 @@ func TestMeasureRun_PruneIsIndependentOfSnapshotAndBundled(t *testing.T) {
 		savingPruneToolResults: savingModeOn,
 	}
 	facts := CostSavingRunFacts{
-		InlinedContextReads:   3,
-		ToolResultChars:       400,
-		PrunedToolResultChars: 200,
+		InlinedContextReads:          3,
+		ToolResultChars:              400,
+		PrunedContextCharsCompounded: 200,
 	}
 	got := measureRun(modes, facts, "")
 
@@ -167,8 +168,9 @@ func TestMeasureRun_PruneIsIndependentOfSnapshotAndBundled(t *testing.T) {
 		t.Errorf("prune must measure context_tokens, got %q (would imply overlap with snapshot/bundled)", prune.Metric)
 	}
 
-	// Prune's measurement is driven only by its own facts (PrunedToolResultChars
-	// when applied). It must NOT see InlinedContextReads — 200/4 = 50 tokens,
+	// Prune's measurement is driven only by its own facts
+	// (PrunedContextCharsCompounded when applied). It must NOT see
+	// InlinedContextReads — 200/4 = 50 tokens,
 	// nothing influenced by the 3 inlined reads above.
 	if prune.Baseline != 50 || prune.Effective != 0 {
 		t.Errorf("prune baseline/effective = %d/%d, want 50/0 (no contamination from InlinedContextReads)", prune.Baseline, prune.Effective)

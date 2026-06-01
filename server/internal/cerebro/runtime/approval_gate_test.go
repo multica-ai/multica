@@ -41,6 +41,13 @@ func (f *gateFakeApprovals) Get(_ context.Context, _, _ pgtype.UUID) (cerebrodb.
 	return cerebrodb.CerebroApprovalRequest{ID: gateTestUUID(2), Status: f.status}, nil
 }
 
+// FindReusable is unused by the blocking runtime tool gate (Guard/GuardDecision
+// hold a single Await), so the fake reports "no reusable ask" — a fresh ask is
+// always created, matching prior behaviour.
+func (f *gateFakeApprovals) FindReusable(_ context.Context, _ approvals.ReusableQuery) (cerebrodb.CerebroApprovalRequest, bool, error) {
+	return cerebrodb.CerebroApprovalRequest{}, false, nil
+}
+
 func gateTestUUID(seed byte) pgtype.UUID {
 	var u pgtype.UUID
 	for i := range u.Bytes {
