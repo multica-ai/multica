@@ -300,6 +300,36 @@ func TestOrchestrateRefusesPlanWithoutCriteria(t *testing.T) {
 	}
 }
 
+// TestOrchestrateDecomposesEmptyParent: a labeled, squad-assigned parent with NO
+// sub-issues dispatches the SQUAD LEADER (not the human owner) to break it down,
+// with a comment that explains there are no sub-issues yet.
+func TestOrchestrateDecomposesEmptyParent(t *testing.T) {
+	fx := newOrchestrationFixture(t)
+	ctx := context.Background()
+
+	// Remove both sub-issues so the parent is labeled + squad-assigned but empty.
+	for _, id := range []string{uuidToString(fx.childA.ID), uuidToString(fx.childB.ID)} {
+		if _, err := testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id); err != nil {
+			t.Fatalf("delete child: %v", err)
+		}
+	}
+
+	testHandler.maybeStartOrchestrationOnLabel(ctx, fx.parent, fx.labelID.ID)
+
+	// CEREBRO-PATCH(orchestration-decompose): FIR-2564 — empty-parent decomposition assertion.
+	// The squad leader (not the owner) is dispatched on the parent to decompose it.
+	if got := countPendingTasksForAgent(t, uuidToString(fx.parent.ID), fx.leaderID); got != 1 {
+		t.Errorf("squad leader should be dispatched once to decompose the empty parent, got %d", got)
+	}
+	content := strings.ToLower(parentSystemCommentContent(t, uuidToString(fx.parent.ID)))
+	if !strings.Contains(content, "no sub-issues") {
+		t.Errorf("expected a 'no sub-issues yet' explanation, got: %s", content)
+	}
+	if !strings.Contains(content, "squad leader") {
+		t.Errorf("explanation should address the squad leader, got: %s", content)
+	}
+}
+
 // TestOrchestrateGateHoldsUntilVerified: childA reaching `done` is NOT enough to
 // release childB — the verification gate holds it until childA is independently
 // verified (`orch-verified`). The done-but-unverified child triggers a

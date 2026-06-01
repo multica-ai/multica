@@ -221,9 +221,7 @@ func (h *Handler) runOrchestration(ctx context.Context, parent db.Issue, postSum
 
 	if len(children) == 0 {
 		if postSummary {
-			h.postOrchestrationComment(ctx, parent,
-				"Orchestration label set, but this issue has no sub-issues to drive. "+
-					"Add sub-issues and `blocks` dependencies between them, then re-apply the label.")
+			h.requestPlanDecomposition(ctx, parent)
 		}
 		return
 	}
@@ -616,6 +614,48 @@ func (h *Handler) requestPlanRefinement(ctx context.Context, parent db.Issue, mi
 		"describing what \"delivered\" means — that is exactly what the verification step judges against.\n" +
 		"2. Check the `blocks` dependencies between the sub-issues are right.\n" +
 		"3. Then remove and re-apply the `orchestrate` label on this issue to start the run."
+	comment, ok := h.postOrchestrationCommentReturning(ctx, parent, instructions)
+	if !ok {
+		return
+	}
+	h.enqueueSquadLeaderTask(ctx, parent, comment.ID, "system", "")
+}
+
+// CEREBRO-PATCH(orchestration-decompose): FIR-2564 — a labeled, squad-assigned
+// parent with ZERO sub-issues wakes the SQUAD LEADER to break it down, instead
+// of leaving a passive "add sub-issues yourself" note for the human owner.
+// Orchestration coordinates existing sub-issues; it does not invent them — so
+// when there are none, the leader (not the owner) plans them, mirroring
+// requestPlanRefinement (the criteria-missing path). Same principle Jesper set:
+// the squad leader finishes the plan. Idempotent on a re-applied label.
+func (h *Handler) requestPlanDecomposition(ctx context.Context, parent db.Issue) {
+	if !h.isSquadLeaderReady(ctx, parent) {
+		h.postOrchestrationComment(ctx, parent,
+			"Orchestration label set, but this issue has no sub-issues to drive and this "+
+				"squad has no available leader to plan them. Assign a squad with an active "+
+				"leader, or add sub-issues and `blocks` dependencies yourself, then re-apply "+
+				"the `orchestrate` label.")
+		return
+	}
+	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+		ID:          parent.AssigneeID,
+		WorkspaceID: parent.WorkspaceID,
+	})
+	if err != nil {
+		return
+	}
+	if h.hasPendingTask(ctx, parent.ID, squad.LeaderID) {
+		return
+	}
+	instructions := "This issue is set to `orchestrate`, but it has no sub-issues yet — " +
+		"orchestration coordinates sub-issues, it does not create them.\n\n" +
+		"As squad leader, break this issue down (the issue owner should NOT have to do this):\n" +
+		"1. Create the sub-issues this work splits into, each assigned to the right agent or squad.\n" +
+		"2. Give each sub-issue a definition-of-done checklist (lines like `- [ ] ...`) — that is " +
+		"exactly what the verification step judges each deliverable against.\n" +
+		"3. Add `blocks` dependencies between the sub-issues so the engine knows what waits on what.\n" +
+		"4. Then remove and re-apply the `orchestrate` label on this issue to start the run.\n\n" +
+		"If the breakdown needs a product decision from the issue owner first, ask it before creating the sub-issues."
 	comment, ok := h.postOrchestrationCommentReturning(ctx, parent, instructions)
 	if !ok {
 		return
