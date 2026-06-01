@@ -1283,6 +1283,7 @@ export function InboxPage() {
       <IssueDetail
         key={selected.issue_id}
         issueId={selected.issue_id}
+        seedFromIssueList={false} // CEREBRO-PATCH(issue-detail-seed-from-list): FIR-2684 — opening a message must not cold-load the board issue-list
         defaultSidebarOpen={false}
         layoutId="multica_inbox_issue_detail_layout"
         highlightCommentId={selected.details?.comment_id ?? undefined}
