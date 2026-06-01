@@ -40,12 +40,12 @@ const MIN_STATUSES = 3;
 
 const BASE_STATUS_LABELS: Record<string, string> = {
   backlog: "Backlog",
-  todo: "To-do",
-  in_progress: "I gang",
-  in_review: "I review",
-  done: "Færdig",
-  blocked: "Blokeret",
-  cancelled: "Annulleret",
+  todo: "Todo",
+  in_progress: "In Progress",
+  in_review: "In Review",
+  done: "Done",
+  blocked: "Blocked",
+  cancelled: "Cancelled",
 };
 
 const PRESET_COLORS = [
@@ -137,8 +137,8 @@ function seedRows(model?: CerebroStatusModel): EditorRow[] {
     },
     {
       uid: "r2",
-      key: "i_gang",
-      label: "I gang",
+      key: "in_progress",
+      label: "In Progress",
       color: PRESET_COLORS[4]!,
       base_status: "in_progress",
       description: "",
@@ -146,8 +146,8 @@ function seedRows(model?: CerebroStatusModel): EditorRow[] {
     },
     {
       uid: "r3",
-      key: "faerdig",
-      label: "Færdig",
+      key: "done",
+      label: "Done",
       color: PRESET_COLORS[3]!,
       base_status: "done",
       description: "",
@@ -249,7 +249,7 @@ export function StatusModelEditor({
   const handleSubmit = async () => {
     if (!canSubmit) {
       toast.error(
-        `En model kræver et navn, mindst ${MIN_STATUSES} statusser, og en beskrivelse på hver status (agenter læser dem).`,
+        `A model needs a name, at least ${MIN_STATUSES} statuses, and a description on every status (agents read them).`,
       );
       return;
     }
@@ -285,36 +285,36 @@ export function StatusModelEditor({
       await onSubmit(input);
       onOpenChange(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Kunne ikke gemme modellen.");
+      toast.error(err instanceof Error ? err.message : "Could not save the model.");
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{model ? "Rediger statusmodel" : "Ny statusmodel"}</DialogTitle>
+          <DialogTitle>{model ? "Edit status model" : "New status model"}</DialogTitle>
           <DialogDescription>
-            Byg en pipeline af egne statusser som lever under de 7 grundtilstande.
-            To statusser kan dele samme grundtilstand — de bliver til separate
-            kolonner på boardet. Beskrivelsen er det agenter læser for at vide
-            hvad statussen betyder.
+            Build a pipeline of custom statuses that live under the 7 core
+            statuses. Two statuses can share the same core status — they become
+            separate columns on the board. The description is what agents read
+            to understand what the status means.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="sm-name">Navn</Label>
+            <Label htmlFor="sm-name">Name</Label>
             <Input
               id="sm-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="fx Plan-først pipeline"
+              placeholder="e.g. Plan-first pipeline"
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="sm-desc">Beskrivelse (valgfri)</Label>
+            <Label htmlFor="sm-desc">Description (optional)</Label>
             <Textarea
               id="sm-desc"
               value={description}
@@ -325,7 +325,7 @@ export function StatusModelEditor({
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label>Statusser</Label>
+              <Label>Statuses</Label>
               <span className="text-xs text-muted-foreground">
                 {rows.length} · min. {MIN_STATUSES}
               </span>
@@ -361,7 +361,7 @@ export function StatusModelEditor({
 
                     <input
                       type="color"
-                      aria-label="Farve"
+                      aria-label="Color"
                       value={row.color}
                       onChange={(e) => updateRow(row.uid, { color: e.target.value })}
                       className="size-7 shrink-0 cursor-pointer rounded-md border bg-transparent p-0"
@@ -370,7 +370,7 @@ export function StatusModelEditor({
                     <Input
                       value={row.label}
                       onChange={(e) => updateRow(row.uid, { label: e.target.value })}
-                      placeholder="Status-navn"
+                      placeholder="Status name"
                       className="flex-1"
                     />
 
@@ -404,7 +404,7 @@ export function StatusModelEditor({
                       htmlFor={`desc-${row.uid}`}
                       className="text-xs text-muted-foreground"
                     >
-                      Beskrivelse — agenter læser denne
+                      Description — agents read this
                     </Label>
                     <Textarea
                       id={`desc-${row.uid}`}
@@ -413,13 +413,13 @@ export function StatusModelEditor({
                         updateRow(row.uid, { description: e.target.value })
                       }
                       rows={2}
-                      placeholder="fx Issue er klar til review fra Tine — agent må sætte sig selv på"
+                      placeholder="e.g. Issue is ready for review — an agent may assign itself"
                     />
                   </div>
 
                   <details className="text-sm">
                     <summary className="cursor-pointer text-xs text-muted-foreground">
-                      Automatisering — valgfri
+                      Automation — optional
                     </summary>
                     <div className="mt-2 space-y-2 pl-2">
                       <div className="flex items-center gap-2">
@@ -437,7 +437,7 @@ export function StatusModelEditor({
                           htmlFor={`assign-${row.uid}`}
                           className="text-xs font-normal"
                         >
-                          Tildel automatisk når issue lander her
+                          Assign automatically when an issue lands here
                         </Label>
                       </div>
                       {row.triggers.assign_enabled && (
@@ -452,7 +452,7 @@ export function StatusModelEditor({
                             className="w-28"
                           >
                             <NativeSelectOption value="member">
-                              Person
+                              Member
                             </NativeSelectOption>
                             <NativeSelectOption value="agent">
                               Agent
@@ -465,7 +465,7 @@ export function StatusModelEditor({
                                 assign_to_id: e.target.value,
                               })
                             }
-                            placeholder="ID på person eller agent"
+                            placeholder="Member or agent ID"
                             className="flex-1"
                           />
                         </div>
@@ -485,7 +485,7 @@ export function StatusModelEditor({
                           htmlFor={`fire-${row.uid}`}
                           className="text-xs font-normal"
                         >
-                          Fyr en agent når issue lander her
+                          Fire an agent when an issue lands here
                         </Label>
                       </div>
                       {row.triggers.fire_enabled && (
@@ -497,7 +497,7 @@ export function StatusModelEditor({
                                 fire_agent_id: e.target.value,
                               })
                             }
-                            placeholder="Agent-ID der skal kaldes"
+                            placeholder="Agent ID to fire"
                           />
                         </div>
                       )}
@@ -509,7 +509,7 @@ export function StatusModelEditor({
 
             <Button type="button" variant="outline" size="sm" onClick={addRow}>
               <Plus className="mr-1.5 size-3.5" />
-              Tilføj status
+              Add status
             </Button>
           </div>
         </div>
@@ -517,10 +517,10 @@ export function StatusModelEditor({
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             <X className="mr-1.5 size-3.5" />
-            Annullér
+            Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={!canSubmit || saving}>
-            {saving ? "Gemmer…" : model ? "Gem ændringer" : "Opret model"}
+            {saving ? "Saving…" : model ? "Save changes" : "Create model"}
           </Button>
         </DialogFooter>
       </DialogContent>
