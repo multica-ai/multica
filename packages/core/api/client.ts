@@ -282,6 +282,33 @@ export class ApiClient {
     return this.baseUrl;
   }
 
+  private absoluteUrl(url: string): string {
+    if (!url.startsWith("/") || url.startsWith("//")) return url;
+    try {
+      return new URL(url, this.baseUrl).toString();
+    } catch {
+      return url;
+    }
+  }
+
+  private normalizeAttachment<T extends { url?: unknown; download_url?: unknown; content_url?: unknown }>(attachment: T): T {
+    return {
+      ...attachment,
+      ...(typeof attachment.url === "string" ? { url: this.absoluteUrl(attachment.url) } : {}),
+      ...(typeof attachment.download_url === "string" ? { download_url: this.absoluteUrl(attachment.download_url) } : {}),
+      ...(typeof attachment.content_url === "string" ? { content_url: this.absoluteUrl(attachment.content_url) } : {}),
+    };
+  }
+
+  private normalizeAttachments<T extends { attachments?: unknown }>(items: T[]): T[] {
+    return items.map((item) => ({
+      ...item,
+      ...(Array.isArray(item.attachments)
+        ? { attachments: item.attachments.map((attachment) => this.normalizeAttachment(attachment)) }
+        : {}),
+    }));
+  }
+
   setToken(token: string | null) {
     this.token = token;
   }
@@ -650,9 +677,10 @@ export class ApiClient {
   // Comments
   async listComments(issueId: string): Promise<Comment[]> {
     const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments`);
-    return parseWithFallback(raw, CommentsListSchema, [], {
+    const comments = parseWithFallback(raw, CommentsListSchema, [], {
       endpoint: "GET /api/issues/:id/comments",
     });
+    return this.normalizeAttachments(comments);
   }
 
   async createComment(issueId: string, content: string, type?: string, parentId?: string, attachmentIds?: string[]): Promise<Comment> {
@@ -671,9 +699,10 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(
       `/api/issues/${issueId}/timeline`,
     );
-    return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
+    const entries = parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
       endpoint: "GET /api/issues/:id/timeline",
     });
+    return this.normalizeAttachments(entries);
   }
 
   async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
@@ -1584,9 +1613,10 @@ export class ApiClient {
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
     const raw = (await res.json()) as unknown;
-    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+    const attachment = parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
       endpoint: "POST /api/upload-file",
     });
+    return this.normalizeAttachment(attachment);
   }
 
   // Chat Sessions
@@ -1653,7 +1683,8 @@ export class ApiClient {
   }
 
   async listAttachments(issueId: string): Promise<Attachment[]> {
-    return this.fetch(`/api/issues/${issueId}/attachments`);
+    const attachments = await this.fetch<Attachment[]>(`/api/issues/${issueId}/attachments`);
+    return attachments.map((attachment) => this.normalizeAttachment(attachment));
   }
 
   // Fetches a fresh attachment metadata record. The server re-signs
@@ -1662,9 +1693,10 @@ export class ApiClient {
   // signed URL cached in TanStack Query.
   async getAttachment(id: string): Promise<Attachment> {
     const raw = await this.fetch<unknown>(`/api/attachments/${id}`);
-    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+    const attachment = parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
       endpoint: "GET /api/attachments/{id}",
     });
+    return this.normalizeAttachment(attachment);
   }
 
   async deleteAttachment(id: string): Promise<void> {

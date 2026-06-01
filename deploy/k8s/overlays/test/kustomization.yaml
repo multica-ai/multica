@@ -18,9 +18,9 @@ commonAnnotations:
 # tag (e.g. main-<sha>) once CI is wired and you can drop the Always patch.
 images:
   - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-server
-    newTag: "0.2.50-feishu-label-sync"
+    newTag: "0.2.52-feishu-sync-fixes"
   - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-web
-    newTag: "0.2.50-feishu-label-sync"
+    newTag: "0.2.52-feishu-sync-fixes"
 
 # Test runs at 1/1 — single web pod is enough for smoke testing and matches
 # the server's single-replica constraint (in-memory WS hub).

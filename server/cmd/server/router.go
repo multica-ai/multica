@@ -424,6 +424,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/feishu-project/sync", h.SyncFeishuProjectIntegration)
 					r.Get("/feishu-project/fields", h.ListFeishuProjectWorkItemFields)
 					r.Get("/feishu-project/business-lines", h.ListFeishuProjectBusinessLines)
+					r.Get("/feishu-project/space-business-lines", h.ListFeishuProjectSpaceBusinessLines)
 					r.Get("/feishu-project/routes", h.ListFeishuProjectRoutes)
 					r.Put("/feishu-project/routes", h.ReplaceFeishuProjectRoutes)
 				})

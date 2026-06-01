@@ -338,6 +338,12 @@ func TestFeishuProjectManualQueryWorkItemsUsesThirtyDayUpdatedAtFilter(t *testin
 }
 
 func TestFeishuProjectQueryWorkItemsResolvesOwnerEmailFromUserDetails(t *testing.T) {
+	// End-to-end: the assignee is in `issue_operator` (经办人), resolved through
+	// user_details. The `owner` and `current_status_operator` fields also reference
+	// the same person but must NOT be the source of OwnerEmail — `owner` is the
+	// CREATOR in Meego and `current_status_operator` is a workflow-position concept.
+	// Here all three happen to coincide, which is realistic when an issue's creator
+	// is also assigned to themselves; the point is which field we pull from.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/open_api/authen/plugin_token":
@@ -352,8 +358,9 @@ func TestFeishuProjectQueryWorkItemsResolvesOwnerEmailFromUserDetails(t *testing
 					"name": "test-wenxue",
 					"work_item_status": {"state_key": "OPEN", "name": "新建"},
 					"fields": [
-						{"field_key": "current_status_operator", "field_alias": "current_status_operator", "field_value": ["7052496113189830658"]},
-						{"field_key": "owner", "field_alias": "owner", "field_value": "7052496113189830658"}
+						{"field_key": "current_status_operator", "field_alias": "current_status_operator", "name": "当前负责人", "field_value": ["7052496113189830658"]},
+						{"field_key": "owner", "field_alias": "owner", "name": "创建者", "field_value": "7052496113189830658"},
+						{"field_key": "issue_operator", "field_alias": "issue_operator", "name": "经办人", "field_value": ["7052496113189830658"]}
 					],
 					"user_details": [{
 						"user_key": "7052496113189830658",
@@ -389,7 +396,65 @@ func TestFeishuProjectQueryWorkItemsResolvesOwnerEmailFromUserDetails(t *testing
 		t.Fatalf("len(items) = %d, want 1", len(items))
 	}
 	if items[0].OwnerEmail != "beastpu@lilith.com" {
-		t.Fatalf("OwnerEmail = %q, want beastpu@lilith.com", items[0].OwnerEmail)
+		t.Fatalf("OwnerEmail = %q, want beastpu@lilith.com (resolved from 经办人 via user_details)", items[0].OwnerEmail)
+	}
+}
+
+// Regression for partopia#7004726014: when 经办人 (operator role) is empty, the synced
+// Multica issue must NOT be auto-assigned to the creator. Modelled on the real Meego
+// payload — only `owner` (= creator), `current_status_operator`, and an empty
+// role_owners[operator] are populated; no `issue_operator` / 经办人 / 处理人 / 负责人.
+func TestFeishuProjectQueryWorkItemsLeavesOwnerEmailEmptyWhenOperatorIsBlank(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/work_item/filter":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"err_code": 0,
+				"data": [{
+					"id": 7004726014,
+					"name": "operator-empty-item",
+					"work_item_status": {"state_key": "OPEN", "name": "新建"},
+					"fields": [
+						{"field_key": "owner", "field_alias": "owner", "name": "创建者", "field_value": "7052790644598751234"},
+						{"field_key": "current_status_operator", "field_alias": "current_status_operator", "name": "当前负责人", "field_value": ["7052790644598751234"]},
+						{"field_key": "role_owners", "field_type_key": "role_owners", "field_value": [
+							{"role": "operator", "owners": null},
+							{"role": "reporter", "owners": ["7052790644598751234"]}
+						]}
+					],
+					"user_details": [{
+						"user_key": "7052790644598751234",
+						"email": "jinnanxu@lilith.com",
+						"name_cn": "徐晋楠"
+					}]
+				}],
+				"pagination": {"page_num": 1, "page_size": 100, "total": 1}
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	items, err := client.QueryWorkItems(context.Background(), db.FeishuProjectIntegration{
+		ProjectKey:    "project-key",
+		PluginID:      "plugin-id",
+		PluginSecret:  "plugin-secret",
+		StatusMapping: []byte(`{"OPEN": "todo"}`),
+	}, "issue", false)
+	if err != nil {
+		t.Fatalf("QueryWorkItems: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].OwnerEmail != "" {
+		t.Fatalf("OwnerEmail = %q, want empty (creator must not leak as assignee)", items[0].OwnerEmail)
 	}
 }
 
@@ -1052,5 +1117,231 @@ func TestFeishuProjectQueryWorkItemsHonorsExplicitSinceFromOpts(t *testing.T) {
 	got, _ := updatedAt["start"].(float64)
 	if int64(got) != explicit {
 		t.Fatalf("updated_at.start = %v, want %d", got, explicit)
+	}
+}
+
+// Regression for the BUG-7004679644 incident: when a user types a work_item_id
+// in the "立即同步" box, Meego applies work_item_status and updated_at filters
+// with AND semantics, so keeping them drops any target whose status has moved
+// off the mapped set or that hasn't been updated in 30 days. Targeted syncs
+// must trust the user's intent and omit both filters.
+func TestFeishuProjectQueryWorkItemsTargetedIDBypassesStatusAndUpdatedAtFilters(t *testing.T) {
+	t.Parallel()
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/work_item/filter":
+			if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":0,"data":[],"pagination":{"page_num":1,"page_size":100,"total":0}}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	err := client.QueryWorkItemPagesWithOptions(
+		context.Background(),
+		db.FeishuProjectIntegration{
+			ProjectKey:    "project-key",
+			PluginID:      "id",
+			PluginSecret:  "secret",
+			StatusMapping: []byte(`{"OPEN":"todo"}`),
+		},
+		"issue",
+		true,
+		FeishuProjectSyncOptions{WorkItemID: "7004679644"},
+		func(FeishuProjectWorkItemPage) error { return nil },
+	)
+	if err != nil {
+		t.Fatalf("QueryWorkItemPagesWithOptions: %v", err)
+	}
+	ids, _ := captured["work_item_ids"].([]any)
+	if len(ids) != 1 || ids[0] != "7004679644" {
+		t.Fatalf("work_item_ids = %#v, want [\"7004679644\"]", captured["work_item_ids"])
+	}
+	if _, present := captured["work_item_status"]; present {
+		t.Fatalf("work_item_status must be omitted for targeted sync, got %#v", captured["work_item_status"])
+	}
+	if _, present := captured["updated_at"]; present {
+		t.Fatalf("updated_at must be omitted for targeted sync, got %#v", captured["updated_at"])
+	}
+}
+
+// A targeted (id-scoped) sync should not be blocked by an empty status_mapping —
+// the user is asking for that exact row, Meego doesn't need a state filter to
+// find it. Only the unscoped (scheduled / full) path keeps the ErrFeishuProjectSyncScopeRequired
+// guardrail so it doesn't unbounded-scan.
+func TestFeishuProjectQueryWorkItemsTargetedIDSkipsStatusMappingGuard(t *testing.T) {
+	t.Parallel()
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/work_item/filter":
+			hits++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"err_code":0,"data":[],"pagination":{"page_num":1,"page_size":100,"total":0}}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	err := client.QueryWorkItemPagesWithOptions(
+		context.Background(),
+		db.FeishuProjectIntegration{
+			ProjectKey:    "project-key",
+			PluginID:      "id",
+			PluginSecret:  "secret",
+			StatusMapping: []byte(`{}`),
+		},
+		"issue",
+		true,
+		FeishuProjectSyncOptions{WorkItemID: "7004679644"},
+		func(FeishuProjectWorkItemPage) error { return nil },
+	)
+	if err != nil {
+		t.Fatalf("targeted sync should not require status mapping: %v", err)
+	}
+	if hits != 1 {
+		t.Fatalf("expected /work_item/filter to be called once, got %d", hits)
+	}
+}
+
+// Regression: a custom plugin/radio field like "BUG提单助手" (field_c1f194) is
+// silently dropped from /work_item/{type}/meta but appears in /field/all with its
+// inline options (是/否). Before the fix, the missing-from-/meta path fell through
+// to /business/all and rendered the space-wide business-line tree as if those were
+// the radio field's options.
+func TestListFieldOptionsCustomRadioReturnsInlineOptionsFromFieldAll(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/work_item/issue/meta":
+			// /meta intentionally omits field_c1f194 — this is the real Meego behavior.
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"fields":[{"field_key":"title","field_type_key":"_text"}]}}`))
+		case "/open_api/project-key/field/all":
+			_, _ = w.Write([]byte(`{
+				"err_code": 0,
+				"data": [
+					{"field_key":"title","field_name":"标题","field_type_key":"_text","work_item_scopes":["issue"]},
+					{"field_key":"field_c1f194","field_name":"BUG提单助手","field_type_key":"radio","is_custom_field":true,"work_item_scopes":["issue"],
+					 "options":[{"option_id":"yes","option_name":"是"},{"option_id":"no","option_name":"否"}]}
+				]
+			}`))
+		case "/open_api/project-key/business/all":
+			t.Fatal("/business/all must not be called — the /business/all fallback was removed")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	opts, err := client.ListFieldOptions(context.Background(), db.FeishuProjectIntegration{
+		ProjectKey:   "project-key",
+		PluginID:     "plugin-id",
+		PluginSecret: "plugin-secret",
+	}, "issue", "field_c1f194")
+	if err != nil {
+		t.Fatalf("ListFieldOptions: %v", err)
+	}
+	if len(opts) != 2 || opts[0].Name != "是" || opts[1].Name != "否" {
+		t.Fatalf("expected [是, 否] from /field/all, got %#v", opts)
+	}
+}
+
+// The space-wide business-line tree lives behind its own service method so that
+// callers who actually want the biz-line tree ask for it explicitly — and callers
+// who just want a field's options can never accidentally end up with the biz-line
+// tree (the regression class this whole refactor is preventing).
+func TestListSpaceBusinessLinesHitsOnlyBusinessAll(t *testing.T) {
+	var sawMeta, sawFieldAll bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/work_item/issue/meta":
+			sawMeta = true
+		case "/open_api/project-key/field/all":
+			sawFieldAll = true
+		case "/open_api/project-key/business/all":
+			_, _ = w.Write([]byte(`{"err_code":0,"data":[
+				{"id":"biz-1","name":"玩家服务组","children":[{"id":"biz-1a","name":"活动中心"}]},
+				{"id":"biz-2","name":"TD基建"}
+			]}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	tree, err := client.ListSpaceBusinessLines(context.Background(), db.FeishuProjectIntegration{
+		ProjectKey:   "project-key",
+		PluginID:     "plugin-id",
+		PluginSecret: "plugin-secret",
+	})
+	if err != nil {
+		t.Fatalf("ListSpaceBusinessLines: %v", err)
+	}
+	if sawMeta || sawFieldAll {
+		t.Fatalf("ListSpaceBusinessLines must not touch field endpoints (meta=%v fieldAll=%v)", sawMeta, sawFieldAll)
+	}
+	if len(tree) != 2 || tree[0].Name != "玩家服务组" || len(tree[0].Children) != 1 || tree[1].Name != "TD基建" {
+		t.Fatalf("unexpected tree: %#v", tree)
+	}
+}
+
+// A field with no inline options anywhere returns nil — the /business/all fallback
+// is gone, so the UI falls through to a free-text input instead of being fed the
+// unrelated space-wide biz-line tree.
+func TestListFieldOptionsReturnsNilWhenNoInlineOptionsAnywhere(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/work_item/issue/meta":
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"fields":[{"field_key":"summary","field_type_key":"_text"}]}}`))
+		case "/open_api/project-key/field/all":
+			_, _ = w.Write([]byte(`{
+				"err_code": 0,
+				"data": [
+					{"field_key":"summary","field_name":"摘要","field_type_key":"_text","work_item_scopes":["issue"]}
+				]
+			}`))
+		case "/open_api/project-key/business/all":
+			t.Fatal("/business/all must not be called — the /business/all fallback was removed")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	opts, err := client.ListFieldOptions(context.Background(), db.FeishuProjectIntegration{
+		ProjectKey:   "project-key",
+		PluginID:     "plugin-id",
+		PluginSecret: "plugin-secret",
+	}, "issue", "summary")
+	if err != nil {
+		t.Fatalf("ListFieldOptions: %v", err)
+	}
+	if opts != nil {
+		t.Fatalf("expected nil, got %#v", opts)
 	}
 }

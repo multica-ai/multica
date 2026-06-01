@@ -248,11 +248,8 @@ func (s *FeishuProjectSyncService) SyncWithRunAndOptions(ctx context.Context, cf
 	var summaryMu sync.Mutex
 	var syncErr error
 	// Manual triggers do a 30-day bootstrap; reconcile triggers do a 6h30m
-	// reconcile pass. Both share the larger-lookback + light-update-existing
-	// path so a no-cost attachment refetch isn't triggered for items whose
-	// external_id is already bound.
+	// reconcile pass.
 	fullSync := trigger == "manual" || trigger == "reconcile"
-	lightUpdateExisting := fullSync && strings.TrimSpace(opts.WorkItemID) == ""
 	if opts.SinceUnixMilli == 0 {
 		opts.SinceUnixMilli = feishuProjectSinceUnixMilliForTrigger(cfg, trigger, time.Now())
 	}
@@ -283,7 +280,7 @@ func (s *FeishuProjectSyncService) SyncWithRunAndOptions(ctx context.Context, cf
 						if ctx.Err() != nil {
 							continue
 						}
-						result, attachErrs, err := s.syncWorkItem(ctx, cfg, item, lightUpdateExisting)
+						result, attachErrs, err := s.syncWorkItem(ctx, cfg, item)
 						if err == nil && !item.UpdatedAt.IsZero() {
 							ms := item.UpdatedAt.UnixMilli()
 							for {
@@ -420,7 +417,7 @@ func enabledFeishuProjectTypes(cfg db.FeishuProjectIntegration) []string {
 	return out
 }
 
-func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem, lightUpdateExisting bool) (result string, attachErrs int, retErr error) {
+func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.FeishuProjectIntegration, item FeishuProjectWorkItem) (result string, attachErrs int, retErr error) {
 	started := time.Now()
 	timing := &feishuProjectSyncTiming{}
 	defer func() {
@@ -479,19 +476,47 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 	mappedPriority := mapFeishuPriority(item.Priority)
 
 	phaseStarted := time.Now()
-	binding, err := s.Queries.GetFeishuProjectIssueBindingByExternal(ctx, db.GetFeishuProjectIssueBindingByExternalParams{
+	binding, bindingErr := s.Queries.GetFeishuProjectIssueBindingByExternal(ctx, db.GetFeishuProjectIssueBindingByExternalParams{
 		IntegrationID: cfg.ID,
 		WorkItemType:  item.Type,
 		WorkItemID:    item.ID,
 	})
 	timing.bindingLookup += time.Since(phaseStarted)
-	if err == nil {
+	var issue db.Issue
+	issueFound := false
+	if bindingErr == nil {
 		phaseStarted = time.Now()
-		issue, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: binding.IssueID, WorkspaceID: cfg.WorkspaceID})
+		fetched, lookupErr := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: binding.IssueID, WorkspaceID: cfg.WorkspaceID})
 		timing.issueLookup += time.Since(phaseStarted)
-		if err != nil {
+		if lookupErr == nil {
+			issue = fetched
+			issueFound = true
+		} else {
+			// User deleted the Multica issue but the binding row hung around
+			// (e.g. the issue→binding FK was bypassed manually, or a future
+			// migration relaxes the cascade). Don't silently no-op — fall
+			// through to the create path so the issue is re-created and
+			// UpsertFeishuProjectIssueBinding's ON CONFLICT repoints this
+			// stale binding to the freshly-created issue_id.
+			slog.Info("Feishu Project binding refers to missing issue, re-creating",
+				"binding_id", UUIDString(binding.ID),
+				"stale_issue_id", UUIDString(binding.IssueID),
+				"work_item_id", item.ID,
+				"lookup_error", lookupErr)
+		}
+	}
+	if issueFound {
+		// Watermark short-circuit: if Meego hasn't touched the work item since
+		// the last sync, nothing downstream (fields, attachments, labels) can
+		// have changed either — skip the entire DB round-trip set. Cuts a 1k-
+		// item manual full-sync from minutes to ~30s when most items are quiet.
+		// The label-sync fields are derived from item.fields too, so they also
+		// bump item.UpdatedAt; safe to skip them here.
+		if !item.UpdatedAt.IsZero() && binding.LastExternalUpdatedAt.Valid &&
+			!item.UpdatedAt.After(binding.LastExternalUpdatedAt.Time) {
 			return "skipped", 0, nil
 		}
+
 		phaseStarted = time.Now()
 		assigneeType, assigneeID := s.resolveAssignee(ctx, cfg, item, mappedStatus, issue.AssigneeType, issue.AssigneeID, fallbackAgentID)
 		timing.ownerLookup += time.Since(phaseStarted)
@@ -503,71 +528,28 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		if mappedPriority != "" {
 			nextPriority = mappedPriority
 		}
+		nextTitle := externalTitle(item)
 
-		if lightUpdateExisting {
-			// Light-update path for manual full-sync: refresh status / assignee /
-			// project only. Skip syncExternalAttachments (~200-500ms per item with
-			// any attachment) and preserve the existing title + description so the
-			// already-synced attachment markdown block doesn't get clobbered. Per
-			// item this collapses to ~25-30ms, so a 1k-item manual sync runs in ~30s
-			// instead of multiple minutes. New attachments added in Meego after the
-			// first sync are still picked up by the next scheduled (incremental)
-			// sync, which keeps its full path.
-			if issue.Status == status &&
-				sameNullableText(issue.AssigneeType, assigneeType) &&
-				sameNullableUUID(issue.AssigneeID, assigneeID) &&
-				issue.Priority == nextPriority &&
-				issue.ProjectID == nextProjectID {
-				labelsChanged, err := s.syncIssueLabels(ctx, cfg, item, issue.ID)
-				if err != nil {
-					return "skipped", 0, err
-				}
-				s.reconcileSyncedIssueTasks(ctx, issue, issue)
-				if labelsChanged {
-					return "updated", 0, nil
-				}
-				return "skipped", 0, nil
-			}
-			phaseStarted = time.Now()
-			updatedIssue, err := s.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
-				ID: issue.ID,
-				// Pass invalid pgtype.Text for title/description → COALESCE in
-				// queries/issue.sql keeps the current values, so the embedded
-				// attachment markdown survives.
-				Title:         pgtype.Text{},
-				Description:   pgtype.Text{},
-				Status:        pgtype.Text{String: status, Valid: true},
-				Priority:      pgtype.Text{String: nextPriority, Valid: true},
-				AssigneeType:  assigneeType,
-				AssigneeID:    assigneeID,
-				DueDate:       issue.DueDate,
-				ParentIssueID: issue.ParentIssueID,
-				ProjectID:     nextProjectID,
-			})
-			timing.issueUpdate += time.Since(phaseStarted)
-			if err != nil {
-				return "skipped", 0, err
-			}
-			phaseStarted = time.Now()
-			_, _ = s.Queries.UpsertFeishuProjectIssueBinding(ctx, bindingParams(cfg, issue.ID, item))
-			timing.bindingUpsert += time.Since(phaseStarted)
-			if _, err := s.syncIssueLabels(ctx, cfg, item, issue.ID); err != nil {
-				return "skipped", 0, err
-			}
-			s.reconcileSyncedIssueTasks(ctx, issue, updatedIssue)
-			return "updated", 0, nil
-		}
-
-		// Full update path — scheduled (incremental) sync. Includes attachment refetch.
+		// Run attachment dedup + ingest unconditionally. syncExternalAttachments
+		// is already external-id-keyed (commit 84fc2800d), so already-bound
+		// attachments are skipped without download/upload — just two cheap DB
+		// lookups. New Meego attachments land in the attachment table and get
+		// a binding row, but we deliberately ignore the returned markdown: the
+		// embedded-markdown-in-description design conflicts with letting users
+		// edit issue descriptions in Multica (the original reason for the now-
+		// removed lightUpdateExisting path). New attachments still surface in
+		// the issue's attachment panel.
 		phaseStarted = time.Now()
-		attachmentMarkdown, attachErr := s.syncExternalAttachments(ctx, cfg, issue.ID, item, timing)
+		_, attachErr := s.syncExternalAttachments(ctx, cfg, issue.ID, item, timing)
 		timing.attachments += time.Since(phaseStarted)
 		if attachErr != nil {
 			return "skipped", 0, attachErr
 		}
-		nextDesc := externalDescription(item, attachmentMarkdown)
-		nextTitle := externalTitle(item)
-		if issue.Title == nextTitle && issue.Description.String == nextDesc && issue.Status == status &&
+		// Field-level diff. description is NOT compared and NOT updated below
+		// — we COALESCE on the DB side to preserve whatever's currently stored,
+		// so any manual edits the user made in Multica survive. title is treated
+		// as Meego-authoritative because users rarely rename synced issues.
+		if issue.Title == nextTitle && issue.Status == status &&
 			issue.Priority == nextPriority &&
 			sameNullableText(issue.AssigneeType, assigneeType) && sameNullableUUID(issue.AssigneeID, assigneeID) &&
 			issue.ProjectID == nextProjectID {
@@ -576,6 +558,10 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 				return "skipped", 0, err
 			}
 			s.reconcileSyncedIssueTasks(ctx, issue, issue)
+			// Advance the binding watermark so the next sync's short-circuit fires.
+			phaseStarted = time.Now()
+			_, _ = s.Queries.UpsertFeishuProjectIssueBinding(ctx, bindingParams(cfg, issue.ID, item))
+			timing.bindingUpsert += time.Since(phaseStarted)
 			if labelsChanged {
 				return "updated", 0, nil
 			}
@@ -583,9 +569,11 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 		}
 		phaseStarted = time.Now()
 		updatedIssue, err := s.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
-			ID:            issue.ID,
+			ID: issue.ID,
+			// Description left as invalid pgtype.Text on purpose — see comment
+			// above. UpdateIssue's COALESCE preserves the current value.
 			Title:         pgtype.Text{String: nextTitle, Valid: true},
-			Description:   pgtype.Text{String: nextDesc, Valid: true},
+			Description:   pgtype.Text{},
 			Status:        pgtype.Text{String: status, Valid: true},
 			Priority:      pgtype.Text{String: nextPriority, Valid: true},
 			AssigneeType:  assigneeType,
@@ -625,7 +613,7 @@ func (s *FeishuProjectSyncService) syncWorkItem(ctx context.Context, cfg db.Feis
 	if err != nil {
 		return "skipped", 0, err
 	}
-	issue, err := qtx.CreateIssue(ctx, db.CreateIssueParams{
+	issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
 		WorkspaceID:  cfg.WorkspaceID,
 		Title:        externalTitle(item),
 		Description:  pgtype.Text{String: externalDescription(item, ""), Valid: true},
@@ -1612,15 +1600,18 @@ func (c *FeishuProjectClient) QueryWorkItemPages(ctx context.Context, cfg db.Fei
 }
 
 func (c *FeishuProjectClient) QueryWorkItemPagesWithOptions(ctx context.Context, cfg db.FeishuProjectIntegration, workItemType string, fullSync bool, opts FeishuProjectSyncOptions, handle func(FeishuProjectWorkItemPage) error) error {
+	explicitID := strings.TrimSpace(opts.WorkItemID)
 	statuses := mappedFeishuProjectStatuses(cfg.StatusMapping, workItemType)
-	if len(statuses) == 0 {
+	// A targeted (id-scoped) sync asks Meego for exactly that row regardless of
+	// state, so it doesn't need a status mapping. Only refuse here for the
+	// scheduled / full-sync path that would otherwise unbounded-scan.
+	if explicitID == "" && len(statuses) == 0 {
 		return ErrFeishuProjectSyncScopeRequired
 	}
 	pageNum := 1
 	for page := 0; page < feishuProjectSyncMaxPages; page++ {
 		req := map[string]any{
 			"work_item_type_keys": []string{workItemType},
-			"work_item_status":    feishuProjectWorkItemStatusFilter(statuses),
 			"page_num":            pageNum,
 			"page_size":           feishuProjectSyncPageSize,
 			"expand": map[string]any{
@@ -1628,23 +1619,30 @@ func (c *FeishuProjectClient) QueryWorkItemPagesWithOptions(ctx context.Context,
 				"need_user_detail": true,
 			},
 		}
-		if strings.TrimSpace(opts.WorkItemID) != "" {
-			req["work_item_ids"] = []string{strings.TrimSpace(opts.WorkItemID)}
-		}
-		now := time.Now()
-		// Sync entry computes the precise lookback per trigger and threads it
-		// through opts.SinceUnixMilli. Direct callers (tests, future ad-hoc
-		// uses) without that context fall back to the legacy fullSync-aware
-		// default.
-		updatedAtStart := opts.SinceUnixMilli
-		if updatedAtStart == 0 {
-			updatedAtStart = feishuProjectSyncSinceUnixMilli(cfg, now)
-			if fullSync {
-				updatedAtStart = feishuProjectManualSyncSinceUnixMilli(now)
+		if explicitID != "" {
+			// User aimed a sync at this exact work item — bypass work_item_status
+			// AND updated_at. Meego applies those filters with AND semantics, so
+			// keeping them would silently drop the target whenever its state has
+			// moved off the mapped set or it hasn't been touched in 30 days.
+			// That was the original BUG-7004679644 incident: 4 manual syncs all
+			// returned 0 items because the work item's status had left the
+			// mapping. Targeted syncs trust the user's intent.
+			req["work_item_ids"] = []string{explicitID}
+		} else {
+			req["work_item_status"] = feishuProjectWorkItemStatusFilter(statuses)
+			// Sync entry computes the precise lookback per trigger and threads
+			// it through opts.SinceUnixMilli. Direct callers (tests, future
+			// ad-hoc uses) without that context fall back to the legacy
+			// fullSync-aware default.
+			updatedAtStart := opts.SinceUnixMilli
+			if updatedAtStart == 0 {
+				now := time.Now()
+				updatedAtStart = feishuProjectSyncSinceUnixMilli(cfg, now)
+				if fullSync {
+					updatedAtStart = feishuProjectManualSyncSinceUnixMilli(now)
+				}
 			}
-		}
-		req["updated_at"] = map[string]any{
-			"start": updatedAtStart,
+			req["updated_at"] = map[string]any{"start": updatedAtStart}
 		}
 		payload, err := c.openAPI(ctx, cfg, http.MethodPost, fmt.Sprintf("/open_api/%s/work_item/filter", cfg.ProjectKey), req)
 		if err != nil {
@@ -1660,7 +1658,7 @@ func (c *FeishuProjectClient) QueryWorkItemPagesWithOptions(ctx context.Context,
 				return err
 			}
 		}
-		if strings.TrimSpace(opts.WorkItemID) != "" {
+		if explicitID != "" {
 			return nil
 		}
 		if hasTotal {
@@ -1765,33 +1763,37 @@ func (c *FeishuProjectClient) IssueStatusOptions(ctx context.Context, cfg db.Fei
 }
 
 // ListWorkItemFields returns the field definitions of a work-item type so the user
-// can pick which one is the "business line" field. Backed by
-// GET /open_api/{project_key}/work_item/{type}/meta — the same endpoint we already use
-// for status options, just parsed for the full field list.
+// can pick which one to designate as the business-line field or use in a label-sync
+// rule. Backed by POST /open_api/{project_key}/field/all — Meego's
+// /work_item/{type}/meta omits custom radio/plugin fields like "BUG提单助手"
+// (field_c1f194), whereas /field/all is the complete field registry and /meta's
+// output is a strict subset of it. We filter by work_item_scopes so the UI only
+// surfaces fields actually applicable to this work-item type.
 func (c *FeishuProjectClient) ListWorkItemFields(ctx context.Context, cfg db.FeishuProjectIntegration, workItemType string) ([]FeishuProjectFieldMeta, error) {
 	if workItemType == "" {
 		workItemType = "issue"
 	}
-	payload, err := c.openAPI(ctx, cfg, http.MethodGet, fmt.Sprintf("/open_api/%s/work_item/%s/meta", cfg.ProjectKey, workItemType), nil)
+	payload, err := c.openAPI(ctx, cfg, http.MethodPost, fmt.Sprintf("/open_api/%s/field/all", cfg.ProjectKey), map[string]any{})
 	if err != nil {
 		return nil, err
 	}
-	return parseFeishuProjectFieldMetas(payload), nil
+	return parseFeishuProjectFieldMetas(payload, workItemType), nil
 }
 
-// ListFieldOptions returns the option tree of a specific work-item field. Used by the
-// routing UI to populate the business-line tree based on the operator's field choice.
+// ListFieldOptions returns the option tree of a specific work-item field. Used by
+// the label-sync UI to populate the "match" value picker and by the routing UI to
+// populate the business-line tree based on the operator's field choice.
 //
-// Two cases Meego presents:
-//  1. Custom select fields (`_select` / `_multi_select` / ...) carry their option list
-//     inline in the meta payload — we extract from there.
-//  2. Built-in business-line fields (`_biz_line` type) DON'T carry inline options;
-//     their valid values come from the space-wide /open_api/{key}/business/all tree.
-//     For this case we fall back to that endpoint so the UI doesn't end up empty when
-//     the operator picks the "obvious" 业务线 field.
+// Two sources, tried in order:
+//  1. /work_item/{type}/meta — carries inline options for built-in select fields.
+//  2. /field/all — the complete field registry. Custom plugin/radio fields (e.g.
+//     "BUG提单助手" / field_c1f194) are silently dropped from /meta but appear here
+//     with their inline options. The previous /business/all fallback used to kick
+//     in for these, serving the space's biz-line tree as if those were the field's
+//     options — that was the bug.
 //
-// Returns nil only if the field isn't found at all OR has no options under either path.
-// Caller (handler/UI) treats nil as "this field has no selectable values".
+// Returns nil when the field has no selectable values under either source — caller
+// (handler/UI) treats nil as "render a free-text input instead".
 func (c *FeishuProjectClient) ListFieldOptions(ctx context.Context, cfg db.FeishuProjectIntegration, workItemType, fieldKey string) ([]FeishuProjectFieldOption, error) {
 	if workItemType == "" {
 		workItemType = "issue"
@@ -1799,29 +1801,40 @@ func (c *FeishuProjectClient) ListFieldOptions(ctx context.Context, cfg db.Feish
 	if strings.TrimSpace(fieldKey) == "" {
 		return nil, fmt.Errorf("field_key is required")
 	}
-	payload, err := c.openAPI(ctx, cfg, http.MethodGet, fmt.Sprintf("/open_api/%s/work_item/%s/meta", cfg.ProjectKey, workItemType), nil)
+	metaPayload, err := c.openAPI(ctx, cfg, http.MethodGet, fmt.Sprintf("/open_api/%s/work_item/%s/meta", cfg.ProjectKey, workItemType), nil)
 	if err != nil {
 		return nil, err
 	}
-	field := findFeishuProjectFieldByKey(payload, fieldKey)
-	if field != nil {
+	if field := findFeishuProjectFieldByKey(metaPayload, fieldKey); field != nil {
 		if tree := extractFeishuProjectFieldOptionTree(field); len(tree) > 0 {
 			return tree, nil
 		}
 	}
-	// Fallback: maybe this is a _biz_line field whose options live in the space tree.
-	// We don't gate on field type because Meego's type keys aren't stable across
-	// space versions; just try the second source and accept whatever comes back.
-	bizPayload, err := c.openAPI(ctx, cfg, http.MethodGet, fmt.Sprintf("/open_api/%s/business/all", cfg.ProjectKey), nil)
+	fieldAllPayload, err := c.openAPI(ctx, cfg, http.MethodPost, fmt.Sprintf("/open_api/%s/field/all", cfg.ProjectKey), map[string]any{})
 	if err != nil {
-		// Don't mask the original "field has no inline options" with a permission
-		// error from /business/all — return nil and let the caller surface the
-		// empty-state message that points at both possible causes.
-		slog.Info("Feishu Project /business/all fallback failed",
-			"project_key", cfg.ProjectKey, "field_key", fieldKey, "error", err)
-		return nil, nil
+		return nil, err
 	}
-	return parseFeishuProjectBusinessLineTree(bizPayload), nil
+	if field := findFeishuProjectFieldByKey(fieldAllPayload, fieldKey); field != nil {
+		if tree := extractFeishuProjectFieldOptionTree(field); len(tree) > 0 {
+			return tree, nil
+		}
+	}
+	return nil, nil
+}
+
+// ListSpaceBusinessLines returns the space-wide business-line tree from
+// /open_api/{project_key}/business/all. This is intentionally split from
+// ListFieldOptions: the previous "fall back to /business/all when a field has no
+// inline options" path silently rendered the space's biz-line tree as the option
+// set of unrelated radio/select fields. Keeping the two endpoints as separate
+// methods makes that confusion structurally impossible — callers ask for the
+// thing they actually want.
+func (c *FeishuProjectClient) ListSpaceBusinessLines(ctx context.Context, cfg db.FeishuProjectIntegration) ([]FeishuProjectFieldOption, error) {
+	payload, err := c.openAPI(ctx, cfg, http.MethodGet, fmt.Sprintf("/open_api/%s/business/all", cfg.ProjectKey), nil)
+	if err != nil {
+		return nil, err
+	}
+	return parseFeishuProjectBusinessLineTree(payload), nil
 }
 
 // findFeishuProjectFieldByKey walks a meta payload looking for a field entry whose
@@ -2888,19 +2901,28 @@ func feishuProjectIsOwnerField(key, displayName string) bool {
 	return false
 }
 
-// feishuProjectOwnerEmail picks the email of the work-item's assignee/owner. It tries:
-//  1. Stable Meego field_keys (`owner`, `operator`) — the common case.
+// feishuProjectOwnerEmail picks the email of the work-item's assignee/handler. It tries:
+//  1. The stable Meego field_key `operator` — some spaces expose the handler directly
+//     under this key (rare; modern spaces use `issue_operator` + role_owners instead).
 //  2. Custom fields indexed by their Chinese display name — different spaces name the
 //     assignee field differently (经办人 / 处理人 / 负责人 / etc.) and may use a
 //     custom field_key like `field_xxx` so a plain field_key match misses them.
+//
+// IMPORTANT: we do NOT consult `record["owner"]`. In Meego the field_key `owner` is
+// the CREATOR (`创建者`), not the current handler — verified in partopia /field/all where
+// `owner.field_name` is consistently "创建者" / "创建人" across every work_item_type.
+// Treating it as assignee caused issues like partopia#7004726014, where 经办人 was empty
+// in Feishu yet the synced Multica issue was assigned to the creator. When no handler
+// signal exists we want OwnerEmail to be empty so the caller can fall back to the
+// integration-configured fallback agent.
 //
 // At each step the raw value is checked for an embedded email pattern first; if none is
 // found and Meego returned a user_details lookup, we treat the value as a user_key list
 // and resolve against that map.
 func feishuProjectOwnerEmail(record map[string]string, userEmails map[string]string) string {
 	candidates := []string{
-		// Stable field_keys
-		record["owner"], record["operator"],
+		// Stable field_key (assignee, not creator).
+		record["operator"],
 		// Chinese display names (fall back when the field is custom and we matched it
 		// in parseFeishuProjectSearch via field["name"]).
 		record["处理人"], record["经办人"], record["负责人"],
@@ -2970,44 +2992,49 @@ func feishuProjectOpenAPIOwnerFieldValue(value any) string {
 	return strings.Join(values, ", ")
 }
 
-// parseFeishuProjectFieldMetas walks the /work_item/{type}/meta response and surfaces
-// every (field_key, field_name, field_type) triple. Reused by ListWorkItemFields so the
-// settings UI can show a dropdown of fields to designate as the business-line field.
-//
-// The meta document is loosely typed in Meego — fields can appear under "fields", under
-// nested "tab"/"field_list" containers, or as top-level entries. We walk recursively and
-// dedupe by field_key.
-func parseFeishuProjectFieldMetas(payload map[string]any) []FeishuProjectFieldMeta {
+// parseFeishuProjectFieldMetas walks the /field/all response (payload["data"] is a flat
+// list) and returns (field_key, field_name, field_type) triples, deduped by key. If
+// workItemType is non-empty, entries are kept only when their work_item_scopes list
+// contains it — /field/all is project-wide and includes fields scoped to other types
+// (e.g. story-only fields) that the caller doesn't want in this dropdown.
+func parseFeishuProjectFieldMetas(payload map[string]any, workItemType string) []FeishuProjectFieldMeta {
+	data, _ := payload["data"].([]any)
 	seen := map[string]bool{}
-	var out []FeishuProjectFieldMeta
-	var walk func(any)
-	walk = func(v any) {
-		switch x := v.(type) {
-		case map[string]any:
-			if key := strings.TrimSpace(firstNonEmpty(fmt.Sprint(x["field_key"]), fmt.Sprint(x["field_alias"]))); key != "" && key != "<nil>" && !seen[key] {
-				typeStr := firstNonEmpty(fmt.Sprint(x["field_type_key"]), fmt.Sprint(x["field_type"]))
-				if _, isOption := x["option"]; !isOption {
-					_, isOption = x["options"]
-					_ = isOption
-				}
-				out = append(out, FeishuProjectFieldMeta{
-					Key:  key,
-					Name: firstNonEmpty(fmt.Sprint(x["name"]), fmt.Sprint(x["field_name"]), key),
-					Type: typeStr,
-				})
-				seen[key] = true
-			}
-			for _, child := range x {
-				walk(child)
-			}
-		case []any:
-			for _, child := range x {
-				walk(child)
-			}
+	out := make([]FeishuProjectFieldMeta, 0, len(data))
+	want := strings.TrimSpace(workItemType)
+	for _, entry := range data {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		if want != "" && !feishuProjectFieldScopeMatches(m["work_item_scopes"], want) {
+			continue
+		}
+		key := strings.TrimSpace(firstNonEmpty(fmt.Sprint(m["field_key"]), fmt.Sprint(m["field_alias"])))
+		if key == "" || key == "<nil>" || seen[key] {
+			continue
+		}
+		out = append(out, FeishuProjectFieldMeta{
+			Key:  key,
+			Name: firstNonEmpty(fmt.Sprint(m["field_name"]), fmt.Sprint(m["name"]), key),
+			Type: firstNonEmpty(fmt.Sprint(m["field_type_key"]), fmt.Sprint(m["field_type"])),
+		})
+		seen[key] = true
+	}
+	return out
+}
+
+func feishuProjectFieldScopeMatches(scopesAny any, workItemType string) bool {
+	scopes, ok := scopesAny.([]any)
+	if !ok {
+		return false
+	}
+	for _, s := range scopes {
+		if strings.TrimSpace(fmt.Sprint(s)) == workItemType {
+			return true
 		}
 	}
-	walk(payload)
-	return out
+	return false
 }
 
 // parseFeishuProjectBusinessLineTree converts the /business/all response into a 2-level

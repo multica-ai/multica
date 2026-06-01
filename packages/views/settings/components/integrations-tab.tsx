@@ -2,11 +2,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { ChevronsUpDown, Loader2, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@multica/ui/components/ui/command";
 import { Input } from "@multica/ui/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -14,6 +23,7 @@ import {
   SelectTrigger,
 } from "@multica/ui/components/ui/select";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -261,6 +271,11 @@ export function IntegrationsTab() {
         queryClient.invalidateQueries({ queryKey: feishuProjectKeys.integration(wsId) }),
         queryClient.invalidateQueries({ queryKey: feishuProjectKeys.issueStatuses(wsId) }),
         queryClient.invalidateQueries({ queryKey: feishuProjectKeys.routes(wsId) }),
+        // Space-keyed data (Meego field list + per-field option tree) lives under the
+        // same wsId regardless of which project_key is configured, so swapping spaces
+        // would otherwise serve stale entries from the prior space's cache.
+        queryClient.invalidateQueries({ queryKey: feishuProjectKeys.fieldsAll(wsId) }),
+        queryClient.invalidateQueries({ queryKey: feishuProjectKeys.businessLinesAll(wsId) }),
       ]);
       toast.success(t(($) => $.integrations.feishu_project_saved));
     } catch (e) {
@@ -625,6 +640,22 @@ function FeishuProjectLabelSyncRuleRow({
   });
   const fieldOptions = flattenFieldOptions(optionsData?.business_lines ?? []);
 
+  // /field/all returns ~50 fields per work-item type — the old Select scrolls forever,
+  // so use a Popover+Command combobox with name/key/pinyin search. Filtering is local
+  // (shouldFilter={false}) because cmdk's default fuzzy match doesn't speak pinyin.
+  const [fieldPickerOpen, setFieldPickerOpen] = useState(false);
+  const [fieldQuery, setFieldQuery] = useState("");
+  const visibleFields = useMemo(() => {
+    const q = fieldQuery.trim().toLowerCase();
+    if (!q) return fields;
+    return fields.filter(
+      (f) =>
+        f.name.toLowerCase().includes(q) ||
+        f.key.toLowerCase().includes(q) ||
+        matchesPinyin(f.name, q),
+    );
+  }, [fields, fieldQuery]);
+
   return (
     <div className="grid gap-3 border-b border-border/70 p-3 last:border-b-0 lg:grid-cols-[76px_minmax(180px,1fr)_minmax(150px,220px)_minmax(150px,220px)_36px] lg:items-center">
       <div className="flex items-center justify-between gap-3 lg:justify-start">
@@ -639,38 +670,74 @@ function FeishuProjectLabelSyncRuleRow({
 
       <label className="min-w-0 space-y-1.5 text-xs font-medium">
         {t(($) => $.integrations.feishu_project_label_sync_field)}
-        <Select
-          value={rule.field_key || NO_FIELD}
-          onValueChange={(value) => {
-            const selected = value ?? NO_FIELD;
-            const key = selected === NO_FIELD ? "" : selected;
-            const nextField = fields.find((field) => field.key === key);
-            onChange({
-              ...rule,
-              field_key: key,
-              field_name: nextField?.name ?? "",
-              match: "",
-            });
+        <Popover
+          open={fieldPickerOpen}
+          onOpenChange={(open) => {
+            setFieldPickerOpen(open);
+            if (!open) setFieldQuery("");
           }}
         >
-          <SelectTrigger size="sm" className="w-full">
-            <span className="min-w-0 flex-1 truncate text-left">
+          <PopoverTrigger
+            className="flex h-7 w-full items-center justify-between gap-1.5 rounded-[min(var(--radius-md),10px)] border border-input bg-transparent px-2.5 text-sm whitespace-nowrap transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 dark:hover:bg-input/50"
+          >
+            <span className={`min-w-0 flex-1 truncate text-left ${selectedField ? "" : "text-muted-foreground"}`}>
               {selectedField
                 ? `${selectedField.name} (${selectedField.key})`
                 : t(($) => $.integrations.feishu_project_label_sync_field_placeholder)}
             </span>
-          </SelectTrigger>
-          <SelectContent align="start">
-            <SelectItem value={NO_FIELD}>
-              {t(($) => $.integrations.feishu_project_label_sync_field_placeholder)}
-            </SelectItem>
-            {fields.map((field) => (
-              <SelectItem key={field.key} value={field.key}>
-                {field.name} ({field.key})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          </PopoverTrigger>
+          <PopoverContent align="start" sideOffset={4} className="w-[var(--anchor-width)] p-0">
+            <Command shouldFilter={false}>
+              <CommandInput
+                placeholder={t(($) => $.integrations.feishu_project_label_sync_field_search_placeholder)}
+                value={fieldQuery}
+                onValueChange={setFieldQuery}
+              />
+              <CommandList className="max-h-64">
+                {visibleFields.length === 0 && (
+                  <CommandEmpty>
+                    {t(($) => $.integrations.feishu_project_label_sync_field_no_results)}
+                  </CommandEmpty>
+                )}
+                <CommandGroup>
+                  <CommandItem
+                    value={NO_FIELD}
+                    onSelect={() => {
+                      onChange({ ...rule, field_key: "", field_name: "", match: "" });
+                      setFieldPickerOpen(false);
+                    }}
+                  >
+                    <span className="text-muted-foreground">
+                      {t(($) => $.integrations.feishu_project_label_sync_field_placeholder)}
+                    </span>
+                  </CommandItem>
+                  {visibleFields.map((field) => (
+                    <CommandItem
+                      key={field.key}
+                      value={field.key}
+                      onSelect={() => {
+                        onChange({
+                          ...rule,
+                          field_key: field.key,
+                          field_name: field.name,
+                          match: "",
+                        });
+                        setFieldPickerOpen(false);
+                      }}
+                      className="flex items-center gap-2"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{field.name}</span>
+                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                        {field.key}
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
       </label>
 
       <label className="min-w-0 space-y-1.5 text-xs font-medium">

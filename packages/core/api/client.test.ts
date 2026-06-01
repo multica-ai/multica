@@ -286,6 +286,43 @@ describe("ApiClient", () => {
       expect(att.download_url).toContain("Policy=");
     });
 
+    it("absolutizes same-origin attachment URLs against the API base URL", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              id: "att-1",
+              workspace_id: "ws-1",
+              issue_id: null,
+              comment_id: null,
+              uploader_type: "member",
+              uploader_id: "u-1",
+              filename: "evidence.png",
+              url: "/uploads/ws-1/evidence.png",
+              download_url: "/api/attachments/att-1/content?workspace_id=ws-1",
+              content_url: "/api/attachments/att-1/content?workspace_id=ws-1",
+              content_type: "image/png",
+              size_bytes: 123,
+              created_at: "2026-05-11T00:00:00Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const att = await client.getAttachment("att-1");
+
+      expect(att.url).toBe("https://api.example.test/uploads/ws-1/evidence.png");
+      expect(att.download_url).toBe(
+        "https://api.example.test/api/attachments/att-1/content?workspace_id=ws-1",
+      );
+      expect(att.content_url).toBe(
+        "https://api.example.test/api/attachments/att-1/content?workspace_id=ws-1",
+      );
+    });
+
     it("falls back to an empty attachment when the response is missing download_url", async () => {
       vi.stubGlobal(
         "fetch",
@@ -305,6 +342,84 @@ describe("ApiClient", () => {
       // surface a user-facing error instead of opening `undefined`.
       expect(att.id).toBe("");
       expect(att.download_url).toBe("");
+    });
+  });
+
+  describe("issue attachment URLs", () => {
+    it("absolutizes attachments embedded in timeline entries", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify([
+              {
+                type: "comment",
+                id: "comment-1",
+                actor_type: "member",
+                actor_id: "user-1",
+                created_at: "2026-05-11T00:00:00Z",
+                content: "![evidence](/api/attachments/att-1/content?workspace_id=ws-1)",
+                attachments: [
+                  {
+                    id: "att-1",
+                    filename: "evidence.png",
+                    url: "/uploads/ws-1/evidence.png",
+                    download_url: "/api/attachments/att-1/content?workspace_id=ws-1",
+                    content_url: "/api/attachments/att-1/content?workspace_id=ws-1",
+                    content_type: "image/png",
+                  },
+                ],
+              },
+            ]),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const [entry] = await client.listTimeline("issue-1");
+
+      expect(entry?.attachments?.[0]?.url).toBe(
+        "https://api.example.test/uploads/ws-1/evidence.png",
+      );
+      expect(entry?.attachments?.[0]?.content_url).toBe(
+        "https://api.example.test/api/attachments/att-1/content?workspace_id=ws-1",
+      );
+    });
+
+    it("absolutizes issue-level attachments used by the description editor", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify([
+              {
+                id: "att-1",
+                workspace_id: "ws-1",
+                issue_id: "issue-1",
+                comment_id: null,
+                uploader_type: "member",
+                uploader_id: "u-1",
+                filename: "evidence.png",
+                url: "/uploads/ws-1/evidence.png",
+                download_url: "/api/attachments/att-1/content?workspace_id=ws-1",
+                content_url: "/api/attachments/att-1/content?workspace_id=ws-1",
+                content_type: "image/png",
+                size_bytes: 123,
+                created_at: "2026-05-11T00:00:00Z",
+              },
+            ]),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const [att] = await client.listAttachments("issue-1");
+
+      expect(att?.download_url).toBe(
+        "https://api.example.test/api/attachments/att-1/content?workspace_id=ws-1",
+      );
     });
   });
 

@@ -137,7 +137,7 @@ describe("Attachment — image dispatch", () => {
     renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
     const img = document.querySelector("img");
     expect(img).toBeTruthy();
-    expect(img?.getAttribute("src")).toBe(att.url);
+    expect(img?.getAttribute("src")).toBe(att.content_url);
     expect(img?.getAttribute("alt")).toBe("shot.png");
     expect(screen.getByTitle("View")).toBeTruthy();
     expect(screen.getByTitle("Download")).toBeTruthy();
@@ -177,7 +177,7 @@ describe("Attachment — image dispatch", () => {
       />,
     );
     const img = document.querySelector("img");
-    expect(img?.getAttribute("src")).toBe(att.url);
+    expect(img?.getAttribute("src")).toBe(att.content_url);
     fireEvent.click(screen.getByTitle("Download"));
     expect(downloadMock).toHaveBeenCalledWith("att-1");
   });

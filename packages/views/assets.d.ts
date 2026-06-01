@@ -20,3 +20,7 @@ declare module "*.svg" {
   const src: string | StaticImageAsset;
   export default src;
 }
+
+declare module "hast-util-to-html" {
+  export function toHtml(tree: unknown, options?: unknown): string;
+}

@@ -385,4 +385,26 @@ describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
     // <p class="truncate"> row. HtmlAttachmentPreview replaces it entirely.
     expect(queryByText("report.html")).toBeNull();
   });
+
+  it("resolves relative markdown image URLs to absolute attachment content URLs", () => {
+    const attachment = {
+      id: "att-1",
+      url: "https://api.example.test/uploads/evidence.png",
+      download_url: "https://api.example.test/api/attachments/att-1/content?workspace_id=ws-1",
+      content_url: "https://api.example.test/api/attachments/att-1/content?workspace_id=ws-1",
+      filename: "evidence.png",
+      content_type: "image/png",
+      size_bytes: 0,
+    } as any;
+    const { container } = renderWithQuery(
+      <ReadonlyContent
+        content="![evidence](/api/attachments/att-1/content?workspace_id=ws-1)"
+        attachments={[attachment]}
+      />,
+    );
+
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(
+      "https://api.example.test/api/attachments/att-1/content?workspace_id=ws-1",
+    );
+  });
 });

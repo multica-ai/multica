@@ -27,6 +27,32 @@ interface ProviderProps {
   children: ReactNode;
 }
 
+function comparableUrlParts(raw: string): string | null {
+  if (!raw) return null;
+  try {
+    const url = raw.startsWith("/")
+      ? new URL(raw, "https://multica.local")
+      : new URL(raw);
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+}
+
+function attachmentUrlMatches(attachment: Attachment, rawUrl: string): boolean {
+  if (!rawUrl) return false;
+  const candidates = [
+    attachment.url,
+    attachment.content_url,
+    attachment.download_url,
+  ].filter(Boolean);
+  if (candidates.some((candidate) => candidate === rawUrl)) return true;
+
+  const rawParts = comparableUrlParts(rawUrl);
+  if (!rawParts) return false;
+  return candidates.some((candidate) => comparableUrlParts(candidate) === rawParts);
+}
+
 /**
  * Provides a click-time download handler to Tiptap NodeViews mounted inside
  * `ContentEditor`. Without a provider the consumer falls back to opening the
@@ -38,15 +64,15 @@ export function AttachmentDownloadProvider({ attachments, children }: ProviderPr
     () => ({
       resolveAttachmentId: (url) => {
         if (!url || !attachments?.length) return undefined;
-        return attachments.find((a) => a.url === url || a.content_url === url)?.id;
+        return attachments.find((a) => attachmentUrlMatches(a, url))?.id;
       },
       resolveAttachment: (url) => {
         if (!url || !attachments?.length) return undefined;
-        return attachments.find((a) => a.url === url || a.content_url === url);
+        return attachments.find((a) => attachmentUrlMatches(a, url));
       },
       openByUrl: (url) => {
         const att = url && attachments?.length
-          ? attachments.find((a) => a.url === url || a.content_url === url)
+          ? attachments.find((a) => attachmentUrlMatches(a, url))
           : undefined;
         if (att) {
           download(att.id);
