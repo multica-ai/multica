@@ -51,6 +51,8 @@ export type CerebroFlagKey =
   | "cerebro_duplicate_check_on_create"
   // FIR-2523: Auth & Permissions settings tab + Google Workspace auto-membership hook.
   | "cerebro_google_identity"
+  // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
+  | "cerebro_pdf_inline_render"
   // FIR-2641: "Remind me" on a specific comment — reuses the personal reminder engine.
   | "cerebro_comment_reminders";
 
@@ -131,6 +133,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // signup is the launch feature, and the table starts empty so a fresh
   // workspace with no configured domains is still a no-op.
   cerebro_google_identity: true,
+  // FIR-2661: ON by default. Uploaded PDFs in Documents and the attachment
+  // viewer render in the browser's native PDF view (scroll, zoom, search).
+  // Off restores the prior behaviour (extracted-text dump in the attachment
+  // viewer; direct file iframe in the document viewer).
+  cerebro_pdf_inline_render: true,
   // FIR-2641: ON by default. Adds "Remind me" to the comment menu — a personal
   // reminder that points at one comment and, when it fires, deep-links the
   // inbox back to that comment. Reuses the existing reminder engine (inbox-only
@@ -480,6 +487,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Adds an Auth & Permissions tab to workspace settings: owner/admin can list email domains that auto-provision into this workspace on first Google login, and pick the default role new members get. Off hides the tab and disables the auto-membership hook. FIR-2523.",
+  },
+  {
+    key: "cerebro_pdf_inline_render",
+    label: "Inline PDF rendering",
+    group: "workspace",
+    description:
+      "Render uploaded PDFs in Documents and the attachment viewer using the browser's native PDF view (scroll, zoom, search) instead of dumping the extracted text. Off restores the extracted-text view. FIR-2661.",
   },
 ];
 

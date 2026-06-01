@@ -14,6 +14,18 @@ vi.mock("./mermaid-diagram", () => ({
   ),
 }));
 
+// Inline PDF rendering is on by default; stub the viewer so the test asserts
+// what it receives without exercising fetch/blob plumbing (covered separately).
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => true,
+}));
+
+vi.mock("./pdf-viewer", () => ({
+  PdfViewer: ({ fileUrl, title }: { fileUrl: string; title: string }) => (
+    <div data-testid="pdf-viewer" data-file-url={fileUrl} title={title} />
+  ),
+}));
+
 import { ArtifactContent } from "./artifact-content";
 
 function artifact(overrides: Partial<Artifact>): Artifact {
@@ -72,7 +84,7 @@ describe("ArtifactContent", () => {
     );
   });
 
-  it("renders pdf artifacts in an iframe with file metadata", () => {
+  it("renders pdf artifacts via the inline PDF viewer with file metadata", () => {
     render(
       <ArtifactContent
         artifact={artifact({
@@ -84,8 +96,8 @@ describe("ArtifactContent", () => {
     );
 
     expect(screen.getByText("PDF - 2.0 KB")).toBeInTheDocument();
-    expect(screen.getByTitle("Quarter Plan")).toHaveAttribute(
-      "src",
+    expect(screen.getByTestId("pdf-viewer")).toHaveAttribute(
+      "data-file-url",
       "https://example.com/report.pdf",
     );
   });

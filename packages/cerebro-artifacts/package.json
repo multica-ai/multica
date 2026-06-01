@@ -17,6 +17,7 @@
     "./views/pages": "./views/pages/index.ts"
   },
   "dependencies": {
+    "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
