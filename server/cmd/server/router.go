@@ -54,6 +54,7 @@ import (
 	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 permission model handler import
 	cerebrogrouppermissions "github.com/multica-ai/multica/server/internal/cerebro/grouppermissions"
 	// CEREBRO-PATCH(cerebro-github-pr-heal): JEH-1919 PR-card self-heal service import.
+	cerebrocommentguard "github.com/multica-ai/multica/server/internal/cerebro/commentguard" // CEREBRO-PATCH(router-comment-target-guard-import): FIR-2674.
 	cerebrogithubprheal "github.com/multica-ai/multica/server/internal/cerebro/githubprheal"
 	cerebroinbox "github.com/multica-ai/multica/server/internal/cerebro/inbox"
 	cerebromentiongate "github.com/multica-ai/multica/server/internal/cerebro/mentiongate"
@@ -316,6 +317,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	mentionGate := cerebromentiongate.New(queries, cerebroGroupPermissionsHandler.Service) // CEREBRO-PATCH(router-mention-trigger-gate): JEH-1917.
 	h.MentionTriggerGate = mentionGate
 	channelListenSvc.AgentTriggerGate = mentionGate.ChannelListenGate()
+	if os.Getenv("CEREBRO_COMMENT_TARGET_GUARD_ENABLED") == "true" { // CEREBRO-PATCH(router-comment-target-guard): FIR-2674 — opt-in kill-switch; off until agents are taught to always include a target.
+		h.CommentTargetGuard = cerebrocommentguard.New()
+	}
 	// CEREBRO-PATCH(router-private-agent-run-request): FIR-2385 — member tag of an unowned private agent → owner inbox run-request.
 	h.PrivateAgentRunRequester = cerebroprivateagentrun.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
@@ -512,8 +516,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/heartbeat", h.DaemonHeartbeat)
 		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
-		r.Post("/workspaces/{workspaceId}/repo/check", h.CheckDaemonRepoCapability)                 // CEREBRO-PATCH(daemon-repo-grants): FIR-2512
-		r.Get("/workspaces/{workspaceId}/repo/check/{approvalId}", h.PollDaemonRepoApproval)        // CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 poll a repo-checkout approval
+		r.Post("/workspaces/{workspaceId}/repo/check", h.CheckDaemonRepoCapability)          // CEREBRO-PATCH(daemon-repo-grants): FIR-2512
+		r.Get("/workspaces/{workspaceId}/repo/check/{approvalId}", h.PollDaemonRepoApproval) // CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 poll a repo-checkout approval
 		r.Get("/workspaces/{workspaceId}/agents/persona", h.ListWorkspacePersonaAgents)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
