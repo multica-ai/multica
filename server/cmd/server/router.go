@@ -720,6 +720,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
 					r.Post("/pause-tasks", h.PauseWorkspaceTasks)
+					// CEREBRO-PATCH(feature-flags-routes): FIR-2505 workspace-level
+					// feature-flag override (owner/admin) — forces a flag on/off for
+					// every member, optionally locked so members cannot override it.
+					r.Put("/feature-flags/{key}/workspace", featureFlagsHandler.UpsertWorkspace)
+					r.Delete("/feature-flags/{key}/workspace", featureFlagsHandler.DeleteWorkspace)
 					r.Post("/members", h.CreateInvitation)
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)

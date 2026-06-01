@@ -27,6 +27,21 @@ func (q *Queries) DeleteCerebroFeatureFlag(ctx context.Context, arg DeleteCerebr
 	return err
 }
 
+const deleteCerebroWorkspaceFeatureFlag = `-- name: DeleteCerebroWorkspaceFeatureFlag :exec
+DELETE FROM cerebro_feature_flags
+WHERE workspace_id = $1 AND user_id = '00000000-0000-0000-0000-000000000000' AND flag_key = $2
+`
+
+type DeleteCerebroWorkspaceFeatureFlagParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	FlagKey     string      `json:"flag_key"`
+}
+
+func (q *Queries) DeleteCerebroWorkspaceFeatureFlag(ctx context.Context, arg DeleteCerebroWorkspaceFeatureFlagParams) error {
+	_, err := q.db.Exec(ctx, deleteCerebroWorkspaceFeatureFlag, arg.WorkspaceID, arg.FlagKey)
+	return err
+}
+
 const getCerebroFeatureFlag = `-- name: GetCerebroFeatureFlag :one
 SELECT enabled FROM cerebro_feature_flags
 WHERE workspace_id = $1 AND user_id = $2 AND flag_key = $3
@@ -80,6 +95,46 @@ func (q *Queries) ListCerebroFeatureFlags(ctx context.Context, arg ListCerebroFe
 	return items, nil
 }
 
+const listCerebroWorkspaceFeatureFlags = `-- name: ListCerebroWorkspaceFeatureFlags :many
+
+SELECT flag_key, enabled, locked FROM cerebro_feature_flags
+WHERE workspace_id = $1 AND user_id = '00000000-0000-0000-0000-000000000000'
+`
+
+type ListCerebroWorkspaceFeatureFlagsRow struct {
+	FlagKey string `json:"flag_key"`
+	Enabled bool   `json:"enabled"`
+	Locked  bool   `json:"locked"`
+}
+
+// Workspace-level overrides live in the same table under the all-zero
+// sentinel user_id. `locked` decides whether members may still override.
+//
+// LANDMINE: this sentinel scheme depends on cerebro_feature_flags.user_id
+// having NO foreign key to "user" (see migration 9014 — composite PK only).
+// Do NOT add a user_id FK later, or the all-zero workspace row stops inserting.
+// The literal '00000000-0000-0000-0000-000000000000' is mirrored in the three
+// queries below (and the feature_flags handler/test); keep them in sync.
+func (q *Queries) ListCerebroWorkspaceFeatureFlags(ctx context.Context, workspaceID pgtype.UUID) ([]ListCerebroWorkspaceFeatureFlagsRow, error) {
+	rows, err := q.db.Query(ctx, listCerebroWorkspaceFeatureFlags, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCerebroWorkspaceFeatureFlagsRow{}
+	for rows.Next() {
+		var i ListCerebroWorkspaceFeatureFlagsRow
+		if err := rows.Scan(&i.FlagKey, &i.Enabled, &i.Locked); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertCerebroFeatureFlag = `-- name: UpsertCerebroFeatureFlag :exec
 INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled)
 VALUES ($1, $2, $3, $4)
@@ -100,6 +155,30 @@ func (q *Queries) UpsertCerebroFeatureFlag(ctx context.Context, arg UpsertCerebr
 		arg.UserID,
 		arg.FlagKey,
 		arg.Enabled,
+	)
+	return err
+}
+
+const upsertCerebroWorkspaceFeatureFlag = `-- name: UpsertCerebroWorkspaceFeatureFlag :exec
+INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled, locked)
+VALUES ($1, '00000000-0000-0000-0000-000000000000', $2, $3, $4)
+ON CONFLICT (workspace_id, user_id, flag_key) DO UPDATE
+SET enabled = EXCLUDED.enabled, locked = EXCLUDED.locked, updated_at = NOW()
+`
+
+type UpsertCerebroWorkspaceFeatureFlagParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	FlagKey     string      `json:"flag_key"`
+	Enabled     bool        `json:"enabled"`
+	Locked      bool        `json:"locked"`
+}
+
+func (q *Queries) UpsertCerebroWorkspaceFeatureFlag(ctx context.Context, arg UpsertCerebroWorkspaceFeatureFlagParams) error {
+	_, err := q.db.Exec(ctx, upsertCerebroWorkspaceFeatureFlag,
+		arg.WorkspaceID,
+		arg.FlagKey,
+		arg.Enabled,
+		arg.Locked,
 	)
 	return err
 }

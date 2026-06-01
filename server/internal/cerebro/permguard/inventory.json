@@ -197,6 +197,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "DELETE /api/workspaces/{id}/feature-flags/{key}/workspace",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "DELETE /api/workspaces/{id}/credentials/{credId}",
       "gate": "workspace_member"
     },
@@ -1154,6 +1158,10 @@
     },
     {
       "id": "PUT /api/workspaces/{id}/feature-flags/{key}",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "PUT /api/workspaces/{id}/feature-flags/{key}/workspace",
       "gate": "workspace_admin"
     },
     {

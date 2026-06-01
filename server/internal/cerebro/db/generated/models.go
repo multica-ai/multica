@@ -465,6 +465,7 @@ type CerebroFeatureFlag struct {
 	FlagKey     string             `json:"flag_key"`
 	Enabled     bool               `json:"enabled"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Locked      bool               `json:"locked"`
 }
 
 type CerebroGroup struct {

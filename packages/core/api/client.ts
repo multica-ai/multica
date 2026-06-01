@@ -683,7 +683,11 @@ export class ApiClient {
   // CEREBRO-PATCH(feature-flags-client): per-(workspace, user) feature flag overrides.
   // Server returns ONLY the overrides — defaults are applied client-side
   // from the cerebro-feature-flags registry.
-  async listFeatureFlags(wsId: string): Promise<{ overrides: Record<string, boolean> }> {
+  async listFeatureFlags(wsId: string): Promise<{
+    overrides: Record<string, boolean>;
+    workspace_overrides?: Record<string, boolean>;
+    locked?: Record<string, boolean>;
+  }> {
     return this.fetch(`/api/workspaces/${wsId}/feature-flags`);
   }
 
@@ -691,6 +695,28 @@ export class ApiClient {
     await this.fetch(`/api/workspaces/${wsId}/feature-flags/${key}`, {
       method: "PUT",
       body: JSON.stringify({ enabled }),
+    });
+  }
+
+  // CEREBRO-PATCH(feature-flags-workspace-overrides): FIR-2505 — workspace-level
+  // override (owner/admin): force a flag on/off for every member. `locked`
+  // forbids members from overriding it personally. listFeatureFlags also gains
+  // the workspace_overrides + locked maps in the same patch.
+  async setWorkspaceFeatureFlag(
+    wsId: string,
+    key: string,
+    enabled: boolean,
+    locked: boolean,
+  ): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/feature-flags/${key}/workspace`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled, locked }),
+    });
+  }
+
+  async clearWorkspaceFeatureFlag(wsId: string, key: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/feature-flags/${key}/workspace`, {
+      method: "DELETE",
     });
   }
 
