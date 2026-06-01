@@ -240,10 +240,17 @@ func runCodexPluginBind(cmd *cobra.Command, args []string) error {
 	if strings.TrimSpace(sourceKey) == "" {
 		return fmt.Errorf("source-key is required")
 	}
+	projectFolder := codexPluginFlagString(cmd, "project-folder")
+	sessionID, err := codexPluginBindingSessionID(cmd, codexPluginFlagString(cmd, "codex-session-id"), projectFolder)
+	if err != nil {
+		return err
+	}
+	threadID := codexPluginFlagString(cmd, "codex-thread-id")
+	branch := codexPluginFlagString(cmd, "branch")
 	body := map[string]any{
 		"cli_name":         "codex_app",
-		"work_dir":         codexPluginFlagString(cmd, "project-folder"),
-		"context_dir":      codexPluginBindContextDir(cmd),
+		"work_dir":         projectFolder,
+		"context_dir":      codexPluginBindContextDirFromValues(threadID, sessionID, branch),
 		"comments_mode":    "thread",
 		"no_status_update": true,
 		"source":           codexPluginFlagString(cmd, "source"),
@@ -257,9 +264,9 @@ func runCodexPluginBind(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("bind codex plugin session: %w", err)
 	}
 	if err := codexPluginPersistBinding(cmd, issueRef.ID, result, map[string]string{
-		"project_folder":   codexPluginFlagString(cmd, "project-folder"),
-		"codex_thread_id":  codexPluginFlagString(cmd, "codex-thread-id"),
-		"codex_session_id": codexPluginFlagString(cmd, "codex-session-id"),
+		"project_folder":   projectFolder,
+		"codex_thread_id":  threadID,
+		"codex_session_id": sessionID,
 		"source":           codexPluginFlagString(cmd, "source"),
 		"source_key":       sourceKey,
 	}); err != nil {
@@ -423,28 +430,30 @@ func codexPluginFlagInt64(cmd *cobra.Command, name string) int64 {
 }
 
 func codexPluginBindContextDir(cmd *cobra.Command) string {
-	items := []string{}
-	if threadID := codexPluginFlagString(cmd, "codex-thread-id"); threadID != "" {
-		items = append(items, "codex_thread_id="+threadID)
-	}
-	if sessionID := codexPluginFlagString(cmd, "codex-session-id"); sessionID != "" {
-		items = append(items, "codex_session_id="+sessionID)
-	}
-	if branch := codexPluginFlagString(cmd, "branch"); branch != "" {
-		items = append(items, "branch="+branch)
-	}
-	return strings.Join(items, "\n")
+	return codexPluginBindContextDirFromValues(
+		codexPluginFlagString(cmd, "codex-thread-id"),
+		codexPluginFlagString(cmd, "codex-session-id"),
+		codexPluginFlagString(cmd, "branch"),
+	)
 }
 
 func codexPluginMCPBindContextDir(args map[string]any) string {
+	return codexPluginBindContextDirFromValues(
+		mcpString(args, "codex_thread_id"),
+		mcpString(args, "codex_session_id"),
+		mcpString(args, "branch"),
+	)
+}
+
+func codexPluginBindContextDirFromValues(threadID, sessionID, branch string) string {
 	items := []string{}
-	if threadID := mcpString(args, "codex_thread_id"); threadID != "" {
+	if threadID = strings.TrimSpace(threadID); threadID != "" {
 		items = append(items, "codex_thread_id="+threadID)
 	}
-	if sessionID := mcpString(args, "codex_session_id"); sessionID != "" {
+	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
 		items = append(items, "codex_session_id="+sessionID)
 	}
-	if branch := mcpString(args, "branch"); branch != "" {
+	if branch = strings.TrimSpace(branch); branch != "" {
 		items = append(items, "branch="+branch)
 	}
 	return strings.Join(items, "\n")
@@ -957,17 +966,24 @@ func codexPluginMCPToolSessionBind(cmd *cobra.Command, args map[string]any) (any
 	if err != nil {
 		return nil, err
 	}
+	projectFolder := mcpString(args, "project_folder")
+	sessionID, err := codexPluginBindingSessionID(cmd, mcpString(args, "codex_session_id"), projectFolder)
+	if err != nil {
+		return nil, err
+	}
+	threadID := mcpString(args, "codex_thread_id")
+	branch := mcpString(args, "branch")
 	sourceKey := mcpString(args, "source_key")
 	if sourceKey == "" {
-		sourceKey = defaultCodexPluginSourceKey(args, "bind")
+		sourceKey = defaultCodexPluginSourceKeyFromValues(threadID, sessionID, "bind")
 	}
 	if sourceKey == "" {
 		return nil, fmt.Errorf("source_key is required")
 	}
 	body := map[string]any{
 		"cli_name":         "codex_app",
-		"work_dir":         mcpString(args, "project_folder"),
-		"context_dir":      codexPluginMCPBindContextDir(args),
+		"work_dir":         projectFolder,
+		"context_dir":      codexPluginBindContextDirFromValues(threadID, sessionID, branch),
 		"comments_mode":    "thread",
 		"no_status_update": true,
 		"source":           firstNonEmpty(mcpString(args, "source"), codexPluginDefaultSource),
@@ -981,9 +997,9 @@ func codexPluginMCPToolSessionBind(cmd *cobra.Command, args map[string]any) (any
 		return nil, fmt.Errorf("session_bind: %w", err)
 	}
 	if err := codexPluginPersistBinding(cmd, issueRef.ID, result, map[string]string{
-		"project_folder":   mcpString(args, "project_folder"),
-		"codex_thread_id":  mcpString(args, "codex_thread_id"),
-		"codex_session_id": mcpString(args, "codex_session_id"),
+		"project_folder":   projectFolder,
+		"codex_thread_id":  threadID,
+		"codex_session_id": sessionID,
 		"source":           firstNonEmpty(mcpString(args, "source"), codexPluginDefaultSource),
 		"source_key":       sourceKey,
 	}); err != nil {
@@ -1257,6 +1273,31 @@ func codexPluginPersistBinding(cmd *cobra.Command, issueID string, run map[strin
 	state.Bindings = upsertCodexPluginBinding(state.Bindings, binding)
 	state.Bindings = trimCodexPluginBindings(state.Bindings, 50)
 	return codexPluginWriteHookState(cmd, state)
+}
+
+func codexPluginBindingSessionID(cmd *cobra.Command, explicitSessionID, projectFolder string) (string, error) {
+	if sessionID := strings.TrimSpace(explicitSessionID); sessionID != "" {
+		return sessionID, nil
+	}
+	state, err := codexPluginReadHookState(cmd)
+	if err != nil {
+		return "", err
+	}
+	return latestCodexPluginPromptSessionID(state.Prompts, projectFolder), nil
+}
+
+func latestCodexPluginPromptSessionID(prompts []codexPluginHookPrompt, projectFolder string) string {
+	projectFolder = strings.TrimSpace(projectFolder)
+	for _, prompt := range prompts {
+		sessionID := strings.TrimSpace(prompt.SessionID)
+		if sessionID == "" {
+			continue
+		}
+		if projectFolder == "" || prompt.CWD == "" || sameOrNestedPath(prompt.CWD, projectFolder) {
+			return sessionID
+		}
+	}
+	return ""
 }
 
 func upsertCodexPluginBinding(bindings []codexPluginHookBinding, binding codexPluginHookBinding) []codexPluginHookBinding {
@@ -1561,20 +1602,14 @@ func findCodexPluginPrompt(prompts []codexPluginHookPrompt, input codexPluginHoo
 }
 
 func findCodexPluginBinding(bindings []codexPluginHookBinding, input codexPluginHookInput, prompt codexPluginHookPrompt) (codexPluginHookBinding, bool) {
-	sessionID := strings.TrimSpace(input.SessionID)
+	sessionID := firstNonEmpty(input.SessionID, prompt.SessionID)
+	if sessionID == "" {
+		return codexPluginHookBinding{}, false
+	}
 	for _, binding := range bindings {
-		if sessionID != "" && binding.CodexSessionID == sessionID {
+		if binding.CodexSessionID != "" && binding.CodexSessionID == sessionID {
 			return binding, true
 		}
-	}
-	cwd := firstNonEmpty(strings.TrimSpace(input.CWD), strings.TrimSpace(prompt.CWD))
-	for _, binding := range bindings {
-		if cwd != "" && binding.ProjectFolder != "" && sameOrNestedPath(cwd, binding.ProjectFolder) {
-			return binding, true
-		}
-	}
-	if len(bindings) == 1 {
-		return bindings[0], true
 	}
 	return codexPluginHookBinding{}, false
 }
@@ -1785,12 +1820,13 @@ func firstNonEmpty(values ...string) string {
 }
 
 func defaultCodexPluginSourceKey(args map[string]any, suffix string) string {
-	threadID := mcpString(args, "codex_thread_id")
-	if threadID == "" {
-		threadID = mcpString(args, "codex_session_id")
-	}
-	if threadID == "" {
+	return defaultCodexPluginSourceKeyFromValues(mcpString(args, "codex_thread_id"), mcpString(args, "codex_session_id"), suffix)
+}
+
+func defaultCodexPluginSourceKeyFromValues(threadID, sessionID, suffix string) string {
+	keyID := firstNonEmpty(threadID, sessionID)
+	if keyID == "" {
 		return ""
 	}
-	return "codex_app_plugin:" + threadID + ":" + suffix
+	return "codex_app_plugin:" + keyID + ":" + suffix
 }

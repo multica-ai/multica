@@ -94,6 +94,10 @@ func TestRunCodexPluginBindPostsBinding(t *testing.T) {
 	if posted["source_key"] != "thread-1:bind" || posted["cli_name"] != "codex_app" || posted["comments_mode"] != "thread" {
 		t.Fatalf("posted body = %+v", posted)
 	}
+	contextDir, _ := posted["context_dir"].(string)
+	if !strings.Contains(contextDir, "codex_session_id=session-1") {
+		t.Fatalf("context_dir = %q, want codex_session_id", contextDir)
+	}
 }
 
 func TestRunCodexPluginEventPostsEvent(t *testing.T) {
@@ -532,6 +536,125 @@ func TestCodexPluginHooksSyncPromptAndStopToBoundThread(t *testing.T) {
 	}
 }
 
+func TestCodexPluginHooksRequireBoundSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	const issueID = "11111111-1111-4111-8111-111111111111"
+
+	var posted []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/OPE-1493":
+			json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "OPE-1493"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueID:
+			json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "OPE-1493"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/local-runs":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":             "binding-1",
+				"issue_id":       issueID,
+				"status":         "running",
+				"top_comment_id": "comment-1",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/local-runs/binding-1/messages":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode posted message: %v", err)
+			}
+			posted = append(posted, body)
+			json.NewEncoder(w).Encode(map[string]any{
+				"task_id": "binding-1",
+				"seq":     len(posted),
+				"type":    body["type"],
+				"content": body["content"],
+			})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	bindCmd := testCodexPluginBindCommand(srv.URL)
+	if err := runCodexPluginBind(bindCmd, []string{"OPE-1493"}); err != nil {
+		t.Fatalf("runCodexPluginBind() error = %v", err)
+	}
+
+	otherPromptCmd := testCodexPluginHookCommand(srv.URL)
+	otherPromptCmd.SetIn(strings.NewReader(`{"hook_event_name":"UserPromptSubmit","session_id":"session-2","turn_id":"turn-1","cwd":"/tmp/project","prompt":"SHOULD NOT SYNC","model":"gpt-5.1-codex"}`))
+	if err := runCodexPluginHook(otherPromptCmd, nil); err != nil {
+		t.Fatalf("other UserPromptSubmit hook error = %v", err)
+	}
+	if len(posted) != 0 {
+		t.Fatalf("other session posted = %+v, want none", posted)
+	}
+
+	otherStopCmd := testCodexPluginHookCommand(srv.URL)
+	otherStopCmd.SetIn(strings.NewReader(`{"hook_event_name":"Stop","session_id":"session-2","turn_id":"turn-1","cwd":"/tmp/project","last_assistant_message":"should not sync","model":"gpt-5.1-codex"}`))
+	if err := runCodexPluginHook(otherStopCmd, nil); err != nil {
+		t.Fatalf("other Stop hook error = %v", err)
+	}
+	if len(posted) != 0 {
+		t.Fatalf("other session stop posted = %+v, want none", posted)
+	}
+
+	boundPromptCmd := testCodexPluginHookCommand(srv.URL)
+	boundPromptCmd.SetIn(strings.NewReader(`{"hook_event_name":"UserPromptSubmit","session_id":"session-1","turn_id":"turn-2","cwd":"/tmp/project","prompt":"SYNC","model":"gpt-5.1-codex"}`))
+	if err := runCodexPluginHook(boundPromptCmd, nil); err != nil {
+		t.Fatalf("bound UserPromptSubmit hook error = %v", err)
+	}
+	if len(posted) != 1 || posted[0]["content"] != "SYNC" {
+		t.Fatalf("bound session posted = %+v", posted)
+	}
+}
+
+func TestCodexPluginHookDoesNotFallbackToSingleBindingWithoutSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	const issueID = "11111111-1111-4111-8111-111111111111"
+
+	var posted []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/OPE-1493":
+			json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "OPE-1493"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/local-runs":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":             "binding-1",
+				"issue_id":       issueID,
+				"status":         "running",
+				"top_comment_id": "comment-1",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/local-runs/binding-1/messages":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode posted message: %v", err)
+			}
+			posted = append(posted, body)
+			json.NewEncoder(w).Encode(map[string]any{"task_id": "binding-1", "seq": len(posted)})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	bindCmd := testCodexPluginBindCommand(srv.URL)
+	_ = bindCmd.Flags().Set("codex-session-id", "")
+	_ = bindCmd.Flags().Set("project-folder", "/tmp/project")
+	if err := runCodexPluginBind(bindCmd, []string{"OPE-1493"}); err != nil {
+		t.Fatalf("runCodexPluginBind() error = %v", err)
+	}
+
+	promptCmd := testCodexPluginHookCommand(srv.URL)
+	promptCmd.SetIn(strings.NewReader(`{"hook_event_name":"UserPromptSubmit","session_id":"session-1","turn_id":"turn-1","cwd":"/tmp/project","prompt":"SHOULD NOT SYNC","model":"gpt-5.1-codex"}`))
+	if err := runCodexPluginHook(promptCmd, nil); err != nil {
+		t.Fatalf("UserPromptSubmit hook error = %v", err)
+	}
+	if len(posted) != 0 {
+		t.Fatalf("single binding fallback posted = %+v, want none", posted)
+	}
+}
+
 func TestCodexPluginStopHookSkipsExplicitConversationSync(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "")
@@ -699,7 +822,7 @@ func testCodexPluginBindCommand(serverURL string) *cobra.Command {
 	cmd.Flags().String("profile", "", "")
 	cmd.Flags().String("config", "", "")
 	cmd.Flags().String("codex-thread-id", "thread-1", "")
-	cmd.Flags().String("codex-session-id", "", "")
+	cmd.Flags().String("codex-session-id", "session-1", "")
 	cmd.Flags().String("project-folder", "/tmp/project", "")
 	cmd.Flags().String("branch", "feat/OPE-1493-codex-plugin", "")
 	cmd.Flags().String("source", "codex_app_plugin", "")

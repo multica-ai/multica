@@ -52,8 +52,8 @@ printf '%s\n' \
 2. Use `session_bind` with `source: "codex_app_plugin"` and a stable
    `source_key`. This creates a localrun issue comment thread with
    `comments_mode=thread`.
-   The helper also stores the binding in local CLI state so plugin hooks can
-   find the active issue in later turns.
+   The helper also stores the binding in local CLI state with the current
+   Codex session id so plugin hooks can find the active issue in later turns.
 3. Use `runtime_event_append` for meaningful plan, progress, tool summary,
    approval, and error events. Use `visibility: "timeline_only"` for noisy
    process details and `visibility: "issue_comment"` when the context should
@@ -100,6 +100,12 @@ The two replies are idempotent and tracked separately, so a retried
 hook only fills in the assistant reply. Codex requires plugin-bundled hooks to
 be reviewed and trusted before they run; until the user trusts the hooks, only
 explicit MCP tool calls from the skill workflow will sync.
+
+Automatic hook sync is isolated by Codex chat session. A hook only writes to a
+binding whose stored `codex_session_id` matches the hook input `session_id`; it
+does not fall back to matching by project folder or by the only local binding.
+If no stable session id is available, automatic hook sync is skipped to avoid
+mixing unrelated chat sessions into the bound issue.
 
 ## Idempotency
 
