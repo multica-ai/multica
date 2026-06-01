@@ -229,7 +229,7 @@ describe("BulkImportModal", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/create issue failed/i)).toBeInTheDocument();
-      expect(issueStoreMocks.fetch).toHaveBeenCalledTimes(1);
+      expect(issueStoreMocks.fetch).not.toHaveBeenCalled();
       expect(onOpenChange).not.toHaveBeenCalled();
     });
   });

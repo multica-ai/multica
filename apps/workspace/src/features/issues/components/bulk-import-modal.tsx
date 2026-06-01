@@ -166,7 +166,6 @@ export function BulkImportModal({ open, onOpenChange }: BulkImportModalProps) {
 
       const result = await api.applyWorkspaceImport(payload);
       if ((result.errors?.length ?? 0) > 0 || result.failed > 0) {
-        await refreshIssues();
         setServerErrors(result.errors ?? []);
         return;
       }
