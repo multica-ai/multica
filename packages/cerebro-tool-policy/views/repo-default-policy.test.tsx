@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
 
@@ -44,17 +44,18 @@ vi.mock("@multica/ui/components/ui/select", () => ({
   ),
 }));
 
-import { RepoDefaultPolicy } from "./repo-default-policy";
+import {
+  RepoDefaultPolicySelect,
+  RepoPolicyBadge,
+  useWriteRepoDefaultPolicy,
+  type ToolSetting,
+} from "./repo-default-policy";
 
 const REPO = "github.com/firtal-group/repo-a";
 
-function renderControl() {
+function withClient(node: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <RepoDefaultPolicy wsId="ws-1" repoUrl={REPO} />
-    </QueryClientProvider>,
-  );
+  return render(<QueryClientProvider client={qc}>{node}</QueryClientProvider>);
 }
 
 function callsByMethod(method: string | undefined) {
@@ -63,18 +64,40 @@ function callsByMethod(method: string | undefined) {
   );
 }
 
+// Harness wiring the writer hook to a button so a click triggers a real write.
+function WriteHarness({ setting }: { setting: ToolSetting }) {
+  const write = useWriteRepoDefaultPolicy();
+  return <button onClick={() => write("ws-1", REPO, setting)}>write</button>;
+}
+
 beforeEach(() => {
   mockCerebroRequest.mockReset();
   // GET table: no existing repo rows → current default is "inherit".
   mockCerebroRequest.mockResolvedValue({ tools: [] });
 });
 
-describe("RepoDefaultPolicy", () => {
+describe("RepoDefaultPolicySelect", () => {
+  it("renders the controlled value and reports changes without writing", async () => {
+    const user = userEvent.setup();
+    function Controlled() {
+      const [value, setValue] = useState<ToolSetting>("ask");
+      return <RepoDefaultPolicySelect value={value} onChange={setValue} />;
+    }
+    withClient(<Controlled />);
+    const select = (await screen.findByLabelText("Default repo access")) as HTMLSelectElement;
+    expect(select.value).toBe("ask");
+    await user.selectOptions(select, "deny");
+    expect(select.value).toBe("deny");
+    // Pure picker: selecting does NOT touch the API.
+    expect(mockCerebroRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("useWriteRepoDefaultPolicy", () => {
   it("writes the chosen default to all three repo capabilities at the workspace layer, scoped to the repo", async () => {
     const user = userEvent.setup();
-    renderControl();
-    const select = await screen.findByLabelText("Default repo access");
-    await user.selectOptions(select, "deny");
+    withClient(<WriteHarness setting="deny" />);
+    await user.click(screen.getByText("write"));
 
     await waitFor(() => {
       const puts = callsByMethod("PUT").map((c) => JSON.parse((c[1] as RequestInit).body as string));
@@ -88,16 +111,29 @@ describe("RepoDefaultPolicy", () => {
     });
   });
 
-  it("'No default' clears the workspace layer for all three capabilities", async () => {
+  it("'No default' (inherit) clears the workspace layer for all three capabilities", async () => {
     const user = userEvent.setup();
-    renderControl();
-    const select = await screen.findByLabelText("Default repo access");
-    await user.selectOptions(select, "inherit");
+    withClient(<WriteHarness setting="inherit" />);
+    await user.click(screen.getByText("write"));
 
     await waitFor(() => {
       const deletes = callsByMethod("DELETE").map((c) => String(c[0]));
       const forRepo = deletes.filter((u) => u.includes(encodeURIComponent(REPO)) && u.includes("layer=workspace"));
       expect(forRepo.length).toBe(3);
     });
+  });
+});
+
+describe("RepoPolicyBadge", () => {
+  it("shows the current default and triggers onManage when clicked", async () => {
+    const user = userEvent.setup();
+    const onManage = vi.fn();
+    withClient(<RepoPolicyBadge wsId="ws-1" repoUrl={REPO} onManage={onManage} />);
+
+    const badge = await screen.findByTestId(`repo-policy-badge-${REPO}`);
+    // No rows for this repo → "No default".
+    expect(badge.textContent).toContain("No default");
+    await user.click(badge);
+    expect(onManage).toHaveBeenCalledTimes(1);
   });
 });
