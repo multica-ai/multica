@@ -1,0 +1,19 @@
+# Agent documentation
+
+This folder holds **authoritative, agent-facing reference docs** for working on
+this codebase. Unlike `docs/plans/` or the `*-plan.md` files (which capture a
+moment in time), everything here is meant to stay true to the live code — if you
+change behavior these docs describe, update the doc in the same PR.
+
+If you are an AI agent working on Firtal Cerebro / Multica, read the doc that
+matches what you are about to touch before you start.
+
+## Index
+
+- [`permission-system.md`](./permission-system.md) — **What an agent is allowed
+  and denied at runtime today, and by which mechanism.** Read this before
+  touching anything that grants, denies, gates, or approves an agent action
+  (tool access, credentials, repo checkout, web fetch, sandbox, mentions,
+  group/autopilot scope, the tool-policy chain). It separates what is enforced
+  **live today** from what is **off by default**, because confusing the two has
+  already caused a wrong conclusion once.

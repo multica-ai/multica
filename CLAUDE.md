@@ -17,6 +17,12 @@ Read that page before:
 
 The legacy `packages/views/locales/glossary.md` is now a stub redirecting to the docs page; do not rely on it.
 
+## Agent documentation (`docs/agents/`)
+
+Authoritative, agent-facing reference docs that stay true to the live code. Read the relevant one before touching that area.
+
+- **`docs/agents/permission-system.md`** — what an agent is allowed and denied at runtime today, and by which mechanism. **Read this before touching anything that grants, denies, gates, or approves an agent action** (tool access, credentials, repo checkout, web fetch, sandbox, mentions, group/autopilot scope, the tool-policy chain). It separates what is enforced **live today** from what is **off by default** — do not assume "the tool-policy chain is off" means "agents are ungated." If you change behavior it describes, update the doc in the same PR.
+
 ## Project Context
 
 Multica is an AI-native task management platform — like Linear, but with AI agents as first-class citizens.

@@ -1,0 +1,71 @@
+name: Cerebro permission-doc guard
+
+# If a PR changes permission/access-enforcement code, it must also update
+# docs/agents/permission-system.md (the authoritative agent-facing map of what an
+# agent is allowed/denied at runtime). This is a real gate, not a reminder.
+#
+# Escape hatch for legitimately doc-irrelevant changes (a comment, a test, a
+# rename): add the label `permission-doc-not-needed` to the PR, or put the token
+# [skip-permission-doc] in the PR description. Either makes the check pass and
+# records a conscious decision.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  permission-doc-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Check permission-doc was updated alongside permission code
+        env:
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'permission-doc-not-needed') }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin "$BASE_REF" --quiet
+          CHANGED=$(git diff --name-only "origin/$BASE_REF"...HEAD)
+
+          # Paths that enforce what an agent may or may not do at runtime.
+          PERM_REGEX='^(server/internal/cerebro/(credentials|toolpolicy|grouppermissions|mentiongate|sandboxprofile|access|permissions|grants|permgate)/|server/internal/cerebro/runtime/(tools_registry|approval_gate|firtal_gateway_tools_extended|firtal_gateway_config)\.go|server/internal/daemon/sandbox\.go)'
+          DOC='docs/agents/permission-system.md'
+
+          PERM_CHANGED=$(echo "$CHANGED" | grep -E "$PERM_REGEX" || true)
+
+          if [ -z "$PERM_CHANGED" ]; then
+            echo "No permission-enforcement paths changed — guard passes."
+            exit 0
+          fi
+
+          echo "This PR changes permission-enforcement code:"
+          echo "$PERM_CHANGED" | sed 's/^/  - /'
+
+          if echo "$CHANGED" | grep -qxF "$DOC"; then
+            echo "✅ $DOC was updated in this PR — guard passes."
+            exit 0
+          fi
+
+          if [ "$HAS_LABEL" = "true" ]; then
+            echo "✅ Label 'permission-doc-not-needed' is set — guard passes (conscious skip)."
+            exit 0
+          fi
+
+          if printf '%s' "$PR_BODY" | grep -qF '[skip-permission-doc]'; then
+            echo "✅ '[skip-permission-doc]' found in PR description — guard passes (conscious skip)."
+            exit 0
+          fi
+
+          echo "::error::This PR changes permission/access-enforcement code but does not update $DOC. Update the doc to match the new behavior, or — if this change does not affect documented behavior — add the label 'permission-doc-not-needed' or put [skip-permission-doc] in the PR description."
+          exit 1

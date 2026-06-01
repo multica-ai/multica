@@ -1,0 +1,110 @@
+# Permission & access control — what an agent can and cannot do
+
+**Read this before you touch anything that grants, denies, gates, or approves an
+agent action.** Permission enforcement in this codebase is spread across many
+subsystems, and they are easy to confuse. This document is the map.
+
+> **The mistake this doc exists to prevent.** The *new* tool-policy chain
+> (Allow / Ask / Deny / Inherit) is **off by default** as a general gate on tool
+> calls. It is tempting to conclude from that "agents are ungated — nothing
+> blocks them." **That is false.** Many *other* mechanisms enforce real, live
+> access control today, independent of any flag. Do not conflate "the new
+> approval chain is off" with "there are no permissions." They are different
+> statements about different systems.
+
+> **The rule for anyone refactoring this area.** Several of the live gates below
+> look like ad-hoc legacy code worth folding into the tool-policy chain. They
+> are live and load-bearing — especially credentials, which is **deny-by-default
+> for agents**. If you move enforcement into a new system, preserve the current
+> behavior **1:1**. "Cleaning up" a live gate can silently open a door that is
+> closed today.
+
+Line numbers drift; this doc cites files and functions. Grep for the function
+name if a line moved.
+
+---
+
+## Mental model: two separate questions
+
+1. **"Is the new tool-policy chain deciding this call?"** — Almost never, today.
+   The chain (`Allow/Ask/Deny/Inherit`, folded Workspace › Runtime › Agent ›
+   Group › User) is wired live for exactly **one** thing: repo checkout. As a
+   general gate on agent *tool* calls it is dormant behind an env switch.
+
+2. **"Is this agent action gated at all, by anything?"** — Very often, yes, by
+   one of the live subsystems in the table below.
+
+Keep these apart. This doc answers question 2 honestly.
+
+---
+
+## What is enforced LIVE today (no flag required)
+
+Every row here actively allows or denies an agent action right now, with default
+configuration. Verified against the code.
+
+| # | What is gated | Mechanism / where | Default behavior |
+|---|---|---|---|
+| 1 | **Credential access** — attach, read-redacted, reveal, rotate, revoke a secret | `server/internal/cerebro/credentials/service.go` (`enforce`), policy chain in `credentials/policy.go` + `server/cmd/server/cerebro_credentials_policy.go`; wired unconditionally in `router.go` via `.WithPolicy(...)` | **Deny-by-default for agents.** Workspace owner/admin (members) pass; agents must have an explicit persona/Multica grant. Plaintext is never decrypted on deny; every attempt is audit-logged. This is a real security boundary. |
+| 2 | **Which tools an agent gets at all** | `server/internal/cerebro/runtime/tools_registry.go` (`GetEnabledToolsForAgent`, `GetCascadeEnabledToolsForAgent`, table `agent_tool_grant`); called every run from `runtime/firtal_gateway_executor.go` | Resolved live per agent on every task. Only tools enabled for that agent are exposed. |
+| 3 | **Whether an agent gets tools at all (outer gate)** | `runtime/firtal_gateway_config.go` (`ToolsEnabledForAgent`, env `MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS`) | **Default empty list = chat-only.** An agent not on the list gets no tools at all. This is the POC tool-loop allowlist. (Env-gated, default-off — a real restriction today.) |
+| 4 | **Excluded tools (~47)** | `runtime/tools_registry.go` — `ToolStatusExcluded`; `callableBuiltinToolNames()` registers only `Implemented`/`NewlyImplemented` | Excluded tools are **never registered**, so no agent can call them regardless of grants. Count drifts as tools land; check the source. |
+| 5 | **web_fetch host allowlist** | `runtime/firtal_gateway_tools_extended.go` (`webFetchAllowlist`, `WebFetchTool.Call`) | Hardcoded `.firtal.com` + `docs.anthropic.com`, plus per-agent `agent_tool_grant.config_json`. Every call checked; non-allowlisted host rejected **before** the HTTP request. |
+| 6 | **Who can create/use a runtime, create/trigger an agent** | `server/internal/cerebro/grouppermissions/permissions.go` (`CanCreateRuntime`, `CanCreateAgent`, `CanUseRuntime`, `CanUseAgent`); enforced in `handler/group_permissions_cerebro.go` | Live group-permission checks on the relevant endpoints. Service always wired in `router.go`. |
+| 7 | **Who can wake an agent via @mention** | `server/internal/cerebro/mentiongate/gate.go` (`CanTriggerMention`); enforced in `handler/comment.go` | Checked on every comment that mentions an agent/squad leader. Disallowed mention is skipped (agent not triggered). |
+| 8 | **Sandbox profile (OS-level)** | `server/internal/cerebro/sandboxprofile/profile.go` (policy shape) + `server/internal/daemon/sandbox.go` (`buildSandboxConfig`) → `server/pkg/agent/sandbox` | Network mode, allowed hosts, writable/denied paths, shell deny, denied executables — enforced by the OS sandbox (macOS seatbelt / `sandbox-exec`) when the daemon launches the agent. Real kernel-level restriction. |
+| 9 | **Autopilot visibility / edit / trigger** | `server/internal/cerebro/access/autopilot_scope.go` (`CanSee`, `CanEdit`, `CanTrigger`); enforced in `handler/autopilot_cerebro.go` | Scope (workspace / personal / group) checked on every read/write/trigger. |
+| 10 | **Repo checkout** (`repo.read` / `repo.checkout` / `repo.push`) | `handler/daemon.go` (`CheckDaemonRepoCapability`) → `toolpolicy.Resolve`; called from `daemon/daemon.go` (`CheckRepoCapability`) | **The one thing already on the new tool-policy chain.** Only Workspace + Agent layers carry signal for an autonomous checkout. Base = Allow (a repo with no policy is reachable; an admin tightens specific repos). "Ask" needs a human, which a daemon checkout has not, so only explicit Allow passes. |
+
+---
+
+## What is OFF by default (and only this)
+
+These exist and work, but with default flags they block nothing for a normal
+agent. Flipping the flag turns them on.
+
+| System | Off-switch | Default | What turning it on does |
+|---|---|---|---|
+| **Tool-policy chain as a general tool-call gate** | `CEREBRO_APPROVAL_GATE_ENABLED` | **off** → `guardToolCall` is a no-op (returns allow) | With `CEREBRO_APPROVAL_GATE_MODE=toolpolicy`, every tool call resolves through the chain; Ask → shared-inbox approval, Deny → blocked. |
+| **Old capability resolver + grants** (`approval_required` → Ask) | same `CEREBRO_APPROVAL_GATE_ENABLED` (mode `capability`, the default mode) | **off** | Checks grants for capabilities like `network.external`, `credentials.read`, `prod.write`; no matching grant = deny; `approval_required=true` = inbox ask. |
+| **Tool-policy UI table** | feature flag `cerebro_tool_policy` | **false** | Shows the rich effective-chain table. |
+| **Simple tool-policy UI table** | feature flag `cerebro_simple_tool_policy` | **false** | Shows the simplified per-agent Allow/Ask/Block toggles. |
+
+Relevant files: `runtime/approval_gate.go` (`approvalGateEnvEnabled`, `BuildApprovalGate`, `toolCapabilityKey`), `permissions/resolver.go`, `grants/grants.go`, `permgate/permgate.go`, `packages/cerebro-feature-flags/registry.ts`.
+
+Note: the old resolver is also consulted live by the **credentials** policy
+(row 1 above) and by a read-only **grant-preview** endpoint — those paths do not
+depend on the approval-gate flag.
+
+---
+
+## Axes that are NOT tool/access control (don't fold these into tool-policy)
+
+These constrain agents but along a different axis than "is this action allowed":
+
+- **agentpass** (`agentpass/agentpass.go`) — spend/budget cap per issue (money, not access).
+- **Budget block** (`runtime/firtal_gateway_executor.go`) — token budget.
+- **auto-pause / ratelimit / codexlimit** (`runtime/auto_pause.go`, `ratelimit/`, `codexlimit/`) — resilience against provider rate limits.
+- **permguard** (`permguard/permguard.go`) — test-time inventory / regression guard, not a runtime gate.
+- **Infisical secret folders** (`infisical/client.go`) — enforced by the external Infisical ACL; can only be mirrored, not moved here.
+
+---
+
+## If you are mapping or refactoring permissions
+
+- Start from the live table above; it is the source of truth for current behavior.
+- Before claiming "X is unguarded," find the runtime call site and confirm it is
+  not one of the live gates. Reading a struct definition is not enough — trace
+  the call.
+- When consolidating gates into the tool-policy chain, keep the deny-by-default
+  posture of credentials and the OS sandbox intact. Prove the new path denies
+  what the old path denied before removing the old path.
+
+## Keeping this doc honest (enforced)
+
+A CI check (`.github/workflows/cerebro-permission-doc-guard.yml`) fails any PR
+that changes permission/access-enforcement code without updating this file. If a
+change genuinely does not affect documented behavior (a comment, a test, a
+rename), add the label `permission-doc-not-needed` to the PR or put
+`[skip-permission-doc]` in the PR description — a conscious skip, not a silent
+one. This is why the doc stays true to the code instead of rotting.
