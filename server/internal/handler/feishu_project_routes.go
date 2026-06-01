@@ -82,9 +82,12 @@ func (h *Handler) ListFeishuProjectWorkItemFields(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, FeishuProjectFieldsResponse{Fields: fields})
 }
 
-// ListFeishuProjectBusinessLines returns the option tree of the work-item field selected
-// as the business-line field. Required query params: field_key. Optional: work_item_type
-// (defaults to "issue").
+// ListFeishuProjectBusinessLines returns the option tree of a work-item field —
+// despite the path's "business-lines" name, this is the generic per-field option
+// reader used by both the routing UI (picks a select-type field as the routing
+// source) and the label-sync UI's match-value picker. For the space-wide built-in
+// business-line tree (independent of any field), see ListFeishuProjectSpaceBusinessLines.
+// Required query params: field_key. Optional: work_item_type (defaults to "issue").
 func (h *Handler) ListFeishuProjectBusinessLines(w http.ResponseWriter, r *http.Request) {
 	cfg, ok := h.loadFeishuProjectIntegration(w, r)
 	if !ok {
@@ -100,6 +103,24 @@ func (h *Handler) ListFeishuProjectBusinessLines(w http.ResponseWriter, r *http.
 		workItemType = "issue"
 	}
 	lines, err := service.NewFeishuProjectClient().ListFieldOptions(r.Context(), cfg, workItemType, fieldKey)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, FeishuProjectBusinessLinesResponse{BusinessLines: lines})
+}
+
+// ListFeishuProjectSpaceBusinessLines returns the space-wide business-line tree
+// from /business/all, independent of any work-item field. Split out from the
+// per-field endpoint above so callers can't accidentally surface the biz-line
+// tree as the option set of an unrelated radio/select field (the original BUG提单助手
+// regression).
+func (h *Handler) ListFeishuProjectSpaceBusinessLines(w http.ResponseWriter, r *http.Request) {
+	cfg, ok := h.loadFeishuProjectIntegration(w, r)
+	if !ok {
+		return
+	}
+	lines, err := service.NewFeishuProjectClient().ListSpaceBusinessLines(r.Context(), cfg)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return

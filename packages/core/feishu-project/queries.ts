@@ -7,12 +7,14 @@ export const feishuProjectKeys = {
   integration: (wsId: string) => [...feishuProjectKeys.all(wsId), "integration"] as const,
   issueStatuses: (wsId: string) => [...feishuProjectKeys.all(wsId), "issue-statuses"] as const,
   sync: (wsId: string) => [...feishuProjectKeys.all(wsId), "sync"] as const,
+  fieldsAll: (wsId: string) => [...feishuProjectKeys.all(wsId), "fields"] as const,
   fields: (wsId: string, workItemType: string) =>
-    [...feishuProjectKeys.all(wsId), "fields", workItemType] as const,
+    [...feishuProjectKeys.fieldsAll(wsId), workItemType] as const,
+  businessLinesAll: (wsId: string) => [...feishuProjectKeys.all(wsId), "business-lines"] as const,
   // Keyed by fieldKey + workItemType — switching the business-line field forces a refetch
   // of the option tree (since the tree IS that field's options, not space-wide biz lines).
   businessLines: (wsId: string, fieldKey: string, workItemType: string) =>
-    [...feishuProjectKeys.all(wsId), "business-lines", workItemType, fieldKey] as const,
+    [...feishuProjectKeys.businessLinesAll(wsId), workItemType, fieldKey] as const,
   routes: (wsId: string) => [...feishuProjectKeys.all(wsId), "routes"] as const,
 };
 

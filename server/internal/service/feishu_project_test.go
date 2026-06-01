@@ -1119,3 +1119,131 @@ func TestFeishuProjectQueryWorkItemsHonorsExplicitSinceFromOpts(t *testing.T) {
 		t.Fatalf("updated_at.start = %v, want %d", got, explicit)
 	}
 }
+
+// Regression: a custom plugin/radio field like "BUG提单助手" (field_c1f194) is
+// silently dropped from /work_item/{type}/meta but appears in /field/all with its
+// inline options (是/否). Before the fix, the missing-from-/meta path fell through
+// to /business/all and rendered the space-wide business-line tree as if those were
+// the radio field's options.
+func TestListFieldOptionsCustomRadioReturnsInlineOptionsFromFieldAll(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/work_item/issue/meta":
+			// /meta intentionally omits field_c1f194 — this is the real Meego behavior.
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"fields":[{"field_key":"title","field_type_key":"_text"}]}}`))
+		case "/open_api/project-key/field/all":
+			_, _ = w.Write([]byte(`{
+				"err_code": 0,
+				"data": [
+					{"field_key":"title","field_name":"标题","field_type_key":"_text","work_item_scopes":["issue"]},
+					{"field_key":"field_c1f194","field_name":"BUG提单助手","field_type_key":"radio","is_custom_field":true,"work_item_scopes":["issue"],
+					 "options":[{"option_id":"yes","option_name":"是"},{"option_id":"no","option_name":"否"}]}
+				]
+			}`))
+		case "/open_api/project-key/business/all":
+			t.Fatal("/business/all must not be called — the /business/all fallback was removed")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	opts, err := client.ListFieldOptions(context.Background(), db.FeishuProjectIntegration{
+		ProjectKey:   "project-key",
+		PluginID:     "plugin-id",
+		PluginSecret: "plugin-secret",
+	}, "issue", "field_c1f194")
+	if err != nil {
+		t.Fatalf("ListFieldOptions: %v", err)
+	}
+	if len(opts) != 2 || opts[0].Name != "是" || opts[1].Name != "否" {
+		t.Fatalf("expected [是, 否] from /field/all, got %#v", opts)
+	}
+}
+
+// The space-wide business-line tree lives behind its own service method so that
+// callers who actually want the biz-line tree ask for it explicitly — and callers
+// who just want a field's options can never accidentally end up with the biz-line
+// tree (the regression class this whole refactor is preventing).
+func TestListSpaceBusinessLinesHitsOnlyBusinessAll(t *testing.T) {
+	var sawMeta, sawFieldAll bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/work_item/issue/meta":
+			sawMeta = true
+		case "/open_api/project-key/field/all":
+			sawFieldAll = true
+		case "/open_api/project-key/business/all":
+			_, _ = w.Write([]byte(`{"err_code":0,"data":[
+				{"id":"biz-1","name":"玩家服务组","children":[{"id":"biz-1a","name":"活动中心"}]},
+				{"id":"biz-2","name":"TD基建"}
+			]}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	tree, err := client.ListSpaceBusinessLines(context.Background(), db.FeishuProjectIntegration{
+		ProjectKey:   "project-key",
+		PluginID:     "plugin-id",
+		PluginSecret: "plugin-secret",
+	})
+	if err != nil {
+		t.Fatalf("ListSpaceBusinessLines: %v", err)
+	}
+	if sawMeta || sawFieldAll {
+		t.Fatalf("ListSpaceBusinessLines must not touch field endpoints (meta=%v fieldAll=%v)", sawMeta, sawFieldAll)
+	}
+	if len(tree) != 2 || tree[0].Name != "玩家服务组" || len(tree[0].Children) != 1 || tree[1].Name != "TD基建" {
+		t.Fatalf("unexpected tree: %#v", tree)
+	}
+}
+
+// A field with no inline options anywhere returns nil — the /business/all fallback
+// is gone, so the UI falls through to a free-text input instead of being fed the
+// unrelated space-wide biz-line tree.
+func TestListFieldOptionsReturnsNilWhenNoInlineOptionsAnywhere(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/open_api/authen/plugin_token":
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"plugin_token":"plugin-token"}}`))
+		case "/open_api/project-key/work_item/issue/meta":
+			_, _ = w.Write([]byte(`{"err_code":0,"data":{"fields":[{"field_key":"summary","field_type_key":"_text"}]}}`))
+		case "/open_api/project-key/field/all":
+			_, _ = w.Write([]byte(`{
+				"err_code": 0,
+				"data": [
+					{"field_key":"summary","field_name":"摘要","field_type_key":"_text","work_item_scopes":["issue"]}
+				]
+			}`))
+		case "/open_api/project-key/business/all":
+			t.Fatal("/business/all must not be called — the /business/all fallback was removed")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &FeishuProjectClient{HTTPClient: server.Client(), BaseURL: server.URL}
+	opts, err := client.ListFieldOptions(context.Background(), db.FeishuProjectIntegration{
+		ProjectKey:   "project-key",
+		PluginID:     "plugin-id",
+		PluginSecret: "plugin-secret",
+	}, "issue", "summary")
+	if err != nil {
+		t.Fatalf("ListFieldOptions: %v", err)
+	}
+	if opts != nil {
+		t.Fatalf("expected nil, got %#v", opts)
+	}
+}

@@ -271,6 +271,11 @@ export function IntegrationsTab() {
         queryClient.invalidateQueries({ queryKey: feishuProjectKeys.integration(wsId) }),
         queryClient.invalidateQueries({ queryKey: feishuProjectKeys.issueStatuses(wsId) }),
         queryClient.invalidateQueries({ queryKey: feishuProjectKeys.routes(wsId) }),
+        // Space-keyed data (Meego field list + per-field option tree) lives under the
+        // same wsId regardless of which project_key is configured, so swapping spaces
+        // would otherwise serve stale entries from the prior space's cache.
+        queryClient.invalidateQueries({ queryKey: feishuProjectKeys.fieldsAll(wsId) }),
+        queryClient.invalidateQueries({ queryKey: feishuProjectKeys.businessLinesAll(wsId) }),
       ]);
       toast.success(t(($) => $.integrations.feishu_project_saved));
     } catch (e) {
