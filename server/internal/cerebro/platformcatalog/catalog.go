@@ -436,6 +436,16 @@ var catalog = []Capability{
 		},
 	},
 	{
+		Key:         "create_local_runtime",
+		Title:       "Create local runtime",
+		Category:    CategoryRuntimes,
+		Description: "Register a new LOCAL (daemon-based) runtime that runs on the user's own machine. Settable Allow/Ask/Deny on every layer; enforced live at the runtime setup-token mint through the unified tool-policy chain (workspace > group > user). The local twin of manage_cloud_runtime (FIR-2672).",
+		Evidence: []string{
+			"server/internal/handler/runtime_setup.go:54",              // CreateRuntimeSetupToken create_local_runtime tool-policy gate
+			"server/internal/handler/group_permissions_cerebro.go:185", // cerebroRequireLocalRuntimePolicy (tool-policy Resolve)
+		},
+	},
+	{
 		Key:         "use_other_runtime",
 		Title:       "Use someone else's runtime",
 		Category:    CategoryRuntimes,

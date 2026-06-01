@@ -116,6 +116,20 @@ func TestCerebroRequireCapability_NilInvokerPasses(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(create-local-runtime-policy-gate): FIR-2672 — the local-runtime
+// tool-policy gate must fail OPEN when no cerebro queries are wired, so the
+// upstream-only test fixtures that drive CreateRuntimeSetupToken without a
+// DB-backed handler keep working. The Allow/Deny resolution itself is covered
+// by toolpolicy/store_test.go + chain_test.go; this pins only the nil-guard.
+func TestCerebroRequireLocalRuntimePolicy_NilQueriesPasses(t *testing.T) {
+	h := &Handler{}
+	r := httptest.NewRequest(http.MethodPost, "/api/workspaces/x/runtime-setup-token", nil)
+	w := httptest.NewRecorder()
+	if !h.cerebroRequireLocalRuntimePolicy(w, r, "00000000-0000-0000-0000-000000000000") {
+		t.Fatalf("nil CerebroQueries: local-runtime gate must pass, got body=%q", w.Body.String())
+	}
+}
+
 func TestCerebroRequireCapability_UnknownCapabilityFailsClosed(t *testing.T) {
 	// Mistyped capability identifier in the handler should never silently
 	// pass — we'd rather see 500 in a test than ship a backdoor.

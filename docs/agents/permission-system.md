@@ -28,8 +28,9 @@ name if a line moved.
 
 1. **"Is the new tool-policy chain deciding this call?"** — Almost never, today.
    The chain (`Allow/Ask/Deny/Inherit`, folded Workspace › Runtime › Agent ›
-   Group › User) is wired live for exactly **one** thing: repo checkout. As a
-   general gate on agent *tool* calls it is dormant behind an env switch.
+   Group › User) is wired live for exactly **two** things: repo checkout (row 10)
+   and local-runtime creation (`create_local_runtime`, row 11). As a general gate
+   on agent *tool* calls it is dormant behind an env switch.
 
 2. **"Is this agent action gated at all, by anything?"** — Very often, yes, by
    one of the live subsystems in the table below.
@@ -54,7 +55,8 @@ configuration. Verified against the code.
 | 7 | **Who can wake an agent via @mention** | `server/internal/cerebro/mentiongate/gate.go` (`CanTriggerMention`); enforced in `handler/comment.go` | Checked on every comment that mentions an agent/squad leader. Disallowed mention is skipped (agent not triggered). |
 | 8 | **Sandbox profile (OS-level)** | `server/internal/cerebro/sandboxprofile/profile.go` (policy shape) + `server/internal/daemon/sandbox.go` (`buildSandboxConfig`) → `server/pkg/agent/sandbox` | Network mode, allowed hosts, writable/denied paths, shell deny, denied executables — enforced by the OS sandbox (macOS seatbelt / `sandbox-exec`) when the daemon launches the agent. Real kernel-level restriction. |
 | 9 | **Autopilot visibility / edit / trigger** | `server/internal/cerebro/access/autopilot_scope.go` (`CanSee`, `CanEdit`, `CanTrigger`); enforced in `handler/autopilot_cerebro.go` | Scope (workspace / personal / group) checked on every read/write/trigger. |
-| 10 | **Repo checkout** (`repo.read` / `repo.checkout` / `repo.push`) | `handler/daemon.go` (`CheckDaemonRepoCapability`) → `toolpolicy.Resolve`; called from `daemon/daemon.go` (`CheckRepoCapability`) | **The one thing already on the new tool-policy chain.** Only Workspace + Agent layers carry signal for an autonomous checkout. Base = Allow (a repo with no policy is reachable; an admin tightens specific repos). "Ask" needs a human, which a daemon checkout has not, so only explicit Allow passes. |
+| 10 | **Repo checkout** (`repo.read` / `repo.checkout` / `repo.push`) | `handler/daemon.go` (`CheckDaemonRepoCapability`) → `toolpolicy.Resolve`; called from `daemon/daemon.go` (`CheckRepoCapability`) | One of two things wired live to the tool-policy chain (see also row 11). Only Workspace + Agent layers carry signal for an autonomous checkout. Base = Allow (a repo with no policy is reachable; an admin tightens specific repos). "Ask" needs a human, which a daemon checkout has not, so only explicit Allow passes. |
+| 11 | **Who can create a LOCAL runtime** (`create_local_runtime`) | `handler/runtime_setup.go` (`CreateRuntimeSetupToken`) → `handler/group_permissions_cerebro.go` (`cerebroRequireLocalRuntimePolicy`) → `toolpolicy.Resolve`; catalog entry in `cerebro/platformcatalog/catalog.go` | **FIR-2672 — the second thing wired live to the tool-policy chain.** Consulted unconditionally at the local-runtime setup-token mint (not behind `CEREBRO_APPROVAL_GATE_ENABLED`). Workspace + Group + User layers carry signal (groups auto-resolved from the user). Base = Allow, so nothing changes until an admin sets Deny on a group/member — preserving the prior behavior 1:1. Admins bypass. Anything other than Allow (Deny **or** Ask) blocks the mint, since the mint has no inbox-approval path yet. This is layered on top of the existing `create_runtime` group capability (row 6), which still gates the same mint. |
 
 ---
 
