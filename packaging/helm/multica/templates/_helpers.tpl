@@ -82,3 +82,13 @@ Resolve the claude-broker image reference.
 {{- $tag := default .Values.image.tag $img.tag -}}
 {{- printf "%s/%s:%s" .Values.image.registry $img.name $tag -}}
 {{- end }}
+
+{{/*
+Resolve the repocache image reference.
+  {{ include "multica.repocacheImage" . }}
+*/}}
+{{- define "multica.repocacheImage" -}}
+{{- $img := .Values.runtime.repocache.image -}}
+{{- $tag := default .Values.image.tag $img.tag -}}
+{{- printf "%s/%s:%s" .Values.image.registry $img.name $tag -}}
+{{- end }}

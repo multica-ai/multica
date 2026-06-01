@@ -135,6 +135,24 @@ runtime:
       requests: { cpu: 100m, memory: 128Mi }
       limits:   { cpu: 500m, memory: 256Mi }
 
+  # ── In-cluster repo cache (Plan F.1) ──────────────────────────────────────
+  # Long-lived Deployment that maintains bare clones of every workspace's repos
+  # on an RWX PVC. Worker Job pods mount the same PVC read-only and `git clone`
+  # locally via a per-task gitconfig with url.<base>.insteadOf rewrites. Cuts
+  # cold-clone time from 5-15s to sub-second.
+  repocache:
+    enabled: true
+    replicaCount: 1
+    image: { name: multica-repocache, tag: "" }   # "" → falls back to image.tag
+    storage:
+      storageClass: ""                  # MUST be RWX-capable
+      accessMode: ReadWriteMany
+      size: 20Gi
+    fetchInterval: 60s
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: 1,    memory: 1Gi }
+
   # ── Claude OAuth broker (in-cluster refresh token holder) ────────────────
   # Owns the canonical Anthropic OAuth state and serves the current bearer
   # to worker Job pods via /access_token. Eliminates the concurrent-refresh
