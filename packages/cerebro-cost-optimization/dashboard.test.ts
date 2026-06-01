@@ -153,7 +153,9 @@ describe("estimatedValue", () => {
     ).toBe("1,500 tokens");
   });
 
-  it("prices a positive non-model_cost metric in dollars when available", () => {
+  it("leads with the token count and shows the price alongside (prune, priced)", () => {
+    // FIR-2639: the saved context is a token quantity — the card must show the
+    // token number, not hide it behind a bare dollar amount.
     expect(
       estimatedValue(
         saving({
@@ -163,7 +165,7 @@ describe("estimatedValue", () => {
           estimatedSavedUnits: 1500,
         }),
       ),
-    ).toBe("$3.20");
+    ).toBe("1,500 tokens ($3.20)");
   });
 });
 
@@ -172,9 +174,10 @@ describe("appliedValue", () => {
     expect(appliedValue(saving({ applied: null }))).toBe("—");
   });
 
-  it("shows the real saving in dollars at 100% rollout (prune, priced)", () => {
+  it("shows saved tokens with the price at 100% rollout (prune, priced)", () => {
     // FIR-2572: prune on for everyone, no holdout — the measured number must
-    // still render as real money, not '—'.
+    // still render, not '—'. FIR-2639: lead with the token count so the saved
+    // context is a clear token figure, with the dollar value alongside.
     expect(
       appliedValue(
         saving({
@@ -183,7 +186,7 @@ describe("appliedValue", () => {
           applied: { savedUnits: 9000, savedCents: 450, runCount: 20 },
         }),
       ),
-    ).toBe("$4.50");
+    ).toBe("9,000 tokens ($4.50)");
   });
 
   it("shows native units for an unpriced applied saving", () => {

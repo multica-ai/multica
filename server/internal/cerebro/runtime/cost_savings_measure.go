@@ -95,8 +95,16 @@ type CostSavingRunFacts struct {
 	ToolResultChars int64
 	// PrunedToolResultChars is the characters prune_tool_results ACTUALLY dropped
 	// from the transcript this run (0 unless the saving was "on" and a round was
-	// superseded). Used as the measured saving when the saving is applied.
+	// superseded). Counts each pruned char ONCE — kept for diagnostics; the saving
+	// is scored from PrunedContextCharsCompounded.
 	PrunedToolResultChars int64
+	// PrunedContextCharsCompounded is the COMPOUNDING pruned-context saving: each
+	// char pruned at round i would otherwise have been resent in every model call
+	// after round i, so it is counted once per subsequent call. This is the honest
+	// measured saving for prune_tool_results when applied — pruning early in a run
+	// saves more than pruning in the last round. Always >= PrunedToolResultChars
+	// (every prune is followed by at least the final model call). FIR-2639.
+	PrunedContextCharsCompounded int64
 	// PromptInputChars is the total prompt characters the run actually sent to the
 	// model (summed across every request). Together with the provider-reported
 	// prompt tokens (Usage input + cache tokens) it gives a REAL chars-per-token
@@ -238,8 +246,10 @@ func measureRun(modes map[string]string, f CostSavingRunFacts, cheapModel string
 
 		case savingPruneToolResults:
 			// Pruning drops superseded tool-call output from the context window.
-			// When applied ("on"), the saving counts the chars we ACTUALLY pruned
-			// this run; in shadow it estimates the full tool-result surface as the
+			// When applied ("on"), the saving counts the COMPOUNDING chars dropped
+			// this run — each pruned char would otherwise have been resent in every
+			// subsequent model call, so it is counted once per call (FIR-2639), not
+			// once total. In shadow it estimates the full tool-result surface as the
 			// would-save. Baseline = approx tokens dropped; effective = 0 once
 			// pruned. The saved tokens are priced as input tokens on the run's
 			// model so the dashboard shows a real dollar figure — never a guess.
@@ -248,7 +258,7 @@ func measureRun(modes map[string]string, f CostSavingRunFacts, cheapModel string
 			}
 			savedChars := f.ToolResultChars
 			if applied {
-				savedChars = f.PrunedToolResultChars
+				savedChars = f.PrunedContextCharsCompounded
 			}
 			// savedContextTokens calibrates chars→tokens from this run's own
 			// provider-reported usage when available, so the saved-token count is

@@ -144,11 +144,11 @@ func TestMeasureRun_PruneToolResultsCalibratesFromRealUsage(t *testing.T) {
 	// 1000 pruned chars => 1000 * 4000 / 20000 = 200 saved tokens.
 	// The chars/4 fallback would (wrongly) give 250, so 200 proves calibration.
 	facts := CostSavingRunFacts{
-		EffectiveModel:        testCheapModel,
-		ToolResultChars:       4000,
-		PrunedToolResultChars: 1000,
-		PromptInputChars:      20_000,
-		Usage:                 pricing.Usage{InputTokens: 4000},
+		EffectiveModel:               testCheapModel,
+		ToolResultChars:              4000,
+		PrunedContextCharsCompounded: 1000,
+		PromptInputChars:             20_000,
+		Usage:                        pricing.Usage{InputTokens: 4000},
 	}
 	got := measureRun(map[string]string{savingPruneToolResults: savingModeOn}, facts, "")
 	m, ok := findMeasurement(got, savingPruneToolResults)
@@ -173,11 +173,11 @@ func TestMeasureRun_PruneToolResultsCalibratesFromRealUsage(t *testing.T) {
 func TestMeasureRun_PruneCalibrationIncludesCacheTokens(t *testing.T) {
 	// Same effective ratio as above (4000 prompt tokens), but split across cache.
 	facts := CostSavingRunFacts{
-		EffectiveModel:        testCheapModel,
-		ToolResultChars:       4000,
-		PrunedToolResultChars: 1000,
-		PromptInputChars:      20_000,
-		Usage:                 pricing.Usage{InputTokens: 2000, CacheReadTokens: 1000, CacheWriteTokens: 1000},
+		EffectiveModel:               testCheapModel,
+		ToolResultChars:              4000,
+		PrunedContextCharsCompounded: 1000,
+		PromptInputChars:             20_000,
+		Usage:                        pricing.Usage{InputTokens: 2000, CacheReadTokens: 1000, CacheWriteTokens: 1000},
 	}
 	got := measureRun(map[string]string{savingPruneToolResults: savingModeOn}, facts, "")
 	m, _ := findMeasurement(got, savingPruneToolResults)
@@ -190,9 +190,9 @@ func TestMeasureRun_PruneCalibrationIncludesCacheTokens(t *testing.T) {
 // fall back to the documented chars/4 estimate.
 func TestMeasureRun_PruneFallsBackToCharsPerTokenWhenUncalibrated(t *testing.T) {
 	facts := CostSavingRunFacts{
-		EffectiveModel:        testCheapModel,
-		ToolResultChars:       4000,
-		PrunedToolResultChars: 1000,
+		EffectiveModel:               testCheapModel,
+		ToolResultChars:              4000,
+		PrunedContextCharsCompounded: 1000,
 		// PromptInputChars and Usage left zero => no calibration possible.
 	}
 	got := measureRun(map[string]string{savingPruneToolResults: savingModeOn}, facts, "")

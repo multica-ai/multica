@@ -362,16 +362,17 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	e.recordTaskMessage(finalCtx, task, completion.Output)
 	e.recordTaskUsage(finalCtx, task, plan.workspaceID, completion)
 	e.recordCostSavingMeasurements(finalCtx, plan.workspaceID, task.ID, costModes, CostSavingRunFacts{
-		RequestedModel:        requestedModel,
-		EffectiveModel:        completion.Model,
-		Usage:                 pricing.Usage{InputTokens: completion.Usage.InputTokens, OutputTokens: completion.Usage.OutputTokens, CacheReadTokens: completion.Usage.CacheReadTokens, CacheWriteTokens: completion.Usage.CacheWriteTokens},
-		ActualCostCents:       completionCostCents(completion),
-		InlinedContextReads:   plan.inlinedContextReads,
-		ToolResultChars:       completion.ToolResultChars,
-		PrunedToolResultChars: completion.PrunedToolResultChars,
-		PromptInputChars:      completion.PromptInputChars,
-		RoutingHeldOut:        routingHeldOut,
-		PruneHeldOut:          pruneHeldOut,
+		RequestedModel:               requestedModel,
+		EffectiveModel:               completion.Model,
+		Usage:                        pricing.Usage{InputTokens: completion.Usage.InputTokens, OutputTokens: completion.Usage.OutputTokens, CacheReadTokens: completion.Usage.CacheReadTokens, CacheWriteTokens: completion.Usage.CacheWriteTokens},
+		ActualCostCents:              completionCostCents(completion),
+		InlinedContextReads:          plan.inlinedContextReads,
+		ToolResultChars:              completion.ToolResultChars,
+		PrunedToolResultChars:        completion.PrunedToolResultChars,
+		PrunedContextCharsCompounded: completion.PrunedContextCharsCompounded,
+		PromptInputChars:             completion.PromptInputChars,
+		RoutingHeldOut:               routingHeldOut,
+		PruneHeldOut:                 pruneHeldOut,
 	})
 
 	result, _ := json.Marshal(protocol.TaskCompletedPayload{
@@ -758,6 +759,10 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 			return GatewayCompletion{}, err
 		}
 		accumulate(completion)
+		// FIR-2639: this call's prompt excluded every char pruned in prior rounds,
+		// so the prune saving compounds across calls. acc.PrunedToolResultChars is
+		// the running total pruned so far; add it once per model call.
+		acc.PrunedContextCharsCompounded += acc.PrunedToolResultChars
 
 		if len(completion.ToolCalls) == 0 {
 			acc.Output = completion.Output
@@ -826,6 +831,8 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 		return GatewayCompletion{}, err
 	}
 	accumulate(final)
+	// FIR-2639: the final forcing call also excluded every pruned char — count it.
+	acc.PrunedContextCharsCompounded += acc.PrunedToolResultChars
 	acc.Output = final.Output
 	return acc, nil
 }
@@ -866,6 +873,10 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 			return GatewayCompletion{}, err
 		}
 		accumulate(completion)
+		// FIR-2639: compound the prune saving — this call's prompt omitted every
+		// char pruned in prior rounds. acc.PrunedToolResultChars is the running
+		// total pruned so far; add it once per model call.
+		acc.PrunedContextCharsCompounded += acc.PrunedToolResultChars
 
 		if len(completion.ToolCalls) == 0 {
 			acc.Output = completion.Output
@@ -948,6 +959,8 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 		return GatewayCompletion{}, err
 	}
 	accumulate(final)
+	// FIR-2639: the final forcing call also excluded every pruned char — count it.
+	acc.PrunedContextCharsCompounded += acc.PrunedToolResultChars
 	acc.Output = final.Output
 	return acc, nil
 }
@@ -1025,6 +1038,10 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 		// prompt tokens, so savedContextTokens calibrates an accurate ratio.
 		completion.PromptInputChars = anthropicHistoryChars(systemText, history)
 		accumulate(completion)
+		// FIR-2639: compound the prune saving — this call's prompt omitted every
+		// char pruned in prior rounds. acc.PrunedToolResultChars is the running
+		// total pruned so far; add it once per model call.
+		acc.PrunedContextCharsCompounded += acc.PrunedToolResultChars
 
 		if len(completion.ToolCalls) == 0 {
 			acc.Output = completion.Output
@@ -1152,6 +1169,8 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 	// no holdout control arm.
 	final.PromptInputChars = anthropicHistoryChars(systemText, history)
 	accumulate(final)
+	// FIR-2639: the final forcing call also excluded every pruned char — count it.
+	acc.PrunedContextCharsCompounded += acc.PrunedToolResultChars
 	acc.Output = final.Output
 	return acc, nil
 }

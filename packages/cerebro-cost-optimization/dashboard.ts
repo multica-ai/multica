@@ -151,21 +151,31 @@ export function metricUnitLabel(metric: CostSavingMetric, count: number): string
 }
 
 /**
- * The estimated would-save figure as a display string: dollars when the saving
- * is money-denominated, otherwise its native units.
+ * The estimated would-save figure as a display string, chosen by metric:
  *
- * model_cost is always money and must render as dollars for every sign —
- * including zero and negative (the saving cost more than the baseline). Pricing
- * it as native units printed the raw cents next to a "model cost" label, e.g.
- * "-200 model cost" instead of "-$2.00". Other metrics show dollars only when a
- * positive priced figure exists, else their native units (e.g. tokens).
+ * - model_cost is always money and must render as dollars for every sign —
+ *   including zero and negative (the saving cost more than the baseline).
+ * - Token metrics (context_tokens, input_tokens) ALWAYS lead with the token
+ *   count, because the saved context IS a token quantity — that is the headline
+ *   number for the prune card. The dollar value rides alongside in parentheses
+ *   when the tokens are priced, so the card never hides the token figure behind
+ *   a bare dollar amount (FIR-2639).
+ * - Other metrics show dollars when a positive priced figure exists, else their
+ *   native units (e.g. platform calls).
  */
 function savingValue(
   metric: CostSavingMetric,
   units: number,
   cents: number,
 ): string {
-  if (metric === "model_cost" || cents > 0) {
+  if (metric === "model_cost") {
+    return formatUsd(cents);
+  }
+  if (metric === "context_tokens" || metric === "input_tokens") {
+    const tokens = `${units.toLocaleString("en-US")} ${metricUnitLabel(metric, units)}`;
+    return cents > 0 ? `${tokens} (${formatUsd(cents)})` : tokens;
+  }
+  if (cents > 0) {
     return formatUsd(cents);
   }
   const unit = metricUnitLabel(metric, units);
