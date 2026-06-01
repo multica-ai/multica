@@ -66,7 +66,7 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
   if (isError || !attachment) {
     return (
       <div className="h-full overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
+        <div className="mx-auto w-full max-w-7xl px-4 py-4 md:px-8 md:py-6">
           <div className="mb-3 flex items-center gap-2">
             <MobileSidebarTrigger className="mr-0" />
             <Button variant="ghost" size="sm" onClick={() => router.back()}>
@@ -116,7 +116,7 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
+      <div className="mx-auto w-full max-w-7xl px-4 py-4 md:px-8 md:py-6">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <MobileSidebarTrigger className="mr-0" />
