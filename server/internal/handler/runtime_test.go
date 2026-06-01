@@ -37,6 +37,12 @@ func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
 			handle: testHandler.DeleteAgentRuntime,
 		},
 		{
+			name:   "archive-agents-and-delete",
+			method: "POST",
+			path:   "/api/runtimes/not-a-uuid/archive-agents-and-delete",
+			handle: testHandler.ArchiveAgentsAndDeleteRuntime,
+		},
+		{
 			name:   "models",
 			method: "POST",
 			path:   "/api/runtimes/not-a-uuid/models",

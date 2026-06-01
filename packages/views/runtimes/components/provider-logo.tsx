@@ -138,6 +138,21 @@ function GeminiLogo({ className }: { className: string }) {
   );
 }
 
+// Antigravity (Google) — official mark, shipped as a PNG asset next to
+// this file. Different bundlers type the PNG import differently — Next.js
+// gives a StaticImageData object (.src), electron-vite + plain vite give
+// a string. Normalise via unknown so neither side's narrower type wins
+// and breaks the other's typecheck.
+import antigravityLogo from "./antigravity-logo.png";
+const antigravityLogoSrc: string = (() => {
+  const asset = antigravityLogo as unknown;
+  return typeof asset === "string" ? asset : (asset as { src: string }).src;
+})();
+
+function AntigravityLogo({ className }: { className: string }) {
+  return <img src={antigravityLogoSrc} alt="Antigravity" className={className} />;
+}
+
 // Kiro CLI — official icon sourced from kiro.dev/icon.svg.
 function KiroLogo({ className }: { className: string }) {
   const maskId = `kiro-logo-mask-${useId().replace(/:/g, "")}`;
@@ -207,6 +222,8 @@ export function ProviderLogo({
       return <KiroLogo className={className} />;
     case "gemini":
       return <GeminiLogo className={className} />;
+    case "antigravity":
+      return <AntigravityLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

@@ -38,6 +38,22 @@
     },
     "row_delete_aria": "Sohbet oturumunu sil",
     "row_rename_aria": "Sohbet oturumunu yeniden adlandır",
+    "row_stop_aria": "Geçerli çalıştırmayı durdur",
+    "stop_action": "Durdur",
+    "row_subtitle": {
+      "working": "Çalışıyor",
+      "completed": "Tamamlandı",
+      "new_reply": "Yeni yanıt",
+      "archived_label": "Arşivlendi"
+    },
+    "stop_dialog": {
+      "title": "Bu çalıştırma durdurulsun mu?",
+      "description_with_title": "Bu, \"{{title}}\" içindeki geçerli ajan task'ını iptal eder. Kısmi çıktı chat'te kalır.",
+      "description_default": "Bu, geçerli ajan task'ını iptal eder. Kısmi çıktı chat'te kalır.",
+      "cancel": "Çalışmaya devam et",
+      "confirm": "Çalıştırmayı durdur",
+      "confirming": "Durduruluyor..."
+    },
     "delete_dialog": {
       "title": "Sohbet oturumunu sil",
       "description_with_title": "\"{{title}}\" ve mesajları kalıcı olarak silinecek. Bu işlem geri alınamaz.",
@@ -102,6 +118,7 @@
       "offline": "Çevrimdışı",
       "reconnecting": "Yeniden bağlanıyor",
       "queued": "Sırada",
+      "waiting_local_directory": "Yerel dizin bekleniyor",
       "starting_up": "Başlatılıyor",
       "thinking": "Düşünüyor",
       "typing": "Yazıyor"

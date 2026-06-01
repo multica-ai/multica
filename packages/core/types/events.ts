@@ -23,6 +23,8 @@ export type WSEventType =
   | "agent:restored"
   | "task:queued"
   | "task:dispatch"
+  | "task:running"
+  | "task:waiting_local_directory"
   | "task:progress"
   | "task:completed"
   | "task:failed"
@@ -239,6 +241,28 @@ export interface TaskDispatchPayload {
   chat_session_id?: string;
 }
 
+export interface TaskRunningPayload {
+  task_id: string;
+  agent_id: string;
+  issue_id: string;
+  chat_session_id?: string;
+  status: string;
+}
+
+// task:waiting_local_directory fires when the daemon dequeues a task but
+// can't immediately acquire the on-disk path lock — another task on this
+// daemon is already executing in the same local_directory. The optional
+// `wait_reason` mirrors the server-side hint (path / holder task id), but
+// is not yet surfaced end-to-end; the UI today only reads the status.
+export interface TaskWaitingLocalDirectoryPayload {
+  task_id: string;
+  agent_id: string;
+  issue_id: string;
+  chat_session_id?: string;
+  status: string;
+  wait_reason?: string;
+}
+
 export interface TaskCompletedPayload {
   task_id: string;
   agent_id: string;
@@ -385,6 +409,8 @@ export interface WSEventPayloadMap {
   "agent:restored": AgentRestoredPayload;
   "task:queued": TaskQueuedPayload;
   "task:dispatch": TaskDispatchPayload;
+  "task:running": TaskRunningPayload;
+  "task:waiting_local_directory": TaskWaitingLocalDirectoryPayload;
   "task:completed": TaskCompletedPayload;
   "task:failed": TaskFailedPayload;
   "task:message": TaskMessagePayload;

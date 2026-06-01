@@ -38,6 +38,22 @@
     },
     "row_delete_aria": "Delete chat session",
     "row_rename_aria": "Rename chat session",
+    "row_stop_aria": "Stop current run",
+    "stop_action": "Stop",
+    "row_subtitle": {
+      "working": "Working",
+      "completed": "Completed",
+      "new_reply": "New reply",
+      "archived_label": "Archived"
+    },
+    "stop_dialog": {
+      "title": "Stop this run?",
+      "description_with_title": "This will cancel the current agent task in \"{{title}}\". Partial output will stay in the chat.",
+      "description_default": "This will cancel the current agent task. Partial output will stay in the chat.",
+      "cancel": "Keep running",
+      "confirm": "Stop run",
+      "confirming": "Stopping..."
+    },
     "delete_dialog": {
       "title": "Delete chat session",
       "description_with_title": "\"{{title}}\" and its messages will be permanently removed. This action cannot be undone.",
@@ -102,6 +118,7 @@
       "offline": "Offline",
       "reconnecting": "Reconnecting",
       "queued": "Queued",
+      "waiting_local_directory": "Waiting for local directory",
       "starting_up": "Starting up",
       "thinking": "Thinking",
       "typing": "Typing"

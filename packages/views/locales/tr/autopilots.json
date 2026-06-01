@@ -257,6 +257,11 @@
     "webhook_created_description": "Aşağıdaki URL'ye herhangi bir JSON POST edin, autopilot tetiklenir. Şimdi kopyalayın — ayrıca autopilot detay sayfasında bulabilir ve yenileyebilirsiniz.",
     "webhook_created_warning": "Bu URL'yi parola gibi koruyun. Ona sahip olan herkes autopilot'u tetikleyebilir.",
     "webhook_created_done": "Tamam",
+    "event_filter_label": "Olay filtreleri",
+    "event_filter_docs_link_label": "Olay filtrelerinin nasıl çalıştığını öğrenin",
+    "event_filter_event_placeholder": "örn. workflow_run",
+    "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_hint": "Yalnızca bu olaylarla eşleşen webhook'ları işle. Tümünü kabul etmek için boş bırakın.",
     "schedule_disabled_reason": "Bu autopilot'un birden fazla zamanlaması var — detay sayfasından düzenleyin.",
     "next_run_label": "Sonraki çalışma:",
     "output_modes": {

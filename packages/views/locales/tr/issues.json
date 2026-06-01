@@ -48,7 +48,9 @@
     "squads_group": "Ekipler",
     "issue_count_one": "{{count}} issue",
     "issue_count_other": "{{count}} issue",
-    "reset": "Tüm filtreleri sıfırla"
+    "reset": "Tüm filtreleri sıfırla",
+    "active_count_one": "{{count}} filtre",
+    "active_count_other": "{{count}} filtre"
   },
   "display": {
     "tooltip": "Görünüm ayarları",
@@ -59,6 +61,8 @@
     "descending_title": "Azalan",
     "group_status": "Durum",
     "group_assignee": "Atanan",
+    "group_parent": "Üst issue",
+    "group_project": "Proje",
     "sort_manual": "Manuel",
     "sort_priority": "Öncelik",
     "sort_start_date": "Başlangıç tarihi",
@@ -78,10 +82,12 @@
     "tooltip_board": "Pano görünümü",
     "tooltip_list": "Liste görünümü",
     "tooltip_gantt": "Gantt görünümü",
+    "tooltip_swimlane": "Kulvar görünümü",
     "section": "Görünüm",
     "board": "Pano",
     "list": "Liste",
-    "gantt": "Gantt"
+    "gantt": "Gantt",
+    "swimlane": "Kulvar"
   },
   "gantt": {
     "header_issue": "Issue",
@@ -120,13 +126,22 @@
     "empty_status": "Issue yok",
     "add_issue_tooltip": "Issue ekle"
   },
+  "swimlane": {
+    "no_parent": "Üst yok",
+    "other_parents": "Diğer üstler",
+    "no_project": "Proje yok",
+    "no_assignee": "Atanmamış",
+    "open_parent": "Üst issue'yu aç",
+    "toggle_collapse": "Kulvarı aç/kapat"
+  },
   "board": {
     "hidden_columns_label": "Gizli sütunlar",
     "hide_column": "Sütunu gizle",
     "show_column": "Sütunu göster",
     "add_issue_tooltip": "Issue ekle",
     "empty_column": "Issue yok",
-    "empty_grouping": "Eşleşen issue yok"
+    "empty_grouping": "Eşleşen issue yok",
+    "ordered_by": "Pano {{field}} ile sıralandı"
   },
   "detail": {
     "not_found": "Bu issue mevcut değil veya bu çalışma alanında silinmiş.",
@@ -236,7 +251,9 @@
     "squad_leader_failed_reason": "değerlendirme başarısız oldu: {{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} aktivite",
-    "activity_count_other": "{{count}} aktivite"
+    "activity_count_other": "{{count}} aktivite",
+    "show_more_activities_one": "{{count}} aktivite daha göster",
+    "show_more_activities_other": "{{count}} aktivite daha göster"
   },
   "comment": {
     "delete_title": "Yorumu sil",
@@ -289,6 +306,7 @@
   "agent_live": {
     "is_working": "{{name}} çalışıyor",
     "is_queued": "{{name}} sırada",
+    "is_waiting_local_directory": "{{name}} yerel dizini bekliyor",
     "queued_elapsed_prefix": "{{elapsed}} süredir sırada",
     "fallback_name": "Ajan",
     "tool_count_one": "{{count}} araç",
@@ -318,6 +336,7 @@
     "trigger_initial": "İlk çalıştırma",
     "status_queued": "Sırada",
     "status_dispatched": "Başlatılıyor",
+    "status_waiting_local_directory": "Yerel dizin bekleniyor",
     "status_running": "Çalışıyor",
     "status_completed": "Tamamlandı",
     "status_failed": "Başarısız",

@@ -46,7 +46,18 @@
     "no_archived": "Henüz arşivlenmiş ajan yok.",
     "search_active": "\"{{query}}\" ile eşleşen ajan yok.",
     "search_active_filtered": "Bu filtrede \"{{query}}\" ile eşleşen ajan yok.",
-    "no_filter_match": "Bu filtreyle eşleşen ajan yok."
+    "no_filter_match": "Bu filtreyle eşleşen ajan yok.",
+    "search_runtime_filtered": "\"{{machine}}\" üzerinde \"{{query}}\" ile eşleşen ajan yok.",
+    "runtime_filtered": "\"{{machine}}\" üzerinde ajan yok."
+  },
+  "runtime_filter": {
+    "all": "Tüm çalışma ortamları",
+    "section_local": "Local",
+    "section_remote": "Remote",
+    "section_cloud": "Cloud",
+    "agent_count_one": "{{count}} ajan",
+    "agent_count_other": "{{count}} ajan",
+    "empty": "Henüz makine yok"
   },
   "columns": {
     "agent": "Ajan",
@@ -195,6 +206,7 @@
     "skills": "Skills",
     "environment": "Ortam",
     "custom_args": "Özel Argümanlar",
+    "mcp_config": "MCP",
     "discard_dialog_title": "Kaydedilmemiş değişiklikler atılsın mı?",
     "discard_dialog_description": "Bu sekmede kaydedilmemiş değişiklikleriniz var. Şimdi ayrılırsanız atılacak.",
     "discard_keep": "Düzenlemeye devam et",
@@ -275,7 +287,15 @@
       "remove_aria": "Variable'ı kaldır",
       "duplicate_keys_toast": "Duplicate environment variable keyleri",
       "saved_toast": "Environment variable'lar kaydedildi",
-      "save_failed_toast": "Environment variable'lar kaydedilemedi"
+      "save_failed_toast": "Environment variable'lar kaydedilemedi",
+      "not_revealed_title_one": "{{count}} ortam değişkeni yapılandırıldı",
+      "not_revealed_title_other": "{{count}} ortam değişkeni yapılandırıldı",
+      "not_revealed_empty": "Yapılandırılmış ortam değişkeni yok.",
+      "not_revealed_hint": "Değerler siz göstermeyene kadar maskeli kalır. Her gösterme ve düzenleme çalışma alanı denetim kaydına işlenir.",
+      "reveal_action": "Göster ve düzenle",
+      "revealing": "Gösteriliyor…",
+      "reveal_failed_toast": "Env değerleri yüklenemedi",
+      "empty_editable": "Yapılandırılmış ortam değişkeni yok. Başlatmada ajana enjekte etmek için bir tane ekleyin."
     },
     "custom_args": {
       "intro": "Başlatmada ajan komutuna eklenen ek CLI argümanları. Çok tokenlı flagler tek satırı paylaşabilir — CLI'a aktarılmadan önce whitespace'e göre bölünür.",
@@ -286,10 +306,21 @@
       "saved_toast": "Özel argümanlar kaydedildi",
       "save_failed_toast": "Özel argümanlar kaydedilemedi"
     },
+    "mcp_config": {
+      "intro": "Çalışma ortamı CLI'ına iletilen MCP sunucu yapılandırması (Claude için --mcp-config, Codex için $CODEX_HOME/config.toml, Hermes/Kimi/Kiro için ACP mcpServers, OpenCode için OPENCODE_CONFIG_CONTENT, OpenClaw için görev başına config wrapper). Olduğu gibi saklanır ve secret içerebilir — yalnızca ajan sahibi ve çalışma alanı adminleri okuyabilir. CLI'ın kendi varsayılanına dönmek için boş bırakın. OpenClaw HTTP/SSE girdileri için Claude'un \"type\" alanı yerine OpenClaw'un kendi alan adını kullanın (örn. \"transport\": \"streamable-http\").",
+      "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
+      "editor_aria": "MCP config JSON editörü",
+      "clear_action": "Temizle",
+      "invalid_json": "Geçersiz JSON: {{error}}",
+      "invalid_not_object": "MCP config bir JSON nesnesi olmalı (örn. {\"mcpServers\": …}).",
+      "saved_toast": "MCP config kaydedildi",
+      "save_failed_toast": "MCP config kaydedilemedi",
+      "redacted_title": "Yapılandırıldı — görünümünüzden gizlendi",
+      "redacted_hint": "Bu config'i yalnızca ajan sahibi veya çalışma alanı admini okuyabilir."
+    },
     "skills": {
       "intro": "Bu ajana atanmış çalışma alanı skill'leri. Local çalışma ortamı skill'leri her zaman otomatik olarak kullanılabilir.",
       "add_action": "Skill ekle",
-      "import_hint": "İçe aktarma, ekibinizin düzenleyip yeniden kullanabileceği bir çalışma alanı kopyası oluşturur.",
       "empty_title": "Atanmış skill yok",
       "empty_hint": "Ekip bilgisini bu ajanla paylaşmak için çalışma alanı skill'leri ekleyin.",
       "remove_failed_toast": "Skill kaldırılamadı",

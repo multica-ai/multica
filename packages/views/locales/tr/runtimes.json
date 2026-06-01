@@ -111,11 +111,45 @@
     "visibility_toast_updated": "Görünürlük {{visibility}} olarak ayarlandı",
     "visibility_toast_failed": "Görünürlük güncellenemedi",
     "delete_dialog": {
-      "title": "Çalışma ortamını Sil",
-      "description": "\"{{name}}\" çalışma ortamınını silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
-      "cancel": "İptal",
-      "confirm": "Sil",
-      "deleting": "Siliniyor..."
+      "light": {
+        "title": "Çalışma ortamı silinsin mi?",
+        "description": "\"{{name}}\" silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
+        "cancel": "İptal",
+        "confirm": "Çalışma ortamını sil",
+        "submitting": "Siliniyor..."
+      },
+      "cascade": {
+        "title_one": "{{count}} ajan arşivlensin ve bu çalışma ortamı silinsin mi?",
+        "title_other": "{{count}} ajan arşivlensin ve bu çalışma ortamı silinsin mi?",
+        "description": "\"{{name}}\" silinecek. Aşağıdaki ajanlar arşivlenip aktif iş akışlarından kaldırılacak; kuyruktaki veya çalışan task'ları iptal edilecek, ardından çalışma ortamı silinecek.",
+        "warning": "Bu işlem yıkıcıdır. Arşivlenen ajanlar aktif iş akışlarından kaldırılır ve kuyruktaki veya çalışan task'ları iptal edilir.",
+        "notice_runtime_has_active_agents": "Bu diyaloğu açtığınızdan beri aktif ajanlar eklendi. Yeni planı gözden geçirip onaylayın.",
+        "notice_runtime_delete_plan_changed": "Bu diyalog açıkken aktif ajan kümesi değişti. Yeni planı gözden geçirip onaylayın.",
+        "checkbox_one": "Bu {{count}} ajanın arşivleneceğini ve kuyruktaki veya çalışan task'larının iptal edileceğini anlıyorum.",
+        "checkbox_other": "Bu {{count}} ajanın arşivleneceğini ve kuyruktaki veya çalışan task'larının iptal edileceğini anlıyorum.",
+        "cancel": "İptal",
+        "confirm_one": "{{count}} ajan arşivle ve çalışma ortamını sil",
+        "confirm_other": "{{count}} ajan arşivle ve çalışma ortamını sil",
+        "submitting": "Arşivleniyor ve siliniyor...",
+        "self_healing_blocked_toast": "Bu çalışma ortamı çalışan bir local daemon tarafından yönetiliyor ve kendini yeniden kaydedecek.",
+        "delete_failed_toast": "Çalışma ortamı silinemedi",
+        "table": {
+          "header_agent": "Ajan",
+          "header_owner": "Sahip",
+          "header_status": "Durum",
+          "header_visibility": "Görünürlük",
+          "header_model": "Model",
+          "owner_self": "Siz",
+          "owner_unassigned": "—",
+          "model_unset": "—",
+          "presence_unknown": "—",
+          "workload_idle": "Boşta",
+          "workload_working": "Çalışıyor",
+          "workload_queued": "Kuyrukta",
+          "visibility_workspace": "Çalışma alanı",
+          "visibility_private": "Özel"
+        }
+      }
     },
     "toast_deleted": "Çalışma ortamı silindi",
     "toast_delete_failed": "Çalışma ortamı silinemedi",

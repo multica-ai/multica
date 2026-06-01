@@ -1,12 +1,29 @@
-export type Locale = "en" | "zh" | "tr";
+import type { SupportedLocale } from "@multica/core/i18n";
+export { docsHrefForLocale } from "@/lib/docs-href";
 
-export const locales: Locale[] = ["en", "zh", "tr"];
+export type Locale = SupportedLocale;
+export type LandingDictionaryLocale = "en" | "zh" | "ko" | "tr";
+
+export const locales: Locale[] = ["en", "zh-Hans", "ko", "tr"];
 
 export const localeLabels: Record<Locale, string> = {
   en: "EN",
-  zh: "\u4e2d\u6587",
-  tr: "TR",
+  "zh-Hans": "\u4e2d\u6587",
+  ko: "\ud55c\uad6d\uc5b4",
+  tr: "T\u00fcrk\u00e7e",
 };
+
+export function toLandingDictionaryLocale(
+  locale: Locale,
+): LandingDictionaryLocale {
+  if (locale === "ko") return "ko";
+  if (locale === "tr") return "tr";
+  return locale === "zh-Hans" ? "zh" : "en";
+}
+
+export function isZhLocale(locale: Locale): boolean {
+  return locale === "zh-Hans";
+}
 
 type FeatureSection = {
   label: string;
@@ -25,9 +42,14 @@ export type ContactSalesOption = { value: string; label: string };
 export type LandingDict = {
   header: {
     github: string;
-    login: string;
+    cta: string;
     dashboard: string;
+    docs: string;
     changelog: string;
+    useCases: string;
+    navigation: string;
+    openMenu: string;
+    closeMenu: string;
   };
   hero: {
     headlineLine1: string;

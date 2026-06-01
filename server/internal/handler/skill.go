@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -88,6 +90,18 @@ type SkillWithFilesResponse struct {
 	Files []SkillFileResponse `json:"files"`
 }
 
+type ExistingSkillIdentity struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func writeSkillImportDuplicateConflict(w http.ResponseWriter, existing ExistingSkillIdentity) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":          "a skill with this name already exists",
+		"existing_skill": existing,
+	})
+}
+
 func skillToResponse(s db.Skill) SkillResponse {
 	return SkillResponse{
 		ID:          uuidToString(s.ID),
@@ -100,6 +114,20 @@ func skillToResponse(s db.Skill) SkillResponse {
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),
 	}
+}
+
+func (h *Handler) existingSkillIdentityByName(ctx context.Context, workspaceID pgtype.UUID, name string) (ExistingSkillIdentity, bool, error) {
+	skill, err := h.Queries.GetSkillByWorkspaceAndName(ctx, db.GetSkillByWorkspaceAndNameParams{
+		WorkspaceID: workspaceID,
+		Name:        name,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ExistingSkillIdentity{}, false, nil
+		}
+		return ExistingSkillIdentity{}, false, err
+	}
+	return ExistingSkillIdentity{ID: uuidToString(skill.ID), Name: skill.Name}, true, nil
 }
 
 // decodeSkillConfig decodes a JSONB skill.config blob, defaulting to {} when
@@ -1657,7 +1685,11 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "a skill with this name already exists")
+			if existing, found, findErr := h.existingSkillIdentityByName(r.Context(), workspaceUUID, imported.name); findErr == nil && found {
+				writeSkillImportDuplicateConflict(w, existing)
+			} else {
+				writeError(w, http.StatusConflict, "a skill with this name already exists")
+			}
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())

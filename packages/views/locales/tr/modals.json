@@ -105,9 +105,25 @@
     "repos_pill_count_other": "{{count}} repo",
     "repos_heading": "Bu projeye GitHub repo'ları bağla",
     "repos_empty": "Henüz çalışma alanı düzeyinde repo yok. Geçici olarak bağlamak için aşağıya bir URL yapıştırın.",
+    "repos_search_placeholder": "Repo ara...",
+    "repos_search_empty": "Aramanızla eşleşen repo yok.",
     "repos_url_placeholder": "https://github.com/owner/repo veya git@github.com:owner/repo.git",
     "repos_add": "Ekle",
-    "repos_selected": "Seçildi"
+    "repos_selected": "Seçildi",
+    "source_pill_local": "Yerel dizin",
+    "source_tab_repos": "GitHub repo'ları",
+    "source_tab_local": "Yerel dizin",
+    "local_heading": "Bu makinedeki yerel bir çalışma dizinini kullan",
+    "local_on_device": "{{device}} cihazına bağlı",
+    "local_this_machine": "bu makine",
+    "local_daemon_offline": "Daemon offline — yerel dizin bağlamak için başlatın.",
+    "local_pick": "Dizin seç…",
+    "local_picking": "Seçici açılıyor…",
+    "local_change": "Dizini değiştir…",
+    "local_clear": "Temizle",
+    "local_pick_failed": "Dizin seçici açılamadı.",
+    "local_invalid_dir": "Bu dizin kullanılamaz. Başka birini seçin.",
+    "local_hint": "Diğer makinelerdeki ajanlar bu yolu göremez — başlatılamazlar. Paylaşımlı çalışma için repo'ları kullanın."
   },
   "create_issue": {
     "sr_manual": "Yeni issue",
@@ -169,7 +185,8 @@
       "toast_sent": "Ajana gönderildi — tamamlandığında gelen kutusu bildirimi alacaksınız",
       "error_agent_unavailable_fallback": "Ajan kullanılamıyor. Başka bir ajan seçin.",
       "error_daemon_version": "Bu ajanın daemon CLI sürümü ({{current}}), gereken {{min}} sürümünün altında. Ajan ile oluşturmayı kullanmak için daemon'ı yükseltin.",
-      "error_unknown": "Gönderilemedi. Tekrar deneyin."
+      "error_unknown": "Gönderilemedi. Tekrar deneyin.",
+      "sub_issue_of": "{{identifier}} alt issue'su"
     }
   }
 }

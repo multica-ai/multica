@@ -103,6 +103,28 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if opts.Cwd != "" {
 		env = append(env, "PWD="+opts.Cwd)
 	}
+	// Project agent.mcp_config into OpenCode via OPENCODE_CONFIG_CONTENT —
+	// OpenCode's general inline-config injection mechanism that merges at
+	// "local" scope (after the project-config loop, before remote / managed
+	// configs). MCP is the only field we currently project there; if a
+	// future Multica field needs the same channel it would assemble a
+	// combined OpenCode config slice before the env append.
+	//
+	// This deliberately leaves <workdir>/opencode.json untouched — the
+	// workdir is reused across turns for the same (agent, issue), and any
+	// agent- or user-written model / tools / permission settings in it must
+	// survive across runs.
+	mcpContent, err := buildOpenCodeMCPConfigContent(opts.McpConfig)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if mcpContent != "" {
+		if _, dup := b.cfg.Env["OPENCODE_CONFIG_CONTENT"]; dup {
+			b.cfg.Logger.Warn("agent.custom_env sets OPENCODE_CONFIG_CONTENT but agent.mcp_config takes precedence and overrides it")
+		}
+		env = append(env, "OPENCODE_CONFIG_CONTENT="+mcpContent)
+	}
 	cmd.Env = env
 
 	stdout, err := cmd.StdoutPipe()

@@ -296,7 +296,14 @@
       "skills_meta": "yeniden kullanılabilir playbook'lar",
       "more_label": "Ve daha fazlası",
       "more_meta": "ve daha fazlası"
-    }
+    },
+    "creation_disabled_eyebrow": "Çalışma alanı oluşturma devre dışı",
+    "creation_disabled_headline": "Yöneticinizden bir davet isteyin.",
+    "creation_disabled_lede": "Bu Multica örneği yeni çalışma alanlarının oluşturulmasına izin vermiyor. Bir yönetici sizi bir çalışma alanına davet ettiğinde, daveti kabul edin ve devam etmek için sayfayı yenileyin.",
+    "creation_disabled_logout": "Çıkış yap",
+    "creation_disabled_eyebrow_resume": "Çalışma alanınız",
+    "creation_disabled_headline_resume": "{{name}} ile devam edin.",
+    "creation_disabled_lede_resume": "Bu örnekte çalışma alanı oluşturma devre dışı, bu yüzden mevcut çalışma alanınıza devam edeceksiniz."
   },
   "step_runtime": {
     "scanning_headline": "Bu bilgisayar bağlanıyor…",

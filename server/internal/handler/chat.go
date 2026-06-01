@@ -736,7 +736,7 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, taskToResponse(*cancelled))
+	writeJSON(w, http.StatusOK, taskToResponse(*cancelled, workspaceID))
 }
 
 // ---------------------------------------------------------------------------

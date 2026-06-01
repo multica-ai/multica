@@ -35,6 +35,22 @@
     },
     "row_delete_aria": "删除对话",
     "row_rename_aria": "重命名对话",
+    "row_stop_aria": "停止当前运行",
+    "stop_action": "停止",
+    "row_subtitle": {
+      "working": "运行中",
+      "completed": "已完成",
+      "new_reply": "新回复",
+      "archived_label": "已归档"
+    },
+    "stop_dialog": {
+      "title": "停止这次运行？",
+      "description_with_title": "这会取消 \"{{title}}\" 里的当前智能体任务。已产生的内容会保留在对话里。",
+      "description_default": "这会取消当前智能体任务。已产生的内容会保留在对话里。",
+      "cancel": "继续运行",
+      "confirm": "停止运行",
+      "confirming": "停止中..."
+    },
     "delete_dialog": {
       "title": "删除对话",
       "description_with_title": "\"{{title}}\" 及其消息会被永久删除，无法撤销。",
@@ -98,6 +114,7 @@
       "offline": "离线",
       "reconnecting": "重连中",
       "queued": "排队中",
+      "waiting_local_directory": "等待本地目录释放",
       "starting_up": "启动中",
       "thinking": "思考中",
       "typing": "输入中"

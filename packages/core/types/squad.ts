@@ -2,6 +2,12 @@ export type SquadMemberType = "agent" | "member";
 
 export type SquadActivityOutcome = "action" | "no_action" | "failed";
 
+export interface SquadMemberPreview {
+  member_type: SquadMemberType;
+  member_id: string;
+  role: string;
+}
+
 export interface Squad {
   id: string;
   workspace_id: string;
@@ -15,6 +21,8 @@ export interface Squad {
   updated_at: string;
   archived_at: string | null;
   archived_by: string | null;
+  member_count?: number;
+  member_preview?: SquadMemberPreview[];
 }
 
 export interface SquadMember {

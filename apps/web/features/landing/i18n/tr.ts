@@ -5,9 +5,14 @@ export function createTrDict(allowSignup: boolean): LandingDict {
   return {
   header: {
     github: "GitHub",
-    login: "Giriş yap",
+    cta: "Başlayın",
     dashboard: "Dashboard",
+    docs: "Dokümanlar",
     changelog: "Değişiklik Günlüğü",
+    useCases: "Kullanım senaryoları",
+    navigation: "Ana navigasyon",
+    openMenu: "Navigasyon menüsünü aç",
+    closeMenu: "Navigasyon menüsünü kapat",
   },
 
   hero: {

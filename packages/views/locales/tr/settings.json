@@ -10,6 +10,7 @@
       "title": "Dil",
       "english": "English",
       "chinese": "中文",
+      "korean": "한국어",
       "turkish": "Türkçe",
       "sync_failed": "Dil bu cihaza kaydedildi, ancak hesabınızla eşitlenemedi. Diğer cihazlarda önceki dil görünebilir."
     },

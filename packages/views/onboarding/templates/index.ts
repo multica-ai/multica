@@ -1,3 +1,8 @@
+import {
+  matchLocale,
+  type SupportedLocale,
+} from "@multica/core/i18n";
+
 export {
   HELPER_INSTRUCTIONS,
   HELPER_DESCRIPTION,
@@ -23,15 +28,22 @@ export {
   type QuestionnaireRaw,
 } from "./user-context";
 
+type ContentLang = "en" | "zh" | "ko" | "tr";
+
+const CONTENT_LANG_BY_LOCALE: Record<SupportedLocale, ContentLang> = {
+  en: "en",
+  "zh-Hans": "zh",
+  ko: "ko",
+  tr: "tr",
+};
+
 /**
- * Pick persisted starter content for the given user language. Maps any "zh*"
- * prefix to Chinese, "tr*" to Turkish, and everything else to English.
+ * Pick persisted onboarding content for the given user language. Maps
+ * supported BCP-47 prefixes to the matching variant; everything else falls
+ * back to English. Mirrors the locale picker used by the frontend i18n layer.
  */
 export function pickContentLang(
   language: string | null | undefined,
-): "en" | "zh" | "tr" {
-  const normalized = language?.toLowerCase();
-  if (normalized?.startsWith("zh")) return "zh";
-  if (normalized?.startsWith("tr")) return "tr";
-  return "en";
+): ContentLang {
+  return CONTENT_LANG_BY_LOCALE[matchLocale(language ? [language] : [])];
 }

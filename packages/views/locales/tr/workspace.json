@@ -21,6 +21,10 @@
     "description": "Sizin ve AI ekip arkadaşlarınızın yan yana çalıştığı tek çalışma alanı: issue'ları alırlar, yorum bırakırlar ve aynı bağlamı paylaşırlar.",
     "invite_hint": "Çalışma alanınız hazır olduğunda ekip arkadaşlarınızı davet edebilirsiniz."
   },
+  "creation_disabled": {
+    "title": "Çalışma alanı oluşturma devre dışı",
+    "description": "Bu Multica örneği yeni çalışma alanlarının oluşturulmasına izin vermiyor. Mevcut bir çalışma alanına davet için yöneticinize başvurun."
+  },
   "no_access": {
     "title": "Çalışma alanı kullanılamıyor",
     "description": "Bu çalışma alanı yok veya erişiminiz yok.",

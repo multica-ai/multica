@@ -17,7 +17,7 @@ import { RESOURCES } from "../locales";
 // extend the slice when their component started using a new namespace.
 //
 // Use `renderWithI18n` like the standard `render`. Pass `locale: "zh-Hans"`
-// to verify Chinese strings; default is "en".
+// or `locale: "ko"` to verify localized strings; default is "en".
 type RenderArgs = Omit<RenderOptions, "wrapper"> & {
   locale?: SupportedLocale;
 };

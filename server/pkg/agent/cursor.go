@@ -396,12 +396,11 @@ var cursorBlockedArgs = map[string]blockedArgMode{
 
 // buildCursorArgs assembles the argv for a one-shot cursor-agent invocation.
 //
-// Usage: cursor-agent chat -p <prompt> --output-format stream-json
+// Usage: cursor-agent -p <prompt> --output-format stream-json
 //
 //	--workspace <cwd> --yolo [--model <m>] [--resume <id>]
 func buildCursorArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
-		"chat",
 		"-p", prompt,
 		"--output-format", "stream-json",
 		"--yolo",

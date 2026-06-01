@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -346,6 +348,9 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/skills/import", body, &result); err != nil {
+		if handleSkillImportConflict(cmd, err) {
+			return nil
+		}
 		return fmt.Errorf("import skill: %w", err)
 	}
 
@@ -356,6 +361,31 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 
 	fmt.Printf("Skill imported: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
 	return nil
+}
+
+func handleSkillImportConflict(cmd *cobra.Command, err error) bool {
+	var httpErr *cli.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict || strings.TrimSpace(httpErr.Body) == "" {
+		return false
+	}
+
+	var body map[string]any
+	if json.Unmarshal([]byte(httpErr.Body), &body) != nil {
+		return false
+	}
+	if _, ok := body["existing_skill"]; !ok {
+		return false
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		_ = cli.PrintJSON(os.Stdout, body)
+		return true
+	}
+
+	existing, _ := body["existing_skill"].(map[string]any)
+	fmt.Printf("Skill already exists: %s (%s)\n", strVal(existing, "name"), strVal(existing, "id"))
+	return true
 }
 
 // ---------------------------------------------------------------------------

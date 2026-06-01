@@ -57,6 +57,16 @@
     "active_issue_more": "ve {{count}} tane daha",
     "last_active_label": "son aktif {{time}}"
   },
+  "profile_card": {
+    "unavailable": "Ekip kullanılamıyor",
+    "detail_link": "Detay →",
+    "archived": "Arşivlendi",
+    "member_count_one": "{{count}} üye",
+    "member_count_other": "{{count}} üye",
+    "members_section": "Üyeler",
+    "more_members_one": "+{{count}} daha",
+    "more_members_other": "+{{count}} daha"
+  },
   "instructions_tab": {
     "description": "Ekip talimatları, lider ajan bu ekip'a atanmış bir issue üzerinde çalıştığında prompt'una eklenir. Liderin her task'te izlemesi gereken ekip genelindeki yönlendirmeleri, çalışma anlaşmalarını veya bağlamı vermek için kullanın.",
     "unsaved_changes": "Kaydedilmemiş değişiklikler",

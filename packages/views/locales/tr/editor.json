@@ -41,7 +41,8 @@
     "preview_too_large": "Dosya önizlemek için çok büyük. Lütfen indirin.",
     "preview_unsupported": "Bu dosya türü önizlenemiyor.",
     "close": "Kapat",
-    "open_in_new_tab": "Yeni sekmede aç"
+    "open_in_new_tab": "Yeni sekmede aç",
+    "remove": "Eki kaldır"
   },
   "link_hover": {
     "copy_link": "Bağlantıyı kopyala",

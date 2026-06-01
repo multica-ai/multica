@@ -32,9 +32,11 @@
     "card_properties": "Kart özellikleri",
     "view_board": "Pano görünümü",
     "view_list": "Liste görünümü",
+    "view_swimlane": "Kulvar görünümü",
     "view_label": "Görünüm",
     "view_board_short": "Pano",
     "view_list_short": "Liste",
+    "view_swimlane_short": "Kulvar",
     "sort_manual": "Manuel"
   },
   "errors": {

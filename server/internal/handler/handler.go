@@ -50,6 +50,13 @@ type Config struct {
 	AllowSignup         bool
 	AllowedEmails       []string
 	AllowedEmailDomains []string
+	// DisableWorkspaceCreation, when true, makes POST /api/workspaces return
+	// 403 for every caller. There is no role/owner exception because the repo
+	// has no platform-admin concept; operators bootstrap the workspace with
+	// the flag off, then flip it on and restart so subsequent users join via
+	// invitation only. The public /api/config endpoint mirrors this flag so
+	// the UI can hide every "Create workspace" affordance — see #3433.
+	DisableWorkspaceCreation bool
 	// PublicURL is the absolute base URL the API is reachable at from the
 	// public internet, with no trailing slash (e.g. "https://app.multica.ai").
 	// Used only to build webhook_url responses for autopilot webhook triggers
@@ -274,20 +281,31 @@ func requestUserID(r *http.Request) string {
 }
 
 // resolveActor determines whether the request is from an agent or a human member.
-// To claim "agent" identity the request MUST carry both X-Agent-ID and a valid
-// X-Task-ID, and the task must belong to the claimed agent. Otherwise we fall
-// back to "member" using the user ID from the session.
+//
+// First-class signal: X-Actor-Source set to "task_token" means the request
+// authenticated via an `mat_` task-scoped token. The auth middleware sets
+// that header (and stripped any client-supplied value first), so it is
+// authoritative — the bound (agent_id, task_id) cannot be forged or
+// stripped by the agent process. This is the path MUL-2600 relies on to
+// reject agent-process traffic on owner-only endpoints.
+//
+// Fallback signal (legacy CLI / member-token paths): the request MUST
+// carry both X-Agent-ID and a valid X-Task-ID, and the task must belong
+// to the claimed agent. Otherwise we fall back to "member".
 //
 // X-Agent-ID alone is not trusted: any workspace member can guess or observe
 // an agent's UUID, and a member-supplied X-Agent-ID would otherwise let that
 // member impersonate the agent and bypass the private-agent gate (#2359
-// review). The daemon always pairs the two headers — X-Agent-ID names the
-// agent claiming the request, X-Task-ID names the in-flight task that
-// authorizes it — so requiring both has no effect on legitimate agent
-// callers but closes the impersonation path.
+// review). The daemon always pairs the two headers, so requiring both has
+// no effect on legitimate agent callers but closes the impersonation path.
 //
 // Returns ("agent", agentID) on success, ("member", userID) otherwise.
 func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		// Server-set header — auth middleware also forced X-Agent-ID
+		// from the token row. Trust it directly without re-querying.
+		return "agent", r.Header.Get("X-Agent-ID")
+	}
 	agentID := r.Header.Get("X-Agent-ID")
 	if agentID == "" {
 		return "member", userID

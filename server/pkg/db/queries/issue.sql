@@ -238,6 +238,17 @@ SELECT * FROM issue
 WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC;
 
+-- name: ListChildrenByParents :many
+-- Batched variant of ListChildIssues: returns all children for the given
+-- parent set in one round trip. Used by Swimlane to avoid an N+1 fan-out
+-- (one request per visible parent lane). Result is grouped client-side by
+-- parent_issue_id; the workspace filter is also enforced so callers can't
+-- enumerate children of parents in workspaces they don't belong to.
+SELECT * FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND parent_issue_id = ANY(sqlc.arg('parent_ids')::uuid[])
+ORDER BY parent_issue_id, position ASC, created_at DESC;
+
 -- name: GetIssueByOrigin :one
 -- Finds the issue stamped with a specific (origin_type, origin_id) pair.
 -- Used by quick-create completion to deterministically locate the issue
