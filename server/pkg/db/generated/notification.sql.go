@@ -274,7 +274,6 @@ SELECT EXISTS (
       AND ne.comment_id = $2
       AND nd.channel = $3
       AND nd.status IN ('pending', 'sent')
-      AND nd.created_at > now() - interval '60 seconds'
 ) AS "exists"
 `
 
@@ -300,7 +299,6 @@ SELECT EXISTS (
       AND ne.comment_id = $2
       AND nd.channel = 'openclaw_weixin'
       AND nd.status IN ('pending', 'sent')
-      AND nd.created_at > now() - interval '60 seconds'
 ) AS "exists"
 `
 
