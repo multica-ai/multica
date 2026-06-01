@@ -955,7 +955,10 @@ export function IssueDetail({
   const id = issueId;
   const router = useNavigation();
   const linkedCommentId = router.searchParams.get("comment")?.trim() || null;
-  const requestedCommentId = (highlightCommentId ?? linkedCommentId) ?? undefined;
+  // Sidebar "jump to comment" sets this to switch the timeline from Virtuoso
+  // to flat rendering (so the target element is guaranteed in the DOM).
+  const [sidebarRequestedId, setSidebarRequestedId] = useState<string | undefined>(undefined);
+  const requestedCommentId = (highlightCommentId ?? sidebarRequestedId ?? linkedCommentId) ?? undefined;
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
 
@@ -1122,12 +1125,11 @@ export function IssueDetail({
     // Update URL without triggering a router navigation/data fetch
     const url = paths.issueDetail(id, { commentId });
     window.history.replaceState(window.history.state, "", url);
-    const el = document.getElementById(`comment-${commentId}`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      setHighlightedId(commentId);
-      setTimeout(() => setHighlightedId(null), 2000);
-    }
+    // Reset guard so the scroll-into-view effect fires even for repeated targets
+    didHighlightRef.current = null;
+    // Switch timeline to flat rendering (disables Virtuoso) so the target
+    // element is guaranteed to be in the DOM when the useEffect scrolls.
+    setSidebarRequestedId(commentId);
   }, [id, paths]);
 
   const [clearHistoryDialogOpen, setClearHistoryDialogOpen] = useState(false);
