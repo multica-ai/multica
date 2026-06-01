@@ -150,6 +150,9 @@ export function SearchPage() {
   const [taskType, setTaskType] = useState<TaskTypeFilter>("all");
   const [dateField, setDateField] = useState<DateField>("activity");
   const [dateRange, setDateRange] = useState<DateRange>("all");
+  // CEREBRO-PATCH(search-page-mobile-filter-2638): FIR-2638 — mobile filter panel toggle state.
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const activeFilterCount = [closedFilter !== "all", taskStatus !== "all", taskType !== "all", dateRange !== "all"].filter(Boolean).length;
 
   const trimmedQuery = query.trim();
   const includeClosed = closedFilter === "all";
@@ -301,7 +304,8 @@ export function SearchPage() {
 
               <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                 <Tabs value={scope} onValueChange={(value) => setScope(value as SearchScope)}>
-                  <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-lg p-1 sm:w-fit sm:flex-nowrap">
+                  {/* CEREBRO-PATCH(search-page-scope-scroll-2638): FIR-2638 — horizontal scroll on mobile instead of wrap. */}
+                  <TabsList className="flex h-auto w-full flex-nowrap justify-start gap-1 overflow-x-auto rounded-lg p-1 no-scrollbar sm:w-fit">
                     <ScopeTab value="all" label="All" count={total} />
                     <ScopeTab value="issues" label="Issues" count={counts.issues} />
                     <ScopeTab value="projects" label="Projects" count={counts.projects} />
@@ -310,7 +314,15 @@ export function SearchPage() {
                   </TabsList>
                 </Tabs>
 
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:flex xl:flex-wrap xl:justify-end">
+                {/* CEREBRO-PATCH(search-page-mobile-filter-toggle-2638): FIR-2638 — mobile Filters toggle button, hidden on xl. */}
+                <button type="button" onClick={() => setFilterPanelOpen((v) => !v)}
+                  className={cn("flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted xl:hidden", filterPanelOpen && "bg-muted")}>
+                  <SlidersHorizontal className="size-3.5" />
+                  {filterPanelOpen ? "Skjul filtre" : `Filtre${activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}`}
+                </button>
+
+                {/* CEREBRO-PATCH(search-page-mobile-filter-panel-2638): FIR-2638 — hidden on mobile until toggled; always visible on xl. */}
+                <div className={cn("grid grid-cols-1 gap-2 sm:grid-cols-2 xl:flex xl:flex-wrap xl:justify-end", !filterPanelOpen && "hidden xl:flex")}>
                   <FilterSelect
                     icon={<SlidersHorizontal className="size-3.5" />}
                     value={closedFilter}
@@ -494,7 +506,8 @@ export function SearchPage() {
 
 function ScopeTab({ value, label, count }: { value: SearchScope; label: string; count: number }) {
   return (
-    <TabsTrigger value={value} className="basis-[calc(50%-0.125rem)] justify-between px-2 sm:basis-auto">
+    // CEREBRO-PATCH(search-page-scope-tab-shrink-2638): FIR-2638 — shrink-0 replaces two-column mobile basis.
+    <TabsTrigger value={value} className="shrink-0 justify-between px-2">
       <span>{label}</span>
       <span className="rounded bg-muted-foreground/10 px-1.5 text-[10px] text-muted-foreground">
         {count}
