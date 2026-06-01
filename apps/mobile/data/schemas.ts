@@ -702,5 +702,25 @@ export const EMPTY_ISSUE_FALLBACK: import("@multica/core/types").Issue = {
   updated_at: "",
 };
 
+// GET /api/workspaces/{id}/feature-flags (cerebro). The server returns the
+// signed-in member's personal overrides, the owner-set workspace overrides, and
+// the locked keys. Defaults are NOT sent — they live frontend-side (web's
+// packages/cerebro-feature-flags/registry.ts). `record(string, boolean)` keeps
+// the schema flag-agnostic so a new server flag never breaks parsing. Mirrors
+// the resolved shape in packages/cerebro-feature-flags/api.ts.
+export const FeatureFlagsResponseSchema = z.object({
+  overrides: z.record(z.string(), z.boolean()).default({}),
+  workspace_overrides: z.record(z.string(), z.boolean()).default({}),
+  locked: z.record(z.string(), z.boolean()).default({}),
+}).loose();
+
+export type FeatureFlagsResponse = z.infer<typeof FeatureFlagsResponseSchema>;
+
+export const EMPTY_FEATURE_FLAGS: FeatureFlagsResponse = {
+  overrides: {},
+  workspace_overrides: {},
+  locked: {},
+};
+
 // Helpers re-exported for ergonomic single-import at the call site.
 export type { Label, Project, ProjectResource };

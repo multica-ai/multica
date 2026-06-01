@@ -33,6 +33,8 @@ import {
   useResolveComment,
   useToggleCommentReaction,
 } from "@/data/mutations/issues";
+import { useCommentRemindersEnabled } from "@/data/queries/feature-flags";
+import { suggestReminderText } from "@/lib/suggest-reminder-text";
 import { QUICK_EMOJIS } from "@/lib/quick-emojis";
 
 const QUICK_ROW_SIZE = 5;
@@ -48,6 +50,7 @@ export function useCommentLongPress(
   const toggleReaction = useToggleCommentReaction(issueId);
   const deleteComment = useDeleteComment(issueId);
   const resolveComment = useResolveComment(issueId);
+  const remindersEnabled = useCommentRemindersEnabled();
   const { getName } = useActorLookup();
 
   const onLongPress = useCallback(() => {
@@ -65,6 +68,7 @@ export function useCommentLongPress(
     type Action =
       | { kind: "reply" }
       | { kind: "react" }
+      | { kind: "remind" }
       | { kind: "copy" }
       | { kind: "select" }
       | { kind: "copyLink" }
@@ -81,6 +85,13 @@ export function useCommentLongPress(
 
     push("Reply", { kind: "reply" });
     push("React…", { kind: "react" });
+    // "Remind me" appears on every comment — own and others' (FIR-2644).
+    // Gated by the cerebro_comment_reminders flag (mirrors web hiding the
+    // action when off) and by wsSlug, which the reminder route needs to
+    // navigate. The route itself derives the issue from the comment.
+    if (remindersEnabled && wsSlug) {
+      push("Remind me…", { kind: "remind" });
+    }
     if (hasContent) {
       push("Copy", { kind: "copy" });
       push("Select Text", { kind: "select" });
@@ -146,6 +157,23 @@ export function useCommentLongPress(
                 }),
             });
             return;
+          case "remind": {
+            if (!wsSlug) return;
+            // Pre-fill the editable text with the same snippet the server
+            // would auto-suggest (lib/suggest-reminder-text mirrors the Go
+            // suggestReminderText), so the picker shows what gets saved.
+            router.push({
+              pathname:
+                "/[workspace]/issue/[id]/comment/[commentId]/reminder",
+              params: {
+                workspace: wsSlug,
+                id: issueId,
+                commentId: entry.id,
+                suggested: suggestReminderText(entry.content ?? ""),
+              },
+            });
+            return;
+          }
           case "copy":
             if (entry.content) {
               Clipboard.setStringAsync(entry.content);
@@ -195,6 +223,7 @@ export function useCommentLongPress(
     issueIdentifier,
     userId,
     wsSlug,
+    remindersEnabled,
     toggleReaction,
     deleteComment,
     resolveComment,
