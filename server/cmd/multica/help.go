@@ -35,6 +35,17 @@ func exactArgs(n int) cobra.PositionalArgs {
 	}
 }
 
+func maximumNArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) > n {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error: accepts at most %d arg, received %d\n\n", n, len(args))
+			cmd.Help()
+			return errSilent
+		}
+		return nil
+	}
+}
+
 
 // initHelp configures the root command to use gh-style help output.
 func initHelp(root *cobra.Command) {

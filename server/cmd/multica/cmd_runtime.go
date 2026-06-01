@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -37,9 +38,9 @@ var runtimeActivityCmd = &cobra.Command{
 }
 
 var runtimeUpdateCmd = &cobra.Command{
-	Use:   "update <runtime-id>",
+	Use:   "update [runtime-id]",
 	Short: "Initiate a CLI update on a runtime",
-	Args:  exactArgs(1),
+	Args:  maximumNArgs(1),
 	RunE:  runRuntimeUpdate,
 }
 
@@ -60,9 +61,11 @@ func init() {
 	runtimeActivityCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// runtime update
-	runtimeUpdateCmd.Flags().String("target-version", "", "Target version to update to (required)")
+	runtimeUpdateCmd.Flags().String("target-version", "", "Target version to update to (required without --latest)")
 	runtimeUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 	runtimeUpdateCmd.Flags().Bool("wait", false, "Wait for update to complete (poll until done)")
+	runtimeUpdateCmd.Flags().Bool("latest", false, "Fetch the latest release from GitHub and use it as target version")
+	runtimeUpdateCmd.Flags().Bool("all", false, "Update all runtimes in the workspace (mutually exclusive with runtime-id)")
 }
 
 // ---------------------------------------------------------------------------
@@ -184,57 +187,191 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	targetVersion, _ := cmd.Flags().GetString("target-version")
-	if targetVersion == "" {
-		return fmt.Errorf("--target-version is required")
+	latest, _ := cmd.Flags().GetBool("latest")
+	all, _ := cmd.Flags().GetBool("all")
+
+	// Resolve target version.
+	if latest {
+		rel, err := cli.FetchLatestRelease()
+		if err != nil {
+			return fmt.Errorf("fetch latest release: %w", err)
+		}
+		targetVersion = rel.TagName
+	} else if targetVersion == "" {
+		return fmt.Errorf("one of --target-version or --latest is required")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
-	defer cancel()
+	// Collect runtime IDs.
+	var runtimeIDs []string
+	if all {
+		if len(args) == 1 {
+			return fmt.Errorf("--all is mutually exclusive with specifying a runtime-id")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
 
-	body := map[string]any{
-		"target_version": targetVersion,
-	}
+		var runtimes []map[string]any
+		if err := client.GetJSON(ctx, "/api/runtimes", &runtimes); err != nil {
+			return fmt.Errorf("list runtimes: %w", err)
+		}
 
-	var update map[string]any
-	if err := client.PostJSON(ctx, "/api/runtimes/"+args[0]+"/update", body, &update); err != nil {
-		return fmt.Errorf("initiate update: %w", err)
+		for _, rt := range runtimes {
+			id, ok := rt["id"].(string)
+			if !ok || id == "" {
+				continue
+			}
+			runtimeIDs = append(runtimeIDs, id)
+		}
+
+		if len(runtimeIDs) == 0 {
+			fmt.Fprintln(os.Stderr, "No runtimes found in workspace.")
+			return nil
+		}
+	} else {
+		if len(args) != 1 {
+			return fmt.Errorf("exactly one runtime-id is required when not using --all")
+		}
+		runtimeIDs = append(runtimeIDs, args[0])
 	}
 
 	wait, _ := cmd.Flags().GetBool("wait")
-	if !wait {
-		output, _ := cmd.Flags().GetString("output")
-		if output == "json" {
-			return cli.PrintJSON(os.Stdout, update)
+	output, _ := cmd.Flags().GetString("output")
+
+	// Track updates across all runtimes for --wait mode.
+	type updateInfo struct {
+		runtimeID string
+		updateID  string
+		update    map[string]any
+	}
+
+	var pending []updateInfo
+	results := make([]updateInfo, 0, len(runtimeIDs))
+
+	for _, rtID := range runtimeIDs {
+		postCtx, postCancel := context.WithTimeout(context.Background(), 150*time.Second)
+		body := map[string]any{
+			"target_version": strings.TrimPrefix(targetVersion, "v"),
 		}
-		fmt.Printf("Update initiated: %s (status: %s)\n", strVal(update, "id"), strVal(update, "status"))
+
+		var update map[string]any
+		if err := client.PostJSON(postCtx, "/api/runtimes/"+rtID+"/update", body, &update); err != nil {
+			postCancel()
+			results = append(results, updateInfo{runtimeID: rtID, update: map[string]any{"error": err.Error()}})
+			continue
+		}
+		postCancel()
+
+		updateID := strVal(update, "id")
+
+		if !wait {
+			results = append(results, updateInfo{runtimeID: rtID, updateID: updateID, update: update})
+		} else {
+			pending = append(pending, updateInfo{runtimeID: rtID, updateID: updateID, update: update})
+		}
+	}
+
+	// Poll updates in --wait mode.
+	if wait && len(pending) > 0 {
+		pollCtx, pollCancel := context.WithTimeout(context.Background(), 150*time.Second)
+		defer pollCancel()
+
+		var completed, failed, timedOut int
+		done := make(map[string]bool)
+
+		for len(done) < len(pending) {
+			select {
+			case <-pollCtx.Done():
+				// Mark remaining as timed out.
+				for _, u := range pending {
+					if !done[u.updateID] {
+						timedOut++
+						u.update["status"] = "timeout"
+						u.update["error"] = "timed out waiting for update"
+						done[u.updateID] = true
+						results = append(results, u)
+					}
+				}
+				break
+			case <-time.After(2 * time.Second):
+				for _, u := range pending {
+					if done[u.updateID] {
+						continue
+					}
+
+					var update map[string]any
+					if err := client.GetJSON(pollCtx, "/api/runtimes/"+u.runtimeID+"/update/"+u.updateID, &update); err != nil {
+						// Polling failed, try next round.
+						continue
+					}
+
+					status := strVal(update, "status")
+					if status == "completed" || status == "failed" || status == "timeout" {
+						done[u.updateID] = true
+						if status == "completed" {
+							completed++
+						} else if status == "failed" {
+							failed++
+						} else {
+							timedOut++
+						}
+						results = append(results, updateInfo{runtimeID: u.runtimeID, updateID: u.updateID, update: update})
+					}
+				}
+			}
+		}
+
+		// Print summary.
+		if output == "json" {
+			type summaryEntry struct {
+				RuntimeID string `json:"runtime_id"`
+				UpdateID  string `json:"update_id"`
+				Status    string `json:"status"`
+				Output    string `json:"output,omitempty"`
+				Error     string `json:"error,omitempty"`
+			}
+			entries := make([]summaryEntry, 0, len(results))
+			for _, r := range results {
+				entries = append(entries, summaryEntry{
+					RuntimeID: r.runtimeID,
+					UpdateID:  r.updateID,
+					Status:    strVal(r.update, "status"),
+					Output:    strVal(r.update, "output"),
+					Error:     strVal(r.update, "error"),
+				})
+			}
+			return cli.PrintJSON(os.Stdout, map[string]any{
+				"completed": completed,
+				"failed":    failed,
+				"timed_out": timedOut,
+				"results":   entries,
+			})
+		}
+
+		fmt.Printf("Update summary: %d completed, %d failed, %d timed out (target: %s)\n",
+			completed, failed, timedOut, targetVersion)
+		for _, r := range results {
+			status := strVal(r.update, "status")
+			if status == "completed" {
+				fmt.Printf("  %s: completed — %s\n", r.runtimeID, strVal(r.update, "output"))
+			} else {
+				fmt.Printf("  %s: %s — %s\n", r.runtimeID, status, strVal(r.update, "error"))
+			}
+		}
 		return nil
 	}
 
-	// Poll until completed/failed/timeout.
-	updateID := strVal(update, "id")
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timed out waiting for update (last status: %s)", strVal(update, "status"))
-		case <-time.After(2 * time.Second):
+	// Non-wait mode output.
+	if output == "json" {
+		var allResults []map[string]any
+		for _, r := range results {
+			allResults = append(allResults, r.update)
 		}
-
-		if err := client.GetJSON(ctx, "/api/runtimes/"+args[0]+"/update/"+updateID, &update); err != nil {
-			return fmt.Errorf("get update status: %w", err)
-		}
-
-		status := strVal(update, "status")
-		if status == "completed" || status == "failed" || status == "timeout" {
-			output, _ := cmd.Flags().GetString("output")
-			if output == "json" {
-				return cli.PrintJSON(os.Stdout, update)
-			}
-			if status == "completed" {
-				fmt.Printf("Update completed: %s\n", strVal(update, "output"))
-			} else {
-				fmt.Printf("Update %s: %s\n", status, strVal(update, "error"))
-			}
-			return nil
-		}
+		return cli.PrintJSON(os.Stdout, allResults)
 	}
+
+	for _, r := range results {
+		fmt.Printf("Runtime %s: update %s (status: %s)\n",
+			r.runtimeID, strVal(r.update, "id"), strVal(r.update, "status"))
+	}
+	return nil
 }
