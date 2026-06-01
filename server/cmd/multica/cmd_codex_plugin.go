@@ -1223,6 +1223,9 @@ func codexPluginReadHookState(cmd *cobra.Command) (codexPluginHookState, error) 
 		}
 		return codexPluginHookState{}, fmt.Errorf("read hook state: %w", err)
 	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return codexPluginHookState{}, nil
+	}
 	var state codexPluginHookState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return codexPluginHookState{}, fmt.Errorf("parse hook state: %w", err)
@@ -1242,7 +1245,33 @@ func codexPluginWriteHookState(cmd *cobra.Command, state codexPluginHookState) e
 	if err != nil {
 		return fmt.Errorf("marshal hook state: %w", err)
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o600)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".state-*.json")
+	if err != nil {
+		return fmt.Errorf("create hook state temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write hook state temp file: %w", err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod hook state temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close hook state temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace hook state: %w", err)
+	}
+	cleanup = false
+	return nil
 }
 
 func codexPluginPersistBinding(cmd *cobra.Command, issueID string, run map[string]any, meta map[string]string) error {

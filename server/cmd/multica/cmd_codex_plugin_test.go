@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -533,6 +535,52 @@ func TestCodexPluginHooksSyncPromptAndStopToBoundThread(t *testing.T) {
 	}
 	if hookResp["continue"] != true {
 		t.Fatalf("stop hook output = %+v", hookResp)
+	}
+}
+
+func TestCodexPluginHookStateHandlesEmptyFileAndWritesAtomically(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("config", "", "")
+	path, err := codexPluginStatePath(cmd)
+	if err != nil {
+		t.Fatalf("codexPluginStatePath() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create state dir: %v", err)
+	}
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("write empty state: %v", err)
+	}
+	state, err := codexPluginReadHookState(cmd)
+	if err != nil {
+		t.Fatalf("codexPluginReadHookState(empty) error = %v", err)
+	}
+	if len(state.Bindings) != 0 || len(state.Prompts) != 0 || len(state.SyncedTurns) != 0 {
+		t.Fatalf("empty state = %+v", state)
+	}
+
+	state.Bindings = []codexPluginHookBinding{{
+		IssueID:        "issue-1",
+		BindingID:      "binding-1",
+		CodexSessionID: "session-1",
+	}}
+	if err := codexPluginWriteHookState(cmd, state); err != nil {
+		t.Fatalf("codexPluginWriteHookState() error = %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read written state: %v", err)
+	}
+	var decoded codexPluginHookState
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("written state is not valid json: %v; data=%q", err, string(data))
+	}
+	if len(decoded.Bindings) != 1 || decoded.Bindings[0].BindingID != "binding-1" {
+		t.Fatalf("decoded state = %+v", decoded)
 	}
 }
 
