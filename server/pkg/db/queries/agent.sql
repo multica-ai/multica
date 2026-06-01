@@ -669,6 +669,13 @@ SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
 
+-- name: ListTasksByIssueForOwner :many
+SELECT atq.* FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE atq.issue_id = $1
+  AND (a.owner_id = $2 OR a.owner_id IS NULL)
+ORDER BY atq.created_at DESC;
+
 -- name: DeleteTasksByIssue :execrows
 DELETE FROM agent_task_queue WHERE issue_id = $1;
 
