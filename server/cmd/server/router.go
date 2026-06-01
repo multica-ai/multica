@@ -317,9 +317,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	mentionGate := cerebromentiongate.New(queries, cerebroGroupPermissionsHandler.Service) // CEREBRO-PATCH(router-mention-trigger-gate): JEH-1917.
 	h.MentionTriggerGate = mentionGate
 	channelListenSvc.AgentTriggerGate = mentionGate.ChannelListenGate()
-	if os.Getenv("CEREBRO_COMMENT_TARGET_GUARD_ENABLED") == "true" { // CEREBRO-PATCH(router-comment-target-guard): FIR-2674 — opt-in kill-switch; off until agents are taught to always include a target.
-		h.CommentTargetGuard = cerebrocommentguard.New()
-	}
+	h.CommentTargetGuard = cerebrocommentguard.New(cerebroQueries) // CEREBRO-PATCH(router-comment-target-guard): FIR-2674 — gated by the cerebro_comment_target_guard feature flag (registry.ts), resolved per workspace; default off.
 	// CEREBRO-PATCH(router-private-agent-run-request): FIR-2385 — member tag of an unowned private agent → owner inbox run-request.
 	h.PrivateAgentRunRequester = cerebroprivateagentrun.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler

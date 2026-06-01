@@ -58,6 +58,8 @@ export type CerebroFlagKey =
   | "cerebro_pdf_inline_render"
   // FIR-2641: "Remind me" on a specific comment — reuses the personal reminder engine.
   | "cerebro_comment_reminders"
+  // FIR-2674: reject agent comments that mention no target (person, agent, or issue).
+  | "cerebro_comment_target_guard"
   // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
   | "cerebro_agent_trigger_permissions";
 
@@ -154,6 +156,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // by default; per-channel push stays opt-in). Off hides the menu action and
   // the server rejects comment-referencing reminders.
   cerebro_comment_reminders: true,
+  // FIR-2674: OFF by default. When on, an agent-authored comment that mentions
+  // no target at all (no person, agent, or issue) is rejected by the server
+  // with a 422 telling the agent to add one. Members are never affected. Off
+  // restores the prior behaviour (comments with no target allowed).
+  cerebro_comment_target_guard: false,
   // FIR-2409: opt-in until the Agent-start tab + per-agent rows are reviewed.
   cerebro_agent_trigger_permissions: false,
 };
@@ -492,6 +499,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Add a 'Remind me' action to the comment menu. Sets a personal reminder that points at that specific comment; when it fires, the inbox opens the issue and scrolls straight to the comment. The reminder text is suggested from the comment and editable before saving. Inbox-only by default (per-channel push stays opt-in). Off hides the action and the server rejects comment-referencing reminders. FIR-2641.",
+  },
+  {
+    key: "cerebro_comment_target_guard",
+    label: "Require a target on agent comments",
+    group: "issues",
+    description:
+      "Reject an agent-authored comment that mentions no target at all — it must point at a person, an agent, or an issue (e.g. MUL-123). An issue link counts and has no side effect, so an agent can always satisfy the rule without waking another agent; member comments are never affected. Off restores the prior behaviour (agent comments with no target allowed). FIR-2674.",
   },
   {
     key: "cerebro_firtal_welcome",

@@ -94,24 +94,13 @@ export function SprintSettingsPanel({ workspaceId, projectId }: Props) {
 
   return (
     <div className="flex flex-col gap-6 p-6 max-w-2xl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-medium">Sprint container</h3>
-          <p className="text-sm text-muted-foreground">
-            Turn this project into a recurring sprint container. Sprints are auto-created
-            ahead of time using your settings — no values are hardcoded.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Label htmlFor="sprint-enabled" className="text-sm">
-            Enabled
-          </Label>
-          <Switch
-            id="sprint-enabled"
-            checked={form.enabled}
-            onCheckedChange={(v) => setForm({ ...form, enabled: v })}
-          />
-        </div>
+      <div>
+        <h3 className="text-lg font-medium">Sprint container</h3>
+        <p className="text-sm text-muted-foreground">
+          Turn this project into a recurring sprint container. Sprints are auto-created
+          ahead of time using your settings — no values are hardcoded. Use the buttons at the
+          bottom to turn sprints on or off for this project.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

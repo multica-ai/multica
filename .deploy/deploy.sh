@@ -223,10 +223,23 @@ rm -rf "$NEXT_NEW"
 # with outputFileTracingExcludes in next.config.mjs, which shrinks the work
 # that step has to do in the first place. 8 GiB is comfortably under the
 # mini's RAM while well above what the trace step needs.
-if ! NEXT_DIST_DIR=.next.new NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=8192" pnpm --filter @multica/web build; then
-  echo "ERROR: Next.js build failed — live frontend untouched." >&2
+build_frontend() {
+  NEXT_DIST_DIR=.next.new NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=8192" \
+    pnpm --filter @multica/web build
+}
+if ! build_frontend; then
+  # Transient OOM/SIGTERM during trace collection is the usual failure mode on
+  # sara-runtime (see deploy-latest.log, FIR-2731). Retry once after clearing
+  # the half-built tree so a wedged .next.new does not block the next deploy.
+  echo "WARN: Next.js build failed on first attempt — cleaning and retrying once…" >&2
+  pkill -f "next build" 2>/dev/null || true
   rm -rf "$NEXT_NEW"
-  exit 1
+  sleep 5
+  if ! build_frontend; then
+    echo "ERROR: Next.js build failed — live frontend untouched." >&2
+    rm -rf "$NEXT_NEW"
+    exit 1
+  fi
 fi
 
 # Refuse to swap in an empty/half-built directory. BUILD_ID is the last

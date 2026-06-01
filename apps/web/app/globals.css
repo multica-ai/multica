@@ -8,7 +8,8 @@
 :root {
   /* Keep route compilation offline: do not depend on next/font/google fetches. */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
+    "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
     monospace;
   --font-serif: "Source Serif 4", "Iowan Old Style", "Apple Garamond",

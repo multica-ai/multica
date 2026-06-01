@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { FolderKanban } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";
@@ -15,28 +16,45 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@multica/ui/components/ui/dialog";
-
-import { projectSprintsOptions, useCreateSprint, useDeleteSprint } from "../core/queries";
-import type { Sprint, SprintStatus } from "../core/types";
+import { cn } from "@multica/ui/lib/utils";
+import {
+  projectTreeOptions,
+  useSetProjectParent,
+} from "@multica/core/projects/nesting";
+import {
+  getProjectColor,
+  PROJECT_STATUS_CONFIG,
+} from "@multica/core/projects/config";
+import { useCreateProject, useDeleteProject } from "@multica/core/projects";
+import type { ProjectTreeItem } from "@multica/core/types";
 
 interface Props {
   workspaceId: string;
   projectId: string;
-  onSelect?: (sprint: Sprint | null) => void;
-  selectedSprintId?: string | null;
 }
 
-const STATUS_VARIANT: Record<SprintStatus, "secondary" | "default" | "outline" | "destructive"> = {
-  planned: "outline",
-  active: "default",
-  done: "secondary",
-  cancelled: "destructive",
-};
+function openDatePicker(e: { currentTarget: HTMLInputElement }) {
+  try {
+    e.currentTarget.showPicker?.();
+  } catch {
+    // Native date inputs still focus normally when showPicker is unavailable.
+  }
+}
 
-export function SprintList({ workspaceId, projectId, onSelect, selectedSprintId }: Props) {
-  const sprintsQuery = useQuery(projectSprintsOptions(workspaceId, projectId));
-  const create = useCreateSprint(workspaceId, projectId);
-  const remove = useDeleteSprint(workspaceId, projectId);
+function flatten(nodes: ProjectTreeItem[]): ProjectTreeItem[] {
+  const out: ProjectTreeItem[] = [];
+  for (const node of nodes) {
+    out.push(node);
+    if (node.children?.length) out.push(...flatten(node.children));
+  }
+  return out;
+}
+
+export function SprintList({ workspaceId, projectId }: Props) {
+  const treeQuery = useQuery(projectTreeOptions(workspaceId));
+  const createProject = useCreateProject();
+  const setProjectParent = useSetProjectParent(workspaceId);
+  const deleteProject = useDeleteProject();
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
@@ -46,40 +64,60 @@ export function SprintList({ workspaceId, projectId, onSelect, selectedSprintId 
     goal: "",
   });
 
+  const projects = flatten(treeQuery.data ?? []);
+  const sprints = projects.filter((project) => project.parent_project_id === projectId);
+
+  function description() {
+    return [
+      form.start_date ? `Start: ${form.start_date}` : "",
+      form.end_date ? `End: ${form.end_date}` : "",
+      form.goal ? `Goal: ${form.goal}` : "",
+    ].filter(Boolean).join("\n");
+  }
+
   function submit() {
-    if (!form.name || !form.start_date || !form.end_date) {
-      toast.error("Name, start date and end date are required");
+    if (!form.name.trim()) {
+      toast.error("Name is required");
       return;
     }
-    create.mutate(
+    createProject.mutate(
       {
-        name: form.name,
-        start_date: form.start_date,
-        end_date: form.end_date,
-        goal: form.goal || undefined,
+        title: form.name.trim(),
+        description: description(),
         status: "planned",
       },
       {
-        onSuccess: () => {
-          setOpen(false);
-          toast.success("Sprint created");
+        onSuccess: (project) => {
+          setProjectParent.mutate(
+            { id: project.id, parentProjectId: projectId },
+            {
+              onSuccess: () => {
+                setOpen(false);
+                toast.success("Sprint project created");
+              },
+              onError: () => toast.error("Sprint project was created, but parent placement failed"),
+            },
+          );
         },
-        onError: () => toast.error("Failed to create sprint"),
+        onError: () => toast.error("Failed to create sprint project"),
       },
     );
   }
 
-  const sprints = sprintsQuery.data?.sprints ?? [];
-
   return (
     <div className="flex flex-col gap-3 p-6">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-medium">Sprints</h3>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-medium">Sprints</h3>
+          <p className="text-sm text-muted-foreground">
+            Sprints are sub-projects under this project. Move an issue into a sprint by setting its Project to the sprint sub-project.
+          </p>
+        </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger render={<Button size="sm">New sprint</Button>} />
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Create sprint</DialogTitle>
+              <DialogTitle>Create sprint project</DialogTitle>
             </DialogHeader>
             <div className="grid gap-3">
               <div className="grid gap-1.5">
@@ -92,26 +130,30 @@ export function SprintList({ workspaceId, projectId, onSelect, selectedSprintId 
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="grid gap-1.5">
-                  <Label htmlFor="sprint-start">Start (YYYY-MM-DD)</Label>
+                  <Label htmlFor="sprint-start">Start</Label>
                   <Input
                     id="sprint-start"
                     type="date"
                     value={form.start_date}
                     onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+                    onClick={openDatePicker}
+                    onFocus={openDatePicker}
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="sprint-end">End (YYYY-MM-DD)</Label>
+                  <Label htmlFor="sprint-end">End</Label>
                   <Input
                     id="sprint-end"
                     type="date"
                     value={form.end_date}
                     onChange={(e) => setForm({ ...form, end_date: e.target.value })}
+                    onClick={openDatePicker}
+                    onFocus={openDatePicker}
                   />
                 </div>
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="sprint-goal">Goal (optional)</Label>
+                <Label htmlFor="sprint-goal">Goal</Label>
                 <Input
                   id="sprint-goal"
                   value={form.goal}
@@ -123,7 +165,7 @@ export function SprintList({ workspaceId, projectId, onSelect, selectedSprintId 
               <Button variant="ghost" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={submit} disabled={create.isPending}>
+              <Button onClick={submit} disabled={createProject.isPending || setProjectParent.isPending}>
                 Create
               </Button>
             </DialogFooter>
@@ -131,58 +173,60 @@ export function SprintList({ workspaceId, projectId, onSelect, selectedSprintId 
         </Dialog>
       </div>
 
-      {sprintsQuery.isLoading && (
-        <div className="text-sm text-muted-foreground">Loading sprints…</div>
+      {treeQuery.isLoading && (
+        <div className="text-sm text-muted-foreground">Loading sprint projects...</div>
       )}
 
-      {sprints.length === 0 && !sprintsQuery.isLoading && (
-        <div className="border rounded-md p-4 text-sm text-muted-foreground">
-          No sprints yet. Create the first sprint to start the sequence — the daily sweeper
-          will then auto-create the next one based on your settings.
+      {sprints.length === 0 && !treeQuery.isLoading && (
+        <div className="rounded-md border p-4 text-sm text-muted-foreground">
+          No sprint sub-projects yet. Create one here, or use the project parent selector to place an existing project under this one.
         </div>
       )}
 
-      <ul className="flex flex-col divide-y border rounded-md">
-        {sprints.map((sprint) => {
-          const isSelected = sprint.id === selectedSprintId;
-          return (
-            <li
-              key={sprint.id}
-              className={`flex items-center justify-between gap-3 p-3 cursor-pointer hover:bg-muted/40 ${
-                isSelected ? "bg-muted/60" : ""
-              }`}
-              onClick={() => onSelect?.(sprint)}
-            >
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{sprint.name}</span>
-                  <Badge variant={STATUS_VARIANT[sprint.status]}>{sprint.status}</Badge>
+      <ul className="flex flex-col divide-y rounded-md border">
+        {sprints.map((sprint) => (
+          <li key={sprint.id} className="flex items-center justify-between gap-3 p-3">
+            <div className="flex min-w-0 items-center gap-3">
+              {sprint.icon ? (
+                <span className="shrink-0 text-sm">{sprint.icon}</span>
+              ) : sprint.color ? (
+                <span className={cn("size-2.5 shrink-0 rounded-full", getProjectColor(sprint.color).dot)} />
+              ) : (
+                <FolderKanban className="h-4 w-4 shrink-0 text-muted-foreground" />
+              )}
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate font-medium">{sprint.title}</span>
+                  <Badge
+                    variant="secondary"
+                    className={cn(
+                      PROJECT_STATUS_CONFIG[sprint.status].badgeBg,
+                      PROJECT_STATUS_CONFIG[sprint.status].badgeText,
+                    )}
+                  >
+                    {PROJECT_STATUS_CONFIG[sprint.status].label}
+                  </Badge>
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  {sprint.start_date} → {sprint.end_date}
-                  {sprint.goal ? ` · ${sprint.goal}` : ""}
+                  {sprint.issue_count} issues · {sprint.done_count} done
                 </span>
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!window.confirm(`Delete sprint "${sprint.name}"?`)) return;
-                  remove.mutate(sprint.id, {
-                    onSuccess: () => {
-                      if (isSelected) onSelect?.(null);
-                      toast.success("Sprint deleted");
-                    },
-                    onError: () => toast.error("Failed to delete sprint"),
-                  });
-                }}
-              >
-                Delete
-              </Button>
-            </li>
-          );
-        })}
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                if (!window.confirm(`Delete sprint project "${sprint.title}"?`)) return;
+                deleteProject.mutate(sprint.id, {
+                  onSuccess: () => toast.success("Sprint project deleted"),
+                  onError: () => toast.error("Failed to delete sprint project"),
+                });
+              }}
+            >
+              Delete
+            </Button>
+          </li>
+        ))}
       </ul>
     </div>
   );

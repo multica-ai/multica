@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/groupplacement"
 	"github.com/multica-ai/multica/server/internal/handler"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -39,18 +40,29 @@ var ErrInvalidRole = errors.New("invalid default_role")
 // has whitespace, or contains an '@'. Surfaced as 400.
 var ErrInvalidDomain = errors.New("invalid signup domain")
 
+// ErrInvalidDefaultGroup mirrors groupplacement.ErrInvalidDefaultGroup for handlers.
+var ErrInvalidDefaultGroup = groupplacement.ErrInvalidDefaultGroup
+
 // Get returns the saved settings for a workspace, or the empty default when
 // no row exists. The "empty default" path means the UI can render a clean
 // form on first visit without a separate create step.
 func (s *Service) Get(ctx context.Context, workspaceID pgtype.UUID) (AuthSettings, error) {
 	row, err := s.cerebro.GetCerebroWorkspaceAuthSettings(ctx, workspaceID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return defaultAuthSettings(uuidString(workspaceID)), nil
-		}
+	var out AuthSettings
+	switch {
+	case err == nil:
+		out = toAuthSettings(row)
+	case errors.Is(err, pgx.ErrNoRows):
+		out = defaultAuthSettings(uuidString(workspaceID))
+	default:
 		return AuthSettings{}, err
 	}
-	return toAuthSettings(row), nil
+	defaultGroupID, err := groupplacement.LoadDefaultGroupID(ctx, s.cerebro, workspaceID)
+	if err != nil {
+		return AuthSettings{}, err
+	}
+	out.DefaultGroupID = defaultGroupID
+	return out, nil
 }
 
 // Update upserts the workspace's settings. Caller authorization (owner/admin
@@ -82,7 +94,18 @@ func (s *Service) Update(
 	if err != nil {
 		return AuthSettings{}, err
 	}
-	return toAuthSettings(row), nil
+	if req.DefaultGroupID != nil {
+		if err := groupplacement.SetWorkspaceDefaultGroup(ctx, s.cerebro, workspaceID, *req.DefaultGroupID); err != nil {
+			return AuthSettings{}, err
+		}
+	}
+	out := toAuthSettings(row)
+	defaultGroupID, err := groupplacement.LoadDefaultGroupID(ctx, s.cerebro, workspaceID)
+	if err != nil {
+		return AuthSettings{}, err
+	}
+	out.DefaultGroupID = defaultGroupID
+	return out, nil
 }
 
 // ProvisionMembershipForNewUser is the upstream-seam method invoked from the
@@ -141,29 +164,15 @@ func (s *Service) ProvisionMembershipForNewUser(
 		}
 		out.WorkspaceIDs = append(out.WorkspaceIDs, m.WorkspaceID)
 
-		// Place the user in the workspace's configured default group so they
-		// land with working permissions from the first login. Best-effort and
-		// idempotent: a workspace with no default group (pgx.ErrNoRows) is
-		// simply skipped, and AddCerebroGroupMember swallows the duplicate on a
-		// returning login. A failure here must not block other workspaces.
-		groupID, err := s.cerebro.GetCerebroDefaultGroupID(ctx, m.WorkspaceID)
-		if err != nil {
-			if !errors.Is(err, pgx.ErrNoRows) && firstErr == nil {
-				firstErr = fmt.Errorf("lookup default group for workspace %s: %w", uuidString(m.WorkspaceID), err)
-			}
-			continue
-		}
-		if _, err := s.cerebro.AddCerebroGroupMember(ctx, cerebrodb.AddCerebroGroupMemberParams{
-			GroupID: groupID,
-			UserID:  user.ID,
-			AddedBy: pgtype.UUID{}, // system action — no human actor
-		}); err != nil {
+		if err := groupplacement.PlaceUserInDefaultGroup(ctx, s.cerebro, m.WorkspaceID, user.ID); err != nil {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("add default-group member in workspace %s: %w", uuidString(m.WorkspaceID), err)
+				firstErr = fmt.Errorf("place user in default group for workspace %s: %w", uuidString(m.WorkspaceID), err)
 			}
 			continue
 		}
-		out.GroupIDs = append(out.GroupIDs, groupID)
+		if groupID, err := s.cerebro.GetCerebroDefaultGroupID(ctx, m.WorkspaceID); err == nil {
+			out.GroupIDs = append(out.GroupIDs, groupID)
+		}
 	}
 
 	// If the user was placed in at least one workspace, mark them onboarded so

@@ -7,6 +7,7 @@ import {
   Lock,
   MoreHorizontal,
   Pause,
+  Square,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -14,6 +15,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Agent, AgentRuntime, UpdateAgentRequest } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
+  agentTaskSnapshotKeys,
+  agentTasksKeys,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
 import { api, ApiError } from "@multica/core/api";
@@ -43,6 +46,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -102,6 +106,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const { canEdit } = useAgentPermissions(agent, wsId);
 
   const [confirmArchive, setConfirmArchive] = useState(false);
+  // CEREBRO-PATCH(agent-detail-cancel-tasks): mirror agents-list cancel-all-tasks action on agent detail.
+  const [confirmCancelTasks, setConfirmCancelTasks] = useState(false);
 
   const handleUpdate = async (id: string, data: Record<string, unknown>) => {
     // Optimistic update: patch the matching agent in the cached list
@@ -164,6 +170,23 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       toast.success(t(($) => $.detail.agent_restored_toast));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.detail.restore_failed_toast));
+    }
+  };
+
+  // CEREBRO-PATCH(agent-detail-cancel-tasks): same API/motor as the agents-list row action.
+  const handleCancelTasks = async (id: string) => {
+    try {
+      const { cancelled } = await api.cancelAgentTasks(id);
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: agentTasksKeys.detail(wsId, id) });
+      toast.success(
+        cancelled === 0
+          ? t(($) => $.row_actions.no_tasks_to_cancel_toast)
+          : t(($) => $.row_actions.cancelled_tasks_toast, { count: cancelled }),
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.row_actions.cancel_failed_toast));
     }
   };
 
@@ -259,6 +282,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         canArchive={canEdit.allowed}
         canResumeRuntime={canManageRuntime}
         onArchive={() => setConfirmArchive(true)}
+        onCancelTasks={() => setConfirmCancelTasks(true)}
       />
 
       {!canEdit.allowed && (
@@ -365,6 +389,50 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           </DialogContent>
         </Dialog>
       )}
+
+      {confirmCancelTasks && (
+        <Dialog
+          open
+          onOpenChange={(v) => {
+            if (!v) setConfirmCancelTasks(false);
+          }}
+        >
+          <DialogContent className="max-w-sm" showCloseButton={false}>
+            <DialogHeader className="gap-1">
+              <DialogTitle className="text-sm font-semibold">
+                {t(($) => $.row_actions.cancel_dialog_title, { name: agent.name })}
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                {describeCancelImpact(
+                  presence?.runningCount ?? 0,
+                  presence?.queuedCount ?? 0,
+                  t,
+                )}
+                {(presence?.runningCount ?? 0) > 0 &&
+                  t(($) => $.row_actions.cancel_dialog_running_note)}
+                {t(($) => $.row_actions.cancel_dialog_irreversible)}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="ghost"
+                onClick={() => setConfirmCancelTasks(false)}
+              >
+                {t(($) => $.row_actions.cancel_dialog_keep)}
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  setConfirmCancelTasks(false);
+                  void handleCancelTasks(agent.id);
+                }}
+              >
+                {t(($) => $.row_actions.cancel_dialog_confirm)}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
@@ -378,6 +446,7 @@ function DetailHeader({
   canArchive,
   canResumeRuntime,
   onArchive,
+  onCancelTasks,
 }: {
   agent: Agent;
   presence: AgentPresenceDetail | null;
@@ -387,9 +456,13 @@ function DetailHeader({
   canArchive: boolean;
   canResumeRuntime: boolean;
   onArchive: () => void;
+  onCancelTasks: () => void;
 }) {
   const { t } = useT("agents");
   const isArchived = !!agent.archived_at;
+  const runningCount = presence?.runningCount ?? 0;
+  const queuedCount = presence?.queuedCount ?? 0;
+  const hasActiveWork = runningCount + queuedCount > 0;
   const av = presence
     ? { ...availabilityConfig[presence.availability], label: t(($) => $.availability[presence.availability]) }
     : null;
@@ -442,6 +515,13 @@ function DetailHeader({
                 <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-auto">
+                {hasActiveWork && (
+                  <DropdownMenuItem onClick={onCancelTasks}>
+                    <Square className="h-3.5 w-3.5" />
+                    {t(($) => $.row_actions.cancel_all_tasks)}
+                  </DropdownMenuItem>
+                )}
+                {hasActiveWork && <DropdownMenuSeparator />}
                 <DropdownMenuItem
                   className="text-destructive"
                   onClick={onArchive}
@@ -456,6 +536,21 @@ function DetailHeader({
       )}
     </PageHeader>
   );
+}
+
+type AgentsT = ReturnType<typeof useT<"agents">>["t"];
+
+function describeCancelImpact(running: number, queued: number, t: AgentsT): string {
+  if (running === 0 && queued === 0) {
+    return t(($) => $.row_actions.cancel_dialog_no_tasks);
+  }
+  const parts: string[] = [];
+  if (running > 0) parts.push(t(($) => $.row_actions.cancel_dialog_running, { count: running }));
+  if (queued > 0) parts.push(t(($) => $.row_actions.cancel_dialog_queued, { count: queued }));
+  return t(($) => $.row_actions.cancel_dialog_impact, {
+    summary: parts.join(" + "),
+    count: running + queued,
+  });
 }
 
 function BackHeader({ paths, title }: { paths: string; title: string }) {

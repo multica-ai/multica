@@ -172,13 +172,24 @@ export class TestApiClient {
     if (!this.workspaceId) {
       throw new Error("ensureWorkspace must run before dismissStarterContent");
     }
+    if (!this.userId) {
+      throw new Error("login must run before dismissStarterContent");
+    }
 
-    const res = await this.authedFetch("/api/me/starter-content/dismiss", {
-      method: "POST",
-      body: JSON.stringify({ workspace_id: this.workspaceId }),
-    });
-    if (!res.ok && res.status !== 409) {
-      throw new Error(`dismissStarterContent failed: ${res.status} ${await res.text()}`);
+    // The /api/me/starter-content/{import,dismiss} HTTP routes were removed
+    // with the starter-content kit (see migration 095). The dialog only
+    // surfaces when user.starter_content_state IS NULL, so we mark the test
+    // user directly in the DB to suppress it without depending on a removed
+    // endpoint.
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      await client.query(
+        `UPDATE "user" SET starter_content_state = 'dismissed' WHERE id = $1 AND starter_content_state IS NULL`,
+        [this.userId],
+      );
+    } finally {
+      await client.end();
     }
   }
 
@@ -253,6 +264,63 @@ export class TestApiClient {
 
   getUserId() {
     return this.userId;
+  }
+
+  getWorkspaceId() {
+    return this.workspaceId;
+  }
+
+  getWorkspaceSlug() {
+    return this.workspaceSlug;
+  }
+
+  async createCerebroGroup(
+    name: string,
+    description?: string,
+  ): Promise<{ id: string; name: string }> {
+    if (!this.workspaceId) {
+      throw new Error("ensureWorkspace must run before createCerebroGroup");
+    }
+    const res = await this.authedFetch(
+      `/api/workspaces/${this.workspaceId}/groups`,
+      {
+        method: "POST",
+        body: JSON.stringify({ name, description: description ?? null }),
+      },
+    );
+    if (!res.ok) {
+      throw new Error(`createCerebroGroup failed: ${res.status} ${await res.text()}`);
+    }
+    return res.json();
+  }
+
+  async setAuthSettingsDefaultGroup(groupId: string | null) {
+    if (!this.workspaceId) {
+      throw new Error("ensureWorkspace must run before setAuthSettingsDefaultGroup");
+    }
+    const current = await this.authedFetch(
+      `/api/cerebro/workspaces/${this.workspaceId}/auth-settings`,
+    );
+    const body = current.ok
+      ? await current.json()
+      : { google_signup_domains: [], default_role: "member", google_workspace_sync_enabled: false };
+    const res = await this.authedFetch(
+      `/api/cerebro/workspaces/${this.workspaceId}/auth-settings`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          google_signup_domains: body.google_signup_domains ?? [],
+          default_role: body.default_role ?? "member",
+          default_group_id: groupId,
+          google_workspace_sync_enabled: body.google_workspace_sync_enabled === true,
+        }),
+      },
+    );
+    if (!res.ok) {
+      throw new Error(
+        `setAuthSettingsDefaultGroup failed: ${res.status} ${await res.text()}`,
+      );
+    }
   }
 
   /**

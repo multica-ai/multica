@@ -896,7 +896,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	req.Content = mention.ExpandIssueIdentifiers(r.Context(), h.Queries, issue.WorkspaceID, req.Content)
 
 	if h.CommentTargetGuard != nil { // CEREBRO-PATCH(comment-target-guard-hook): FIR-2674 reject agent comments with no target.
-		if msg, ok := h.CommentTargetGuard.RejectComment(authorType, req.Content); !ok {
+		if msg, ok := h.CommentTargetGuard.RejectComment(r.Context(), issue.WorkspaceID, authorType, req.Content); !ok { // CEREBRO-PATCH(comment-target-guard-hook): FIR-2674 resolve guard flag per workspace.
 			writeError(w, http.StatusUnprocessableEntity, msg)
 			return
 		}

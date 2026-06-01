@@ -796,6 +796,9 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(member-default-group-placement): FIR-2732 auto-assign default group.
+	h.placeMemberInDefaultGroup(r.Context(), requester.WorkspaceID, user.ID)
+
 	slog.Info("member added", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
 	userID := requestUserID(r)
 	eventPayload := map[string]any{"member": memberWithUserResponse(member, user)}

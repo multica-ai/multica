@@ -70,6 +70,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrInvalidDomain):
 			writeError(w, http.StatusBadRequest, "google_signup_domains must contain non-empty domain values without '@' or whitespace")
 			return
+		case errors.Is(err, ErrInvalidDefaultGroup):
+			writeError(w, http.StatusBadRequest, "default_group_id must be a group in this workspace")
+			return
 		}
 		slog.Error("update cerebro workspace auth settings failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to save auth settings")
