@@ -76,12 +76,18 @@ type Config struct {
 	// Casdoor SSO configuration. When Endpoint is non-empty, the Casdoor
 	// OAuth flow is enabled. Login redirects to Casdoor's authorize endpoint;
 	// callback exchanges the code for a token and provisions the user.
-	CasdoorEndpoint     string
-	CasdoorClientID     string
-	CasdoorClientSecret string
-	CasdoorRedirectURI  string
-	CasdoorOrgName      string
-	CasdoorAppName      string
+	//
+	// Endpoint is the internal address used by the backend for token exchange
+	// and userinfo (e.g. K8s cluster DNS). PublicEndpoint is the external
+	// address exposed to browsers for the OAuth authorize redirect. When
+	// PublicEndpoint is empty, Endpoint is used for both.
+	CasdoorEndpoint       string
+	CasdoorPublicEndpoint string
+	CasdoorClientID       string
+	CasdoorClientSecret   string
+	CasdoorRedirectURI    string
+	CasdoorOrgName        string
+	CasdoorAppName        string
 }
 
 type cloudRuntimeProxy interface {

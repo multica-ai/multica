@@ -121,8 +121,13 @@ func (h *Handler) CasdoorLogin(w http.ResponseWriter, r *http.Request) {
 		redirectURI = fmt.Sprintf("%s://%s/auth/casdoor/callback", scheme, r.Host)
 	}
 
-	// Build Casdoor authorize URL.
-	authorizeURL, err := url.Parse(cfg.CasdoorEndpoint + "/login/oauth/authorize")
+	// Build Casdoor authorize URL. Use the public endpoint (external address
+	// visible to browsers) when available; fall back to the internal endpoint.
+	publicEndpoint := cfg.CasdoorPublicEndpoint
+	if publicEndpoint == "" {
+		publicEndpoint = cfg.CasdoorEndpoint
+	}
+	authorizeURL, err := url.Parse(publicEndpoint + "/login/oauth/authorize")
 	if err != nil {
 		slog.Error("casdoor: invalid endpoint URL", "error", err, "endpoint", cfg.CasdoorEndpoint)
 		writeError(w, http.StatusInternalServerError, "invalid Casdoor endpoint")
