@@ -78,6 +78,8 @@ import (
 	cerebroworkflows "github.com/multica-ai/multica/server/internal/cerebro/workflows"
 	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 workflow v2a status-model handler import
 	cerebrostatusmodels "github.com/multica-ai/multica/server/internal/cerebro/statusmodels"
+	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler import
+	cerebrosprints "github.com/multica-ai/multica/server/internal/cerebro/sprints"
 	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler import
 	cerebroagentavatar "github.com/multica-ai/multica/server/internal/cerebro/agent_avatar"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -395,6 +397,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.CustomStatusResolver = cerebroStatusModelsHandler
 	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler instance; FIR-2049 pass queries so avatar reads gateway creds from workspace settings
 	cerebroAgentAvatarHandler := cerebroagentavatar.New(store, queries)
+	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler instance
+	cerebroSprintsHandler := cerebrosprints.NewHandler(cerebroQueries)
 
 	r := chi.NewRouter()
 
@@ -1384,6 +1388,34 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/regenerate-signing-secret", cerebroWorkflowsHandler.RegenerateInboundSigningSecret)
 				r.Post("/{id}/regenerate-outbound-secret", cerebroWorkflowsHandler.RegenerateOutboundSecret)
 				r.Post("/_test/cron-sweep", cerebroWorkflowsHandler.TestSweepCron)
+			})
+			// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint REST surface.
+			r.Route("/api/cerebro/projects/{projectID}/sprint-settings", func(r chi.Router) {
+				r.Get("/", cerebroSprintsHandler.GetSettings)
+				r.Put("/", cerebroSprintsHandler.UpsertSettings)
+				r.Delete("/", cerebroSprintsHandler.DeleteSettings)
+			})
+			r.Route("/api/cerebro/projects/{projectID}/sprints", func(r chi.Router) {
+				r.Get("/", cerebroSprintsHandler.ListSprints)
+				r.Post("/", cerebroSprintsHandler.CreateSprint)
+			})
+			r.Route("/api/cerebro/projects/{projectID}/sprint-recurring-tasks", func(r chi.Router) {
+				r.Get("/", cerebroSprintsHandler.ListRecurringTasks)
+				r.Post("/", cerebroSprintsHandler.CreateRecurringTask)
+			})
+			r.Route("/api/cerebro/sprint-recurring-tasks/{id}", func(r chi.Router) {
+				r.Put("/", cerebroSprintsHandler.UpdateRecurringTask)
+				r.Delete("/", cerebroSprintsHandler.DeleteRecurringTask)
+			})
+			r.Route("/api/cerebro/sprints/{sprintID}", func(r chi.Router) {
+				r.Get("/", cerebroSprintsHandler.GetSprint)
+				r.Put("/", cerebroSprintsHandler.UpdateSprint)
+				r.Delete("/", cerebroSprintsHandler.DeleteSprint)
+				r.Get("/issues", cerebroSprintsHandler.ListSprintIssues)
+			})
+			r.Route("/api/cerebro/issues/{issueID}/sprint", func(r chi.Router) {
+				r.Get("/", cerebroSprintsHandler.GetIssueAssignment)
+				r.Put("/", cerebroSprintsHandler.AssignIssue)
 			})
 			// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 workflow v2a status-model REST surface.
 			r.Route("/api/cerebro/status-models", func(r chi.Router) {

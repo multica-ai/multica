@@ -51,6 +51,8 @@ export type CerebroFlagKey =
   | "cerebro_duplicate_check_on_create"
   // FIR-2523: Auth & Permissions settings tab + Google Workspace auto-membership hook.
   | "cerebro_google_identity"
+  // FIR-2666: project sprint feature (sprint settings, auto-create next sprint, recurring tasks).
+  | "cerebro_sprints"
   // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
   | "cerebro_pdf_inline_render"
   // FIR-2641: "Remind me" on a specific comment — reuses the personal reminder engine.
@@ -133,6 +135,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // signup is the launch feature, and the table starts empty so a fresh
   // workspace with no configured domains is still a no-op.
   cerebro_google_identity: true,
+  // FIR-2666: project sprint feature. Defaults OFF — turn on per workspace
+  // when ready. Hides the Sprints tab on the project page, the sprint picker
+  // in the issue sidebar, and skips the sprint sweeper.
+  cerebro_sprints: false,
   // FIR-2661: ON by default. Uploaded PDFs in Documents and the attachment
   // viewer render in the browser's native PDF view (scroll, zoom, search).
   // Off restores the prior behaviour (extracted-text dump in the attachment
@@ -487,6 +493,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Adds an Auth & Permissions tab to workspace settings: owner/admin can list email domains that auto-provision into this workspace on first Google login, and pick the default role new members get. Off hides the tab and disables the auto-membership hook. FIR-2523.",
+  },
+  {
+    key: "cerebro_sprints",
+    label: "Project sprints",
+    group: "workspace",
+    description:
+      "Turn a project into a sprint container: per-project sprint settings (duration, start-day, lead days for auto-create, move-incomplete), a Sprints tab on the project page, a sprint picker in the issue sidebar, and a daily sweeper that creates the next sprint, moves incomplete issues, and clones recurring tasks. Every period (lead days, duration) is a setting — no hardcoded values. FIR-2666.",
   },
   {
     key: "cerebro_pdf_inline_render",
