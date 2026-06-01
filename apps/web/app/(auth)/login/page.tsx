@@ -64,7 +64,7 @@ function LoginPageContent() {
   const searchParams = useSearchParams();
 
   const casdoorEnabled = useConfigStore((state) => state.casdoorEnabled);
-  const casdoorLoginUrl = useConfigStore((state) => state.casdoorLoginUrl);
+  const casdoorLoginUrl = useConfigStore((state) => state.casdoorLoginUrl) || "/auth/casdoor/login";
 
   const cliCallbackRaw = searchParams.get("cli_callback");
   const cliState = searchParams.get("cli_state") || "";
