@@ -38,6 +38,7 @@ type orchestrationFixture struct {
 	labelID  db.GetLabelParams // carries ID + WorkspaceID for convenience
 	agentID  string            // the child worker agent
 	leaderID string            // the squad leader = independent verifier
+	squadID  string            // the squad the parent is assigned to
 }
 
 func createBacklogChild(t *testing.T, parentID, title string) db.Issue {
@@ -173,6 +174,7 @@ func newOrchestrationFixture(t *testing.T) orchestrationFixture {
 		labelID:  db.GetLabelParams{ID: label.ID, WorkspaceID: parent.WorkspaceID},
 		agentID:  agentID,
 		leaderID: leaderID,
+		squadID:  squadID,
 	}
 }
 
@@ -415,6 +417,69 @@ func TestOrchestrateGateHoldsUntilVerified(t *testing.T) {
 	}
 	if got := countPendingTasksForAgent(t, uuidToString(fx.childB.ID), fx.agentID); got != 1 {
 		t.Errorf("childB should have 1 enqueued task after verification, got %d", got)
+	}
+}
+
+// CEREBRO-PATCH(orchestration-verifier-fallback): FIR-2564 — regression test.
+// TestOrchestrateVerifierFallsBackToReviewerWhenLeaderIsWorker: when the squad
+// leader is also the agent that built a sub-issue (the common small-squad case
+// where the leader assigns the work to herself), she cannot independently judge
+// her own deliverable. The engine must fall back to an independent squad member
+// — here a Reviewer — instead of stranding the run on the human-label gate.
+// FIR-2564 regression: this is exactly why the reminder orchestration stalled
+// one step before the goal.
+func TestOrchestrateVerifierFallsBackToReviewerWhenLeaderIsWorker(t *testing.T) {
+	fx := newOrchestrationFixture(t)
+	ctx := context.Background()
+
+	// A third agent that is the squad's dedicated Reviewer = independent verifier.
+	var reviewerID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'Handler Reviewer Agent', '', 'cloud', '{}'::jsonb, $2, 'workspace', 1, $3)
+		ON CONFLICT (workspace_id, name) DO UPDATE SET runtime_id = EXCLUDED.runtime_id
+		RETURNING id
+	`, testWorkspaceID, testRuntimeID, testUserID).Scan(&reviewerID); err != nil {
+		t.Fatalf("create reviewer agent: %v", err)
+	}
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO squad_member (squad_id, member_type, member_id, role) VALUES ($1, 'agent', $2, 'Reviewer')`,
+		fx.squadID, reviewerID); err != nil {
+		t.Fatalf("add reviewer member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.childA.ID)
+		testPool.Exec(context.Background(), `DELETE FROM squad_member WHERE squad_id = $1 AND member_id = $2`, fx.squadID, reviewerID)
+	})
+
+	// Make the leader the worker on childA (leader builds and owns the sub-issue).
+	setIssueAssigneeDirect(t, uuidToString(fx.childA.ID), "agent", fx.leaderID)
+	childA, _ := testHandler.Queries.GetIssue(ctx, fx.childA.ID)
+
+	// childA reports done → fire the verification request.
+	prevA := childA
+	doneA, err := testHandler.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID: childA.ID, Status: "done", WorkspaceID: fx.parent.WorkspaceID,
+	})
+	if err != nil {
+		t.Fatalf("mark childA done: %v", err)
+	}
+	testHandler.advanceOrchestrationOnChildDone(ctx, prevA, doneA)
+
+	// The Reviewer — not the leader (who did the work), not the human gate —
+	// must be dispatched to verify.
+	if got := countPendingTasksForAgent(t, uuidToString(fx.childA.ID), reviewerID); got != 1 {
+		t.Errorf("independent reviewer should have 1 verify task on childA, got %d", got)
+	}
+	if got := countPendingTasksForAgent(t, uuidToString(fx.childA.ID), fx.leaderID); got != 0 {
+		t.Errorf("leader (the worker) must NOT verify her own work, got %d tasks", got)
+	}
+	// Gate still holds: childB stays blocked until childA is actually verified.
+	if got := issueStatus(t, fx.childB); got != "backlog" {
+		t.Errorf("childB must stay backlog until childA is verified, got %q", got)
 	}
 }
 

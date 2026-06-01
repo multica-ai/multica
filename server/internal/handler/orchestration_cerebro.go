@@ -788,15 +788,20 @@ func (h *Handler) selectVerifierAgent(ctx context.Context, parent, child db.Issu
 			ID:          parent.AssigneeID,
 			WorkspaceID: parent.WorkspaceID,
 		})
-		if err != nil || !squad.LeaderID.Valid {
+		if err != nil {
 			return pgtype.UUID{}, false
 		}
-		// Leader must not be the child's own agent worker.
-		if child.AssigneeType.Valid && child.AssigneeType.String == "agent" &&
-			child.AssigneeID == squad.LeaderID {
-			return pgtype.UUID{}, false
+		workerIsAgent := child.AssigneeType.Valid && child.AssigneeType.String == "agent"
+		// Prefer the squad leader as the independent verifier — but the leader
+		// must not be the very agent that did the work. In small squads the
+		// leader often builds the sub-issues and assigns them to herself; she
+		// cannot independently judge her own deliverable. In that case fall back
+		// to another squad member (e.g. a dedicated reviewer/QA) BEFORE the human
+		// gate, so the run is not stranded waiting on a manual label nobody adds.
+		if squad.LeaderID.Valid && !(workerIsAgent && child.AssigneeID == squad.LeaderID) {
+			return squad.LeaderID, true
 		}
-		return squad.LeaderID, true
+		return h.selectIndependentSquadMember(ctx, parent.AssigneeID, child.AssigneeID, workerIsAgent)
 	}
 	if parent.AssigneeType.Valid && parent.AssigneeType.String == "agent" && parent.AssigneeID.Valid {
 		if child.AssigneeType.Valid && child.AssigneeType.String == "agent" &&
@@ -806,6 +811,51 @@ func (h *Handler) selectVerifierAgent(ctx context.Context, parent, child db.Issu
 		return parent.AssigneeID, true
 	}
 	return pgtype.UUID{}, false
+}
+
+// CEREBRO-PATCH(orchestration-verifier-fallback): FIR-2564 — when the squad
+// leader is the worker, fall back to an independent squad member (reviewer/QA)
+// before the human gate, so a run is not stranded on a manual label nobody adds.
+// selectIndependentSquadMember returns an agent member of the squad that is not
+// the child's worker, so it can independently verify the deliverable. A member
+// whose role names a reviewer/QA function is preferred (that is exactly what
+// they are on the squad for); otherwise the first eligible agent member is used.
+// ok=false when no independent agent member exists — the caller then falls back
+// to the human verification gate.
+func (h *Handler) selectIndependentSquadMember(ctx context.Context, squadID, workerID pgtype.UUID, workerIsAgent bool) (pgtype.UUID, bool) {
+	rows, err := h.Queries.ListSquadMemberPreviewRowsBySquad(ctx, squadID)
+	if err != nil {
+		return pgtype.UUID{}, false
+	}
+	var fallback pgtype.UUID
+	haveFallback := false
+	for _, m := range rows {
+		if m.MemberType != "agent" || !m.MemberID.Valid {
+			continue
+		}
+		if workerIsAgent && m.MemberID == workerID {
+			continue
+		}
+		if isReviewerRole(m.Role) {
+			return m.MemberID, true
+		}
+		if !haveFallback {
+			fallback = m.MemberID
+			haveFallback = true
+		}
+	}
+	if haveFallback {
+		return fallback, true
+	}
+	return pgtype.UUID{}, false
+}
+
+// isReviewerRole reports whether a squad member's role names a review/QA/test
+// function, making them the natural independent verifier of a deliverable.
+func isReviewerRole(role string) bool {
+	r := strings.ToLower(role)
+	return strings.Contains(r, "review") || strings.Contains(r, "qa") ||
+		strings.Contains(r, "test") || strings.Contains(r, "verif")
 }
 
 // advanceOnChildVerified runs when an `orch-verified` label is attached to a
