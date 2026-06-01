@@ -71,6 +71,7 @@ agent. Flipping the flag turns them on.
 | **Old capability resolver + grants** (`approval_required` → Ask) | same `CEREBRO_APPROVAL_GATE_ENABLED` (mode `capability`, the default mode) | **off** | Checks grants for capabilities like `network.external`, `credentials.read`, `prod.write`; no matching grant = deny; `approval_required=true` = inbox ask. |
 | **Tool-policy UI table** | feature flag `cerebro_tool_policy` | **false** | Shows the rich effective-chain table. |
 | **Simple tool-policy UI table** | feature flag `cerebro_simple_tool_policy` | **false** | Shows the simplified per-agent Allow/Ask/Block toggles. |
+| **Platform actions in the tool-policy table** | feature flag `cerebro_platform_capabilities` | **false** | Surfaces the code-owned platform capabilities (`platformcatalog`, incl. `create_local_runtime`) as settable rows. Server-side gate is `toolpolicy.PlatformCapabilitiesEnabled`. **FIR-2672 fix:** that gate now resolves the flag with the canonical precedence (locked-workspace > personal > unlocked-workspace > default), so the admin screen's "Force on for the whole workspace" override (stored under the all-zero sentinel user_id) actually takes effect — previously it read only the requester's own row and silently ignored the workspace override. |
 
 Relevant files: `runtime/approval_gate.go` (`approvalGateEnvEnabled`, `BuildApprovalGate`, `toolCapabilityKey`), `permissions/resolver.go`, `grants/grants.go`, `permgate/permgate.go`, `packages/cerebro-feature-flags/registry.ts`.
 

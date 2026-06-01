@@ -12,6 +12,7 @@ export { KindIcon, KIND_LABELS } from "./kind-icon";
 export { KIND_TEMPLATES, KIND_HELP } from "./kind-templates";
 export { MermaidDiagram } from "./mermaid-diagram";
 export { MoveScopeMenu } from "./move-scope-menu";
+export { PdfViewer } from "./pdf-viewer";
 export { ProjectDocuments } from "./project-documents";
 export { WorkspaceDocuments } from "./workspace-documents";
 export {

@@ -11,6 +11,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 )
 
@@ -126,5 +128,76 @@ func TestTable_PlatformRowsSurviveRuntimeFilter(t *testing.T) {
 	}
 	if _, ok := findRow(rows, "add_comment"); !ok {
 		t.Error("platform row add_comment hidden by runtime filter")
+	}
+}
+
+// TestPlatformCapabilitiesEnabled_HonorsWorkspaceOverride pins the FIR-2672 fix:
+// the gate must honor the workspace-level "Force on for the whole workspace"
+// override (stored under the all-zero sentinel user_id), not just a per-user
+// row. Before the fix the gate read only the requester's own row, so the admin
+// screen's workspace toggle had no effect and platform actions never surfaced.
+func TestPlatformCapabilitiesEnabled_HonorsWorkspaceOverride(t *testing.T) {
+	s := newTPStore(t)
+	clearFlags(t, s)
+	ctx := context.Background()
+	// A requester with no personal override row of their own.
+	requester := uuidByte(0x9)
+
+	// Default (no override anywhere) → off.
+	if s.PlatformCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("no override: want disabled (registry default OFF)")
+	}
+
+	// Locked workspace override ON → enabled for everyone, incl. a user with no
+	// personal row. This is the exact scenario Jesper configured.
+	setWorkspaceFlag(t, s, FlagPlatformCapabilities, true, true)
+	if !s.PlatformCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("locked workspace ON: want enabled for a user with no personal row")
+	}
+
+	// Locked workspace OFF wins outright over a personal ON.
+	setWorkspaceFlag(t, s, FlagPlatformCapabilities, false, true)
+	setPersonalFlag(t, s, requester, FlagPlatformCapabilities, true)
+	if s.PlatformCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("locked workspace OFF: must win over personal ON")
+	}
+
+	// Unlocked workspace OFF + personal ON → personal wins.
+	setWorkspaceFlag(t, s, FlagPlatformCapabilities, false, false)
+	if !s.PlatformCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("unlocked workspace OFF + personal ON: personal must win")
+	}
+	clearFlags(t, s)
+}
+
+func clearFlags(t *testing.T, s *Store) {
+	t.Helper()
+	if _, err := s.pool.Exec(context.Background(),
+		`DELETE FROM cerebro_feature_flags WHERE workspace_id = $1`, tpTestWorkspaceID); err != nil {
+		t.Fatalf("clear feature flags: %v", err)
+	}
+}
+
+func setWorkspaceFlag(t *testing.T, s *Store, key string, enabled, locked bool) {
+	t.Helper()
+	if _, err := s.pool.Exec(context.Background(), `
+		INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled, locked)
+		VALUES ($1, '00000000-0000-0000-0000-000000000000', $2, $3, $4)
+		ON CONFLICT (workspace_id, user_id, flag_key)
+		DO UPDATE SET enabled = EXCLUDED.enabled, locked = EXCLUDED.locked`,
+		tpTestWorkspaceID, key, enabled, locked); err != nil {
+		t.Fatalf("set workspace flag: %v", err)
+	}
+}
+
+func setPersonalFlag(t *testing.T, s *Store, userID pgtype.UUID, key string, enabled bool) {
+	t.Helper()
+	if _, err := s.pool.Exec(context.Background(), `
+		INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (workspace_id, user_id, flag_key)
+		DO UPDATE SET enabled = EXCLUDED.enabled`,
+		tpTestWorkspaceID, userID, key, enabled); err != nil {
+		t.Fatalf("set personal flag: %v", err)
 	}
 }

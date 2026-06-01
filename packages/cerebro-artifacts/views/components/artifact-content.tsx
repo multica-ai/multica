@@ -2,7 +2,9 @@
 
 import type { Artifact } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { ArtifactBody } from "./artifact-body";
+import { PdfViewer } from "./pdf-viewer";
 import { sanitizeHtml } from "../utils/sanitize-html";
 
 function normalizeTitle(s: string): string {
@@ -55,6 +57,7 @@ export function ArtifactContent({
   className?: string;
   frameClassName?: string;
 }) {
+  const inlinePdf = useFeatureFlag("cerebro_pdf_inline_render");
   const renderedBody = stripLeadingTitleHeading(
     artifact.body ?? "",
     artifact.title,
@@ -72,14 +75,22 @@ export function ArtifactContent({
               : ""}
           </span>
         </div>
-        <iframe
-          src={artifact.file_url}
-          title={artifact.title}
-          className={cn(
-            "h-[80vh] w-full rounded border border-border bg-white",
-            frameClassName,
-          )}
-        />
+        {inlinePdf ? (
+          <PdfViewer
+            fileUrl={artifact.file_url}
+            title={artifact.title}
+            className={frameClassName}
+          />
+        ) : (
+          <iframe
+            src={artifact.file_url}
+            title={artifact.title}
+            className={cn(
+              "h-[80vh] w-full rounded border border-border bg-white",
+              frameClassName,
+            )}
+          />
+        )}
       </div>
     );
   }

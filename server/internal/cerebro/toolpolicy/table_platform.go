@@ -36,25 +36,64 @@ const FlagPlatformCapabilities = "cerebro_platform_capabilities"
 
 // PlatformCapabilitiesEnabled reports whether the platform-capability catalog
 // should be appended to the table for this (workspace, user). The flag defaults
-// OFF, so a missing override row means false; a DB error also returns false
-// (fail closed — show nothing new) and is logged.
+// OFF, so with no override anywhere it stays hidden; a DB error fails closed
+// (show nothing new) and is logged.
+//
+// FIR-2672: resolution MUST mirror the canonical client precedence in
+// packages/cerebro-feature-flags/store.ts (resolveFlag):
+//
+//  1. a LOCKED workspace override wins outright;
+//  2. otherwise a personal override wins;
+//  3. otherwise an unlocked workspace override (a soft workspace default);
+//  4. otherwise the registry default (false for this flag).
+//
+// The earlier implementation read only the per-user row, so the workspace-level
+// "Force on for the whole workspace" override (stored under the all-zero
+// sentinel user_id, NOT the requester's id) was silently ignored — the toggle
+// the admin screen offers for this flag had no effect on the server gate, so
+// platform actions never surfaced. Honoring the sentinel row fixes that.
 func (s *Store) PlatformCapabilitiesEnabled(ctx context.Context, workspaceID, userID pgtype.UUID) bool {
-	if s.q == nil || !userID.Valid {
+	if s.q == nil {
 		return false
 	}
-	on, err := s.q.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
-		WorkspaceID: workspaceID,
-		UserID:      userID,
-		FlagKey:     FlagPlatformCapabilities,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false
-	}
+	// Workspace-level override lives under the all-zero sentinel user_id.
+	var wsEnabled, wsLocked, wsFound bool
+	wsRows, err := s.q.ListCerebroWorkspaceFeatureFlags(ctx, workspaceID)
 	if err != nil {
-		slog.Error("toolpolicy: platform-capabilities flag lookup failed", "error", err)
-		return false
+		slog.Error("toolpolicy: workspace platform-capabilities flag lookup failed", "error", err)
+	} else {
+		for _, r := range wsRows {
+			if r.FlagKey == FlagPlatformCapabilities {
+				wsEnabled, wsLocked, wsFound = r.Enabled, r.Locked, true
+				break
+			}
+		}
 	}
-	return on
+	// 1. A locked workspace override wins outright.
+	if wsFound && wsLocked {
+		return wsEnabled
+	}
+	// 2. Otherwise a personal override wins.
+	if userID.Valid {
+		on, perr := s.q.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+			WorkspaceID: workspaceID,
+			UserID:      userID,
+			FlagKey:     FlagPlatformCapabilities,
+		})
+		if perr == nil {
+			return on
+		}
+		if !errors.Is(perr, pgx.ErrNoRows) {
+			slog.Error("toolpolicy: platform-capabilities flag lookup failed", "error", perr)
+			return false
+		}
+	}
+	// 3. Otherwise an unlocked workspace override (soft default).
+	if wsFound {
+		return wsEnabled
+	}
+	// 4. Otherwise the registry default — OFF for this flag.
+	return false
 }
 
 // appendPlatformRows adds one row per platform capability (platformcatalog.All)
@@ -106,7 +145,7 @@ type platformPolicyLayers struct {
 
 // loadPlatformPolicySettings fetches every explicit per-layer setting authored
 // for the given platform capability keys (capability-wide rows, resource_pattern
-// = '') in the query's context, bucketed by tool_key. It mirrors the subject
+// = ”) in the query's context, bucketed by tool_key. It mirrors the subject
 // predicates of the capability-wide query in table.go so an absent (Valid=false)
 // subject id never matches and that layer stays Inherit.
 func (s *Store) loadPlatformPolicySettings(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID, keys []string) (map[string]*platformPolicyLayers, error) {

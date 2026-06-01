@@ -397,6 +397,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/cerebro/github/pull-requests",
+      "exempt": "pre-auth service-to-service — CEREBRO_GITHUB_LINK_KEY bearer token authorises the firtal-data-registry poll-based PR-link push before any user JWT exists (FIR-2568)"
+    },
+    {
       "id": "POST /api/cerebro/issues/check-similar",
       "gate": "workspace_member"
     },

@@ -760,6 +760,56 @@ func (h *Handler) requestChildVerification(ctx context.Context, parent, child db
 		"Verifying "+childRef+" independently before releasing the sub-issues that depend on it.")
 }
 
+// handStalledChildToLeader hands a sub-issue whose worker keeps stalling to the
+// squad leader (a backup builder) to take over and finish, instead of freezing
+// the flow and waiting for a human. The independent builder is the same agent
+// the verifier path picks (the parent's squad leader, never the child's own
+// stalled worker). Carries human-origin provenance so the leader's own
+// downstream hand-offs fire. Returns true if a takeover was dispatched.
+// Idempotent: a child whose leader already has a pending task is left alone.
+// CEREBRO-PATCH(orchestration-stalled-handoff): FIR-2687 — stalled-worker takeover.
+func (h *Handler) handStalledChildToLeader(ctx context.Context, parent, child db.Issue) bool {
+	builderID, ok := h.selectVerifierAgent(ctx, parent, child)
+	if !ok {
+		return false // no independent builder (e.g. the leader IS the stalled worker)
+	}
+	if h.hasPendingTask(ctx, child.ID, builderID) {
+		return true // a takeover is already queued
+	}
+	childRef := "#" + strconv.Itoa(int(child.Number))
+	req, posted := h.postOrchestrationCommentReturning(ctx, child, h.buildStalledTakeoverInstructions(childRef))
+	if !posted {
+		return false
+	}
+	if actor, ok := h.resolveOrchestrationActor(ctx, child); ok {
+		if _, err := h.TaskService.EnqueueTaskForMentionFromComment(ctx, child, builderID, req.ID,
+			service.TaskDelegationContext{OriginalUserID: actor}); err != nil {
+			slog.Warn("orchestration: stalled-takeover enqueue failed", "child_id", uuidToString(child.ID), "error", err)
+			return false
+		}
+		return true
+	}
+	if _, err := h.TaskService.EnqueueTaskForMention(ctx, child, builderID, req.ID); err != nil {
+		slog.Warn("orchestration: stalled-takeover enqueue failed", "child_id", uuidToString(child.ID), "error", err)
+		return false
+	}
+	return true
+}
+
+// buildStalledTakeoverInstructions is the takeover prompt posted on the child as
+// the backup builder's task trigger. Unlike the verifier prompt, it tells the
+// leader to BUILD the work, not judge it — the original worker could not finish.
+func (h *Handler) buildStalledTakeoverInstructions(childRef string) string {
+	return "Takeover requested for " + childRef + ".\n\n" +
+		"The agent originally assigned to this sub-issue started, but its run kept ending " +
+		"without finishing — it stalled twice, so the orchestrator is handing the work to you, " +
+		"the squad leader, as the backup builder.\n\n" +
+		"Take over and drive this sub-issue to done yourself: read its acceptance criteria (the " +
+		"checklist in its description), build or finish whatever is missing, verify it against " +
+		"evidence, and move it to `done` (or `in_review` if it needs independent verification). " +
+		"Do not wait for the original worker — it could not complete the run."
+}
+
 // buildVerifierInstructions is the judge prompt posted on the child as the
 // verifier's task trigger. It is explicit enough to act on without the
 // orchestration-verify skill, but that skill documents the same contract.
@@ -788,15 +838,20 @@ func (h *Handler) selectVerifierAgent(ctx context.Context, parent, child db.Issu
 			ID:          parent.AssigneeID,
 			WorkspaceID: parent.WorkspaceID,
 		})
-		if err != nil || !squad.LeaderID.Valid {
+		if err != nil {
 			return pgtype.UUID{}, false
 		}
-		// Leader must not be the child's own agent worker.
-		if child.AssigneeType.Valid && child.AssigneeType.String == "agent" &&
-			child.AssigneeID == squad.LeaderID {
-			return pgtype.UUID{}, false
+		workerIsAgent := child.AssigneeType.Valid && child.AssigneeType.String == "agent"
+		// Prefer the squad leader as the independent verifier — but the leader
+		// must not be the very agent that did the work. In small squads the
+		// leader often builds the sub-issues and assigns them to herself; she
+		// cannot independently judge her own deliverable. In that case fall back
+		// to another squad member (e.g. a dedicated reviewer/QA) BEFORE the human
+		// gate, so the run is not stranded waiting on a manual label nobody adds.
+		if squad.LeaderID.Valid && !(workerIsAgent && child.AssigneeID == squad.LeaderID) {
+			return squad.LeaderID, true
 		}
-		return squad.LeaderID, true
+		return h.selectIndependentSquadMember(ctx, parent.AssigneeID, child.AssigneeID, workerIsAgent)
 	}
 	if parent.AssigneeType.Valid && parent.AssigneeType.String == "agent" && parent.AssigneeID.Valid {
 		if child.AssigneeType.Valid && child.AssigneeType.String == "agent" &&
@@ -806,6 +861,51 @@ func (h *Handler) selectVerifierAgent(ctx context.Context, parent, child db.Issu
 		return parent.AssigneeID, true
 	}
 	return pgtype.UUID{}, false
+}
+
+// CEREBRO-PATCH(orchestration-verifier-fallback): FIR-2564 — when the squad
+// leader is the worker, fall back to an independent squad member (reviewer/QA)
+// before the human gate, so a run is not stranded on a manual label nobody adds.
+// selectIndependentSquadMember returns an agent member of the squad that is not
+// the child's worker, so it can independently verify the deliverable. A member
+// whose role names a reviewer/QA function is preferred (that is exactly what
+// they are on the squad for); otherwise the first eligible agent member is used.
+// ok=false when no independent agent member exists — the caller then falls back
+// to the human verification gate.
+func (h *Handler) selectIndependentSquadMember(ctx context.Context, squadID, workerID pgtype.UUID, workerIsAgent bool) (pgtype.UUID, bool) {
+	rows, err := h.Queries.ListSquadMemberPreviewRowsBySquad(ctx, squadID)
+	if err != nil {
+		return pgtype.UUID{}, false
+	}
+	var fallback pgtype.UUID
+	haveFallback := false
+	for _, m := range rows {
+		if m.MemberType != "agent" || !m.MemberID.Valid {
+			continue
+		}
+		if workerIsAgent && m.MemberID == workerID {
+			continue
+		}
+		if isReviewerRole(m.Role) {
+			return m.MemberID, true
+		}
+		if !haveFallback {
+			fallback = m.MemberID
+			haveFallback = true
+		}
+	}
+	if haveFallback {
+		return fallback, true
+	}
+	return pgtype.UUID{}, false
+}
+
+// isReviewerRole reports whether a squad member's role names a review/QA/test
+// function, making them the natural independent verifier of a deliverable.
+func isReviewerRole(role string) bool {
+	r := strings.ToLower(role)
+	return strings.Contains(r, "review") || strings.Contains(r, "qa") ||
+		strings.Contains(r, "test") || strings.Contains(r, "verif")
 }
 
 // advanceOnChildVerified runs when an `orch-verified` label is attached to a

@@ -23,6 +23,13 @@ const (
 	orchestrateStalledLabelName  = "orch-stalled"
 	orchestrateStalledLabelColor = "#f59e0b"
 
+	// CEREBRO-PATCH(orchestration-stalled-handoff): FIR-2687 — when a re-dispatch
+	// fails to revive a stalled sub-issue, the worker is handed to the squad
+	// leader (backup builder). This marker records that hand-off so the next
+	// sweep escalates to a human instead of freezing or re-handing in a loop.
+	orchestrateHandedOffLabelName  = "orch-handed-off"
+	orchestrateHandedOffLabelColor = "#8b5cf6"
+
 	// defaultWatchdogInterval is how often the stall sweep runs in production.
 	defaultWatchdogInterval = 10 * time.Minute
 	// defaultStallAfter is how long an in-flight sub-issue may sit with no active
@@ -103,9 +110,7 @@ func (w *OrchestrationWatchdog) sweepParent(ctx context.Context, parent db.Issue
 		// stale marker and leave it alone.
 		if w.h.issueHasLabelNamed(ctx, child, orchestrateVerifiedLabelName) ||
 			w.h.issueHasLabelNamed(ctx, child, orchestrateRejectedLabelName) {
-			if w.h.issueHasLabelNamed(ctx, child, orchestrateStalledLabelName) {
-				w.h.detachWorkspaceLabel(ctx, child, orchestrateStalledLabelName)
-			}
+			w.clearStallMarkers(ctx, child)
 			// CEREBRO-PATCH(orchestration-status-reconcile): FIR-2564 — status must
 			// match reality: a VERIFIED sub-issue is complete, so it must be `done`.
 			// (A run can bump a verified child back to in_progress/in_review — e.g.
@@ -136,9 +141,7 @@ func (w *OrchestrationWatchdog) sweepParent(ctx context.Context, parent db.Issue
 		default:
 			// Backlog/terminal children are not "started + stuck"; clear any
 			// stale marker so a future stall is flagged fresh.
-			if w.h.issueHasLabelNamed(ctx, child, orchestrateStalledLabelName) {
-				w.h.detachWorkspaceLabel(ctx, child, orchestrateStalledLabelName)
-			}
+			w.clearStallMarkers(ctx, child)
 		}
 	}
 }
@@ -156,21 +159,46 @@ func (w *OrchestrationWatchdog) checkStalledChild(ctx context.Context, parent, c
 		return
 	}
 	if active {
-		// A run is active -> not stalled; clear any prior marker.
-		if w.h.issueHasLabelNamed(ctx, child, orchestrateStalledLabelName) {
-			w.h.detachWorkspaceLabel(ctx, child, orchestrateStalledLabelName)
-		}
+		// A run is active -> not stalled; clear any prior recovery markers.
+		w.clearStallMarkers(ctx, child)
 		return
 	}
 
 	ref := "#" + strconv.Itoa(int(child.Number))
 	if w.h.issueHasLabelNamed(ctx, child, orchestrateStalledLabelName) {
-		// Already re-dispatched once and still stuck -> escalate, don't loop.
-		// (Comment dedup keeps this from repeating every sweep.)
-		w.h.postOrchestrationComment(ctx, parent,
-			"Sub-issue "+ref+" is still stalled after an automatic re-dispatch — its run keeps "+
-				"ending without finishing. This needs attention (check the agent/runtime or the "+
-				"sub-issue's blockers). The orchestrator will not keep re-dispatching it.")
+		// CEREBRO-PATCH(orchestration-stalled-handoff): FIR-2687 — re-dispatching the
+		// same worker already failed once. Rather than give up and freeze the whole
+		// flow waiting for a human, hand the sub-issue to the squad leader (a backup
+		// builder) to take over and finish it. Only if that hand-off has ALSO been
+		// tried and the issue is STILL stuck do we escalate to a human — bounded at
+		// re-dispatch → hand-off → human, never an infinite loop.
+		if w.h.issueHasLabelNamed(ctx, child, orchestrateHandedOffLabelName) {
+			// (Comment dedup keeps this from repeating every sweep.)
+			w.h.postOrchestrationComment(ctx, parent,
+				"Sub-issue "+ref+" is still stalled after both an automatic re-dispatch and a hand-off "+
+					"to the squad leader — its run keeps ending without finishing. This needs a human "+
+					"(check the agent/runtime or the sub-issue's blockers). The orchestrator will not "+
+					"keep re-dispatching it.")
+			return
+		}
+		if w.h.handStalledChildToLeader(ctx, parent, child) {
+			if id := w.h.ensureWorkspaceLabel(ctx, parent.WorkspaceID, orchestrateHandedOffLabelName, orchestrateHandedOffLabelColor); id.Valid {
+				_ = w.h.Queries.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+					IssueID:     child.ID,
+					LabelID:     id,
+					WorkspaceID: child.WorkspaceID,
+				})
+			}
+			w.h.postOrchestrationComment(ctx, parent,
+				"Sub-issue "+ref+" stalled again after an automatic re-dispatch, so I handed it to the "+
+					"squad leader to take over and finish — the flow keeps moving instead of waiting "+
+					"for a human.")
+		} else {
+			w.h.postOrchestrationComment(ctx, parent,
+				"Sub-issue "+ref+" is still stalled after an automatic re-dispatch and there is no "+
+					"independent backup builder to hand it to (the squad leader is the stalled worker, "+
+					"or no leader is ready). This needs a human.")
+		}
 		return
 	}
 
@@ -191,6 +219,19 @@ func (w *OrchestrationWatchdog) checkStalledChild(ctx context.Context, parent, c
 		w.h.postOrchestrationComment(ctx, parent,
 			"Sub-issue "+ref+" looked stalled and could not be re-dispatched (no ready agent/squad "+
 				"leader). This needs attention.")
+	}
+}
+
+// clearStallMarkers sheds BOTH recovery markers when a child recovers (a run is
+// active again) or terminates, so a future stall is flagged fresh and re-runs
+// the full re-dispatch → hand-off → escalate ladder from the start.
+// CEREBRO-PATCH(orchestration-stalled-handoff): FIR-2687 — hand-off marker cleanup.
+func (w *OrchestrationWatchdog) clearStallMarkers(ctx context.Context, child db.Issue) {
+	if w.h.issueHasLabelNamed(ctx, child, orchestrateStalledLabelName) {
+		w.h.detachWorkspaceLabel(ctx, child, orchestrateStalledLabelName)
+	}
+	if w.h.issueHasLabelNamed(ctx, child, orchestrateHandedOffLabelName) {
+		w.h.detachWorkspaceLabel(ctx, child, orchestrateHandedOffLabelName)
 	}
 }
 

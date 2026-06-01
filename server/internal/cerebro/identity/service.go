@@ -85,11 +85,14 @@ func (s *Service) Update(
 	return toAuthSettings(row), nil
 }
 
-// ProvisionMembershipForNewUser is the upstream-seam method invoked from
-// findOrCreateUser. It looks up every workspace whose google_signup_domains
-// includes the user's email domain and creates a member row in each with the
-// per-workspace default role. Idempotent: an existing member row (race,
-// retried login) does not error.
+// ProvisionMembershipForNewUser is the upstream-seam method invoked from the
+// login path on EVERY successful login (not only first signup) so it doubles
+// as a self-heal: a user who logged in before their workspace was configured
+// gets reconciled on their next login. It looks up every workspace whose
+// google_signup_domains includes the user's email domain, ensures a member row
+// (with the per-workspace default role) AND places the user in that
+// workspace's configured default group. Idempotent throughout: an existing
+// member row or group membership (returning login) does not error.
 //
 // Best-effort: a per-workspace insert failure is logged via the error return
 // for the FIRST error encountered but the loop still tries every other
@@ -123,22 +126,56 @@ func (s *Service) ProvisionMembershipForNewUser(
 			// safest role rather than skipping the workspace.
 			role = "member"
 		}
+		// Ensure workspace membership. A unique-constraint violation means the
+		// user is already a member (a returning login re-running this path) —
+		// treat that as success so we still reconcile group placement below.
 		if _, err := s.upstream.CreateMember(ctx, db.CreateMemberParams{
 			WorkspaceID: m.WorkspaceID,
 			UserID:      user.ID,
 			Role:        role,
-		}); err != nil {
-			if isUniqueViolation(err) {
-				// Already a member — treat as success and record the workspace.
-				out.WorkspaceIDs = append(out.WorkspaceIDs, m.WorkspaceID)
-				continue
-			}
+		}); err != nil && !isUniqueViolation(err) {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("create member in workspace %s: %w", uuidString(m.WorkspaceID), err)
 			}
 			continue
 		}
 		out.WorkspaceIDs = append(out.WorkspaceIDs, m.WorkspaceID)
+
+		// Place the user in the workspace's configured default group so they
+		// land with working permissions from the first login. Best-effort and
+		// idempotent: a workspace with no default group (pgx.ErrNoRows) is
+		// simply skipped, and AddCerebroGroupMember swallows the duplicate on a
+		// returning login. A failure here must not block other workspaces.
+		groupID, err := s.cerebro.GetCerebroDefaultGroupID(ctx, m.WorkspaceID)
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) && firstErr == nil {
+				firstErr = fmt.Errorf("lookup default group for workspace %s: %w", uuidString(m.WorkspaceID), err)
+			}
+			continue
+		}
+		if _, err := s.cerebro.AddCerebroGroupMember(ctx, cerebrodb.AddCerebroGroupMemberParams{
+			GroupID: groupID,
+			UserID:  user.ID,
+			AddedBy: pgtype.UUID{}, // system action — no human actor
+		}); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("add default-group member in workspace %s: %w", uuidString(m.WorkspaceID), err)
+			}
+			continue
+		}
+		out.GroupIDs = append(out.GroupIDs, groupID)
+	}
+
+	// If the user was placed in at least one workspace, mark them onboarded so
+	// the post-login router sends them straight into the workspace instead of
+	// the first-run onboarding wall. This mirrors the invitation-accept path
+	// (handler/invitation.go), which holds the member<->onboarded_at invariant
+	// the desktop workspace layout depends on. Idempotent (MarkUserOnboarded
+	// COALESCEs onboarded_at, so a returning user keeps their original time).
+	if len(out.WorkspaceIDs) > 0 {
+		if _, err := s.upstream.MarkUserOnboarded(ctx, user.ID); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("mark user onboarded %s: %w", uuidString(user.ID), err)
+		}
 	}
 	return out, firstErr
 }
