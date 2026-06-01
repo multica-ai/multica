@@ -630,6 +630,19 @@ jobs:
           # the org repo where the auto-issued token works.
           password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
+      # Dockerfile.claude requires CLAUDE_CODE_VERSION to pin the npm install
+      # of @anthropic-ai/claude-code. The single source of truth is
+      # packaging/claude-code-version, bumped by the daily watcher workflow.
+      - name: Read pinned claude-code version
+        id: claude_code
+        run: |
+          version="$(tr -d '[:space:]' < packaging/claude-code-version)"
+          if [[ -z "$version" ]]; then
+            echo "packaging/claude-code-version is empty" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
@@ -643,6 +656,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=release-runtime-claude-${{ env.PLATFORM_PAIR }}
           build-args: |
             BASE_IMAGE=ghcr.io/${{ github.repository_owner }}/multica-runtime-base:${{ needs.verify.outputs.tag_name }}
+            CLAUDE_CODE_VERSION=${{ steps.claude_code.outputs.version }}
           outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/multica-runtime-claude,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
