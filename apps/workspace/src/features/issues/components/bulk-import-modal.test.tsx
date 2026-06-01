@@ -55,11 +55,12 @@ describe("parseCsvInput", () => {
     expect(result[1]?.description).toBeUndefined();
   });
 
-  it("ignores rows with empty title", () => {
+  it("keeps rows with empty title so validation can surface them", () => {
     const csv = "title,priority\n,high\nValid Issue,low";
     const result = parseCsvInput(csv);
-    expect(result).toHaveLength(1);
-    expect(result[0]?.title).toBe("Valid Issue");
+    expect(result).toHaveLength(2);
+    expect(result[0]?.title).toBe("");
+    expect(result[1]?.title).toBe("Valid Issue");
   });
 
   it("returns empty array when no title column", () => {
@@ -86,20 +87,18 @@ describe("parseCsvInput", () => {
 
 vi.mock("@/shared/api", () => ({
   api: {
-    bulkCreateIssues: vi.fn(),
-  },
-  BulkCreateApiError: class BulkCreateApiError extends Error {
-    errors: { index: number; reason: string }[];
-    constructor(errors: { index: number; reason: string }[]) {
-      super("Validation errors");
-      this.errors = errors;
-    }
+    dryRunWorkspaceImport: vi.fn(),
+    applyWorkspaceImport: vi.fn(),
   },
 }));
 
+const issueStoreMocks = vi.hoisted(() => ({
+  fetch: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/features/issues", () => ({
-  useIssueStore: (sel: (s: { addIssue: () => void }) => unknown) =>
-    sel({ addIssue: vi.fn() }),
+  useIssueStore: (sel: (s: { fetch: () => Promise<void> }) => unknown) =>
+    sel({ fetch: issueStoreMocks.fetch }),
 }));
 
 vi.mock("sonner", () => ({
@@ -134,20 +133,25 @@ describe("BulkImportModal", () => {
     expect(screen.getByText(/No valid issues found/i)).toBeInTheDocument();
   });
 
-  it("calls bulkCreateIssues and closes on success", async () => {
+  it("calls dry-run and apply import pipeline then closes on success", async () => {
     const { api } = await import("@/shared/api");
-    const mockFn = vi.mocked(api.bulkCreateIssues);
-    mockFn.mockResolvedValueOnce({
-      issues: [
-        {
-          id: "1", workspace_id: "ws", number: 1, identifier: "MUL-1",
-          title: "Issue One", description: null, status: "backlog", priority: "none",
-          assignee_type: null, assignee_id: null, creator_type: "member",
-          creator_id: "u1", parent_issue_id: null, position: 0,
-          due_date: null, start_date: null, end_date: null,
-          created_at: "", updated_at: "", project_id: null,
-        },
-      ],
+    const dryRunMock = vi.mocked(api.dryRunWorkspaceImport);
+    const applyMock = vi.mocked(api.applyWorkspaceImport);
+    dryRunMock.mockResolvedValueOnce({
+      summary: "dry-run ok",
+      warnings: [],
+      errors: [],
+      created: 0,
+      skipped: 0,
+      failed: 0,
+    });
+    applyMock.mockResolvedValueOnce({
+      summary: "apply ok",
+      warnings: [],
+      errors: [],
+      created: 1,
+      skipped: 0,
+      failed: 0,
     });
 
     const onOpenChange = vi.fn();
@@ -158,17 +162,28 @@ describe("BulkImportModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /Import 1/i }));
 
     await waitFor(() => {
-      expect(mockFn).toHaveBeenCalledWith([{ title: "Issue One" }]);
+      expect(dryRunMock).toHaveBeenCalledWith(
+        expect.objectContaining({ source_type: "issue-csv", issues: [{ title: "Issue One" }] }),
+      );
+      expect(applyMock).toHaveBeenCalledWith(
+        expect.objectContaining({ source_type: "issue-csv", issues: [{ title: "Issue One" }] }),
+      );
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
   });
 
-  it("shows server errors and keeps modal open on failure", async () => {
-    const { api, BulkCreateApiError } = await import("@/shared/api");
-    const mockFn = vi.mocked(api.bulkCreateIssues);
-    mockFn.mockRejectedValueOnce(
-      new BulkCreateApiError([{ index: 0, reason: "title is required" }]),
-    );
+  it("shows dry-run errors and keeps modal open", async () => {
+    const { api } = await import("@/shared/api");
+    const dryRunMock = vi.mocked(api.dryRunWorkspaceImport);
+    const applyMock = vi.mocked(api.applyWorkspaceImport);
+    dryRunMock.mockResolvedValueOnce({
+      summary: "dry-run blocked",
+      warnings: [],
+      errors: [{ code: "title_required", message: "title is required" }],
+      created: 0,
+      skipped: 0,
+      failed: 1,
+    });
 
     const onOpenChange = vi.fn();
     render(<BulkImportModal open onOpenChange={onOpenChange} />);
@@ -179,6 +194,42 @@ describe("BulkImportModal", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/title is required/i)).toBeInTheDocument();
+      expect(applyMock).not.toHaveBeenCalled();
+      expect(onOpenChange).not.toHaveBeenCalled();
+    });
+  });
+
+  it("shows apply errors and keeps modal open", async () => {
+    const { api } = await import("@/shared/api");
+    const dryRunMock = vi.mocked(api.dryRunWorkspaceImport);
+    const applyMock = vi.mocked(api.applyWorkspaceImport);
+    dryRunMock.mockResolvedValueOnce({
+      summary: "dry-run ok",
+      warnings: [],
+      errors: [],
+      created: 0,
+      skipped: 0,
+      failed: 0,
+    });
+    applyMock.mockResolvedValueOnce({
+      summary: "apply partial",
+      warnings: [],
+      errors: [{ code: "create_issue_failed", message: "create issue failed" }],
+      created: 0,
+      skipped: 0,
+      failed: 1,
+    });
+
+    const onOpenChange = vi.fn();
+    render(<BulkImportModal open onOpenChange={onOpenChange} />);
+
+    const ta = screen.getByRole("textbox");
+    fireEvent.change(ta, { target: { value: "Issue One" } });
+    fireEvent.click(screen.getByRole("button", { name: /Import 1/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/create issue failed/i)).toBeInTheDocument();
+      expect(issueStoreMocks.fetch).toHaveBeenCalledTimes(1);
       expect(onOpenChange).not.toHaveBeenCalled();
     });
   });

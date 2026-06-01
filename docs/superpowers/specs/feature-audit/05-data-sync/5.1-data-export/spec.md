@@ -12,9 +12,9 @@
 
 ## 当前状态
 
-- 证据：`apps/workspace/src/features/settings/components/settings-page.tsx` `SettingsPage`；结论：没有导出入口。
-- 证据：`apps/workspace/src/router.tsx` `routeTree`；结论：没有导出页面。
-- 证据：`apps/workspace/src/shared/types/issue.ts` `Issue`、`apps/workspace/src/shared/types/time-entry.ts` `TimeEntry`；结论：源数据已经存在，只缺导出契约和入口。
+- 证据：`apps/workspace/src/features/settings/components/settings-page.tsx` `SettingsPage`、`apps/workspace/src/features/settings/components/data-tab.tsx` `DataTab`；结论：Settings 已新增 Data 标签和 Export JSON 入口。
+- 证据：`server/internal/handler/data_sync.go` `ExportWorkspaceData`、`server/cmd/server/router.go` `/api/data/export`；结论：后端导出接口已接入 workspace 路由。
+- 证据：`server/internal/service/data_sync.go` `BuildExportManifest`；结论：导出契约已统一为 `schema_version=2026-05-31`，并支持分页聚合 issues。
 
 ## 证据
 
@@ -25,9 +25,14 @@
 
 ## 缺口
 
-1. 没有统一导出入口。
-2. 没有 canonical export 契约。
-3. 没有多格式派生规则，执行阶段不能自行决定 JSON/CSV/PDF/Excel 各自用什么数据源。
+1. 多格式派生（CSV/Excel/PDF）仍未实现，当前只交付 canonical JSON。
+2. 导出范围暂只覆盖 issues，time entry / pomodoro 等实体仍待扩展。
+
+## 验证记录
+
+- 证据：`server/internal/service/data_sync_test.go` `TestBuildExportManifest_IncludesIssuesAndSchemaVersion`、`TestBuildExportManifest_PaginatesWithoutSilentTruncation`；结论：导出契约和分页行为已被单测覆盖。
+- 证据：`server/internal/handler/handler_test.go` `TestExportWorkspaceData`；结论：导出接口返回 200 和 manifest。
+- 证据：`e2e/data-sync.spec.ts` `can export workspace manifest from data tab`；结论：页面入口可触发后端导出并返回有效 manifest。
 
 ## 交接说明
 

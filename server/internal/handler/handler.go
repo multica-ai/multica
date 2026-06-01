@@ -44,6 +44,7 @@ type Handler struct {
 	UpdateStore      *UpdateStore
 	Storage          storage.Storage
 	CFSigner         *auth.CloudFrontSigner
+	DataSyncService  *service.DataSyncService
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, s3 storage.Storage, cfSigner *auth.CloudFrontSigner) *Handler {
@@ -64,6 +65,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		UpdateStore:  NewUpdateStore(),
 		Storage:      s3,
 		CFSigner:     cfSigner,
+		DataSyncService: service.NewDataSyncService(queries),
 	}
 }
 

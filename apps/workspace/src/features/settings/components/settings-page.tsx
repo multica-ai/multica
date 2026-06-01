@@ -1,6 +1,6 @@
 "use client";
 
-import { User, Palette, Key, Settings, Users, FolderGit2, Bot, Tag, Bell, Zap, Timer } from "lucide-react";
+import { User, Palette, Key, Settings, Users, FolderGit2, Bot, Tag, Bell, Zap, Timer, Database } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useWorkspaceStore } from "@/features/workspace";
@@ -16,6 +16,7 @@ import { NotificationsTab } from "./notifications-tab";
 import { AutomationTab } from "@/features/automation";
 import { PomodoroSettingsTab } from "./pomodoro-settings-tab";
 import { TimeEntryLabelsTab } from "./time-entry-labels-tab";
+import { DataTab } from "./data-tab";
 
 const accountTabs = [
   { value: "profile", label: "Profile", icon: User },
@@ -31,6 +32,7 @@ const workspaceTabs = [
   { value: "members", label: "Members", icon: Users },
   { value: "labels", label: "Labels", icon: Tag },
   { value: "time-labels", label: "Time Labels", icon: Tag },
+  { value: "data", label: "Data", icon: Database },
   { value: "ai", label: "AI", icon: Bot },
   { value: "automation", label: "Automation", icon: Zap },
 ];
@@ -119,6 +121,7 @@ export default function SettingsPage() {
           <TabsContent value="members"><MembersTab /></TabsContent>
           <TabsContent value="labels"><LabelsTab /></TabsContent>
           <TabsContent value="time-labels"><TimeEntryLabelsTab /></TabsContent>
+          <TabsContent value="data"><DataTab /></TabsContent>
           <TabsContent value="ai"><AITab /></TabsContent>
           <TabsContent value="notifications"><NotificationsTab /></TabsContent>
           <TabsContent value="pomodoro"><PomodoroSettingsTab /></TabsContent>

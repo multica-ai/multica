@@ -7,6 +7,7 @@ const (
 	EventIssueUpdated     = "issue:updated"
 	EventIssueDeleted     = "issue:deleted"
 	EventIssueBulkCreated = "issue:bulk_created"
+	EventIssueImported    = "issue:imported"
 
 	// Comment events
 	EventCommentCreated       = "comment:created"

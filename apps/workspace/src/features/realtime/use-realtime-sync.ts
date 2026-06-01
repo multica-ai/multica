@@ -56,6 +56,11 @@ export function useRealtimeSync(ws: WSClient | null) {
     ]);
 
     const refreshMap: Record<string, () => void> = {
+      issue: () => {
+        const workspaceId = useWorkspaceStore.getState().workspace?.id;
+        if (!workspaceId) return;
+        void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
+      },
       inbox: () => {
         const workspaceId = useWorkspaceStore.getState().workspace?.id;
         if (!workspaceId) return;
