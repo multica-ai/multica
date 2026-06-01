@@ -464,12 +464,56 @@ kubectl -n multica exec "$POD" -c runtask -- ls /repos
 The gitconfig file should contain blocks like:
 
 ```ini
+# Fetch: all URL forms redirect to the cache.
 [url "file:///repos/<workspace-id>/github.com+chrissnell+graywolf.git"]
         insteadOf = https://github.com/chrissnell/graywolf
         insteadOf = https://github.com/chrissnell/graywolf.git
         insteadOf = git@github.com:chrissnell/graywolf
         insteadOf = git@github.com:chrissnell/graywolf.git
+
+# Push: the same URL forms redirect to the SSH origin so pushes go to
+# GitHub directly. Without this, push would route through the insteadOf
+# rewrite above to the read-only PVC and fail.
+[url "git@github.com:chrissnell/graywolf.git"]
+        pushInsteadOf = https://github.com/chrissnell/graywolf
+        pushInsteadOf = https://github.com/chrissnell/graywolf.git
+        pushInsteadOf = git@github.com:chrissnell/graywolf
 ```
+
+### How to confirm a clone hit the cache
+
+The behavior of `git`'s `insteadOf` is subtle:
+
+- The agent runs `git clone https://github.com/chrissnell/graywolf`.
+- Git resolves the URL through `insteadOf` at fetch time and pulls
+  objects from `file:///repos/...`. **No network traffic to github.com.**
+- But the URL git **stores** in `<clone>/.git/config` is the *original*
+  `https://github.com/chrissnell/graywolf`, not the rewritten form.
+- Future fetches/pushes against this remote re-apply `insteadOf` (for
+  fetch) or `pushInsteadOf` (for push) at every operation.
+
+So `cat .git/config` will show the original URL. To see what git
+actually uses, run:
+
+```bash
+git -C <clone> remote get-url origin            # shows rewritten URL
+git -C <clone> remote get-url --push origin     # shows push target
+```
+
+A clone that hit the cache shows only `Updating files: X% (Y/N)` in
+output (no `Receiving objects`, no `Resolving deltas`). A network clone
+shows the full receive/resolve/update progress.
+
+### Performance ceiling: workdir storage
+
+The bottleneck for a cached clone is not the network — it's the
+file-syscall cost of writing the checked-out working tree to the
+per-task PVC (`runtime.controller.workdir.storageClass`). On NFS-backed
+storage classes, a 36 MB / 1300-file repo takes ~20 s for the
+`Updating files` phase alone. For dramatically faster workers, point
+`runtime.controller.workdir.storageClass` at a local-path provisioner
+or other node-local storage class — checkout drops to ~1 s for the
+same repo, and the per-task PVC has no need to outlive the task.
 
 ### Metrics
 
