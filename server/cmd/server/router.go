@@ -688,6 +688,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/cost-optimization", costOptimizationHandler.List)
 					// CEREBRO-PATCH(cerebro-cost-optimization-dashboard): FIR-2325 phase-5 savings dashboard (any member).
 					r.Get("/cost-optimization/dashboard", costOptimizationHandler.Dashboard)
+					// CEREBRO-PATCH(cerebro-cost-optimization-holdout): FIR-2640 per-saving holdout share read (any member).
+					r.Get("/cost-optimization/holdout", costOptimizationHandler.ListHoldout)
 					// CEREBRO-PATCH(cerebro-groups-routes): workspace group list (member-level).
 					r.Get("/groups", cerebroGroupsHandler.List)
 					// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 workspace role list (member-level).
@@ -756,6 +758,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 saving-mode writes (admin/owner only).
 					r.Put("/cost-optimization/{key}", costOptimizationHandler.Upsert)
 					r.Delete("/cost-optimization/{key}", costOptimizationHandler.Delete)
+					// CEREBRO-PATCH(cerebro-cost-optimization-holdout): FIR-2640 per-saving holdout share writes (admin/owner only).
+					r.Put("/cost-optimization/holdout/{key}", costOptimizationHandler.UpsertHoldout)
+					r.Delete("/cost-optimization/holdout/{key}", costOptimizationHandler.DeleteHoldout)
 					// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval decisions + intake seam (admin/owner only).
 					r.Post("/approvals/intake", cerebroApprovalsHandler.Intake)
 					r.Post("/approvals/{approvalId}/approve", cerebroApprovalsHandler.Approve)

@@ -2,11 +2,13 @@ package runtime
 
 import (
 	"context"
+	"errors"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/pricing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -309,6 +311,31 @@ func (e *FirtalGatewayExecutor) loadCostSavingModes(ctx context.Context, workspa
 		modes[row.SavingKey] = row.Mode
 	}
 	return modes
+}
+
+// resolveHoldoutPct returns the holdout share to apply for one saving on a run.
+// It prefers the per-workspace, PER-SAVING UI override (FIR-2640) and falls back
+// to the env/default config (FIR-2325) when the saving has no override or the
+// lookup fails. This is what makes "a real run respect the holdout chosen per
+// saving in the UI, not just env".
+func (e *FirtalGatewayExecutor) resolveHoldoutPct(ctx context.Context, workspaceID pgtype.UUID, savingKey string) int {
+	fallback := e.cfg.costSavingHoldoutPct()
+	if e.cerebro == nil || !workspaceID.Valid {
+		return chooseHoldoutPct(nil, fallback)
+	}
+	pct, err := e.cerebro.GetCerebroCostOptimizationHoldout(ctx, cerebrodb.GetCerebroCostOptimizationHoldoutParams{
+		WorkspaceID: workspaceID,
+		SavingKey:   savingKey,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			e.logger.Warn("firtal gateway cost-optimization holdout load failed",
+				"workspace_id", util.UUIDToString(workspaceID), "saving_key", savingKey, "error", err)
+		}
+		return chooseHoldoutPct(nil, fallback)
+	}
+	override := int(pct)
+	return chooseHoldoutPct(&override, fallback)
 }
 
 // recordCostSavingMeasurements scores the run against the workspace's saving

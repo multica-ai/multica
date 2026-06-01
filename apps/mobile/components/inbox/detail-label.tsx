@@ -67,6 +67,8 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   due_date_reminder: "Due date reminder",
   start_date_reminder: "Start date reminder",
   private_agent_run_request: "Private agent request",
+  skill_change_request_created: "Skill change requested",
+  skill_change_request_reviewed: "Skill change reviewed",
 };
 
 function shortDate(dateStr: string): string {

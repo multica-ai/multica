@@ -109,6 +109,53 @@ export function isDefaultMode(key: CostSavingKey, mode: CostSavingMode): boolean
   return mode === COST_SAVING_DEFAULTS[key];
 }
 
+/**
+ * Default holdout share (percent of "on" runs deliberately withheld as the A/B
+ * control arm) shown when a workspace has no override. MUST mirror the server's
+ * `defaultCostSavingHoldoutPct` (server/internal/cerebro/runtime/cost_savings_holdout.go):
+ * the server stores only overrides, so a missing row resolves to this default
+ * for both display and the actual run. (FIR-2640)
+ */
+export const DEFAULT_COST_SAVING_HOLDOUT_PCT = 20;
+
+/**
+ * Clamp a holdout share to the valid 0-100 integer range. Non-finite input
+ * falls back to the registry default. Used to sanitize both server responses
+ * and user input before they reach the API.
+ */
+export function clampHoldoutPct(pct: number): number {
+  if (!Number.isFinite(pct)) return DEFAULT_COST_SAVING_HOLDOUT_PCT;
+  if (pct < 0) return 0;
+  if (pct > 100) return 100;
+  return Math.round(pct);
+}
+
+/**
+ * Whether a holdout share represents full rollout — every "on" run gets the
+ * saving, with no control arm held back. That is exactly holdout = 0%.
+ */
+export function isFullRollout(pct: number): boolean {
+  return pct <= 0;
+}
+
+/**
+ * Savings that actually have a runtime holdout arm, so a rollout/holdout control
+ * does something for them. Only the gateway savings the server can withhold per
+ * run qualify: model_routing (keep the run on the expensive model) and
+ * prune_tool_results (skip pruning). The others have no behavioral control arm,
+ * so showing them a holdout knob would be a dead control — we don't. MUST stay
+ * in sync with the runtime's heldOut logic in cost_savings_measure.go.
+ */
+const HOLDOUT_SAVINGS: ReadonlySet<CostSavingKey> = new Set<CostSavingKey>([
+  "model_routing",
+  "prune_tool_results",
+]);
+
+/** Whether a saving supports a per-saving rollout/holdout control. */
+export function savingSupportsHoldout(key: CostSavingKey): boolean {
+  return HOLDOUT_SAVINGS.has(key);
+}
+
 export interface CostSavingDefinition {
   key: CostSavingKey;
   label: string;

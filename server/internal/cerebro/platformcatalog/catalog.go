@@ -610,6 +610,8 @@ var catalog = []Capability{
 			"DELETE /api/workspaces/{id}/feature-flags/{key}/workspace",
 			"PUT /api/workspaces/{id}/cost-optimization/{key}",
 			"DELETE /api/workspaces/{id}/cost-optimization/{key}",
+			"PUT /api/workspaces/{id}/cost-optimization/holdout/{key}",
+			"DELETE /api/workspaces/{id}/cost-optimization/holdout/{key}",
 			"PUT /api/cerebro/workspaces/{id}/auth-settings/",
 			"POST /api/workspaces/{id}/pause-tasks",
 		},

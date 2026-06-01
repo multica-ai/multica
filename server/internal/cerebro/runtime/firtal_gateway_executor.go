@@ -327,9 +327,12 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	// Phase 5: a random holdout share of routed runs is kept on the requested
 	// (expensive) model as a control arm, so the dashboard can compare real cost.
 	costModes := e.loadCostSavingModes(parent, plan.workspaceID)
+	// FIR-2640: the holdout share is resolved PER SAVING from the UI setting when
+	// set, falling back to the env/default config. Each saving can be at full
+	// rollout (holdout 0) or any holdout independently of the others.
 	requestedModel := agent.Model.String
 	routingOn := costModes[savingModelRouting] == savingModeOn && e.cfg.CheapModel != ""
-	routingHeldOut := routingOn && costSavingHeldOut(task.ID, savingModelRouting, e.cfg.costSavingHoldoutPct())
+	routingHeldOut := routingOn && costSavingHeldOut(task.ID, savingModelRouting, e.resolveHoldoutPct(parent, plan.workspaceID, savingModelRouting))
 	if routingOn && !routingHeldOut {
 		agent.Model = pgtype.Text{String: e.cfg.CheapModel, Valid: true}
 	}
@@ -337,7 +340,7 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	// is the control arm with pruning withheld, so the dashboard can compare the
 	// control group's real cost against the pruned treatment group's.
 	pruneOn := costModes[savingPruneToolResults] == savingModeOn
-	pruneHeldOut := pruneOn && costSavingHeldOut(task.ID, savingPruneToolResults, e.cfg.costSavingHoldoutPct())
+	pruneHeldOut := pruneOn && costSavingHeldOut(task.ID, savingPruneToolResults, e.resolveHoldoutPct(parent, plan.workspaceID, savingPruneToolResults))
 
 	runCtx, cancel := context.WithTimeout(parent, cfg.TaskTimeout)
 	defer cancel()

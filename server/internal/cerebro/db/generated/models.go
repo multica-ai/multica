@@ -403,6 +403,14 @@ type CerebroCostOptimization struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroCostOptimizationHoldout struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SavingKey   string             `json:"saving_key"`
+	HoldoutPct  int32              `json:"holdout_pct"`
+	UpdatedBy   pgtype.UUID        `json:"updated_by"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroCostOptimizationMeasurement struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
@@ -630,6 +638,16 @@ type CerebroRuntimeToolUserGrant struct {
 	UserID    pgtype.UUID        `json:"user_id"`
 	GrantedBy pgtype.UUID        `json:"granted_by"`
 	GrantedAt pgtype.Timestamptz `json:"granted_at"`
+}
+
+type CerebroSearchEmbeddingQueue struct {
+	ID          int64              `json:"id"`
+	TargetType  string             `json:"target_type"`
+	TargetID    pgtype.UUID        `json:"target_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	EnqueuedAt  pgtype.Timestamptz `json:"enqueued_at"`
+	Attempts    int32              `json:"attempts"`
+	LastError   pgtype.Text        `json:"last_error"`
 }
 
 type CerebroShareToken struct {

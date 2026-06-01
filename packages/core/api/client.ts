@@ -748,6 +748,27 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${wsId}/cost-optimization/dashboard`);
   }
 
+  // CEREBRO-PATCH(cost-optimization-holdout-client): FIR-2640 PER-SAVING holdout
+  // share (percent of a saving's "on" runs withheld as the A/B control arm). GET
+  // returns the raw overrides map; cerebro-cost-optimization validates it. PUT
+  // sets one saving's share; DELETE clears it (reverts to the server default).
+  async getCostOptimizationHoldout(wsId: string): Promise<unknown> {
+    return this.fetch(`/api/workspaces/${wsId}/cost-optimization/holdout`);
+  }
+
+  async setCostOptimizationHoldout(wsId: string, key: string, pct: number): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/cost-optimization/holdout/${key}`, {
+      method: "PUT",
+      body: JSON.stringify({ holdout_pct: pct }),
+    });
+  }
+
+  async clearCostOptimizationHoldout(wsId: string, key: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/cost-optimization/holdout/${key}`, {
+      method: "DELETE",
+    });
+  }
+
   // CEREBRO-PATCH(cerebro-account-client): JEH-921 workspace accounts CRUD.
   async listCerebroAccounts(wsId: string): Promise<CerebroAccount[]> {
     return this.fetch(`/api/workspaces/${wsId}/accounts`);
