@@ -192,6 +192,19 @@ function LoginPageContent() {
   return (
     <LoginPage
       onSuccess={handleSuccess}
+      // Firtal is an internal tool: employees sign in with their Google
+      // account, so make Google the primary method and demote the one-time
+      // code to a secondary option (kept for guests/externals). Falls back to
+      // the code layout automatically when Google isn't configured.
+      primaryMethod={googleClientId ? "google" : "code"}
+      notice={
+        googleClientId ? (
+          <span>
+            Firtal-medarbejdere logger ind med deres Google-konto. Engangskode
+            er kun til gæster og eksterne.
+          </span>
+        ) : undefined
+      }
       google={
         googleClientId
           ? {

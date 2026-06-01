@@ -17,6 +17,8 @@ export { CerebroInboxTimestamp } from "./components/cerebro-inbox-timestamp";
 export { CerebroInboxReminderRow } from "./components/cerebro-inbox-reminder-row";
 export { CerebroInboxRunRequestRow } from "./components/cerebro-inbox-run-request-row";
 export { useInboxKeyboardShortcuts } from "./use-inbox-keyboard-shortcuts";
+// FIR-2684 — always refetch the opened message (timeline + detail) on select.
+export { useInboxMessageRefresh, refreshInboxMessageQueries } from "./use-inbox-message-refresh";
 export {
   useMuteInbox,
   useUnmuteInbox,

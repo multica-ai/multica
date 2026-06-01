@@ -48,6 +48,7 @@ import {
   sortInboxEntriesPinned,
   pinnedBucketizer, // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — freeze open row's group
   type PinnedGroup, // CEREBRO-PATCH(inbox-pin-selected-group): FIR-2474 — frozen-group ref type
+  useInboxMessageRefresh, // CEREBRO-PATCH(inbox-message-refresh): FIR-2684 — always refetch opened message
 } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
 import { useArchiveChannel } from "@multica/cerebro-channels";
@@ -142,7 +143,7 @@ function isGroupByMode(s: string | null): s is GroupByMode {
 export function InboxPage() {
   const { t } = useT("inbox");
   // CEREBRO-PATCH(inbox-skill-change-request): FIR-2629 pull `push` to deep-link skill-CR items to the skill detail.
-  const { searchParams, replace, push } = useNavigation();
+  const { searchParams, replace, replaceSilent, push } = useNavigation(); // CEREBRO-PATCH(inbox-silent-select): FIR-2684 — silent URL update on select
   // ?chat=<id> selects a chat session (preferred). ?issue=<id> selects a
   // notification or issue. Both are also accepted as legacy aliases for
   // each other so old bookmarks of `?issue=<chat-id>` keep landing on the
@@ -356,6 +357,8 @@ export function InboxPage() {
     ? null
     : items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
   const qc = useQueryClient();
+  // CEREBRO-PATCH(inbox-message-refresh): FIR-2684 — staleTime is Infinity, so re-opening a cached issue won't refetch; force-refresh the opened message so the latest comment is always present (without a full-page reload).
+  useInboxMessageRefresh(wsId, selected?.issue_id ?? null);
 
   const pendingChatIdRef = useRef<string | null>(null);
   // CEREBRO-PATCH(inbox-pin-selected): FIR-2474 — sort time of the open row, frozen at open
@@ -390,8 +393,9 @@ export function InboxPage() {
       : kind === "chat"
         ? `${inboxPath}?chat=${key}`
         : `${inboxPath}?issue=${key}`;
-    replace(url);
-  }, [replace, wsPaths]);
+    // CEREBRO-PATCH(inbox-silent-select): FIR-2684 — selection is client state; sync the URL silently (no RSC route nav) so opening an item doesn't reload the page. Falls back to `replace` (desktop).
+    (replaceSilent ?? replace)(url);
+  }, [replace, replaceSilent, wsPaths]);
 
   // CEREBRO-PATCH(inbox-page-archive-chat): FIR-1958 — soft-archive via
   // updateChatSession(status: "archived") instead of deleteChatSession so the

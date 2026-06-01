@@ -28,6 +28,8 @@ import (
 	cerebroruntimetools "github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 cerebro workflow engine import
 	cerebroworkflows "github.com/multica-ai/multica/server/internal/cerebro/workflows"
+	// CEREBRO-PATCH(main-sprints-sweeper): FIR-2666 project sprint sweeper import
+	cerebrosprints "github.com/multica-ai/multica/server/internal/cerebro/sprints"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -365,6 +367,8 @@ func main() {
 	go workflowSvc.RunRetrySweeper(sweepCtx, 30*time.Second)
 	// CEREBRO-PATCH(cerebro-workflows-cron-sweeper): JEH-1108 PR 2 cron tick. Default 1-minute tick; gated per-tick on CEREBRO_WORKFLOWS_ENABLED.
 	go workflowSvc.RunCronSweeper(sweepCtx, time.Minute)
+	// CEREBRO-PATCH(main-sprints-sweeper): FIR-2666 daily sprint auto-create / advance-state sweeper. No-ops when no project opted in (cerebro_sprints flag off).
+	go cerebrosprints.NewSweeper(pool, cerebrodb.New(pool), queries).Run(sweepCtx, 24*time.Hour)
 	if gatewayCfg, err := cerebroruntime.LoadFirtalGatewayRuntimeConfig(); err != nil {
 		slog.Error("invalid firtal gateway server runtime config", "error", err)
 		os.Exit(1)

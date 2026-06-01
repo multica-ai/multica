@@ -19,6 +19,15 @@ function NavigationProviderInner({
   const adapter: NavigationAdapter = {
     push: router.push,
     replace: router.replace,
+    // FIR-2684: change the URL without a Next.js RSC route navigation. Calling
+    // router.push/replace for a pure query-param change (e.g. inbox ?issue=)
+    // triggers a server RSC payload fetch + route re-render — the "whole page
+    // reloads" symptom. The native History API updates the URL silently; Next
+    // syncs usePathname/useSearchParams from it (supported since 14.1) with no
+    // round-trip and no re-render.
+    replaceSilent: (path: string) => {
+      window.history.replaceState(null, "", path);
+    },
     back: router.back,
     pathname,
     searchParams: new URLSearchParams(searchParams.toString()),

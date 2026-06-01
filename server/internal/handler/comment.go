@@ -895,6 +895,13 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
 	req.Content = mention.ExpandIssueIdentifiers(r.Context(), h.Queries, issue.WorkspaceID, req.Content)
 
+	if h.CommentTargetGuard != nil { // CEREBRO-PATCH(comment-target-guard-hook): FIR-2674 reject agent comments with no target.
+		if msg, ok := h.CommentTargetGuard.RejectComment(authorType, req.Content); !ok {
+			writeError(w, http.StatusUnprocessableEntity, msg)
+			return
+		}
+	}
+
 	// NOTE: Comment content is stored as Markdown source. XSS is handled at the
 	// rendering layer (rehype-sanitize) and at the editor layer
 	// (@tiptap/markdown with html:false). Running an HTML sanitizer here would

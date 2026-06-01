@@ -139,6 +139,8 @@ type Handler struct {
 	GroupPermissions GroupPermissionsInvoker
 	// CEREBRO-PATCH(handler-mention-trigger-gate): cerebro @mention trigger gate.
 	MentionTriggerGate MentionTriggerGateInvoker
+	// CEREBRO-PATCH(handler-comment-target-guard): FIR-2674 reject agent comments with no target.
+	CommentTargetGuard CommentTargetGuardInvoker
 	// CEREBRO-PATCH(handler-private-agent-run-request): FIR-2385 — turns a member's
 	// tag of an unowned private agent into a run-request in the owner's inbox.
 	PrivateAgentRunRequester PrivateAgentRunRequesterInvoker
@@ -257,6 +259,16 @@ type RuntimePauseState struct {
 // @mention trigger gate.
 type MentionTriggerGateInvoker interface {
 	CanTriggerMention(ctx context.Context, r *http.Request, workspaceID string, agentID, ownerID pgtype.UUID) (bool, error)
+}
+
+// CommentTargetGuardInvoker is the upstream-side seam for Cerebro's "no agent
+// comment without a target" guard (FIR-2674). RejectComment returns
+// (message, ok=false) when an agent-authored comment references no target and
+// must be rejected; ok=true means it passes. A nil invoker disables the guard.
+//
+// CEREBRO-PATCH(handler-comment-target-guard-iface): seam for FIR-2674.
+type CommentTargetGuardInvoker interface {
+	RejectComment(authorType, content string) (string, bool)
 }
 
 // PrivateAgentRunRequesterInvoker is the upstream-side seam for FIR-2385. It is
