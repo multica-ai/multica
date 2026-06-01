@@ -494,6 +494,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// context is derived from the trigger row, never from request headers.
 	r.Post("/api/webhooks/autopilots/{token}", h.HandleAutopilotWebhook)
 	// CEREBRO-PATCH(runtime-setup-routes): public token-gated runtime setup
+	r.Post("/api/runtime-setup/exchange", h.ExchangeRuntimeSetupToken)
+	r.Get("/install-runtime.sh", h.ServeInstallRuntimeScript)
 	// CEREBRO-PATCH(sharetoken-public-route): JEH-1076 anonymous public-link
 	// CEREBRO-PATCH(cerebro-workflows-webhook-ingress): JEH-1108 PR 2 public inbound webhook endpoint. Token-in-URL is the auth surface; HMAC + timestamp window are layered defenses. Mounted OUTSIDE the auth-required groups by design. When opts.WorkflowService is nil (tests), the route returns 503.
 	// CEREBRO-PATCH(sharetoken-public-route): JEH-1076 anonymous public-link
@@ -660,6 +662,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/api/push/subscriptions", h.ListPushSubscriptions)
 		r.Post("/api/push/subscribe", h.SubscribePush)
 		r.Post("/api/push/unsubscribe", h.UnsubscribePush)
+		// CEREBRO-PATCH(runtime-setup-routes): current web/desktop clients use
+		// workspace headers; older QA/docs use the workspace-scoped path below.
+		r.With(middleware.RequireWorkspaceMember(queries)).Post("/api/runtime-setup/tokens", h.CreateRuntimeSetupToken)
 		// /api/upload-file is registered in the task-allowlist group above
 		// so agents can upload attachments while running a task.
 
@@ -719,6 +724,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/approvals", cerebroApprovalsHandler.List)
 					r.Get("/approvals/audit", cerebroApprovalsHandler.Audit)
 					r.Get("/approvals/{approvalId}", cerebroApprovalsHandler.Get)
+					// CEREBRO-PATCH(runtime-setup-routes): legacy workspace-scoped setup-token mint.
+					r.Post("/runtime-setup-token", h.CreateRuntimeSetupToken)
 					// CEREBRO-PATCH(cerebro-account-routes): workspace accounts CRUD + JEH-998 controls patch.
 					r.Get("/accounts", cerebroAccountHandler.List)
 					r.Post("/accounts", cerebroAccountHandler.Create)
