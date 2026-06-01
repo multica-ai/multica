@@ -16,6 +16,8 @@ export { CerebroUnarchiveToolbarButton } from "./components/cerebro-unarchive-to
 export { CerebroInboxTimestamp } from "./components/cerebro-inbox-timestamp";
 export { CerebroInboxReminderRow } from "./components/cerebro-inbox-reminder-row";
 export { CerebroInboxRunRequestRow } from "./components/cerebro-inbox-run-request-row";
+// FIR-2643 — "Remind me" on a specific comment, hooked into the shared comment menu.
+export { useCommentReminder } from "./use-comment-reminder";
 export { useInboxKeyboardShortcuts } from "./use-inbox-keyboard-shortcuts";
 export {
   useMuteInbox,
