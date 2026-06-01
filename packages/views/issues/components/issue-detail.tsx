@@ -1869,8 +1869,8 @@ export function IssueDetail({
       });
       toast.success(`Cleared ${result.comments_deleted} comments, ${result.tasks_deleted} task runs`);
       setClearHistoryDialogOpen(false);
-    } catch {
-      toast.error("Failed to clear history");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.detail.clear_history_failed));
     }
   };
 

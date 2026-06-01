@@ -270,6 +270,7 @@
     "update_failed": "댓글을 업데이트하지 못했습니다",
     "send_failed": "댓글을 보내지 못했습니다",
     "send_reply_failed": "답글을 보내지 못했습니다",
+    "login_required": "계속하려면 로그인해 주세요",
     "delete_failed": "댓글을 삭제하지 못했습니다",
     "reply_count_one": "답글 {{count}}개",
     "reply_count_other": "답글 {{count}}개",
