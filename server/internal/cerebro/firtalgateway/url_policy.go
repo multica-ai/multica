@@ -8,11 +8,21 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
 
 const defaultHTTPTimeout = 10 * time.Minute
+
+// allowInternalEnvVar opts the operator into reaching the Firtal gateway over an
+// internal/private address — e.g. a Sliplane `<service>.internal:port` host on
+// the shared private container network — instead of the public, Cloudflare
+// Access-gated domain. It is a deployment-wide operator decision and only ever
+// relaxes the policy for the trusted server env gateway URL (and the
+// request-time dials of that URL); untrusted workspace-supplied URLs are always
+// validated strictly. Default unset = strict public-HTTPS SSRF policy.
+const allowInternalEnvVar = "FIRTAL_DATA_REGISTRY_AI_GATEWAY_ALLOW_INTERNAL"
 
 var disallowedGatewayIPPrefixes = mustParsePrefixes([]string{
 	"0.0.0.0/8",
@@ -44,7 +54,31 @@ var disallowedGatewayIPPrefixes = mustParsePrefixes([]string{
 	"ff00::/8",
 })
 
+// GatewayAllowsInternal reports whether the operator opted into an
+// internal/insecure gateway address via allowInternalEnvVar. See the constant's
+// doc for why this is safe: only the trusted server env URL is ever validated
+// with the relaxed policy.
+func GatewayAllowsInternal() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(allowInternalEnvVar))) {
+	case "true", "1", "yes", "on":
+		return true
+	}
+	return false
+}
+
+// NormalizeBaseURL validates and canonicalizes an untrusted gateway URL under
+// the strict policy (public HTTPS only).
 func NormalizeBaseURL(raw string) (string, error) {
+	return normalizeBaseURL(raw, false)
+}
+
+// NormalizeTrustedBaseURL canonicalizes an operator-trusted gateway URL, allowing
+// an internal http:// address when GatewayAllowsInternal() is set.
+func NormalizeTrustedBaseURL(raw string) (string, error) {
+	return normalizeBaseURL(raw, GatewayAllowsInternal())
+}
+
+func normalizeBaseURL(raw string, allowInternal bool) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", fmt.Errorf("gateway URL is required")
@@ -53,7 +87,7 @@ func NormalizeBaseURL(raw string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("gateway URL is invalid")
 	}
-	if parsed.Scheme != "https" {
+	if parsed.Scheme != "https" && !(allowInternal && parsed.Scheme == "http") {
 		return "", fmt.Errorf("gateway URL must use https")
 	}
 	if parsed.Host == "" || parsed.Hostname() == "" {
@@ -70,8 +104,23 @@ func NormalizeBaseURL(raw string) (string, error) {
 	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
+// ValidateBaseURL validates an untrusted gateway URL (e.g. a workspace-supplied
+// URL) under the strict policy: public HTTPS, fully qualified, no private host
+// or IP. This never relaxes, regardless of GatewayAllowsInternal().
 func ValidateBaseURL(raw string) (string, error) {
-	normalized, err := NormalizeBaseURL(raw)
+	return validateBaseURL(raw, false)
+}
+
+// ValidateTrustedBaseURL validates the operator-trusted server env gateway URL
+// (FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL). When GatewayAllowsInternal() is set it
+// permits an internal http:// address (private host/IP) so the gateway can be
+// reached over the private container network.
+func ValidateTrustedBaseURL(raw string) (string, error) {
+	return validateBaseURL(raw, GatewayAllowsInternal())
+}
+
+func validateBaseURL(raw string, allowInternal bool) (string, error) {
+	normalized, err := normalizeBaseURL(raw, allowInternal)
 	if err != nil {
 		return "", err
 	}
@@ -79,7 +128,7 @@ func ValidateBaseURL(raw string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("gateway URL is invalid")
 	}
-	if err := validateGatewayHost(parsed.Hostname()); err != nil {
+	if err := validateGatewayHost(parsed.Hostname(), allowInternal); err != nil {
 		return "", err
 	}
 	return normalized, nil
@@ -112,11 +161,16 @@ func NewHTTPClient() *http.Client {
 
 func guardedDialContext(dial func(context.Context, string, string) (net.Conn, error)) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		// The dialer guards the resolved gateway base URL, which is either the
+		// trusted server env URL or a workspace URL already validated as public.
+		// When the operator opted into an internal gateway, allow the private
+		// target through; otherwise enforce the strict public-only policy.
+		allowInternal := GatewayAllowsInternal()
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
 			return nil, fmt.Errorf("gateway dial address is invalid: %w", err)
 		}
-		if err := validateGatewayHost(host); err != nil {
+		if err := validateGatewayHost(host, allowInternal); err != nil {
 			return nil, err
 		}
 		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
@@ -127,7 +181,7 @@ func guardedDialContext(dial func(context.Context, string, string) (net.Conn, er
 			return nil, errors.New("gateway host resolved no addresses")
 		}
 		for _, ip := range ips {
-			if err := validateGatewayIP(ip.IP); err != nil {
+			if err := validateGatewayIP(ip.IP, allowInternal); err != nil {
 				return nil, err
 			}
 		}
@@ -143,7 +197,7 @@ func guardedDialContext(dial func(context.Context, string, string) (net.Conn, er
 	}
 }
 
-func validateGatewayHost(host string) error {
+func validateGatewayHost(host string, allowInternal bool) error {
 	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
 	if host == "" {
 		return fmt.Errorf("gateway URL must include a host")
@@ -152,7 +206,12 @@ func validateGatewayHost(host string) error {
 		host = strings.TrimSuffix(host, ".")
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		return validateGatewayIP(ip)
+		return validateGatewayIP(ip, allowInternal)
+	}
+	if allowInternal {
+		// Operator opted in: accept internal single-label / .internal / .local
+		// hostnames (e.g. a Sliplane `<service>.internal` private address).
+		return nil
 	}
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return fmt.Errorf("gateway host must not be localhost")
@@ -168,9 +227,12 @@ func validateGatewayHost(host string) error {
 	return nil
 }
 
-func validateGatewayIP(ip net.IP) error {
+func validateGatewayIP(ip net.IP, allowInternal bool) error {
 	if ip == nil {
 		return fmt.Errorf("gateway host resolved invalid address")
+	}
+	if allowInternal {
+		return nil
 	}
 	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() {
 		return fmt.Errorf("gateway host must resolve to public addresses")

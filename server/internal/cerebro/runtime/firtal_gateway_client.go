@@ -126,7 +126,7 @@ func (c *GatewayClient) completeChat(ctx context.Context, model string, messages
 	if model == "" {
 		model = defaultFirtalGatewayModel
 	}
-	baseURL, err := firtalgateway.NormalizeBaseURL(c.cfg.BaseURL)
+	baseURL, err := firtalgateway.NormalizeTrustedBaseURL(c.cfg.BaseURL)
 	if err != nil {
 		return GatewayCompletion{}, fmt.Errorf("invalid gateway URL: %w", err)
 	}

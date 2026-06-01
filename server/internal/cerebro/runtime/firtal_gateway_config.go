@@ -232,7 +232,8 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 	}
 
 	if cfg.Enabled && cfg.BaseURL != "" {
-		normalizedURL, err := firtalgateway.ValidateBaseURL(cfg.BaseURL)
+		// Operator-trusted server env URL: honors the internal-address opt-in.
+		normalizedURL, err := firtalgateway.ValidateTrustedBaseURL(cfg.BaseURL)
 		if err != nil {
 			return FirtalGatewayRuntimeConfig{}, fmt.Errorf("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL %w", err)
 		}
@@ -255,6 +256,7 @@ func FirtalGatewayConfigFromWorkspaceSettings(raw []byte, fallback FirtalGateway
 		}
 	}
 
+	workspaceProvidedURL := false
 	if envelope.FirtalGateway != nil {
 		settings := envelope.FirtalGateway
 		if !settings.Enabled {
@@ -262,6 +264,7 @@ func FirtalGatewayConfigFromWorkspaceSettings(raw []byte, fallback FirtalGateway
 		}
 		if gatewayURL := strings.TrimSpace(settings.GatewayURL); gatewayURL != "" {
 			cfg.BaseURL = strings.TrimRight(gatewayURL, "/")
+			workspaceProvidedURL = true
 		}
 		if key := strings.TrimSpace(settings.APIKey); key != "" {
 			cfg.APIKey = key
@@ -275,7 +278,15 @@ func FirtalGatewayConfigFromWorkspaceSettings(raw []byte, fallback FirtalGateway
 	if cfg.BaseURL == "" || cfg.APIKey == "" {
 		return cfg, false, nil
 	}
-	normalizedURL, err := firtalgateway.ValidateBaseURL(cfg.BaseURL)
+	// A workspace-supplied URL is untrusted input and is always validated
+	// strictly (public HTTPS). When the workspace inherits the operator's env
+	// URL, validate it with the trusted policy so an opted-in internal address
+	// is accepted.
+	validate := firtalgateway.ValidateTrustedBaseURL
+	if workspaceProvidedURL {
+		validate = firtalgateway.ValidateBaseURL
+	}
+	normalizedURL, err := validate(cfg.BaseURL)
 	if err != nil {
 		return cfg, false, fmt.Errorf("workspace firtal gateway URL %w", err)
 	}
