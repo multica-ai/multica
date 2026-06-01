@@ -760,6 +760,56 @@ func (h *Handler) requestChildVerification(ctx context.Context, parent, child db
 		"Verifying "+childRef+" independently before releasing the sub-issues that depend on it.")
 }
 
+// handStalledChildToLeader hands a sub-issue whose worker keeps stalling to the
+// squad leader (a backup builder) to take over and finish, instead of freezing
+// the flow and waiting for a human. The independent builder is the same agent
+// the verifier path picks (the parent's squad leader, never the child's own
+// stalled worker). Carries human-origin provenance so the leader's own
+// downstream hand-offs fire. Returns true if a takeover was dispatched.
+// Idempotent: a child whose leader already has a pending task is left alone.
+// CEREBRO-PATCH(orchestration-stalled-handoff): FIR-2687 — stalled-worker takeover.
+func (h *Handler) handStalledChildToLeader(ctx context.Context, parent, child db.Issue) bool {
+	builderID, ok := h.selectVerifierAgent(ctx, parent, child)
+	if !ok {
+		return false // no independent builder (e.g. the leader IS the stalled worker)
+	}
+	if h.hasPendingTask(ctx, child.ID, builderID) {
+		return true // a takeover is already queued
+	}
+	childRef := "#" + strconv.Itoa(int(child.Number))
+	req, posted := h.postOrchestrationCommentReturning(ctx, child, h.buildStalledTakeoverInstructions(childRef))
+	if !posted {
+		return false
+	}
+	if actor, ok := h.resolveOrchestrationActor(ctx, child); ok {
+		if _, err := h.TaskService.EnqueueTaskForMentionFromComment(ctx, child, builderID, req.ID,
+			service.TaskDelegationContext{OriginalUserID: actor}); err != nil {
+			slog.Warn("orchestration: stalled-takeover enqueue failed", "child_id", uuidToString(child.ID), "error", err)
+			return false
+		}
+		return true
+	}
+	if _, err := h.TaskService.EnqueueTaskForMention(ctx, child, builderID, req.ID); err != nil {
+		slog.Warn("orchestration: stalled-takeover enqueue failed", "child_id", uuidToString(child.ID), "error", err)
+		return false
+	}
+	return true
+}
+
+// buildStalledTakeoverInstructions is the takeover prompt posted on the child as
+// the backup builder's task trigger. Unlike the verifier prompt, it tells the
+// leader to BUILD the work, not judge it — the original worker could not finish.
+func (h *Handler) buildStalledTakeoverInstructions(childRef string) string {
+	return "Takeover requested for " + childRef + ".\n\n" +
+		"The agent originally assigned to this sub-issue started, but its run kept ending " +
+		"without finishing — it stalled twice, so the orchestrator is handing the work to you, " +
+		"the squad leader, as the backup builder.\n\n" +
+		"Take over and drive this sub-issue to done yourself: read its acceptance criteria (the " +
+		"checklist in its description), build or finish whatever is missing, verify it against " +
+		"evidence, and move it to `done` (or `in_review` if it needs independent verification). " +
+		"Do not wait for the original worker — it could not complete the run."
+}
+
 // buildVerifierInstructions is the judge prompt posted on the child as the
 // verifier's task trigger. It is explicit enough to act on without the
 // orchestration-verify skill, but that skill documents the same contract.

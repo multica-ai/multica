@@ -616,10 +616,12 @@ func TestOrchestrationWatchdog_RecoversStalledChild(t *testing.T) {
 	}
 }
 
-// TestOrchestrationWatchdog_EscalatesPersistentStall: a child still stalled
-// after a prior re-dispatch (carries orch-stalled, no active task) is escalated
-// via a comment and NOT re-dispatched again (no infinite loop).
-func TestOrchestrationWatchdog_EscalatesPersistentStall(t *testing.T) {
+// CEREBRO-PATCH(orchestration-stalled-handoff): FIR-2687 — stalled-worker takeover tests.
+// TestOrchestrationWatchdog_HandsOffPersistentStallToLeader: a child still stalled
+// after a prior re-dispatch (carries orch-stalled, no active task) is handed to the
+// squad leader (backup builder) to finish — NOT re-dispatched to the same worker and
+// NOT frozen. The child is marked orch-handed-off and a note is posted on the parent.
+func TestOrchestrationWatchdog_HandsOffPersistentStallToLeader(t *testing.T) {
 	fx := newOrchestrationFixture(t)
 	ctx := context.Background()
 
@@ -640,11 +642,60 @@ func TestOrchestrationWatchdog_EscalatesPersistentStall(t *testing.T) {
 
 	wd.sweepOnce(ctx, time.Now())
 
+	// The original worker is NOT re-dispatched again...
 	if got := countPendingTasksForAgent(t, uuidToString(fx.childA.ID), fx.agentID); got != 0 {
-		t.Errorf("persistent stall must not re-dispatch again, got %d", got)
+		t.Errorf("persistent stall must not re-dispatch the original worker, got %d", got)
+	}
+	// ...the squad leader (backup builder) is dispatched on the child instead...
+	if got := countPendingTasksForAgent(t, uuidToString(fx.childA.ID), fx.leaderID); got != 1 {
+		t.Errorf("squad leader should be handed the stalled child once, got %d", got)
+	}
+	// ...the child is marked handed-off so the next sweep escalates, not re-hands...
+	if !testHandler.issueHasLabelNamed(ctx, fx.childA, "orch-handed-off") {
+		t.Errorf("handed-off child should carry the orch-handed-off marker")
+	}
+	// ...and a hand-off note is posted on the parent.
+	if countSystemCommentsOn(t, uuidToString(fx.parent.ID)) <= before {
+		t.Errorf("hand-off should post a note on the parent")
+	}
+}
+
+// TestOrchestrationWatchdog_EscalatesAfterHandoffStillStalled: once a child has
+// already been re-dispatched AND handed to the leader (carries both markers) and
+// is STILL stalled, the watchdog escalates to a human and does not dispatch the
+// leader again — the recovery ladder is bounded, no infinite loop.
+func TestOrchestrationWatchdog_EscalatesAfterHandoffStillStalled(t *testing.T) {
+	fx := newOrchestrationFixture(t)
+	ctx := context.Background()
+
+	if _, err := testHandler.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID: fx.childA.ID, Status: "in_progress", WorkspaceID: fx.parent.WorkspaceID,
+	}); err != nil {
+		t.Fatalf("set in_progress: %v", err)
+	}
+	testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.childA.ID)
+	stalled := getOrCreateTestLabel(t, fx.labelID, "orch-stalled", "#f59e0b")
+	handedOff := getOrCreateTestLabel(t, fx.labelID, "orch-handed-off", "#8b5cf6")
+	for _, l := range []db.IssueLabel{stalled, handedOff} {
+		testHandler.Queries.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+			IssueID: fx.childA.ID, LabelID: l.ID, WorkspaceID: fx.parent.WorkspaceID,
+		})
+	}
+
+	wd := NewOrchestrationWatchdog(testHandler)
+	wd.stallAfter = -time.Hour
+	before := countSystemCommentsOn(t, uuidToString(fx.parent.ID))
+
+	wd.sweepOnce(ctx, time.Now())
+
+	if got := countPendingTasksForAgent(t, uuidToString(fx.childA.ID), fx.agentID); got != 0 {
+		t.Errorf("post-handoff stall must not re-dispatch the worker, got %d", got)
+	}
+	if got := countPendingTasksForAgent(t, uuidToString(fx.childA.ID), fx.leaderID); got != 0 {
+		t.Errorf("post-handoff stall must not re-dispatch the leader again, got %d", got)
 	}
 	if countSystemCommentsOn(t, uuidToString(fx.parent.ID)) <= before {
-		t.Errorf("persistent stall should post an escalation comment")
+		t.Errorf("post-handoff persistent stall should post a human-escalation comment")
 	}
 }
 
