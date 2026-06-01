@@ -270,6 +270,57 @@ func TestFilterCustomArgsBlocksProtocolFlags(t *testing.T) {
 	}
 }
 
+func TestFilterCustomArgsStripsShellQuotes(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.Default()
+
+	// Single-quoted inline value: --deny-tool='write' → --deny-tool=write
+	result := filterCustomArgs([]string{"--deny-tool='write'"}, nil, logger)
+	if len(result) != 1 || result[0] != "--deny-tool=write" {
+		t.Fatalf("expected [--deny-tool=write], got %v", result)
+	}
+
+	// Double-quoted inline value: --deny-tool="write" → --deny-tool=write
+	result = filterCustomArgs([]string{`--deny-tool="write"`}, nil, logger)
+	if len(result) != 1 || result[0] != "--deny-tool=write" {
+		t.Fatalf("expected [--deny-tool=write], got %v", result)
+	}
+
+	// Standalone quoted value: 'write' → write
+	result = filterCustomArgs([]string{"'write'"}, nil, logger)
+	if len(result) != 1 || result[0] != "write" {
+		t.Fatalf("expected [write], got %v", result)
+	}
+
+	// Non-flag assignments may use quotes semantically (for example Codex
+	// `-c model="o3"`), so they must survive unchanged.
+	result = filterCustomArgs([]string{`model="o3"`}, nil, logger)
+	if len(result) != 1 || result[0] != `model="o3"` {
+		t.Fatalf("expected [model=\"o3\"], got %v", result)
+	}
+
+	// Unquoted arg passes through unchanged
+	result = filterCustomArgs([]string{"--deny-tool=write"}, nil, logger)
+	if len(result) != 1 || result[0] != "--deny-tool=write" {
+		t.Fatalf("expected [--deny-tool=write], got %v", result)
+	}
+
+	// Mismatched quotes are not stripped
+	result = filterCustomArgs([]string{"--flag='val\""}, nil, logger)
+	if len(result) != 1 || result[0] != "--flag='val\"" {
+		t.Fatalf("mismatched quotes should not be stripped, got %v", result)
+	}
+
+	// Blocked flag with quoted value: the blocking still fires, the unquoted
+	// form passes the flag-match, and the arg is dropped.
+	blocked := map[string]blockedArgMode{"--output-format": blockedWithValue}
+	result = filterCustomArgs([]string{"--output-format='json'", "--verbose"}, blocked, logger)
+	if len(result) != 1 || result[0] != "--verbose" {
+		t.Fatalf("quoted blocked flag should still be dropped, got %v", result)
+	}
+}
+
 func TestBuildClaudeArgsPassesThroughCustomArgs(t *testing.T) {
 	t.Parallel()
 
