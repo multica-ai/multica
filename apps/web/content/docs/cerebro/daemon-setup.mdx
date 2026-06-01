@@ -39,10 +39,10 @@ Din runtime når Cerebro over det almindelige internet på `https://sara-api.fir
 </Callout>
 
 <Callout type="warn">
-**Inden du kører kommandoen: din maskines udgående IP skal være åbnet i Cloudflare.** Adgangen til runtime-adressen er låst til kendte IP'er. Kør `curl ifconfig.me` på din maskine og send resultatet til Jesper, så han åbner for den. Indtil din IP er åbnet, kan daemonen ikke nå serveren. Brug helst en fast/statisk IP (kontor eller en altid-tændt boks) — en bærbar på skiftende hjemme-/café-net falder ud hver gang adressen skifter.
+**Cloudflare-adgangen er låst til kendte IP'er.** Vores kontor- og runtime-maskiner er allerede på listen — det er de samme IP'er som `secrets.firtal.com` og de andre interne apps bruger (`5.186.35.114/32` og `80.208.64.206/32`). Sidder din maskine på kontor-nettet eller den altid-tændte boks, virker den allerede. Er du på et andet net, så kør `curl ifconfig.me` og få den ene adresse lagt på listen. Brug helst en fast/statisk IP — en bærbar på skiftende hjemme-/café-net falder ud hver gang adressen skifter.
 </Callout>
 
-Når din IP er åbnet, kør:
+Når din IP er på listen (kontor/runtime-maskiner er det allerede), kør:
 
 ```bash
 multica setup self-host \
