@@ -5,7 +5,7 @@ description: Sådan installerer du multica-CLI'en, peger den på vores eget host
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Cerebro kører på vores egen Mac mini, ikke på Multica Cloud. For at agenterne kan udføre opgaver på din maskine, skal du installere `multica`-CLI'en, pege den på vores server, og starte daemonen.
+Cerebro kører på vores egen Mac mini, ikke på Multica Cloud. For at agenterne kan udføre opgaver på din maskine, skal du installere `multica`-CLI'en, pege den på vores server, og starte daemonen. Forbindelsen går over det almindelige internet bag Cloudflare — **Tailscale er ikke længere nødvendigt**.
 
 Du skal **ikke** oprette dit eget workspace. Du bliver tilføjet til det eksisterende **Firtal**-workspace via en invitation — så snart du har accepteret den, springer du workspace-opretningen over.
 
@@ -29,12 +29,25 @@ multica --version
 
 ## 2. Konfigurér CLI'en til Cerebro
 
-Vores Cerebro-instans kører på `https://sara.tailbde0.ts.net` (frontend, backend og daemon-API ligger alle på samme host). Kør:
+Din runtime når Cerebro over det almindelige internet på `https://sara-api.firtal.com` — vores runtime-adresse bag Cloudflare. Du behøver **ikke** Tailscale eller anden VPN længere.
+
+<Callout type="info">
+**To adresser — hold dem adskilt:**
+
+- **`https://sara-api.firtal.com`** — *runtime-/maskine-adressen.* Den peger din daemon og CLI på (trinene nedenfor). Adgangen er låst til kendte IP'er.
+- **`https://sara.firtal.com`** — *browser-/UI-adressen.* Den åbner du i en browser for at logge ind, acceptere invitationen og bruge appen. Den virker fra enhver enhed med login.
+</Callout>
+
+<Callout type="warn">
+**Inden du kører kommandoen: din maskines udgående IP skal være åbnet i Cloudflare.** Adgangen til runtime-adressen er låst til kendte IP'er. Kør `curl ifconfig.me` på din maskine og send resultatet til Jesper, så han åbner for den. Indtil din IP er åbnet, kan daemonen ikke nå serveren. Brug helst en fast/statisk IP (kontor eller en altid-tændt boks) — en bærbar på skiftende hjemme-/café-net falder ud hver gang adressen skifter.
+</Callout>
+
+Når din IP er åbnet, kør:
 
 ```bash
 multica setup self-host \
-  --server-url https://sara.tailbde0.ts.net \
-  --app-url https://sara.tailbde0.ts.net
+  --server-url https://sara-api.firtal.com \
+  --app-url https://sara-api.firtal.com
 ```
 
 Hvad kommandoen gør:
@@ -44,7 +57,7 @@ Hvad kommandoen gør:
 3. Starter daemonen i baggrunden.
 
 <Callout type="warn">
-Du vil se en advarsel som `⚠ Server at https://sara.tailbde0.ts.net is not reachable.` Det er kosmetisk — vores reverse proxy eksponerer ikke `/health` på roden. Fortsæt med næste trin; loginnet virker stadig.
+Du vil se en advarsel som `⚠ Server at https://sara-api.firtal.com is not reachable.` Det er kosmetisk — vores reverse proxy eksponerer ikke `/health` på roden. Fortsæt med næste trin; loginnet virker stadig.
 </Callout>
 
 Hvis advarslen forhindrer browseren i at åbne, kør login manuelt bagefter:
@@ -107,7 +120,7 @@ Daemonen er kun runtimen — den udfører ikke noget før der findes en **agent*
 
 ### Via UI'et (anbefalet)
 
-1. Åbn `https://sara.tailbde0.ts.net` i din browser og vælg Firtal-workspacet.
+1. Åbn `https://sara.firtal.com` i din browser og vælg Firtal-workspacet.
 2. Gå til **Agents** i sidemenuen og klik **New agent**.
 3. Udfyld:
    - **Name** — fx `Mia - CEO EA`. Det er det navn issues bliver assigned med.
@@ -235,6 +248,10 @@ Du har nu en kørende daemon, en agent på din egen runtime og en persistent set
 **"Server at … is not reachable" — men loginnet virker.** Kosmetisk. Vores reverse proxy svarer ikke på `/health`. Ignorér.
 
 **Login åbner `multica.ai` i stedet for Cerebro.** Du har en gammel cloud-konfiguration. Kør `multica setup self-host …` igen, og svar `y` til at overskrive.
+
+**Daemonen kan ikke nå serveren / login redirecter til en Cloudflare-loginside.** Din udgående IP er ikke åbnet i Cloudflare endnu (eller den har skiftet). Kør `curl ifconfig.me` og send adressen til Jesper, så han åbner for den. Skifter din IP ofte (bærbar på hjemme-/café-net), så brug en fast IP eller bed om en mere permanent løsning.
+
+**Jeg peger stadig på Tailscale-adressen (`…ts.net`).** Gammel opsætning. Kør `multica setup self-host --server-url https://sara-api.firtal.com --app-url https://sara-api.firtal.com` igen og overskriv — så er du fri af Tailscale.
 
 **Daemonen starter ikke fordi porten er optaget.** En anden daemon-instans kører allerede. `multica daemon stop` og prøv igen, eller tjek `~/.multica/daemon.log`.
 
