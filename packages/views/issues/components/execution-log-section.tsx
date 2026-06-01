@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Loader2, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
@@ -270,6 +270,7 @@ function useStatusLabel(status: AgentTask["status"]): string {
 
 function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
+  const queryClient = useQueryClient();
   const timeAgo = useTimeAgo();
   const [cancelling, setCancelling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -290,6 +291,8 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
       await api.cancelTask(issueId, task.id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.cancel_failed));
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
       setCancelling(false);
     }
   };

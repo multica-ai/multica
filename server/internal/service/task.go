@@ -46,6 +46,18 @@ type TaskWakeupNotifier interface {
 	NotifyTaskAvailable(runtimeID, taskID string)
 }
 
+type TaskCancelState string
+
+const (
+	TaskCancelStateCancelled       TaskCancelState = "cancelled"
+	TaskCancelStateAlreadyTerminal TaskCancelState = "already_terminal"
+)
+
+type CancelTaskResult struct {
+	Task        db.AgentTaskQueue
+	CancelState TaskCancelState
+}
+
 // triggerSummaryMaxLen caps the snapshot length so the row stays cheap to
 // transmit (it ends up in every task list response). 200 is enough for a
 // recognisable preview of a one-paragraph comment.
@@ -735,16 +747,18 @@ func (s *TaskService) CaptureCancelledTasks(ctx context.Context, cancelled []db.
 	}
 }
 
-// CancelTask cancels a single task by ID. It broadcasts a task:cancelled event
-// so frontends can update immediately.
-func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
+// CancelTaskWithResult cancels a single task by ID. Active tasks transition to
+// cancelled and broadcast task:cancelled; terminal tasks are returned as an
+// idempotent success so stale clients can refresh without surfacing a false
+// error.
+func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UUID) (*CancelTaskResult, error) {
 	task, err := s.Queries.CancelAgentTask(ctx, taskID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, err := s.Queries.GetAgentTask(ctx, taskID)
 		if err != nil {
 			return nil, fmt.Errorf("cancel task: %w", err)
 		}
-		return &existing, nil
+		return &CancelTaskResult{Task: existing, CancelState: TaskCancelStateAlreadyTerminal}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("cancel task: %w", err)
@@ -756,10 +770,20 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
-	// Broadcast cancellation as a task:failed event so frontends clear the live card
+	// Broadcast cancellation so frontends clear the live card.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
 
-	return &task, nil
+	return &CancelTaskResult{Task: task, CancelState: TaskCancelStateCancelled}, nil
+}
+
+// CancelTask preserves the legacy call shape for internal callers that only
+// need the final task row.
+func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
+	result, err := s.CancelTaskWithResult(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return &result.Task, nil
 }
 
 // ClaimTask atomically claims the next queued task for an agent,
