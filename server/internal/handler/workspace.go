@@ -45,7 +45,7 @@ type WorkspaceResponse struct {
 	UpdatedAt   string  `json:"updated_at"`
 }
 
-func workspaceToResponse(w db.Workspace) WorkspaceResponse {
+func workspaceToResponse(w db.MulticaWorkspace) WorkspaceResponse {
 	var settings any
 	if w.Settings != nil {
 		json.Unmarshal(w.Settings, &settings)
@@ -82,7 +82,7 @@ type MemberResponse struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-func memberToResponse(m db.Member) MemberResponse {
+func memberToResponse(m db.MulticaMember) MemberResponse {
 	return MemberResponse{
 		ID:          uuidToString(m.ID),
 		WorkspaceID: uuidToString(m.WorkspaceID),
@@ -361,7 +361,7 @@ type CreateMemberRequest struct {
 	Role  string `json:"role"`
 }
 
-func memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {
+func memberWithUserResponse(member db.MulticaMember, user db.MulticaUser) MemberWithUserResponse {
 	return MemberWithUserResponse{
 		ID:          uuidToString(member.ID),
 		WorkspaceID: uuidToString(member.WorkspaceID),

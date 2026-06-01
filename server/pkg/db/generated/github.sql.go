@@ -12,7 +12,7 @@ import (
 )
 
 const createGitHubInstallation = `-- name: CreateGitHubInstallation :one
-INSERT INTO github_installation (
+INSERT INTO multica_github_installation (
     workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6
@@ -36,7 +36,7 @@ type CreateGitHubInstallationParams struct {
 	ConnectedByID    pgtype.UUID `json:"connected_by_id"`
 }
 
-func (q *Queries) CreateGitHubInstallation(ctx context.Context, arg CreateGitHubInstallationParams) (GithubInstallation, error) {
+func (q *Queries) CreateGitHubInstallation(ctx context.Context, arg CreateGitHubInstallationParams) (MulticaGithubInstallation, error) {
 	row := q.db.QueryRow(ctx, createGitHubInstallation,
 		arg.WorkspaceID,
 		arg.InstallationID,
@@ -45,7 +45,7 @@ func (q *Queries) CreateGitHubInstallation(ctx context.Context, arg CreateGitHub
 		arg.AccountAvatarUrl,
 		arg.ConnectedByID,
 	)
-	var i GithubInstallation
+	var i MulticaGithubInstallation
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -61,7 +61,7 @@ func (q *Queries) CreateGitHubInstallation(ctx context.Context, arg CreateGitHub
 }
 
 const deleteGitHubInstallation = `-- name: DeleteGitHubInstallation :exec
-DELETE FROM github_installation WHERE id = $1 AND workspace_id = $2
+DELETE FROM multica_github_installation WHERE id = $1 AND workspace_id = $2
 `
 
 type DeleteGitHubInstallationParams struct {
@@ -75,7 +75,7 @@ func (q *Queries) DeleteGitHubInstallation(ctx context.Context, arg DeleteGitHub
 }
 
 const deleteGitHubInstallationByInstallationID = `-- name: DeleteGitHubInstallationByInstallationID :one
-DELETE FROM github_installation WHERE installation_id = $1
+DELETE FROM multica_github_installation WHERE installation_id = $1
 RETURNING id, workspace_id
 `
 
@@ -92,13 +92,13 @@ func (q *Queries) DeleteGitHubInstallationByInstallationID(ctx context.Context, 
 }
 
 const getGitHubInstallationByID = `-- name: GetGitHubInstallationByID :one
-SELECT id, workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id, created_at, updated_at FROM github_installation
+SELECT id, workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id, created_at, updated_at FROM multica_github_installation
 WHERE id = $1
 `
 
-func (q *Queries) GetGitHubInstallationByID(ctx context.Context, id pgtype.UUID) (GithubInstallation, error) {
+func (q *Queries) GetGitHubInstallationByID(ctx context.Context, id pgtype.UUID) (MulticaGithubInstallation, error) {
 	row := q.db.QueryRow(ctx, getGitHubInstallationByID, id)
-	var i GithubInstallation
+	var i MulticaGithubInstallation
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -114,13 +114,13 @@ func (q *Queries) GetGitHubInstallationByID(ctx context.Context, id pgtype.UUID)
 }
 
 const getGitHubInstallationByInstallationID = `-- name: GetGitHubInstallationByInstallationID :one
-SELECT id, workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id, created_at, updated_at FROM github_installation
+SELECT id, workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id, created_at, updated_at FROM multica_github_installation
 WHERE installation_id = $1
 `
 
-func (q *Queries) GetGitHubInstallationByInstallationID(ctx context.Context, installationID int64) (GithubInstallation, error) {
+func (q *Queries) GetGitHubInstallationByInstallationID(ctx context.Context, installationID int64) (MulticaGithubInstallation, error) {
 	row := q.db.QueryRow(ctx, getGitHubInstallationByInstallationID, installationID)
-	var i GithubInstallation
+	var i MulticaGithubInstallation
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -136,7 +136,7 @@ func (q *Queries) GetGitHubInstallationByInstallationID(ctx context.Context, ins
 }
 
 const getGitHubPullRequest = `-- name: GetGitHubPullRequest :one
-SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files FROM github_pull_request
+SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files FROM multica_github_pull_request
 WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $4
 `
 
@@ -147,14 +147,14 @@ type GetGitHubPullRequestParams struct {
 	PrNumber    int32       `json:"pr_number"`
 }
 
-func (q *Queries) GetGitHubPullRequest(ctx context.Context, arg GetGitHubPullRequestParams) (GithubPullRequest, error) {
+func (q *Queries) GetGitHubPullRequest(ctx context.Context, arg GetGitHubPullRequestParams) (MulticaGithubPullRequest, error) {
 	row := q.db.QueryRow(ctx, getGitHubPullRequest,
 		arg.WorkspaceID,
 		arg.RepoOwner,
 		arg.RepoName,
 		arg.PrNumber,
 	)
-	var i GithubPullRequest
+	var i MulticaGithubPullRequest
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -187,8 +187,8 @@ const getSiblingPullRequestStateCountsForIssue = `-- name: GetSiblingPullRequest
 SELECT
     COALESCE(SUM(CASE WHEN pr.state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
     COALESCE(SUM(CASE WHEN pr.state = 'merged' THEN 1 ELSE 0 END), 0)::bigint AS merged_count
-FROM github_pull_request pr
-JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+FROM multica_github_pull_request pr
+JOIN multica_issue_pull_request ipr ON ipr.pull_request_id = pr.id
 WHERE ipr.issue_id = $1
   AND pr.id <> $2
 `
@@ -203,11 +203,11 @@ type GetSiblingPullRequestStateCountsForIssueRow struct {
 	MergedCount int64 `json:"merged_count"`
 }
 
-// Returns, for the PRs linked to an issue excluding one PR by id (the PR
+// Returns, for the PRs linked to an multica_issue excluding one PR by id (the PR
 // currently being processed by the webhook handler), how many are still in
 // flight (open or draft) and how many have already merged. The webhook
 // handler combines these with the current event's state to decide whether
-// to auto-advance the issue: the issue moves to done only when there is no
+// to auto-advance the multica_issue: the multica_issue moves to done only when there is no
 // in-flight sibling AND at least one linked PR (current or sibling) merged.
 func (q *Queries) GetSiblingPullRequestStateCountsForIssue(ctx context.Context, arg GetSiblingPullRequestStateCountsForIssueParams) (GetSiblingPullRequestStateCountsForIssueRow, error) {
 	row := q.db.QueryRow(ctx, getSiblingPullRequestStateCountsForIssue, arg.IssueID, arg.ID)
@@ -218,7 +218,7 @@ func (q *Queries) GetSiblingPullRequestStateCountsForIssue(ctx context.Context, 
 
 const linkIssueToPullRequest = `-- name: LinkIssueToPullRequest :exec
 
-INSERT INTO issue_pull_request (
+INSERT INTO multica_issue_pull_request (
     issue_id, pull_request_id, linked_by_type, linked_by_id
 ) VALUES (
     $1, $2, $3, $4
@@ -248,7 +248,7 @@ func (q *Queries) LinkIssueToPullRequest(ctx context.Context, arg LinkIssueToPul
 
 const listGitHubInstallationsByWorkspace = `-- name: ListGitHubInstallationsByWorkspace :many
 
-SELECT id, workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id, created_at, updated_at FROM github_installation
+SELECT id, workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id, created_at, updated_at FROM multica_github_installation
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -256,15 +256,15 @@ ORDER BY created_at ASC
 // =====================
 // GitHub Installation
 // =====================
-func (q *Queries) ListGitHubInstallationsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]GithubInstallation, error) {
+func (q *Queries) ListGitHubInstallationsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]MulticaGithubInstallation, error) {
 	rows, err := q.db.Query(ctx, listGitHubInstallationsByWorkspace, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []GithubInstallation{}
+	items := []MulticaGithubInstallation{}
 	for rows.Next() {
-		var i GithubInstallation
+		var i MulticaGithubInstallation
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -287,7 +287,7 @@ func (q *Queries) ListGitHubInstallationsByWorkspace(ctx context.Context, worksp
 }
 
 const listIssueIDsForPullRequest = `-- name: ListIssueIDsForPullRequest :many
-SELECT issue_id FROM issue_pull_request
+SELECT issue_id FROM multica_issue_pull_request
 WHERE pull_request_id = $1
 `
 
@@ -314,14 +314,14 @@ func (q *Queries) ListIssueIDsForPullRequest(ctx context.Context, pullRequestID 
 const listPullRequestsByIssue = `-- name: ListPullRequestsByIssue :many
 WITH issue_prs AS (
     SELECT pr.id, pr.head_sha
-    FROM github_pull_request pr
-    JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+    FROM multica_github_pull_request pr
+    JOIN multica_issue_pull_request ipr ON ipr.pull_request_id = pr.id
     WHERE ipr.issue_id = $1
 ),
 per_app_latest AS (
     SELECT DISTINCT ON (cs.pr_id, cs.app_id)
         cs.pr_id, cs.app_id, cs.conclusion, cs.status
-    FROM github_pull_request_check_suite cs
+    FROM multica_github_pull_request_check_suite cs
     JOIN issue_prs ip ON ip.id = cs.pr_id
     WHERE cs.head_sha = ip.head_sha AND ip.head_sha <> ''
     ORDER BY cs.pr_id, cs.app_id, cs.updated_at DESC
@@ -352,8 +352,8 @@ SELECT
     COALESCE(c.passed, 0)::bigint  AS checks_passed,
     COALESCE(c.failed, 0)::bigint  AS checks_failed,
     COALESCE(c.pending, 0)::bigint AS checks_pending
-FROM github_pull_request pr
-JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+FROM multica_github_pull_request pr
+JOIN multica_issue_pull_request ipr ON ipr.pull_request_id = pr.id
 LEFT JOIN checks c ON c.pr_id = pr.id
 WHERE ipr.issue_id = $1
 ORDER BY pr.pr_created_at DESC
@@ -389,11 +389,11 @@ type ListPullRequestsByIssueRow struct {
 	ChecksPending   int64              `json:"checks_pending"`
 }
 
-// Returns the issue's linked PRs with the aggregated check-suite counts for
-// the PR's CURRENT head SHA. The `issue_prs` CTE narrows to this issue's PR
+// Returns the multica_issue's linked PRs with the aggregated check-suite counts for
+// the PR's CURRENT head SHA. The `issue_prs` CTE narrows to this multica_issue's PR
 // ids first so the per-app aggregation only touches suite rows for those
 // PRs — without that scoping the planner has to scan/aggregate every PR's
-// suites in the workspace before joining on issue. Per-app latest suite is
+// suites in the multica_workspace before joining on multica_issue. Per-app latest suite is
 // selected so a single app firing multiple suites on the same head doesn't
 // get counted N times. Late-arriving suites for an OLD head are stored but
 // excluded by the head_sha filter, so they can't override the new head's
@@ -447,7 +447,7 @@ func (q *Queries) ListPullRequestsByIssue(ctx context.Context, issueID pgtype.UU
 }
 
 const unlinkIssueFromPullRequest = `-- name: UnlinkIssueFromPullRequest :exec
-DELETE FROM issue_pull_request
+DELETE FROM multica_issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2
 `
 
@@ -463,7 +463,7 @@ func (q *Queries) UnlinkIssueFromPullRequest(ctx context.Context, arg UnlinkIssu
 
 const upsertGitHubPullRequest = `-- name: UpsertGitHubPullRequest :one
 
-INSERT INTO github_pull_request (
+INSERT INTO multica_github_pull_request (
     workspace_id, installation_id, repo_owner, repo_name, pr_number,
     title, state, html_url, branch, author_login, author_avatar_url,
     merged_at, closed_at, pr_created_at, pr_updated_at,
@@ -491,7 +491,7 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     mergeable_state = CASE
         WHEN COALESCE($21::boolean, FALSE) THEN NULL
         WHEN EXCLUDED.mergeable_state IS NOT NULL THEN EXCLUDED.mergeable_state
-        ELSE github_pull_request.mergeable_state
+        ELSE multica_github_pull_request.mergeable_state
     END,
     additions     = EXCLUDED.additions,
     deletions     = EXCLUDED.deletions,
@@ -537,7 +537,7 @@ type UpsertGitHubPullRequestParams struct {
 //     information that GitHub only re-computes lazily.
 //
 // INSERT path always writes the incoming value (NULL acceptable for a new row).
-func (q *Queries) UpsertGitHubPullRequest(ctx context.Context, arg UpsertGitHubPullRequestParams) (GithubPullRequest, error) {
+func (q *Queries) UpsertGitHubPullRequest(ctx context.Context, arg UpsertGitHubPullRequestParams) (MulticaGithubPullRequest, error) {
 	row := q.db.QueryRow(ctx, upsertGitHubPullRequest,
 		arg.WorkspaceID,
 		arg.InstallationID,
@@ -561,7 +561,7 @@ func (q *Queries) UpsertGitHubPullRequest(ctx context.Context, arg UpsertGitHubP
 		arg.MergeableState,
 		arg.ClearMergeableState,
 	)
-	var i GithubPullRequest
+	var i MulticaGithubPullRequest
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -592,7 +592,7 @@ func (q *Queries) UpsertGitHubPullRequest(ctx context.Context, arg UpsertGitHubP
 
 const upsertPullRequestCheckSuite = `-- name: UpsertPullRequestCheckSuite :exec
 
-INSERT INTO github_pull_request_check_suite (
+INSERT INTO multica_github_pull_request_check_suite (
     pr_id, suite_id, head_sha, app_id, conclusion, status, updated_at
 ) VALUES (
     $1, $2, $3, $4, $7, $5, $6
@@ -603,7 +603,7 @@ ON CONFLICT (pr_id, suite_id) DO UPDATE SET
     conclusion = EXCLUDED.conclusion,
     status     = EXCLUDED.status,
     updated_at = EXCLUDED.updated_at
-WHERE EXCLUDED.updated_at >= github_pull_request_check_suite.updated_at
+WHERE EXCLUDED.updated_at >= multica_github_pull_request_check_suite.updated_at
 `
 
 type UpsertPullRequestCheckSuiteParams struct {

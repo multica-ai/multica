@@ -83,7 +83,7 @@ func TestListAgentSkills_OmitsContent(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "Handler Skill Summary Test", nil)
 	skillID := insertHandlerTestSkill(t, "agent-skill-omits-content", strings.Repeat("b", 1024))
 	if _, err := testPool.Exec(context.Background(),
-		`INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`,
+		`INSERT INTO multica_agent_skill (agent_id, skill_id) VALUES ($1, $2)`,
 		agentID, skillID,
 	); err != nil {
 		t.Fatalf("attach skill to agent: %v", err)
@@ -135,14 +135,14 @@ func insertHandlerTestSkill(t *testing.T, namePrefix, content string) string {
 	name := namePrefix + "-" + t.Name()
 	var id string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+		INSERT INTO multica_skill (workspace_id, name, description, content, config, created_by)
 		VALUES ($1, $2, $3, $4, '{}'::jsonb, $5)
 		RETURNING id
 	`, testWorkspaceID, name, "fixture", content, testUserID).Scan(&id); err != nil {
 		t.Fatalf("insert skill: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM skill WHERE id = $1`, id)
+		testPool.Exec(context.Background(), `DELETE FROM multica_skill WHERE id = $1`, id)
 	})
 	return id
 }

@@ -15,13 +15,13 @@ func newLanguageTestUser(t *testing.T, email string) string {
 
 	var userID string
 	if err := testPool.QueryRow(ctx,
-		`INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
+		`INSERT INTO multica_user (name, email) VALUES ($1, $2) RETURNING id`,
 		"Language Test", email,
 	).Scan(&userID); err != nil {
 		t.Fatalf("insert test user: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, userID)
+		testPool.Exec(ctx, `DELETE FROM multica_user WHERE id = $1`, userID)
 	})
 	return userID
 }
@@ -46,7 +46,7 @@ func TestUpdateMeAcceptsLanguage(t *testing.T) {
 
 	var lang *string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT language FROM "user" WHERE id = $1`, userID,
+		`SELECT language FROM multica_user WHERE id = $1`, userID,
 	).Scan(&lang); err != nil {
 		t.Fatalf("lookup user: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestUpdateMeRejectsUnsupportedLanguage(t *testing.T) {
 
 	var lang *string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT language FROM "user" WHERE id = $1`, userID,
+		`SELECT language FROM multica_user WHERE id = $1`, userID,
 	).Scan(&lang); err != nil {
 		t.Fatalf("lookup user: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestUpdateMePreservesLanguageWhenNotProvided(t *testing.T) {
 	userID := newLanguageTestUser(t, "lang-preserve@multica.ai")
 
 	if _, err := testPool.Exec(context.Background(),
-		`UPDATE "user" SET language = 'en' WHERE id = $1`, userID,
+		`UPDATE multica_user SET language = 'en' WHERE id = $1`, userID,
 	); err != nil {
 		t.Fatalf("preset language: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestUpdateMePreservesLanguageWhenNotProvided(t *testing.T) {
 
 	var lang *string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT language FROM "user" WHERE id = $1`, userID,
+		`SELECT language FROM multica_user WHERE id = $1`, userID,
 	).Scan(&lang); err != nil {
 		t.Fatalf("lookup user: %v", err)
 	}

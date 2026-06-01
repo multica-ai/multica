@@ -73,7 +73,7 @@ func run() error {
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+		dbURL = "postgres://costrict:costrict_password@localhost:5432/costrict"
 	}
 
 	// SIGINT/SIGTERM cancels ctx so an in-flight slice stops cleanly —

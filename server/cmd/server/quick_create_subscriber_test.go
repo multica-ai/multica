@@ -24,7 +24,7 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 
 	var agentID string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		`SELECT id::text FROM multica_agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
 		testWorkspaceID,
 	).Scan(&agentID); err != nil {
 		t.Fatalf("load fixture agent: %v", err)
@@ -42,11 +42,11 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 		t.Fatalf("EnqueueQuickCreateTask: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, task.ID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, task.ID)
 	})
 
 	if _, err := testPool.Exec(ctx,
-		`UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = now() WHERE id = $1`,
+		`UPDATE multica_agent_task_queue SET status = 'dispatched', dispatched_at = now() WHERE id = $1`,
 		task.ID,
 	); err != nil {
 		t.Fatalf("dispatch task: %v", err)
@@ -74,7 +74,7 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 		t.Fatalf("CreateIssueWithOrigin: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issue.ID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issue.ID)
 	})
 
 	if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", ""); err != nil {
@@ -97,7 +97,7 @@ func TestQuickCreateFailure_DoesNotSubscribeRequester(t *testing.T) {
 
 	var agentID string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		`SELECT id::text FROM multica_agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
 		testWorkspaceID,
 	).Scan(&agentID); err != nil {
 		t.Fatalf("load fixture agent: %v", err)
@@ -115,11 +115,11 @@ func TestQuickCreateFailure_DoesNotSubscribeRequester(t *testing.T) {
 		t.Fatalf("EnqueueQuickCreateTask: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, task.ID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, task.ID)
 	})
 
 	if _, err := testPool.Exec(ctx,
-		`UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = now() WHERE id = $1`,
+		`UPDATE multica_agent_task_queue SET status = 'dispatched', dispatched_at = now() WHERE id = $1`,
 		task.ID,
 	); err != nil {
 		t.Fatalf("dispatch task: %v", err)
@@ -138,7 +138,7 @@ func TestQuickCreateFailure_DoesNotSubscribeRequester(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM issue_subscriber s
-		JOIN issue i ON i.id = s.issue_id
+		JOIN multica_issue i ON i.id = s.issue_id
 		WHERE s.user_type = 'member' AND s.user_id = $1
 		  AND i.origin_type = 'quick_create' AND i.origin_id = $2
 	`, testUserID, task.ID).Scan(&leaked); err != nil {

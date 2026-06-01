@@ -1,20 +1,20 @@
 -- name: ListProjects :many
-SELECT * FROM project
+SELECT * FROM multica_project
 WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
 ORDER BY created_at DESC;
 
 -- name: GetProject :one
-SELECT * FROM project
+SELECT * FROM multica_project
 WHERE id = $1;
 
 -- name: GetProjectInWorkspace :one
-SELECT * FROM project
+SELECT * FROM multica_project
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateProject :one
-INSERT INTO project (
+INSERT INTO multica_project (
     workspace_id, title, description, icon, status,
     lead_type, lead_id, priority
 ) VALUES (
@@ -22,7 +22,7 @@ INSERT INTO project (
 ) RETURNING *;
 
 -- name: UpdateProject :one
-UPDATE project SET
+UPDATE multica_project SET
     title = COALESCE(sqlc.narg('title'), title),
     description = sqlc.narg('description'),
     icon = sqlc.narg('icon'),
@@ -36,16 +36,16 @@ RETURNING *;
 
 -- name: DeleteProject :exec
 -- Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
-DELETE FROM project WHERE id = $1 AND workspace_id = $2;
+DELETE FROM multica_project WHERE id = $1 AND workspace_id = $2;
 
 -- name: CountIssuesByProject :one
-SELECT count(*) FROM issue
+SELECT count(*) FROM multica_issue
 WHERE project_id = $1;
 
 -- name: GetProjectIssueStats :many
 SELECT project_id,
        count(*)::bigint AS total_count,
        count(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done_count
-FROM issue
+FROM multica_issue
 WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;

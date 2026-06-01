@@ -65,7 +65,7 @@ type WorkflowNodeRunResponse struct {
 
 // ── Converters ───────────────────────────────────────────────────────────────
 
-func workflowRunToResponse(r db.WorkflowRun) WorkflowRunResponse {
+func workflowRunToResponse(r db.MulticaWorkflowRun) WorkflowRunResponse {
 	return WorkflowRunResponse{
 		ID:              uuidToString(r.ID),
 		WorkflowID:      uuidToString(r.WorkflowID),
@@ -82,7 +82,7 @@ func workflowRunToResponse(r db.WorkflowRun) WorkflowRunResponse {
 	}
 }
 
-func workflowNodeRunToResponse(nr db.WorkflowNodeRun) WorkflowNodeRunResponse {
+func workflowNodeRunToResponse(nr db.MulticaWorkflowNodeRun) WorkflowNodeRunResponse {
 	return WorkflowNodeRunResponse{
 		ID:             uuidToString(nr.ID),
 		WorkflowRunID:  uuidToString(nr.WorkflowRunID),
@@ -213,7 +213,7 @@ func (h *Handler) GetWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	}
 	nodeRunResp := make([]WorkflowNodeRunResponse, len(nodeRuns))
 	for i, nr := range nodeRuns {
-		nodeRunResp[i] = workflowNodeRunToResponse(db.WorkflowNodeRun{
+		nodeRunResp[i] = workflowNodeRunToResponse(db.MulticaWorkflowNodeRun{
 		ID:             nr.ID,
 		WorkflowRunID:  nr.WorkflowRunID,
 		WorkflowNodeID: nr.WorkflowNodeID,
@@ -451,7 +451,7 @@ func (h *Handler) ListMyWorkflowTasks(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]WorkflowNodeRunResponse, len(nodeRuns))
 	for i, nr := range nodeRuns {
-		resp[i] = workflowNodeRunToResponse(db.WorkflowNodeRun{
+		resp[i] = workflowNodeRunToResponse(db.MulticaWorkflowNodeRun{
 		ID:             nr.ID,
 		WorkflowRunID:  nr.WorkflowRunID,
 		WorkflowNodeID: nr.WorkflowNodeID,

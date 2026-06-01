@@ -34,7 +34,7 @@ type HeartbeatScheduler interface {
 	// back online (sync path immediately; batched path defers to the runtime's
 	// next beat, which will see status="offline" and take the sync branch in
 	// recordHeartbeat).
-	Schedule(ctx context.Context, rt db.AgentRuntime) error
+	Schedule(ctx context.Context, rt db.MulticaAgentRuntime) error
 }
 
 // PassthroughHeartbeatScheduler is the synchronous, legacy-behavior scheduler.
@@ -49,7 +49,7 @@ func NewPassthroughHeartbeatScheduler(queries *db.Queries) *PassthroughHeartbeat
 	return &PassthroughHeartbeatScheduler{queries: queries}
 }
 
-func (p *PassthroughHeartbeatScheduler) Schedule(ctx context.Context, rt db.AgentRuntime) error {
+func (p *PassthroughHeartbeatScheduler) Schedule(ctx context.Context, rt db.MulticaAgentRuntime) error {
 	if rt.Status == "online" && rt.LastSeenAt.Valid {
 		rows, err := p.queries.TouchAgentRuntimeLastSeen(ctx, rt.ID)
 		if err != nil {
@@ -114,7 +114,7 @@ func NewBatchedHeartbeatScheduler(queries *db.Queries, tickInterval time.Duratio
 	}
 }
 
-func (b *BatchedHeartbeatScheduler) Schedule(ctx context.Context, rt db.AgentRuntime) error {
+func (b *BatchedHeartbeatScheduler) Schedule(ctx context.Context, rt db.MulticaAgentRuntime) error {
 	// Status flip (offline→online) and never-seen rows must commit before
 	// returning so callers / dependent reads observe the new state. Only
 	// the hot "already online, bumping last_seen_at" case is batched.

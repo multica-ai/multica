@@ -5,7 +5,9 @@ import { resolve } from "path";
 // Load root .env so REMOTE_API_URL is available to next.config.ts
 config({ path: resolve(__dirname, "../../.env") });
 
-const remoteApiUrl = process.env.REMOTE_API_URL || "http://localhost:8080";
+// REMOTE_API_URL is now read at request-time by middleware.ts so operators
+// can change the backend target (e.g. in K8s) without rebuilding the image.
+// Only static rewrites (/docs) remain here.
 const docsUrl = process.env.DOCS_URL || "http://localhost:4000";
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -48,24 +50,9 @@ const nextConfig: NextConfig = {
           destination: `${docsUrl}/docs/:path*`,
         },
       ],
-      afterFiles: [
-        {
-          source: "/api/:path*",
-          destination: `${remoteApiUrl}/api/:path*`,
-        },
-        {
-          source: "/ws",
-          destination: `${remoteApiUrl}/ws`,
-        },
-        {
-          source: "/auth/:path*",
-          destination: `${remoteApiUrl}/auth/:path*`,
-        },
-        {
-          source: "/uploads/:path*",
-          destination: `${remoteApiUrl}/uploads/:path*`,
-        },
-      ],
+      // Runtime rewrites (/api, /auth, /ws, /uploads) moved to middleware.ts
+      // so REMOTE_API_URL can be overridden without rebuilding.
+      afterFiles: [],
       fallback: [],
     };
   },

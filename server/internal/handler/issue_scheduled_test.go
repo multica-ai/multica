@@ -22,29 +22,29 @@ func TestListIssues_ScheduledFilter(t *testing.T) {
 	// the assertion isn't polluted by other issues seeded by parallel tests.
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+		INSERT INTO multica_project (workspace_id, title) VALUES ($1, $2) RETURNING id
 	`, testWorkspaceID, fmt.Sprintf("Gantt Scheduled %d", suffix)).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_project WHERE id = $1`, projectID) })
 
 	insertIssue := func(title string, startDate, dueDate *time.Time) string {
 		var number int
 		if err := testPool.QueryRow(ctx, `
-			UPDATE workspace
-			SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+			UPDATE multica_workspace
+			SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM multica_issue WHERE workspace_id = $1)) + 1
 			WHERE id = $1 RETURNING issue_counter
 		`, testWorkspaceID).Scan(&number); err != nil {
 			t.Fatalf("next issue number: %v", err)
 		}
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id, start_date, due_date)
+			INSERT INTO multica_issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id, start_date, due_date)
 			VALUES ($1, $2, 'todo', 'none', 'member', $3, 0, $4, $5, $6, $7) RETURNING id
 		`, testWorkspaceID, title, testUserID, number, projectID, startDate, dueDate).Scan(&id); err != nil {
 			t.Fatalf("create issue %q: %v", title, err)
 		}
-		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id) })
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, id) })
 		return id
 	}
 

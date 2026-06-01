@@ -29,7 +29,7 @@ type LabelResponse struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-func labelToResponse(l db.IssueLabel) LabelResponse {
+func labelToResponse(l db.MulticaIssueLabel) LabelResponse {
 	return LabelResponse{
 		ID:          uuidToString(l.ID),
 		WorkspaceID: uuidToString(l.WorkspaceID),
@@ -40,7 +40,7 @@ func labelToResponse(l db.IssueLabel) LabelResponse {
 	}
 }
 
-func labelsToResponse(list []db.IssueLabel) []LabelResponse {
+func labelsToResponse(list []db.MulticaIssueLabel) []LabelResponse {
 	out := make([]LabelResponse, len(list))
 	for i, l := range list {
 		out[i] = labelToResponse(l)
@@ -291,7 +291,7 @@ type AttachLabelRequest struct {
 // nil → clients refetch via query invalidation, and we skip broadcasting an
 // empty list that would incorrectly overwrite every subscriber's optimistic
 // state.
-func (h *Handler) listLabelsForIssueSafe(r *http.Request, issueID, workspaceID pgtype.UUID) ([]db.IssueLabel, bool) {
+func (h *Handler) listLabelsForIssueSafe(r *http.Request, issueID, workspaceID pgtype.UUID) ([]db.MulticaIssueLabel, bool) {
 	labels, err := h.Queries.ListLabelsByIssue(r.Context(), db.ListLabelsByIssueParams{
 		IssueID:     issueID,
 		WorkspaceID: workspaceID,

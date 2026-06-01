@@ -12,7 +12,7 @@ import (
 )
 
 const countProjectResources = `-- name: CountProjectResources :one
-SELECT count(*) FROM project_resource WHERE project_id = $1
+SELECT count(*) FROM multica_project_resource WHERE project_id = $1
 `
 
 func (q *Queries) CountProjectResources(ctx context.Context, projectID pgtype.UUID) (int64, error) {
@@ -23,7 +23,7 @@ func (q *Queries) CountProjectResources(ctx context.Context, projectID pgtype.UU
 }
 
 const createProjectResource = `-- name: CreateProjectResource :one
-INSERT INTO project_resource (
+INSERT INTO multica_project_resource (
     project_id, workspace_id, resource_type, resource_ref, label, position, created_by
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7
@@ -40,7 +40,7 @@ type CreateProjectResourceParams struct {
 	CreatedBy    pgtype.UUID `json:"created_by"`
 }
 
-func (q *Queries) CreateProjectResource(ctx context.Context, arg CreateProjectResourceParams) (ProjectResource, error) {
+func (q *Queries) CreateProjectResource(ctx context.Context, arg CreateProjectResourceParams) (MulticaProjectResource, error) {
 	row := q.db.QueryRow(ctx, createProjectResource,
 		arg.ProjectID,
 		arg.WorkspaceID,
@@ -50,7 +50,7 @@ func (q *Queries) CreateProjectResource(ctx context.Context, arg CreateProjectRe
 		arg.Position,
 		arg.CreatedBy,
 	)
-	var i ProjectResource
+	var i MulticaProjectResource
 	err := row.Scan(
 		&i.ID,
 		&i.ProjectID,
@@ -66,7 +66,7 @@ func (q *Queries) CreateProjectResource(ctx context.Context, arg CreateProjectRe
 }
 
 const deleteProjectResource = `-- name: DeleteProjectResource :exec
-DELETE FROM project_resource WHERE id = $1
+DELETE FROM multica_project_resource WHERE id = $1
 `
 
 func (q *Queries) DeleteProjectResource(ctx context.Context, id pgtype.UUID) error {
@@ -75,13 +75,13 @@ func (q *Queries) DeleteProjectResource(ctx context.Context, id pgtype.UUID) err
 }
 
 const getProjectResource = `-- name: GetProjectResource :one
-SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM project_resource
+SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM multica_project_resource
 WHERE id = $1
 `
 
-func (q *Queries) GetProjectResource(ctx context.Context, id pgtype.UUID) (ProjectResource, error) {
+func (q *Queries) GetProjectResource(ctx context.Context, id pgtype.UUID) (MulticaProjectResource, error) {
 	row := q.db.QueryRow(ctx, getProjectResource, id)
-	var i ProjectResource
+	var i MulticaProjectResource
 	err := row.Scan(
 		&i.ID,
 		&i.ProjectID,
@@ -98,7 +98,7 @@ func (q *Queries) GetProjectResource(ctx context.Context, id pgtype.UUID) (Proje
 
 const getProjectResourceCounts = `-- name: GetProjectResourceCounts :many
 SELECT project_id, count(*)::bigint AS resource_count
-FROM project_resource
+FROM multica_project_resource
 WHERE project_id = ANY($1::uuid[])
 GROUP BY project_id
 `
@@ -129,7 +129,7 @@ func (q *Queries) GetProjectResourceCounts(ctx context.Context, projectIds []pgt
 }
 
 const getProjectResourceInWorkspace = `-- name: GetProjectResourceInWorkspace :one
-SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM project_resource
+SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM multica_project_resource
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -138,9 +138,9 @@ type GetProjectResourceInWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetProjectResourceInWorkspace(ctx context.Context, arg GetProjectResourceInWorkspaceParams) (ProjectResource, error) {
+func (q *Queries) GetProjectResourceInWorkspace(ctx context.Context, arg GetProjectResourceInWorkspaceParams) (MulticaProjectResource, error) {
 	row := q.db.QueryRow(ctx, getProjectResourceInWorkspace, arg.ID, arg.WorkspaceID)
-	var i ProjectResource
+	var i MulticaProjectResource
 	err := row.Scan(
 		&i.ID,
 		&i.ProjectID,
@@ -156,20 +156,20 @@ func (q *Queries) GetProjectResourceInWorkspace(ctx context.Context, arg GetProj
 }
 
 const listProjectResources = `-- name: ListProjectResources :many
-SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM project_resource
+SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM multica_project_resource
 WHERE project_id = $1
 ORDER BY position ASC, created_at ASC
 `
 
-func (q *Queries) ListProjectResources(ctx context.Context, projectID pgtype.UUID) ([]ProjectResource, error) {
+func (q *Queries) ListProjectResources(ctx context.Context, projectID pgtype.UUID) ([]MulticaProjectResource, error) {
 	rows, err := q.db.Query(ctx, listProjectResources, projectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ProjectResource{}
+	items := []MulticaProjectResource{}
 	for rows.Next() {
-		var i ProjectResource
+		var i MulticaProjectResource
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,
@@ -192,20 +192,20 @@ func (q *Queries) ListProjectResources(ctx context.Context, projectID pgtype.UUI
 }
 
 const listProjectResourcesForProjects = `-- name: ListProjectResourcesForProjects :many
-SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM project_resource
+SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM multica_project_resource
 WHERE project_id = ANY($1::uuid[])
 ORDER BY project_id, position ASC, created_at ASC
 `
 
-func (q *Queries) ListProjectResourcesForProjects(ctx context.Context, projectIds []pgtype.UUID) ([]ProjectResource, error) {
+func (q *Queries) ListProjectResourcesForProjects(ctx context.Context, projectIds []pgtype.UUID) ([]MulticaProjectResource, error) {
 	rows, err := q.db.Query(ctx, listProjectResourcesForProjects, projectIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ProjectResource{}
+	items := []MulticaProjectResource{}
 	for rows.Next() {
-		var i ProjectResource
+		var i MulticaProjectResource
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,

@@ -1,23 +1,23 @@
 -- name: ListAgents :many
-SELECT * FROM agent
+SELECT * FROM multica_agent
 WHERE workspace_id = $1 AND archived_at IS NULL
 ORDER BY created_at ASC;
 
 -- name: ListAllAgents :many
-SELECT * FROM agent
+SELECT * FROM multica_agent
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
 -- name: GetAgent :one
-SELECT * FROM agent
+SELECT * FROM multica_agent
 WHERE id = $1;
 
 -- name: GetAgentInWorkspace :one
-SELECT * FROM agent
+SELECT * FROM multica_agent
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateAgent :one
-INSERT INTO agent (
+INSERT INTO multica_agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level
@@ -25,7 +25,7 @@ INSERT INTO agent (
 RETURNING *;
 
 -- name: UpdateAgent :one
-UPDATE agent SET
+UPDATE multica_agent SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
     avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),
@@ -49,42 +49,42 @@ RETURNING *;
 -- Explicit NULL-clear for thinking_level. COALESCE-based UpdateAgent cannot
 -- set the column back to NULL, so the API layer routes "user picked Default"
 -- through this dedicated query.
-UPDATE agent SET thinking_level = NULL, updated_at = now()
+UPDATE multica_agent SET thinking_level = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: ClearAgentMcpConfig :one
-UPDATE agent SET mcp_config = NULL, updated_at = now()
+UPDATE multica_agent SET mcp_config = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: ArchiveAgent :one
-UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
+UPDATE multica_agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: ArchiveAgentsByRuntime :many
--- Bulk-archives every active agent bound to any runtime in the given set.
--- Used when revoking a leaving member's runtimes so agents pinned to those
+-- Bulk-archives every active multica_agent bound to any runtime in the given set.
+-- Used when revoking a leaving multica_member's runtimes so agents pinned to those
 -- runtimes can no longer be assigned new work. Returns the affected rows so
--- the caller can broadcast agent:archived per agent.
-UPDATE agent
+-- the caller can broadcast multica_agent:archived per multica_agent.
+UPDATE multica_agent
 SET archived_at = now(), archived_by = @archived_by, updated_at = now()
 WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND archived_at IS NULL
 RETURNING *;
 
 -- name: RestoreAgent :one
-UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
+UPDATE multica_agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: ListAgentTasks :many
-SELECT * FROM agent_task_queue
+SELECT * FROM multica_agent_task_queue
 WHERE agent_id = $1
 ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
-INSERT INTO agent_task_queue (
+INSERT INTO multica_agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     trigger_summary, force_fresh_session, is_leader_task
 )
@@ -97,35 +97,35 @@ VALUES (
 RETURNING *;
 
 -- name: CreateQuickCreateTask :one
--- Quick-create tasks have no issue / chat / autopilot link; the entire job
--- description (prompt, requester, workspace) lives in context JSONB. The
+-- Quick-create tasks have no multica_issue / chat / multica_autopilot link; the entire job
+-- description (prompt, requester, multica_workspace) lives in context JSONB. The
 -- daemon detects this variant via context.type == "quick_create".
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
+INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
 VALUES ($1, $2, NULL, 'queued', $3, $4)
 RETURNING *;
 
 -- name: LinkTaskToIssue :exec
--- Attaches the issue a quick-create task produced back to the task row, once
--- the agent has finished and the issue exists. Guarded by `issue_id IS NULL`
--- so this never overwrites an issue id that was set at task creation (only
+-- Attaches the multica_issue a quick-create task produced back to the task row, once
+-- the multica_agent has finished and the multica_issue exists. Guarded by `issue_id IS NULL`
+-- so this never overwrites an multica_issue id that was set at task creation (only
 -- quick-create tasks land here unset). Fixes the activity row staying on
--- "Creating issue" forever after completion.
-UPDATE agent_task_queue
+-- "Creating multica_issue" forever after completion.
+UPDATE multica_agent_task_queue
 SET issue_id = $2
 WHERE id = $1 AND issue_id IS NULL;
 
 -- name: CreateRetryTask :one
 -- Clones a parent task into a fresh queued attempt. Carries forward the
--- agent's resume context (session_id/work_dir) so the child can continue
+-- multica_agent's resume context (session_id/work_dir) so the child can continue
 -- the conversation when the backend supports it. Resume-unsafe failures are
--- retried as fresh sessions so the child does not inherit a stuck agent
+-- retried as fresh sessions so the child does not inherit a stuck multica_agent
 -- conversation. Keep the CASE WHEN predicates in sync with
 -- resumeUnsafeFailureReason and the resume lookup blacklists. attempt is
 -- incremented; max_attempts, trigger_comment_id, and is_leader_task are
--- inherited so the retried task keeps the same squad-role provenance as its
+-- inherited so the retried task keeps the same multica_squad-role provenance as its
 -- parent and the self-trigger guard in shouldEnqueueSquadLeaderOnComment
 -- continues to recognise it as a leader task.
-INSERT INTO agent_task_queue (
+INSERT INTO multica_agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
@@ -139,49 +139,49 @@ SELECT
     p.attempt + 1, p.max_attempts, p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task
-FROM agent_task_queue p
+FROM multica_agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :many
--- Cancels every active task on the issue and returns the affected rows so the
--- caller can reconcile each agent's status and broadcast task:cancelled events
+-- Cancels every active task on the multica_issue and returns the affected rows so the
+-- caller can reconcile each multica_agent's status and broadcast task:cancelled events
 -- (#1587). Prior :exec form silently dropped that info, so internal cancel
--- paths (issue status flips to cancelled/done, etc.) left agents stuck at
+-- paths (multica_issue status flips to cancelled/done, etc.) left agents stuck at
 -- status="working" with no self-correction.
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
 RETURNING *;
 
 -- name: CancelAgentTasksByIssueAndAgent :many
--- Cancels active tasks for a single (issue, agent) pair without touching
--- tasks belonging to other agents on the same issue. Used by the manual
+-- Cancels active tasks for a single (multica_issue, multica_agent) pair without touching
+-- tasks belonging to other agents on the same multica_issue. Used by the manual
 -- rerun flow so re-running the assignee doesn't collateral-cancel a
--- still-running @-mention agent on the same issue.
-UPDATE agent_task_queue
+-- still-running @-mention multica_agent on the same multica_issue.
+UPDATE multica_agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running')
 RETURNING *;
 
 -- name: CancelAgentTasksByAgent :many
--- Bulk-cancel every active (queued/dispatched/running) task for an agent.
+-- Bulk-cancel every active (queued/dispatched/running) task for an multica_agent.
 -- Returns the affected rows so callers can broadcast task:cancelled events.
 -- Mirrors the shape of CancelAgentTasksByIssue / CancelAgentTasksByIssueAndAgent
 -- (also :many + RETURNING + completed_at) so the three sibling cancel paths
 -- behave consistently.
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running')
 RETURNING *;
 
 -- name: CancelAgentTasksByTriggerComment :many
--- Cancels active tasks whose trigger is the given comment. Called when a
--- comment is deleted so the agent does not run with the now-deleted content
--- already embedded in its prompt. Must run BEFORE the comment row is deleted
+-- Cancels active tasks whose trigger is the given multica_comment. Called when a
+-- multica_comment is deleted so the multica_agent does not run with the now-deleted content
+-- already embedded in its prompt. Must run BEFORE the multica_comment row is deleted
 -- because the FK ON DELETE SET NULL would otherwise nullify trigger_comment_id
 -- and we'd lose the ability to find the affected tasks.
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE trigger_comment_id = $1 AND status IN ('queued', 'dispatched', 'running')
 RETURNING *;
@@ -189,35 +189,35 @@ RETURNING *;
 -- name: CancelAgentTasksByChatSession :many
 -- Cancels active tasks belonging to a chat session. Called from
 -- DeleteChatSession so the daemon doesn't keep running work whose result
--- has nowhere to land. Must run BEFORE the chat_session row is deleted —
+-- has nowhere to land. Must run BEFORE the multica_chat_session row is deleted —
 -- the FK ON DELETE SET NULL would otherwise nullify chat_session_id and we
 -- could no longer reach those tasks.
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
 RETURNING *;
 
 -- name: GetAgentTask :one
-SELECT * FROM agent_task_queue
+SELECT * FROM multica_agent_task_queue
 WHERE id = $1;
 
 -- name: ClaimAgentTask :one
--- Claims the next queued task for an agent, enforcing per-(issue, agent) serialization:
--- a task is only claimable when no other task for the same issue AND same agent is
+-- Claims the next queued task for an multica_agent, enforcing per-(multica_issue, multica_agent) serialization:
+-- a task is only claimable when no other task for the same multica_issue AND same multica_agent is
 -- already dispatched or running. This allows different agents to work on the same
--- issue in parallel while preventing a single agent from running duplicate tasks.
+-- multica_issue in parallel while preventing a single multica_agent from running duplicate tasks.
 -- Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
--- Quick-create tasks have no issue / chat / autopilot link, so they serialize on
--- "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
+-- Quick-create tasks have no multica_issue / chat / multica_autopilot link, so they serialize on
+-- "any other quick-create-shaped task" (all four FKs NULL) for the same multica_agent —
 -- otherwise a user mashing the create button could fire concurrent quick-creates
--- whose completion lookup would race over "most recent issue by this agent".
-UPDATE agent_task_queue
+-- whose completion lookup would race over "most recent multica_issue by this multica_agent".
+UPDATE multica_agent_task_queue
 SET status = 'dispatched', dispatched_at = now()
 WHERE id = (
-    SELECT atq.id FROM agent_task_queue atq
+    SELECT atq.id FROM multica_agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
       AND NOT EXISTS (
-          SELECT 1 FROM agent_task_queue active
+          SELECT 1 FROM multica_agent_task_queue active
           WHERE active.agent_id = atq.agent_id
             AND active.status IN ('dispatched', 'running')
             AND (
@@ -245,10 +245,10 @@ RETURNING *;
 -- with no `started_at`, so the daemon has not acknowledged it via StartTask.
 -- Refresh dispatched_at so the server-side dispatch timeout measures from the
 -- recovered delivery attempt.
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET dispatched_at = now()
 WHERE id = (
-    SELECT atq.id FROM agent_task_queue atq
+    SELECT atq.id FROM multica_agent_task_queue atq
     WHERE atq.runtime_id = $1
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
@@ -260,13 +260,13 @@ WHERE id = (
 RETURNING *;
 
 -- name: StartAgentTask :one
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET status = 'running', started_at = now()
 WHERE id = $1 AND status = 'dispatched'
 RETURNING *;
 
 -- name: CompleteAgentTask :one
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2, session_id = $3, work_dir = $4
 WHERE id = $1 AND status = 'running'
 RETURNING *;
@@ -275,7 +275,7 @@ RETURNING *;
 -- Returns the session_id and work_dir from the most recent task for a given
 -- (agent_id, issue_id) pair, used for session resumption on the auto-retry
 -- path. We accept both 'completed' and 'failed' tasks: a failed task may
--- have established a real agent session before crashing (orphaned by a
+-- have established a real multica_agent session before crashing (orphaned by a
 -- daemon restart, runtime offline, or sweeper timeout), and the daemon pins
 -- the resume pointer mid-flight via UpdateAgentTaskSession. Without this,
 -- an auto-retry of a mid-run failure would silently start a fresh
@@ -291,7 +291,7 @@ RETURNING *;
 -- here so even auto-retry does not inherit the bad session. The daemon
 -- classifies these failures (iteration_limit, agent_fallback_message,
 -- api_invalid_request, codex_semantic_inactivity) when it detects either an
--- agent fallback marker in the output, an upstream API 400 that means the
+-- multica_agent fallback marker in the output, an upstream API 400 that means the
 -- conversation history itself is unprocessable (oversized image, malformed
 -- base64, etc.), or a Codex semantic inactivity timeout whose recorded
 -- session may replay the same stuck state.
@@ -304,7 +304,7 @@ RETURNING *;
 -- error text. Migration 079 backfills the failure_reason column itself,
 -- so observability stays accurate; this clause guarantees session resume
 -- never picks up a bad session even when failure_reason hasn't caught up.
-SELECT session_id, work_dir, runtime_id FROM agent_task_queue
+SELECT session_id, work_dir, runtime_id FROM multica_agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2
   AND (
     status = 'completed'
@@ -320,7 +320,7 @@ LIMIT 1;
 
 -- name: FailAgentTask :one
 -- Marks a task as failed. session_id and work_dir are merged via COALESCE so
--- if the agent already established a real session before failing (e.g. it
+-- if the multica_agent already established a real session before failing (e.g. it
 -- crashed mid-conversation, was cancelled, or hit a tool error) the resume
 -- pointer is preserved on the task row. The next chat task can then fall
 -- back to GetLastChatTaskSession and continue the conversation instead of
@@ -328,7 +328,7 @@ LIMIT 1;
 --
 -- failure_reason is a coarse classifier consumed by the auto-retry path;
 -- 'agent_error' is the safe default when the daemon doesn't supply one.
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET status = 'failed',
     completed_at = now(),
     error = $2,
@@ -342,7 +342,7 @@ RETURNING *;
 -- Pins the resume pointer mid-flight so a daemon crash leaves a usable
 -- session_id/work_dir on the task row. No-op if the task is no longer
 -- in dispatched/running.
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET session_id = COALESCE(sqlc.narg('session_id'), session_id),
     work_dir  = COALESCE(sqlc.narg('work_dir'), work_dir)
 WHERE id = $1 AND status IN ('dispatched', 'running');
@@ -352,7 +352,7 @@ WHERE id = $1 AND status IN ('dispatched', 'running');
 -- task that the prior incarnation of this runtime owned but did not
 -- finalize. Returns the failed rows so callers can hand them to the
 -- auto-retry path.
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET status = 'failed',
     completed_at = now(),
     error = 'daemon restarted while task was in flight',
@@ -363,8 +363,8 @@ RETURNING *;
 -- name: FailStaleTasks :many
 -- Fails tasks stuck in dispatched/running beyond the given thresholds.
 -- Handles cases where the daemon is alive but the task is orphaned
--- (e.g. agent process hung, daemon failed to report completion).
-UPDATE agent_task_queue
+-- (e.g. multica_agent process hung, daemon failed to report completion).
+UPDATE multica_agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'task timed out',
     failure_reason = 'timeout'
 WHERE (status = 'dispatched' AND dispatched_at < now() - make_interval(secs => @dispatch_timeout_secs::double precision))
@@ -395,14 +395,14 @@ RETURNING *;
 -- the DB when the backlog is large — the sweeper drains the rest on
 -- subsequent ticks.
 WITH victims AS (
-    SELECT id FROM agent_task_queue
+    SELECT id FROM multica_agent_task_queue
     WHERE status = 'queued'
       AND created_at < now() - make_interval(secs => @ttl_secs::double precision)
     ORDER BY created_at ASC
     LIMIT @max_per_tick::int
     FOR UPDATE SKIP LOCKED
 )
-UPDATE agent_task_queue t
+UPDATE multica_agent_task_queue t
 SET status = 'failed',
     completed_at = now(),
     error = 'task expired in queue',
@@ -414,48 +414,48 @@ WHERE t.id = v.id
 RETURNING t.*;
 
 -- name: CancelAgentTask :one
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE id = $1 AND status IN ('queued', 'dispatched', 'running')
 RETURNING *;
 
 -- name: CountRunningTasks :one
-SELECT count(*) FROM agent_task_queue
+SELECT count(*) FROM multica_agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running');
 
 -- name: HasActiveTaskForIssue :one
--- Returns true if there is any queued, dispatched, or running task for the issue.
-SELECT count(*) > 0 AS has_active FROM agent_task_queue
+-- Returns true if there is any queued, dispatched, or running task for the multica_issue.
+SELECT count(*) > 0 AS has_active FROM multica_agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running');
 
 -- name: HasPendingTaskForIssue :one
--- Returns true if there is a queued or dispatched (but not yet running) task for the issue.
+-- Returns true if there is a queued or dispatched (but not yet running) task for the multica_issue.
 -- Used by the coalescing queue: allow enqueue when a task is running (so
--- the agent picks up new comments on the next cycle) but skip if a pending
+-- the multica_agent picks up new comments on the next cycle) but skip if a pending
 -- task already exists (natural dedup).
-SELECT count(*) > 0 AS has_pending FROM agent_task_queue
+SELECT count(*) > 0 AS has_pending FROM multica_agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched');
 
 -- name: HasPendingTaskForIssueAndAgent :one
--- Returns true if a specific agent already has a queued or dispatched task
--- for the given issue. Used by @mention trigger dedup.
-SELECT count(*) > 0 AS has_pending FROM agent_task_queue
+-- Returns true if a specific multica_agent already has a queued or dispatched task
+-- for the given multica_issue. Used by @mention trigger dedup.
+SELECT count(*) > 0 AS has_pending FROM multica_agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched');
 
 -- name: GetLatestTaskIsLeaderForIssueAndAgent :one
--- Returns the is_leader_task flag of the agent's most recent task on this
--- issue, or NULL if the agent has never had a task on this issue. Used by
--- the squad-leader self-trigger guard to tell whether the agent's last
--- activity on the issue was in the leader role or the worker role (an
--- agent that holds both roles in a squad would otherwise be skipped by
+-- Returns the is_leader_task flag of the multica_agent's most recent task on this
+-- multica_issue, or NULL if the multica_agent has never had a task on this multica_issue. Used by
+-- the multica_squad-leader self-trigger guard to tell whether the multica_agent's last
+-- activity on the multica_issue was in the leader role or the worker role (an
+-- multica_agent that holds both roles in a multica_squad would otherwise be skipped by
 -- the role-blind authorID == leaderID check).
-SELECT is_leader_task FROM agent_task_queue
+SELECT is_leader_task FROM multica_agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2
 ORDER BY created_at DESC
 LIMIT 1;
 
 -- name: ListPendingTasksByRuntime :many
-SELECT * FROM agent_task_queue
+SELECT * FROM multica_agent_task_queue
 WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')
 ORDER BY priority DESC, created_at ASC;
 
@@ -464,41 +464,41 @@ ORDER BY priority DESC, created_at ASC;
 -- 'queued' (in contrast to ListPendingTasksByRuntime which also includes
 -- 'dispatched') because dispatched rows are by definition already owned
 -- and cannot be re-claimed — including them in the candidate list pads
--- the result with rows that always lose the per-(issue, agent) race in
+-- the result with rows that always lose the per-(multica_issue, multica_agent) race in
 -- ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
 -- runtime is busy on a long-running task. Backed by the partial index
 -- idx_agent_task_queue_claim_candidates so the warm path is cheap.
-SELECT * FROM agent_task_queue
+SELECT * FROM multica_agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
 ORDER BY priority DESC, created_at ASC;
 
 -- name: ListActiveTasksByIssue :many
--- Backs the issue-detail "agent live" banner. Includes 'queued' so the
+-- Backs the multica_issue-detail "multica_agent live" banner. Includes 'queued' so the
 -- banner shows up the moment a task is enqueued — not only after a runtime
 -- claims it. The queued window can be long when the runtime is offline or
 -- busy on a prior task, and a silent UI during that window looks like the
 -- platform never received the trigger.
-SELECT * FROM agent_task_queue
+SELECT * FROM multica_agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
 ORDER BY created_at DESC;
 
 -- name: GetWorkspaceAgentRunCounts :many
--- Total task runs per agent over the trailing 30 days, used by the Agents
+-- Total task runs per multica_agent over the trailing 30 days, used by the Agents
 -- list RUNS column. 30-day window keeps the count meaningful (a long-dormant
--- agent shouldn't show "5,420 runs from 2 years ago") and keeps the scan
--- bounded as the workspace ages.
+-- multica_agent shouldn't show "5,420 runs from 2 years ago") and keeps the scan
+-- bounded as the multica_workspace ages.
 SELECT
     atq.agent_id,
     COUNT(*)::int AS run_count
-FROM agent_task_queue atq
-JOIN agent a ON a.id = atq.agent_id
+FROM multica_agent_task_queue atq
+JOIN multica_agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
   AND atq.created_at > now() - INTERVAL '30 days'
 GROUP BY atq.agent_id;
 
 -- name: GetWorkspaceAgentActivity30d :many
--- Returns per-agent daily activity buckets for the last 30 days. Single
--- workspace-wide read backs both surfaces:
+-- Returns per-multica_agent daily activity buckets for the last 30 days. Single
+-- multica_workspace-wide read backs both surfaces:
 --   - Agents list ACTIVITY column — uses only the trailing 7 buckets
 --   - Agent detail "Last 30 days" panel — uses the full 30
 -- 30 days contains 7 days, so one fetch + a client-side .slice(-7) wins
@@ -506,7 +506,7 @@ GROUP BY atq.agent_id;
 -- front-end zero-fills.
 --
 -- Anchored on completed_at (not created_at) because the sparkline answers
--- "what did this agent produce?" not "what was queued at it?". A task that's
+-- "what did this multica_agent produce?" not "what was queued at it?". A task that's
 -- still in flight has no completed_at and contributes nothing here — that's
 -- correct: in-flight tasks are surfaced via the live presence indicator,
 -- not the historical trend.
@@ -515,8 +515,8 @@ SELECT
     DATE_TRUNC('day', atq.completed_at)::timestamptz AS bucket,
     COUNT(*)::int AS task_count,
     COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
-FROM agent_task_queue atq
-JOIN agent a ON a.id = atq.agent_id
+FROM multica_agent_task_queue atq
+JOIN multica_agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at > now() - INTERVAL '30 days'
@@ -524,25 +524,25 @@ GROUP BY atq.agent_id, bucket
 ORDER BY atq.agent_id, bucket;
 
 -- name: ListWorkspaceAgentTaskSnapshot :many
--- Returns the tasks needed to derive each agent's current presence:
+-- Returns the tasks needed to derive each multica_agent's current presence:
 --   - All active tasks (queued / dispatched / running) — for working signal + counts
---   - Each agent's most recent OUTCOME task (completed / failed) — for sticky
+--   - Each multica_agent's most recent OUTCOME task (completed / failed) — for sticky
 --     failed signal
 -- The front-end picks "active wins, else latest outcome" — see derive-presence.ts.
 --
 -- Cancelled tasks are excluded from the outcome half on purpose: cancel is a
 -- procedural signal ("attempt aborted"), not an outcome. It tells us nothing
--- about whether the agent works, so it must NOT be allowed to mask a prior
--- failure. Concretely: if an agent fails and then the user cancels the queued
--- retry (or the parent issue closes and cascades cancels), the failed signal
+-- about whether the multica_agent works, so it must NOT be allowed to mask a prior
+-- failure. Concretely: if an multica_agent fails and then the user cancels the queued
+-- retry (or the parent multica_issue closes and cascades cancels), the failed signal
 -- has to stay red. Only a real success (completed) or a fresh attempt (active)
 -- clears it.
 --
 -- No UI windows in SQL: stickiness is decided by "is the latest outcome a
--- failure?", not a 2-minute clock. JOINs agent because agent_task_queue has
+-- failure?", not a 2-minute clock. JOINs multica_agent because multica_agent_task_queue has
 -- no workspace_id column.
-SELECT atq.* FROM agent_task_queue atq
-JOIN agent a ON a.id = atq.agent_id
+SELECT atq.* FROM multica_agent_task_queue atq
+JOIN multica_agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
   AND atq.status IN ('queued', 'dispatched', 'running')
 
@@ -550,27 +550,27 @@ UNION ALL
 
 SELECT t.* FROM (
   SELECT DISTINCT ON (atq.agent_id) atq.*
-  FROM agent_task_queue atq
-  JOIN agent a ON a.id = atq.agent_id
+  FROM multica_agent_task_queue atq
+  JOIN multica_agent a ON a.id = atq.agent_id
   WHERE a.workspace_id = $1
     AND atq.status IN ('completed', 'failed')
   ORDER BY atq.agent_id, atq.completed_at DESC NULLS LAST
 ) t;
 
 -- name: ListTasksByIssue :many
-SELECT * FROM agent_task_queue
+SELECT * FROM multica_agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
 
 -- name: UpdateAgentStatus :one
-UPDATE agent SET status = $2, updated_at = now()
+UPDATE multica_agent SET status = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: RefreshAgentStatusFromTasks :one
-UPDATE agent AS a
+UPDATE multica_agent AS a
 SET status = CASE WHEN EXISTS (
-    SELECT 1 FROM agent_task_queue q
+    SELECT 1 FROM multica_agent_task_queue q
     WHERE q.agent_id = a.id AND q.status IN ('dispatched', 'running')
 ) THEN 'working' ELSE 'idle' END,
     updated_at = now()

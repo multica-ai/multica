@@ -1,17 +1,17 @@
 -- name: ListActivitiesForIssue :many
--- All activities for an issue in chronological order, capped at $2 (DB safety
+-- All activities for an multica_issue in chronological order, capped at $2 (DB safety
 -- net to bound the response).
-SELECT * FROM activity_log
+SELECT * FROM multica_activity_log
 WHERE issue_id = $1
 ORDER BY created_at ASC, id ASC
 LIMIT $2;
 
 -- name: GetActivity :one
-SELECT * FROM activity_log
+SELECT * FROM multica_activity_log
 WHERE id = $1;
 
 -- name: CreateActivity :one
-INSERT INTO activity_log (
+INSERT INTO multica_activity_log (
     workspace_id, issue_id, actor_type, actor_id, action, details
 ) VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
@@ -19,7 +19,7 @@ RETURNING *;
 -- name: HasSquadLeaderNoActionEvaluationForTask :one
 SELECT EXISTS (
   SELECT 1
-  FROM activity_log
+  FROM multica_activity_log
   WHERE issue_id = @issue_id
     AND actor_type = 'agent'
     AND actor_id = @agent_id
@@ -34,7 +34,7 @@ SELECT
   details->>'to_type' as assignee_type,
   details->>'to_id' as assignee_id,
   COUNT(*)::bigint as frequency
-FROM activity_log
+FROM multica_activity_log
 WHERE workspace_id = $1
   AND actor_id = $2
   AND actor_type = 'member'

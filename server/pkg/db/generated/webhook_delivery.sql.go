@@ -12,7 +12,7 @@ import (
 )
 
 const bumpWebhookDeliveryAttempt = `-- name: BumpWebhookDeliveryAttempt :one
-UPDATE webhook_delivery
+UPDATE multica_webhook_delivery
 SET attempt_count = attempt_count + 1,
     last_attempt_at = now()
 WHERE id = $1
@@ -22,9 +22,9 @@ RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_ke
 // On duplicate detection, bump attempt_count and refresh last_attempt_at on
 // the existing delivery so the UI / operator can see retry pressure without
 // creating a new row per attempt.
-func (q *Queries) BumpWebhookDeliveryAttempt(ctx context.Context, id pgtype.UUID) (WebhookDelivery, error) {
+func (q *Queries) BumpWebhookDeliveryAttempt(ctx context.Context, id pgtype.UUID) (MulticaWebhookDelivery, error) {
 	row := q.db.QueryRow(ctx, bumpWebhookDeliveryAttempt, id)
-	var i WebhookDelivery
+	var i MulticaWebhookDelivery
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -54,7 +54,7 @@ func (q *Queries) BumpWebhookDeliveryAttempt(ctx context.Context, id pgtype.UUID
 
 const createWebhookDelivery = `-- name: CreateWebhookDelivery :one
 
-INSERT INTO webhook_delivery (
+INSERT INTO multica_webhook_delivery (
     workspace_id, autopilot_id, trigger_id, provider, event,
     dedupe_key, dedupe_source, signature_status, status,
     selected_headers, content_type, raw_body,
@@ -89,7 +89,7 @@ type CreateWebhookDeliveryParams struct {
 // Inserts a delivery row. On dedupe-key collision the unique partial index
 // (trigger_id, dedupe_key) raises 23505 and the handler treats it as
 // "duplicate" rather than an error.
-func (q *Queries) CreateWebhookDelivery(ctx context.Context, arg CreateWebhookDeliveryParams) (WebhookDelivery, error) {
+func (q *Queries) CreateWebhookDelivery(ctx context.Context, arg CreateWebhookDeliveryParams) (MulticaWebhookDelivery, error) {
 	row := q.db.QueryRow(ctx, createWebhookDelivery,
 		arg.WorkspaceID,
 		arg.AutopilotID,
@@ -105,7 +105,7 @@ func (q *Queries) CreateWebhookDelivery(ctx context.Context, arg CreateWebhookDe
 		arg.RawBody,
 		arg.ReplayedFromDeliveryID,
 	)
-	var i WebhookDelivery
+	var i MulticaWebhookDelivery
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -134,13 +134,13 @@ func (q *Queries) CreateWebhookDelivery(ctx context.Context, arg CreateWebhookDe
 }
 
 const getWebhookDelivery = `-- name: GetWebhookDelivery :one
-SELECT id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at FROM webhook_delivery
+SELECT id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at FROM multica_webhook_delivery
 WHERE id = $1
 `
 
-func (q *Queries) GetWebhookDelivery(ctx context.Context, id pgtype.UUID) (WebhookDelivery, error) {
+func (q *Queries) GetWebhookDelivery(ctx context.Context, id pgtype.UUID) (MulticaWebhookDelivery, error) {
 	row := q.db.QueryRow(ctx, getWebhookDelivery, id)
-	var i WebhookDelivery
+	var i MulticaWebhookDelivery
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -169,7 +169,7 @@ func (q *Queries) GetWebhookDelivery(ctx context.Context, id pgtype.UUID) (Webho
 }
 
 const getWebhookDeliveryByTriggerAndDedupe = `-- name: GetWebhookDeliveryByTriggerAndDedupe :one
-SELECT id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at FROM webhook_delivery
+SELECT id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at FROM multica_webhook_delivery
 WHERE trigger_id = $1
   AND dedupe_key = $2
 ORDER BY (status IN ('rejected', 'failed')), created_at DESC
@@ -188,9 +188,9 @@ type GetWebhookDeliveryByTriggerAndDedupeParams struct {
 // key. Prefer non-terminal rows in the lookup: without the ORDER BY we
 // could return a stale rejection / failure even after the operator fixed
 // the cause and a fresh dispatch succeeded.
-func (q *Queries) GetWebhookDeliveryByTriggerAndDedupe(ctx context.Context, arg GetWebhookDeliveryByTriggerAndDedupeParams) (WebhookDelivery, error) {
+func (q *Queries) GetWebhookDeliveryByTriggerAndDedupe(ctx context.Context, arg GetWebhookDeliveryByTriggerAndDedupeParams) (MulticaWebhookDelivery, error) {
 	row := q.db.QueryRow(ctx, getWebhookDeliveryByTriggerAndDedupe, arg.TriggerID, arg.DedupeKey)
-	var i WebhookDelivery
+	var i MulticaWebhookDelivery
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -219,7 +219,7 @@ func (q *Queries) GetWebhookDeliveryByTriggerAndDedupe(ctx context.Context, arg 
 }
 
 const getWebhookDeliveryInWorkspace = `-- name: GetWebhookDeliveryInWorkspace :one
-SELECT id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at FROM webhook_delivery
+SELECT id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at FROM multica_webhook_delivery
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -229,9 +229,9 @@ type GetWebhookDeliveryInWorkspaceParams struct {
 }
 
 // Workspace-scoped read for authenticated detail / replay endpoints.
-func (q *Queries) GetWebhookDeliveryInWorkspace(ctx context.Context, arg GetWebhookDeliveryInWorkspaceParams) (WebhookDelivery, error) {
+func (q *Queries) GetWebhookDeliveryInWorkspace(ctx context.Context, arg GetWebhookDeliveryInWorkspaceParams) (MulticaWebhookDelivery, error) {
 	row := q.db.QueryRow(ctx, getWebhookDeliveryInWorkspace, arg.ID, arg.WorkspaceID)
-	var i WebhookDelivery
+	var i MulticaWebhookDelivery
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -266,8 +266,8 @@ SELECT
     d.attempt_count, d.content_type, d.response_status,
     d.autopilot_run_id, d.replayed_from_delivery_id, d.error,
     d.received_at, d.last_attempt_at, d.created_at
-FROM webhook_delivery d
-JOIN autopilot a ON a.id = d.autopilot_id
+FROM multica_webhook_delivery d
+JOIN multica_autopilot a ON a.id = d.autopilot_id
 WHERE d.autopilot_id = $1
   AND a.workspace_id = $2
 ORDER BY d.created_at DESC
@@ -303,7 +303,7 @@ type ListWebhookDeliveriesByAutopilotRow struct {
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
-// Workspace-scoped via the join so a runId from another workspace cannot
+// Workspace-scoped via the join so a runId from another multica_workspace cannot
 // leak. Newest first, paged by limit/offset.
 //
 // Projection: large columns (`raw_body`, `selected_headers`, `response_body`)
@@ -357,7 +357,7 @@ func (q *Queries) ListWebhookDeliveriesByAutopilot(ctx context.Context, arg List
 }
 
 const updateWebhookDeliveryDispatched = `-- name: UpdateWebhookDeliveryDispatched :one
-UPDATE webhook_delivery
+UPDATE multica_webhook_delivery
 SET status = $2,
     autopilot_run_id = $3,
     response_status = $4,
@@ -376,9 +376,9 @@ type UpdateWebhookDeliveryDispatchedParams struct {
 }
 
 // Finalises a delivery that successfully created (or skipped to) an
-// autopilot_run. response_status is the HTTP status we returned, recorded
+// multica_autopilot_run. response_status is the HTTP status we returned, recorded
 // alongside so the operator can correlate logs.
-func (q *Queries) UpdateWebhookDeliveryDispatched(ctx context.Context, arg UpdateWebhookDeliveryDispatchedParams) (WebhookDelivery, error) {
+func (q *Queries) UpdateWebhookDeliveryDispatched(ctx context.Context, arg UpdateWebhookDeliveryDispatchedParams) (MulticaWebhookDelivery, error) {
 	row := q.db.QueryRow(ctx, updateWebhookDeliveryDispatched,
 		arg.ID,
 		arg.Status,
@@ -386,7 +386,7 @@ func (q *Queries) UpdateWebhookDeliveryDispatched(ctx context.Context, arg Updat
 		arg.ResponseStatus,
 		arg.ResponseBody,
 	)
-	var i WebhookDelivery
+	var i MulticaWebhookDelivery
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -415,7 +415,7 @@ func (q *Queries) UpdateWebhookDeliveryDispatched(ctx context.Context, arg Updat
 }
 
 const updateWebhookDeliveryTerminal = `-- name: UpdateWebhookDeliveryTerminal :one
-UPDATE webhook_delivery
+UPDATE multica_webhook_delivery
 SET status = $2,
     error = $3,
     response_status = $4,
@@ -433,10 +433,10 @@ type UpdateWebhookDeliveryTerminalParams struct {
 	ResponseBody   pgtype.Text `json:"response_body"`
 }
 
-// Finalises a delivery without an autopilot_run link — rejected, ignored,
+// Finalises a delivery without an multica_autopilot_run link — rejected, ignored,
 // failed. Separate query so callers can't accidentally drop the run_id when
 // they only meant to set status/error.
-func (q *Queries) UpdateWebhookDeliveryTerminal(ctx context.Context, arg UpdateWebhookDeliveryTerminalParams) (WebhookDelivery, error) {
+func (q *Queries) UpdateWebhookDeliveryTerminal(ctx context.Context, arg UpdateWebhookDeliveryTerminalParams) (MulticaWebhookDelivery, error) {
 	row := q.db.QueryRow(ctx, updateWebhookDeliveryTerminal,
 		arg.ID,
 		arg.Status,
@@ -444,7 +444,7 @@ func (q *Queries) UpdateWebhookDeliveryTerminal(ctx context.Context, arg UpdateW
 		arg.ResponseStatus,
 		arg.ResponseBody,
 	)
-	var i WebhookDelivery
+	var i MulticaWebhookDelivery
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,

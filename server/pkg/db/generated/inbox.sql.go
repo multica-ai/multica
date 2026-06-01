@@ -12,7 +12,7 @@ import (
 )
 
 const archiveAllInbox = `-- name: ArchiveAllInbox :execrows
-UPDATE inbox_item SET archived = true
+UPDATE multica_inbox_item SET archived = true
 WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false
 `
 
@@ -30,7 +30,7 @@ func (q *Queries) ArchiveAllInbox(ctx context.Context, arg ArchiveAllInboxParams
 }
 
 const archiveAllReadInbox = `-- name: ArchiveAllReadInbox :execrows
-UPDATE inbox_item SET archived = true
+UPDATE multica_inbox_item SET archived = true
 WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND read = true AND archived = false
 `
 
@@ -48,9 +48,9 @@ func (q *Queries) ArchiveAllReadInbox(ctx context.Context, arg ArchiveAllReadInb
 }
 
 const archiveCompletedInbox = `-- name: ArchiveCompletedInbox :execrows
-UPDATE inbox_item i SET archived = true
+UPDATE multica_inbox_item i SET archived = true
 WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2 AND i.archived = false
-  AND i.issue_id IN (SELECT id FROM issue WHERE status IN ('done', 'cancelled'))
+  AND i.issue_id IN (SELECT id FROM multica_issue WHERE status IN ('done', 'cancelled'))
 `
 
 type ArchiveCompletedInboxParams struct {
@@ -67,7 +67,7 @@ func (q *Queries) ArchiveCompletedInbox(ctx context.Context, arg ArchiveComplete
 }
 
 const archiveInboxByIssue = `-- name: ArchiveInboxByIssue :execrows
-UPDATE inbox_item SET archived = true
+UPDATE multica_inbox_item SET archived = true
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false
 `
 
@@ -92,7 +92,7 @@ func (q *Queries) ArchiveInboxByIssue(ctx context.Context, arg ArchiveInboxByIss
 }
 
 const archiveInboxByIssueAndType = `-- name: ArchiveInboxByIssueAndType :many
-UPDATE inbox_item SET archived = true
+UPDATE multica_inbox_item SET archived = true
 WHERE workspace_id = $1 AND issue_id = $2 AND type = $3 AND archived = false
 RETURNING recipient_type, recipient_id
 `
@@ -129,14 +129,14 @@ func (q *Queries) ArchiveInboxByIssueAndType(ctx context.Context, arg ArchiveInb
 }
 
 const archiveInboxItem = `-- name: ArchiveInboxItem :one
-UPDATE inbox_item SET archived = true
+UPDATE multica_inbox_item SET archived = true
 WHERE id = $1
 RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
 `
 
-func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
+func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (MulticaInboxItem, error) {
 	row := q.db.QueryRow(ctx, archiveInboxItem, id)
-	var i InboxItem
+	var i MulticaInboxItem
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -158,7 +158,7 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 }
 
 const countUnreadInbox = `-- name: CountUnreadInbox :one
-SELECT count(*) FROM inbox_item
+SELECT count(*) FROM multica_inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false
 `
 
@@ -176,7 +176,7 @@ func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxPara
 }
 
 const createInboxItem = `-- name: CreateInboxItem :one
-INSERT INTO inbox_item (
+INSERT INTO multica_inbox_item (
     workspace_id, recipient_type, recipient_id,
     type, severity, issue_id, title, body,
     actor_type, actor_id, details
@@ -198,7 +198,7 @@ type CreateInboxItemParams struct {
 	Details       []byte      `json:"details"`
 }
 
-func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams) (InboxItem, error) {
+func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams) (MulticaInboxItem, error) {
 	row := q.db.QueryRow(ctx, createInboxItem,
 		arg.WorkspaceID,
 		arg.RecipientType,
@@ -212,7 +212,7 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 		arg.ActorID,
 		arg.Details,
 	)
-	var i InboxItem
+	var i MulticaInboxItem
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -234,13 +234,13 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 }
 
 const getInboxItem = `-- name: GetInboxItem :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details FROM inbox_item
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details FROM multica_inbox_item
 WHERE id = $1
 `
 
-func (q *Queries) GetInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
+func (q *Queries) GetInboxItem(ctx context.Context, id pgtype.UUID) (MulticaInboxItem, error) {
 	row := q.db.QueryRow(ctx, getInboxItem, id)
-	var i InboxItem
+	var i MulticaInboxItem
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -262,7 +262,7 @@ func (q *Queries) GetInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, 
 }
 
 const getInboxItemInWorkspace = `-- name: GetInboxItemInWorkspace :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details FROM inbox_item
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details FROM multica_inbox_item
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -271,9 +271,9 @@ type GetInboxItemInWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemInWorkspaceParams) (InboxItem, error) {
+func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemInWorkspaceParams) (MulticaInboxItem, error) {
 	row := q.db.QueryRow(ctx, getInboxItemInWorkspace, arg.ID, arg.WorkspaceID)
-	var i InboxItem
+	var i MulticaInboxItem
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -297,8 +297,8 @@ func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemI
 const listInboxItems = `-- name: ListInboxItems :many
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details,
        iss.status as issue_status
-FROM inbox_item i
-LEFT JOIN issue iss ON iss.id = i.issue_id
+FROM multica_inbox_item i
+LEFT JOIN multica_issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
 ORDER BY i.created_at DESC
 `
@@ -366,7 +366,7 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 }
 
 const markAllInboxRead = `-- name: MarkAllInboxRead :execrows
-UPDATE inbox_item SET read = true
+UPDATE multica_inbox_item SET read = true
 WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false AND read = false
 `
 
@@ -384,14 +384,14 @@ func (q *Queries) MarkAllInboxRead(ctx context.Context, arg MarkAllInboxReadPara
 }
 
 const markInboxRead = `-- name: MarkInboxRead :one
-UPDATE inbox_item SET read = true
+UPDATE multica_inbox_item SET read = true
 WHERE id = $1
 RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
 `
 
-func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
+func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (MulticaInboxItem, error) {
 	row := q.db.QueryRow(ctx, markInboxRead, id)
-	var i InboxItem
+	var i MulticaInboxItem
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,

@@ -14,7 +14,7 @@ import (
 const getRuntimeTaskHourlyActivity = `-- name: GetRuntimeTaskHourlyActivity :many
 SELECT EXTRACT(HOUR FROM started_at AT TIME ZONE $2::text)::int AS hour,
        COUNT(*)::int AS count
-FROM agent_task_queue
+FROM multica_agent_task_queue
 WHERE runtime_id = $1 AND started_at IS NOT NULL
 GROUP BY hour
 ORDER BY hour
@@ -62,8 +62,8 @@ SELECT
     SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
     SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
     COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
-JOIN agent_task_queue atq ON atq.id = tu.task_id
+FROM multica_task_usage tu
+JOIN multica_agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.runtime_id = $1
   AND tu.created_at >= $3::timestamptz
 GROUP BY EXTRACT(HOUR FROM tu.created_at AT TIME ZONE $2::text), tu.model
@@ -131,7 +131,7 @@ SELECT
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens
-FROM task_usage_hourly
+FROM multica_task_usage_hourly
 WHERE runtime_id = $1
   AND bucket_hour >= $3::timestamptz
 GROUP BY DATE(bucket_hour AT TIME ZONE $2::text), provider, model
@@ -154,7 +154,7 @@ type ListRuntimeUsageRow struct {
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
 }
 
-// Reads from the UTC-bucketed `task_usage_hourly` rollup table,
+// Reads from the UTC-bucketed `multica_task_usage_hourly` rollup table,
 // aggregated to per-(date, provider, model) under the
 // caller-supplied @tz. Powers the trend chart on the runtime detail
 // page and the per-row cost cell on the runtimes list.
@@ -199,8 +199,8 @@ SELECT
     SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
     SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
     COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
-JOIN agent_task_queue atq ON atq.id = tu.task_id
+FROM multica_task_usage tu
+JOIN multica_agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.runtime_id = $1
   AND tu.created_at >= $2::timestamptz
 GROUP BY atq.agent_id, tu.model
@@ -222,12 +222,12 @@ type ListRuntimeUsageByAgentRow struct {
 	TaskCount        int32       `json:"task_count"`
 }
 
-// Per-(agent, model) token aggregates for a runtime since a cutoff. Powers
-// the runtime-detail "Cost by agent" tab. task_usage only carries task_id,
+// Per-(multica_agent, model) token aggregates for a runtime since a cutoff. Powers
+// the runtime-detail "Cost by multica_agent" tab. multica_task_usage only carries task_id,
 // so we join the queue to expose agent_id. The model dimension is kept on
 // purpose: cost is computed client-side from a per-model pricing table, so
 // collapsing models server-side would erase the information needed to do
-// that arithmetic. The client groups by agent_id and sums cost per agent.
+// that arithmetic. The client groups by agent_id and sums cost per multica_agent.
 //
 // This view doesn't bucket by date, so it doesn't need @tz; only the
 // @since cutoff is provided in runtime-local terms (computed in Go).

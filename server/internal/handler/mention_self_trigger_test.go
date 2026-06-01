@@ -24,13 +24,13 @@ type selfMentionFixture struct {
 	JID        string
 	RuntimeID  string
 	IssueAID   string // primary issue (used for same-issue scenarios)
-	IssueA     db.Issue
+	IssueA     db.MulticaIssue
 	IssueBID   string // a second issue (used for the cross-issue scenario)
-	IssueB     db.Issue
+	IssueB     db.MulticaIssue
 	CommentAID string // a comment on IssueA authored by J — used as the trigger
-	CommentA   db.Comment
+	CommentA   db.MulticaComment
 	CommentBID string // a comment on IssueB authored by J — used as the trigger
-	CommentB   db.Comment
+	CommentB   db.MulticaComment
 }
 
 func newSelfMentionFixture(t *testing.T) selfMentionFixture {
@@ -40,12 +40,12 @@ func newSelfMentionFixture(t *testing.T) selfMentionFixture {
 	// Reuse the seeded workspace-visible agent — it already has a runtime.
 	var jID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+		SELECT id FROM multica_agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
 	`, testWorkspaceID).Scan(&jID); err != nil {
 		t.Fatalf("load seeded agent: %v", err)
 	}
 	var runtimeID string
-	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, jID).Scan(&runtimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM multica_agent WHERE id = $1`, jID).Scan(&runtimeID); err != nil {
 		t.Fatalf("load runtime: %v", err)
 	}
 
@@ -55,24 +55,24 @@ func newSelfMentionFixture(t *testing.T) selfMentionFixture {
 		// land on the default number=0 and trip uq_issue_workspace_number.
 		var number int
 		if err := testPool.QueryRow(ctx, `
-			UPDATE workspace
-			SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+			UPDATE multica_workspace
+			SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM multica_issue WHERE workspace_id = $1)) + 1
 			WHERE id = $1 RETURNING issue_counter
 		`, testWorkspaceID).Scan(&number); err != nil {
 			t.Fatalf("next issue number: %v", err)
 		}
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
+			INSERT INTO multica_issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
 			VALUES ($1, 'member', $2, $3, 'agent', $4, $5)
 			RETURNING id
 		`, testWorkspaceID, testUserID, title, jID, number).Scan(&id); err != nil {
 			t.Fatalf("create issue %q: %v", title, err)
 		}
 		t.Cleanup(func() {
-			testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, id)
-			testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, id)
-			testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id)
+			testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, id)
+			testPool.Exec(context.Background(), `DELETE FROM multica_comment WHERE issue_id = $1`, id)
+			testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, id)
 		})
 		return id
 	}
@@ -81,7 +81,7 @@ func newSelfMentionFixture(t *testing.T) selfMentionFixture {
 		t.Helper()
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
+			INSERT INTO multica_comment (workspace_id, issue_id, author_type, author_id, content)
 			VALUES ($1, $2, 'agent', $3, $4)
 			RETURNING id
 		`, testWorkspaceID, issueID, jID, content).Scan(&id); err != nil {
@@ -133,7 +133,7 @@ func countQueuedOrDispatched(t *testing.T, agentID, issueID string) int {
 	t.Helper()
 	var n int
 	if err := testPool.QueryRow(context.Background(), `
-		SELECT count(*) FROM agent_task_queue
+		SELECT count(*) FROM multica_agent_task_queue
 		WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched')
 	`, issueID, agentID).Scan(&n); err != nil {
 		t.Fatalf("count queued/dispatched tasks: %v", err)
@@ -179,7 +179,7 @@ func TestEnqueueMentionedAgentTasks_SelfMentionWhileRunningQueuesFollowup(t *tes
 
 	// Seed a running task for J on issue A — this is the agent's current run.
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status)
 		VALUES ($1, $2, $3, 'running')
 	`, fx.JID, fx.RuntimeID, fx.IssueAID); err != nil {
 		t.Fatalf("seed running task: %v", err)
@@ -217,11 +217,11 @@ func TestEnqueueMentionedAgentTasks_SelfMentionDedupesAgainstPendingTask(t *test
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.IssueAID); err != nil {
+			if _, err := testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, fx.IssueAID); err != nil {
 				t.Fatalf("reset tasks: %v", err)
 			}
 			if _, err := testPool.Exec(ctx, `
-				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status)
+				INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status)
 				VALUES ($1, $2, $3, $4)
 			`, fx.JID, fx.RuntimeID, fx.IssueAID, tc.status); err != nil {
 				t.Fatalf("seed %s task: %v", tc.status, err)

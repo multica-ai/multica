@@ -31,7 +31,7 @@ func (e *ActiveDuplicateError) Error() string {
 	return DuplicateMessage(e.Identifier, e.Title, e.Status)
 }
 
-func NewActiveDuplicateError(issue db.Issue, issuePrefix string) *ActiveDuplicateError {
+func NewActiveDuplicateError(issue db.MulticaIssue, issuePrefix string) *ActiveDuplicateError {
 	return &ActiveDuplicateError{
 		ID:         util.UUIDToString(issue.ID),
 		Identifier: fmt.Sprintf("%s-%d", issuePrefix, issue.Number),
@@ -48,16 +48,16 @@ func LockAndFindActiveDuplicate(
 	parentIssueID pgtype.UUID,
 	title string,
 	allowDuplicate bool,
-) (db.Issue, bool, error) {
+) (db.MulticaIssue, bool, error) {
 	normalizedTitle := NormalizeTitle(title)
 	if normalizedTitle == "" {
-		return db.Issue{}, false, nil
+		return db.MulticaIssue{}, false, nil
 	}
 	if err := q.LockIssueDuplicateKey(ctx, lockKey(workspaceID, projectID, parentIssueID, normalizedTitle)); err != nil {
-		return db.Issue{}, false, err
+		return db.MulticaIssue{}, false, err
 	}
 	if allowDuplicate {
-		return db.Issue{}, false, nil
+		return db.MulticaIssue{}, false, nil
 	}
 
 	duplicate, err := q.FindActiveDuplicateIssue(ctx, db.FindActiveDuplicateIssueParams{
@@ -68,9 +68,9 @@ func LockAndFindActiveDuplicate(
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Issue{}, false, nil
+			return db.MulticaIssue{}, false, nil
 		}
-		return db.Issue{}, false, err
+		return db.MulticaIssue{}, false, err
 	}
 	return duplicate, true, nil
 }

@@ -33,7 +33,7 @@ type InvitationResponse struct {
 	WorkspaceName string `json:"workspace_name,omitempty"`
 }
 
-func invitationToResponse(inv db.WorkspaceInvitation) InvitationResponse {
+func invitationToResponse(inv db.MulticaWorkspaceInvitation) InvitationResponse {
 	return InvitationResponse{
 		ID:            uuidToString(inv.ID),
 		WorkspaceID:   uuidToString(inv.WorkspaceID),

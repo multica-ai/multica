@@ -202,7 +202,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	}
 	isFirstAgent := len(agents) == 0
 
-	var assistant db.Agent
+	var assistant db.MulticaAgent
 	assistantCreated := false
 	for _, existing := range agents {
 		if existing.Name == onboardingAssistantName && existing.Visibility == "workspace" {
@@ -402,7 +402,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var issue db.Issue
+	var issue db.MulticaIssue
 	issueCreated := false
 	if foundIssue {
 		issue = existing

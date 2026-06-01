@@ -290,7 +290,7 @@ func handleTaskActivity(ctx context.Context, bus *events.Bus, queries *db.Querie
 
 // publishActivityEvent sends an activity:created event for WS broadcasting.
 // Payload matches frontend ActivityCreatedPayload: { issue_id, entry: TimelineEntry }
-func publishActivityEvent(bus *events.Bus, original events.Event, activity db.ActivityLog) {
+func publishActivityEvent(bus *events.Bus, original events.Event, activity db.MulticaActivityLog) {
 	actorType := ""
 	if activity.ActorType.Valid {
 		actorType = activity.ActorType.String

@@ -12,15 +12,15 @@ import (
 )
 
 const attachLabelToIssue = `-- name: AttachLabelToIssue :exec
-INSERT INTO issue_to_label (issue_id, label_id)
+INSERT INTO multica_issue_to_label (issue_id, label_id)
 SELECT $1::uuid, $2::uuid
 WHERE EXISTS (
-    SELECT 1 FROM issue i
+    SELECT 1 FROM multica_issue i
     WHERE i.id = $1::uuid
       AND i.workspace_id = $3::uuid
 )
 AND EXISTS (
-    SELECT 1 FROM issue_label l
+    SELECT 1 FROM multica_issue_label l
     WHERE l.id = $2::uuid
       AND l.workspace_id = $3::uuid
 )
@@ -33,8 +33,8 @@ type AttachLabelToIssueParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Workspace-guarded INSERT: the WHERE EXISTS clauses ensure both the issue
-// and the label belong to the given workspace. A future caller that forgets
+// Workspace-guarded INSERT: the WHERE EXISTS clauses ensure both the multica_issue
+// and the label belong to the given multica_workspace. A future caller that forgets
 // handler-level prechecks still cannot attach labels across workspaces.
 func (q *Queries) AttachLabelToIssue(ctx context.Context, arg AttachLabelToIssueParams) error {
 	_, err := q.db.Exec(ctx, attachLabelToIssue, arg.IssueID, arg.LabelID, arg.WorkspaceID)
@@ -42,7 +42,7 @@ func (q *Queries) AttachLabelToIssue(ctx context.Context, arg AttachLabelToIssue
 }
 
 const createLabel = `-- name: CreateLabel :one
-INSERT INTO issue_label (workspace_id, name, color)
+INSERT INTO multica_issue_label (workspace_id, name, color)
 VALUES ($1, $2, $3)
 RETURNING id, workspace_id, name, color, created_at, updated_at
 `
@@ -53,9 +53,9 @@ type CreateLabelParams struct {
 	Color       string      `json:"color"`
 }
 
-func (q *Queries) CreateLabel(ctx context.Context, arg CreateLabelParams) (IssueLabel, error) {
+func (q *Queries) CreateLabel(ctx context.Context, arg CreateLabelParams) (MulticaIssueLabel, error) {
 	row := q.db.QueryRow(ctx, createLabel, arg.WorkspaceID, arg.Name, arg.Color)
-	var i IssueLabel
+	var i MulticaIssueLabel
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -68,7 +68,7 @@ func (q *Queries) CreateLabel(ctx context.Context, arg CreateLabelParams) (Issue
 }
 
 const deleteLabel = `-- name: DeleteLabel :one
-DELETE FROM issue_label
+DELETE FROM multica_issue_label
 WHERE id = $1 AND workspace_id = $2
 RETURNING id
 `
@@ -88,11 +88,11 @@ func (q *Queries) DeleteLabel(ctx context.Context, arg DeleteLabelParams) (pgtyp
 }
 
 const detachLabelFromIssue = `-- name: DetachLabelFromIssue :exec
-DELETE FROM issue_to_label
+DELETE FROM multica_issue_to_label
 WHERE issue_id = $1::uuid
   AND label_id = $2::uuid
   AND EXISTS (
-      SELECT 1 FROM issue i
+      SELECT 1 FROM multica_issue i
       WHERE i.id = $1::uuid
         AND i.workspace_id = $3::uuid
   )
@@ -104,15 +104,15 @@ type DetachLabelFromIssueParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Workspace-guarded DELETE: only deletes if the issue is in the given
-// workspace. Mirror of the attach query.
+// Workspace-guarded DELETE: only deletes if the multica_issue is in the given
+// multica_workspace. Mirror of the attach query.
 func (q *Queries) DetachLabelFromIssue(ctx context.Context, arg DetachLabelFromIssueParams) error {
 	_, err := q.db.Exec(ctx, detachLabelFromIssue, arg.IssueID, arg.LabelID, arg.WorkspaceID)
 	return err
 }
 
 const getLabel = `-- name: GetLabel :one
-SELECT id, workspace_id, name, color, created_at, updated_at FROM issue_label
+SELECT id, workspace_id, name, color, created_at, updated_at FROM multica_issue_label
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -121,9 +121,9 @@ type GetLabelParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetLabel(ctx context.Context, arg GetLabelParams) (IssueLabel, error) {
+func (q *Queries) GetLabel(ctx context.Context, arg GetLabelParams) (MulticaIssueLabel, error) {
 	row := q.db.QueryRow(ctx, getLabel, arg.ID, arg.WorkspaceID)
-	var i IssueLabel
+	var i MulticaIssueLabel
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -136,20 +136,20 @@ func (q *Queries) GetLabel(ctx context.Context, arg GetLabelParams) (IssueLabel,
 }
 
 const listLabels = `-- name: ListLabels :many
-SELECT id, workspace_id, name, color, created_at, updated_at FROM issue_label
+SELECT id, workspace_id, name, color, created_at, updated_at FROM multica_issue_label
 WHERE workspace_id = $1
 ORDER BY LOWER(name) ASC
 `
 
-func (q *Queries) ListLabels(ctx context.Context, workspaceID pgtype.UUID) ([]IssueLabel, error) {
+func (q *Queries) ListLabels(ctx context.Context, workspaceID pgtype.UUID) ([]MulticaIssueLabel, error) {
 	rows, err := q.db.Query(ctx, listLabels, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []IssueLabel{}
+	items := []MulticaIssueLabel{}
 	for rows.Next() {
-		var i IssueLabel
+		var i MulticaIssueLabel
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -170,8 +170,8 @@ func (q *Queries) ListLabels(ctx context.Context, workspaceID pgtype.UUID) ([]Is
 
 const listLabelsByIssue = `-- name: ListLabelsByIssue :many
 SELECT l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at
-FROM issue_label l
-JOIN issue_to_label il ON il.label_id = l.id
+FROM multica_issue_label l
+JOIN multica_issue_to_label il ON il.label_id = l.id
 WHERE il.issue_id = $1::uuid
   AND l.workspace_id = $2::uuid
 ORDER BY LOWER(l.name) ASC
@@ -183,16 +183,16 @@ type ListLabelsByIssueParams struct {
 }
 
 // Workspace filter at the SQL layer (mirrors GetProjectInWorkspace). Any caller
-// that passes the wrong workspace gets an empty list rather than leaking labels.
-func (q *Queries) ListLabelsByIssue(ctx context.Context, arg ListLabelsByIssueParams) ([]IssueLabel, error) {
+// that passes the wrong multica_workspace gets an empty list rather than leaking labels.
+func (q *Queries) ListLabelsByIssue(ctx context.Context, arg ListLabelsByIssueParams) ([]MulticaIssueLabel, error) {
 	rows, err := q.db.Query(ctx, listLabelsByIssue, arg.IssueID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []IssueLabel{}
+	items := []MulticaIssueLabel{}
 	for rows.Next() {
-		var i IssueLabel
+		var i MulticaIssueLabel
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -213,8 +213,8 @@ func (q *Queries) ListLabelsByIssue(ctx context.Context, arg ListLabelsByIssuePa
 
 const listLabelsForIssues = `-- name: ListLabelsForIssues :many
 SELECT il.issue_id, l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at
-FROM issue_label l
-JOIN issue_to_label il ON il.label_id = l.id
+FROM multica_issue_label l
+JOIN multica_issue_to_label il ON il.label_id = l.id
 WHERE il.issue_id = ANY($1::uuid[])
   AND l.workspace_id = $2::uuid
 ORDER BY il.issue_id, LOWER(l.name) ASC
@@ -235,7 +235,7 @@ type ListLabelsForIssuesRow struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
-// Bulk variant: fetch labels for many issues in one round-trip so the issue
+// Bulk variant: fetch labels for many issues in one round-trip so the multica_issue
 // list endpoints can fold labels into each row without N+1 queries from the
 // client. Workspace-guarded the same way as ListLabelsByIssue.
 func (q *Queries) ListLabelsForIssues(ctx context.Context, arg ListLabelsForIssuesParams) ([]ListLabelsForIssuesRow, error) {
@@ -267,7 +267,7 @@ func (q *Queries) ListLabelsForIssues(ctx context.Context, arg ListLabelsForIssu
 }
 
 const updateLabel = `-- name: UpdateLabel :one
-UPDATE issue_label SET
+UPDATE multica_issue_label SET
     name = COALESCE($3, name),
     color = COALESCE($4, color),
     updated_at = now()
@@ -282,14 +282,14 @@ type UpdateLabelParams struct {
 	Color       pgtype.Text `json:"color"`
 }
 
-func (q *Queries) UpdateLabel(ctx context.Context, arg UpdateLabelParams) (IssueLabel, error) {
+func (q *Queries) UpdateLabel(ctx context.Context, arg UpdateLabelParams) (MulticaIssueLabel, error) {
 	row := q.db.QueryRow(ctx, updateLabel,
 		arg.ID,
 		arg.WorkspaceID,
 		arg.Name,
 		arg.Color,
 	)
-	var i IssueLabel
+	var i MulticaIssueLabel
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,

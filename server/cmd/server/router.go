@@ -106,6 +106,15 @@ type RouterOptions struct {
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
 	// tests leave this nil and get the legacy synchronous behavior.
 	HeartbeatScheduler handler.HeartbeatScheduler
+	// Casdoor SSO: when JWKSProvider is non-nil, the CasdoorAuth middleware
+	// is stacked before the legacy Auth middleware on protected routes.
+	// SubjectResolver maps Casdoor subject_id to a Multica user UUID.
+	JWKSProvider    *auth.JWKSProvider
+	SubjectResolver middleware.SubjectResolver
+	CasdoorEnabled  bool
+	// SkillProxy, when non-nil, enables the /api/agent-skills endpoints that
+	// proxy skill fetches to the costrict-web internal API.
+	SkillProxy *service.SkillProxy
 }
 
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) chi.Router {
@@ -138,6 +147,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
 		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
 		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
+		// Casdoor SSO — enabled when CASDOOR_ENDPOINT is set.
+		CasdoorEndpoint:       strings.TrimRight(os.Getenv("CASDOOR_ENDPOINT"), "/"),
+		CasdoorPublicEndpoint: strings.TrimRight(os.Getenv("CASDOOR_PUBLIC_ENDPOINT"), "/"),
+		CasdoorClientID:       os.Getenv("CASDOOR_CLIENT_ID"),
+		CasdoorClientSecret:   os.Getenv("CASDOOR_CLIENT_SECRET"),
+		CasdoorRedirectURI:    os.Getenv("CASDOOR_REDIRECT_URI"),
+		CasdoorOrgName:      os.Getenv("CASDOOR_ORG_NAME"),
+		CasdoorAppName:      os.Getenv("CASDOOR_APP_NAME"),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.DaemonWakeup != nil {
@@ -252,6 +269,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/logout", h.Logout)
 
+	// Casdoor SSO routes (only registered when Casdoor is enabled)
+	if opts.CasdoorEnabled {
+		r.Get("/auth/casdoor/login", h.CasdoorLogin)
+		r.Get("/auth/casdoor/callback", h.CasdoorCallback)
+	}
+
 	// Public API
 	r.Get("/api/config", h.GetConfig)
 	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
@@ -302,6 +325,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Protected API routes
 	r.Group(func(r chi.Router) {
+		if opts.JWKSProvider != nil {
+			r.Use(middleware.CasdoorAuth(opts.JWKSProvider, opts.SubjectResolver))
+		}
 		r.Use(middleware.Auth(queries, patCache))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
@@ -694,6 +720,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Put("/", h.UpdateNotificationPreferences)
 			})
 		})
+
+		// Agent skills proxy — forwards to costrict-web internal API.
+		// Only registered when the proxy is configured (COSTRICT_API_INTERNAL set).
+		if opts.SkillProxy != nil {
+			sph := handler.NewSkillProxyHandler(opts.SkillProxy)
+			r.Get("/api/agent-skills", sph.ListAgentSkills)
+			r.Get("/api/agent-skills/{id}", sph.GetAgentSkill)
+		}
 	})
 
 	return r

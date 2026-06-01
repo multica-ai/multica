@@ -88,7 +88,7 @@ func slimDeliveryToResponse(d db.ListWebhookDeliveriesByAutopilotRow) WebhookDel
 	return resp
 }
 
-func deliveryToResponse(d db.WebhookDelivery, detail bool) WebhookDeliveryResponse {
+func deliveryToResponse(d db.MulticaWebhookDelivery, detail bool) WebhookDeliveryResponse {
 	resp := WebhookDeliveryResponse{
 		ID:              uuidToString(d.ID),
 		WorkspaceID:     uuidToString(d.WorkspaceID),
@@ -352,10 +352,10 @@ func (h *Handler) ReplayAutopilotDelivery(w http.ResponseWriter, r *http.Request
 // same workspace AND belongs to the given autopilot. Cross-autopilot or
 // cross-workspace IDs are returned as 404 — defense in depth against ID
 // guessing.
-func (h *Handler) loadDeliveryForAutopilot(w http.ResponseWriter, r *http.Request, autopilot db.Autopilot, deliveryID string) (db.WebhookDelivery, bool) {
+func (h *Handler) loadDeliveryForAutopilot(w http.ResponseWriter, r *http.Request, autopilot db.MulticaAutopilot, deliveryID string) (db.MulticaWebhookDelivery, bool) {
 	deliveryUUID, ok := parseUUIDOrBadRequest(w, deliveryID, "delivery id")
 	if !ok {
-		return db.WebhookDelivery{}, false
+		return db.MulticaWebhookDelivery{}, false
 	}
 	delivery, err := h.Queries.GetWebhookDeliveryInWorkspace(r.Context(), db.GetWebhookDeliveryInWorkspaceParams{
 		ID:          deliveryUUID,
@@ -364,14 +364,14 @@ func (h *Handler) loadDeliveryForAutopilot(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "delivery not found")
-			return db.WebhookDelivery{}, false
+			return db.MulticaWebhookDelivery{}, false
 		}
 		writeError(w, http.StatusInternalServerError, "failed to load delivery")
-		return db.WebhookDelivery{}, false
+		return db.MulticaWebhookDelivery{}, false
 	}
 	if uuidToString(delivery.AutopilotID) != uuidToString(autopilot.ID) {
 		writeError(w, http.StatusNotFound, "delivery not found")
-		return db.WebhookDelivery{}, false
+		return db.MulticaWebhookDelivery{}, false
 	}
 	return delivery, true
 }

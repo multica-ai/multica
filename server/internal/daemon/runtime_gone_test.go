@@ -474,7 +474,7 @@ func TestHandleRuntimeGone_PartialWorkspaceRecoveryKeepsSibling(t *testing.T) {
 		}
 	}
 	if _, ok := seen["rt-codex-1"]; !ok {
-		t.Fatalf("surviving codex runtime missing from workspace state after recovery: %v", got)
+		t.Fatalf("surviving codex runtime missing from multica_workspace state after recovery: %v", got)
 	}
 	if _, ok := seen["rt-claude-1"]; ok {
 		t.Fatalf("deleted claude runtime should not be in workspace state: %v", got)

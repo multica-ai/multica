@@ -12,7 +12,7 @@ import (
 )
 
 const createVerificationCode = `-- name: CreateVerificationCode :one
-INSERT INTO verification_code (email, code, expires_at)
+INSERT INTO multica_verification_code (email, code, expires_at)
 VALUES ($1, $2, $3)
 RETURNING id, email, code, expires_at, used, created_at, attempts
 `
@@ -23,9 +23,9 @@ type CreateVerificationCodeParams struct {
 	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 }
 
-func (q *Queries) CreateVerificationCode(ctx context.Context, arg CreateVerificationCodeParams) (VerificationCode, error) {
+func (q *Queries) CreateVerificationCode(ctx context.Context, arg CreateVerificationCodeParams) (MulticaVerificationCode, error) {
 	row := q.db.QueryRow(ctx, createVerificationCode, arg.Email, arg.Code, arg.ExpiresAt)
-	var i VerificationCode
+	var i MulticaVerificationCode
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -39,7 +39,7 @@ func (q *Queries) CreateVerificationCode(ctx context.Context, arg CreateVerifica
 }
 
 const deleteExpiredVerificationCodes = `-- name: DeleteExpiredVerificationCodes :exec
-DELETE FROM verification_code
+DELETE FROM multica_verification_code
 WHERE expires_at < now() - interval '1 hour'
 `
 
@@ -49,15 +49,15 @@ func (q *Queries) DeleteExpiredVerificationCodes(ctx context.Context) error {
 }
 
 const getLatestCodeByEmail = `-- name: GetLatestCodeByEmail :one
-SELECT id, email, code, expires_at, used, created_at, attempts FROM verification_code
+SELECT id, email, code, expires_at, used, created_at, attempts FROM multica_verification_code
 WHERE email = $1
 ORDER BY created_at DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLatestCodeByEmail(ctx context.Context, email string) (VerificationCode, error) {
+func (q *Queries) GetLatestCodeByEmail(ctx context.Context, email string) (MulticaVerificationCode, error) {
 	row := q.db.QueryRow(ctx, getLatestCodeByEmail, email)
-	var i VerificationCode
+	var i MulticaVerificationCode
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -71,7 +71,7 @@ func (q *Queries) GetLatestCodeByEmail(ctx context.Context, email string) (Verif
 }
 
 const getLatestVerificationCode = `-- name: GetLatestVerificationCode :one
-SELECT id, email, code, expires_at, used, created_at, attempts FROM verification_code
+SELECT id, email, code, expires_at, used, created_at, attempts FROM multica_verification_code
 WHERE email = $1
   AND used = FALSE
   AND expires_at > now()
@@ -80,9 +80,9 @@ ORDER BY created_at DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLatestVerificationCode(ctx context.Context, email string) (VerificationCode, error) {
+func (q *Queries) GetLatestVerificationCode(ctx context.Context, email string) (MulticaVerificationCode, error) {
 	row := q.db.QueryRow(ctx, getLatestVerificationCode, email)
-	var i VerificationCode
+	var i MulticaVerificationCode
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -96,7 +96,7 @@ func (q *Queries) GetLatestVerificationCode(ctx context.Context, email string) (
 }
 
 const incrementVerificationCodeAttempts = `-- name: IncrementVerificationCodeAttempts :exec
-UPDATE verification_code
+UPDATE multica_verification_code
 SET attempts = attempts + 1
 WHERE id = $1
 `
@@ -107,7 +107,7 @@ func (q *Queries) IncrementVerificationCodeAttempts(ctx context.Context, id pgty
 }
 
 const markVerificationCodeUsed = `-- name: MarkVerificationCodeUsed :exec
-UPDATE verification_code
+UPDATE multica_verification_code
 SET used = TRUE
 WHERE id = $1
 `

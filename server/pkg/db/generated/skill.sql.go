@@ -12,7 +12,7 @@ import (
 )
 
 const addAgentSkill = `-- name: AddAgentSkill :exec
-INSERT INTO agent_skill (agent_id, skill_id)
+INSERT INTO multica_agent_skill (agent_id, skill_id)
 VALUES ($1, $2)
 ON CONFLICT DO NOTHING
 `
@@ -28,7 +28,7 @@ func (q *Queries) AddAgentSkill(ctx context.Context, arg AddAgentSkillParams) er
 }
 
 const createSkill = `-- name: CreateSkill :one
-INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+INSERT INTO multica_skill (workspace_id, name, description, content, config, created_by)
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at
 `
@@ -42,7 +42,7 @@ type CreateSkillParams struct {
 	CreatedBy   pgtype.UUID `json:"created_by"`
 }
 
-func (q *Queries) CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill, error) {
+func (q *Queries) CreateSkill(ctx context.Context, arg CreateSkillParams) (MulticaSkill, error) {
 	row := q.db.QueryRow(ctx, createSkill,
 		arg.WorkspaceID,
 		arg.Name,
@@ -51,7 +51,7 @@ func (q *Queries) CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill
 		arg.Config,
 		arg.CreatedBy,
 	)
-	var i Skill
+	var i MulticaSkill
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -67,7 +67,7 @@ func (q *Queries) CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill
 }
 
 const deleteSkill = `-- name: DeleteSkill :exec
-DELETE FROM skill WHERE id = $1 AND workspace_id = $2
+DELETE FROM multica_skill WHERE id = $1 AND workspace_id = $2
 `
 
 type DeleteSkillParams struct {
@@ -82,7 +82,7 @@ func (q *Queries) DeleteSkill(ctx context.Context, arg DeleteSkillParams) error 
 }
 
 const deleteSkillFile = `-- name: DeleteSkillFile :exec
-DELETE FROM skill_file WHERE id = $1
+DELETE FROM multica_skill_file WHERE id = $1
 `
 
 func (q *Queries) DeleteSkillFile(ctx context.Context, id pgtype.UUID) error {
@@ -91,7 +91,7 @@ func (q *Queries) DeleteSkillFile(ctx context.Context, id pgtype.UUID) error {
 }
 
 const deleteSkillFilesBySkill = `-- name: DeleteSkillFilesBySkill :exec
-DELETE FROM skill_file WHERE skill_id = $1
+DELETE FROM multica_skill_file WHERE skill_id = $1
 `
 
 func (q *Queries) DeleteSkillFilesBySkill(ctx context.Context, skillID pgtype.UUID) error {
@@ -100,13 +100,13 @@ func (q *Queries) DeleteSkillFilesBySkill(ctx context.Context, skillID pgtype.UU
 }
 
 const getSkill = `-- name: GetSkill :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM multica_skill
 WHERE id = $1
 `
 
-func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (Skill, error) {
+func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (MulticaSkill, error) {
 	row := q.db.QueryRow(ctx, getSkill, id)
-	var i Skill
+	var i MulticaSkill
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -122,7 +122,7 @@ func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (Skill, error) {
 }
 
 const getSkillByWorkspaceAndName = `-- name: GetSkillByWorkspaceAndName :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM multica_skill
 WHERE workspace_id = $1 AND name = $2
 `
 
@@ -131,13 +131,13 @@ type GetSkillByWorkspaceAndNameParams struct {
 	Name        string      `json:"name"`
 }
 
-// Used by agent-template materialization to implement find-or-create: when a
-// template references a skill by name that already exists in the workspace,
+// Used by multica_agent-template materialization to implement find-or-create: when a
+// template references a multica_skill by name that already exists in the multica_workspace,
 // reuse the existing skill_id rather than INSERT (which would fail the
 // UNIQUE(workspace_id, name) constraint from migration 008).
-func (q *Queries) GetSkillByWorkspaceAndName(ctx context.Context, arg GetSkillByWorkspaceAndNameParams) (Skill, error) {
+func (q *Queries) GetSkillByWorkspaceAndName(ctx context.Context, arg GetSkillByWorkspaceAndNameParams) (MulticaSkill, error) {
 	row := q.db.QueryRow(ctx, getSkillByWorkspaceAndName, arg.WorkspaceID, arg.Name)
-	var i Skill
+	var i MulticaSkill
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -153,13 +153,13 @@ func (q *Queries) GetSkillByWorkspaceAndName(ctx context.Context, arg GetSkillBy
 }
 
 const getSkillFile = `-- name: GetSkillFile :one
-SELECT id, skill_id, path, content, created_at, updated_at FROM skill_file
+SELECT id, skill_id, path, content, created_at, updated_at FROM multica_skill_file
 WHERE id = $1
 `
 
-func (q *Queries) GetSkillFile(ctx context.Context, id pgtype.UUID) (SkillFile, error) {
+func (q *Queries) GetSkillFile(ctx context.Context, id pgtype.UUID) (MulticaSkillFile, error) {
 	row := q.db.QueryRow(ctx, getSkillFile, id)
-	var i SkillFile
+	var i MulticaSkillFile
 	err := row.Scan(
 		&i.ID,
 		&i.SkillID,
@@ -172,7 +172,7 @@ func (q *Queries) GetSkillFile(ctx context.Context, id pgtype.UUID) (SkillFile, 
 }
 
 const getSkillInWorkspace = `-- name: GetSkillInWorkspace :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM multica_skill
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -181,9 +181,9 @@ type GetSkillInWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetSkillInWorkspace(ctx context.Context, arg GetSkillInWorkspaceParams) (Skill, error) {
+func (q *Queries) GetSkillInWorkspace(ctx context.Context, arg GetSkillInWorkspaceParams) (MulticaSkill, error) {
 	row := q.db.QueryRow(ctx, getSkillInWorkspace, arg.ID, arg.WorkspaceID)
-	var i Skill
+	var i MulticaSkill
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -200,8 +200,8 @@ func (q *Queries) GetSkillInWorkspace(ctx context.Context, arg GetSkillInWorkspa
 
 const listAgentSkillSummaries = `-- name: ListAgentSkillSummaries :many
 SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at
-FROM skill s
-JOIN agent_skill ask ON ask.skill_id = s.id
+FROM multica_skill s
+JOIN multica_agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
 ORDER BY s.name ASC
 `
@@ -217,7 +217,7 @@ type ListAgentSkillSummariesRow struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
-// Summary variant for the agent skills list endpoint — omits `content` for
+// Summary variant for the multica_agent skills list endpoint — omits `content` for
 // the same reason as ListSkillSummariesByWorkspace.
 func (q *Queries) ListAgentSkillSummaries(ctx context.Context, agentID pgtype.UUID) ([]ListAgentSkillSummariesRow, error) {
 	rows, err := q.db.Query(ctx, listAgentSkillSummaries, agentID)
@@ -250,22 +250,22 @@ func (q *Queries) ListAgentSkillSummaries(ctx context.Context, agentID pgtype.UU
 
 const listAgentSkills = `-- name: ListAgentSkills :many
 
-SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at FROM skill s
-JOIN agent_skill ask ON ask.skill_id = s.id
+SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at FROM multica_skill s
+JOIN multica_agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
 ORDER BY s.name ASC
 `
 
 // Agent-Skill junction
-func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]Skill, error) {
+func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]MulticaSkill, error) {
 	rows, err := q.db.Query(ctx, listAgentSkills, agentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Skill{}
+	items := []MulticaSkill{}
 	for rows.Next() {
-		var i Skill
+		var i MulticaSkill
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -289,8 +289,8 @@ func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]S
 
 const listAgentSkillsByWorkspace = `-- name: ListAgentSkillsByWorkspace :many
 SELECT ask.agent_id, s.id, s.name, s.description
-FROM agent_skill ask
-JOIN skill s ON s.id = ask.skill_id
+FROM multica_agent_skill ask
+JOIN multica_skill s ON s.id = ask.skill_id
 WHERE s.workspace_id = $1
 ORDER BY s.name ASC
 `
@@ -329,21 +329,21 @@ func (q *Queries) ListAgentSkillsByWorkspace(ctx context.Context, workspaceID pg
 
 const listSkillFiles = `-- name: ListSkillFiles :many
 
-SELECT id, skill_id, path, content, created_at, updated_at FROM skill_file
+SELECT id, skill_id, path, content, created_at, updated_at FROM multica_skill_file
 WHERE skill_id = $1
 ORDER BY path ASC
 `
 
 // Skill File CRUD
-func (q *Queries) ListSkillFiles(ctx context.Context, skillID pgtype.UUID) ([]SkillFile, error) {
+func (q *Queries) ListSkillFiles(ctx context.Context, skillID pgtype.UUID) ([]MulticaSkillFile, error) {
 	rows, err := q.db.Query(ctx, listSkillFiles, skillID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []SkillFile{}
+	items := []MulticaSkillFile{}
 	for rows.Next() {
-		var i SkillFile
+		var i MulticaSkillFile
 		if err := rows.Scan(
 			&i.ID,
 			&i.SkillID,
@@ -364,7 +364,7 @@ func (q *Queries) ListSkillFiles(ctx context.Context, skillID pgtype.UUID) ([]Sk
 
 const listSkillSummariesByWorkspace = `-- name: ListSkillSummariesByWorkspace :many
 SELECT id, workspace_id, name, description, config, created_by, created_at, updated_at
-FROM skill
+FROM multica_skill
 WHERE workspace_id = $1
 ORDER BY name ASC
 `
@@ -415,21 +415,21 @@ func (q *Queries) ListSkillSummariesByWorkspace(ctx context.Context, workspaceID
 
 const listSkillsByWorkspace = `-- name: ListSkillsByWorkspace :many
 
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM multica_skill
 WHERE workspace_id = $1
 ORDER BY name ASC
 `
 
 // Skill CRUD
-func (q *Queries) ListSkillsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]Skill, error) {
+func (q *Queries) ListSkillsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]MulticaSkill, error) {
 	rows, err := q.db.Query(ctx, listSkillsByWorkspace, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Skill{}
+	items := []MulticaSkill{}
 	for rows.Next() {
-		var i Skill
+		var i MulticaSkill
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -452,7 +452,7 @@ func (q *Queries) ListSkillsByWorkspace(ctx context.Context, workspaceID pgtype.
 }
 
 const removeAgentSkill = `-- name: RemoveAgentSkill :exec
-DELETE FROM agent_skill
+DELETE FROM multica_agent_skill
 WHERE agent_id = $1 AND skill_id = $2
 `
 
@@ -467,7 +467,7 @@ func (q *Queries) RemoveAgentSkill(ctx context.Context, arg RemoveAgentSkillPara
 }
 
 const removeAllAgentSkills = `-- name: RemoveAllAgentSkills :exec
-DELETE FROM agent_skill WHERE agent_id = $1
+DELETE FROM multica_agent_skill WHERE agent_id = $1
 `
 
 func (q *Queries) RemoveAllAgentSkills(ctx context.Context, agentID pgtype.UUID) error {
@@ -476,7 +476,7 @@ func (q *Queries) RemoveAllAgentSkills(ctx context.Context, agentID pgtype.UUID)
 }
 
 const updateSkill = `-- name: UpdateSkill :one
-UPDATE skill SET
+UPDATE multica_skill SET
     name = COALESCE($2, name),
     description = COALESCE($3, description),
     content = COALESCE($4, content),
@@ -494,7 +494,7 @@ type UpdateSkillParams struct {
 	Config      []byte      `json:"config"`
 }
 
-func (q *Queries) UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill, error) {
+func (q *Queries) UpdateSkill(ctx context.Context, arg UpdateSkillParams) (MulticaSkill, error) {
 	row := q.db.QueryRow(ctx, updateSkill,
 		arg.ID,
 		arg.Name,
@@ -502,7 +502,7 @@ func (q *Queries) UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill
 		arg.Content,
 		arg.Config,
 	)
-	var i Skill
+	var i MulticaSkill
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -518,7 +518,7 @@ func (q *Queries) UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill
 }
 
 const upsertSkillFile = `-- name: UpsertSkillFile :one
-INSERT INTO skill_file (skill_id, path, content)
+INSERT INTO multica_skill_file (skill_id, path, content)
 VALUES ($1, $2, $3)
 ON CONFLICT (skill_id, path) DO UPDATE SET
     content = EXCLUDED.content,
@@ -532,9 +532,9 @@ type UpsertSkillFileParams struct {
 	Content string      `json:"content"`
 }
 
-func (q *Queries) UpsertSkillFile(ctx context.Context, arg UpsertSkillFileParams) (SkillFile, error) {
+func (q *Queries) UpsertSkillFile(ctx context.Context, arg UpsertSkillFileParams) (MulticaSkillFile, error) {
 	row := q.db.QueryRow(ctx, upsertSkillFile, arg.SkillID, arg.Path, arg.Content)
-	var i SkillFile
+	var i MulticaSkillFile
 	err := row.Scan(
 		&i.ID,
 		&i.SkillID,

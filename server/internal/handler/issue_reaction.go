@@ -20,7 +20,7 @@ type IssueReactionResponse struct {
 	CreatedAt string `json:"created_at"`
 }
 
-func issueReactionToResponse(r db.IssueReaction) IssueReactionResponse {
+func issueReactionToResponse(r db.MulticaIssueReaction) IssueReactionResponse {
 	return IssueReactionResponse{
 		ID:        uuidToString(r.ID),
 		IssueID:   uuidToString(r.IssueID),

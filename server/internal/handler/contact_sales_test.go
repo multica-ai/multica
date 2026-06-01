@@ -35,12 +35,12 @@ func validContactSalesRequest() CreateContactSalesRequest {
 func clearContactSalesForEmail(t *testing.T, email string) {
 	t.Helper()
 	if _, err := testPool.Exec(context.Background(),
-		`DELETE FROM contact_sales_inquiry WHERE business_email = $1`, email); err != nil {
+		`DELETE FROM multica_contact_sales_inquiry WHERE business_email = $1`, email); err != nil {
 		t.Fatalf("clear contact_sales_inquiry: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM contact_sales_inquiry WHERE business_email = $1`, email)
+			`DELETE FROM multica_contact_sales_inquiry WHERE business_email = $1`, email)
 	})
 }
 
@@ -226,7 +226,7 @@ func TestCreateContactSalesNormalizesDisplayNameEmail(t *testing.T) {
 
 	var stored string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT business_email FROM contact_sales_inquiry WHERE business_email = $1`,
+		`SELECT business_email FROM multica_contact_sales_inquiry WHERE business_email = $1`,
 		"ada@display-name.example").Scan(&stored); err != nil {
 		t.Fatalf("expected row with canonical email persisted: %v", err)
 	}

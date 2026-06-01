@@ -25,7 +25,7 @@ import (
 // — e.g. one starts allowing "starting" runtimes while another doesn't, and
 // the bug only surfaces when a user assigns the same squad through two
 // different entry points. Touch this function, all three paths move together.
-func AgentReadiness(ctx context.Context, q *db.Queries, agent db.Agent) (ready bool, reason string, err error) {
+func AgentReadiness(ctx context.Context, q *db.Queries, agent db.MulticaAgent) (ready bool, reason string, err error) {
 	if agent.ArchivedAt.Valid {
 		return false, "agent is archived", nil
 	}

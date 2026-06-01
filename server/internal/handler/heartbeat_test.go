@@ -66,7 +66,7 @@ func (f *fakeLivenessStore) touchCount() int {
 func readRuntimeRow(t *testing.T, runtimeID string) (status string, lastSeen time.Time, updatedAt time.Time) {
 	t.Helper()
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT status, last_seen_at, updated_at FROM agent_runtime WHERE id = $1`, runtimeID,
+		`SELECT status, last_seen_at, updated_at FROM multica_agent_runtime WHERE id = $1`, runtimeID,
 	).Scan(&status, &lastSeen, &updatedAt); err != nil {
 		t.Fatalf("read runtime row: %v", err)
 	}
@@ -76,7 +76,7 @@ func readRuntimeRow(t *testing.T, runtimeID string) (status string, lastSeen tim
 func setRuntimeLastSeenAt(t *testing.T, runtimeID string, when time.Time) {
 	t.Helper()
 	if _, err := testPool.Exec(context.Background(),
-		`UPDATE agent_runtime SET last_seen_at = $1 WHERE id = $2`, when, runtimeID,
+		`UPDATE multica_agent_runtime SET last_seen_at = $1 WHERE id = $2`, when, runtimeID,
 	); err != nil {
 		t.Fatalf("force last_seen_at: %v", err)
 	}
@@ -85,7 +85,7 @@ func setRuntimeLastSeenAt(t *testing.T, runtimeID string, when time.Time) {
 func setRuntimeStatus(t *testing.T, runtimeID, status string) {
 	t.Helper()
 	if _, err := testPool.Exec(context.Background(),
-		`UPDATE agent_runtime SET status = $1 WHERE id = $2`, status, runtimeID,
+		`UPDATE multica_agent_runtime SET status = $1 WHERE id = $2`, status, runtimeID,
 	); err != nil {
 		t.Fatalf("force status: %v", err)
 	}
@@ -93,7 +93,7 @@ func setRuntimeStatus(t *testing.T, runtimeID, status string) {
 
 // loadRuntime is a thin wrapper around the sqlc query to keep the test bodies
 // short.
-func loadRuntime(t *testing.T, runtimeID string) db.AgentRuntime {
+func loadRuntime(t *testing.T, runtimeID string) db.MulticaAgentRuntime {
 	t.Helper()
 	uuid, err := pgUUID(runtimeID)
 	if err != nil {

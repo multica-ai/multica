@@ -103,7 +103,7 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 
 	var userID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO "user" (name, email)
+		INSERT INTO multica_user (name, email)
 		VALUES ($1, $2)
 		RETURNING id
 	`, integrationTestName, integrationTestEmail).Scan(&userID); err != nil {
@@ -112,7 +112,7 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 
 	var workspaceID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description)
+		INSERT INTO multica_workspace (name, slug, description)
 		VALUES ($1, $2, $3)
 		RETURNING id
 	`, "Integration Tests", integrationTestWorkspaceSlug, "Temporary workspace for router integration tests").Scan(&workspaceID); err != nil {
@@ -120,7 +120,7 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 	}
 
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO member (workspace_id, user_id, role)
+		INSERT INTO multica_member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'owner')
 	`, workspaceID, userID); err != nil {
 		return "", "", err
@@ -128,7 +128,7 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 
 	var runtimeID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
+		INSERT INTO multica_agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
 		)
 		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now())
@@ -138,7 +138,7 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 	}
 
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO agent (
+		INSERT INTO multica_agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks, owner_id
 		)
@@ -151,10 +151,10 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 }
 
 func cleanupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) error {
-	if _, err := pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, integrationTestWorkspaceSlug); err != nil {
+	if _, err := pool.Exec(ctx, `DELETE FROM multica_workspace WHERE slug = $1`, integrationTestWorkspaceSlug); err != nil {
 		return err
 	}
-	if _, err := pool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, integrationTestEmail); err != nil {
+	if _, err := pool.Exec(ctx, `DELETE FROM multica_user WHERE email = $1`, integrationTestEmail); err != nil {
 		return err
 	}
 	return nil
@@ -279,24 +279,24 @@ func TestSendCodeAndVerify(t *testing.T) {
 	ctx := context.Background()
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_verification_code WHERE email = $1`, email)
 		var userID string
-		err := testPool.QueryRow(ctx, `SELECT id FROM "user" WHERE email = $1`, email).Scan(&userID)
+		err := testPool.QueryRow(ctx, `SELECT id FROM multica_user WHERE email = $1`, email).Scan(&userID)
 		if err == nil {
 			rows, queryErr := testPool.Query(ctx, `
-				SELECT w.id FROM workspace w JOIN member m ON m.workspace_id = w.id WHERE m.user_id = $1
+				SELECT w.id FROM multica_workspace w JOIN multica_member m ON m.workspace_id = w.id WHERE m.user_id = $1
 			`, userID)
 			if queryErr == nil {
 				defer rows.Close()
 				for rows.Next() {
 					var wsID string
 					if rows.Scan(&wsID) == nil {
-						testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsID)
+						testPool.Exec(ctx, `DELETE FROM multica_workspace WHERE id = $1`, wsID)
 					}
 				}
 			}
 		}
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_user WHERE email = $1`, email)
 	})
 
 	// Step 1: Send code
@@ -312,7 +312,7 @@ func TestSendCodeAndVerify(t *testing.T) {
 
 	// Read code from DB
 	var code string
-	err = testPool.QueryRow(ctx, `SELECT code FROM verification_code WHERE email = $1 ORDER BY created_at DESC LIMIT 1`, email).Scan(&code)
+	err = testPool.QueryRow(ctx, `SELECT code FROM multica_verification_code WHERE email = $1 ORDER BY created_at DESC LIMIT 1`, email).Scan(&code)
 	if err != nil {
 		t.Fatalf("failed to read code from DB: %v", err)
 	}
@@ -362,11 +362,11 @@ func TestVerifyCodeNewUserHasNoWorkspace(t *testing.T) {
 	ctx := context.Background()
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_user WHERE email = $1`, email)
 	})
 
-	testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	testPool.Exec(ctx, `DELETE FROM multica_user WHERE email = $1`, email)
 
 	// Send code
 	body, _ := json.Marshal(map[string]string{"email": email})
@@ -378,7 +378,7 @@ func TestVerifyCodeNewUserHasNoWorkspace(t *testing.T) {
 
 	// Read code from DB
 	var code string
-	err = testPool.QueryRow(ctx, `SELECT code FROM verification_code WHERE email = $1 ORDER BY created_at DESC LIMIT 1`, email).Scan(&code)
+	err = testPool.QueryRow(ctx, `SELECT code FROM multica_verification_code WHERE email = $1 ORDER BY created_at DESC LIMIT 1`, email).Scan(&code)
 	if err != nil {
 		t.Fatalf("failed to read code from DB: %v", err)
 	}
@@ -732,22 +732,22 @@ func TestDeleteWorkspaceRequiresOwner(t *testing.T) {
 
 	const slug = "integration-tests-delete-403"
 	// Best-effort cleanup from any prior run.
-	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	_, _ = testPool.Exec(ctx, `DELETE FROM multica_workspace WHERE slug = $1`, slug)
 
 	var wsID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description)
+		INSERT INTO multica_workspace (name, slug, description)
 		VALUES ($1, $2, $3)
 		RETURNING id
 	`, "Integration Tests Delete 403", slug, "DeleteWorkspace permission test").Scan(&wsID); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_workspace WHERE id = $1`, wsID)
 	})
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO member (workspace_id, user_id, role)
+		INSERT INTO multica_member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'admin')
 	`, wsID, testUserID); err != nil {
 		t.Fatalf("create admin member: %v", err)
@@ -770,7 +770,7 @@ func TestDeleteWorkspaceRequiresOwner(t *testing.T) {
 	}
 
 	var exists bool
-	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM workspace WHERE id = $1)`, wsID).Scan(&exists); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM multica_workspace WHERE id = $1)`, wsID).Scan(&exists); err != nil {
 		t.Fatalf("verify workspace: %v", err)
 	}
 	if !exists {

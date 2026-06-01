@@ -31,7 +31,7 @@ func inboxItemsForRecipient(t *testing.T, queries *db.Queries, recipientID strin
 // cleanupInboxForIssue deletes all inbox items related to a given issue.
 func cleanupInboxForIssue(t *testing.T, issueID string) {
 	t.Helper()
-	testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE issue_id = $1`, issueID)
+	testPool.Exec(context.Background(), `DELETE FROM multica_inbox_item WHERE issue_id = $1`, issueID)
 }
 
 // addTestSubscriber manually inserts a subscriber for an issue.
@@ -56,9 +56,9 @@ func createTestSubIssue(t *testing.T, workspaceID, creatorID, parentIssueID stri
 	ctx := context.Background()
 	var issueID string
 	err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, parent_issue_id, number)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_type, creator_id, position, parent_issue_id, number)
 		VALUES ($1, 'sub-issue test', 'todo', 'medium', 'member', $2, 0, $3,
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1))
 		RETURNING id
 	`, workspaceID, creatorID, parentIssueID).Scan(&issueID)
 	if err != nil {
@@ -1026,7 +1026,7 @@ func TestNotification_ParentBubble_PriorityChangeSuppressed(t *testing.T) {
 func countInboxByTypeForRecipient(t *testing.T, recipientID, notifType string) (active, archived int) {
 	t.Helper()
 	rows, err := testPool.Query(context.Background(), `
-		SELECT archived FROM inbox_item
+		SELECT archived FROM multica_inbox_item
 		WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND type = $3
 	`, testWorkspaceID, recipientID, notifType)
 	if err != nil {
@@ -1114,7 +1114,7 @@ func TestNotification_StatusChange_ArchivesStaleTaskFailed(t *testing.T) {
 	// the archive scope is narrow. Use a comment-like notification by
 	// directly inserting a row of a different type.
 	_, err := testPool.Exec(context.Background(), `
-		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, details)
+		INSERT INTO multica_inbox_item (workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, details)
 		VALUES ($1, 'member', $2, 'new_comment', 'info', $3, 'sibling notification', '{}')
 	`, testWorkspaceID, testUserID, issueID)
 	if err != nil {

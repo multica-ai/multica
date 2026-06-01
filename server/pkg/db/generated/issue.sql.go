@@ -15,7 +15,7 @@ const childIssueProgress = `-- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
        COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done
-FROM issue
+FROM multica_issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL
 GROUP BY parent_issue_id
@@ -52,7 +52,7 @@ SELECT
   assignee_type,
   assignee_id,
   COUNT(*)::bigint as frequency
-FROM issue
+FROM multica_issue
 WHERE workspace_id = $1
   AND creator_id = $2
   AND creator_type = 'member'
@@ -94,7 +94,7 @@ func (q *Queries) CountCreatedIssueAssignees(ctx context.Context, arg CountCreat
 }
 
 const countIssues = `-- name: CountIssues :one
-SELECT count(*) FROM issue i
+SELECT count(*) FROM multica_issue i
 WHERE i.workspace_id = $1
   AND ($2::text IS NULL OR i.status = $2)
   AND ($3::text IS NULL OR i.priority = $3)
@@ -107,29 +107,29 @@ WHERE i.workspace_id = $1
   AND (
     $10::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
-          SELECT a.id FROM agent a
+          SELECT a.id FROM multica_agent a
            WHERE a.workspace_id = $1
              AND a.owner_id     = $10::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
+            FROM multica_squad_member sm
+            JOIN multica_squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
              AND sm.member_id   = $10::uuid
           UNION
           SELECT s.id
-            FROM squad s
-            JOIN agent a ON a.id = s.leader_id
+            FROM multica_squad s
+            JOIN multica_agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
              AND a.owner_id     = $10::uuid
           UNION
           SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-            JOIN agent a ON a.id = sm.member_id
+            FROM multica_squad_member sm
+            JOIN multica_squad s ON s.id = sm.squad_id
+            JOIN multica_agent a ON a.id = sm.member_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
@@ -171,7 +171,7 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 }
 
 const createIssue = `-- name: CreateIssue :one
-INSERT INTO issue (
+INSERT INTO multica_issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
@@ -202,7 +202,7 @@ type CreateIssueParams struct {
 	WorkflowRunID pgtype.UUID        `json:"workflow_run_id"`
 }
 
-func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error) {
+func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (MulticaIssue, error) {
 	row := q.db.QueryRow(ctx, createIssue,
 		arg.WorkspaceID,
 		arg.Title,
@@ -222,7 +222,7 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		arg.WorkflowID,
 		arg.WorkflowRunID,
 	)
-	var i Issue
+	var i MulticaIssue
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -255,7 +255,7 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 }
 
 const createIssueWithOrigin = `-- name: CreateIssueWithOrigin :one
-INSERT INTO issue (
+INSERT INTO multica_issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
@@ -289,7 +289,7 @@ type CreateIssueWithOriginParams struct {
 	WorkflowRunID pgtype.UUID        `json:"workflow_run_id"`
 }
 
-func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWithOriginParams) (Issue, error) {
+func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWithOriginParams) (MulticaIssue, error) {
 	row := q.db.QueryRow(ctx, createIssueWithOrigin,
 		arg.WorkspaceID,
 		arg.Title,
@@ -311,7 +311,7 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		arg.WorkflowID,
 		arg.WorkflowRunID,
 	)
-	var i Issue
+	var i MulticaIssue
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -344,7 +344,7 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 }
 
 const deleteIssue = `-- name: DeleteIssue :exec
-DELETE FROM issue WHERE id = $1 AND workspace_id = $2
+DELETE FROM multica_issue WHERE id = $1 AND workspace_id = $2
 `
 
 type DeleteIssueParams struct {
@@ -363,7 +363,7 @@ func (q *Queries) DeleteIssue(ctx context.Context, arg DeleteIssueParams) error 
 }
 
 const deleteIssueMetadataKey = `-- name: DeleteIssueMetadataKey :one
-UPDATE issue SET
+UPDATE multica_issue SET
     metadata = metadata - $1::text,
     updated_at = now()
 WHERE id = $2 AND workspace_id = $3
@@ -376,11 +376,11 @@ type DeleteIssueMetadataKeyParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Atomically removes a single key from the issue's metadata JSONB.
+// Atomically removes a single key from the multica_issue's metadata JSONB.
 // Deleting a missing key is a no-op (still returns the row).
-func (q *Queries) DeleteIssueMetadataKey(ctx context.Context, arg DeleteIssueMetadataKeyParams) (Issue, error) {
+func (q *Queries) DeleteIssueMetadataKey(ctx context.Context, arg DeleteIssueMetadataKeyParams) (MulticaIssue, error) {
 	row := q.db.QueryRow(ctx, deleteIssueMetadataKey, arg.Key, arg.ID, arg.WorkspaceID)
-	var i Issue
+	var i MulticaIssue
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -413,7 +413,7 @@ func (q *Queries) DeleteIssueMetadataKey(ctx context.Context, arg DeleteIssueMet
 }
 
 const findActiveDuplicateIssue = `-- name: FindActiveDuplicateIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, workflow_id, workflow_run_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, workflow_id, workflow_run_id FROM multica_issue
 WHERE workspace_id = $1
   AND status NOT IN ('done', 'cancelled')
   AND project_id IS NOT DISTINCT FROM $2::uuid
@@ -430,14 +430,14 @@ type FindActiveDuplicateIssueParams struct {
 	NormalizedTitle string      `json:"normalized_title"`
 }
 
-func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDuplicateIssueParams) (Issue, error) {
+func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDuplicateIssueParams) (MulticaIssue, error) {
 	row := q.db.QueryRow(ctx, findActiveDuplicateIssue,
 		arg.WorkspaceID,
 		arg.ProjectID,
 		arg.ParentIssueID,
 		arg.NormalizedTitle,
 	)
-	var i Issue
+	var i MulticaIssue
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -470,13 +470,13 @@ func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDu
 }
 
 const getIssue = `-- name: GetIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, workflow_id, workflow_run_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, workflow_id, workflow_run_id FROM multica_issue
 WHERE id = $1
 `
 
-func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
+func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (MulticaIssue, error) {
 	row := q.db.QueryRow(ctx, getIssue, id)
-	var i Issue
+	var i MulticaIssue
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -509,7 +509,7 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 }
 
 const getIssueByNumber = `-- name: GetIssueByNumber :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, workflow_id, workflow_run_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, workflow_id, workflow_run_id FROM multica_issue
 WHERE workspace_id = $1 AND number = $2
 `
 
@@ -518,9 +518,9 @@ type GetIssueByNumberParams struct {
 	Number      int32       `json:"number"`
 }
 
-func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberParams) (Issue, error) {
+func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberParams) (MulticaIssue, error) {
 	row := q.db.QueryRow(ctx, getIssueByNumber, arg.WorkspaceID, arg.Number)
-	var i Issue
+	var i MulticaIssue
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -553,7 +553,7 @@ func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberPara
 }
 
 const getIssueByOrigin = `-- name: GetIssueByOrigin :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, workflow_id, workflow_run_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, workflow_id, workflow_run_id FROM multica_issue
 WHERE workspace_id = $1
   AND origin_type = $2
   AND origin_id = $3
@@ -566,14 +566,14 @@ type GetIssueByOriginParams struct {
 	OriginID    pgtype.UUID `json:"origin_id"`
 }
 
-// Finds the issue stamped with a specific (origin_type, origin_id) pair.
-// Used by quick-create completion to deterministically locate the issue
-// produced by a given agent_task_queue.id — robust against concurrent
-// issue creates by the same agent (assignment task + quick-create both
+// Finds the multica_issue stamped with a specific (origin_type, origin_id) pair.
+// Used by quick-create completion to deterministically locate the multica_issue
+// produced by a given multica_agent_task_queue.id — robust against concurrent
+// multica_issue creates by the same multica_agent (assignment task + quick-create both
 // running with max_concurrent_tasks > 1).
-func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginParams) (Issue, error) {
+func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginParams) (MulticaIssue, error) {
 	row := q.db.QueryRow(ctx, getIssueByOrigin, arg.WorkspaceID, arg.OriginType, arg.OriginID)
-	var i Issue
+	var i MulticaIssue
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -606,7 +606,7 @@ func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginPara
 }
 
 const getIssueInWorkspace = `-- name: GetIssueInWorkspace :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, workflow_id, workflow_run_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, workflow_id, workflow_run_id FROM multica_issue
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -615,9 +615,9 @@ type GetIssueInWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspaceParams) (Issue, error) {
+func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspaceParams) (MulticaIssue, error) {
 	row := q.db.QueryRow(ctx, getIssueInWorkspace, arg.ID, arg.WorkspaceID)
-	var i Issue
+	var i MulticaIssue
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -650,20 +650,20 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 }
 
 const listChildIssues = `-- name: ListChildIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, workflow_id, workflow_run_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, workflow_id, workflow_run_id FROM multica_issue
 WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC
 `
 
-func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID) ([]Issue, error) {
+func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID) ([]MulticaIssue, error) {
 	rows, err := q.db.Query(ctx, listChildIssues, parentIssueID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Issue{}
+	items := []MulticaIssue{}
 	for rows.Next() {
-		var i Issue
+		var i MulticaIssue
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -706,7 +706,7 @@ const listIssues = `-- name: ListIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
-FROM issue i
+FROM multica_issue i
 WHERE i.workspace_id = $1
   AND ($4::text IS NULL OR i.status = $4)
   AND ($5::text IS NULL OR i.priority = $5)
@@ -718,38 +718,38 @@ WHERE i.workspace_id = $1
   AND ($11::jsonb IS NULL OR i.metadata @> $11::jsonb)
   AND (
     $12::uuid IS NULL
-    -- (1) assignee is an agent owned by the user
+    -- (1) assignee is an multica_agent owned by the user
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
-          SELECT a.id FROM agent a
+          SELECT a.id FROM multica_agent a
            WHERE a.workspace_id = $1
              AND a.owner_id     = $12::uuid
     ))
-    -- (2)(3)(4) assignee is a squad related to the user — three relations
+    -- (2)(3)(4) assignee is a multica_squad related to the user — three relations
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-          -- (2) the user is a human member of the squad
+          -- (2) the user is a human multica_member of the multica_squad
           SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
+            FROM multica_squad_member sm
+            JOIN multica_squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
              AND sm.member_id   = $12::uuid
           UNION
-          -- (3) the squad's canonical leader is an agent owned by the user.
-          -- We read squad.leader_id directly rather than relying on a
-          -- squad_member row, because the leader copy in squad_member is
-          -- best-effort (see squad.go AddSquadMember error handling).
+          -- (3) the multica_squad's canonical leader is an multica_agent owned by the user.
+          -- We read multica_squad.leader_id directly rather than relying on a
+          -- multica_squad_member row, because the leader copy in multica_squad_member is
+          -- best-effort (see multica_squad.go AddSquadMember error handling).
           SELECT s.id
-            FROM squad s
-            JOIN agent a ON a.id = s.leader_id
+            FROM multica_squad s
+            JOIN multica_agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
              AND a.owner_id     = $12::uuid
           UNION
-          -- (4) the squad has an agent member owned by the user
+          -- (4) the multica_squad has an multica_agent multica_member owned by the user
           SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-            JOIN agent a ON a.id = sm.member_id
+            FROM multica_squad_member sm
+            JOIN multica_squad s ON s.id = sm.squad_id
+            JOIN multica_agent a ON a.id = sm.member_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
@@ -798,9 +798,9 @@ type ListIssuesRow struct {
 }
 
 // involves_user_id widens the assignee filter to surface issues where the user
-// is *indirectly* the assignee — via an owned agent or a squad they belong to /
-// lead / have an agent inside. The semantics intentionally exclude direct
-// member assignment (`assignee_type='member' AND assignee_id=involves_user_id`)
+// is *indirectly* the assignee — via an owned multica_agent or a multica_squad they belong to /
+// lead / have an multica_agent inside. The semantics intentionally exclude direct
+// multica_member assignment (`assignee_type='member' AND assignee_id=involves_user_id`)
 // because that is already the meaning of the `assignee_id` filter (tab 1
 // "Assigned to me"), and the two filters must produce disjoint result sets.
 func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListIssuesRow, error) {
@@ -860,7 +860,7 @@ const listOpenIssues = `-- name: ListOpenIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
-FROM issue i
+FROM multica_issue i
 WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
   AND ($2::text IS NULL OR i.priority = $2)
@@ -872,29 +872,29 @@ WHERE i.workspace_id = $1
   AND (
     $8::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
-          SELECT a.id FROM agent a
+          SELECT a.id FROM multica_agent a
            WHERE a.workspace_id = $1
              AND a.owner_id     = $8::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
+            FROM multica_squad_member sm
+            JOIN multica_squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
              AND sm.member_id   = $8::uuid
           UNION
           SELECT s.id
-            FROM squad s
-            JOIN agent a ON a.id = s.leader_id
+            FROM multica_squad s
+            JOIN multica_agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
              AND a.owner_id     = $8::uuid
           UNION
           SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-            JOIN agent a ON a.id = sm.member_id
+            FROM multica_squad_member sm
+            JOIN multica_squad s ON s.id = sm.squad_id
+            JOIN multica_agent a ON a.id = sm.member_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
@@ -938,7 +938,7 @@ type ListOpenIssuesRow struct {
 }
 
 // See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
-// filter; member-direct assignment is intentionally excluded).
+// filter; multica_member-direct assignment is intentionally excluded).
 func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) ([]ListOpenIssuesRow, error) {
 	rows, err := q.db.Query(ctx, listOpenIssues,
 		arg.WorkspaceID,
@@ -998,7 +998,7 @@ func (q *Queries) LockIssueDuplicateKey(ctx context.Context, dollar_1 string) er
 }
 
 const markIssueFirstExecuted = `-- name: MarkIssueFirstExecuted :one
-UPDATE issue
+UPDATE multica_issue
 SET first_executed_at = now()
 WHERE id = $1 AND first_executed_at IS NULL
 RETURNING id, workspace_id, creator_type, creator_id, first_executed_at
@@ -1013,7 +1013,7 @@ type MarkIssueFirstExecutedRow struct {
 }
 
 // Flips first_executed_at from NULL to now() atomically. Returns the row if
-// this was the first time the issue was executed; no rows otherwise. The
+// this was the first time the multica_issue was executed; no rows otherwise. The
 // analytics issue_executed event fires exactly when this returns a row —
 // retries and re-assignments hit the WHERE clause and no-op.
 func (q *Queries) MarkIssueFirstExecuted(ctx context.Context, id pgtype.UUID) (MarkIssueFirstExecutedRow, error) {
@@ -1031,7 +1031,7 @@ func (q *Queries) MarkIssueFirstExecuted(ctx context.Context, id pgtype.UUID) (M
 
 const setIssueMetadataKey = `-- name: SetIssueMetadataKey :one
 
-UPDATE issue SET
+UPDATE multica_issue SET
     metadata = jsonb_set(metadata, ARRAY[$1::text], $2::jsonb),
     updated_at = now()
 WHERE id = $3 AND workspace_id = $4
@@ -1046,17 +1046,17 @@ type SetIssueMetadataKeyParams struct {
 }
 
 // SearchIssues: moved to handler (dynamic SQL for multi-word search support).
-// Atomically sets a single key in the issue's metadata JSONB. The
+// Atomically sets a single key in the multica_issue's metadata JSONB. The
 // workspace_id filter is the authorization gate — handler resolves the
-// issue first so this is also the tenant check.
-func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataKeyParams) (Issue, error) {
+// multica_issue first so this is also the tenant check.
+func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataKeyParams) (MulticaIssue, error) {
 	row := q.db.QueryRow(ctx, setIssueMetadataKey,
 		arg.Key,
 		arg.Value,
 		arg.ID,
 		arg.WorkspaceID,
 	)
-	var i Issue
+	var i MulticaIssue
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -1089,7 +1089,7 @@ func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataK
 }
 
 const updateIssue = `-- name: UpdateIssue :one
-UPDATE issue SET
+UPDATE multica_issue SET
     title = COALESCE($2, title),
     description = COALESCE($3, description),
     status = COALESCE($4, status),
@@ -1125,7 +1125,7 @@ type UpdateIssueParams struct {
 	WorkflowRunID pgtype.UUID        `json:"workflow_run_id"`
 }
 
-func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue, error) {
+func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (MulticaIssue, error) {
 	row := q.db.QueryRow(ctx, updateIssue,
 		arg.ID,
 		arg.Title,
@@ -1142,7 +1142,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		arg.WorkflowID,
 		arg.WorkflowRunID,
 	)
-	var i Issue
+	var i MulticaIssue
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -1175,7 +1175,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 }
 
 const updateIssueStatus = `-- name: UpdateIssueStatus :one
-UPDATE issue SET
+UPDATE multica_issue SET
     status = $2,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $3
@@ -1189,9 +1189,9 @@ type UpdateIssueStatusParams struct {
 }
 
 // Workspace_id in the WHERE clause is a SQL-layer tenant guard; see DeleteIssue.
-func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusParams) (Issue, error) {
+func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusParams) (MulticaIssue, error) {
 	row := q.db.QueryRow(ctx, updateIssueStatus, arg.ID, arg.Status, arg.WorkspaceID)
-	var i Issue
+	var i MulticaIssue
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,

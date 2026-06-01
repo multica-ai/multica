@@ -66,10 +66,10 @@ func TestCreateFeedbackRateLimit(t *testing.T) {
 // window when run in sequence.
 func clearFeedbackForTestUser(t *testing.T) {
 	t.Helper()
-	if _, err := testPool.Exec(context.Background(), `DELETE FROM feedback WHERE user_id = $1`, parseUUID(testUserID)); err != nil {
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM multica_feedback WHERE user_id = $1`, parseUUID(testUserID)); err != nil {
 		t.Fatalf("clear feedback: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM feedback WHERE user_id = $1`, parseUUID(testUserID))
+		testPool.Exec(context.Background(), `DELETE FROM multica_feedback WHERE user_id = $1`, parseUUID(testUserID))
 	})
 }

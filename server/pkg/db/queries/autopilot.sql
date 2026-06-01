@@ -3,21 +3,21 @@
 -- =====================
 
 -- name: ListAutopilots :many
-SELECT * FROM autopilot
+SELECT * FROM multica_autopilot
 WHERE workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
 ORDER BY created_at DESC;
 
 -- name: GetAutopilot :one
-SELECT * FROM autopilot
+SELECT * FROM multica_autopilot
 WHERE id = $1;
 
 -- name: GetAutopilotInWorkspace :one
-SELECT * FROM autopilot
+SELECT * FROM multica_autopilot
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateAutopilot :one
-INSERT INTO autopilot (
+INSERT INTO multica_autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
     status, execution_mode, issue_title_template, project_id,
     created_by_type, created_by_id
@@ -28,7 +28,7 @@ INSERT INTO autopilot (
 ) RETURNING *;
 
 -- name: UpdateAutopilot :one
-UPDATE autopilot SET
+UPDATE multica_autopilot SET
     title = COALESCE(sqlc.narg('title'), title),
     description = COALESCE(sqlc.narg('description'), description),
     assignee_type = COALESCE(sqlc.narg('assignee_type'), assignee_type),
@@ -42,10 +42,10 @@ WHERE id = $1
 RETURNING *;
 
 -- name: DeleteAutopilot :exec
-DELETE FROM autopilot WHERE id = $1;
+DELETE FROM multica_autopilot WHERE id = $1;
 
 -- name: UpdateAutopilotLastRunAt :exec
-UPDATE autopilot SET last_run_at = now(), updated_at = now()
+UPDATE multica_autopilot SET last_run_at = now(), updated_at = now()
 WHERE id = $1;
 
 -- =====================
@@ -53,16 +53,16 @@ WHERE id = $1;
 -- =====================
 
 -- name: ListAutopilotTriggers :many
-SELECT * FROM autopilot_trigger
+SELECT * FROM multica_autopilot_trigger
 WHERE autopilot_id = $1
 ORDER BY created_at ASC;
 
 -- name: GetAutopilotTrigger :one
-SELECT * FROM autopilot_trigger
+SELECT * FROM multica_autopilot_trigger
 WHERE id = $1;
 
 -- name: CreateAutopilotTrigger :one
-INSERT INTO autopilot_trigger (
+INSERT INTO multica_autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
     next_run_at, webhook_token, label, provider
 ) VALUES (
@@ -72,7 +72,7 @@ INSERT INTO autopilot_trigger (
 ) RETURNING *;
 
 -- name: UpdateAutopilotTrigger :one
-UPDATE autopilot_trigger SET
+UPDATE multica_autopilot_trigger SET
     enabled = COALESCE(sqlc.narg('enabled')::boolean, enabled),
     cron_expression = COALESCE(sqlc.narg('cron_expression'), cron_expression),
     timezone = COALESCE(sqlc.narg('timezone'), timezone),
@@ -83,24 +83,24 @@ WHERE id = $1
 RETURNING *;
 
 -- name: DeleteAutopilotTrigger :exec
-DELETE FROM autopilot_trigger WHERE id = $1;
+DELETE FROM multica_autopilot_trigger WHERE id = $1;
 
 -- name: AdvanceTriggerNextRun :exec
-UPDATE autopilot_trigger
+UPDATE multica_autopilot_trigger
 SET next_run_at = sqlc.narg('next_run_at'),
     last_fired_at = now(),
     updated_at = now()
 WHERE id = $1;
 
 -- name: GetWebhookTriggerByToken :one
--- Look up a webhook trigger by its public bearer token. Joined to autopilot
--- so the webhook handler can derive the workspace from the trigger's parent
+-- Look up a webhook trigger by its public bearer token. Joined to multica_autopilot
+-- so the webhook handler can derive the multica_workspace from the trigger's parent
 -- without trusting any request header. The handler still re-loads the
 -- Autopilot via GetAutopilot and cross-checks WorkspaceID matches the row's
 -- autopilot_workspace_id.
 SELECT t.*, a.workspace_id AS autopilot_workspace_id
-FROM autopilot_trigger t
-JOIN autopilot a ON a.id = t.autopilot_id
+FROM multica_autopilot_trigger t
+JOIN multica_autopilot a ON a.id = t.autopilot_id
 WHERE t.kind = 'webhook'
   AND t.webhook_token = $1;
 
@@ -109,7 +109,7 @@ WHERE t.kind = 'webhook'
 -- dispatch succeeded, was admission-skipped, or even if Autopilot status
 -- transitioned to paused/disabled at exactly the wrong moment. Disabled /
 -- paused early-return paths in the handler never call this.
-UPDATE autopilot_trigger
+UPDATE multica_autopilot_trigger
 SET last_fired_at = now(),
     updated_at = now()
 WHERE id = $1;
@@ -118,7 +118,7 @@ WHERE id = $1;
 -- Rotates the bearer token for a webhook trigger. Restricted to kind='webhook'
 -- so an accidental call against a schedule/api trigger is a no-op (returns no
 -- rows) rather than corrupting unrelated state.
-UPDATE autopilot_trigger
+UPDATE multica_autopilot_trigger
 SET webhook_token = $2,
     updated_at = now()
 WHERE id = $1
@@ -131,7 +131,7 @@ RETURNING *;
 -- token. Splitting the create + token-set keeps the existing CreateAutopilotTrigger
 -- query usable by the schedule path without forcing every caller to think
 -- about webhook_token.
-UPDATE autopilot_trigger
+UPDATE multica_autopilot_trigger
 SET webhook_token = $2,
     updated_at = now()
 WHERE id = $1
@@ -143,7 +143,7 @@ RETURNING *;
 -- write-only endpoint only ever carries the secret value, with no risk of an
 -- accidental log line leaking it alongside other fields. Restricted to
 -- webhook triggers to avoid corrupting unrelated state.
-UPDATE autopilot_trigger
+UPDATE multica_autopilot_trigger
 SET signing_secret = sqlc.narg('signing_secret'),
     updated_at = now()
 WHERE id = $1
@@ -155,11 +155,11 @@ RETURNING *;
 -- =====================
 
 -- name: CreateAutopilotRun :one
--- squad_id is an attribution hook: set to the assignee squad when the
--- parent autopilot has assignee_type='squad', NULL otherwise. The executing
--- agent_id on agent_task_queue still records who actually ran the work
--- (the squad leader); squad_id lets reports group by squad without a join.
-INSERT INTO autopilot_run (
+-- squad_id is an attribution hook: set to the assignee multica_squad when the
+-- parent multica_autopilot has assignee_type='squad', NULL otherwise. The executing
+-- agent_id on multica_agent_task_queue still records who actually ran the work
+-- (the multica_squad leader); squad_id lets reports group by multica_squad without a join.
+INSERT INTO multica_autopilot_run (
     autopilot_id, trigger_id, source, status, trigger_payload, squad_id
 ) VALUES (
     $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
@@ -167,53 +167,53 @@ INSERT INTO autopilot_run (
 ) RETURNING *;
 
 -- name: GetAutopilotRun :one
-SELECT * FROM autopilot_run
+SELECT * FROM multica_autopilot_run
 WHERE id = $1;
 
 -- name: ListAutopilotRuns :many
-SELECT * FROM autopilot_run
+SELECT * FROM multica_autopilot_run
 WHERE autopilot_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: UpdateAutopilotRunIssueCreated :one
-UPDATE autopilot_run
+UPDATE multica_autopilot_run
 SET status = 'issue_created', issue_id = $2
 WHERE id = $1
 RETURNING *;
 
 -- name: UpdateAutopilotRunRunning :one
-UPDATE autopilot_run
+UPDATE multica_autopilot_run
 SET status = 'running', task_id = $2
 WHERE id = $1
 RETURNING *;
 
 -- name: UpdateAutopilotRunCompleted :one
-UPDATE autopilot_run
+UPDATE multica_autopilot_run
 SET status = 'completed', completed_at = now(), result = sqlc.narg('result')
 WHERE id = $1
 RETURNING *;
 
 -- name: UpdateAutopilotRunFailed :one
-UPDATE autopilot_run
+UPDATE multica_autopilot_run
 SET status = 'failed', completed_at = now(), failure_reason = $2
 WHERE id = $1
 RETURNING *;
 
 -- name: UpdateAutopilotRunSkipped :one
--- Marks an autopilot_run as skipped without enqueueing any task. Used by the
--- pre-flight admission check when the assignee agent's runtime is offline:
--- creating an issue / task in that state would just pile a doomed job onto
--- agent_task_queue (the canonical "持续给离线 local agent 入队" symptom from
+-- Marks an multica_autopilot_run as skipped without enqueueing any task. Used by the
+-- pre-flight admission check when the assignee multica_agent's runtime is offline:
+-- creating an multica_issue / task in that state would just pile a doomed job onto
+-- multica_agent_task_queue (the canonical "持续给离线 local multica_agent 入队" symptom from
 -- MUL-1899). Recording the skip + reason gives the UI / failure monitor / ops
 -- a paper trail without polluting the failure ratio.
-UPDATE autopilot_run
+UPDATE multica_autopilot_run
 SET status = 'skipped', completed_at = now(), failure_reason = $2
 WHERE id = $1
 RETURNING *;
 
 -- name: UpdateAutopilotRunSkippedWithResult :one
-UPDATE autopilot_run
+UPDATE multica_autopilot_run
 SET status = 'skipped',
     completed_at = now(),
     failure_reason = $2,
@@ -227,10 +227,10 @@ RETURNING *;
 
 -- name: ClaimDueScheduleTriggers :many
 -- Atomically claim all due schedule triggers to prevent concurrent execution.
--- Joins the autopilot table to ensure only active autopilots are fired.
-UPDATE autopilot_trigger t
+-- Joins the multica_autopilot table to ensure only active autopilots are fired.
+UPDATE multica_autopilot_trigger t
 SET next_run_at = NULL
-FROM autopilot a
+FROM multica_autopilot a
 WHERE t.autopilot_id = a.id
   AND t.kind = 'schedule'
   AND t.enabled = true
@@ -244,7 +244,7 @@ RETURNING t.*, a.workspace_id AS autopilot_workspace_id;
 -- =====================
 
 -- name: CreateAutopilotTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
+INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
 VALUES ($1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary))
 RETURNING *;
 
@@ -253,15 +253,15 @@ RETURNING *;
 -- =====================
 
 -- name: GetAutopilotRunByIssue :one
-SELECT * FROM autopilot_run
+SELECT * FROM multica_autopilot_run
 WHERE issue_id = $1 AND status IN ('issue_created', 'running')
 LIMIT 1;
 
 -- name: FailAutopilotRunsByIssue :exec
--- Fails active autopilot runs linked to a given issue.
--- Must be called BEFORE issue deletion (ON DELETE SET NULL clears issue_id).
-UPDATE autopilot_run
-SET status = 'failed', completed_at = now(), failure_reason = 'linked issue was deleted'
+-- Fails active multica_autopilot runs linked to a given multica_issue.
+-- Must be called BEFORE multica_issue deletion (ON DELETE SET NULL clears issue_id).
+UPDATE multica_autopilot_run
+SET status = 'failed', completed_at = now(), failure_reason = 'linked multica_issue was deleted'
 WHERE issue_id = $1
   AND status IN ('issue_created', 'running');
 
@@ -274,8 +274,8 @@ WHERE issue_id = $1
 -- advanced — typically due to a scheduler crash. Returns them so the scheduler
 -- can recompute next_run_at.
 SELECT t.*, a.workspace_id AS autopilot_workspace_id
-FROM autopilot_trigger t
-JOIN autopilot a ON t.autopilot_id = a.id
+FROM multica_autopilot_trigger t
+JOIN multica_autopilot a ON t.autopilot_id = a.id
 WHERE t.kind = 'schedule'
   AND t.enabled = true
   AND t.next_run_at IS NULL
@@ -292,17 +292,17 @@ WHERE t.kind = 'schedule'
 -- excluded from BOTH numerator and denominator: an admission-skipped run
 -- (e.g. assignee runtime offline at dispatch time, MUL-1899) is neither a
 -- success nor a failure, so it must not dilute the failure ratio (which
--- would let a 100%-failing autopilot mask itself behind a wall of skips)
+-- would let a 100%-failing multica_autopilot mask itself behind a wall of skips)
 -- nor inflate it. issue_created/running are still excluded so in-flight
 -- work isn't penalised.
 -- Used by the failure monitor to auto-pause sustained-failure autopilots
--- (the canonical example from MUL-1336 was an autopilot scheduled every 5 min
+-- (the canonical example from MUL-1336 was an multica_autopilot scheduled every 5 min
 -- that 100% failed for days, burning ~1.5k useless tasks per week).
 WITH stats AS (
     SELECT autopilot_id,
            count(*) FILTER (WHERE status IN ('completed', 'failed')) AS total,
            count(*) FILTER (WHERE status = 'failed') AS failed
-    FROM autopilot_run
+    FROM multica_autopilot_run
     WHERE created_at >= sqlc.arg('since')::timestamptz
     GROUP BY autopilot_id
 )
@@ -310,7 +310,7 @@ SELECT a.id, a.workspace_id, a.title, a.assignee_id,
        a.created_by_type, a.created_by_id,
        s.total::bigint  AS total_runs,
        s.failed::bigint AS failed_runs
-FROM autopilot a
+FROM multica_autopilot a
 JOIN stats s ON s.autopilot_id = a.id
 WHERE a.status = 'active'
   AND s.total >= sqlc.arg('min_runs')::bigint
@@ -318,11 +318,11 @@ WHERE a.status = 'active'
 ORDER BY s.failed DESC, a.id ASC;
 
 -- name: SystemPauseAutopilot :one
--- Atomically pauses an autopilot only if it is currently active. Returns no
--- rows when the autopilot was already paused/archived (or another worker
+-- Atomically pauses an multica_autopilot only if it is currently active. Returns no
+-- rows when the multica_autopilot was already paused/archived (or another worker
 -- raced first), letting the caller treat that as a benign no-op rather than
 -- an error.
-UPDATE autopilot
+UPDATE multica_autopilot
 SET status = 'paused', updated_at = now()
 WHERE id = $1 AND status = 'active'
 RETURNING *;

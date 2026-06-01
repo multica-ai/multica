@@ -24,14 +24,14 @@ func createHandlerTestChatSession(t *testing.T, agentID string) string {
 
 	var sessionID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
+		INSERT INTO multica_chat_session (workspace_id, agent_id, creator_id, title, status)
 		VALUES ($1, $2, $3, $4, 'active')
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID, "Handler Test Chat Session").Scan(&sessionID); err != nil {
 		t.Fatalf("failed to create handler test chat session: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, sessionID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_chat_session WHERE id = $1`, sessionID)
 	})
 	return sessionID
 }
@@ -157,7 +157,7 @@ func TestUploadFileResolvesWorkspaceViaSlugHeader(t *testing.T) {
 	var count int
 	if err := testPool.QueryRow(
 		context.Background(),
-		`SELECT count(*) FROM attachment WHERE workspace_id = $1 AND filename = $2`,
+		`SELECT count(*) FROM multica_attachment WHERE workspace_id = $1 AND filename = $2`,
 		testWorkspaceID,
 		"slug-upload.txt",
 	).Scan(&count); err != nil {
@@ -170,7 +170,7 @@ func TestUploadFileResolvesWorkspaceViaSlugHeader(t *testing.T) {
 	// Clean up so reruns don't accumulate rows.
 	if _, err := testPool.Exec(
 		context.Background(),
-		`DELETE FROM attachment WHERE workspace_id = $1 AND filename = $2`,
+		`DELETE FROM multica_attachment WHERE workspace_id = $1 AND filename = $2`,
 		testWorkspaceID,
 		"slug-upload.txt",
 	); err != nil {
@@ -209,7 +209,7 @@ func TestUploadFileResolvesWorkspaceViaIDHeaderStill(t *testing.T) {
 	// Clean up.
 	if _, err := testPool.Exec(
 		context.Background(),
-		`DELETE FROM attachment WHERE workspace_id = $1 AND filename = $2`,
+		`DELETE FROM multica_attachment WHERE workspace_id = $1 AND filename = $2`,
 		testWorkspaceID,
 		"uuid-upload.txt",
 	); err != nil {
@@ -273,7 +273,7 @@ func TestUploadFile_AttachesToChatSession(t *testing.T) {
 	var dbSession, dbMessage *string
 	if err := testPool.QueryRow(
 		context.Background(),
-		`SELECT chat_session_id::text, chat_message_id::text FROM attachment WHERE id = $1`,
+		`SELECT chat_session_id::text, chat_message_id::text FROM multica_attachment WHERE id = $1`,
 		resp.ID,
 	).Scan(&dbSession, &dbMessage); err != nil {
 		t.Fatalf("query attachment row: %v", err)
@@ -286,7 +286,7 @@ func TestUploadFile_AttachesToChatSession(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, resp.ID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_attachment WHERE id = $1`, resp.ID)
 	})
 }
 
@@ -335,14 +335,14 @@ func seedPreviewAttachment(t *testing.T, store *mockStorage, key, filename, cont
 
 	var id string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+		INSERT INTO multica_attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
 		VALUES ($1, 'member', $2, $3, $4, $5, $6)
 		RETURNING id::text
 	`, testWorkspaceID, testUserID, filename, url, contentType, len(body)).Scan(&id); err != nil {
 		t.Fatalf("seed attachment row: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, id)
+		testPool.Exec(context.Background(), `DELETE FROM multica_attachment WHERE id = $1`, id)
 	})
 	return id
 }

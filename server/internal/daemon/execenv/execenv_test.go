@@ -2487,7 +2487,7 @@ func TestReuseSeedsUserSkillUpdates(t *testing.T) {
 	defer env.Cleanup(true)
 
 	if err := os.WriteFile(filepath.Join(userSkill, "SKILL.md"), []byte("v2"), 0o644); err != nil {
-		t.Fatalf("update user SKILL.md: %v", err)
+		t.Fatalf("update multica_user SKILL.md: %v", err)
 	}
 
 	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{

@@ -18,7 +18,7 @@ func pickFixtureAgent(t *testing.T) pgtype.UUID {
 	t.Helper()
 	var agentID string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		`SELECT id::text FROM multica_agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
 		testWorkspaceID,
 	).Scan(&agentID); err != nil {
 		t.Fatalf("load fixture agent: %v", err)
@@ -28,7 +28,7 @@ func pickFixtureAgent(t *testing.T) pgtype.UUID {
 
 // seedAutopilot creates an autopilot owned by the given creator (member or
 // agent UUID + type) and registers cleanup. Status defaults to "active".
-func seedAutopilot(t *testing.T, queries *db.Queries, title, creatorType string, creatorID pgtype.UUID, agentID pgtype.UUID) db.Autopilot {
+func seedAutopilot(t *testing.T, queries *db.Queries, title, creatorType string, creatorID pgtype.UUID, agentID pgtype.UUID) db.MulticaAutopilot {
 	t.Helper()
 	ctx := context.Background()
 	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
@@ -47,9 +47,9 @@ func seedAutopilot(t *testing.T, queries *db.Queries, title, creatorType string,
 	t.Cleanup(func() {
 		// inbox_item has no FK to autopilot, so clean both up explicitly.
 		testPool.Exec(context.Background(),
-			`DELETE FROM inbox_item WHERE workspace_id = $1 AND details->>'autopilot_id' = $2`,
+			`DELETE FROM multica_inbox_item WHERE workspace_id = $1 AND details->>'autopilot_id' = $2`,
 			testWorkspaceID, util.UUIDToString(ap.ID))
-		testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_autopilot WHERE id = $1`, ap.ID)
 	})
 	return ap
 }
@@ -67,7 +67,7 @@ func seedAutopilotRuns(t *testing.T, autopilotID pgtype.UUID, total, failed int,
 			status = "failed"
 		}
 		if _, err := testPool.Exec(ctx, `
-			INSERT INTO autopilot_run (autopilot_id, source, status, created_at, triggered_at, completed_at)
+			INSERT INTO multica_autopilot_run (autopilot_id, source, status, created_at, triggered_at, completed_at)
 			VALUES ($1, 'schedule', $2, $3, $3, $3)
 		`, autopilotID, status, runAt); err != nil {
 			t.Fatalf("seed autopilot_run: %v", err)
@@ -176,7 +176,7 @@ func TestAutopilotFailureMonitor_LeavesAlreadyPausedAlone(t *testing.T) {
 
 	// Manually pause first.
 	if _, err := testPool.Exec(context.Background(),
-		`UPDATE autopilot SET status = 'paused' WHERE id = $1`, ap.ID); err != nil {
+		`UPDATE multica_autopilot SET status = 'paused' WHERE id = $1`, ap.ID); err != nil {
 		t.Fatalf("manual pause: %v", err)
 	}
 

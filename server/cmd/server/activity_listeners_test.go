@@ -14,7 +14,7 @@ import (
 
 // listActivitiesForIssue is a test helper that fetches up to 100 activity_log
 // records for an issue. Uses the same query that backs the timeline endpoint.
-func listActivitiesForIssue(t *testing.T, queries *db.Queries, issueID string) []db.ActivityLog {
+func listActivitiesForIssue(t *testing.T, queries *db.Queries, issueID string) []db.MulticaActivityLog {
 	t.Helper()
 	activities, err := queries.ListActivitiesForIssue(context.Background(), db.ListActivitiesForIssueParams{
 		IssueID: util.MustParseUUID(issueID),
@@ -28,7 +28,7 @@ func listActivitiesForIssue(t *testing.T, queries *db.Queries, issueID string) [
 
 func cleanupActivities(t *testing.T, issueID string) {
 	t.Helper()
-	testPool.Exec(context.Background(), `DELETE FROM activity_log WHERE issue_id = $1`, issueID)
+	testPool.Exec(context.Background(), `DELETE FROM multica_activity_log WHERE issue_id = $1`, issueID)
 }
 
 func TestActivityIssueCreated(t *testing.T) {

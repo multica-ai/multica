@@ -27,14 +27,14 @@ func newRunningSquadLeaderTaskFixture(t *testing.T) runningSquadLeaderTaskFixtur
 
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT runtime_id FROM agent WHERE id = $1
+		SELECT runtime_id FROM multica_agent WHERE id = $1
 	`, fx.LeaderID).Scan(&runtimeID); err != nil {
 		t.Fatalf("load leader runtime: %v", err)
 	}
 
 	var triggerCommentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type)
 		VALUES ($1, $2, 'member', $3, 'LGTM', 'comment')
 		RETURNING id
 	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
@@ -43,7 +43,7 @@ func newRunningSquadLeaderTaskFixture(t *testing.T) runningSquadLeaderTaskFixtur
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id, trigger_comment_id,
 			status, priority, started_at
 		)
@@ -53,7 +53,7 @@ func newRunningSquadLeaderTaskFixture(t *testing.T) runningSquadLeaderTaskFixtur
 		t.Fatalf("create running squad leader task: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID)
 	})
 
 	return runningSquadLeaderTaskFixture{
@@ -108,7 +108,7 @@ func countAgentCommentsForIssue(t *testing.T, issueID, agentID string) int {
 	t.Helper()
 	var count int
 	if err := testPool.QueryRow(context.Background(), `
-		SELECT count(*) FROM comment
+		SELECT count(*) FROM multica_comment
 		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
 	`, issueID, agentID).Scan(&count); err != nil {
 		t.Fatalf("count agent comments: %v", err)

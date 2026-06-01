@@ -31,7 +31,7 @@ func createRuntimeLocalSkillTestRuntime(t *testing.T, ownerID string) string {
 
 	var runtimeID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO agent_runtime (
+		INSERT INTO multica_agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
 		)
 		VALUES ($1, $2, $3, 'local', 'claude', 'online', 'Runtime Local Skills Test', '{}'::jsonb, $4, now())
@@ -41,7 +41,7 @@ func createRuntimeLocalSkillTestRuntime(t *testing.T, ownerID string) string {
 	}
 
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, runtimeID)
 	})
 
 	return runtimeID
@@ -55,7 +55,7 @@ func createRuntimeLocalSkillTestMember(t *testing.T, role string) string {
 
 	var userID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO "user" (name, email)
+		INSERT INTO multica_user (name, email)
 		VALUES ($1, $2)
 		RETURNING id
 	`, name, email).Scan(&userID); err != nil {
@@ -63,14 +63,14 @@ func createRuntimeLocalSkillTestMember(t *testing.T, role string) string {
 	}
 
 	if _, err := testPool.Exec(context.Background(), `
-		INSERT INTO member (workspace_id, user_id, role)
+		INSERT INTO multica_member (workspace_id, user_id, role)
 		VALUES ($1, $2, $3)
 	`, testWorkspaceID, userID, role); err != nil {
 		t.Fatalf("create member: %v", err)
 	}
 
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_user WHERE id = $1`, userID)
 	})
 
 	return userID
@@ -82,7 +82,7 @@ func countSkillsByName(t *testing.T, name string) int {
 	var count int
 	if err := testPool.QueryRow(context.Background(), `
 		SELECT count(*)
-		FROM skill
+		FROM multica_skill
 		WHERE workspace_id = $1 AND name = $2
 	`, testWorkspaceID, name).Scan(&count); err != nil {
 		t.Fatalf("count skills: %v", err)
@@ -97,7 +97,7 @@ func countSkillFiles(t *testing.T, skillID string) int {
 	var count int
 	if err := testPool.QueryRow(context.Background(), `
 		SELECT count(*)
-		FROM skill_file
+		FROM multica_skill_file
 		WHERE skill_id = $1
 	`, skillID).Scan(&count); err != nil {
 		t.Fatalf("count skill files: %v", err)

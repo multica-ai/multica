@@ -1,21 +1,21 @@
 -- name: ListAgentRuntimes :many
-SELECT * FROM agent_runtime
+SELECT * FROM multica_agent_runtime
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
 -- name: GetAgentRuntime :one
-SELECT * FROM agent_runtime
+SELECT * FROM multica_agent_runtime
 WHERE id = $1;
 
 -- name: GetAgentRuntimeForWorkspace :one
-SELECT * FROM agent_runtime
+SELECT * FROM multica_agent_runtime
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: UpsertAgentRuntime :one
 -- (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
 -- that updated an existing row (false). Analytics reads this to fire
 -- runtime_registered/runtime_ready only on first-time registration.
-INSERT INTO agent_runtime (
+INSERT INTO multica_agent_runtime (
     workspace_id,
     daemon_id,
     name,
@@ -34,17 +34,17 @@ DO UPDATE SET
     status = EXCLUDED.status,
     device_info = EXCLUDED.device_info,
     metadata = EXCLUDED.metadata,
-    owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
+    owner_id = COALESCE(EXCLUDED.owner_id, multica_agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
 RETURNING *, (xmax = 0) AS inserted;
 
 -- name: UpdateAgentRuntimeVisibility :one
 -- Toggles a runtime between 'private' (only owner can bind agents) and
--- 'public' (any workspace member can). Default for new rows is 'private'
--- (see migration 083). Gated at the handler layer to owner / workspace
+-- 'public' (any multica_workspace multica_member can). Default for new rows is 'private'
+-- (see migration 083). Gated at the handler layer to owner / multica_workspace
 -- admin only.
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET visibility = @visibility, updated_at = now()
 WHERE id = @id
 RETURNING *;
@@ -63,7 +63,7 @@ RETURNING *;
 -- query would silently leave a freshly-heartbeated runtime stuck in offline.
 -- Returning affected rows lets callers detect that race and fall back to
 -- MarkAgentRuntimeOnline to flip the row back online.
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET last_seen_at = now()
 WHERE id = $1 AND status = 'online';
 
@@ -77,7 +77,7 @@ WHERE id = $1 AND status = 'online';
 -- NOT touch updated_at so the rows stay HOT-eligible. Affected-rows < len(ids)
 -- means some IDs raced to offline between Schedule and flush; their next beat
 -- will fall through the recordHeartbeat sync path and call MarkAgentRuntimeOnline.
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET last_seen_at = now()
 WHERE id = ANY(@ids::uuid[]) AND status = 'online';
 
@@ -85,13 +85,13 @@ WHERE id = ANY(@ids::uuid[]) AND status = 'online';
 -- Used on the offline→online transition (and on first heartbeat after
 -- registration). Writes status, last_seen_at, and updated_at because the
 -- status flip is a real state change and we want updated_at to reflect it.
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: SetAgentRuntimeOffline :exec
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE id = $1;
 
@@ -100,7 +100,7 @@ WHERE id = $1;
 -- sweeper uses this as a candidate set, then optionally filters via the
 -- LivenessStore before flipping rows to offline (a fresh Redis liveness
 -- record means the DB row is just lagging, not actually dead).
-SELECT id, workspace_id, owner_id, daemon_id, provider FROM agent_runtime
+SELECT id, workspace_id, owner_id, daemon_id, provider FROM multica_agent_runtime
 WHERE status = 'online'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision);
 
@@ -116,7 +116,7 @@ WHERE status = 'online'
 -- because the predicate and the write lived in one statement; here we
 -- carry it forward explicitly so the SELECT/filter/UPDATE pipeline retains
 -- the same race-freedom.
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE status = 'online'
   AND id = ANY(@ids::uuid[])
@@ -126,17 +126,17 @@ RETURNING id, workspace_id, owner_id, daemon_id, provider;
 -- name: FailTasksForOfflineRuntimes :many
 -- Marks dispatched/running tasks as failed when their runtime is offline.
 -- This cleans up orphaned tasks after a daemon crash or network partition.
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',
     failure_reason = 'runtime_offline'
 WHERE status IN ('dispatched', 'running')
   AND runtime_id IN (
-    SELECT id FROM agent_runtime WHERE status = 'offline'
+    SELECT id FROM multica_agent_runtime WHERE status = 'offline'
   )
 RETURNING *;
 
 -- name: ListAgentRuntimesByOwner :many
-SELECT * FROM agent_runtime
+SELECT * FROM multica_agent_runtime
 WHERE workspace_id = $1 AND owner_id = $2
 ORDER BY created_at ASC;
 
@@ -144,52 +144,52 @@ ORDER BY created_at ASC;
 -- Unconditionally flips a known set of runtime IDs to offline. Distinct from
 -- MarkRuntimesOfflineByIDs (which keeps a stale-window predicate so the
 -- sweeper cannot demote a runtime that just heartbeated): this variant is
--- used by intentional revocation paths — e.g. removing a workspace member —
+-- used by intentional revocation paths — e.g. removing a multica_workspace multica_member —
 -- where the caller has already decided the runtime should be offline
 -- regardless of recent liveness.
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE id = ANY(@runtime_ids::uuid[]) AND status = 'online'
 RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
 -- name: CancelAgentTasksByRuntimeOrAgent :many
 -- Cancels every active task that either lives on one of the given runtimes
--- OR belongs to one of the given agents. Used by the member-revocation flow:
--- the runtime-side covers tasks queued against the leaving member's runtimes;
--- the agent-side covers tasks pinned to a different runtime that those agents
--- left behind from a prior UpdateAgent (agent.runtime_id can change, but
--- agent_task_queue.runtime_id does not get rewritten when it does, so a task
--- queued on runtime A by agent X — later moved to runtime B — survives the
+-- OR belongs to one of the given agents. Used by the multica_member-revocation flow:
+-- the runtime-side covers tasks queued against the leaving multica_member's runtimes;
+-- the multica_agent-side covers tasks pinned to a different runtime that those agents
+-- left behind from a prior UpdateAgent (multica_agent.runtime_id can change, but
+-- multica_agent_task_queue.runtime_id does not get rewritten when it does, so a task
+-- queued on runtime A by multica_agent X — later moved to runtime B — survives the
 -- runtime-only revoke and could still be claimed because ClaimAgentTask does
--- not gate on agent.archived_at).
+-- not gate on multica_agent.archived_at).
 --
 -- We use 'cancelled' rather than 'failed' so the daemon's per-task status
--- poller (watchTaskCancellation) interrupts the running agent gracefully.
+-- poller (watchTaskCancellation) interrupts the running multica_agent gracefully.
 -- Returns the affected rows so the caller can broadcast task:cancelled and
--- reconcile per-agent status.
-UPDATE agent_task_queue
+-- reconcile per-multica_agent status.
+UPDATE multica_agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE (runtime_id = ANY(@runtime_ids::uuid[]) OR agent_id = ANY(@agent_ids::uuid[]))
   AND status IN ('queued', 'dispatched', 'running')
 RETURNING *;
 
 -- name: DeleteAgentRuntime :exec
-DELETE FROM agent_runtime WHERE id = $1;
+DELETE FROM multica_agent_runtime WHERE id = $1;
 
 -- name: CountActiveAgentsByRuntime :one
-SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL;
+SELECT count(*) FROM multica_agent WHERE runtime_id = $1 AND archived_at IS NULL;
 
 -- name: DeleteArchivedAgentsByRuntime :exec
-DELETE FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
+DELETE FROM multica_agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
 
 -- name: PauseAutopilotsByAgentAssignees :exec
--- Pauses every active autopilot whose agent assignee is in the supplied list.
+-- Pauses every active multica_autopilot whose multica_agent assignee is in the supplied list.
 -- Called before hard-deleting archived agents on runtime teardown so the rows
--- do not become dangling (autopilot.assignee_id no longer has an agent FK
+-- do not become dangling (multica_autopilot.assignee_id no longer has an multica_agent FK
 -- since migration 096). Status='paused' makes the breakage visible in the UI
--- — operators can re-point the autopilot at a live agent or delete it —
+-- — operators can re-point the multica_autopilot at a live multica_agent or delete it —
 -- rather than silently piling skipped runs.
-UPDATE autopilot
+UPDATE multica_autopilot
 SET status = 'paused', updated_at = now()
 WHERE status = 'active'
   AND assignee_type = 'agent'
@@ -199,7 +199,7 @@ WHERE status = 'active'
 -- Companion to DeleteArchivedAgentsByRuntime: enumerates the archived agents
 -- about to be hard-deleted so the runtime teardown can pause autopilots that
 -- still point at them. Returns ids only — the caller only needs the set.
-SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
+SELECT id FROM multica_agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
 
 -- name: FindLegacyRuntimesByDaemonID :many
 -- Looks up runtime rows keyed on a prior (hostname-derived) daemon_id. Used
@@ -214,25 +214,25 @@ SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
 --
 -- Returns many rather than one because case drift may have already minted
 -- duplicate rows historically (e.g. `Foo.local` AND `foo.local` under the
--- same workspace+provider). A single-row lookup would consolidate only one
+-- same multica_workspace+provider). A single-row lookup would consolidate only one
 -- of them and leave the rest orphaned. Callers must merge every returned
 -- row into the new UUID-keyed runtime.
-SELECT * FROM agent_runtime
+SELECT * FROM multica_agent_runtime
 WHERE workspace_id = @workspace_id
   AND provider = @provider
   AND LOWER(daemon_id) = LOWER(@daemon_id);
 
 -- name: ReassignAgentsToRuntime :execrows
--- Re-points every agent referencing old_runtime_id at new_runtime_id.
-UPDATE agent
+-- Re-points every multica_agent referencing old_runtime_id at new_runtime_id.
+UPDATE multica_agent
 SET runtime_id = @new_runtime_id
 WHERE runtime_id = @old_runtime_id;
 
 -- name: ReassignTasksToRuntime :execrows
 -- Re-points every queued/running/completed task referencing old_runtime_id.
--- Required before deleting the old runtime row because agent_task_queue has
+-- Required before deleting the old runtime row because multica_agent_task_queue has
 -- an ON DELETE CASCADE FK that would otherwise drop historical tasks.
-UPDATE agent_task_queue
+UPDATE multica_agent_task_queue
 SET runtime_id = @new_runtime_id
 WHERE runtime_id = @old_runtime_id;
 
@@ -241,16 +241,16 @@ WHERE runtime_id = @old_runtime_id;
 -- this row. Useful for debugging when tracing back why a given runtime row
 -- subsumed an old one, and only overwrites NULL so the earliest merge is
 -- preserved.
-UPDATE agent_runtime
+UPDATE multica_agent_runtime
 SET legacy_daemon_id = COALESCE(legacy_daemon_id, $2)
 WHERE id = $1;
 
 -- name: DeleteStaleOfflineRuntimes :many
 -- Deletes runtimes that have been offline for longer than the TTL and have
--- no agents bound (active or archived). The FK constraint on agent.runtime_id
--- is ON DELETE RESTRICT, so we must exclude all agent references.
-DELETE FROM agent_runtime
+-- no agents bound (active or archived). The FK constraint on multica_agent.runtime_id
+-- is ON DELETE RESTRICT, so we must exclude all multica_agent references.
+DELETE FROM multica_agent_runtime
 WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
-  AND id NOT IN (SELECT DISTINCT runtime_id FROM agent)
+  AND id NOT IN (SELECT DISTINCT runtime_id FROM multica_agent)
 RETURNING id, workspace_id;

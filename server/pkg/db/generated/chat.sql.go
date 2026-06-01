@@ -12,7 +12,7 @@ import (
 )
 
 const createChatMessage = `-- name: CreateChatMessage :one
-INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms)
+INSERT INTO multica_chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms)
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms
 `
@@ -26,7 +26,7 @@ type CreateChatMessageParams struct {
 	ElapsedMs     pgtype.Int8 `json:"elapsed_ms"`
 }
 
-func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessageParams) (ChatMessage, error) {
+func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessageParams) (MulticaChatMessage, error) {
 	row := q.db.QueryRow(ctx, createChatMessage,
 		arg.ChatSessionID,
 		arg.Role,
@@ -35,7 +35,7 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 		arg.FailureReason,
 		arg.ElapsedMs,
 	)
-	var i ChatMessage
+	var i MulticaChatMessage
 	err := row.Scan(
 		&i.ID,
 		&i.ChatSessionID,
@@ -50,8 +50,8 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 }
 
 const createChatSession = `-- name: CreateChatSession :one
-INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id)
-VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2))
+INSERT INTO multica_chat_session (workspace_id, agent_id, creator_id, title, runtime_id)
+VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM multica_agent WHERE id = $2))
 RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id
 `
 
@@ -62,14 +62,14 @@ type CreateChatSessionParams struct {
 	Title       string      `json:"title"`
 }
 
-func (q *Queries) CreateChatSession(ctx context.Context, arg CreateChatSessionParams) (ChatSession, error) {
+func (q *Queries) CreateChatSession(ctx context.Context, arg CreateChatSessionParams) (MulticaChatSession, error) {
 	row := q.db.QueryRow(ctx, createChatSession,
 		arg.WorkspaceID,
 		arg.AgentID,
 		arg.CreatorID,
 		arg.Title,
 	)
-	var i ChatSession
+	var i MulticaChatSession
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -88,7 +88,7 @@ func (q *Queries) CreateChatSession(ctx context.Context, arg CreateChatSessionPa
 }
 
 const createChatTask = `-- name: CreateChatTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
+INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
 VALUES ($1, $2, NULL, 'queued', $3, $4)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, workflow_node_run_id
 `
@@ -100,14 +100,14 @@ type CreateChatTaskParams struct {
 	ChatSessionID pgtype.UUID `json:"chat_session_id"`
 }
 
-func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) (AgentTaskQueue, error) {
+func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) (MulticaAgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createChatTask,
 		arg.AgentID,
 		arg.RuntimeID,
 		arg.Priority,
 		arg.ChatSessionID,
 	)
-	var i AgentTaskQueue
+	var i MulticaAgentTaskQueue
 	err := row.Scan(
 		&i.ID,
 		&i.AgentID,
@@ -140,7 +140,7 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 }
 
 const deleteChatSession = `-- name: DeleteChatSession :exec
-DELETE FROM chat_session WHERE id = $1 AND workspace_id = $2
+DELETE FROM multica_chat_session WHERE id = $1 AND workspace_id = $2
 `
 
 type DeleteChatSessionParams struct {
@@ -148,8 +148,8 @@ type DeleteChatSessionParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Hard delete. chat_message rows cascade via FK ON DELETE CASCADE; the
-// chat_session_id on agent_task_queue is set NULL by FK so completed/failed
+// Hard delete. multica_chat_message rows cascade via FK ON DELETE CASCADE; the
+// chat_session_id on multica_agent_task_queue is set NULL by FK so completed/failed
 // task history survives the session being removed. Callers MUST run inside
 // the same transaction that holds LockChatSessionForDelete and that has
 // already cancelled any in-flight tasks (see CancelAgentTasksByChatSession)
@@ -162,13 +162,13 @@ func (q *Queries) DeleteChatSession(ctx context.Context, arg DeleteChatSessionPa
 }
 
 const getChatMessage = `-- name: GetChatMessage :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms FROM multica_chat_message
 WHERE id = $1
 `
 
-func (q *Queries) GetChatMessage(ctx context.Context, id pgtype.UUID) (ChatMessage, error) {
+func (q *Queries) GetChatMessage(ctx context.Context, id pgtype.UUID) (MulticaChatMessage, error) {
 	row := q.db.QueryRow(ctx, getChatMessage, id)
-	var i ChatMessage
+	var i MulticaChatMessage
 	err := row.Scan(
 		&i.ID,
 		&i.ChatSessionID,
@@ -183,13 +183,13 @@ func (q *Queries) GetChatMessage(ctx context.Context, id pgtype.UUID) (ChatMessa
 }
 
 const getChatSession = `-- name: GetChatSession :one
-SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id FROM chat_session
+SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id FROM multica_chat_session
 WHERE id = $1
 `
 
-func (q *Queries) GetChatSession(ctx context.Context, id pgtype.UUID) (ChatSession, error) {
+func (q *Queries) GetChatSession(ctx context.Context, id pgtype.UUID) (MulticaChatSession, error) {
 	row := q.db.QueryRow(ctx, getChatSession, id)
-	var i ChatSession
+	var i MulticaChatSession
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -208,7 +208,7 @@ func (q *Queries) GetChatSession(ctx context.Context, id pgtype.UUID) (ChatSessi
 }
 
 const getChatSessionInWorkspace = `-- name: GetChatSessionInWorkspace :one
-SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id FROM chat_session
+SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id FROM multica_chat_session
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -217,9 +217,9 @@ type GetChatSessionInWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetChatSessionInWorkspace(ctx context.Context, arg GetChatSessionInWorkspaceParams) (ChatSession, error) {
+func (q *Queries) GetChatSessionInWorkspace(ctx context.Context, arg GetChatSessionInWorkspaceParams) (MulticaChatSession, error) {
 	row := q.db.QueryRow(ctx, getChatSessionInWorkspace, arg.ID, arg.WorkspaceID)
-	var i ChatSession
+	var i MulticaChatSession
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -238,7 +238,7 @@ func (q *Queries) GetChatSessionInWorkspace(ctx context.Context, arg GetChatSess
 }
 
 const getLastChatTaskSession = `-- name: GetLastChatTaskSession :one
-SELECT session_id, work_dir, runtime_id FROM agent_task_queue
+SELECT session_id, work_dir, runtime_id FROM multica_agent_task_queue
 WHERE chat_session_id = $1
   AND (
     status = 'completed'
@@ -261,9 +261,9 @@ type GetLastChatTaskSessionRow struct {
 
 // Returns the most recent task in this chat session that managed to record a
 // session_id. Includes both completed and failed tasks: even a failed task
-// may have established a real agent session before failing, and we'd rather
+// may have established a real multica_agent session before failing, and we'd rather
 // resume there than start over and lose conversation memory. Used as a
-// fallback when chat_session.session_id is NULL. Resume-unsafe failures are
+// fallback when multica_chat_session.session_id is NULL. Resume-unsafe failures are
 // excluded because replaying those sessions deterministically reproduces the
 // same terminal state.
 func (q *Queries) GetLastChatTaskSession(ctx context.Context, chatSessionID pgtype.UUID) (GetLastChatTaskSessionRow, error) {
@@ -274,7 +274,7 @@ func (q *Queries) GetLastChatTaskSession(ctx context.Context, chatSessionID pgty
 }
 
 const getPendingChatTask = `-- name: GetPendingChatTask :one
-SELECT id, status, created_at FROM agent_task_queue
+SELECT id, status, created_at FROM multica_agent_task_queue
 WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
 ORDER BY created_at DESC
 LIMIT 1
@@ -301,7 +301,7 @@ func (q *Queries) GetPendingChatTask(ctx context.Context, chatSessionID pgtype.U
 const listAllChatSessionsByCreator = `-- name: ListAllChatSessionsByCreator :many
 SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id,
        (cs.unread_since IS NOT NULL)::bool AS has_unread
-FROM chat_session cs
+FROM multica_chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
 ORDER BY cs.updated_at DESC
 `
@@ -362,20 +362,20 @@ func (q *Queries) ListAllChatSessionsByCreator(ctx context.Context, arg ListAllC
 }
 
 const listChatMessages = `-- name: ListChatMessages :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms FROM multica_chat_message
 WHERE chat_session_id = $1
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUID) ([]ChatMessage, error) {
+func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUID) ([]MulticaChatMessage, error) {
 	rows, err := q.db.Query(ctx, listChatMessages, chatSessionID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ChatMessage{}
+	items := []MulticaChatMessage{}
 	for rows.Next() {
-		var i ChatMessage
+		var i MulticaChatMessage
 		if err := rows.Scan(
 			&i.ID,
 			&i.ChatSessionID,
@@ -399,7 +399,7 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 const listChatSessionsByCreator = `-- name: ListChatSessionsByCreator :many
 SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id,
        (cs.unread_since IS NOT NULL)::bool AS has_unread
-FROM chat_session cs
+FROM multica_chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
 ORDER BY cs.updated_at DESC
 `
@@ -464,8 +464,8 @@ func (q *Queries) ListChatSessionsByCreator(ctx context.Context, arg ListChatSes
 
 const listPendingChatTasksByCreator = `-- name: ListPendingChatTasksByCreator :many
 SELECT atq.id AS task_id, atq.status, atq.chat_session_id
-FROM agent_task_queue atq
-JOIN chat_session cs ON cs.id = atq.chat_session_id
+FROM multica_agent_task_queue atq
+JOIN multica_chat_session cs ON cs.id = atq.chat_session_id
 WHERE cs.workspace_id = $1
   AND cs.creator_id = $2
   AND atq.status IN ('queued', 'dispatched', 'running')
@@ -484,7 +484,7 @@ type ListPendingChatTasksByCreatorRow struct {
 }
 
 // Aggregate view of all in-flight chat tasks owned by a given creator in a
-// workspace. Drives the FAB's "running" indicator when the chat window is
+// multica_workspace. Drives the FAB's "running" indicator when the chat window is
 // closed and no single session's query is active.
 func (q *Queries) ListPendingChatTasksByCreator(ctx context.Context, arg ListPendingChatTasksByCreatorParams) ([]ListPendingChatTasksByCreatorRow, error) {
 	rows, err := q.db.Query(ctx, listPendingChatTasksByCreator, arg.WorkspaceID, arg.CreatorID)
@@ -507,15 +507,15 @@ func (q *Queries) ListPendingChatTasksByCreator(ctx context.Context, arg ListPen
 }
 
 const lockChatSessionForDelete = `-- name: LockChatSessionForDelete :one
-SELECT id FROM chat_session
+SELECT id FROM multica_chat_session
 WHERE id = $1
 FOR UPDATE
 `
 
-// Acquires an exclusive (FOR UPDATE) row lock on chat_session(id). Used by
+// Acquires an exclusive (FOR UPDATE) row lock on multica_chat_session(id). Used by
 // the delete path so that a concurrent SendChatMessage cannot enqueue a new
-// agent_task_queue row referencing this session between our cancel and
-// delete steps. The FK from agent_task_queue.chat_session_id takes a
+// multica_agent_task_queue row referencing this session between our cancel and
+// delete steps. The FK from multica_agent_task_queue.chat_session_id takes a
 // KEY SHARE lock on the parent row during INSERT validation, which
 // conflicts with FOR UPDATE — concurrent inserts block here and then fail
 // their FK check after we commit the delete.
@@ -527,7 +527,7 @@ func (q *Queries) LockChatSessionForDelete(ctx context.Context, id pgtype.UUID) 
 }
 
 const markChatSessionRead = `-- name: MarkChatSessionRead :exec
-UPDATE chat_session SET unread_since = NULL
+UPDATE multica_chat_session SET unread_since = NULL
 WHERE id = $1
 `
 
@@ -538,7 +538,7 @@ func (q *Queries) MarkChatSessionRead(ctx context.Context, id pgtype.UUID) error
 }
 
 const setUnreadSinceIfNull = `-- name: SetUnreadSinceIfNull :exec
-UPDATE chat_session SET unread_since = now()
+UPDATE multica_chat_session SET unread_since = now()
 WHERE id = $1 AND unread_since IS NULL
 `
 
@@ -551,7 +551,7 @@ func (q *Queries) SetUnreadSinceIfNull(ctx context.Context, id pgtype.UUID) erro
 }
 
 const touchChatSession = `-- name: TouchChatSession :exec
-UPDATE chat_session SET updated_at = now()
+UPDATE multica_chat_session SET updated_at = now()
 WHERE id = $1
 `
 
@@ -561,7 +561,7 @@ func (q *Queries) TouchChatSession(ctx context.Context, id pgtype.UUID) error {
 }
 
 const updateChatSessionSession = `-- name: UpdateChatSessionSession :exec
-UPDATE chat_session
+UPDATE multica_chat_session
 SET session_id = COALESCE($1, session_id),
     work_dir = COALESCE($2, work_dir),
     runtime_id = COALESCE($3, runtime_id),
@@ -578,9 +578,9 @@ type UpdateChatSessionSessionParams struct {
 
 // Updates the resume pointer for a chat session. Empty/NULL inputs are
 // ignored via COALESCE so a task that completes without a session_id (e.g.
-// the agent crashed before establishing one) cannot wipe out a previously
+// the multica_agent crashed before establishing one) cannot wipe out a previously
 // recorded resume pointer. This makes the chat memory robust against
-// intermittent agent failures.
+// intermittent multica_agent failures.
 func (q *Queries) UpdateChatSessionSession(ctx context.Context, arg UpdateChatSessionSessionParams) error {
 	_, err := q.db.Exec(ctx, updateChatSessionSession,
 		arg.SessionID,
@@ -592,7 +592,7 @@ func (q *Queries) UpdateChatSessionSession(ctx context.Context, arg UpdateChatSe
 }
 
 const updateChatSessionTitle = `-- name: UpdateChatSessionTitle :one
-UPDATE chat_session SET title = $2, updated_at = now()
+UPDATE multica_chat_session SET title = $2, updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id
 `
@@ -602,9 +602,9 @@ type UpdateChatSessionTitleParams struct {
 	Title string      `json:"title"`
 }
 
-func (q *Queries) UpdateChatSessionTitle(ctx context.Context, arg UpdateChatSessionTitleParams) (ChatSession, error) {
+func (q *Queries) UpdateChatSessionTitle(ctx context.Context, arg UpdateChatSessionTitleParams) (MulticaChatSession, error) {
 	row := q.db.QueryRow(ctx, updateChatSessionTitle, arg.ID, arg.Title)
-	var i ChatSession
+	var i MulticaChatSession
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,

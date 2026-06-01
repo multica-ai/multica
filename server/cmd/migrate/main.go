@@ -27,7 +27,7 @@ func main() {
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+		dbURL = "postgres://costrict:costrict_password@localhost:5432/costrict"
 	}
 
 	ctx := context.Background()

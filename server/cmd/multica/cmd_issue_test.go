@@ -506,7 +506,7 @@ func TestResolveIssueRef(t *testing.T) {
 		}
 	})
 
-	t.Run("short UUID prefix resolves from workspace issue list", func(t *testing.T) {
+	t.Run("short UUID prefix resolves from multica_workspace issue list", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/api/issues" {
 				http.NotFound(w, r)

@@ -63,6 +63,9 @@ function LoginPageContent() {
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
 
+  const casdoorEnabled = useConfigStore((state) => state.casdoorEnabled);
+  const casdoorLoginUrl = useConfigStore((state) => state.casdoorLoginUrl) || "/auth/casdoor/login";
+
   const cliCallbackRaw = searchParams.get("cli_callback");
   const cliState = searchParams.get("cli_state") || "";
   const platform = searchParams.get("platform");
@@ -203,6 +206,8 @@ function LoginPageContent() {
           : undefined
       }
       onTokenObtained={setLoggedInCookie}
+      casdoorEnabled={casdoorEnabled}
+      casdoorLoginUrl={casdoorLoginUrl}
       extra={
         <span className="text-xs text-muted-foreground">
           {t(($) => $.web.prefer_desktop)}{" "}

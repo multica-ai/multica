@@ -11,7 +11,7 @@ import (
 )
 
 const countRecentContactSalesByEmail = `-- name: CountRecentContactSalesByEmail :one
-SELECT count(*) FROM contact_sales_inquiry
+SELECT count(*) FROM multica_contact_sales_inquiry
 WHERE business_email = $1 AND created_at > now() - interval '1 hour'
 `
 
@@ -23,7 +23,7 @@ func (q *Queries) CountRecentContactSalesByEmail(ctx context.Context, businessEm
 }
 
 const createContactSalesInquiry = `-- name: CreateContactSalesInquiry :one
-INSERT INTO contact_sales_inquiry (
+INSERT INTO multica_contact_sales_inquiry (
     first_name,
     last_name,
     business_email,
@@ -60,7 +60,7 @@ type CreateContactSalesInquiryParams struct {
 	SubmitterIp     *netip.Addr `json:"submitter_ip"`
 }
 
-func (q *Queries) CreateContactSalesInquiry(ctx context.Context, arg CreateContactSalesInquiryParams) (ContactSalesInquiry, error) {
+func (q *Queries) CreateContactSalesInquiry(ctx context.Context, arg CreateContactSalesInquiryParams) (MulticaContactSalesInquiry, error) {
 	row := q.db.QueryRow(ctx, createContactSalesInquiry,
 		arg.FirstName,
 		arg.LastName,
@@ -75,7 +75,7 @@ func (q *Queries) CreateContactSalesInquiry(ctx context.Context, arg CreateConta
 		arg.UserAgent,
 		arg.SubmitterIp,
 	)
-	var i ContactSalesInquiry
+	var i MulticaContactSalesInquiry
 	err := row.Scan(
 		&i.ID,
 		&i.FirstName,

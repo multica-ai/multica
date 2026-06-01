@@ -23,7 +23,7 @@ type PinnedItemResponse struct {
 	CreatedAt   string  `json:"created_at"`
 }
 
-func pinnedItemToResponse(p db.PinnedItem) PinnedItemResponse {
+func pinnedItemToResponse(p db.MulticaPinnedItem) PinnedItemResponse {
 	return PinnedItemResponse{
 		ID:          uuidToString(p.ID),
 		WorkspaceID: uuidToString(p.WorkspaceID),

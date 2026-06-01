@@ -43,9 +43,9 @@ func createIssueForTimeline(t *testing.T, title string) string {
 	json.NewDecoder(w.Body).Decode(&issue)
 	t.Cleanup(func() {
 		ctx := context.Background()
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, issue.ID)
-		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issue.ID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issue.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_activity_log WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_comment WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issue.ID)
 	})
 	return issue.ID
 }
@@ -62,7 +62,7 @@ func seedTimelineEntries(t *testing.T, issueID string, commentN, activityN int) 
 		var id string
 		ts := base.Add(time.Duration(i) * time.Minute)
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at, updated_at)
+			INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type, created_at, updated_at)
 			VALUES ($1, $2, 'member', $3, $4, 'comment', $5, $5)
 			RETURNING id
 		`, issueID, testWorkspaceID, testUserID, fmt.Sprintf("comment %d", i), ts).Scan(&id); err != nil {
@@ -74,7 +74,7 @@ func seedTimelineEntries(t *testing.T, issueID string, commentN, activityN int) 
 		var id string
 		ts := base.Add(time.Duration(commentN+i) * time.Minute)
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO activity_log (workspace_id, issue_id, actor_type, actor_id, action, details, created_at)
+			INSERT INTO multica_activity_log (workspace_id, issue_id, actor_type, actor_id, action, details, created_at)
 			VALUES ($1, $2, 'member', $3, 'status_changed', '{"from":"todo","to":"in_progress"}'::jsonb, $4)
 			RETURNING id
 		`, testWorkspaceID, issueID, testUserID, ts).Scan(&id); err != nil {

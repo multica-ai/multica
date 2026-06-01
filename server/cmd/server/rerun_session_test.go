@@ -21,9 +21,9 @@ func setupRerunTestFixture(t *testing.T) (string, string, string) {
 
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a
-		JOIN member m ON m.workspace_id = a.workspace_id
-		JOIN "user" u ON u.id = m.user_id
+		SELECT a.id, a.runtime_id FROM multica_agent a
+		JOIN multica_member m ON m.workspace_id = a.workspace_id
+		JOIN multica_user u ON u.id = m.user_id
 		WHERE u.email = $1
 		  AND a.archived_at IS NULL
 		LIMIT 1
@@ -36,10 +36,10 @@ func setupRerunTestFixture(t *testing.T) (string, string, string) {
 	// uq_issue_workspace_number unique constraint when multiple fixtures
 	// coexist in the same test (e.g. TestRerunIssueRejectsCrossIssueTask).
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
 		SELECT $1, 'Rerun test issue', 'todo', 'none', 'member', m.user_id, 'agent', $2,
-		       (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1)
-		FROM member m WHERE m.workspace_id = $1 LIMIT 1
+		       (SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1)
+		FROM multica_member m WHERE m.workspace_id = $1 LIMIT 1
 		RETURNING id
 	`, testWorkspaceID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("failed to create test issue: %v", err)
@@ -51,8 +51,8 @@ func setupRerunTestFixture(t *testing.T) (string, string, string) {
 func cleanupRerunFixture(t *testing.T, issueID string) {
 	t.Helper()
 	ctx := context.Background()
-	testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-	testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
+	testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID)
 }
 
 // TestGetLastTaskSessionExcludesPoisonedFailures asserts that the
@@ -74,14 +74,14 @@ func TestGetLastTaskSessionExcludesPoisonedFailures(t *testing.T) {
 	// The poisoned task is the *most recent* one, so without the filter the
 	// resume lookup would return its session_id.
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
 		VALUES ($1, $2, $3, 'failed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'HEALTHY-SESSION', '/tmp/healthy', 'timeout')
 	`, agentID, runtimeID, issueID); err != nil {
 		t.Fatalf("insert healthy failed task: %v", err)
 	}
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
 		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'POISONED-SESSION', '/tmp/poisoned', 'iteration_limit')
 	`, agentID, runtimeID, issueID); err != nil {
 		t.Fatalf("insert poisoned failed task: %v", err)
@@ -119,7 +119,7 @@ func TestGetLastTaskSessionFallbackPoisonedClassifier(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
 		VALUES ($1, $2, $3, 'failed', 0, now() - interval '5 seconds', now() - interval '5 seconds', 'POISONED-FALLBACK', '/tmp/poisoned', 'agent_fallback_message')
 	`, agentID, runtimeID, issueID); err != nil {
 		t.Fatalf("insert poisoned failed task: %v", err)
@@ -152,7 +152,7 @@ func TestGetLastTaskSessionExcludesAPIInvalidRequest(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
 		VALUES ($1, $2, $3, 'failed', 0, now() - interval '5 seconds', now() - interval '5 seconds', 'POISONED-API400', '/tmp/poisoned', 'api_invalid_request')
 	`, agentID, runtimeID, issueID); err != nil {
 		t.Fatalf("insert poisoned failed task: %v", err)
@@ -183,14 +183,14 @@ func TestGetLastTaskSessionExcludesCodexSemanticInactivity(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
 		VALUES ($1, $2, $3, 'failed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'HEALTHY-SESSION', '/tmp/healthy', 'timeout')
 	`, agentID, runtimeID, issueID); err != nil {
 		t.Fatalf("insert healthy failed task: %v", err)
 	}
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
 		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'CODEX-STUCK-SESSION', '/tmp/codex-stuck', 'codex_semantic_inactivity',
 		        'codex semantic inactivity timeout after 10m0s without agent progress (last activity: tool-result:exec_command)')
 	`, agentID, runtimeID, issueID); err != nil {
@@ -222,7 +222,7 @@ func TestCreateRetryTaskFreshensCodexSemanticInactivity(t *testing.T) {
 
 	var parentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority,
 			started_at, completed_at, session_id, work_dir, failure_reason,
 			attempt, max_attempts
@@ -265,7 +265,7 @@ func TestCreateRetryTaskKeepsOrdinaryTimeoutSession(t *testing.T) {
 
 	var parentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority,
 			started_at, completed_at, session_id, work_dir, failure_reason,
 			attempt, max_attempts
@@ -322,7 +322,7 @@ func TestGetLastTaskSessionExcludesLegacyAPI400(t *testing.T) {
 	// them via ILIKE on the off chance a row escapes the migration
 	// (deploy window, manual relabel, etc.).
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
 		VALUES ($1, $2, $3, 'failed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'LEGACY-POISONED', '/tmp/legacy', 'agent_error',
 		        'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Could not process image"}}')
 	`, agentID, runtimeID, issueID); err != nil {
@@ -335,7 +335,7 @@ func TestGetLastTaskSessionExcludesLegacyAPI400(t *testing.T) {
 	// the legacy row (failure_reason filter MISSES) — the exact
 	// wormhole GPT-Boy flagged on PR review.
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
 		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'NEW-POISONED', '/tmp/new', 'api_invalid_request',
 		        'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Could not process image"}}')
 	`, agentID, runtimeID, issueID); err != nil {
@@ -368,7 +368,7 @@ func TestGetLastTaskSessionKeepsBenignAgentErrorWithSession(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
 		VALUES ($1, $2, $3, 'failed', 0, now() - interval '30 seconds', now() - interval '30 seconds', 'HEALTHY-RESUMABLE', '/tmp/healthy', 'agent_error',
 		        'tool execution failed: connection refused')
 	`, agentID, runtimeID, issueID); err != nil {
@@ -442,27 +442,27 @@ func TestRerunIssueTargetsSourceTaskAgent(t *testing.T) {
 	// that's whose task row the user clicked.
 	var secondaryAgentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (
+		INSERT INTO multica_agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks, owner_id
 		)
 		SELECT a.workspace_id, 'Rerun Secondary Agent', '', 'cloud', '{}'::jsonb,
 		       a.runtime_id, 'workspace', 1, a.owner_id
-		FROM agent a WHERE a.id = $1
+		FROM multica_agent a WHERE a.id = $1
 		RETURNING id
 	`, primaryAgentID).Scan(&secondaryAgentID); err != nil {
 		t.Fatalf("create secondary agent: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE agent_id = $1`, secondaryAgentID)
-		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, secondaryAgentID)
+		testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE agent_id = $1`, secondaryAgentID)
+		testPool.Exec(ctx, `DELETE FROM multica_agent WHERE id = $1`, secondaryAgentID)
 	})
 
 	// Insert a failed past task on this issue under the secondary agent —
 	// the row the user is about to click retry on.
 	var sourceTaskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority,
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority,
 		                              started_at, completed_at, failure_reason)
 		VALUES ($1, $2, $3, 'failed', 0,
 		        now() - interval '1 minute', now() - interval '30 seconds', 'agent_error')
@@ -521,10 +521,10 @@ func TestRerunIssueRejectsCrossIssueTask(t *testing.T) {
 	// rerun assertion can.
 	var issueBID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
 		SELECT $1, 'Rerun cross-issue test', 'todo', 'none', 'member', m.user_id, 'agent', $2,
-		       (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1)
-		FROM member m WHERE m.workspace_id = $1 LIMIT 1
+		       (SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1)
+		FROM multica_member m WHERE m.workspace_id = $1 LIMIT 1
 		RETURNING id
 	`, testWorkspaceID, agentID).Scan(&issueBID); err != nil {
 		t.Fatalf("create second issue: %v", err)
@@ -533,7 +533,7 @@ func TestRerunIssueRejectsCrossIssueTask(t *testing.T) {
 
 	var crossTaskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority,
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority,
 		                              started_at, completed_at, failure_reason)
 		VALUES ($1, $2, $3, 'failed', 0,
 		        now() - interval '1 minute', now() - interval '30 seconds', 'agent_error')
@@ -579,22 +579,22 @@ func TestRerunIssueInheritsTriggerCommentFromSourceTask(t *testing.T) {
 	// Create a comment to stand in as the original mention / reply trigger.
 	var triggerCommentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type)
 		SELECT $1, $2, 'member', m.user_id, 'please retry this', 'comment'
-		FROM member m WHERE m.workspace_id = $2 LIMIT 1
+		FROM multica_member m WHERE m.workspace_id = $2 LIMIT 1
 		RETURNING id
 	`, issueID, testWorkspaceID).Scan(&triggerCommentID); err != nil {
 		t.Fatalf("insert trigger comment: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, triggerCommentID)
+		testPool.Exec(ctx, `DELETE FROM multica_comment WHERE id = $1`, triggerCommentID)
 	})
 
 	// Source task carries the trigger_comment_id — this is the row whose
 	// retry button the user clicks in the execution log.
 	var sourceTaskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority,
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority,
 		                              started_at, completed_at, failure_reason,
 		                              trigger_comment_id)
 		VALUES ($1, $2, $3, 'failed', 0,

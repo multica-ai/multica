@@ -12,7 +12,7 @@ import (
 )
 
 const cancelWorkflowNodeRuns = `-- name: CancelWorkflowNodeRuns :exec
-UPDATE workflow_node_run SET
+UPDATE multica_workflow_node_run SET
     status = 'cancelled',
     completed_at = now(),
     updated_at = now()
@@ -26,7 +26,7 @@ func (q *Queries) CancelWorkflowNodeRuns(ctx context.Context, workflowRunID pgty
 }
 
 const createWorkflowAgentTask = `-- name: CreateWorkflowAgentTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, workflow_node_run_id, context)
+INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, workflow_node_run_id, context)
 VALUES ($1, $2, $4, 'queued', $3, $5, $6)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, workflow_node_run_id
 `
@@ -40,7 +40,7 @@ type CreateWorkflowAgentTaskParams struct {
 	Context           []byte      `json:"context"`
 }
 
-func (q *Queries) CreateWorkflowAgentTask(ctx context.Context, arg CreateWorkflowAgentTaskParams) (AgentTaskQueue, error) {
+func (q *Queries) CreateWorkflowAgentTask(ctx context.Context, arg CreateWorkflowAgentTaskParams) (MulticaAgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createWorkflowAgentTask,
 		arg.AgentID,
 		arg.RuntimeID,
@@ -49,7 +49,7 @@ func (q *Queries) CreateWorkflowAgentTask(ctx context.Context, arg CreateWorkflo
 		arg.WorkflowNodeRunID,
 		arg.Context,
 	)
-	var i AgentTaskQueue
+	var i MulticaAgentTaskQueue
 	err := row.Scan(
 		&i.ID,
 		&i.AgentID,
@@ -82,7 +82,7 @@ func (q *Queries) CreateWorkflowAgentTask(ctx context.Context, arg CreateWorkflo
 }
 
 const createWorkflowNodeRun = `-- name: CreateWorkflowNodeRun :one
-INSERT INTO workflow_node_run (
+INSERT INTO multica_workflow_node_run (
     workflow_run_id, workflow_node_id, node_title, status,
     retry_count, worker_type, worker_id, critic_type, critic_id
 ) VALUES (
@@ -102,7 +102,7 @@ type CreateWorkflowNodeRunParams struct {
 	CriticID       pgtype.UUID `json:"critic_id"`
 }
 
-func (q *Queries) CreateWorkflowNodeRun(ctx context.Context, arg CreateWorkflowNodeRunParams) (WorkflowNodeRun, error) {
+func (q *Queries) CreateWorkflowNodeRun(ctx context.Context, arg CreateWorkflowNodeRunParams) (MulticaWorkflowNodeRun, error) {
 	row := q.db.QueryRow(ctx, createWorkflowNodeRun,
 		arg.WorkflowRunID,
 		arg.WorkflowNodeID,
@@ -114,7 +114,7 @@ func (q *Queries) CreateWorkflowNodeRun(ctx context.Context, arg CreateWorkflowN
 		arg.WorkerID,
 		arg.CriticID,
 	)
-	var i WorkflowNodeRun
+	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowRunID,
@@ -142,8 +142,8 @@ func (q *Queries) CreateWorkflowNodeRun(ctx context.Context, arg CreateWorkflowN
 
 const getDownstreamNodeRuns = `-- name: GetDownstreamNodeRuns :many
 SELECT wnr.id, wnr.workflow_run_id, wnr.workflow_node_id, wnr.node_title, wnr.status, wnr.retry_count, wnr.worker_type, wnr.worker_id, wnr.worker_output, wnr.critic_type, wnr.critic_id, wnr.critic_output, wnr.critic_comment, wnr.agent_task_id, wnr.started_at, wnr.completed_at, wnr.created_at, wnr.updated_at, wnr.worker_agent_task_id, wnr.critic_agent_task_id
-FROM workflow_node_run wnr
-JOIN workflow_edge we ON we.target_node_id = wnr.workflow_node_id
+FROM multica_workflow_node_run wnr
+JOIN multica_workflow_edge we ON we.target_node_id = wnr.workflow_node_id
 WHERE we.source_node_id = $2
   AND wnr.workflow_run_id = $1
 `
@@ -155,15 +155,15 @@ type GetDownstreamNodeRunsParams struct {
 
 // Returns node runs whose node has an incoming edge from the given node.
 // Used to find downstream nodes that should be activated when an upstream completes.
-func (q *Queries) GetDownstreamNodeRuns(ctx context.Context, arg GetDownstreamNodeRunsParams) ([]WorkflowNodeRun, error) {
+func (q *Queries) GetDownstreamNodeRuns(ctx context.Context, arg GetDownstreamNodeRunsParams) ([]MulticaWorkflowNodeRun, error) {
 	rows, err := q.db.Query(ctx, getDownstreamNodeRuns, arg.WorkflowRunID, arg.WorkflowNodeID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []WorkflowNodeRun{}
+	items := []MulticaWorkflowNodeRun{}
 	for rows.Next() {
-		var i WorkflowNodeRun
+		var i MulticaWorkflowNodeRun
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkflowRunID,
@@ -198,9 +198,9 @@ func (q *Queries) GetDownstreamNodeRuns(ctx context.Context, arg GetDownstreamNo
 
 const getNodeRunUpstreamStatuses = `-- name: GetNodeRunUpstreamStatuses :many
 SELECT up_wnr.status
-FROM workflow_node_run wnr
-JOIN workflow_edge we ON we.target_node_id = wnr.workflow_node_id
-JOIN workflow_node_run up_wnr ON up_wnr.workflow_node_id = we.source_node_id
+FROM multica_workflow_node_run wnr
+JOIN multica_workflow_edge we ON we.target_node_id = wnr.workflow_node_id
+JOIN multica_workflow_node_run up_wnr ON up_wnr.workflow_node_id = we.source_node_id
     AND up_wnr.workflow_run_id = wnr.workflow_run_id
 WHERE wnr.id = $1
 `
@@ -228,13 +228,13 @@ func (q *Queries) GetNodeRunUpstreamStatuses(ctx context.Context, id pgtype.UUID
 }
 
 const getWorkflowNodeRun = `-- name: GetWorkflowNodeRun :one
-SELECT id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id FROM workflow_node_run
+SELECT id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id FROM multica_workflow_node_run
 WHERE id = $1
 `
 
-func (q *Queries) GetWorkflowNodeRun(ctx context.Context, id pgtype.UUID) (WorkflowNodeRun, error) {
+func (q *Queries) GetWorkflowNodeRun(ctx context.Context, id pgtype.UUID) (MulticaWorkflowNodeRun, error) {
 	row := q.db.QueryRow(ctx, getWorkflowNodeRun, id)
-	var i WorkflowNodeRun
+	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowRunID,
@@ -261,7 +261,7 @@ func (q *Queries) GetWorkflowNodeRun(ctx context.Context, id pgtype.UUID) (Workf
 }
 
 const getWorkflowNodeRunsByStatus = `-- name: GetWorkflowNodeRunsByStatus :many
-SELECT id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id FROM workflow_node_run
+SELECT id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id FROM multica_workflow_node_run
 WHERE workflow_run_id = $1 AND status = $2
 ORDER BY created_at ASC
 `
@@ -271,15 +271,15 @@ type GetWorkflowNodeRunsByStatusParams struct {
 	Status        string      `json:"status"`
 }
 
-func (q *Queries) GetWorkflowNodeRunsByStatus(ctx context.Context, arg GetWorkflowNodeRunsByStatusParams) ([]WorkflowNodeRun, error) {
+func (q *Queries) GetWorkflowNodeRunsByStatus(ctx context.Context, arg GetWorkflowNodeRunsByStatusParams) ([]MulticaWorkflowNodeRun, error) {
 	rows, err := q.db.Query(ctx, getWorkflowNodeRunsByStatus, arg.WorkflowRunID, arg.Status)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []WorkflowNodeRun{}
+	items := []MulticaWorkflowNodeRun{}
 	for rows.Next() {
-		var i WorkflowNodeRun
+		var i MulticaWorkflowNodeRun
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkflowRunID,
@@ -313,7 +313,7 @@ func (q *Queries) GetWorkflowNodeRunsByStatus(ctx context.Context, arg GetWorkfl
 }
 
 const linkNodeRunAgentTask = `-- name: LinkNodeRunAgentTask :one
-UPDATE workflow_node_run SET
+UPDATE multica_workflow_node_run SET
     agent_task_id = $2,
     updated_at = now()
 WHERE id = $1
@@ -325,9 +325,9 @@ type LinkNodeRunAgentTaskParams struct {
 	AgentTaskID pgtype.UUID `json:"agent_task_id"`
 }
 
-func (q *Queries) LinkNodeRunAgentTask(ctx context.Context, arg LinkNodeRunAgentTaskParams) (WorkflowNodeRun, error) {
+func (q *Queries) LinkNodeRunAgentTask(ctx context.Context, arg LinkNodeRunAgentTaskParams) (MulticaWorkflowNodeRun, error) {
 	row := q.db.QueryRow(ctx, linkNodeRunAgentTask, arg.ID, arg.AgentTaskID)
-	var i WorkflowNodeRun
+	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowRunID,
@@ -354,7 +354,7 @@ func (q *Queries) LinkNodeRunAgentTask(ctx context.Context, arg LinkNodeRunAgent
 }
 
 const linkNodeRunCriticTask = `-- name: LinkNodeRunCriticTask :one
-UPDATE workflow_node_run SET
+UPDATE multica_workflow_node_run SET
     critic_agent_task_id = $2,
     updated_at = now()
 WHERE id = $1
@@ -366,9 +366,9 @@ type LinkNodeRunCriticTaskParams struct {
 	CriticAgentTaskID pgtype.UUID `json:"critic_agent_task_id"`
 }
 
-func (q *Queries) LinkNodeRunCriticTask(ctx context.Context, arg LinkNodeRunCriticTaskParams) (WorkflowNodeRun, error) {
+func (q *Queries) LinkNodeRunCriticTask(ctx context.Context, arg LinkNodeRunCriticTaskParams) (MulticaWorkflowNodeRun, error) {
 	row := q.db.QueryRow(ctx, linkNodeRunCriticTask, arg.ID, arg.CriticAgentTaskID)
-	var i WorkflowNodeRun
+	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowRunID,
@@ -395,7 +395,7 @@ func (q *Queries) LinkNodeRunCriticTask(ctx context.Context, arg LinkNodeRunCrit
 }
 
 const linkNodeRunWorkerTask = `-- name: LinkNodeRunWorkerTask :one
-UPDATE workflow_node_run SET
+UPDATE multica_workflow_node_run SET
     worker_agent_task_id = $2,
     updated_at = now()
 WHERE id = $1
@@ -407,9 +407,9 @@ type LinkNodeRunWorkerTaskParams struct {
 	WorkerAgentTaskID pgtype.UUID `json:"worker_agent_task_id"`
 }
 
-func (q *Queries) LinkNodeRunWorkerTask(ctx context.Context, arg LinkNodeRunWorkerTaskParams) (WorkflowNodeRun, error) {
+func (q *Queries) LinkNodeRunWorkerTask(ctx context.Context, arg LinkNodeRunWorkerTaskParams) (MulticaWorkflowNodeRun, error) {
 	row := q.db.QueryRow(ctx, linkNodeRunWorkerTask, arg.ID, arg.WorkerAgentTaskID)
-	var i WorkflowNodeRun
+	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowRunID,
@@ -436,21 +436,21 @@ func (q *Queries) LinkNodeRunWorkerTask(ctx context.Context, arg LinkNodeRunWork
 }
 
 const listActiveNodeRuns = `-- name: ListActiveNodeRuns :many
-SELECT id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id FROM workflow_node_run
+SELECT id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id FROM multica_workflow_node_run
 WHERE workflow_run_id = $1
   AND status NOT IN ('format_failed', 'completed', 'failed', 'blocked', 'skipped', 'cancelled')
 `
 
-// Returns all active (non-terminal) node runs for a workflow run.
-func (q *Queries) ListActiveNodeRuns(ctx context.Context, workflowRunID pgtype.UUID) ([]WorkflowNodeRun, error) {
+// Returns all active (non-terminal) node runs for a multica_workflow run.
+func (q *Queries) ListActiveNodeRuns(ctx context.Context, workflowRunID pgtype.UUID) ([]MulticaWorkflowNodeRun, error) {
 	rows, err := q.db.Query(ctx, listActiveNodeRuns, workflowRunID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []WorkflowNodeRun{}
+	items := []MulticaWorkflowNodeRun{}
 	for rows.Next() {
-		var i WorkflowNodeRun
+		var i MulticaWorkflowNodeRun
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkflowRunID,
@@ -488,13 +488,13 @@ SELECT wnr.id, wnr.workflow_run_id, wnr.workflow_node_id, wnr.node_title, wnr.st
        wr.workflow_title,
        wr.workflow_id,
        wr.workspace_id
-FROM workflow_node_run wnr
-JOIN workflow_run wr ON wr.id = wnr.workflow_run_id
+FROM multica_workflow_node_run wnr
+JOIN multica_workflow_run wr ON wr.id = wnr.workflow_run_id
 WHERE wr.workspace_id = $1
   AND (
-    -- Human worker: node run is assigned to this member via worker_id
+    -- Human worker: node run is assigned to this multica_member via worker_id
     (wnr.worker_type = 'human' AND wnr.worker_id = $4::uuid AND wnr.status IN ('worker_assigned', 'working'))
-    -- Human critic: node run is assigned to this member via critic_id
+    -- Human critic: node run is assigned to this multica_member via critic_id
     OR (wnr.critic_type = 'human' AND wnr.critic_id = $4::uuid AND wnr.status = 'awaiting_critic')
     -- Any human worker (worker_type=human, worker_id is null): anyone can claim
     OR (wnr.worker_type = 'human' AND wnr.worker_id IS NULL AND wnr.status = 'worker_assigned')
@@ -591,7 +591,7 @@ func (q *Queries) ListMyWorkflowTasks(ctx context.Context, arg ListMyWorkflowTas
 
 const listWorkflowNodeRuns = `-- name: ListWorkflowNodeRuns :many
 
-SELECT id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id FROM workflow_node_run
+SELECT id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id FROM multica_workflow_node_run
 WHERE workflow_run_id = $1
 ORDER BY created_at ASC
 `
@@ -599,15 +599,15 @@ ORDER BY created_at ASC
 // =====================
 // Workflow Node Run State Machine
 // =====================
-func (q *Queries) ListWorkflowNodeRuns(ctx context.Context, workflowRunID pgtype.UUID) ([]WorkflowNodeRun, error) {
+func (q *Queries) ListWorkflowNodeRuns(ctx context.Context, workflowRunID pgtype.UUID) ([]MulticaWorkflowNodeRun, error) {
 	rows, err := q.db.Query(ctx, listWorkflowNodeRuns, workflowRunID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []WorkflowNodeRun{}
+	items := []MulticaWorkflowNodeRun{}
 	for rows.Next() {
-		var i WorkflowNodeRun
+		var i MulticaWorkflowNodeRun
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkflowRunID,
@@ -641,20 +641,20 @@ func (q *Queries) ListWorkflowNodeRuns(ctx context.Context, workflowRunID pgtype
 }
 
 const listWorkflowNodeRunsByRun = `-- name: ListWorkflowNodeRunsByRun :many
-SELECT id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id FROM workflow_node_run
+SELECT id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id FROM multica_workflow_node_run
 WHERE workflow_run_id = $1
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListWorkflowNodeRunsByRun(ctx context.Context, workflowRunID pgtype.UUID) ([]WorkflowNodeRun, error) {
+func (q *Queries) ListWorkflowNodeRunsByRun(ctx context.Context, workflowRunID pgtype.UUID) ([]MulticaWorkflowNodeRun, error) {
 	rows, err := q.db.Query(ctx, listWorkflowNodeRunsByRun, workflowRunID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []WorkflowNodeRun{}
+	items := []MulticaWorkflowNodeRun{}
 	for rows.Next() {
-		var i WorkflowNodeRun
+		var i MulticaWorkflowNodeRun
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkflowRunID,
@@ -688,7 +688,7 @@ func (q *Queries) ListWorkflowNodeRunsByRun(ctx context.Context, workflowRunID p
 }
 
 const listWorkflowNodeRunsByRunAndNode = `-- name: ListWorkflowNodeRunsByRunAndNode :one
-SELECT id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id FROM workflow_node_run
+SELECT id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id FROM multica_workflow_node_run
 WHERE workflow_run_id = $1 AND workflow_node_id = $2
 LIMIT 1
 `
@@ -698,9 +698,9 @@ type ListWorkflowNodeRunsByRunAndNodeParams struct {
 	WorkflowNodeID pgtype.UUID `json:"workflow_node_id"`
 }
 
-func (q *Queries) ListWorkflowNodeRunsByRunAndNode(ctx context.Context, arg ListWorkflowNodeRunsByRunAndNodeParams) (WorkflowNodeRun, error) {
+func (q *Queries) ListWorkflowNodeRunsByRunAndNode(ctx context.Context, arg ListWorkflowNodeRunsByRunAndNodeParams) (MulticaWorkflowNodeRun, error) {
 	row := q.db.QueryRow(ctx, listWorkflowNodeRunsByRunAndNode, arg.WorkflowRunID, arg.WorkflowNodeID)
-	var i WorkflowNodeRun
+	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowRunID,
@@ -727,7 +727,7 @@ func (q *Queries) ListWorkflowNodeRunsByRunAndNode(ctx context.Context, arg List
 }
 
 const setWorkflowNodeRunCriticOutput = `-- name: SetWorkflowNodeRunCriticOutput :one
-UPDATE workflow_node_run SET
+UPDATE multica_workflow_node_run SET
     critic_output = $3,
     critic_comment = $4,
     status = $2,
@@ -745,7 +745,7 @@ type SetWorkflowNodeRunCriticOutputParams struct {
 	RetryCount    pgtype.Int4 `json:"retry_count"`
 }
 
-func (q *Queries) SetWorkflowNodeRunCriticOutput(ctx context.Context, arg SetWorkflowNodeRunCriticOutputParams) (WorkflowNodeRun, error) {
+func (q *Queries) SetWorkflowNodeRunCriticOutput(ctx context.Context, arg SetWorkflowNodeRunCriticOutputParams) (MulticaWorkflowNodeRun, error) {
 	row := q.db.QueryRow(ctx, setWorkflowNodeRunCriticOutput,
 		arg.ID,
 		arg.Status,
@@ -753,7 +753,7 @@ func (q *Queries) SetWorkflowNodeRunCriticOutput(ctx context.Context, arg SetWor
 		arg.CriticComment,
 		arg.RetryCount,
 	)
-	var i WorkflowNodeRun
+	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowRunID,
@@ -780,7 +780,7 @@ func (q *Queries) SetWorkflowNodeRunCriticOutput(ctx context.Context, arg SetWor
 }
 
 const setWorkflowNodeRunWorkerOutput = `-- name: SetWorkflowNodeRunWorkerOutput :one
-UPDATE workflow_node_run SET
+UPDATE multica_workflow_node_run SET
     worker_output = $2,
     status = $3,
     updated_at = now()
@@ -794,9 +794,9 @@ type SetWorkflowNodeRunWorkerOutputParams struct {
 	Status       string      `json:"status"`
 }
 
-func (q *Queries) SetWorkflowNodeRunWorkerOutput(ctx context.Context, arg SetWorkflowNodeRunWorkerOutputParams) (WorkflowNodeRun, error) {
+func (q *Queries) SetWorkflowNodeRunWorkerOutput(ctx context.Context, arg SetWorkflowNodeRunWorkerOutputParams) (MulticaWorkflowNodeRun, error) {
 	row := q.db.QueryRow(ctx, setWorkflowNodeRunWorkerOutput, arg.ID, arg.WorkerOutput, arg.Status)
-	var i WorkflowNodeRun
+	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowRunID,
@@ -823,7 +823,7 @@ func (q *Queries) SetWorkflowNodeRunWorkerOutput(ctx context.Context, arg SetWor
 }
 
 const updateWorkflowNodeRunAgentTask = `-- name: UpdateWorkflowNodeRunAgentTask :one
-UPDATE workflow_node_run SET
+UPDATE multica_workflow_node_run SET
     agent_task_id = $2,
     updated_at = now()
 WHERE id = $1
@@ -835,9 +835,9 @@ type UpdateWorkflowNodeRunAgentTaskParams struct {
 	AgentTaskID pgtype.UUID `json:"agent_task_id"`
 }
 
-func (q *Queries) UpdateWorkflowNodeRunAgentTask(ctx context.Context, arg UpdateWorkflowNodeRunAgentTaskParams) (WorkflowNodeRun, error) {
+func (q *Queries) UpdateWorkflowNodeRunAgentTask(ctx context.Context, arg UpdateWorkflowNodeRunAgentTaskParams) (MulticaWorkflowNodeRun, error) {
 	row := q.db.QueryRow(ctx, updateWorkflowNodeRunAgentTask, arg.ID, arg.AgentTaskID)
-	var i WorkflowNodeRun
+	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowRunID,
@@ -864,7 +864,7 @@ func (q *Queries) UpdateWorkflowNodeRunAgentTask(ctx context.Context, arg Update
 }
 
 const updateWorkflowNodeRunCriticReview = `-- name: UpdateWorkflowNodeRunCriticReview :one
-UPDATE workflow_node_run SET
+UPDATE multica_workflow_node_run SET
     critic_output = $2,
     critic_comment = $3,
     updated_at = now()
@@ -878,9 +878,9 @@ type UpdateWorkflowNodeRunCriticReviewParams struct {
 	CriticComment pgtype.Text `json:"critic_comment"`
 }
 
-func (q *Queries) UpdateWorkflowNodeRunCriticReview(ctx context.Context, arg UpdateWorkflowNodeRunCriticReviewParams) (WorkflowNodeRun, error) {
+func (q *Queries) UpdateWorkflowNodeRunCriticReview(ctx context.Context, arg UpdateWorkflowNodeRunCriticReviewParams) (MulticaWorkflowNodeRun, error) {
 	row := q.db.QueryRow(ctx, updateWorkflowNodeRunCriticReview, arg.ID, arg.CriticOutput, arg.CriticComment)
-	var i WorkflowNodeRun
+	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowRunID,
@@ -907,7 +907,7 @@ func (q *Queries) UpdateWorkflowNodeRunCriticReview(ctx context.Context, arg Upd
 }
 
 const updateWorkflowNodeRunRework = `-- name: UpdateWorkflowNodeRunRework :one
-UPDATE workflow_node_run SET
+UPDATE multica_workflow_node_run SET
     status = $2,
     retry_count = retry_count + 1,
     worker_output = NULL,
@@ -923,9 +923,9 @@ type UpdateWorkflowNodeRunReworkParams struct {
 	Status string      `json:"status"`
 }
 
-func (q *Queries) UpdateWorkflowNodeRunRework(ctx context.Context, arg UpdateWorkflowNodeRunReworkParams) (WorkflowNodeRun, error) {
+func (q *Queries) UpdateWorkflowNodeRunRework(ctx context.Context, arg UpdateWorkflowNodeRunReworkParams) (MulticaWorkflowNodeRun, error) {
 	row := q.db.QueryRow(ctx, updateWorkflowNodeRunRework, arg.ID, arg.Status)
-	var i WorkflowNodeRun
+	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowRunID,
@@ -952,7 +952,7 @@ func (q *Queries) UpdateWorkflowNodeRunRework(ctx context.Context, arg UpdateWor
 }
 
 const updateWorkflowNodeRunStatus = `-- name: UpdateWorkflowNodeRunStatus :one
-UPDATE workflow_node_run SET
+UPDATE multica_workflow_node_run SET
     status = $2,
     started_at = CASE
         WHEN $2 IN ('format_checking', 'working', 'critic_reviewing')
@@ -974,9 +974,9 @@ type UpdateWorkflowNodeRunStatusParams struct {
 	Status string      `json:"status"`
 }
 
-func (q *Queries) UpdateWorkflowNodeRunStatus(ctx context.Context, arg UpdateWorkflowNodeRunStatusParams) (WorkflowNodeRun, error) {
+func (q *Queries) UpdateWorkflowNodeRunStatus(ctx context.Context, arg UpdateWorkflowNodeRunStatusParams) (MulticaWorkflowNodeRun, error) {
 	row := q.db.QueryRow(ctx, updateWorkflowNodeRunStatus, arg.ID, arg.Status)
-	var i WorkflowNodeRun
+	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowRunID,
@@ -1003,7 +1003,7 @@ func (q *Queries) UpdateWorkflowNodeRunStatus(ctx context.Context, arg UpdateWor
 }
 
 const updateWorkflowNodeRunWorkerOutput = `-- name: UpdateWorkflowNodeRunWorkerOutput :one
-UPDATE workflow_node_run SET
+UPDATE multica_workflow_node_run SET
     worker_output = $2,
     status = 'awaiting_critic',
     updated_at = now()
@@ -1016,9 +1016,9 @@ type UpdateWorkflowNodeRunWorkerOutputParams struct {
 	WorkerOutput []byte      `json:"worker_output"`
 }
 
-func (q *Queries) UpdateWorkflowNodeRunWorkerOutput(ctx context.Context, arg UpdateWorkflowNodeRunWorkerOutputParams) (WorkflowNodeRun, error) {
+func (q *Queries) UpdateWorkflowNodeRunWorkerOutput(ctx context.Context, arg UpdateWorkflowNodeRunWorkerOutputParams) (MulticaWorkflowNodeRun, error) {
 	row := q.db.QueryRow(ctx, updateWorkflowNodeRunWorkerOutput, arg.ID, arg.WorkerOutput)
-	var i WorkflowNodeRun
+	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
 		&i.WorkflowRunID,

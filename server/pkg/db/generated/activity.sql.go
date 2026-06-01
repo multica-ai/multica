@@ -16,7 +16,7 @@ SELECT
   details->>'to_type' as assignee_type,
   details->>'to_id' as assignee_id,
   COUNT(*)::bigint as frequency
-FROM activity_log
+FROM multica_activity_log
 WHERE workspace_id = $1
   AND actor_id = $2
   AND actor_type = 'member'
@@ -59,7 +59,7 @@ func (q *Queries) CountAssigneeChangesByActor(ctx context.Context, arg CountAssi
 }
 
 const createActivity = `-- name: CreateActivity :one
-INSERT INTO activity_log (
+INSERT INTO multica_activity_log (
     workspace_id, issue_id, actor_type, actor_id, action, details
 ) VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at
@@ -74,7 +74,7 @@ type CreateActivityParams struct {
 	Details     []byte      `json:"details"`
 }
 
-func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) (ActivityLog, error) {
+func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) (MulticaActivityLog, error) {
 	row := q.db.QueryRow(ctx, createActivity,
 		arg.WorkspaceID,
 		arg.IssueID,
@@ -83,7 +83,7 @@ func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) 
 		arg.Action,
 		arg.Details,
 	)
-	var i ActivityLog
+	var i MulticaActivityLog
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -98,13 +98,13 @@ func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) 
 }
 
 const getActivity = `-- name: GetActivity :one
-SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM activity_log
+SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM multica_activity_log
 WHERE id = $1
 `
 
-func (q *Queries) GetActivity(ctx context.Context, id pgtype.UUID) (ActivityLog, error) {
+func (q *Queries) GetActivity(ctx context.Context, id pgtype.UUID) (MulticaActivityLog, error) {
 	row := q.db.QueryRow(ctx, getActivity, id)
-	var i ActivityLog
+	var i MulticaActivityLog
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -121,7 +121,7 @@ func (q *Queries) GetActivity(ctx context.Context, id pgtype.UUID) (ActivityLog,
 const hasSquadLeaderNoActionEvaluationForTask = `-- name: HasSquadLeaderNoActionEvaluationForTask :one
 SELECT EXISTS (
   SELECT 1
-  FROM activity_log
+  FROM multica_activity_log
   WHERE issue_id = $1
     AND actor_type = 'agent'
     AND actor_id = $2
@@ -145,7 +145,7 @@ func (q *Queries) HasSquadLeaderNoActionEvaluationForTask(ctx context.Context, a
 }
 
 const listActivitiesForIssue = `-- name: ListActivitiesForIssue :many
-SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM activity_log
+SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM multica_activity_log
 WHERE issue_id = $1
 ORDER BY created_at ASC, id ASC
 LIMIT $2
@@ -156,17 +156,17 @@ type ListActivitiesForIssueParams struct {
 	Limit   int32       `json:"limit"`
 }
 
-// All activities for an issue in chronological order, capped at $2 (DB safety
+// All activities for an multica_issue in chronological order, capped at $2 (DB safety
 // net to bound the response).
-func (q *Queries) ListActivitiesForIssue(ctx context.Context, arg ListActivitiesForIssueParams) ([]ActivityLog, error) {
+func (q *Queries) ListActivitiesForIssue(ctx context.Context, arg ListActivitiesForIssueParams) ([]MulticaActivityLog, error) {
 	rows, err := q.db.Query(ctx, listActivitiesForIssue, arg.IssueID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ActivityLog{}
+	items := []MulticaActivityLog{}
 	for rows.Next() {
-		var i ActivityLog
+		var i MulticaActivityLog
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,

@@ -13,28 +13,28 @@ import (
 
 // fakeScopeQuerier implements scopeAuthQuerier with in-memory maps.
 type fakeScopeQuerier struct {
-	tasks    map[[16]byte]db.AgentTaskQueue
-	issues   map[[16]byte]db.Issue
-	sessions map[[16]byte]db.ChatSession
+	tasks    map[[16]byte]db.MulticaAgentTaskQueue
+	issues   map[[16]byte]db.MulticaIssue
+	sessions map[[16]byte]db.MulticaChatSession
 }
 
-func (f *fakeScopeQuerier) GetAgentTask(_ context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
+func (f *fakeScopeQuerier) GetAgentTask(_ context.Context, id pgtype.UUID) (db.MulticaAgentTaskQueue, error) {
 	if t, ok := f.tasks[id.Bytes]; ok {
 		return t, nil
 	}
-	return db.AgentTaskQueue{}, errors.New("not found")
+	return db.MulticaAgentTaskQueue{}, errors.New("not found")
 }
-func (f *fakeScopeQuerier) GetIssue(_ context.Context, id pgtype.UUID) (db.Issue, error) {
+func (f *fakeScopeQuerier) GetIssue(_ context.Context, id pgtype.UUID) (db.MulticaIssue, error) {
 	if i, ok := f.issues[id.Bytes]; ok {
 		return i, nil
 	}
-	return db.Issue{}, errors.New("not found")
+	return db.MulticaIssue{}, errors.New("not found")
 }
-func (f *fakeScopeQuerier) GetChatSession(_ context.Context, id pgtype.UUID) (db.ChatSession, error) {
+func (f *fakeScopeQuerier) GetChatSession(_ context.Context, id pgtype.UUID) (db.MulticaChatSession, error) {
 	if s, ok := f.sessions[id.Bytes]; ok {
 		return s, nil
 	}
-	return db.ChatSession{}, errors.New("not found")
+	return db.MulticaChatSession{}, errors.New("not found")
 }
 
 func mustUUID(t *testing.T) (string, pgtype.UUID) {
@@ -60,7 +60,7 @@ func TestScopeAuthorizer_ChatRequiresCreator(t *testing.T) {
 	_ = otherWsStrOnly
 
 	q := &fakeScopeQuerier{
-		sessions: map[[16]byte]db.ChatSession{
+		sessions: map[[16]byte]db.MulticaChatSession{
 			sessUUID.Bytes: {
 				ID:          sessUUID,
 				WorkspaceID: wsUUID,
@@ -120,13 +120,13 @@ func TestScopeAuthorizer_ChatTaskRequiresCreator(t *testing.T) {
 	_ = sessStr
 
 	q := &fakeScopeQuerier{
-		tasks: map[[16]byte]db.AgentTaskQueue{
+		tasks: map[[16]byte]db.MulticaAgentTaskQueue{
 			taskUUID.Bytes: {
 				ID:            taskUUID,
 				ChatSessionID: sessUUID,
 			},
 		},
-		sessions: map[[16]byte]db.ChatSession{
+		sessions: map[[16]byte]db.MulticaChatSession{
 			sessUUID.Bytes: {
 				ID:          sessUUID,
 				WorkspaceID: wsUUID,
@@ -158,13 +158,13 @@ func TestScopeAuthorizer_IssueTaskWorkspaceOnly(t *testing.T) {
 	_, issueUUID := mustUUID(t)
 
 	q := &fakeScopeQuerier{
-		tasks: map[[16]byte]db.AgentTaskQueue{
+		tasks: map[[16]byte]db.MulticaAgentTaskQueue{
 			taskUUID.Bytes: {
 				ID:      taskUUID,
 				IssueID: issueUUID,
 			},
 		},
-		issues: map[[16]byte]db.Issue{
+		issues: map[[16]byte]db.MulticaIssue{
 			issueUUID.Bytes: {
 				ID:          issueUUID,
 				WorkspaceID: wsUUID,

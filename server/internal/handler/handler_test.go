@@ -95,7 +95,7 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 
 	var userID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO "user" (name, email)
+		INSERT INTO multica_user (name, email)
 		VALUES ($1, $2)
 		RETURNING id
 	`, handlerTestName, handlerTestEmail).Scan(&userID); err != nil {
@@ -104,7 +104,7 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 
 	var workspaceID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
+		INSERT INTO multica_workspace (name, slug, description, issue_prefix)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id
 	`, "Handler Tests", handlerTestWorkspaceSlug, "Temporary workspace for handler tests", "HAN").Scan(&workspaceID); err != nil {
@@ -112,7 +112,7 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 	}
 
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO member (workspace_id, user_id, role)
+		INSERT INTO multica_member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'owner')
 	`, workspaceID, userID); err != nil {
 		return "", "", err
@@ -120,7 +120,7 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 
 	var runtimeID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
+		INSERT INTO multica_agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
 		)
 		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now())
@@ -131,7 +131,7 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 	testRuntimeID = runtimeID
 
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO agent (
+		INSERT INTO multica_agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks, owner_id
 		)
@@ -144,10 +144,10 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 }
 
 func cleanupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) error {
-	if _, err := pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, handlerTestWorkspaceSlug); err != nil {
+	if _, err := pool.Exec(ctx, `DELETE FROM multica_workspace WHERE slug = $1`, handlerTestWorkspaceSlug); err != nil {
 		return err
 	}
-	if _, err := pool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, handlerTestEmail); err != nil {
+	if _, err := pool.Exec(ctx, `DELETE FROM multica_user WHERE email = $1`, handlerTestEmail); err != nil {
 		return err
 	}
 	return nil
@@ -176,7 +176,7 @@ func handlerTestRuntimeID(t *testing.T) string {
 
 	var runtimeID string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT id FROM agent_runtime WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		`SELECT id FROM multica_agent_runtime WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
 		testWorkspaceID,
 	).Scan(&runtimeID); err != nil {
 		t.Fatalf("failed to load handler test runtime: %v", err)
@@ -190,7 +190,7 @@ func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string 
 
 	var agentID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO agent (
+		INSERT INTO multica_agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks, owner_id,
 			instructions, custom_env, custom_args, mcp_config
@@ -202,7 +202,7 @@ func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string 
 	}
 
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent WHERE id = $1`, agentID)
 	})
 
 	return agentID
@@ -217,14 +217,14 @@ func createHandlerTestTaskForAgent(t *testing.T, agentID string) string {
 
 	var taskID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, status, priority)
 		VALUES ($1, $2, 'queued', 0)
 		RETURNING id
 	`, agentID, handlerTestRuntimeID(t)).Scan(&taskID); err != nil {
 		t.Fatalf("failed to create handler test task: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID)
 	})
 	return taskID
 }
@@ -233,7 +233,7 @@ func fetchAgentMcpConfig(t *testing.T, agentID string) []byte {
 	t.Helper()
 
 	var mcpConfig []byte
-	if err := testPool.QueryRow(context.Background(), `SELECT mcp_config FROM agent WHERE id = $1`, agentID).Scan(&mcpConfig); err != nil {
+	if err := testPool.QueryRow(context.Background(), `SELECT mcp_config FROM multica_agent WHERE id = $1`, agentID).Scan(&mcpConfig); err != nil {
 		t.Fatalf("failed to load agent mcp_config: %v", err)
 	}
 
@@ -413,7 +413,7 @@ func TestDeleteIssueByIdentifier(t *testing.T) {
 	// returned 204 here too, but the row would still exist.
 	var count int
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM issue WHERE id = $1`, created.ID,
+		`SELECT COUNT(*) FROM multica_issue WHERE id = $1`, created.ID,
 	).Scan(&count); err != nil {
 		t.Fatalf("count query: %v", err)
 	}
@@ -656,16 +656,16 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 	defer func() {
 		for _, id := range []string{duplicateID, issueID, parentID} {
 			if id != "" {
-				testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+				testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, id)
 			}
 		}
 		if projectID != "" {
-			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+			testPool.Exec(ctx, `DELETE FROM multica_project WHERE id = $1`, projectID)
 		}
 	}()
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
+		INSERT INTO multica_project (workspace_id, title)
 		VALUES ($1, $2)
 		RETURNING id
 	`, testWorkspaceID, "Duplicate guard project "+suffix).Scan(&projectID); err != nil {
@@ -777,7 +777,7 @@ func TestCreateIssueAllowsDuplicateAfterCancelled(t *testing.T) {
 	defer func() {
 		for _, id := range []string{secondID, firstID} {
 			if id != "" {
-				testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+				testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, id)
 			}
 		}
 	}()
@@ -822,7 +822,7 @@ func TestCreateIssueAllowsDuplicateAfterDone(t *testing.T) {
 	defer func() {
 		for _, id := range []string{secondID, firstID} {
 			if id != "" {
-				testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+				testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, id)
 			}
 		}
 	}()
@@ -866,13 +866,13 @@ func TestTriggerAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	var autopilotID string
 	defer func() {
 		if autopilotID != "" {
-			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+			testPool.Exec(ctx, `DELETE FROM multica_autopilot WHERE id = $1`, autopilotID)
 		}
-		testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
 	}()
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("load test agent: %v", err)
 	}
 
@@ -932,7 +932,7 @@ func TestTriggerAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	}
 
 	var count int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM multica_issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count); err != nil {
 		t.Fatalf("count issues: %v", err)
 	}
 	if count != 2 {
@@ -946,13 +946,13 @@ func TestScheduledAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	var autopilotID string
 	defer func() {
 		if autopilotID != "" {
-			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+			testPool.Exec(ctx, `DELETE FROM multica_autopilot WHERE id = $1`, autopilotID)
 		}
-		testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
 	}()
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("load test agent: %v", err)
 	}
 
@@ -1011,7 +1011,7 @@ func TestScheduledAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	}
 
 	var count int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM multica_issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count); err != nil {
 		t.Fatalf("count issues: %v", err)
 	}
 	if count != 2 {
@@ -1030,15 +1030,15 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 	var autopilotID, issueID string
 	defer func() {
 		if issueID != "" {
-			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+			testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID)
 		}
 		if autopilotID != "" {
-			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+			testPool.Exec(ctx, `DELETE FROM multica_autopilot WHERE id = $1`, autopilotID)
 		}
 	}()
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("load test agent: %v", err)
 	}
 
@@ -1086,7 +1086,7 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 	var creatorType, creatorID string
 	if err := testPool.QueryRow(ctx, `
 		SELECT id, creator_type, creator_id
-		FROM issue
+		FROM multica_issue
 		WHERE workspace_id = $1 AND title = $2
 		ORDER BY created_at DESC
 		LIMIT 1
@@ -1119,18 +1119,18 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 	var autopilotID, issueID, projectID string
 	defer func() {
 		if issueID != "" {
-			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+			testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID)
 		}
 		if autopilotID != "" {
-			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+			testPool.Exec(ctx, `DELETE FROM multica_autopilot WHERE id = $1`, autopilotID)
 		}
 		if projectID != "" {
-			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+			testPool.Exec(ctx, `DELETE FROM multica_project WHERE id = $1`, projectID)
 		}
 	}()
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
+		INSERT INTO multica_project (workspace_id, title)
 		VALUES ($1, $2)
 		RETURNING id::text
 	`, testWorkspaceID, "Autopilot project target").Scan(&projectID); err != nil {
@@ -1138,7 +1138,7 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 	}
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("load test agent: %v", err)
 	}
 
@@ -1180,7 +1180,7 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 	var issueProjectID *string
 	if err := testPool.QueryRow(ctx, `
 		SELECT project_id::text
-		FROM issue
+		FROM multica_issue
 		WHERE id = $1
 	`, issueID).Scan(&issueProjectID); err != nil {
 		t.Fatalf("load created issue project: %v", err)
@@ -1195,23 +1195,23 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 	var autopilotID, projectID string
 	defer func() {
 		if autopilotID != "" {
-			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+			testPool.Exec(ctx, `DELETE FROM multica_autopilot WHERE id = $1`, autopilotID)
 		}
 		if projectID != "" {
-			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+			testPool.Exec(ctx, `DELETE FROM multica_project WHERE id = $1`, projectID)
 		}
 	}()
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
+		INSERT INTO multica_project (workspace_id, title)
 		VALUES ($1, $2)
 		RETURNING id::text
-	`, testWorkspaceID, "Autopilot update project target").Scan(&projectID); err != nil {
+	`, testWorkspaceID, "Autopilot update multica_project target").Scan(&projectID); err != nil {
 		t.Fatalf("create project fixture: %v", err)
 	}
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("load test agent: %v", err)
 	}
 
@@ -1382,7 +1382,7 @@ func TestCreateIssueRejectsMalformedAssigneeID(t *testing.T) {
 
 func TestCreateIssueRejectsMalformedAttachmentIDBeforeWrite(t *testing.T) {
 	var before int
-	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&before); err != nil {
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM multica_issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&before); err != nil {
 		t.Fatalf("count issues before: %v", err)
 	}
 
@@ -1397,7 +1397,7 @@ func TestCreateIssueRejectsMalformedAttachmentIDBeforeWrite(t *testing.T) {
 	}
 
 	var after int
-	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&after); err != nil {
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM multica_issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&after); err != nil {
 		t.Fatalf("count issues after: %v", err)
 	}
 	if after != before {
@@ -1835,7 +1835,7 @@ func TestAgentCRUD(t *testing.T) {
 		t.Fatal("ListAgents: expected at least 1 agent")
 	}
 
-	// Update agent status
+	// Update multica_agent status
 	agentID := agents[0].ID
 	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/agents/"+agentID, map[string]any{
@@ -1941,7 +1941,7 @@ func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
 		t.Fatalf("CreateAgent: decode response: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, created.ID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent WHERE id = $1`, created.ID)
 	})
 
 	assertJSONEqual(t, created.McpConfig, `null`)
@@ -1981,7 +1981,7 @@ func TestCreateWorkspaceUsesRequestedSlug(t *testing.T) {
 	ctx := context.Background()
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+		testPool.Exec(ctx, `DELETE FROM multica_workspace WHERE slug = $1`, slug)
 	})
 
 	w := httptest.NewRecorder()
@@ -2008,7 +2008,7 @@ func TestCreateWorkspaceSlugConflictReturnsConflict(t *testing.T) {
 	retriedSlug := handlerTestWorkspaceSlug + "-2"
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, retriedSlug)
+		testPool.Exec(ctx, `DELETE FROM multica_workspace WHERE slug = $1`, retriedSlug)
 	})
 
 	w := httptest.NewRecorder()
@@ -2022,7 +2022,7 @@ func TestCreateWorkspaceSlugConflictReturnsConflict(t *testing.T) {
 	}
 
 	var count int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM workspace WHERE slug = $1`, retriedSlug).Scan(&count); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM multica_workspace WHERE slug = $1`, retriedSlug).Scan(&count); err != nil {
 		t.Fatalf("CreateWorkspace: check retried slug: %v", err)
 	}
 	if count != 0 {
@@ -2061,7 +2061,7 @@ func TestSendCode(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM verification_code WHERE email = $1`, "sendcode-test@multica.ai")
+		testPool.Exec(context.Background(), `DELETE FROM multica_verification_code WHERE email = $1`, "sendcode-test@multica.ai")
 	})
 }
 
@@ -2101,7 +2101,7 @@ func TestSendCodeDbError(t *testing.T) {
 func TestSendCodeRateLimit(t *testing.T) {
 	const email = "ratelimit-test@multica.ai"
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM verification_code WHERE email = $1`, email)
+		testPool.Exec(context.Background(), `DELETE FROM multica_verification_code WHERE email = $1`, email)
 	})
 
 	// First request should succeed
@@ -2133,7 +2133,7 @@ func TestVerifyCode(t *testing.T) {
 	ctx := context.Background()
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_verification_code WHERE email = $1`, email)
 		user, err := testHandler.Queries.GetUserByEmail(ctx, email)
 		if err == nil {
 			workspaces, listErr := testHandler.Queries.ListWorkspaces(ctx, user.ID)
@@ -2143,7 +2143,7 @@ func TestVerifyCode(t *testing.T) {
 				}
 			}
 		}
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_user WHERE email = $1`, email)
 	})
 
 	// Send code first
@@ -2188,7 +2188,7 @@ func createVerificationCodeForTest(t *testing.T, email, code string) {
 	t.Helper()
 
 	_, err := testPool.Exec(context.Background(), `
-		INSERT INTO verification_code (email, code, expires_at)
+		INSERT INTO multica_verification_code (email, code, expires_at)
 		VALUES ($1, $2, now() + interval '10 minutes')
 	`, email, code)
 	if err != nil {
@@ -2204,7 +2204,7 @@ func TestVerifyCodeRejectsDevCodeUnlessExplicitlyConfigured(t *testing.T) {
 	ctx := context.Background()
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_verification_code WHERE email = $1`, email)
 	})
 
 	createVerificationCodeForTest(t, email, "123456")
@@ -2228,8 +2228,8 @@ func TestVerifyCodeAcceptsConfiguredDevCodeOutsideProduction(t *testing.T) {
 	ctx := context.Background()
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_user WHERE email = $1`, email)
 	})
 
 	createVerificationCodeForTest(t, email, "123456")
@@ -2253,7 +2253,7 @@ func TestVerifyCodeRejectsConfiguredDevCodeInProduction(t *testing.T) {
 	ctx := context.Background()
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_verification_code WHERE email = $1`, email)
 	})
 
 	createVerificationCodeForTest(t, email, "123456")
@@ -2276,7 +2276,7 @@ func TestVerifyCodeWrongCode(t *testing.T) {
 	ctx := context.Background()
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_verification_code WHERE email = $1`, email)
 	})
 
 	// Send code
@@ -2306,7 +2306,7 @@ func TestVerifyCodeBruteForceProtection(t *testing.T) {
 	ctx := context.Background()
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_verification_code WHERE email = $1`, email)
 	})
 
 	// Send code
@@ -2356,8 +2356,8 @@ func TestVerifyCodeNewUserHasNoWorkspace(t *testing.T) {
 	ctx := context.Background()
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM multica_user WHERE email = $1`, email)
 	})
 
 	// Send code
@@ -2406,7 +2406,7 @@ func TestResolveActor(t *testing.T) {
 	// Look up the agent created by the test fixture.
 	var agentID string
 	err := testPool.QueryRow(ctx,
-		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		`SELECT id FROM multica_agent WHERE workspace_id = $1 AND name = $2`,
 		testWorkspaceID, "Handler Test Agent",
 	).Scan(&agentID)
 	if err != nil {
@@ -2416,7 +2416,7 @@ func TestResolveActor(t *testing.T) {
 	// Create a task for the agent so we can test X-Task-ID validation.
 	var issueID string
 	err = testPool.QueryRow(ctx,
-		`INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, position)
+		`INSERT INTO multica_issue (workspace_id, title, status, priority, creator_type, creator_id, number, position)
 		 VALUES ($1, 'resolveActor test', 'todo', 'none', 'member', $2, 9999, 0)
 		 RETURNING id`, testWorkspaceID, testUserID,
 	).Scan(&issueID)
@@ -2426,14 +2426,14 @@ func TestResolveActor(t *testing.T) {
 
 	// Look up runtime_id for the agent.
 	var runtimeID string
-	err = testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID)
+	err = testPool.QueryRow(ctx, `SELECT runtime_id FROM multica_agent WHERE id = $1`, agentID).Scan(&runtimeID)
 	if err != nil {
 		t.Fatalf("failed to get agent runtime_id: %v", err)
 	}
 
 	var taskID string
 	err = testPool.QueryRow(ctx,
-		`INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		`INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
 		 VALUES ($1, $2, $3, 'queued', 0)
 		 RETURNING id`, agentID, runtimeID, issueID,
 	).Scan(&taskID)
@@ -2442,8 +2442,8 @@ func TestResolveActor(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	tests := []struct {
@@ -2522,7 +2522,7 @@ func TestBacklogNoTriggerOnCreate(t *testing.T) {
 
 	var agentID string
 	err := testPool.QueryRow(ctx,
-		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		`SELECT id FROM multica_agent WHERE workspace_id = $1 AND name = $2`,
 		testWorkspaceID, "Handler Test Agent",
 	).Scan(&agentID)
 	if err != nil {
@@ -2546,7 +2546,7 @@ func TestBacklogNoTriggerOnCreate(t *testing.T) {
 
 	var taskCount int
 	err = testPool.QueryRow(ctx,
-		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`,
+		`SELECT count(*) FROM multica_agent_task_queue WHERE issue_id = $1`,
 		created.ID,
 	).Scan(&taskCount)
 	if err != nil {
@@ -2570,7 +2570,7 @@ func TestBacklogToTodoTriggersAgent(t *testing.T) {
 
 	var agentID string
 	err := testPool.QueryRow(ctx,
-		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		`SELECT id FROM multica_agent WHERE workspace_id = $1 AND name = $2`,
 		testWorkspaceID, "Handler Test Agent",
 	).Scan(&agentID)
 	if err != nil {
@@ -2607,7 +2607,7 @@ func TestBacklogToTodoTriggersAgent(t *testing.T) {
 	// Verify exactly one task was enqueued (from the status transition, not creation).
 	var taskCount int
 	err = testPool.QueryRow(ctx,
-		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+		`SELECT count(*) FROM multica_agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
 		created.ID, agentID,
 	).Scan(&taskCount)
 	if err != nil {
@@ -2618,7 +2618,7 @@ func TestBacklogToTodoTriggersAgent(t *testing.T) {
 	}
 
 	// Cleanup
-	testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, created.ID)
+	testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, created.ID)
 	cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
 	cleanupReq = withURLParam(cleanupReq, "id", created.ID)
 	testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
@@ -2673,16 +2673,16 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 	issueID := issue.ID
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	// Helper: count queued tasks for a given agent on this issue.
 	countTasks := func(agentID string) int {
 		var n int
 		err := testPool.QueryRow(ctx,
-			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+			`SELECT count(*) FROM multica_agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
 			issueID, agentID,
 		).Scan(&n)
 		if err != nil {
@@ -2694,7 +2694,7 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 	// Helper: cancel all tasks for an agent on this issue.
 	cancelTasks := func(agentID string) {
 		_, err := testPool.Exec(ctx,
-			`UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1 AND agent_id = $2`,
+			`UPDATE multica_agent_task_queue SET status = 'cancelled' WHERE issue_id = $1 AND agent_id = $2`,
 			issueID, agentID,
 		)
 		if err != nil {
@@ -2793,15 +2793,15 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 	issueID := issue.ID
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	countTasks := func(agentID string) int {
 		var n int
 		err := testPool.QueryRow(ctx,
-			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+			`SELECT count(*) FROM multica_agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
 			issueID, agentID,
 		).Scan(&n)
 		if err != nil {
@@ -2834,7 +2834,7 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 
 	// Cancel reviewer's task so it's free to be re-triggered if the bug returns.
 	if _, err := testPool.Exec(ctx,
-		`UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1 AND agent_id = $2`,
+		`UPDATE multica_agent_task_queue SET status = 'cancelled' WHERE issue_id = $1 AND agent_id = $2`,
 		issueID, reviewerAgent,
 	); err != nil {
 		t.Fatalf("cancel reviewer task: %v", err)
@@ -2856,7 +2856,7 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 		t.Fatalf("member follow-up: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	if got := countTasks(reviewerAgent); got != 0 {
-		t.Fatalf("expected 0 tasks for Reviewer after plain member reply (no inheritance from agent root), got %d", got)
+		t.Fatalf("expected 0 tasks for Reviewer after plain member reply (no inheritance from multica_agent root), got %d", got)
 	}
 }
 
@@ -2888,15 +2888,15 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	issueID := issue.ID
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	countTasks := func(agentID string) int {
 		var n int
 		err := testPool.QueryRow(ctx,
-			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+			`SELECT count(*) FROM multica_agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
 			issueID, agentID,
 		).Scan(&n)
 		if err != nil {

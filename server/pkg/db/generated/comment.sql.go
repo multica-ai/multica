@@ -12,7 +12,7 @@ import (
 )
 
 const countComments = `-- name: CountComments :one
-SELECT count(*) FROM comment
+SELECT count(*) FROM multica_comment
 WHERE issue_id = $1 AND workspace_id = $2
 `
 
@@ -29,7 +29,7 @@ func (q *Queries) CountComments(ctx context.Context, arg CountCommentsParams) (i
 }
 
 const createComment = `-- name: CreateComment :one
-INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id
 `
@@ -44,7 +44,7 @@ type CreateCommentParams struct {
 	ParentID    pgtype.UUID `json:"parent_id"`
 }
 
-func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (Comment, error) {
+func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (MulticaComment, error) {
 	row := q.db.QueryRow(ctx, createComment,
 		arg.IssueID,
 		arg.WorkspaceID,
@@ -54,7 +54,7 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 		arg.Type,
 		arg.ParentID,
 	)
-	var i Comment
+	var i MulticaComment
 	err := row.Scan(
 		&i.ID,
 		&i.IssueID,
@@ -74,7 +74,7 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 }
 
 const deleteComment = `-- name: DeleteComment :exec
-DELETE FROM comment WHERE id = $1 AND workspace_id = $2
+DELETE FROM multica_comment WHERE id = $1 AND workspace_id = $2
 `
 
 type DeleteCommentParams struct {
@@ -89,13 +89,13 @@ func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) er
 }
 
 const getComment = `-- name: GetComment :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM multica_comment
 WHERE id = $1
 `
 
-func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, error) {
+func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (MulticaComment, error) {
 	row := q.db.QueryRow(ctx, getComment, id)
-	var i Comment
+	var i MulticaComment
 	err := row.Scan(
 		&i.ID,
 		&i.IssueID,
@@ -115,7 +115,7 @@ func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, erro
 }
 
 const getCommentInWorkspace = `-- name: GetCommentInWorkspace :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM multica_comment
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -124,9 +124,9 @@ type GetCommentInWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWorkspaceParams) (Comment, error) {
+func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWorkspaceParams) (MulticaComment, error) {
 	row := q.db.QueryRow(ctx, getCommentInWorkspace, arg.ID, arg.WorkspaceID)
-	var i Comment
+	var i MulticaComment
 	err := row.Scan(
 		&i.ID,
 		&i.IssueID,
@@ -147,7 +147,7 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 
 const hasAgentCommentedSince = `-- name: HasAgentCommentedSince :one
 SELECT EXISTS (
-    SELECT 1 FROM comment
+    SELECT 1 FROM multica_comment
     WHERE issue_id = $1
       AND author_type = 'agent'
       AND author_id = $2
@@ -169,7 +169,7 @@ func (q *Queries) HasAgentCommentedSince(ctx context.Context, arg HasAgentCommen
 }
 
 const hasAgentRepliedInThread = `-- name: HasAgentRepliedInThread :one
-SELECT count(*) > 0 AS has_replied FROM comment
+SELECT count(*) > 0 AS has_replied FROM multica_comment
 WHERE parent_id = $1 AND author_type = 'agent' AND author_id = $2
 `
 
@@ -178,9 +178,9 @@ type HasAgentRepliedInThreadParams struct {
 	AgentID  pgtype.UUID `json:"agent_id"`
 }
 
-// Returns true if the given agent has posted a reply in the thread rooted at
-// the specified parent comment. Used to detect agent participation in a
-// member-started thread so that follow-up member replies still trigger the agent.
+// Returns true if the given multica_agent has posted a reply in the thread rooted at
+// the specified parent multica_comment. Used to detect multica_agent participation in a
+// multica_member-started thread so that follow-up multica_member replies still trigger the multica_agent.
 func (q *Queries) HasAgentRepliedInThread(ctx context.Context, arg HasAgentRepliedInThreadParams) (bool, error) {
 	row := q.db.QueryRow(ctx, hasAgentRepliedInThread, arg.ParentID, arg.AgentID)
 	var has_replied bool
@@ -189,7 +189,7 @@ func (q *Queries) HasAgentRepliedInThread(ctx context.Context, arg HasAgentRepli
 }
 
 const listCommentsForIssue = `-- name: ListCommentsForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM multica_comment
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC, id ASC
 LIMIT $3
@@ -201,18 +201,18 @@ type ListCommentsForIssueParams struct {
 	Limit       int32       `json:"limit"`
 }
 
-// All comments for an issue in chronological order, capped at $3 (DB safety
+// All comments for an multica_issue in chronological order, capped at $3 (DB safety
 // net). Issue p99 is ~30 comments, max ever observed in prod is ~1.1k, so
 // the handler-side cap of 2000 is purely defensive.
-func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForIssueParams) ([]Comment, error) {
+func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForIssueParams) ([]MulticaComment, error) {
 	rows, err := q.db.Query(ctx, listCommentsForIssue, arg.IssueID, arg.WorkspaceID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Comment{}
+	items := []MulticaComment{}
 	for rows.Next() {
-		var i Comment
+		var i MulticaComment
 		if err := rows.Scan(
 			&i.ID,
 			&i.IssueID,
@@ -239,7 +239,7 @@ func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForI
 }
 
 const listCommentsSinceForIssue = `-- name: ListCommentsSinceForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM multica_comment
 WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
 ORDER BY created_at ASC, id ASC
 LIMIT $4
@@ -253,8 +253,8 @@ type ListCommentsSinceForIssueParams struct {
 }
 
 // Comments created strictly after $3 in chronological order, capped at $4.
-// Powers the CLI's `--since` agent-polling flow.
-func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListCommentsSinceForIssueParams) ([]Comment, error) {
+// Powers the CLI's `--since` multica_agent-polling flow.
+func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListCommentsSinceForIssueParams) ([]MulticaComment, error) {
 	rows, err := q.db.Query(ctx, listCommentsSinceForIssue,
 		arg.IssueID,
 		arg.WorkspaceID,
@@ -265,9 +265,9 @@ func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListComment
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Comment{}
+	items := []MulticaComment{}
 	for rows.Next() {
-		var i Comment
+		var i MulticaComment
 		if err := rows.Scan(
 			&i.ID,
 			&i.IssueID,
@@ -297,14 +297,14 @@ const listRecentThreadCommentsForIssue = `-- name: ListRecentThreadCommentsForIs
 WITH RECURSIVE membership(id, root_id, comment_created_at) AS (
     -- Each root maps to itself.
     SELECT c.id, c.id AS root_id, c.created_at
-    FROM comment c
+    FROM multica_comment c
     WHERE c.issue_id = $1
       AND c.workspace_id = $2
       AND c.parent_id IS NULL
     UNION ALL
     -- Each descendant inherits its parent's root_id.
     SELECT c.id, m.root_id, c.created_at
-    FROM comment c
+    FROM multica_comment c
     JOIN membership m ON c.parent_id = m.id
     WHERE c.issue_id = $1
       AND c.workspace_id = $2
@@ -331,7 +331,7 @@ SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        p.last_activity_at AS thread_last_activity_at
 FROM picked p
 JOIN membership m ON m.root_id = p.root_id
-JOIN comment c ON c.id = m.id
+JOIN multica_comment c ON c.id = m.id
 ORDER BY p.last_activity_at ASC, p.root_id ASC, c.created_at ASC, c.id ASC
 `
 
@@ -368,9 +368,9 @@ type ListRecentThreadCommentsForIssueRow struct {
 // root_id DESC) and the top N are expanded.
 //
 // Why thread-grouped instead of row-recent: with row-recent the newest 20
-// comments can come from 8 different threads — the agent sees 8 unrelated
-// tails. With thread-grouped the agent sees N complete conversational arcs,
-// which matches how a human reads an issue (#2340).
+// comments can come from 8 different threads — the multica_agent sees 8 unrelated
+// tails. With thread-grouped the multica_agent sees N complete conversational arcs,
+// which matches how a human reads an multica_issue (#2340).
 //
 // Response ordering:
 //
@@ -378,17 +378,17 @@ type ListRecentThreadCommentsForIssueRow struct {
 //	in-thread:   (created_at ASC, id ASC)
 //
 // So the oldest-active thread appears first and the most recently-active
-// thread is at the tail, closest to "now" in an agent prompt.
+// thread is at the tail, closest to "now" in an multica_agent prompt.
 //
 // Cursor scrolls back through threads. When @has_cursor=TRUE only threads
 // with (last_activity_at, root_id) < (@before_at, @before_id) are eligible.
 // The cursor is a THREAD cursor — both values identify a thread (its last
-// activity timestamp and its root comment id), not a single row.
+// activity timestamp and its root multica_comment id), not a single row.
 //
-// The recursive `membership` CTE labels each comment with its thread root by
+// The recursive `membership` CTE labels each multica_comment with its thread root by
 // walking down from every root. It does not assume any maximum nesting depth,
 // which preserves correctness even if the schema ever allows reply-of-reply
-// (the agent path in TaskService.createAgentComment collapses to root today,
+// (the multica_agent path in TaskService.createAgentComment collapses to root today,
 // but the user-facing CreateComment handler does not enforce it).
 func (q *Queries) ListRecentThreadCommentsForIssue(ctx context.Context, arg ListRecentThreadCommentsForIssueParams) ([]ListRecentThreadCommentsForIssueRow, error) {
 	rows, err := q.db.Query(ctx, listRecentThreadCommentsForIssue,
@@ -437,30 +437,30 @@ const listThreadCommentsForIssue = `-- name: ListThreadCommentsForIssue :many
 WITH RECURSIVE root_of AS (
     -- Walk up from the anchor until parent_id IS NULL.
     SELECT c.id, c.parent_id
-    FROM comment c
+    FROM multica_comment c
     WHERE c.id = $2 AND c.issue_id = $3 AND c.workspace_id = $4
     UNION ALL
     SELECT p.id, p.parent_id
-    FROM comment p
+    FROM multica_comment p
     JOIN root_of r ON p.id = r.parent_id
 ),
 thread_root AS (
     SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1
 ),
 descendants AS (
-    -- Start from the root, then keep adding any comment whose parent is
-    -- already in the set. Cycle-safe under PK constraint (a comment cannot
+    -- Start from the root, then keep adding any multica_comment whose parent is
+    -- already in the set. Cycle-safe under PK constraint (a multica_comment cannot
     -- be its own ancestor).
     SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
            c.created_at, c.updated_at, c.parent_id, c.workspace_id,
            c.resolved_at, c.resolved_by_type, c.resolved_by_id
-    FROM comment c
+    FROM multica_comment c
     JOIN thread_root tr ON c.id = tr.id
     UNION
     SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
            c.created_at, c.updated_at, c.parent_id, c.workspace_id,
            c.resolved_at, c.resolved_by_type, c.resolved_by_id
-    FROM comment c
+    FROM multica_comment c
     JOIN descendants d ON c.parent_id = d.id
     WHERE c.issue_id = $3 AND c.workspace_id = $4
 )
@@ -499,7 +499,7 @@ type ListThreadCommentsForIssueRow struct {
 // (recursive — defends against any future deeper nesting; today's data is two
 // layers because the CreateComment path collapses replies to root, but the
 // schema does not enforce that). @anchor_id may itself be a root or a reply.
-// Output is chronological so it can be fed straight to the agent.
+// Output is chronological so it can be fed straight to the multica_agent.
 func (q *Queries) ListThreadCommentsForIssue(ctx context.Context, arg ListThreadCommentsForIssueParams) ([]ListThreadCommentsForIssueRow, error) {
 	rows, err := q.db.Query(ctx, listThreadCommentsForIssue,
 		arg.RowLimit,
@@ -542,11 +542,11 @@ func (q *Queries) ListThreadCommentsForIssue(ctx context.Context, arg ListThread
 const listThreadCommentsForIssuePaged = `-- name: ListThreadCommentsForIssuePaged :many
 WITH RECURSIVE root_of AS (
     SELECT c.id, c.parent_id
-    FROM comment c
+    FROM multica_comment c
     WHERE c.id = $1 AND c.issue_id = $2 AND c.workspace_id = $3
     UNION ALL
     SELECT p.id, p.parent_id
-    FROM comment p
+    FROM multica_comment p
     JOIN root_of r ON p.id = r.parent_id
 ),
 thread_root AS (
@@ -556,13 +556,13 @@ descendants AS (
     SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
            c.created_at, c.updated_at, c.parent_id, c.workspace_id,
            c.resolved_at, c.resolved_by_type, c.resolved_by_id
-    FROM comment c
+    FROM multica_comment c
     JOIN thread_root tr ON c.id = tr.id
     UNION
     SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
            c.created_at, c.updated_at, c.parent_id, c.workspace_id,
            c.resolved_at, c.resolved_by_type, c.resolved_by_id
-    FROM comment c
+    FROM multica_comment c
     JOIN descendants d ON c.parent_id = d.id
     WHERE c.issue_id = $2 AND c.workspace_id = $3
 ),
@@ -637,7 +637,7 @@ type ListThreadCommentsForIssuePagedRow struct {
 // Reply selection happens DESC (newest replies first) so the cursor walks
 // toward older replies; the outer SELECT then re-sorts the combined output
 // ASC so the body stays chronological (oldest → newest), matching every
-// other comment list path.
+// other multica_comment list path.
 func (q *Queries) ListThreadCommentsForIssuePaged(ctx context.Context, arg ListThreadCommentsForIssuePagedParams) ([]ListThreadCommentsForIssuePagedRow, error) {
 	rows, err := q.db.Query(ctx, listThreadCommentsForIssuePaged,
 		arg.AnchorID,
@@ -681,7 +681,7 @@ func (q *Queries) ListThreadCommentsForIssuePaged(ctx context.Context, arg ListT
 }
 
 const resolveComment = `-- name: ResolveComment :one
-UPDATE comment SET
+UPDATE multica_comment SET
     resolved_at = COALESCE(resolved_at, now()),
     resolved_by_type = COALESCE(resolved_by_type, $2),
     resolved_by_id = COALESCE(resolved_by_id, $3),
@@ -698,9 +698,9 @@ type ResolveCommentParams struct {
 
 // Idempotent: re-resolving keeps the original resolved_at + resolver. Always
 // returns the row so the handler can surface the canonical state.
-func (q *Queries) ResolveComment(ctx context.Context, arg ResolveCommentParams) (Comment, error) {
+func (q *Queries) ResolveComment(ctx context.Context, arg ResolveCommentParams) (MulticaComment, error) {
 	row := q.db.QueryRow(ctx, resolveComment, arg.ID, arg.ResolvedByType, arg.ResolvedByID)
-	var i Comment
+	var i MulticaComment
 	err := row.Scan(
 		&i.ID,
 		&i.IssueID,
@@ -720,7 +720,7 @@ func (q *Queries) ResolveComment(ctx context.Context, arg ResolveCommentParams) 
 }
 
 const unresolveComment = `-- name: UnresolveComment :one
-UPDATE comment SET
+UPDATE multica_comment SET
     resolved_at = NULL,
     resolved_by_type = NULL,
     resolved_by_id = NULL,
@@ -730,9 +730,9 @@ RETURNING id, issue_id, author_type, author_id, content, type, created_at, updat
 `
 
 // Idempotent: a no-op clear (already unresolved) just returns the row.
-func (q *Queries) UnresolveComment(ctx context.Context, id pgtype.UUID) (Comment, error) {
+func (q *Queries) UnresolveComment(ctx context.Context, id pgtype.UUID) (MulticaComment, error) {
 	row := q.db.QueryRow(ctx, unresolveComment, id)
-	var i Comment
+	var i MulticaComment
 	err := row.Scan(
 		&i.ID,
 		&i.IssueID,
@@ -752,7 +752,7 @@ func (q *Queries) UnresolveComment(ctx context.Context, id pgtype.UUID) (Comment
 }
 
 const updateComment = `-- name: UpdateComment :one
-UPDATE comment SET
+UPDATE multica_comment SET
     content = $2,
     updated_at = now()
 WHERE id = $1
@@ -764,9 +764,9 @@ type UpdateCommentParams struct {
 	Content string      `json:"content"`
 }
 
-func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (Comment, error) {
+func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (MulticaComment, error) {
 	row := q.db.QueryRow(ctx, updateComment, arg.ID, arg.Content)
-	var i Comment
+	var i MulticaComment
 	err := row.Scan(
 		&i.ID,
 		&i.IssueID,

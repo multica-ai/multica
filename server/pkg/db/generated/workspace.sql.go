@@ -12,7 +12,7 @@ import (
 )
 
 const createWorkspace = `-- name: CreateWorkspace :one
-INSERT INTO workspace (name, slug, description, context, issue_prefix)
+INSERT INTO multica_workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter
 `
@@ -25,7 +25,7 @@ type CreateWorkspaceParams struct {
 	IssuePrefix string      `json:"issue_prefix"`
 }
 
-func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams) (Workspace, error) {
+func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams) (MulticaWorkspace, error) {
 	row := q.db.QueryRow(ctx, createWorkspace,
 		arg.Name,
 		arg.Slug,
@@ -33,7 +33,7 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		arg.Context,
 		arg.IssuePrefix,
 	)
-	var i Workspace
+	var i MulticaWorkspace
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -51,7 +51,7 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 }
 
 const deleteWorkspace = `-- name: DeleteWorkspace :exec
-DELETE FROM workspace WHERE id = $1
+DELETE FROM multica_workspace WHERE id = $1
 `
 
 func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
@@ -60,13 +60,13 @@ func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter FROM multica_workspace
 WHERE id = $1
 `
 
-func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (Workspace, error) {
+func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (MulticaWorkspace, error) {
 	row := q.db.QueryRow(ctx, getWorkspace, id)
-	var i Workspace
+	var i MulticaWorkspace
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -84,13 +84,13 @@ func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (Workspace, 
 }
 
 const getWorkspaceBySlug = `-- name: GetWorkspaceBySlug :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter FROM multica_workspace
 WHERE slug = $1
 `
 
-func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspace, error) {
+func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (MulticaWorkspace, error) {
 	row := q.db.QueryRow(ctx, getWorkspaceBySlug, slug)
-	var i Workspace
+	var i MulticaWorkspace
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -108,7 +108,7 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 }
 
 const incrementIssueCounter = `-- name: IncrementIssueCounter :one
-UPDATE workspace SET issue_counter = issue_counter + 1
+UPDATE multica_workspace SET issue_counter = issue_counter + 1
 WHERE id = $1
 RETURNING issue_counter
 `
@@ -124,21 +124,21 @@ const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
        w.issue_prefix, w.issue_counter
-FROM member m
-JOIN workspace w ON w.id = m.workspace_id
+FROM multica_member m
+JOIN multica_workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
 ORDER BY w.created_at ASC
 `
 
-func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Workspace, error) {
+func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]MulticaWorkspace, error) {
 	rows, err := q.db.Query(ctx, listWorkspaces, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Workspace{}
+	items := []MulticaWorkspace{}
 	for rows.Next() {
-		var i Workspace
+		var i MulticaWorkspace
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -163,7 +163,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 }
 
 const updateWorkspace = `-- name: UpdateWorkspace :one
-UPDATE workspace SET
+UPDATE multica_workspace SET
     name = COALESCE($2, name),
     description = COALESCE($3, description),
     context = COALESCE($4, context),
@@ -185,7 +185,7 @@ type UpdateWorkspaceParams struct {
 	IssuePrefix pgtype.Text `json:"issue_prefix"`
 }
 
-func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams) (Workspace, error) {
+func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams) (MulticaWorkspace, error) {
 	row := q.db.QueryRow(ctx, updateWorkspace,
 		arg.ID,
 		arg.Name,
@@ -195,7 +195,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		arg.Repos,
 		arg.IssuePrefix,
 	)
-	var i Workspace
+	var i MulticaWorkspace
 	err := row.Scan(
 		&i.ID,
 		&i.Name,

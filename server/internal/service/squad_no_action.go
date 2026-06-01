@@ -9,7 +9,7 @@ import (
 
 // HasSquadLeaderNoActionEvaluationForTask reports whether this exact task
 // already recorded a squad leader no_action evaluation.
-func HasSquadLeaderNoActionEvaluationForTask(ctx context.Context, q *db.Queries, task db.AgentTaskQueue) (bool, error) {
+func HasSquadLeaderNoActionEvaluationForTask(ctx context.Context, q *db.Queries, task db.MulticaAgentTaskQueue) (bool, error) {
 	if q == nil || !task.ID.Valid || !task.IssueID.Valid || !task.AgentID.Valid {
 		return false, nil
 	}
