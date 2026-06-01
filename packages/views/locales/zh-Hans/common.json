@@ -9,5 +9,20 @@
     "minutes_ago": "{{count}} 分钟前",
     "hours_ago": "{{count}} 小时前",
     "days_ago": "{{count}} 天前"
+  },
+  "views": {
+    "save_view": "保存视图",
+    "create": "创建",
+    "rename": "重命名",
+    "rename_view": "重命名视图",
+    "view_name_placeholder": "视图名称",
+    "shared": "共享",
+    "shared_hint": "工作区内所有人都能看到此视图",
+    "share": "共享给工作区",
+    "unshare": "设为私有",
+    "delete_view": "删除视图",
+    "delete_confirm_title": "删除此视图?",
+    "delete_confirm_body": "此视图将对所有共享对象移除,且无法撤销。",
+    "options": "视图选项"
   }
 }

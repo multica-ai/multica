@@ -28,25 +28,25 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID            string                  `json:"id"`
-	WorkspaceID   string                  `json:"workspace_id"`
-	Number        int32                   `json:"number"`
-	Identifier    string                  `json:"identifier"`
-	Title         string                  `json:"title"`
-	Description   *string                 `json:"description"`
-	Status        string                  `json:"status"`
-	Priority      string                  `json:"priority"`
-	AssigneeType  *string                 `json:"assignee_type"`
-	AssigneeID    *string                 `json:"assignee_id"`
-	CreatorType   string                  `json:"creator_type"`
-	CreatorID     string                  `json:"creator_id"`
-	ParentIssueID *string                 `json:"parent_issue_id"`
-	ProjectID     *string                 `json:"project_id"`
-	Position      float64                 `json:"position"`
-	StartDate     *string                 `json:"start_date"`
-	DueDate       *string                 `json:"due_date"`
-	CreatedAt     string                  `json:"created_at"`
-	UpdatedAt     string                  `json:"updated_at"`
+	ID            string  `json:"id"`
+	WorkspaceID   string  `json:"workspace_id"`
+	Number        int32   `json:"number"`
+	Identifier    string  `json:"identifier"`
+	Title         string  `json:"title"`
+	Description   *string `json:"description"`
+	Status        string  `json:"status"`
+	Priority      string  `json:"priority"`
+	AssigneeType  *string `json:"assignee_type"`
+	AssigneeID    *string `json:"assignee_id"`
+	CreatorType   string  `json:"creator_type"`
+	CreatorID     string  `json:"creator_id"`
+	ParentIssueID *string `json:"parent_issue_id"`
+	ProjectID     *string `json:"project_id"`
+	Position      float64 `json:"position"`
+	StartDate     *string `json:"start_date"`
+	DueDate       *string `json:"due_date"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -199,10 +199,10 @@ func assigneeGroupID(assigneeType pgtype.Text, assigneeID pgtype.UUID) string {
 // SearchIssueResponse extends IssueResponse with search metadata.
 type SearchIssueResponse struct {
 	IssueResponse
-	MatchSource                string  `json:"match_source"`
-	MatchedSnippet             *string `json:"matched_snippet,omitempty"`
-	MatchedDescriptionSnippet  *string `json:"matched_description_snippet,omitempty"`
-	MatchedCommentSnippet      *string `json:"matched_comment_snippet,omitempty"`
+	MatchSource               string  `json:"match_source"`
+	MatchedSnippet            *string `json:"matched_snippet,omitempty"`
+	MatchedDescriptionSnippet *string `json:"matched_description_snippet,omitempty"`
+	MatchedCommentSnippet     *string `json:"matched_comment_snippet,omitempty"`
 }
 
 // extractSnippet extracts a snippet of text around the first occurrence of query.
@@ -706,70 +706,64 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse optional filter params. Malformed UUIDs in filters return 400 —
-	// silently coercing them to a zero UUID would mask a client bug and let
-	// the query return an empty result set (or worse, match a NULL row).
-	var priorityFilter pgtype.Text
-	if p := r.URL.Query().Get("priority"); p != "" {
-		priorityFilter = pgtype.Text{String: p, Valid: true}
-	}
-	var assigneeFilter pgtype.UUID
-	if a := r.URL.Query().Get("assignee_id"); a != "" {
-		id, ok := parseUUIDOrBadRequest(w, a, "assignee_id")
-		if !ok {
-			return
+	// open_only=true returns all non-done/cancelled issues (no limit). This is a
+	// legacy programmatic path with no UI caller; it still uses the single-value
+	// sqlc filters rather than the orthogonal filter set the main path builds.
+	if r.URL.Query().Get("open_only") == "true" {
+		// Malformed UUIDs return 400 — silently coercing them to a zero UUID
+		// would mask a client bug and match a NULL row.
+		var priorityFilter pgtype.Text
+		if p := r.URL.Query().Get("priority"); p != "" {
+			priorityFilter = pgtype.Text{String: p, Valid: true}
 		}
-		assigneeFilter = id
-	}
-	var assigneeIdsFilter []pgtype.UUID
-	if ids := r.URL.Query().Get("assignee_ids"); ids != "" {
-		for _, raw := range strings.Split(ids, ",") {
-			if s := strings.TrimSpace(raw); s != "" {
-				id, ok := parseUUIDOrBadRequest(w, s, "assignee_ids")
-				if !ok {
-					return
+		var assigneeFilter pgtype.UUID
+		if a := r.URL.Query().Get("assignee_id"); a != "" {
+			id, ok := parseUUIDOrBadRequest(w, a, "assignee_id")
+			if !ok {
+				return
+			}
+			assigneeFilter = id
+		}
+		var assigneeIdsFilter []pgtype.UUID
+		if ids := r.URL.Query().Get("assignee_ids"); ids != "" {
+			for _, raw := range strings.Split(ids, ",") {
+				if s := strings.TrimSpace(raw); s != "" {
+					id, ok := parseUUIDOrBadRequest(w, s, "assignee_ids")
+					if !ok {
+						return
+					}
+					assigneeIdsFilter = append(assigneeIdsFilter, id)
 				}
-				assigneeIdsFilter = append(assigneeIdsFilter, id)
 			}
 		}
-	}
-	var creatorFilter pgtype.UUID
-	if c := r.URL.Query().Get("creator_id"); c != "" {
-		id, ok := parseUUIDOrBadRequest(w, c, "creator_id")
+		var creatorFilter pgtype.UUID
+		if c := r.URL.Query().Get("creator_id"); c != "" {
+			id, ok := parseUUIDOrBadRequest(w, c, "creator_id")
+			if !ok {
+				return
+			}
+			creatorFilter = id
+		}
+		var projectFilter pgtype.UUID
+		if p := r.URL.Query().Get("project_id"); p != "" {
+			id, ok := parseUUIDOrBadRequest(w, p, "project_id")
+			if !ok {
+				return
+			}
+			projectFilter = id
+		}
+		var involvesUserFilter pgtype.UUID
+		if u := r.URL.Query().Get("involves_user_id"); u != "" {
+			id, ok := parseUUIDOrBadRequest(w, u, "involves_user_id")
+			if !ok {
+				return
+			}
+			involvesUserFilter = id
+		}
+		metadataFilter, ok := parseMetadataFilterParam(w, r.URL.Query().Get("metadata"))
 		if !ok {
 			return
 		}
-		creatorFilter = id
-	}
-	var projectFilter pgtype.UUID
-	if p := r.URL.Query().Get("project_id"); p != "" {
-		id, ok := parseUUIDOrBadRequest(w, p, "project_id")
-		if !ok {
-			return
-		}
-		projectFilter = id
-	}
-	// involves_user_id widens the assignee filter to surface issues where the
-	// user is the indirect assignee (their owned agent, or a squad they belong
-	// to / lead / have an agent inside). Direct member-assignment is excluded
-	// by design — that is the meaning of `assignee_id` (tab 1), and tab 3 must
-	// be disjoint from tab 1.
-	var involvesUserFilter pgtype.UUID
-	if u := r.URL.Query().Get("involves_user_id"); u != "" {
-		id, ok := parseUUIDOrBadRequest(w, u, "involves_user_id")
-		if !ok {
-			return
-		}
-		involvesUserFilter = id
-	}
-
-	metadataFilter, ok := parseMetadataFilterParam(w, r.URL.Query().Get("metadata"))
-	if !ok {
-		return
-	}
-
-	// open_only=true returns all non-done/cancelled issues (no limit).
-	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
 			WorkspaceID:    wsUUID,
 			Priority:       priorityFilter,
@@ -821,19 +815,6 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var statusFilter pgtype.Text
-	if s := r.URL.Query().Get("status"); s != "" {
-		statusFilter = pgtype.Text{String: s, Valid: true}
-	}
-
-	// scheduled=true restricts the result to issues that have at least one of
-	// start_date / due_date set. Used by the Project Gantt view, which only
-	// renders schedulable rows and shouldn't pay for the full project list.
-	var scheduledFilter pgtype.Bool
-	if r.URL.Query().Get("scheduled") == "true" {
-		scheduledFilter = pgtype.Bool{Bool: true, Valid: true}
-	}
-
 	// Parse sort and direction params for dynamic ORDER BY.
 	// Manual sort (position) is always ASC — direction is ignored because
 	// the user defines order through drag-and-drop, reversing it has no
@@ -865,7 +846,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Build dynamic SQL — same approach as ListGroupedIssues.
+	// Build dynamic SQL — shares the orthogonal filter parser with
+	// ListGroupedIssues so the two endpoints return the same set for the same
+	// filters (the contract a saved view relies on to drive either render mode).
 	where := []string{"i.workspace_id = $1"}
 	args := []any{wsUUID}
 	addArg := func(v any) string {
@@ -873,63 +856,17 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		return "$" + strconv.Itoa(len(args))
 	}
 
-	if statusFilter.Valid {
-		where = append(where, fmt.Sprintf("i.status = %s", addArg(statusFilter.String)))
+	if !h.appendIssueFilters(w, r, &where, addArg) {
+		return
 	}
-	if priorityFilter.Valid {
-		where = append(where, fmt.Sprintf("i.priority = %s", addArg(priorityFilter.String)))
-	}
-	if assigneeFilter.Valid {
-		where = append(where, fmt.Sprintf("i.assignee_id = %s::uuid", addArg(assigneeFilter)))
-	}
-	if len(assigneeIdsFilter) > 0 {
-		where = append(where, fmt.Sprintf("i.assignee_id = ANY(%s::uuid[])", addArg(assigneeIdsFilter)))
-	}
-	if creatorFilter.Valid {
-		where = append(where, fmt.Sprintf("i.creator_id = %s::uuid", addArg(creatorFilter)))
-	}
-	if projectFilter.Valid {
-		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(projectFilter)))
-	}
-	if scheduledFilter.Valid {
+
+	// scheduled=true restricts the result to issues that have at least one of
+	// start_date / due_date set. Used by the Project Gantt view, which only
+	// renders schedulable rows and shouldn't pay for the full project list. It
+	// is not a filter-bar dimension, so it lives here rather than in the shared
+	// filter parser.
+	if r.URL.Query().Get("scheduled") == "true" {
 		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
-	}
-	if metadataFilter != nil {
-		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
-	}
-	if involvesUserFilter.Valid {
-		ref := addArg(involvesUserFilter)
-		where = append(where, fmt.Sprintf(`(
-    (i.assignee_type = 'agent' AND i.assignee_id IN (
-       SELECT a.id FROM agent a
-        WHERE a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-    ))
-    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'member'
-          AND sm.member_id   = %[1]s::uuid
-       UNION
-       SELECT s.id
-         FROM squad s
-         JOIN agent a ON a.id = s.leader_id
-        WHERE s.workspace_id = $1
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-       UNION
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-         JOIN agent a ON a.id = sm.member_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'agent'
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-    ))
-)`, ref))
 	}
 
 	whereSql := strings.Join(where, " AND ")
@@ -1034,6 +971,11 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 type issueActorFilter struct {
 	actorType string
 	actorID   pgtype.UUID
+	// setKind, when non-empty, marks a dynamic actor set resolved server-side
+	// from the requesting user rather than a concrete actorID match: "my_agents"
+	// (agents the user owns) or "my_squads" (squads the user belongs to). For
+	// these, actorID holds the requesting user's UUID, consumed by a subquery.
+	setKind string
 }
 
 func splitCommaParam(raw string) []string {
@@ -1070,7 +1012,23 @@ func parseUUIDParamList(w http.ResponseWriter, raw, fieldName string) ([]pgtype.
 	return ids, true
 }
 
-func parseActorFilterList(w http.ResponseWriter, raw, fieldName string) ([]issueActorFilter, bool) {
+// meToken is the placeholder a saved view stores instead of a hardcoded user
+// UUID so the same view resolves to whoever is viewing it. The server expands
+// it to the requesting user; it only makes sense for a member actor (the
+// viewer is a person, never an agent or squad).
+const meToken = "{me}"
+
+// myAgentsToken / mySquadsToken are the dynamic-set counterparts of {me}: a
+// saved view stores them instead of a frozen list of agent/squad UUIDs so the
+// "my agents" scope follows the user's current agents/squads. Each only pairs
+// with its own actor type and is meaningless for a creator (a creator is always
+// a member).
+const (
+	myAgentsToken = "{my_agents}"
+	mySquadsToken = "{my_squads}"
+)
+
+func parseActorFilterList(w http.ResponseWriter, raw, fieldName, currentUserID string) ([]issueActorFilter, bool) {
 	parts := splitCommaParam(raw)
 	if len(parts) == 0 {
 		return nil, true
@@ -1082,16 +1040,269 @@ func parseActorFilterList(w http.ResponseWriter, raw, fieldName string) ([]issue
 			writeError(w, http.StatusBadRequest, "invalid "+fieldName)
 			return nil, false
 		}
-		id, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(pieces[1]), fieldName)
+		actorType := pieces[0]
+		idRaw := strings.TrimSpace(pieces[1])
+
+		// Dynamic-set tokens resolve to the requesting user; each pairs with
+		// exactly one actor type. actorID carries the user UUID for the subquery.
+		if setKind, isSet := actorSetKind(idRaw); isSet {
+			if (idRaw == myAgentsToken && actorType != "agent") ||
+				(idRaw == mySquadsToken && actorType != "squad") {
+				writeError(w, http.StatusBadRequest, idRaw+" cannot pair with "+actorType+" in "+fieldName)
+				return nil, false
+			}
+			if currentUserID == "" {
+				writeError(w, http.StatusBadRequest, idRaw+" requires an authenticated user in "+fieldName)
+				return nil, false
+			}
+			id, ok := parseUUIDOrBadRequest(w, currentUserID, fieldName)
+			if !ok {
+				return nil, false
+			}
+			filters = append(filters, issueActorFilter{actorType: actorType, actorID: id, setKind: setKind})
+			continue
+		}
+
+		if idRaw == meToken {
+			if actorType != "member" {
+				writeError(w, http.StatusBadRequest, meToken+" is only valid for a member in "+fieldName)
+				return nil, false
+			}
+			if currentUserID == "" {
+				writeError(w, http.StatusBadRequest, meToken+" requires an authenticated user in "+fieldName)
+				return nil, false
+			}
+			idRaw = currentUserID
+		}
+		id, ok := parseUUIDOrBadRequest(w, idRaw, fieldName)
 		if !ok {
 			return nil, false
 		}
 		filters = append(filters, issueActorFilter{
-			actorType: pieces[0],
+			actorType: actorType,
 			actorID:   id,
 		})
 	}
 	return filters, true
+}
+
+func actorSetKind(idRaw string) (string, bool) {
+	switch idRaw {
+	case myAgentsToken:
+		return "my_agents", true
+	case mySquadsToken:
+		return "my_squads", true
+	default:
+		return "", false
+	}
+}
+
+// myAgentsAssigneePredicate / mySquadsAssigneePredicate are the assignee WHERE
+// predicates for the {my_agents} / {my_squads} dynamic sets, and the building
+// blocks of the legacy involves_user_id fragment. %[1]s is the bind ref for the
+// user UUID; $1 is the workspace UUID (both ListIssues and ListGroupedIssues
+// reserve $1 = workspace_id). Member-direct assignment is deliberately excluded
+// — that is assignee_filters=member:<id>, which must stay disjoint from these.
+const (
+	myAgentsAssigneePredicate = `(i.assignee_type = 'agent' AND i.assignee_id IN (
+       SELECT a.id FROM agent a
+        WHERE a.workspace_id = $1
+          AND a.owner_id     = %[1]s::uuid
+    ))`
+	mySquadsAssigneePredicate = `(i.assignee_type = 'squad' AND i.assignee_id IN (
+       SELECT sm.squad_id
+         FROM squad_member sm
+         JOIN squad s ON s.id = sm.squad_id
+        WHERE s.workspace_id = $1
+          AND sm.member_type = 'member'
+          AND sm.member_id   = %[1]s::uuid
+       UNION
+       SELECT s.id
+         FROM squad s
+         JOIN agent a ON a.id = s.leader_id
+        WHERE s.workspace_id = $1
+          AND a.workspace_id = $1
+          AND a.owner_id     = %[1]s::uuid
+       UNION
+       SELECT sm.squad_id
+         FROM squad_member sm
+         JOIN squad s ON s.id = sm.squad_id
+         JOIN agent a ON a.id = sm.member_id
+        WHERE s.workspace_id = $1
+          AND sm.member_type = 'agent'
+          AND a.workspace_id = $1
+          AND a.owner_id     = %[1]s::uuid
+    ))`
+	// issueInvolvesUserFragment widens an assignee filter to any issue where the
+	// user is the indirect assignee (owned agent OR involved squad).
+	issueInvolvesUserFragment = "(" + myAgentsAssigneePredicate + " OR " + mySquadsAssigneePredicate + ")"
+)
+
+// appendIssueFilters parses the orthogonal issue-filter query params shared by
+// ListIssues and ListGroupedIssues, appending SQL predicates to *where and
+// registering bind args through addArg. Callers must already have reserved
+// $1 = workspace_id (so the involves fragment can reference it). Returns false
+// after writing a 400 for any malformed input.
+func (h *Handler) appendIssueFilters(w http.ResponseWriter, r *http.Request, where *[]string, addArg func(any) string) bool {
+	q := r.URL.Query()
+
+	statuses := splitCommaParam(q.Get("statuses"))
+	if len(statuses) == 0 {
+		statuses = splitCommaParam(q.Get("status"))
+	}
+	if len(statuses) > 0 {
+		*where = append(*where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(statuses)))
+	}
+
+	priorities := splitCommaParam(q.Get("priorities"))
+	if len(priorities) == 0 {
+		priorities = splitCommaParam(q.Get("priority"))
+	}
+	if len(priorities) > 0 {
+		*where = append(*where, fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(priorities)))
+	}
+
+	assigneeTypes := splitCommaParam(q.Get("assignee_types"))
+	assigneeFiltersRaw := q.Get("assignee_filters")
+	// assignee_types (class-level: "all members") and assignee_filters
+	// (entity-level: "these specific actors") are mutually exclusive — combining
+	// them is either redundant or contradictory, and a saved view only ever
+	// carries one. Reject up front to keep the contract sharp.
+	if len(assigneeTypes) > 0 && assigneeFiltersRaw != "" {
+		writeError(w, http.StatusBadRequest, "assignee_types and assignee_filters are mutually exclusive")
+		return false
+	}
+	if len(assigneeTypes) > 0 {
+		for _, assigneeType := range assigneeTypes {
+			if !isIssueActorType(assigneeType) {
+				writeError(w, http.StatusBadRequest, "invalid assignee_types")
+				return false
+			}
+		}
+		*where = append(*where, fmt.Sprintf("i.assignee_type = ANY(%s::text[])", addArg(assigneeTypes)))
+	}
+
+	if raw := q.Get("assignee_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "assignee_id")
+		if !ok {
+			return false
+		}
+		*where = append(*where, fmt.Sprintf("i.assignee_id = %s::uuid", addArg(id)))
+	}
+	if raw := q.Get("assignee_ids"); raw != "" {
+		ids, ok := parseUUIDParamList(w, raw, "assignee_ids")
+		if !ok {
+			return false
+		}
+		if len(ids) > 0 {
+			*where = append(*where, fmt.Sprintf("i.assignee_id = ANY(%s::uuid[])", addArg(ids)))
+		}
+	}
+	if raw := q.Get("creator_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "creator_id")
+		if !ok {
+			return false
+		}
+		*where = append(*where, fmt.Sprintf("i.creator_id = %s::uuid", addArg(id)))
+	}
+	if raw := q.Get("project_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "project_id")
+		if !ok {
+			return false
+		}
+		*where = append(*where, fmt.Sprintf("i.project_id = %s::uuid", addArg(id)))
+	}
+	if filter, ok := parseMetadataFilterParam(w, q.Get("metadata")); !ok {
+		return false
+	} else if filter != nil {
+		*where = append(*where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(filter))))
+	}
+	if raw := q.Get("involves_user_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "involves_user_id")
+		if !ok {
+			return false
+		}
+		*where = append(*where, fmt.Sprintf(issueInvolvesUserFragment, addArg(id)))
+	}
+
+	currentUserID := requestUserID(r)
+
+	assigneeFilters, ok := parseActorFilterList(w, assigneeFiltersRaw, "assignee_filters", currentUserID)
+	if !ok {
+		return false
+	}
+	includeNoAssignee := q.Get("include_no_assignee") == "true"
+	if len(assigneeFilters) > 0 || includeNoAssignee {
+		ors := make([]string, 0, len(assigneeFilters)+1)
+		for _, filter := range assigneeFilters {
+			switch filter.setKind {
+			case "my_agents":
+				ors = append(ors, fmt.Sprintf(myAgentsAssigneePredicate, addArg(filter.actorID)))
+			case "my_squads":
+				ors = append(ors, fmt.Sprintf(mySquadsAssigneePredicate, addArg(filter.actorID)))
+			default:
+				ors = append(ors, fmt.Sprintf(
+					"(i.assignee_type = %s::text AND i.assignee_id = %s::uuid)",
+					addArg(filter.actorType),
+					addArg(filter.actorID),
+				))
+			}
+		}
+		if includeNoAssignee {
+			ors = append(ors, "(i.assignee_type IS NULL AND i.assignee_id IS NULL)")
+		}
+		*where = append(*where, "("+strings.Join(ors, " OR ")+")")
+	}
+
+	creatorFilters, ok := parseActorFilterList(w, q.Get("creator_filters"), "creator_filters", currentUserID)
+	if !ok {
+		return false
+	}
+	if len(creatorFilters) > 0 {
+		ors := make([]string, 0, len(creatorFilters))
+		for _, filter := range creatorFilters {
+			// Dynamic actor sets describe assignment, not authorship.
+			if filter.setKind != "" {
+				writeError(w, http.StatusBadRequest, "creator_filters does not support dynamic actor sets")
+				return false
+			}
+			ors = append(ors, fmt.Sprintf(
+				"(i.creator_type = %s::text AND i.creator_id = %s::uuid)",
+				addArg(filter.actorType),
+				addArg(filter.actorID),
+			))
+		}
+		*where = append(*where, "("+strings.Join(ors, " OR ")+")")
+	}
+
+	projectIDs, ok := parseUUIDParamList(w, q.Get("project_ids"), "project_ids")
+	if !ok {
+		return false
+	}
+	includeNoProject := q.Get("include_no_project") == "true"
+	if len(projectIDs) > 0 || includeNoProject {
+		ors := make([]string, 0, 2)
+		if len(projectIDs) > 0 {
+			ors = append(ors, fmt.Sprintf("i.project_id = ANY(%s::uuid[])", addArg(projectIDs)))
+		}
+		if includeNoProject {
+			ors = append(ors, "i.project_id IS NULL")
+		}
+		*where = append(*where, "("+strings.Join(ors, " OR ")+")")
+	}
+
+	labelIDs, ok := parseUUIDParamList(w, q.Get("label_ids"), "label_ids")
+	if !ok {
+		return false
+	}
+	if len(labelIDs) > 0 {
+		*where = append(*where, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM issue_to_label itl WHERE itl.issue_id = i.id AND itl.label_id = ANY(%s::uuid[]))",
+			addArg(labelIDs),
+		))
+	}
+
+	return true
 }
 
 func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
@@ -1139,174 +1350,8 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		return "$" + strconv.Itoa(len(args))
 	}
 
-	statuses := splitCommaParam(r.URL.Query().Get("statuses"))
-	if len(statuses) == 0 {
-		statuses = splitCommaParam(r.URL.Query().Get("status"))
-	}
-	if len(statuses) > 0 {
-		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(statuses)))
-	}
-
-	priorities := splitCommaParam(r.URL.Query().Get("priorities"))
-	if len(priorities) == 0 {
-		priorities = splitCommaParam(r.URL.Query().Get("priority"))
-	}
-	if len(priorities) > 0 {
-		where = append(where, fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(priorities)))
-	}
-
-	assigneeTypes := splitCommaParam(r.URL.Query().Get("assignee_types"))
-	if len(assigneeTypes) > 0 {
-		for _, assigneeType := range assigneeTypes {
-			if !isIssueActorType(assigneeType) {
-				writeError(w, http.StatusBadRequest, "invalid assignee_types")
-				return
-			}
-		}
-		where = append(where, fmt.Sprintf("i.assignee_type = ANY(%s::text[])", addArg(assigneeTypes)))
-	}
-
-	if raw := r.URL.Query().Get("assignee_id"); raw != "" {
-		id, ok := parseUUIDOrBadRequest(w, raw, "assignee_id")
-		if !ok {
-			return
-		}
-		where = append(where, fmt.Sprintf("i.assignee_id = %s::uuid", addArg(id)))
-	}
-	if raw := r.URL.Query().Get("assignee_ids"); raw != "" {
-		ids, ok := parseUUIDParamList(w, raw, "assignee_ids")
-		if !ok {
-			return
-		}
-		if len(ids) > 0 {
-			where = append(where, fmt.Sprintf("i.assignee_id = ANY(%s::uuid[])", addArg(ids)))
-		}
-	}
-	if raw := r.URL.Query().Get("creator_id"); raw != "" {
-		id, ok := parseUUIDOrBadRequest(w, raw, "creator_id")
-		if !ok {
-			return
-		}
-		where = append(where, fmt.Sprintf("i.creator_id = %s::uuid", addArg(id)))
-	}
-	if raw := r.URL.Query().Get("project_id"); raw != "" {
-		id, ok := parseUUIDOrBadRequest(w, raw, "project_id")
-		if !ok {
-			return
-		}
-		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(id)))
-	}
-	if filter, ok := parseMetadataFilterParam(w, r.URL.Query().Get("metadata")); !ok {
+	if !h.appendIssueFilters(w, r, &where, addArg) {
 		return
-	} else if filter != nil {
-		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(filter))))
-	}
-	// Mirror the involves_user_id 4-branch UNION from sqlc's ListIssues /
-	// ListOpenIssues / CountIssues. ListGroupedIssues is a hand-written dynamic
-	// SQL builder that does not share parameters with sqlc, so the fragment is
-	// re-implemented here in lock-step. Member-direct assignment is excluded by
-	// design: that semantics belongs to tab 1 (`assignee_id`), and tab 3 must
-	// stay disjoint from tab 1.
-	if raw := r.URL.Query().Get("involves_user_id"); raw != "" {
-		id, ok := parseUUIDOrBadRequest(w, raw, "involves_user_id")
-		if !ok {
-			return
-		}
-		ref := addArg(id)
-		where = append(where, fmt.Sprintf(`(
-    (i.assignee_type = 'agent' AND i.assignee_id IN (
-       SELECT a.id FROM agent a
-        WHERE a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-    ))
-    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'member'
-          AND sm.member_id   = %[1]s::uuid
-       UNION
-       SELECT s.id
-         FROM squad s
-         JOIN agent a ON a.id = s.leader_id
-        WHERE s.workspace_id = $1
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-       UNION
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-         JOIN agent a ON a.id = sm.member_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'agent'
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-    ))
-)`, ref))
-	}
-
-	assigneeFilters, ok := parseActorFilterList(w, r.URL.Query().Get("assignee_filters"), "assignee_filters")
-	if !ok {
-		return
-	}
-	includeNoAssignee := r.URL.Query().Get("include_no_assignee") == "true"
-	if len(assigneeFilters) > 0 || includeNoAssignee {
-		ors := make([]string, 0, len(assigneeFilters)+1)
-		for _, filter := range assigneeFilters {
-			ors = append(ors, fmt.Sprintf(
-				"(i.assignee_type = %s::text AND i.assignee_id = %s::uuid)",
-				addArg(filter.actorType),
-				addArg(filter.actorID),
-			))
-		}
-		if includeNoAssignee {
-			ors = append(ors, "(i.assignee_type IS NULL AND i.assignee_id IS NULL)")
-		}
-		where = append(where, "("+strings.Join(ors, " OR ")+")")
-	}
-
-	creatorFilters, ok := parseActorFilterList(w, r.URL.Query().Get("creator_filters"), "creator_filters")
-	if !ok {
-		return
-	}
-	if len(creatorFilters) > 0 {
-		ors := make([]string, 0, len(creatorFilters))
-		for _, filter := range creatorFilters {
-			ors = append(ors, fmt.Sprintf(
-				"(i.creator_type = %s::text AND i.creator_id = %s::uuid)",
-				addArg(filter.actorType),
-				addArg(filter.actorID),
-			))
-		}
-		where = append(where, "("+strings.Join(ors, " OR ")+")")
-	}
-
-	projectIDs, ok := parseUUIDParamList(w, r.URL.Query().Get("project_ids"), "project_ids")
-	if !ok {
-		return
-	}
-	includeNoProject := r.URL.Query().Get("include_no_project") == "true"
-	if len(projectIDs) > 0 || includeNoProject {
-		ors := make([]string, 0, 2)
-		if len(projectIDs) > 0 {
-			ors = append(ors, fmt.Sprintf("i.project_id = ANY(%s::uuid[])", addArg(projectIDs)))
-		}
-		if includeNoProject {
-			ors = append(ors, "i.project_id IS NULL")
-		}
-		where = append(where, "("+strings.Join(ors, " OR ")+")")
-	}
-
-	labelIDs, ok := parseUUIDParamList(w, r.URL.Query().Get("label_ids"), "label_ids")
-	if !ok {
-		return
-	}
-	if len(labelIDs) > 0 {
-		where = append(where, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM issue_to_label itl WHERE itl.issue_id = i.id AND itl.label_id = ANY(%s::uuid[]))",
-			addArg(labelIDs),
-		))
 	}
 
 	if groupAssigneeType := r.URL.Query().Get("group_assignee_type"); groupAssigneeType != "" {

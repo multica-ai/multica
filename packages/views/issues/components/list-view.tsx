@@ -18,8 +18,8 @@ import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-ki
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus } from "@multica/core/types";
-import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
+import { useLoadMoreByStatus, type LoadMoreView } from "@multica/core/issues/mutations";
+import type { IssueSortParam } from "@multica/core/issues/queries";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -55,8 +55,7 @@ export function ListView({
   issues,
   visibleStatuses,
   childProgressMap = EMPTY_PROGRESS_MAP,
-  myIssuesScope,
-  myIssuesFilter,
+  view,
   projectId,
   onMoveIssue,
   sort,
@@ -64,8 +63,8 @@ export function ListView({
   issues: Issue[];
   visibleStatuses: IssueStatus[];
   childProgressMap?: Map<string, ChildProgress>;
-  myIssuesScope?: string;
-  myIssuesFilter?: MyIssuesFilter;
+  /** Active saved view — per-status load-more targets its view-driven cache. */
+  view?: LoadMoreView;
   projectId?: string;
   onMoveIssue?: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   sort?: IssueSortParam;
@@ -91,10 +90,6 @@ export function ListView({
       ),
     [visibleStatuses, listCollapsedStatuses]
   );
-
-  const myIssuesOpts = myIssuesScope
-    ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
-    : undefined;
 
   const dragEnabled = !!onMoveIssue;
 
@@ -306,7 +301,7 @@ export function ListView({
             issueIds={columns[statusGroupId(status)] ?? EMPTY_IDS}
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
-            myIssuesOpts={myIssuesOpts}
+            view={view}
             projectId={projectId}
             dragEnabled={dragEnabled}
             isExpanded={isExpanded}
@@ -355,7 +350,7 @@ function StatusAccordionItem({
   issueIds,
   issueMap,
   childProgressMap,
-  myIssuesOpts,
+  view,
   projectId,
   dragEnabled,
   isExpanded,
@@ -366,7 +361,7 @@ function StatusAccordionItem({
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  view?: LoadMoreView;
   projectId?: string;
   dragEnabled: boolean;
   isExpanded: boolean;
@@ -379,8 +374,9 @@ function StatusAccordionItem({
   const deselect = useIssueSelectionStore((s) => s.deselect);
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     status,
-    myIssuesOpts,
+    undefined,
     sort,
+    view,
   );
 
   const issues = useMemo(

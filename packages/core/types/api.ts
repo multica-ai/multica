@@ -64,6 +64,19 @@ export interface ListIssuesParams {
    * majority on the client.
    */
   scheduled?: boolean;
+  // Orthogonal filter set, aligned with GET /api/issues (Phase 1) and shared
+  // with /grouped. CSV/multi-value; saved views serialize directly to these.
+  // assignee_filters / creator_filters are "type:id" tokens, where id may be
+  // the server-expanded {me} / {my_agents} / {my_squads} placeholder.
+  statuses?: IssueStatus[];
+  priorities?: IssuePriority[];
+  assignee_types?: IssueAssigneeType[];
+  assignee_filters?: string[];
+  include_no_assignee?: boolean;
+  creator_filters?: string[];
+  project_ids?: string[];
+  include_no_project?: boolean;
+  label_ids?: string[];
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
 }
@@ -71,6 +84,75 @@ export interface ListIssuesParams {
 export interface IssueActorRef {
   type: IssueAssigneeType;
   id: string;
+}
+
+// ---------------------------------------------------------------------------
+// Saved views (MUL-2782)
+// ---------------------------------------------------------------------------
+
+export type ViewPage = "issues" | "my_issues" | "project";
+
+/**
+ * A saved view's stored filter object — the GET /api/issues query params, plus
+ * `any_of` for cross-dimension OR (the AND-only API can't express it, so the
+ * client fans out one request per branch and dedupes; see resolveViewRequests).
+ * assignee_filters / creator_filters hold "type:id" tokens, where id may be a
+ * server-expanded placeholder ({me} / {my_agents} / {my_squads}).
+ */
+export interface ViewFilters {
+  statuses?: IssueStatus[];
+  priorities?: IssuePriority[];
+  assignee_types?: IssueAssigneeType[];
+  assignee_filters?: string[];
+  include_no_assignee?: boolean;
+  creator_filters?: string[];
+  project_ids?: string[];
+  include_no_project?: boolean;
+  label_ids?: string[];
+  /** OR branches. Each branch is a flat ViewFilters (no nested any_of). */
+  any_of?: ViewFilters[];
+}
+
+export interface SavedView {
+  id: string;
+  workspace_id: string;
+  creator_id: string | null;
+  name: string;
+  page: ViewPage;
+  project_id: string | null;
+  filters: ViewFilters;
+  display: Record<string, unknown>;
+  position: number;
+  shared: boolean;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListViewsResponse {
+  views: SavedView[];
+}
+
+export interface CreateViewRequest {
+  name: string;
+  page: ViewPage;
+  project_id?: string | null;
+  filters?: ViewFilters;
+  display?: Record<string, unknown>;
+  position?: number;
+  shared?: boolean;
+}
+
+export interface UpdateViewRequest {
+  name?: string;
+  filters?: ViewFilters;
+  display?: Record<string, unknown>;
+  position?: number;
+  shared?: boolean;
+}
+
+export interface ReorderViewsRequest {
+  ids: string[];
 }
 
 export interface ListGroupedIssuesParams {

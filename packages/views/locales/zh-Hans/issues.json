@@ -30,6 +30,13 @@
     "agents_label": "智能体",
     "agents_description": "分配给智能体的 issue"
   },
+  "views": {
+    "defaults": {
+      "all": "全部",
+      "members": "成员",
+      "agents": "智能体"
+    }
+  },
   "filters": {
     "tooltip": "筛选",
     "placeholder": "筛选...",

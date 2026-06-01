@@ -41,5 +41,13 @@
   },
   "errors": {
     "move_failed": "이슈를 이동하지 못했습니다"
+  },
+  "views": {
+    "defaults": {
+      "all": "전체",
+      "assigned": "할당됨",
+      "created": "내가 만든 이슈",
+      "agents": "내 에이전트와 스쿼드"
+    }
   }
 }

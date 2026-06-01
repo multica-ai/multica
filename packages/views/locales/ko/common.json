@@ -9,5 +9,20 @@
     "minutes_ago": "{{count}}분 전",
     "hours_ago": "{{count}}시간 전",
     "days_ago": "{{count}}일 전"
+  },
+  "views": {
+    "save_view": "뷰 저장",
+    "create": "만들기",
+    "rename": "이름 변경",
+    "rename_view": "뷰 이름 변경",
+    "view_name_placeholder": "뷰 이름",
+    "shared": "공유됨",
+    "shared_hint": "워크스페이스의 모든 사용자가 이 뷰를 볼 수 있습니다",
+    "share": "워크스페이스와 공유",
+    "unshare": "비공개로 전환",
+    "delete_view": "뷰 삭제",
+    "delete_confirm_title": "이 뷰를 삭제할까요?",
+    "delete_confirm_body": "이 뷰는 공유된 모든 사용자에게서 제거되며 취소할 수 없습니다.",
+    "options": "뷰 옵션"
   }
 }

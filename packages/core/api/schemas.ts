@@ -20,6 +20,7 @@ import type {
   TimelineEntry,
   User,
   WebhookDelivery,
+  ListViewsResponse,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
@@ -709,6 +710,31 @@ export const EMPTY_USER: User = {
 };
 
 // ---------------------------------------------------------------------------
+// Saved views (MUL-2782). Lenient: page kept as z.string() so an unknown
+// server-side page value still parses; filters/display are opaque objects.
+// ---------------------------------------------------------------------------
+
+export const SavedViewSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  creator_id: z.string().nullable().default(null),
+  name: z.string().default(""),
+  page: z.string().default("issues"),
+  project_id: z.string().nullable().default(null),
+  filters: z.record(z.string(), z.unknown()).default({}),
+  display: z.record(z.string(), z.unknown()).default({}),
+  position: z.number().default(0),
+  shared: z.boolean().default(true),
+  is_default: z.boolean().default(false),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+});
+
+export const ListViewsResponseSchema = z.object({
+  views: z.array(SavedViewSchema).default([]),
+});
+
+export const EMPTY_LIST_VIEWS_RESPONSE: ListViewsResponse = { views: [] };
 // Billing schemas (cloud-billing proxy surface)
 //
 // All billing JSON we receive comes from multica-cloud verbatim — we proxy

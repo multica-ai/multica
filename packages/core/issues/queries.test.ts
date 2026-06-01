@@ -10,8 +10,12 @@ import {
   PROJECT_GANTT_PAGE_LIMIT,
   childrenByParentsOptions,
   issueKeys,
+  mergeAssigneeGroups,
+  mergeIssueCaches,
   projectGanttIssuesOptions,
+  viewIssueListOptions,
 } from "./queries";
+import type { GroupedIssuesResponse, ListIssuesCache } from "../types";
 
 const WS_ID = "ws-1";
 const PROJECT_ID = "project-1";
@@ -211,5 +215,115 @@ describe("childrenByParentsOptions chunking", () => {
 
     expect(grouped.get("p-0")).toHaveLength(1);
     expect(grouped.get(lastId)).toHaveLength(1);
+  });
+});
+
+describe("mergeIssueCaches", () => {
+  const withStatus = (issue: Issue, status: string): Issue => ({ ...issue, status: status as Issue["status"] });
+  const cacheOf = (status: string, issues: Issue[], total: number): ListIssuesCache => ({
+    byStatus: { [status as Issue["status"]]: { issues, total } },
+  });
+
+  it("passes a single cache through untouched (preserves server totals)", () => {
+    const cache = cacheOf("todo", [makeIssue(1)], 42);
+    // Same reference back — single-source pagination relies on the server total.
+    expect(mergeIssueCaches([cache])).toBe(cache);
+    expect(mergeIssueCaches([cache]).byStatus.todo?.total).toBe(42);
+  });
+
+  it("unions multiple caches per status, deduping by id and preserving order", () => {
+    const a = cacheOf("todo", [withStatus(makeIssue(1), "todo"), withStatus(makeIssue(2), "todo")], 2);
+    const b = cacheOf("todo", [withStatus(makeIssue(2), "todo"), withStatus(makeIssue(3), "todo")], 2);
+    const merged = mergeIssueCaches([a, b]);
+    expect(merged.byStatus.todo?.issues.map((i) => i.id)).toEqual([
+      "issue-1",
+      "issue-2",
+      "issue-3",
+    ]);
+    // Multi-source: total is the merged length, not a server count.
+    expect(merged.byStatus.todo?.total).toBe(3);
+  });
+});
+
+describe("mergeAssigneeGroups", () => {
+  const group = (
+    assigneeId: string | null,
+    issues: Issue[],
+  ): GroupedIssuesResponse["groups"][number] => ({
+    id: assigneeId ?? "none",
+    assignee_type: assigneeId ? "member" : null,
+    assignee_id: assigneeId,
+    issues,
+    total: issues.length,
+  });
+
+  it("passes a single response through untouched", () => {
+    const res: GroupedIssuesResponse = { groups: [group("u1", [makeIssue(1)])] };
+    expect(mergeAssigneeGroups([res])).toBe(res);
+  });
+
+  it("merges groups by (assignee_type, assignee_id), deduping issues", () => {
+    const r1: GroupedIssuesResponse = { groups: [group("u1", [makeIssue(1), makeIssue(2)])] };
+    const r2: GroupedIssuesResponse = { groups: [group("u1", [makeIssue(2), makeIssue(3)])] };
+    const merged = mergeAssigneeGroups([r1, r2]);
+    expect(merged.groups).toHaveLength(1);
+    expect(merged.groups[0]!.issues.map((i) => i.id)).toEqual([
+      "issue-1",
+      "issue-2",
+      "issue-3",
+    ]);
+    expect(merged.groups[0]!.total).toBe(3);
+  });
+});
+
+describe("viewIssueListOptions", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("keys distinct cache entries per viewId even with identical filters", () => {
+    const a = viewIssueListOptions(WS_ID, "view-a", { statuses: ["todo"] });
+    const b = viewIssueListOptions(WS_ID, "view-b", { statuses: ["todo"] });
+    expect(a.queryKey).not.toEqual(b.queryKey);
+  });
+
+  it("fans out one fetch per any_of branch and dedupes the union by id", async () => {
+    // Two branches that both surface the same todo issue; the union must
+    // dedupe it. Each branch fetches one page per paginated status, so the
+    // call count is (#branches × #statuses).
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => {
+        if (params?.status !== "todo") return { issues: [], total: 0 };
+        if (params.assignee_filters) return { issues: [makeIssue(1)], total: 1 };
+        if (params.creator_filters) return { issues: [makeIssue(1), makeIssue(2)], total: 2 };
+        return { issues: [], total: 0 };
+      });
+    installFakeApi(listIssues);
+
+    // fetchQuery returns the raw queryFn result (the bucketed cache); `select`
+    // only runs for useQuery observers, so read the bucket directly here. The
+    // options' `select` narrows the inferred return type to Issue[], so reach
+    // into the untransformed cache via the query cache instead.
+    const opts = viewIssueListOptions(WS_ID, "v", {
+      any_of: [
+        { assignee_filters: ["member:{me}"] },
+        { creator_filters: ["member:{me}"] },
+      ],
+    });
+    await qc.fetchQuery(opts);
+    const cache = qc.getQueryData<ListIssuesCache>(opts.queryKey);
+
+    expect(cache?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
+      "issue-1",
+      "issue-2",
+    ]);
   });
 });

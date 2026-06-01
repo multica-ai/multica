@@ -39,6 +39,14 @@
     "view_swimlane_short": "Swimlane",
     "sort_manual": "Manual"
   },
+  "views": {
+    "defaults": {
+      "all": "All",
+      "assigned": "Assigned",
+      "created": "Created",
+      "agents": "My Agents"
+    }
+  },
   "errors": {
     "move_failed": "Failed to move issue"
   }

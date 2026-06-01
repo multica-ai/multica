@@ -9,5 +9,20 @@
     "minutes_ago": "{{count}}m ago",
     "hours_ago": "{{count}}h ago",
     "days_ago": "{{count}}d ago"
+  },
+  "views": {
+    "save_view": "Save view",
+    "create": "Create",
+    "rename": "Rename",
+    "rename_view": "Rename view",
+    "view_name_placeholder": "View name",
+    "shared": "Shared",
+    "shared_hint": "Everyone in the workspace can see this view",
+    "share": "Share with workspace",
+    "unshare": "Make private",
+    "delete_view": "Delete view",
+    "delete_confirm_title": "Delete this view?",
+    "delete_confirm_body": "This view will be removed for everyone it's shared with. This can't be undone.",
+    "options": "View options"
   }
 }

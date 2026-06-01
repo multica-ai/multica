@@ -38,6 +38,14 @@
     "view_swimlane_short": "泳道",
     "sort_manual": "手动"
   },
+  "views": {
+    "defaults": {
+      "all": "全部",
+      "assigned": "已分配",
+      "created": "我创建的",
+      "agents": "我的智能体"
+    }
+  },
   "errors": {
     "move_failed": "移动 issue 失败"
   }

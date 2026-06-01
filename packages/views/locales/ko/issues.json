@@ -457,5 +457,12 @@
     "dont_show_again": "다시 보지 않기",
     "keep_in_backlog": "백로그에 두기",
     "move_to_todo": "할 일로 이동"
+  },
+  "views": {
+    "defaults": {
+      "all": "전체",
+      "members": "멤버",
+      "agents": "에이전트"
+    }
   }
 }

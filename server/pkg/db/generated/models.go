@@ -471,6 +471,22 @@ type ProjectResource struct {
 	CreatedBy    pgtype.UUID        `json:"created_by"`
 }
 
+type SavedView struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	CreatorID   pgtype.UUID        `json:"creator_id"`
+	Name        string             `json:"name"`
+	Page        string             `json:"page"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	Filters     []byte             `json:"filters"`
+	Display     []byte             `json:"display"`
+	Position    float64            `json:"position"`
+	Shared      bool               `json:"shared"`
+	IsDefault   bool               `json:"is_default"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Skill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

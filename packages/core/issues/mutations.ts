@@ -8,6 +8,11 @@ import {
   type IssueSortParam,
   type MyIssuesFilter,
 } from "./queries";
+import { resolveViewRequests } from "../views/resolver";
+import type { ViewFilters } from "../types";
+
+/** View-driven load-more source threaded from the page into the list/board/swimlane columns. */
+export type LoadMoreView = { viewId: string | null; filters: ViewFilters };
 import {
   addIssueToBuckets,
   findIssueLocation,
@@ -70,19 +75,34 @@ export function useLoadMoreByStatus(
   status: IssueStatus,
   myIssues?: { scope: string; filter: MyIssuesFilter },
   sort?: IssueSortParam,
+  // View-driven list source (Issues / My Issues after the Saved Views
+  // refactor). When present it takes precedence over `myIssues` for cache-key
+  // derivation. A multi-branch (any_of) view has no single server total per
+  // status — per-status offset pagination across branches is unsound — so
+  // load-more is disabled for it (hasMore stays false); single-branch views
+  // paginate normally against the one resolved request.
+  view?: LoadMoreView,
 ) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [isLoading, setIsLoading] = useState(false);
 
-  const activeKey = myIssues
-    ? issueKeys.myListSorted(wsId, myIssues.scope, myIssues.filter, sort)
-    : issueKeys.listSorted(wsId, sort);
+  const viewRequests = view ? resolveViewRequests(view.filters) : null;
+  const viewSingleBranch = viewRequests?.length === 1 ? viewRequests[0]! : null;
+  const viewPaginable = view ? viewRequests!.length === 1 : false;
+
+  const activeKey = view
+    ? issueKeys.viewListSorted(wsId, view.viewId, view.filters, sort)
+    : myIssues
+      ? issueKeys.myListSorted(wsId, myIssues.scope, myIssues.filter, sort)
+      : issueKeys.listSorted(wsId, sort);
   const cache = qc.getQueryData<ListIssuesCache>(activeKey);
   const bucket = cache?.byStatus[status];
   const loaded = bucket?.issues.length ?? 0;
   const total = bucket?.total ?? 0;
-  const hasMore = loaded < total;
+  // For a multi-branch view, total is the merged length (not a server count),
+  // so `loaded < total` is never true and load-more stays disabled.
+  const hasMore = view ? viewPaginable && loaded < total : loaded < total;
 
   const loadMore = useCallback(async () => {
     if (isLoading || !hasMore) return;
@@ -93,7 +113,7 @@ export function useLoadMoreByStatus(
         limit: ISSUE_PAGE_SIZE,
         offset: loaded,
         ...sort,
-        ...myIssues?.filter,
+        ...(view ? viewSingleBranch ?? {} : myIssues?.filter),
       });
       qc.setQueryData<ListIssuesCache>(activeKey, (old) => {
         if (!old) return old;
@@ -108,7 +128,7 @@ export function useLoadMoreByStatus(
     } finally {
       setIsLoading(false);
     }
-  }, [qc, activeKey, status, loaded, hasMore, isLoading, myIssues?.filter, sort]);
+  }, [qc, activeKey, status, loaded, hasMore, isLoading, myIssues?.filter, sort, view, viewSingleBranch]);
 
   return { loadMore, hasMore, isLoading, total };
 }

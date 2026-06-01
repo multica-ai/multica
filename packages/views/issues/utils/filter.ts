@@ -19,6 +19,22 @@ export interface IssueFilters {
 }
 
 /**
+ * No-op filter fields. Used by the view-driven pages, where status / priority /
+ * assignee / etc are applied server-side and the only client filter left is the
+ * ephemeral `agentRunningFilter` chip — spread this and override that one flag.
+ */
+export const EMPTY_CLIENT_FILTERS: Omit<IssueFilters, "agentRunningFilter" | "runningIssueIds"> = {
+  statusFilters: [],
+  priorityFilters: [],
+  assigneeFilters: [],
+  includeNoAssignee: false,
+  creatorFilters: [],
+  projectFilters: [],
+  includeNoProject: false,
+  labelFilters: [],
+};
+
+/**
  * Filter issues using positive selection model.
  * Empty arrays = no filter (show all). Non-empty = show only matching.
  *

@@ -81,6 +81,12 @@ import type {
   CreatePinRequest,
   PinnedItemType,
   ReorderPinsRequest,
+  ViewPage,
+  SavedView,
+  ListViewsResponse,
+  CreateViewRequest,
+  UpdateViewRequest,
+  ReorderViewsRequest,
   Invitation,
   Autopilot,
   AutopilotTrigger,
@@ -167,6 +173,8 @@ import {
   TimelineEntriesSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
+  ListViewsResponseSchema,
+  EMPTY_LIST_VIEWS_RESPONSE,
   BillingBalanceSchema,
   BillingTransactionsPageSchema,
   BillingBatchesPageSchema,
@@ -477,6 +485,16 @@ export class ApiClient {
     }
     if (params?.open_only) search.set("open_only", "true");
     if (params?.scheduled) search.set("scheduled", "true");
+    // Orthogonal filter set (Phase 1) — saved views resolve to these.
+    if (params?.statuses?.length) search.set("statuses", params.statuses.join(","));
+    if (params?.priorities?.length) search.set("priorities", params.priorities.join(","));
+    if (params?.assignee_types?.length) search.set("assignee_types", params.assignee_types.join(","));
+    if (params?.assignee_filters?.length) search.set("assignee_filters", params.assignee_filters.join(","));
+    if (params?.include_no_assignee) search.set("include_no_assignee", "true");
+    if (params?.creator_filters?.length) search.set("creator_filters", params.creator_filters.join(","));
+    if (params?.project_ids?.length) search.set("project_ids", params.project_ids.join(","));
+    if (params?.include_no_project) search.set("include_no_project", "true");
+    if (params?.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
     if (params?.sort_by) search.set("sort", params.sort_by);
     if (params?.sort_direction) search.set("direction", params.sort_direction);
     const path = `/api/issues?${search}`;
@@ -1802,6 +1820,33 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  // Saved views
+  async listViews(params: { page: ViewPage; projectId?: string }): Promise<ListViewsResponse> {
+    const search = new URLSearchParams();
+    search.set("page", params.page);
+    if (params.projectId) search.set("project_id", params.projectId);
+    const raw = await this.fetch<unknown>(`/api/views?${search}`);
+    return parseWithFallback(raw, ListViewsResponseSchema, EMPTY_LIST_VIEWS_RESPONSE, {
+      endpoint: "GET /api/views",
+    });
+  }
+
+  async createView(data: CreateViewRequest): Promise<SavedView> {
+    return this.fetch("/api/views", { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async updateView(id: string, data: UpdateViewRequest): Promise<SavedView> {
+    return this.fetch(`/api/views/${id}`, { method: "PUT", body: JSON.stringify(data) });
+  }
+
+  async deleteView(id: string): Promise<void> {
+    await this.fetch(`/api/views/${id}`, { method: "DELETE" });
+  }
+
+  async reorderViews(data: ReorderViewsRequest): Promise<void> {
+    await this.fetch("/api/views/reorder", { method: "PUT", body: JSON.stringify(data) });
   }
 
   // Squads

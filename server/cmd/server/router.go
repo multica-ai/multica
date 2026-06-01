@@ -495,6 +495,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Saved views (issue list filter/display presets)
+			r.Route("/api/views", func(r chi.Router) {
+				r.Get("/", h.ListViews)
+				r.Post("/", h.CreateView)
+				r.Put("/reorder", h.ReorderViews)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Put("/", h.UpdateView)
+					r.Delete("/", h.DeleteView)
+				})
+			})
+
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)

@@ -6,6 +6,8 @@ import {
   DuplicateIssueErrorBodySchema,
   EMPTY_USER,
   ListIssuesResponseSchema,
+  ListViewsResponseSchema,
+  EMPTY_LIST_VIEWS_RESPONSE,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -268,5 +270,34 @@ describe("dashboard + runtime usage schema drift", () => {
       { date: "2026-05-19", region: "us-east" },
     ]);
     expect((parsed[0] as Record<string, unknown>).region).toBe("us-east");
+  });
+});
+
+describe("ListViewsResponseSchema", () => {
+  it("parses a well-formed views payload", () => {
+    const raw = {
+      views: [
+        {
+          id: "v1", workspace_id: "ws1", creator_id: null, name: "High",
+          page: "issues", project_id: null, filters: { priorities: ["high"] },
+          display: {}, position: 0, shared: true, is_default: false,
+          created_at: "t", updated_at: "t",
+        },
+      ],
+    };
+    const out = parseWithFallback(raw, ListViewsResponseSchema, EMPTY_LIST_VIEWS_RESPONSE, { endpoint: "test" });
+    expect(out.views).toHaveLength(1);
+    expect(out.views[0]!.name).toBe("High");
+  });
+
+  it("falls back when views is the wrong type, never throwing", () => {
+    const out = parseWithFallback({ views: "nope" }, ListViewsResponseSchema, EMPTY_LIST_VIEWS_RESPONSE, { endpoint: "test" });
+    expect(out).toEqual({ views: [] });
+  });
+
+  it("tolerates an unknown page value (enum drift downgrades, not crashes)", () => {
+    const raw = { views: [{ id: "v1", name: "X", page: "future_page" }] };
+    const out = parseWithFallback(raw, ListViewsResponseSchema, EMPTY_LIST_VIEWS_RESPONSE, { endpoint: "test" });
+    expect(out.views[0]!.page).toBe("future_page");
   });
 });

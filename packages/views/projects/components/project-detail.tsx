@@ -6,22 +6,23 @@ import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, 
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, UpdateIssueRequest, ViewFilters } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import {
-  myIssueAssigneeGroupsOptions,
-  myIssueListOptions,
+  viewIssueAssigneeGroupsOptions,
+  viewIssueListOptions,
+  viewFiltersToGroupedFilter,
+  withBoardStatusScope,
   projectGanttIssuesOptions,
   childIssueProgressOptions,
   type AssigneeGroupedIssuesFilter,
   type IssueSortParam,
-  type MyIssuesFilter,
 } from "@multica/core/issues/queries";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { useUpdateIssue, type LoadMoreView } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -29,7 +30,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
-import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
+import { createIssueViewStore, stateToViewFilters } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
@@ -115,8 +116,7 @@ function ProjectIssuesContent({
   assigneeGroups,
   assigneeGroupQueryKey,
   assigneeGroupFilter,
-  scope,
-  filter,
+  view,
   sort,
   ganttIssues,
 }: {
@@ -125,8 +125,7 @@ function ProjectIssuesContent({
   assigneeGroups?: IssueAssigneeGroup[];
   assigneeGroupQueryKey?: QueryKey;
   assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
-  scope: string;
-  filter: MyIssuesFilter;
+  view: LoadMoreView;
   sort?: IssueSortParam;
   ganttIssues: Issue[];
 }) {
@@ -229,8 +228,7 @@ function ProjectIssuesContent({
           hiddenStatuses={hiddenStatuses}
           onMoveIssue={handleMoveIssue}
           childProgressMap={childProgressMap}
-          myIssuesScope={scope}
-          myIssuesFilter={filter}
+          view={view}
           sort={sort}
           projectId={projectId}
         />
@@ -240,8 +238,7 @@ function ProjectIssuesContent({
           issues={issues}
           visibleStatuses={visibleStatuses}
           childProgressMap={childProgressMap}
-          myIssuesScope={scope}
-          myIssuesFilter={filter}
+          view={view}
           sort={sort}
           projectId={projectId}
           onMoveIssue={handleMoveIssue}
@@ -256,8 +253,7 @@ function ProjectIssuesContent({
           hiddenStatuses={hiddenStatuses}
           onMoveIssue={handleMoveIssue}
           childProgressMap={childProgressMap}
-          myIssuesScope={scope}
-          myIssuesFilter={filter}
+          view={view}
           sort={sort}
           projectId={projectId}
         />
@@ -269,11 +265,11 @@ function ProjectIssuesContent({
 function ProjectIssuesSurface({
   projectId,
   scope,
-  filter,
+  filters: projectFilters,
 }: {
   projectId: string;
   scope: string;
-  filter: MyIssuesFilter;
+  filters: ViewFilters;
 }) {
   const wsId = useWorkspaceId();
   const viewMode = useViewStore((s) => s.viewMode);
@@ -297,32 +293,34 @@ function ProjectIssuesSurface({
     [sortBy, sortDirection],
   );
 
+  // The project page filters server-side on project_ids (plus any filter-bar
+  // narrowing). viewId is the synthetic project scope so the load-more cache
+  // keys to this surface, not a saved view.
+  const activeFilters = useMemo<ViewFilters>(
+    () => ({ ...projectFilters, ...stateToViewFilters({
+      statusFilters, priorityFilters, assigneeFilters, includeNoAssignee,
+      creatorFilters, projectFilters: [], includeNoProject: false, labelFilters,
+    }) }),
+    [projectFilters, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+  );
+  // Assignee-grouped board: default to BOARD_STATUSES when no status filter is
+  // set, and drive BOTH the fetch and the per-group load-more from the same
+  // scoped filters so they agree (see withBoardStatusScope).
+  const boardFilters = useMemo<ViewFilters>(
+    () => withBoardStatusScope(activeFilters),
+    [activeFilters],
+  );
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
-    () => ({
-      ...filter,
-      statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
-      priorities: priorityFilters,
-      assignee_filters: assigneeFilters,
-      include_no_assignee: includeNoAssignee,
-      creator_filters: creatorFilters,
-      label_ids: labelFilters,
-    }),
-    [assigneeFilters, creatorFilters, filter, includeNoAssignee, labelFilters, priorityFilters, statusFilters],
+    () => viewFiltersToGroupedFilter(boardFilters),
+    [boardFilters],
   );
-  const assigneeGroupsOptions = myIssueAssigneeGroupsOptions(
-    wsId,
-    scope,
-    assigneeGroupFilter,
-    undefined,
-    sort,
-  );
+  const assigneeGroupsOptions = viewIssueAssigneeGroupsOptions(wsId, scope, boardFilters, sort);
   // Each view owns exactly one data source. Board/List ride the bucketed
-  // `myIssueListOptions` cache; the assignee-grouped board uses the grouped
-  // endpoint; Gantt has its own scheduled-only fetch. We gate `enabled` on
-  // the current view so switching to Gantt doesn't re-trigger the full
-  // per-status fetch in the background.
+  // view-driven cache; the assignee-grouped board uses the grouped endpoint;
+  // Gantt has its own scheduled-only fetch. We gate `enabled` on the current
+  // view so switching to Gantt doesn't re-trigger the full per-status fetch.
   const statusIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, scope, filter, undefined, sort),
+    ...viewIssueListOptions(wsId, scope, activeFilters, sort),
     enabled: !usesAssigneeBoard && !usesGantt,
   });
   const assigneeGroupsQuery = useQuery({
@@ -356,8 +354,7 @@ function ProjectIssuesSurface({
         assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
         assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
         assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
-        scope={scope}
-        filter={filter}
+        view={{ viewId: scope, filters: activeFilters }}
         sort={sort}
         ganttIssues={ganttIssues}
       />
@@ -380,8 +377,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const userId = useAuthStore((s) => s.user?.id);
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
   const projectScope = `project:${projectId}`;
-  const projectFilter = useMemo<MyIssuesFilter>(
-    () => ({ project_id: projectId }),
+  const projectFilter = useMemo<ViewFilters>(
+    () => ({ project_ids: [projectId] }),
     [projectId],
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -771,7 +768,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               <ProjectIssuesSurface
                 projectId={projectId}
                 scope={projectScope}
-                filter={projectFilter}
+                filters={projectFilter}
               />
             </ViewStoreProvider>
           </div>
