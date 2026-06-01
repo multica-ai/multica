@@ -3,6 +3,12 @@ SELECT * FROM issue_label
 WHERE workspace_id = $1
 ORDER BY LOWER(name) ASC;
 
+-- name: ListLabelsByIDs :many
+SELECT * FROM issue_label
+WHERE workspace_id = $1
+  AND id = ANY($2::uuid[])
+ORDER BY LOWER(name) ASC;
+
 -- name: GetLabel :one
 SELECT * FROM issue_label
 WHERE id = $1 AND workspace_id = $2;

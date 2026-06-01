@@ -124,6 +124,8 @@ func init() {
 	autopilotCreateCmd.Flags().String("priority", "none", "Priority for created issues (none, low, medium, high, urgent)")
 	autopilotCreateCmd.Flags().String("project", "", "Project ID (optional)")
 	autopilotCreateCmd.Flags().String("issue-title-template", "", "Template for issue titles (create_issue mode). Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected at create-time.")
+	autopilotCreateCmd.Flags().StringArray("initial-label", nil, "Initial label name, full UUID, or UUID prefix for create_issue runs (repeatable)")
+	autopilotCreateCmd.Flags().String("duplicate-guard", "none", "Duplicate guard policy: none, active_run, or active_title")
 	autopilotCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// update
@@ -135,6 +137,9 @@ func init() {
 	autopilotUpdateCmd.Flags().String("status", "", "New status (active, paused)")
 	autopilotUpdateCmd.Flags().String("mode", "", "New execution mode (create_issue or run_only)")
 	autopilotUpdateCmd.Flags().String("issue-title-template", "", "New issue title template. Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected.")
+	autopilotUpdateCmd.Flags().StringArray("initial-label", nil, "Replace initial labels with label names, full UUIDs, or UUID prefixes (repeatable; pass none to clear)")
+	autopilotUpdateCmd.Flags().Bool("clear-initial-labels", false, "Clear all initial labels")
+	autopilotUpdateCmd.Flags().String("duplicate-guard", "", "New duplicate guard policy: none, active_run, or active_title")
 	autopilotUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// delete
@@ -313,6 +318,20 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("issue-title-template"); v != "" {
 		body["issue_title_template"] = v
 	}
+	if labels, _ := cmd.Flags().GetStringArray("initial-label"); len(labels) > 0 {
+		labelIDs, err := resolveInitialLabelIDs(ctx, client, labels)
+		if err != nil {
+			return err
+		}
+		body["initial_label_ids"] = labelIDs
+	}
+	if cmd.Flags().Changed("duplicate-guard") {
+		v, _ := cmd.Flags().GetString("duplicate-guard")
+		if !isValidCLIDuplicateGuardPolicy(v) {
+			return fmt.Errorf("--duplicate-guard must be none, active_run, or active_title")
+		}
+		body["duplicate_guard_policy"] = v
+	}
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/autopilots", body, &result); err != nil {
@@ -388,6 +407,27 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("issue-title-template") {
 		v, _ := cmd.Flags().GetString("issue-title-template")
 		body["issue_title_template"] = v
+	}
+	if cmd.Flags().Changed("initial-label") {
+		labels, _ := cmd.Flags().GetStringArray("initial-label")
+		labelIDs, err := resolveInitialLabelIDs(ctx, client, labels)
+		if err != nil {
+			return err
+		}
+		body["initial_label_ids"] = labelIDs
+	}
+	if clear, _ := cmd.Flags().GetBool("clear-initial-labels"); clear {
+		if cmd.Flags().Changed("initial-label") {
+			return fmt.Errorf("--clear-initial-labels cannot be combined with --initial-label")
+		}
+		body["initial_label_ids"] = []string{}
+	}
+	if cmd.Flags().Changed("duplicate-guard") {
+		v, _ := cmd.Flags().GetString("duplicate-guard")
+		if !isValidCLIDuplicateGuardPolicy(v) {
+			return fmt.Errorf("--duplicate-guard must be none, active_run, or active_title")
+		}
+		body["duplicate_guard_policy"] = v
 	}
 
 	if len(body) == 0 {
@@ -758,4 +798,50 @@ func resolveAgent(ctx context.Context, client *cli.APIClient, nameOrID string) (
 		}
 		return "", fmt.Errorf("ambiguous agent %q; matches:\n%s", nameOrID, strings.Join(parts, "\n"))
 	}
+}
+
+func isValidCLIDuplicateGuardPolicy(policy string) bool {
+	switch policy {
+	case "none", "active_run", "active_title":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveInitialLabelIDs(ctx context.Context, client *cli.APIClient, labels []string) ([]string, error) {
+	if len(labels) == 0 {
+		return []string{}, nil
+	}
+	candidates, err := fetchLabelCandidates(ctx, client)
+	if err != nil {
+		return nil, fmt.Errorf("fetch labels: %w", err)
+	}
+	out := make([]string, 0, len(labels))
+	seen := map[string]bool{}
+	for _, raw := range labels {
+		input := strings.TrimSpace(raw)
+		if input == "" {
+			return nil, fmt.Errorf("--initial-label cannot be empty")
+		}
+		id := ""
+		for _, c := range candidates {
+			if strings.EqualFold(c.Display, input) {
+				id = c.ID
+				break
+			}
+		}
+		if id == "" {
+			resolved, err := resolveLabelID(ctx, client, input)
+			if err != nil {
+				return nil, fmt.Errorf("resolve initial label %q: %w", input, err)
+			}
+			id = resolved.ID
+		}
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }

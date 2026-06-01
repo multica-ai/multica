@@ -2,14 +2,136 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestAutopilotCreateIssueInitialLabelsAndDuplicateGuard(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	suffix := time.Now().UnixNano()
+	labelNames := []string{
+		fmt.Sprintf("source:agent-created-%d", suffix),
+		fmt.Sprintf("type:follow-up-%d", suffix),
+		fmt.Sprintf("work:backend-%d", suffix),
+	}
+	labelIDs := make([]pgtype.UUID, 0, len(labelNames))
+	for _, name := range labelNames {
+		var labelID pgtype.UUID
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue_label (workspace_id, name, color)
+			VALUES ($1, $2, '#64748b')
+			RETURNING id
+		`, parseUUID(testWorkspaceID), name).Scan(&labelID); err != nil {
+			t.Fatalf("create label %q: %v", name, err)
+		}
+		labelIDs = append(labelIDs, labelID)
+	}
+	t.Cleanup(func() {
+		for _, labelID := range labelIDs {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM issue_label WHERE id = $1`, labelID)
+		}
+	})
+
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:          parseUUID(testWorkspaceID),
+		Title:                "Initial label duplicate guard regression",
+		Description:          pgtype.Text{String: "BOG-465 regression test", Valid: true},
+		AssigneeType:         "agent",
+		AssigneeID:           parseUUID(agentID),
+		Status:               "active",
+		ExecutionMode:        "create_issue",
+		IssueTitleTemplate:   pgtype.Text{String: fmt.Sprintf("BOG-465 smoke %d", suffix), Valid: true},
+		InitialLabelIds:      labelIDs,
+		DuplicateGuardPolicy: pgtype.Text{String: "active_title", Valid: true},
+		CreatedByType:        "member",
+		CreatedByID:          parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE origin_type = 'autopilot' AND origin_id = $1`, ap.ID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	firstRun, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("first DispatchAutopilot: %v", err)
+	}
+	if firstRun == nil || !firstRun.IssueID.Valid {
+		t.Fatalf("first run did not create an issue: %+v", firstRun)
+	}
+
+	var attachedCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM issue_to_label
+		WHERE issue_id = $1 AND label_id = ANY($2::uuid[])
+	`, firstRun.IssueID, labelIDs).Scan(&attachedCount); err != nil {
+		t.Fatalf("count attached labels: %v", err)
+	}
+	if attachedCount != len(labelIDs) {
+		t.Fatalf("expected %d initial labels attached, got %d", len(labelIDs), attachedCount)
+	}
+
+	secondRun, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("second DispatchAutopilot: %v", err)
+	}
+	if secondRun == nil {
+		t.Fatal("expected duplicate guard run, got nil")
+	}
+	if secondRun.Status != "skipped" {
+		t.Fatalf("expected duplicate guard run status skipped, got %q", secondRun.Status)
+	}
+	if !secondRun.FailureReason.Valid || !strings.Contains(secondRun.FailureReason.String, "duplicate guard") {
+		t.Fatalf("expected duplicate guard failure reason, got %+v", secondRun.FailureReason)
+	}
+	var result struct {
+		DuplicateGuard struct {
+			Policy  string `json:"policy"`
+			Status  string `json:"status"`
+			Details struct {
+				IssueID string `json:"issue_id"`
+				Title   string `json:"title"`
+			} `json:"details"`
+		} `json:"duplicate_guard"`
+	}
+	if err := json.Unmarshal(secondRun.Result, &result); err != nil {
+		t.Fatalf("unmarshal duplicate guard result: %v; raw=%s", err, string(secondRun.Result))
+	}
+	if result.DuplicateGuard.Policy != "active_title" {
+		t.Fatalf("duplicate guard policy = %q, want active_title", result.DuplicateGuard.Policy)
+	}
+	if result.DuplicateGuard.Status != "skipped_duplicate" {
+		t.Fatalf("duplicate guard status = %q, want skipped_duplicate", result.DuplicateGuard.Status)
+	}
+	if result.DuplicateGuard.Details.IssueID != util.UUIDToString(firstRun.IssueID) {
+		t.Fatalf("duplicate guard issue_id = %q, want %q", result.DuplicateGuard.Details.IssueID, util.UUIDToString(firstRun.IssueID))
+	}
+}
 
 func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 	ctx := context.Background()

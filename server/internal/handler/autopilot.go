@@ -32,16 +32,18 @@ type AutopilotResponse struct {
 	// AssigneeType is "agent" or "squad". Path A from MUL-2429: when set
 	// to "squad", AssigneeID points at squad(id) rather than agent(id) and
 	// dispatch resolves to squad.leader_id at run time.
-	AssigneeType       string  `json:"assignee_type"`
-	AssigneeID         string  `json:"assignee_id"`
-	Status             string  `json:"status"`
-	ExecutionMode      string  `json:"execution_mode"`
-	IssueTitleTemplate *string `json:"issue_title_template"`
-	CreatedByType      string  `json:"created_by_type"`
-	CreatedByID        string  `json:"created_by_id"`
-	LastRunAt          *string `json:"last_run_at"`
-	CreatedAt          string  `json:"created_at"`
-	UpdatedAt          string  `json:"updated_at"`
+	AssigneeType         string   `json:"assignee_type"`
+	AssigneeID           string   `json:"assignee_id"`
+	Status               string   `json:"status"`
+	ExecutionMode        string   `json:"execution_mode"`
+	IssueTitleTemplate   *string  `json:"issue_title_template"`
+	InitialLabelIDs      []string `json:"initial_label_ids"`
+	DuplicateGuardPolicy string   `json:"duplicate_guard_policy"`
+	CreatedByType        string   `json:"created_by_type"`
+	CreatedByID          string   `json:"created_by_id"`
+	LastRunAt            *string  `json:"last_run_at"`
+	CreatedAt            string   `json:"created_at"`
+	UpdatedAt            string   `json:"updated_at"`
 }
 
 type AutopilotTriggerResponse struct {
@@ -111,23 +113,42 @@ func autopilotToResponse(a db.Autopilot) AutopilotResponse {
 		// non-null.
 		assigneeType = "agent"
 	}
-	return AutopilotResponse{
-		ID:                 uuidToString(a.ID),
-		WorkspaceID:        uuidToString(a.WorkspaceID),
-		Title:              a.Title,
-		Description:        textToPtr(a.Description),
-		ProjectID:          uuidToPtr(a.ProjectID),
-		AssigneeType:       assigneeType,
-		AssigneeID:         uuidToString(a.AssigneeID),
-		Status:             a.Status,
-		ExecutionMode:      a.ExecutionMode,
-		IssueTitleTemplate: textToPtr(a.IssueTitleTemplate),
-		CreatedByType:      a.CreatedByType,
-		CreatedByID:        uuidToString(a.CreatedByID),
-		LastRunAt:          timestampToPtr(a.LastRunAt),
-		CreatedAt:          timestampToString(a.CreatedAt),
-		UpdatedAt:          timestampToString(a.UpdatedAt),
+	duplicateGuardPolicy := a.DuplicateGuardPolicy
+	if duplicateGuardPolicy == "" {
+		duplicateGuardPolicy = "none"
 	}
+	return AutopilotResponse{
+		ID:                   uuidToString(a.ID),
+		WorkspaceID:          uuidToString(a.WorkspaceID),
+		Title:                a.Title,
+		Description:          textToPtr(a.Description),
+		ProjectID:            uuidToPtr(a.ProjectID),
+		AssigneeType:         assigneeType,
+		AssigneeID:           uuidToString(a.AssigneeID),
+		Status:               a.Status,
+		ExecutionMode:        a.ExecutionMode,
+		IssueTitleTemplate:   textToPtr(a.IssueTitleTemplate),
+		InitialLabelIDs:      uuidSliceToStrings(a.InitialLabelIds),
+		DuplicateGuardPolicy: duplicateGuardPolicy,
+		CreatedByType:        a.CreatedByType,
+		CreatedByID:          uuidToString(a.CreatedByID),
+		LastRunAt:            timestampToPtr(a.LastRunAt),
+		CreatedAt:            timestampToString(a.CreatedAt),
+		UpdatedAt:            timestampToString(a.UpdatedAt),
+	}
+}
+
+func uuidSliceToStrings(ids []pgtype.UUID) []string {
+	if len(ids) == 0 {
+		return []string{}
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id.Valid {
+			out = append(out, uuidToString(id))
+		}
+	}
+	return out
 }
 
 func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerResponse {
@@ -239,21 +260,25 @@ type CreateAutopilotRequest struct {
 	ProjectID   *string `json:"project_id"`
 	// AssigneeType is optional and defaults to "agent" — preserves backward
 	// compatibility with desktop clients shipped before MUL-2429.
-	AssigneeType       *string `json:"assignee_type"`
-	AssigneeID         string  `json:"assignee_id"`
-	ExecutionMode      string  `json:"execution_mode"`
-	IssueTitleTemplate *string `json:"issue_title_template"`
+	AssigneeType         *string  `json:"assignee_type"`
+	AssigneeID           string   `json:"assignee_id"`
+	ExecutionMode        string   `json:"execution_mode"`
+	IssueTitleTemplate   *string  `json:"issue_title_template"`
+	InitialLabelIDs      []string `json:"initial_label_ids"`
+	DuplicateGuardPolicy *string  `json:"duplicate_guard_policy"`
 }
 
 type UpdateAutopilotRequest struct {
-	Title              *string `json:"title"`
-	Description        *string `json:"description"`
-	ProjectID          *string `json:"project_id"`
-	AssigneeType       *string `json:"assignee_type"`
-	AssigneeID         *string `json:"assignee_id"`
-	Status             *string `json:"status"`
-	ExecutionMode      *string `json:"execution_mode"`
-	IssueTitleTemplate *string `json:"issue_title_template"`
+	Title                *string   `json:"title"`
+	Description          *string   `json:"description"`
+	ProjectID            *string   `json:"project_id"`
+	AssigneeType         *string   `json:"assignee_type"`
+	AssigneeID           *string   `json:"assignee_id"`
+	Status               *string   `json:"status"`
+	ExecutionMode        *string   `json:"execution_mode"`
+	IssueTitleTemplate   *string   `json:"issue_title_template"`
+	InitialLabelIDs      *[]string `json:"initial_label_ids"`
+	DuplicateGuardPolicy *string   `json:"duplicate_guard_policy"`
 }
 
 type CreateAutopilotTriggerRequest struct {
@@ -436,19 +461,33 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	initialLabelIDs, ok := h.parseAutopilotInitialLabelIDs(w, r, req.InitialLabelIDs, wsUUID)
+	if !ok {
+		return
+	}
+	duplicateGuardPolicy := "none"
+	if req.DuplicateGuardPolicy != nil && *req.DuplicateGuardPolicy != "" {
+		duplicateGuardPolicy = *req.DuplicateGuardPolicy
+	}
+	if !isValidDuplicateGuardPolicy(duplicateGuardPolicy) {
+		writeError(w, http.StatusBadRequest, "duplicate_guard_policy must be none, active_run, or active_title")
+		return
+	}
 
 	autopilot, err := h.Queries.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
-		WorkspaceID:        wsUUID,
-		Title:              req.Title,
-		AssigneeType:       assigneeType,
-		AssigneeID:         assigneeUUID,
-		Status:             "active",
-		ExecutionMode:      req.ExecutionMode,
-		CreatedByType:      "member",
-		CreatedByID:        parseUUID(userID),
-		Description:        ptrToText(req.Description),
-		IssueTitleTemplate: ptrToText(req.IssueTitleTemplate),
-		ProjectID:          projectID,
+		WorkspaceID:          wsUUID,
+		Title:                req.Title,
+		AssigneeType:         assigneeType,
+		AssigneeID:           assigneeUUID,
+		Status:               "active",
+		ExecutionMode:        req.ExecutionMode,
+		CreatedByType:        "member",
+		CreatedByID:          parseUUID(userID),
+		Description:          ptrToText(req.Description),
+		IssueTitleTemplate:   ptrToText(req.IssueTitleTemplate),
+		ProjectID:            projectID,
+		InitialLabelIds:      initialLabelIDs,
+		DuplicateGuardPolicy: pgtype.Text{String: duplicateGuardPolicy, Valid: true},
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
@@ -521,6 +560,28 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.ProjectID = projectID
+	}
+	if _, ok := rawFields["initial_label_ids"]; ok {
+		if req.InitialLabelIDs == nil {
+			writeError(w, http.StatusBadRequest, "initial_label_ids cannot be null")
+			return
+		}
+		initialLabelIDs, ok := h.parseAutopilotInitialLabelIDs(w, r, *req.InitialLabelIDs, prev.WorkspaceID)
+		if !ok {
+			return
+		}
+		params.InitialLabelIds = initialLabelIDs
+	}
+	if _, ok := rawFields["duplicate_guard_policy"]; ok {
+		policy := "none"
+		if req.DuplicateGuardPolicy != nil && *req.DuplicateGuardPolicy != "" {
+			policy = *req.DuplicateGuardPolicy
+		}
+		if !isValidDuplicateGuardPolicy(policy) {
+			writeError(w, http.StatusBadRequest, "duplicate_guard_policy must be none, active_run, or active_title")
+			return
+		}
+		params.DuplicateGuardPolicy = pgtype.Text{String: policy, Valid: true}
 	}
 	// assignee_type and assignee_id are validated as a pair: switching
 	// between agent and squad without supplying a new id would leave the
@@ -839,6 +900,51 @@ func isValidAutopilotAssigneeType(t string) bool {
 	default:
 		return false
 	}
+}
+
+func isValidDuplicateGuardPolicy(policy string) bool {
+	switch policy {
+	case "", "none", "active_run", "active_title":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *Handler) parseAutopilotInitialLabelIDs(w http.ResponseWriter, r *http.Request, raw []string, workspaceID pgtype.UUID) ([]pgtype.UUID, bool) {
+	if len(raw) == 0 {
+		return []pgtype.UUID{}, true
+	}
+	ids := make([]pgtype.UUID, 0, len(raw))
+	seen := map[string]bool{}
+	for _, item := range raw {
+		id, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(item), "initial_label_ids")
+		if !ok {
+			return nil, false
+		}
+		key := uuidToString(id)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return []pgtype.UUID{}, true
+	}
+	labels, err := h.Queries.ListLabelsByIDs(r.Context(), db.ListLabelsByIDsParams{
+		WorkspaceID: workspaceID,
+		Column2:     ids,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to validate initial labels")
+		return nil, false
+	}
+	if len(labels) != len(ids) {
+		writeError(w, http.StatusBadRequest, "initial_label_ids must reference labels in this workspace")
+		return nil, false
+	}
+	return ids, true
 }
 
 // validateAutopilotAssignee checks that the assignee (agent or squad) exists

@@ -648,14 +648,35 @@ multica autopilot create \
   --title "Nightly bug triage" \
   --description "Scan todo issues and prioritize." \
   --agent "Lambda" \
-  --mode create_issue
+  --mode create_issue \
+  --initial-label source:agent-created \
+  --initial-label type:follow-up \
+  --initial-label work:backend \
+  --duplicate-guard active_title
 
 multica autopilot update <id> --status paused
 multica autopilot update <id> --description "New prompt"
+multica autopilot update <id> --initial-label source:agent-created --initial-label type:follow-up
+multica autopilot update <id> --duplicate-guard none
 multica autopilot delete <id>
 ```
 
-`--mode` currently only accepts `create_issue` (creates a new issue on each run and assigns it to the agent). The server data model also defines `run_only`, but the daemon task path doesn't yet resolve a workspace for runs without an issue, so it's not exposed by the CLI. `--agent` accepts either a name or UUID.
+`--mode` accepts `create_issue` (creates a new issue on each run and assigns it to the agent) or `run_only` (runs a task directly). `--agent` accepts either a name or UUID.
+
+For `create_issue` autopilots, repeat `--initial-label` to attach labels to the created issue before the run is dispatched. Values may be label names, full UUIDs, or UUID prefixes. Use `multica autopilot update <id>` without any `--initial-label` flags only when you are not changing the label set; pass the flag one or more times to replace it, or use `--clear-initial-labels` to remove all initial labels.
+
+`--duplicate-guard` controls no-op protection:
+
+- `none` — always create a new run/issue.
+- `active_run` — skip when the same autopilot already has an active run.
+- `active_title` — skip `create_issue` when the same autopilot already has a non-terminal issue with the rendered title, project, and assignee.
+
+Rollback for label/guard experiments is safe and does not change schedules or triggers:
+
+```bash
+multica autopilot update <id> --duplicate-guard none
+multica autopilot update <id> --clear-initial-labels
+```
 
 ### Manual Trigger
 

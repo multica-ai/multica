@@ -116,21 +116,23 @@ type Attachment struct {
 }
 
 type Autopilot struct {
-	ID                 pgtype.UUID        `json:"id"`
-	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
-	Title              string             `json:"title"`
-	Description        pgtype.Text        `json:"description"`
-	AssigneeID         pgtype.UUID        `json:"assignee_id"`
-	Status             string             `json:"status"`
-	ExecutionMode      string             `json:"execution_mode"`
-	IssueTitleTemplate pgtype.Text        `json:"issue_title_template"`
-	CreatedByType      string             `json:"created_by_type"`
-	CreatedByID        pgtype.UUID        `json:"created_by_id"`
-	LastRunAt          pgtype.Timestamptz `json:"last_run_at"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	AssigneeType       string             `json:"assignee_type"`
-	ProjectID          pgtype.UUID        `json:"project_id"`
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	Title                string             `json:"title"`
+	Description          pgtype.Text        `json:"description"`
+	AssigneeID           pgtype.UUID        `json:"assignee_id"`
+	Status               string             `json:"status"`
+	ExecutionMode        string             `json:"execution_mode"`
+	IssueTitleTemplate   pgtype.Text        `json:"issue_title_template"`
+	CreatedByType        string             `json:"created_by_type"`
+	CreatedByID          pgtype.UUID        `json:"created_by_id"`
+	LastRunAt            pgtype.Timestamptz `json:"last_run_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	AssigneeType         string             `json:"assignee_type"`
+	ProjectID            pgtype.UUID        `json:"project_id"`
+	InitialLabelIds      []pgtype.UUID      `json:"initial_label_ids"`
+	DuplicateGuardPolicy string             `json:"duplicate_guard_policy"`
 }
 
 type AutopilotRun struct {

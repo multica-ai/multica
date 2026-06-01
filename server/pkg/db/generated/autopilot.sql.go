@@ -104,30 +104,48 @@ func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueSched
 	return items, nil
 }
 
+const countActiveAutopilotRuns = `-- name: CountActiveAutopilotRuns :one
+SELECT count(*)::bigint
+FROM autopilot_run
+WHERE autopilot_id = $1
+  AND status IN ('pending', 'issue_created', 'running')
+`
+
+func (q *Queries) CountActiveAutopilotRuns(ctx context.Context, autopilotID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveAutopilotRuns, autopilotID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
     status, execution_mode, issue_title_template, project_id,
-    created_by_type, created_by_id
+    initial_label_ids, duplicate_guard_policy, created_by_type, created_by_id
 ) VALUES (
     $1, $2, $9, $3, $4,
     $5, $6, $10, $11,
+    COALESCE($12::uuid[], '{}'),
+    COALESCE($13::text, 'none'),
     $7, $8
-) RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id
+) RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, initial_label_ids, duplicate_guard_policy
 `
 
 type CreateAutopilotParams struct {
-	WorkspaceID        pgtype.UUID `json:"workspace_id"`
-	Title              string      `json:"title"`
-	AssigneeType       string      `json:"assignee_type"`
-	AssigneeID         pgtype.UUID `json:"assignee_id"`
-	Status             string      `json:"status"`
-	ExecutionMode      string      `json:"execution_mode"`
-	CreatedByType      string      `json:"created_by_type"`
-	CreatedByID        pgtype.UUID `json:"created_by_id"`
-	Description        pgtype.Text `json:"description"`
-	IssueTitleTemplate pgtype.Text `json:"issue_title_template"`
-	ProjectID          pgtype.UUID `json:"project_id"`
+	WorkspaceID          pgtype.UUID   `json:"workspace_id"`
+	Title                string        `json:"title"`
+	AssigneeType         string        `json:"assignee_type"`
+	AssigneeID           pgtype.UUID   `json:"assignee_id"`
+	Status               string        `json:"status"`
+	ExecutionMode        string        `json:"execution_mode"`
+	CreatedByType        string        `json:"created_by_type"`
+	CreatedByID          pgtype.UUID   `json:"created_by_id"`
+	Description          pgtype.Text   `json:"description"`
+	IssueTitleTemplate   pgtype.Text   `json:"issue_title_template"`
+	ProjectID            pgtype.UUID   `json:"project_id"`
+	InitialLabelIds      []pgtype.UUID `json:"initial_label_ids"`
+	DuplicateGuardPolicy pgtype.Text   `json:"duplicate_guard_policy"`
 }
 
 func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams) (Autopilot, error) {
@@ -143,6 +161,8 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 		arg.Description,
 		arg.IssueTitleTemplate,
 		arg.ProjectID,
+		arg.InitialLabelIds,
+		arg.DuplicateGuardPolicy,
 	)
 	var i Autopilot
 	err := row.Scan(
@@ -161,6 +181,8 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.InitialLabelIds,
+		&i.DuplicateGuardPolicy,
 	)
 	return i, err
 }
@@ -369,8 +391,71 @@ func (q *Queries) FailAutopilotRunsByIssue(ctx context.Context, issueID pgtype.U
 	return err
 }
 
+const findActiveAutopilotIssueByTitle = `-- name: FindActiveAutopilotIssueByTitle :one
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata
+FROM issue
+WHERE workspace_id = $1
+  AND origin_type = 'autopilot'
+  AND origin_id = $2
+  AND title = $3
+  AND assignee_type = $4
+  AND assignee_id = $5
+  AND project_id IS NOT DISTINCT FROM $6::uuid
+  AND status NOT IN ('done', 'cancelled')
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type FindActiveAutopilotIssueByTitleParams struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	OriginID     pgtype.UUID `json:"origin_id"`
+	Title        string      `json:"title"`
+	AssigneeType pgtype.Text `json:"assignee_type"`
+	AssigneeID   pgtype.UUID `json:"assignee_id"`
+	ProjectID    pgtype.UUID `json:"project_id"`
+}
+
+func (q *Queries) FindActiveAutopilotIssueByTitle(ctx context.Context, arg FindActiveAutopilotIssueByTitleParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, findActiveAutopilotIssueByTitle,
+		arg.WorkspaceID,
+		arg.OriginID,
+		arg.Title,
+		arg.AssigneeType,
+		arg.AssigneeID,
+		arg.ProjectID,
+	)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+	)
+	return i, err
+}
+
 const getAutopilot = `-- name: GetAutopilot :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, initial_label_ids, duplicate_guard_policy FROM autopilot
 WHERE id = $1
 `
 
@@ -393,12 +478,14 @@ func (q *Queries) GetAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, 
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.InitialLabelIds,
+		&i.DuplicateGuardPolicy,
 	)
 	return i, err
 }
 
 const getAutopilotInWorkspace = `-- name: GetAutopilotInWorkspace :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, initial_label_ids, duplicate_guard_policy FROM autopilot
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -426,6 +513,8 @@ func (q *Queries) GetAutopilotInWorkspace(ctx context.Context, arg GetAutopilotI
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.InitialLabelIds,
+		&i.DuplicateGuardPolicy,
 	)
 	return i, err
 }
@@ -669,7 +758,7 @@ func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.
 
 const listAutopilots = `-- name: ListAutopilots :many
 
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, initial_label_ids, duplicate_guard_policy FROM autopilot
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
 ORDER BY created_at DESC
@@ -708,6 +797,8 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 			&i.UpdatedAt,
 			&i.AssigneeType,
 			&i.ProjectID,
+			&i.InitialLabelIds,
+			&i.DuplicateGuardPolicy,
 		); err != nil {
 			return nil, err
 		}
@@ -1002,7 +1093,7 @@ const systemPauseAutopilot = `-- name: SystemPauseAutopilot :one
 UPDATE autopilot
 SET status = 'paused', updated_at = now()
 WHERE id = $1 AND status = 'active'
-RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, initial_label_ids, duplicate_guard_policy
 `
 
 // Atomically pauses an autopilot only if it is currently active. Returns no
@@ -1028,6 +1119,8 @@ func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (Aut
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.InitialLabelIds,
+		&i.DuplicateGuardPolicy,
 	)
 	return i, err
 }
@@ -1058,21 +1151,25 @@ UPDATE autopilot SET
     execution_mode = COALESCE($7, execution_mode),
     issue_title_template = $8,
     project_id = $9,
+    initial_label_ids = COALESCE($10::uuid[], initial_label_ids),
+    duplicate_guard_policy = COALESCE($11, duplicate_guard_policy),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, initial_label_ids, duplicate_guard_policy
 `
 
 type UpdateAutopilotParams struct {
-	ID                 pgtype.UUID `json:"id"`
-	Title              pgtype.Text `json:"title"`
-	Description        pgtype.Text `json:"description"`
-	AssigneeType       pgtype.Text `json:"assignee_type"`
-	AssigneeID         pgtype.UUID `json:"assignee_id"`
-	Status             pgtype.Text `json:"status"`
-	ExecutionMode      pgtype.Text `json:"execution_mode"`
-	IssueTitleTemplate pgtype.Text `json:"issue_title_template"`
-	ProjectID          pgtype.UUID `json:"project_id"`
+	ID                   pgtype.UUID   `json:"id"`
+	Title                pgtype.Text   `json:"title"`
+	Description          pgtype.Text   `json:"description"`
+	AssigneeType         pgtype.Text   `json:"assignee_type"`
+	AssigneeID           pgtype.UUID   `json:"assignee_id"`
+	Status               pgtype.Text   `json:"status"`
+	ExecutionMode        pgtype.Text   `json:"execution_mode"`
+	IssueTitleTemplate   pgtype.Text   `json:"issue_title_template"`
+	ProjectID            pgtype.UUID   `json:"project_id"`
+	InitialLabelIds      []pgtype.UUID `json:"initial_label_ids"`
+	DuplicateGuardPolicy pgtype.Text   `json:"duplicate_guard_policy"`
 }
 
 func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams) (Autopilot, error) {
@@ -1086,6 +1183,8 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 		arg.ExecutionMode,
 		arg.IssueTitleTemplate,
 		arg.ProjectID,
+		arg.InitialLabelIds,
+		arg.DuplicateGuardPolicy,
 	)
 	var i Autopilot
 	err := row.Scan(
@@ -1104,6 +1203,8 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.InitialLabelIds,
+		&i.DuplicateGuardPolicy,
 	)
 	return i, err
 }

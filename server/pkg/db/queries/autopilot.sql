@@ -20,10 +20,12 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
     status, execution_mode, issue_title_template, project_id,
-    created_by_type, created_by_id
+    initial_label_ids, duplicate_guard_policy, created_by_type, created_by_id
 ) VALUES (
     $1, $2, sqlc.narg('description'), $3, $4,
     $5, $6, sqlc.narg('issue_title_template'), sqlc.narg('project_id'),
+    COALESCE(sqlc.narg('initial_label_ids')::uuid[], '{}'),
+    COALESCE(sqlc.narg('duplicate_guard_policy')::text, 'none'),
     $7, $8
 ) RETURNING *;
 
@@ -37,6 +39,8 @@ UPDATE autopilot SET
     execution_mode = COALESCE(sqlc.narg('execution_mode'), execution_mode),
     issue_title_template = sqlc.narg('issue_title_template'),
     project_id = sqlc.narg('project_id'),
+    initial_label_ids = COALESCE(sqlc.narg('initial_label_ids')::uuid[], initial_label_ids),
+    duplicate_guard_policy = COALESCE(sqlc.narg('duplicate_guard_policy'), duplicate_guard_policy),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -222,6 +226,26 @@ SET status = 'skipped',
     result = sqlc.narg('result')
 WHERE id = $1
 RETURNING *;
+
+-- name: CountActiveAutopilotRuns :one
+SELECT count(*)::bigint
+FROM autopilot_run
+WHERE autopilot_id = $1
+  AND status IN ('pending', 'issue_created', 'running');
+
+-- name: FindActiveAutopilotIssueByTitle :one
+SELECT *
+FROM issue
+WHERE workspace_id = $1
+  AND origin_type = 'autopilot'
+  AND origin_id = $2
+  AND title = $3
+  AND assignee_type = $4
+  AND assignee_id = $5
+  AND project_id IS NOT DISTINCT FROM sqlc.narg('project_id')::uuid
+  AND status NOT IN ('done', 'cancelled')
+ORDER BY created_at DESC
+LIMIT 1;
 
 -- =====================
 -- Scheduler Queries

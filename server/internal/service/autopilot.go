@@ -62,8 +62,8 @@ func (s *AutopilotService) DispatchAutopilot(
 	source string,
 	payload []byte,
 ) (*db.AutopilotRun, error) {
-	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
-		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, reason)
+	if reason, result, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
+		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, reason, result)
 	}
 
 	// Determine initial status based on execution mode.
@@ -158,6 +158,33 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	title := s.interpolateTemplate(ap, *run, triggerTimezone)
 	description := s.buildIssueDescription(ap, *run, triggerTimezone)
 
+	if ap.DuplicateGuardPolicy == "active_title" {
+		duplicate, err := qtx.FindActiveAutopilotIssueByTitle(ctx, db.FindActiveAutopilotIssueByTitleParams{
+			WorkspaceID:  ap.WorkspaceID,
+			OriginID:     ap.ID,
+			Title:        title,
+			AssigneeType: pgtype.Text{String: ap.AssigneeType, Valid: true},
+			AssigneeID:   ap.AssigneeID,
+			ProjectID:    ap.ProjectID,
+		})
+		if err == nil {
+			return &errDispatchSkipped{
+				reason: "duplicate guard: active issue with same title exists",
+				result: duplicateGuardResult("active_title", "skipped_duplicate", map[string]any{
+					"issue_id": util.UUIDToString(duplicate.ID),
+					"title":    title,
+				}),
+			}
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("check duplicate issue: %w", err)
+		}
+	}
+
+	if err := s.validateInitialLabels(ctx, qtx, ap); err != nil {
+		return err
+	}
+
 	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("increment issue counter: %w", err)
@@ -194,6 +221,10 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	})
 	if err != nil {
 		return fmt.Errorf("create issue: %w", err)
+	}
+
+	if err := s.attachInitialLabels(ctx, qtx, ap, issue.ID); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -262,6 +293,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 // monitor would auto-pause autopilots whose only crime was a flaky runtime).
 type errDispatchSkipped struct {
 	reason string
+	result []byte
 }
 
 func (e *errDispatchSkipped) Error() string { return e.reason }
@@ -440,10 +472,20 @@ func (s *AutopilotService) handleDispatchSkip(ctx context.Context, ap db.Autopil
 	if !errors.As(err, &skipErr) {
 		return nil
 	}
-	updated, uerr := s.Queries.UpdateAutopilotRunSkipped(ctx, db.UpdateAutopilotRunSkippedParams{
-		ID:            run.ID,
-		FailureReason: pgtype.Text{String: skipErr.reason, Valid: true},
-	})
+	var updated db.AutopilotRun
+	var uerr error
+	if len(skipErr.result) > 0 {
+		updated, uerr = s.Queries.UpdateAutopilotRunSkippedWithResult(ctx, db.UpdateAutopilotRunSkippedWithResultParams{
+			ID:            run.ID,
+			FailureReason: pgtype.Text{String: skipErr.reason, Valid: true},
+			Result:        skipErr.result,
+		})
+	} else {
+		updated, uerr = s.Queries.UpdateAutopilotRunSkipped(ctx, db.UpdateAutopilotRunSkippedParams{
+			ID:            run.ID,
+			FailureReason: pgtype.Text{String: skipErr.reason, Valid: true},
+		})
+	}
 	if uerr != nil {
 		slog.Warn("failed to mark dispatch as skipped",
 			"run_id", util.UUIDToString(run.ID), "error", uerr)
@@ -465,6 +507,51 @@ func (s *AutopilotService) handleDispatchSkip(ctx context.Context, ap db.Autopil
 	s.Queries.UpdateAutopilotLastRunAt(ctx, ap.ID)
 	s.publishRunDone(util.UUIDToString(ap.WorkspaceID), updated, "skipped")
 	return run
+}
+
+func (s *AutopilotService) validateInitialLabels(ctx context.Context, q *db.Queries, ap db.Autopilot) error {
+	if len(ap.InitialLabelIds) == 0 {
+		return nil
+	}
+	labels, err := q.ListLabelsByIDs(ctx, db.ListLabelsByIDsParams{
+		WorkspaceID: ap.WorkspaceID,
+		Column2:     ap.InitialLabelIds,
+	})
+	if err != nil {
+		return fmt.Errorf("validate initial labels: %w", err)
+	}
+	if len(labels) != len(ap.InitialLabelIds) {
+		return fmt.Errorf("initial label resolution failed: one or more labels no longer exist in workspace")
+	}
+	return nil
+}
+
+func (s *AutopilotService) attachInitialLabels(ctx context.Context, q *db.Queries, ap db.Autopilot, issueID pgtype.UUID) error {
+	for _, labelID := range ap.InitialLabelIds {
+		if err := q.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+			IssueID:     issueID,
+			LabelID:     labelID,
+			WorkspaceID: ap.WorkspaceID,
+		}); err != nil {
+			return fmt.Errorf("attach initial label %s: %w", util.UUIDToString(labelID), err)
+		}
+	}
+	return nil
+}
+
+func duplicateGuardResult(policy, status string, details map[string]any) []byte {
+	result := map[string]any{
+		"duplicate_guard": map[string]any{
+			"policy":  policy,
+			"status":  status,
+			"details": details,
+		},
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reason string) {
@@ -491,9 +578,22 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 //     scheduled run. Migration 096 removed the agent FK on autopilot, so an
 //     agent assignee being missing is now a real condition the gate must
 //     handle (previously cascade-deleted).
-func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot) (string, bool) {
+func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot) (string, []byte, bool) {
 	if !ap.AssigneeID.Valid {
-		return "autopilot has no assignee", true
+		return "autopilot has no assignee", nil, true
+	}
+	if ap.DuplicateGuardPolicy == "active_run" {
+		count, err := s.Queries.CountActiveAutopilotRuns(ctx, ap.ID)
+		if err != nil {
+			slog.Warn("autopilot duplicate guard: failed to count active runs",
+				"autopilot_id", util.UUIDToString(ap.ID),
+				"error", err,
+			)
+		} else if count > 0 {
+			return "duplicate guard: active run exists", duplicateGuardResult("active_run", "skipped_duplicate", map[string]any{
+				"active_run_count": count,
+			}), true
+		}
 	}
 	agent, squadResolved, err := s.resolveAutopilotLeader(ctx, ap)
 	if err != nil {
@@ -516,18 +616,18 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 			// should have rewritten this autopilot's assignee to the leader
 			// already; surfacing the case explicitly keeps the failure
 			// reason useful when something slipped past the transfer.
-			return "assignee squad is archived", true
+			return "assignee squad is archived", nil, true
 		case missing && squadResolved:
-			return "assignee squad cannot be resolved", true
+			return "assignee squad cannot be resolved", nil, true
 		case missing && !squadResolved:
 			// Agent row gone. With migration 096 the FK is gone too, so
 			// this is the new "agent was hard-deleted under us" case. Skip
 			// rather than fail-open: we know retrying will not help.
-			return "assignee agent no longer exists", true
+			return "assignee agent no longer exists", nil, true
 		}
 		// Transient DB error — fail-open so the next scheduler tick gets a
 		// chance to succeed.
-		return "", false
+		return "", nil, false
 	}
 	ready, reason, err := AgentReadiness(ctx, s.Queries, agent)
 	if err != nil {
@@ -536,10 +636,10 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 			"runtime_id", util.UUIDToString(agent.RuntimeID),
 			"error", err,
 		)
-		return "", false
+		return "", nil, false
 	}
 	if !ready {
-		return formatAdmissionReason(ap, reason), true
+		return formatAdmissionReason(ap, reason), nil, true
 	}
 	// Private-agent gate at the autopilot layer. Caller identity = the
 	// autopilot's creator: if the creator no longer has access to the
@@ -560,14 +660,14 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 				WorkspaceID: ap.WorkspaceID,
 			})
 			if err != nil {
-				return "autopilot creator no longer in workspace", true
+				return "autopilot creator no longer in workspace", nil, true
 			}
 			if member.Role != "owner" && member.Role != "admin" {
-				return "autopilot creator lacks access to private assignee agent", true
+				return "autopilot creator lacks access to private assignee agent", nil, true
 			}
 		}
 	}
-	return "", false
+	return "", nil, false
 }
 
 // formatAdmissionReason rewrites the generic AgentReadiness reason into the
@@ -665,6 +765,7 @@ func (s *AutopilotService) recordSkippedRun(
 	source string,
 	payload []byte,
 	reason string,
+	result []byte,
 ) (*db.AutopilotRun, error) {
 	run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
 		AutopilotID:    autopilot.ID,
@@ -678,15 +779,25 @@ func (s *AutopilotService) recordSkippedRun(
 		return nil, fmt.Errorf("create skipped run: %w", err)
 	}
 
-	updated, err := s.Queries.UpdateAutopilotRunSkipped(ctx, db.UpdateAutopilotRunSkippedParams{
-		ID:            run.ID,
-		FailureReason: pgtype.Text{String: reason, Valid: true},
-	})
-	if err == nil {
+	var updated db.AutopilotRun
+	var updateErr error
+	if len(result) > 0 {
+		updated, updateErr = s.Queries.UpdateAutopilotRunSkippedWithResult(ctx, db.UpdateAutopilotRunSkippedWithResultParams{
+			ID:            run.ID,
+			FailureReason: pgtype.Text{String: reason, Valid: true},
+			Result:        result,
+		})
+	} else {
+		updated, updateErr = s.Queries.UpdateAutopilotRunSkipped(ctx, db.UpdateAutopilotRunSkippedParams{
+			ID:            run.ID,
+			FailureReason: pgtype.Text{String: reason, Valid: true},
+		})
+	}
+	if updateErr == nil {
 		run = updated
 	} else {
 		slog.Warn("failed to set skip reason on autopilot run",
-			"run_id", util.UUIDToString(run.ID), "error", err)
+			"run_id", util.UUIDToString(run.ID), "error", updateErr)
 	}
 
 	slog.Info("autopilot dispatch skipped",

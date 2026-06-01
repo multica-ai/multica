@@ -168,6 +168,45 @@ func (q *Queries) ListLabels(ctx context.Context, workspaceID pgtype.UUID) ([]Is
 	return items, nil
 }
 
+const listLabelsByIDs = `-- name: ListLabelsByIDs :many
+SELECT id, workspace_id, name, color, created_at, updated_at FROM issue_label
+WHERE workspace_id = $1
+  AND id = ANY($2::uuid[])
+ORDER BY LOWER(name) ASC
+`
+
+type ListLabelsByIDsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	Column2     []pgtype.UUID `json:"column_2"`
+}
+
+func (q *Queries) ListLabelsByIDs(ctx context.Context, arg ListLabelsByIDsParams) ([]IssueLabel, error) {
+	rows, err := q.db.Query(ctx, listLabelsByIDs, arg.WorkspaceID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueLabel{}
+	for rows.Next() {
+		var i IssueLabel
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Color,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLabelsByIssue = `-- name: ListLabelsByIssue :many
 SELECT l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at
 FROM issue_label l

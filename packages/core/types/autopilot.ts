@@ -8,6 +8,8 @@ export type AutopilotExecutionMode = "create_issue" | "run_only";
 // Path A). Older servers omit this field — callers should default to "agent".
 export type AutopilotAssigneeType = "agent" | "squad";
 
+export type AutopilotDuplicateGuardPolicy = "none" | "active_run" | "active_title";
+
 export type AutopilotTriggerKind = "schedule" | "webhook" | "api";
 
 // `skipped` is emitted by the backend pre-flight admission check
@@ -34,6 +36,8 @@ export interface Autopilot {
   status: AutopilotStatus;
   execution_mode: AutopilotExecutionMode;
   issue_title_template: string | null;
+  initial_label_ids: string[];
+  duplicate_guard_policy: AutopilotDuplicateGuardPolicy;
   created_by_type: string;
   created_by_id: string;
   last_run_at: string | null;
@@ -98,6 +102,8 @@ export interface CreateAutopilotRequest {
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
   issue_title_template?: string;
+  initial_label_ids?: string[];
+  duplicate_guard_policy?: AutopilotDuplicateGuardPolicy;
 }
 
 export interface UpdateAutopilotRequest {
@@ -111,6 +117,8 @@ export interface UpdateAutopilotRequest {
   status?: AutopilotStatus;
   execution_mode?: AutopilotExecutionMode;
   issue_title_template?: string | null;
+  initial_label_ids?: string[];
+  duplicate_guard_policy?: AutopilotDuplicateGuardPolicy;
 }
 
 export interface CreateAutopilotTriggerRequest {
