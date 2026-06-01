@@ -204,6 +204,12 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceMember(queries))
 
+			r.Route("/api/data", func(r chi.Router) {
+				r.Get("/export", h.ExportWorkspaceData)
+				r.Post("/import/dry-run", h.DryRunWorkspaceImport)
+				r.Post("/import/apply", h.ApplyWorkspaceImport)
+			})
+
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/", h.ListIssues)

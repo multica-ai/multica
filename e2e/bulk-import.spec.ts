@@ -36,6 +36,7 @@ test.describe("Bulk Issue Import", () => {
     await dialog.getByRole("button", { name: /Import 3/i }).click();
 
     await expect(dialog).not.toBeVisible({ timeout: 10000 });
+    await page.reload();
 
     for (const title of titles) {
       await expect(page.getByText(title).first()).toBeVisible({ timeout: 10000 });

@@ -45,3 +45,4 @@ export type { TimeEntry, TimeEntryLabel, CreateTimeEntryRequest, SwitchTimeEntry
 export type { DailyReview, DailyPlan } from "./daily";
 export type { AutomationTemplate, StandupSummaryResult } from "./automation";
 export type { PomodoroPhase, PomodoroStatus, PomodoroSession, CompletePomodoroBody, CompletePomodoroResponse } from "./pomodoro";
+export type { ManifestIssue, WorkspaceExportManifest, WorkspaceImportPayload, WorkspaceImportError, WorkspaceImportResult } from "./data-sync";

@@ -12,6 +12,7 @@ export type WSEventType =
   | "issue:updated"
   | "issue:deleted"
   | "issue:bulk_created"
+  | "issue:imported"
   | "comment:created"
   | "comment:updated"
   | "comment:deleted"

@@ -21,8 +21,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { BulkCreateIssueItem, BulkCreateIssueError } from "@/shared/types";
-import { api, BulkCreateApiError } from "@/shared/api";
+import type { BulkCreateIssueItem, WorkspaceImportError, WorkspaceImportPayload } from "@/shared/types";
+import { api } from "@/shared/api";
 import { useIssueStore } from "@/features/issues";
 
 // ---------------------------------------------------------------------------
@@ -56,7 +56,6 @@ export function parseCsvInput(text: string): BulkCreateIssueItem[] {
   return lines.slice(1).flatMap((line) => {
     const cols = parseCsvLine(line);
     const title = cols[titleIdx]?.trim() ?? "";
-    if (!title) return [];
     const item: BulkCreateIssueItem = { title };
     if (descIdx !== -1 && cols[descIdx]) item.description = cols[descIdx];
     if (priorityIdx !== -1 && cols[priorityIdx]) item.priority = cols[priorityIdx] as BulkCreateIssueItem["priority"];
@@ -129,9 +128,9 @@ export function BulkImportModal({ open, onOpenChange }: BulkImportModalProps) {
   const [mode, setMode] = useState<"text" | "csv">("text");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [serverErrors, setServerErrors] = useState<BulkCreateIssueError[] | null>(null);
+  const [serverErrors, setServerErrors] = useState<WorkspaceImportError[] | null>(null);
 
-  const addIssue = useIssueStore((s) => s.addIssue);
+  const refreshIssues = useIssueStore((s) => s.fetch);
 
   const parsedItems =
     mode === "text" ? parseTextInput(input) : parseCsvInput(input);
@@ -154,18 +153,29 @@ export function BulkImportModal({ open, onOpenChange }: BulkImportModalProps) {
     setLoading(true);
     setServerErrors(null);
     try {
-      const result = await api.bulkCreateIssues(parsedItems);
-      result.issues.forEach((issue) => addIssue(issue));
-      toast.success(`${result.issues.length} issue${result.issues.length === 1 ? "" : "s"} created`);
+      const payload: WorkspaceImportPayload = {
+        schema_version: "2026-05-31",
+        source_type: "issue-csv",
+        issues: parsedItems,
+      };
+      const dryRun = await api.dryRunWorkspaceImport(payload);
+      if ((dryRun.errors?.length ?? 0) > 0) {
+        setServerErrors(dryRun.errors ?? []);
+        return;
+      }
+
+      const result = await api.applyWorkspaceImport(payload);
+      if ((result.errors?.length ?? 0) > 0 || result.failed > 0) {
+        setServerErrors(result.errors ?? []);
+        return;
+      }
+      await refreshIssues();
+      toast.success(`${result.created} issue${result.created === 1 ? "" : "s"} created`);
       setInput("");
       onOpenChange(false);
     } catch (err: unknown) {
-      if (err instanceof BulkCreateApiError) {
-        setServerErrors(err.errors);
-      } else {
-        const msg = err instanceof Error ? err.message : "Failed to import issues";
-        toast.error(msg);
-      }
+      const msg = err instanceof Error ? err.message : "Failed to import issues";
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -233,8 +243,8 @@ export function BulkImportModal({ open, onOpenChange }: BulkImportModalProps) {
             <p className="font-medium mb-1">Import failed:</p>
             <ul className="list-disc list-inside space-y-0.5">
               {serverErrors.map((e) => (
-                <li key={e.index}>
-                  Row {e.index + 1}: {e.reason}
+                <li key={`${e.code}-${e.message}`}>
+                  {e.message}
                 </li>
               ))}
             </ul>
@@ -275,5 +285,3 @@ export function BulkImportButton() {
     </>
   );
 }
-
-

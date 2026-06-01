@@ -12,9 +12,9 @@
 
 ## 当前状态
 
-- 证据：`apps/workspace/src/features/issues/components/issues-header.tsx` `BulkImportButton`；结论：导入入口只挂在 issue 页面。
-- 证据：`apps/workspace/src/features/issues/components/bulk-import-modal.tsx` `parseCsv`；结论：当前已支持 issue CSV/文本导入。
-- 证据：代码搜索 `apps/`、`server/`，关键词 `导入.*json|json backup|workspace import|restore data`；结论：未找到匹配，说明统一 JSON 导入和备份恢复还不存在。
+- 证据：`apps/workspace/src/features/settings/components/settings-page.tsx` `SettingsPage`、`apps/workspace/src/features/settings/components/data-tab.tsx` `DataTab`；结论：Settings Data 标签已支持粘贴 manifest 执行 dry-run / apply。
+- 证据：`server/internal/handler/data_sync.go` `DryRunWorkspaceImport` / `ApplyWorkspaceImport`、`server/cmd/server/router.go` `/api/data/import/*`；结论：统一导入接口已接通。
+- 证据：`apps/workspace/src/features/issues/components/bulk-import-modal.tsx` `handleSubmit`；结论：Issue 批量导入已迁移为统一 import pipeline（先 dry-run，再 apply）。
 
 ## 证据
 
@@ -24,10 +24,15 @@
 
 ## 缺口
 
-1. 没有统一导入入口。
-2. 没有 canonical JSON 导入。
-3. 没有备份恢复导入。
-4. 现有 issue 导入无法复用到其他实体。
+1. 当前导入实体仅覆盖 issues，备份恢复和其他实体仍未接入。
+2. 当前导入输入仍是手工粘贴 JSON，尚未支持文件上传与大文件处理。
+
+## 验证记录
+
+- 证据：`server/internal/service/data_sync_test.go` `TestDryRunImport_RejectsWorkspaceMismatch`、`TestApplyImport_CanonicalJSONRejectsWorkspaceMismatch`、`TestApplyImport_IssueCSVValidationIsAllOrNothing`；结论：服务层 dry-run/apply 契约已覆盖关键校验。
+- 证据：`server/internal/handler/handler_test.go` `TestDryRunWorkspaceImportWorkspaceMismatch`、`TestApplyWorkspaceImportIssueCSV`；结论：导入接口已返回结构化结果并可执行写入。
+- 证据：`apps/workspace/src/features/settings/components/data-tab.test.tsx`、`apps/workspace/src/features/issues/components/bulk-import-modal.test.tsx`；结论：DataTab 与 BulkImportModal 前端流程已迁到统一导入 API。
+- 证据：`e2e/data-sync.spec.ts` `can dry-run and apply canonical import from data tab`、`e2e/bulk-import.spec.ts` `can bulk import issues via plain text`；结论：页面级导入主路径可用。
 
 ## 交接说明
 

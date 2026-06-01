@@ -63,6 +63,9 @@ import type {
   PomodoroSession,
   CompletePomodoroBody,
   CompletePomodoroResponse,
+  WorkspaceExportManifest,
+  WorkspaceImportPayload,
+  WorkspaceImportResult,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -322,6 +325,24 @@ export class ApiClient {
       throw new Error(message);
     }
     return res.json() as Promise<BulkCreateIssuesResponse>;
+  }
+
+  async exportWorkspaceData(): Promise<WorkspaceExportManifest> {
+    return this.fetch("/api/data/export");
+  }
+
+  async dryRunWorkspaceImport(payload: WorkspaceImportPayload): Promise<WorkspaceImportResult> {
+    return this.fetch("/api/data/import/dry-run", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async applyWorkspaceImport(payload: WorkspaceImportPayload): Promise<WorkspaceImportResult> {
+    return this.fetch("/api/data/import/apply", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   }
 
   async updateIssue(id: string, data: UpdateIssueRequest): Promise<Issue> {

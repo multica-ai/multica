@@ -373,6 +373,109 @@ func TestIssueHierarchyLabelsAndDependencies(t *testing.T) {
 	}
 }
 
+func TestExportWorkspaceData(t *testing.T) {
+	title := fmt.Sprintf("Export Test %d", time.Now().UnixNano())
+	createRecorder := httptest.NewRecorder()
+	createReq := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":    title,
+		"status":   "backlog",
+		"priority": "none",
+	})
+	testHandler.CreateIssue(createRecorder, createReq)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue for export test: expected 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/data/export?workspace_id="+testWorkspaceID, nil)
+	testHandler.ExportWorkspaceData(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ExportWorkspaceData: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("ExportWorkspaceData: expected application/json content type, got %q", ct)
+	}
+
+	var manifest service.WorkspaceExportManifest
+	if err := json.NewDecoder(w.Body).Decode(&manifest); err != nil {
+		t.Fatalf("ExportWorkspaceData: decode response failed: %v", err)
+	}
+	if manifest.SchemaVersion != service.ManifestSchemaVersion {
+		t.Fatalf("ExportWorkspaceData: schema_version = %q, want %q", manifest.SchemaVersion, service.ManifestSchemaVersion)
+	}
+	if manifest.Workspace.ID != testWorkspaceID {
+		t.Fatalf("ExportWorkspaceData: workspace.id = %q, want %q", manifest.Workspace.ID, testWorkspaceID)
+	}
+}
+
+func TestDryRunWorkspaceImportWorkspaceMismatch(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/data/import/dry-run?workspace_id="+testWorkspaceID, map[string]any{
+		"schema_version": service.ManifestSchemaVersion,
+		"source_type":    "canonical-json",
+		"workspace_id":   "ffffffff-ffff-ffff-ffff-ffffffffffff",
+		"issues": []map[string]any{
+			{"title": "Example issue"},
+		},
+	})
+	testHandler.DryRunWorkspaceImport(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DryRunWorkspaceImport: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result service.WorkspaceImportResult
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("DryRunWorkspaceImport: decode failed: %v", err)
+	}
+	if len(result.Errors) != 1 || result.Errors[0].Code != "workspace_mismatch" {
+		t.Fatalf("DryRunWorkspaceImport: expected workspace_mismatch, got %+v", result.Errors)
+	}
+}
+
+func TestApplyWorkspaceImportIssueCSV(t *testing.T) {
+	title := fmt.Sprintf("Import Test %d", time.Now().UnixNano())
+	eventsCh := make(chan events.Event, 1)
+	testHandler.Bus.Subscribe(protocol.EventIssueImported, func(e events.Event) {
+		if len(eventsCh) == 0 {
+			eventsCh <- e
+		}
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/data/import/apply?workspace_id="+testWorkspaceID, map[string]any{
+		"schema_version": service.ManifestSchemaVersion,
+		"source_type":    "issue-csv",
+		"issues": []map[string]any{
+			{
+				"title":    title,
+				"status":   "backlog",
+				"priority": "none",
+			},
+		},
+	})
+	testHandler.ApplyWorkspaceImport(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ApplyWorkspaceImport: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result service.WorkspaceImportResult
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("ApplyWorkspaceImport: decode failed: %v", err)
+	}
+	if result.Created != 1 {
+		t.Fatalf("ApplyWorkspaceImport: created = %d, want 1", result.Created)
+	}
+
+	select {
+	case evt := <-eventsCh:
+		if evt.Type != protocol.EventIssueImported {
+			t.Fatalf("expected %q event, got %q", protocol.EventIssueImported, evt.Type)
+		}
+	default:
+		t.Fatal("expected import event")
+	}
+}
+
 func TestProjectCRUDAndIssueLinking(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
