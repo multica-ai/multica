@@ -57,7 +57,9 @@ export type CerebroFlagKey =
   // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
   | "cerebro_pdf_inline_render"
   // FIR-2641: "Remind me" on a specific comment — reuses the personal reminder engine.
-  | "cerebro_comment_reminders";
+  | "cerebro_comment_reminders"
+  // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
+  | "cerebro_agent_trigger_permissions";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -152,6 +154,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // by default; per-channel push stays opt-in). Off hides the menu action and
   // the server rejects comment-referencing reminders.
   cerebro_comment_reminders: true,
+  // FIR-2409: opt-in until the Agent-start tab + per-agent rows are reviewed.
+  cerebro_agent_trigger_permissions: false,
 };
 
 /**
@@ -474,6 +478,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Notify the assignee when an issue's start or due date arrives (the day-of, in their timezone). Delivery follows each user's per-channel notification preferences (inbox / mobile push / desktop). Off hides the settings rows. FIR-2412.",
+  },
+  {
+    key: "cerebro_agent_trigger_permissions",
+    label: "Agent-start permissions",
+    group: "permissions",
+    description:
+      "Add a friendly 'Agent-start' tab under Settings → Permissions to control who may start (trigger) an agent they don't own — a workspace-wide default plus a per-agent override (Allow / run-request / owner-only). Reuses the tool-policy engine; server enforcement is unchanged when off. FIR-2409.",
   },
   {
     key: "cerebro_comment_reminders",

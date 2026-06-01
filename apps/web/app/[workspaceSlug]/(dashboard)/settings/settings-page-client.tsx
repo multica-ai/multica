@@ -6,7 +6,10 @@ import { cerebroCostOptimizationTabs } from "@multica/cerebro-cost-optimization/
 import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags/settings-tabs";
 import { SettingsPage, type ExtraSettingsTab } from "@multica/views/settings";
 import { useMembersTabCerebroExtras } from "@multica/cerebro-members/views";
-import { useCerebroToolPolicySettingsTabs } from "@multica/cerebro-tool-policy/views";
+import {
+  useCerebroToolPolicySettingsTabs,
+  useCerebroAgentTriggerSettingsTabs,
+} from "@multica/cerebro-tool-policy/views";
 
 // Assembled here, inside the client boundary, so the lucide icon components
 // carried in each tab's `icon` field are never serialized from a Server
@@ -29,9 +32,12 @@ export function SettingsPageClient({
   // cerebro_tool_policy flag is on. Merged here (not in the module-level const)
   // because the flag is read via a hook.
   const toolPolicyTabs = useCerebroToolPolicySettingsTabs();
+  // FIR-2409: the friendly "Agent-start" tab, present only when the
+  // cerebro_agent_trigger_permissions flag is on.
+  const agentTriggerTabs = useCerebroAgentTriggerSettingsTabs();
   const accountTabs = useMemo(
-    () => [...extraAccountTabs, ...toolPolicyTabs],
-    [toolPolicyTabs],
+    () => [...extraAccountTabs, ...toolPolicyTabs, ...agentTriggerTabs],
+    [toolPolicyTabs, agentTriggerTabs],
   );
 
   return (

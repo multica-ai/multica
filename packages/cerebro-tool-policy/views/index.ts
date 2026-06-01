@@ -18,3 +18,7 @@ export {
   useWriteRepoDefaultPolicy,
   type ToolSetting,
 } from "./repo-default-policy";
+export {
+  AgentTriggerTab,
+  useCerebroAgentTriggerSettingsTabs,
+} from "./agent-trigger-tab";
