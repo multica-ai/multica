@@ -72,11 +72,13 @@ function renderSidebar(onHighlightComment = vi.fn()) {
       </QueryClientProvider>
     </I18nProvider>,
   );
-  return { ...result, onHighlightComment };
+  return { ...result, onHighlightComment, queryClient };
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  mockApi.listTasksByIssue.mockReset();
+  mockApi.listTaskInteractions.mockReset();
+  mockApi.listTaskTrace.mockReset();
   mockApi.listTaskInteractions.mockResolvedValue([]);
   mockApi.listTaskTrace.mockResolvedValue({ lines: [] });
 });
@@ -108,6 +110,93 @@ describe("AgentStreamSidebar", () => {
     );
     expect(rows[0]).toHaveTextContent("Newest run");
     expect(rows[1]).toHaveTextContent("Oldest run");
+  });
+
+  it("switches from a recent run to a new active run", async () => {
+    const recentRun = makeTask({
+      id: "task-recent",
+      status: "completed",
+      created_at: "2026-01-01T00:01:00Z",
+      completed_at: "2026-01-01T00:02:00Z",
+      trigger_summary: "Completed run",
+    });
+    const activeRun = makeTask({
+      id: "task-active",
+      status: "running",
+      created_at: "2026-01-01T00:03:00Z",
+      started_at: "2026-01-01T00:03:30Z",
+      completed_at: null,
+      trigger_summary: "Active run",
+    });
+    mockApi.listTasksByIssue
+      .mockResolvedValueOnce([recentRun])
+      .mockResolvedValueOnce([recentRun, activeRun]);
+
+    const { queryClient } = renderSidebar();
+
+    await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-recent"));
+
+    await queryClient.invalidateQueries({ queryKey: ["issues", "tasks", "issue-1"] });
+
+    await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-active"));
+  });
+
+  it("switches to another active run when the selected active run completes", async () => {
+    const firstActive = makeTask({
+      id: "task-active-old",
+      status: "running",
+      created_at: "2026-01-01T00:01:00Z",
+      started_at: "2026-01-01T00:01:30Z",
+      completed_at: null,
+      trigger_summary: "First active run",
+    });
+    const completedFirst = {
+      ...firstActive,
+      status: "completed" as const,
+      completed_at: "2026-01-01T00:05:00Z",
+    };
+    const secondActive = makeTask({
+      id: "task-active-new",
+      status: "running",
+      created_at: "2026-01-01T00:03:00Z",
+      started_at: "2026-01-01T00:03:30Z",
+      completed_at: null,
+      trigger_summary: "Second active run",
+    });
+    mockApi.listTasksByIssue
+      .mockResolvedValueOnce([firstActive])
+      .mockResolvedValueOnce([completedFirst, secondActive]);
+
+    const { queryClient } = renderSidebar();
+
+    await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-active-old"));
+
+    await queryClient.invalidateQueries({ queryKey: ["issues", "tasks", "issue-1"] });
+
+    await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-active-new"));
+  });
+
+  it("defaults to the newest recent run when there are no active runs", async () => {
+    mockApi.listTasksByIssue.mockResolvedValue([
+      makeTask({
+        id: "task-old",
+        status: "completed",
+        created_at: "2026-01-01T00:01:00Z",
+        completed_at: "2026-01-01T00:02:00Z",
+        trigger_summary: "Older completed run",
+      }),
+      makeTask({
+        id: "task-new",
+        status: "completed",
+        created_at: "2026-01-01T00:03:00Z",
+        completed_at: "2026-01-01T00:04:00Z",
+        trigger_summary: "Newest completed run",
+      }),
+    ]);
+
+    renderSidebar();
+
+    await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-new"));
   });
 
   it("jumps using the task trigger_comment_id", async () => {

@@ -54,16 +54,20 @@ export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamS
     [chronologicalTasks],
   );
 
-  // Selection logic: pick a sensible default, then keep the current active run focused.
-  const manualSelection = useRef(false);
+  // Selection logic: active runs take focus, while the current active run stays stable across refreshes.
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Auto-select only when there is no current valid selection.
   useEffect(() => {
-    if (manualSelection.current) return;
-    if (selectedId && allSorted.some((task) => task.id === selectedId)) return;
-    const candidate = activeTasks[0] ?? recentTasks[0];
-    setSelectedId(candidate?.id ?? null);
+    const selectedTask = selectedId
+      ? allSorted.find((task) => task.id === selectedId) ?? null
+      : null;
+
+    if (selectedTask && ACTIVE_STATUSES.has(selectedTask.status)) return;
+
+    const candidate = activeTasks[0] ?? selectedTask ?? recentTasks[0] ?? null;
+    if ((candidate?.id ?? null) !== selectedId) {
+      setSelectedId(candidate?.id ?? null);
+    }
   }, [activeTasks, recentTasks, allSorted, selectedId]);
 
   const selectedTask = useMemo(
@@ -71,15 +75,6 @@ export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamS
     [allSorted, selectedId],
   );
   const agentColorMap = useAgentColorMap(tasks);
-
-  // Reset manual selection when selected task is gone from the list.
-  useEffect(() => {
-    if (manualSelection.current && selectedId && !allSorted.find((t) => t.id === selectedId)) {
-      manualSelection.current = false;
-      const fallback = activeTasks[0] ?? recentTasks[0];
-      setSelectedId(fallback?.id ?? null);
-    }
-  }, [allSorted, activeTasks, recentTasks, selectedId]);
 
   const isLive = selectedTask != null && ACTIVE_STATUSES.has(selectedTask.status);
   const [paused, setPaused] = useState(false);
@@ -131,12 +126,10 @@ export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamS
   }, [selectorOpen]);
 
   const handleSelect = useCallback((id: string) => {
-    manualSelection.current = true;
     setSelectedId(id);
   }, []);
 
   const handleSelectAndClose = useCallback((id: string) => {
-    manualSelection.current = true;
     setSelectedId(id);
     setSelectorOpen(false);
   }, []);
