@@ -46,6 +46,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/orchestration"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -355,7 +356,7 @@ func (h *Handler) startOrchestratedChild(ctx context.Context, child db.Issue) bo
 		if !ok {
 			return false
 		}
-		h.enqueueSquadLeaderTask(ctx, promoted, pgtype.UUID{}, "system", "")
+		h.enqueueOrchestrationLeaderTask(ctx, promoted, pgtype.UUID{})
 		return true
 	}
 
@@ -582,6 +583,58 @@ func (h *Handler) markVerificationGate(ctx context.Context, childIssues []db.Iss
 
 // CEREBRO-PATCH(orchestration-plan-refinement): FIR-2564 — squad leader finishes
 // an under-specified plan, not the human.
+// CEREBRO-PATCH(orchestration-handoff-provenance): FIR-2564 — the engine's own
+// agent dispatches must carry a human origin (original_user_id), or the
+// dispatched leader cannot wake any FURTHER agent (verifier / QA): the platform
+// only triggers an agent-to-agent handoff when the current task has human
+// origin, so without it the downstream run is saved-but-never-started and the
+// flow silently stalls one step short of the goal. resolveOrchestrationActor
+// finds that human by walking up the parent chain to the first member creator
+// (or an autopilot's member owner). Mirrors the autopilot-handoff-provenance fix.
+func (h *Handler) resolveOrchestrationActor(ctx context.Context, issue db.Issue) (pgtype.UUID, bool) {
+	cur := issue
+	for i := 0; i < 6; i++ { // bounded walk up the parent chain
+		if cur.CreatorType == "member" && cur.CreatorID.Valid {
+			return cur.CreatorID, true
+		}
+		if cur.OriginType.Valid && cur.OriginType.String == "autopilot" && cur.OriginID.Valid {
+			if ap, err := h.Queries.GetAutopilot(ctx, cur.OriginID); err == nil &&
+				ap.CreatedByType == "member" && ap.CreatedByID.Valid {
+				return ap.CreatedByID, true
+			}
+		}
+		if !cur.ParentIssueID.Valid {
+			break
+		}
+		parent, err := h.Queries.GetIssue(ctx, cur.ParentIssueID)
+		if err != nil {
+			break
+		}
+		cur = parent
+	}
+	return pgtype.UUID{}, false
+}
+
+// enqueueOrchestrationLeaderTask dispatches the squad leader for an orchestrated
+// issue WITH human-origin provenance, so the leader's own downstream handoffs
+// (verification, QA, full-delivery eval) actually trigger instead of being saved
+// but never started. If no human can be resolved, it still dispatches the leader
+// (which runs regardless) but posts one loud, deduped note — so the flow never
+// silently parks on a handoff that cannot fire.
+func (h *Handler) enqueueOrchestrationLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID) {
+	if actor, ok := h.resolveOrchestrationActor(ctx, issue); ok {
+		h.enqueueSquadLeaderTask(ctx, issue, triggerCommentID, "member", uuidToString(actor),
+			commentTaskDelegation{context: service.TaskDelegationContext{OriginalUserID: actor}})
+		return
+	}
+	h.enqueueSquadLeaderTask(ctx, issue, triggerCommentID, "system", "")
+	h.postOrchestrationComment(ctx, issue,
+		"I dispatched the squad leader, but this issue has no human owner I can attribute the run to "+
+			"(it was created by an agent with no person behind it). The leader's own hand-offs to a "+
+			"verifier or QA agent may not start automatically — a person may need to trigger the next step. "+
+			"Assign a human owner, or comment from a human account, to unblock automatic hand-offs.")
+}
+
 // requestPlanRefinement hands an under-specified plan to the SQUAD LEADER to
 // finish — never the human. The leader adds the missing acceptance criteria to
 // each named sub-issue (and fixes dependencies), then re-applies the
@@ -618,7 +671,7 @@ func (h *Handler) requestPlanRefinement(ctx context.Context, parent db.Issue, mi
 	if !ok {
 		return
 	}
-	h.enqueueSquadLeaderTask(ctx, parent, comment.ID, "system", "")
+	h.enqueueOrchestrationLeaderTask(ctx, parent, comment.ID)
 }
 
 // CEREBRO-PATCH(orchestration-decompose): FIR-2564 — a labeled, squad-assigned
@@ -660,7 +713,7 @@ func (h *Handler) requestPlanDecomposition(ctx context.Context, parent db.Issue)
 	if !ok {
 		return
 	}
-	h.enqueueSquadLeaderTask(ctx, parent, comment.ID, "system", "")
+	h.enqueueOrchestrationLeaderTask(ctx, parent, comment.ID)
 }
 
 // requestChildVerification dispatches an independent verification of a finished
@@ -903,7 +956,7 @@ func (h *Handler) maybeRequestFullDeliveryEval(ctx context.Context, parent db.Is
 	if !ok {
 		return
 	}
-	h.enqueueSquadLeaderTask(ctx, parent, comment.ID, "system", "")
+	h.enqueueOrchestrationLeaderTask(ctx, parent, comment.ID)
 }
 
 // ensureWorkspaceLabel returns the id of a workspace label with the given name,

@@ -203,7 +203,9 @@ func (w *OrchestrationWatchdog) redispatchChild(ctx context.Context, child db.Is
 		if !w.h.isSquadLeaderReady(ctx, child) {
 			return false
 		}
-		w.h.enqueueSquadLeaderTask(ctx, child, pgtype.UUID{}, "system", "")
+		// CEREBRO-PATCH(orchestration-handoff-provenance): FIR-2564 — carry human
+		// origin so the re-dispatched leader can still wake a verifier/QA agent.
+		w.h.enqueueOrchestrationLeaderTask(ctx, child, pgtype.UUID{})
 		return true
 	}
 	if child.AssigneeType.Valid && child.AssigneeType.String == "agent" && child.AssigneeID.Valid {
