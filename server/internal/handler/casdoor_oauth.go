@@ -261,13 +261,21 @@ func (h *Handler) CasdoorCallback(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("casdoor: user logged in", "user_id", uuidToString(user.ID), "email", userInfo.Email)
 
-	// Redirect to frontend. Use the origin derived from the configured
-	// redirect URI so the browser lands on the frontend (e.g. localhost:3000)
-	// rather than the backend port when Casdoor admin still points at 8080.
+	// Redirect to frontend. Strip the callback path from the configured
+	// redirect URI so the browser lands on the app root (including any
+	// basePath prefix such as /multica-web).
 	frontendOrigin := "/"
 	if cfg.CasdoorRedirectURI != "" {
 		if u, err := url.Parse(cfg.CasdoorRedirectURI); err == nil {
-			frontendOrigin = u.Scheme + "://" + u.Host + "/"
+			callbackPath := "/auth/casdoor/callback"
+			basePath := u.Path
+			if strings.HasSuffix(basePath, callbackPath) {
+				basePath = strings.TrimSuffix(basePath, callbackPath)
+			}
+			if basePath == "" {
+				basePath = "/"
+			}
+			frontendOrigin = u.Scheme + "://" + u.Host + basePath
 		}
 	}
 	http.Redirect(w, r, frontendOrigin, http.StatusFound)
