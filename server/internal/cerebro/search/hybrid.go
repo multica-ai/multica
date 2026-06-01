@@ -16,10 +16,10 @@ const rrfK = 60.0
 // pool sizes for each retrieval path. The defaults (100 each) are large
 // enough that small filter sets do not starve the fusion stage.
 type HybridInput struct {
-	Query             QueryInput
-	QueryVectorLit    string // pgvector textual literal e.g. "[0.1,0.2,...]"
-	FTSCandidatePool  int    // default 100
-	VecCandidatePool  int    // default 100
+	Query            QueryInput
+	QueryVectorLit   string // pgvector textual literal e.g. "[0.1,0.2,...]"
+	FTSCandidatePool int    // default 100
+	VecCandidatePool int    // default 100
 }
 
 // BuildHybrid returns the SQL that fuses Del 1's FTS ranking with pgvector
@@ -59,6 +59,10 @@ func BuildHybrid(h HybridInput) Query {
 	// Trigram predicates use the `<%` operator so the gin_trgm_ops indexes
 	// can serve them — same indexability reason as in Build (see query.go).
 	var ftsTextPreds []string
+	// Trigram-fuzzy on comment.content was OR'd into the EXISTS subquery
+	// too, but the OR-with-FTS forced a seq scan on every comment in the
+	// workspace. FIR-2664 dropped it: typo-tolerance stays on issue title +
+	// description, comment matches stay strict FTS.
 	ftsTextPreds = append(ftsTextPreds,
 		fmt.Sprintf("i.search_tsv @@ websearch_to_tsquery('simple', %s)", tsParam),
 		fmt.Sprintf("%s <%% lower(i.title)", trgmParam),
@@ -66,9 +70,8 @@ func BuildHybrid(h HybridInput) Query {
 		fmt.Sprintf(`EXISTS (
 			SELECT 1 FROM comment c
 			WHERE c.issue_id = i.id
-			  AND (c.search_tsv @@ websearch_to_tsquery('simple', %s)
-			       OR %s <%% lower(c.content))
-		)`, tsParam, trgmParam),
+			  AND c.search_tsv @@ websearch_to_tsquery('simple', %s)
+		)`, tsParam),
 	)
 
 	var numParam string
@@ -127,21 +130,19 @@ func BuildHybrid(h HybridInput) Query {
 		WHEN EXISTS (
 			SELECT 1 FROM comment c
 			WHERE c.issue_id = i.id
-			  AND (c.search_tsv @@ websearch_to_tsquery('simple', %s)
-			       OR %s <%% lower(c.content))
+			  AND c.search_tsv @@ websearch_to_tsquery('simple', %s)
 		) THEN 'comment'
 		ELSE 'semantic'
-	END`, tsParam, trgmParam, trgmParam, tsParam, trgmParam)
+	END`, tsParam, trgmParam, trgmParam, tsParam)
 
 	matchedCommentExpr := fmt.Sprintf(`COALESCE((
 		SELECT c.content FROM comment c
 		WHERE c.issue_id = i.id
-		  AND (c.search_tsv @@ websearch_to_tsquery('simple', %s)
-		       OR %s <%% lower(c.content))
+		  AND c.search_tsv @@ websearch_to_tsquery('simple', %s)
 		ORDER BY ts_rank(c.search_tsv, websearch_to_tsquery('simple', %s)) DESC NULLS LAST,
 		         c.created_at DESC
 		LIMIT 1
-	), '')`, tsParam, trgmParam, tsParam)
+	), '')`, tsParam, tsParam)
 
 	limitParam := next(in.Limit)
 	offsetParam := next(in.Offset)

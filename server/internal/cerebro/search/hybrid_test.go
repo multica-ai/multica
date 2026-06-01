@@ -83,11 +83,15 @@ func TestBuildHybrid_UsesIndexableTrigramOperator(t *testing.T) {
 	for _, want := range []string{
 		"<% lower(i.title)",
 		"<% lower(coalesce(i.description, ''))",
-		"<% lower(c.content)",
 	} {
 		if !strings.Contains(q.SQL, want) {
 			t.Errorf("BuildHybrid SQL missing indexable trigram fragment %q", want)
 		}
+	}
+	// FIR-2664 (round 2): comment.content trigram fuzzy is OUT — see the
+	// note in query_test.go's TestBuild_FreeText for the EXPLAIN evidence.
+	if strings.Contains(q.SQL, "<% lower(c.content)") {
+		t.Error("BuildHybrid must not include comment.content trigram fuzzy — it forces seq scan (FIR-2664)")
 	}
 }
 

@@ -177,13 +177,17 @@ func Build(in QueryInput) Query {
 		// but is opaque to the planner and forces a seq scan.
 		textPreds = append(textPreds, fmt.Sprintf("%s <%% lower(i.title)", trgmParam))
 		textPreds = append(textPreds, fmt.Sprintf("%s <%% lower(coalesce(i.description, ''))", trgmParam))
-		// FTS or trigram hit on a comment of this issue
+		// FTS-only hit on a comment of this issue. Trigram-fuzzy on
+		// comment.content used to be OR'd here too, but the OR-with-FTS
+		// prevented BitmapOr on `idx_comment_content_trgm` and forced a seq
+		// scan of every comment in the workspace — FIR-2664's `deploymeny`
+		// EXPLAIN clocked it at 1414ms / 19751 rows. Typo-tolerance lives
+		// on issue title + description; comment matches stay strict FTS.
 		textPreds = append(textPreds, fmt.Sprintf(`EXISTS (
 			SELECT 1 FROM comment c
 			WHERE c.issue_id = i.id
-			  AND (c.search_tsv @@ websearch_to_tsquery('simple', %s)
-			       OR %s <%% lower(c.content))
-		)`, tsParam, trgmParam))
+			  AND c.search_tsv @@ websearch_to_tsquery('simple', %s)
+		)`, tsParam))
 	}
 
 	// Optional identifier-number match.
@@ -257,15 +261,16 @@ func Build(in QueryInput) Query {
 	// show a comment snippet next to title-only matches.
 	matchedCommentExpr := "''"
 	if hasText {
+		// Mirrors the EXISTS in textPreds — FTS-only to keep the per-row
+		// subquery cheap. See FIR-2664 note above for the trigram drop.
 		matchedCommentExpr = fmt.Sprintf(`COALESCE((
 			SELECT c.content FROM comment c
 			WHERE c.issue_id = i.id
-			  AND (c.search_tsv @@ websearch_to_tsquery('simple', %s)
-			       OR %s <%% lower(c.content))
+			  AND c.search_tsv @@ websearch_to_tsquery('simple', %s)
 			ORDER BY ts_rank(c.search_tsv, websearch_to_tsquery('simple', %s)) DESC NULLS LAST,
 			         c.created_at DESC
 			LIMIT 1
-		), '')`, tsParam, trgmParam, tsParam)
+		), '')`, tsParam, tsParam)
 	}
 
 	// --- pagination ---

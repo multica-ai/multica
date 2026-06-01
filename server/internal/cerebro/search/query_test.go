@@ -23,8 +23,12 @@ func TestBuild_FreeText(t *testing.T) {
 	if !strings.Contains(q.SQL, "<% lower(coalesce(i.description, ''))") {
 		t.Error("SQL should use the `<%` operator for the description trigram fallback (FIR-2664)")
 	}
-	if !strings.Contains(q.SQL, "<% lower(c.content)") {
-		t.Error("SQL should use the `<%` operator for the comment trigram fallback (FIR-2664)")
+	// FIR-2664 (round 2): comment.content fuzzy was the dominant cost on
+	// prod — Seq Scan on comment table because OR-with-FTS prevented
+	// BitmapOr on idx_comment_content_trgm. Comment match is now strict FTS;
+	// typo-tolerance lives on title + description only. Lock that in.
+	if strings.Contains(q.SQL, "<% lower(c.content)") {
+		t.Error("comment content trigram must NOT appear — it forces seq scan on comment (FIR-2664)")
 	}
 	if !strings.Contains(q.SQL, "search_tsv @@") {
 		t.Error("SQL should match against the generated tsvector column")
