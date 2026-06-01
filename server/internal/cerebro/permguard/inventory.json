@@ -2029,6 +2029,30 @@
       "gate": "via:PUT /api/projects/{id}/"
     },
     {
+      "id": "sprint assign",
+      "gate": "via:PUT /api/issues/{id}"
+    },
+    {
+      "id": "sprint create",
+      "gate": "via:POST /api/projects/ + PUT /api/projects/{id}/parent"
+    },
+    {
+      "id": "sprint delete",
+      "gate": "via:DELETE /api/projects/{id}/"
+    },
+    {
+      "id": "sprint get",
+      "exempt": "read-only - wraps GET /api/projects/{id}"
+    },
+    {
+      "id": "sprint list",
+      "exempt": "read-only - wraps GET /api/projects/tree"
+    },
+    {
+      "id": "sprint update",
+      "gate": "via:PUT /api/projects/{id}/"
+    },
+    {
       "id": "repo check",
       "exempt": "read-only — pre-flight capability query, wraps daemon_auth-gated POST /api/daemon/workspaces/{workspaceId}/repo/check"
     },
