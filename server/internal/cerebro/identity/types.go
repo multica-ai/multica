@@ -25,6 +25,10 @@ type AuthSettings struct {
 	WorkspaceID                string   `json:"workspace_id"`
 	GoogleSignupDomains        []string `json:"google_signup_domains"`
 	DefaultRole                string   `json:"default_role"`
+	// DefaultGroupID is the cerebro group every new workspace member is placed
+	// into (auto-signup, invitation accept, manual member add). Null when the
+	// workspace has not configured a fallback yet.
+	DefaultGroupID             *string  `json:"default_group_id"`
 	GoogleWorkspaceSyncEnabled bool     `json:"google_workspace_sync_enabled"`
 	UpdatedAt                  string   `json:"updated_at"`
 	UpdatedByUserID            *string  `json:"updated_by_user_id"`
@@ -35,6 +39,9 @@ type AuthSettings struct {
 type UpdateAuthSettingsRequest struct {
 	GoogleSignupDomains []string `json:"google_signup_domains"`
 	DefaultRole         string   `json:"default_role"`
+	// DefaultGroupID sets which group new members are auto-assigned to. When
+	// non-nil, the pointer value must be a group UUID in this workspace.
+	DefaultGroupID *string `json:"default_group_id"`
 	// GoogleWorkspaceSyncEnabled turns the FIR-2596 BigQuery group sync on or
 	// off for this workspace. Default false: the sync worker never touches a
 	// workspace until an owner/admin opts in here.

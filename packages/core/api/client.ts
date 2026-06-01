@@ -1208,6 +1208,8 @@ export class ApiClient {
     payload: {
       google_signup_domains: string[];
       default_role: string;
+      // CEREBRO-PATCH(cerebro-identity-default-group): FIR-2732 fallback group for new members
+      default_group_id: string | null;
       // CEREBRO-PATCH(cerebro-identity-sync-toggle): FIR-2596 per-workspace Google group sync flag
       google_workspace_sync_enabled: boolean;
     },

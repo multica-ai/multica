@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { Plus, RefreshCw, ShieldCheck, Users, X } from "lucide-react";
 
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -31,6 +31,7 @@ import { Switch } from "@multica/ui/components/ui/switch";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 
 import {
+  authSettingsGroupListOptions,
   authSettingsOptions,
   useUpdateAuthSettings,
 } from "../queries";
@@ -66,10 +67,14 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
     currentMember?.role === "owner" || currentMember?.role === "admin";
 
   const { data: settings, isPending } = useQuery(authSettingsOptions(wsId));
+  const { data: groups = [], isPending: groupsPending } = useQuery(
+    authSettingsGroupListOptions(wsId),
+  );
   const updateMutation = useUpdateAuthSettings();
 
   const [domains, setDomains] = useState<string[]>([]);
   const [defaultRole, setDefaultRole] = useState<CerebroAuthSettingsRole>("member");
+  const [defaultGroupId, setDefaultGroupId] = useState<string | null>(null);
   const [syncEnabled, setSyncEnabled] = useState(false);
   const [draftDomain, setDraftDomain] = useState("");
 
@@ -83,6 +88,7 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
       ? (settings.default_role as CerebroAuthSettingsRole)
       : "member";
     setDefaultRole(role);
+    setDefaultGroupId(settings.default_group_id ?? null);
     setSyncEnabled(settings.google_workspace_sync_enabled === true);
   }, [settings]);
 
@@ -96,9 +102,10 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
     return (
       saved !== draft ||
       settings.default_role !== defaultRole ||
+      (settings.default_group_id ?? null) !== defaultGroupId ||
       (settings.google_workspace_sync_enabled === true) !== syncEnabled
     );
-  }, [settings, domains, defaultRole, syncEnabled]);
+  }, [settings, domains, defaultRole, defaultGroupId, syncEnabled]);
 
   if (!enabled) return null;
 
@@ -127,6 +134,7 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
         workspaceId: wsId,
         google_signup_domains: domains,
         default_role: defaultRole,
+        default_group_id: defaultGroupId,
         google_workspace_sync_enabled: syncEnabled,
       });
       toast.success("Auth-indstillinger gemt.");
@@ -223,6 +231,47 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
       </section>
 
       <section className="rounded-md border border-border p-4 space-y-3">
+        <h4 className="text-sm font-medium flex items-center gap-2">
+          <Users className="h-4 w-4" />
+          Standard-gruppe for nye brugere
+        </h4>
+        <p className="text-xs text-muted-foreground">
+          Alle nye medlemmer (auto-signup, invitation og manuel tilføjelse)
+          placeres automatisk i denne gruppe, så de har adgang fra dag ét.
+        </p>
+        {groupsPending ? (
+          <div className="text-xs text-muted-foreground">Henter grupper…</div>
+        ) : groups.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">
+            Opret mindst én gruppe under Groups-fanen først.
+          </p>
+        ) : (
+          <Select
+            value={defaultGroupId ?? ""}
+            onValueChange={(v) => setDefaultGroupId(v || null)}
+            disabled={!canEdit || isPending}
+          >
+            <SelectTrigger className="w-full max-w-md h-9 text-sm">
+              <SelectValue placeholder="Vælg standard-gruppe">
+                {() =>
+                  defaultGroupId
+                    ? (groups.find((g) => g.id === defaultGroupId)?.name ?? defaultGroupId)
+                    : null
+                }
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {groups.map((group) => (
+                <SelectItem key={group.id} value={group.id}>
+                  {group.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </section>
+
+      <section className="rounded-md border border-border p-4 space-y-3">
         <h4 className="text-sm font-medium">Default-rolle</h4>
         <p className="text-xs text-muted-foreground">
           Rolle som auto-oprettede medlemmer får. Du kan altid ændre rollen
@@ -280,7 +329,11 @@ export function AuthPermissionsTab(_props: AuthPermissionsTabProps = {}) {
           <Button
             type="button"
             onClick={handleSave}
-            disabled={!dirty || updateMutation.isPending}
+            disabled={
+              !dirty ||
+              updateMutation.isPending ||
+              (groups.length > 0 && !defaultGroupId)
+            }
           >
             {updateMutation.isPending ? "Gemmer…" : "Gem ændringer"}
           </Button>
