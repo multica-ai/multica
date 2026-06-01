@@ -1471,3 +1471,140 @@ func TestGetRemoteDefaultBranchAmbiguousOriginReturnsEmpty(t *testing.T) {
 		t.Fatalf("getRemoteDefaultBranch = %q, want \"\" (ambiguous origin/* must not guess)", got)
 	}
 }
+
+func TestCreateSharedClone_BasicCheckout(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateSharedClone(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "Lambda",
+		TaskID:      "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+	})
+	if err != nil {
+		t.Fatalf("CreateSharedClone failed: %v", err)
+	}
+
+	if _, err := os.Stat(result.Path); err != nil {
+		t.Fatalf("clone path missing: %v", err)
+	}
+
+	// The clone must be a regular repo (`.git` is a directory), not a
+	// worktree (`.git` is a file pointing at the bare's worktrees dir).
+	// This is the whole point of CreateSharedClone — worktree-add would
+	// write into the bare, which is RO in the real controller flow.
+	gitInfo, err := os.Stat(filepath.Join(result.Path, ".git"))
+	if err != nil {
+		t.Fatalf("stat .git: %v", err)
+	}
+	if !gitInfo.IsDir() {
+		t.Errorf(".git must be a directory (regular clone), got file (worktree)")
+	}
+
+	if !strings.HasPrefix(result.BranchName, "agent/lambda/") {
+		t.Errorf("expected branch agent/lambda/...; got %q", result.BranchName)
+	}
+
+	// Origin URL was reset to the original repo URL so the gitconfig CM's
+	// insteadOf / pushInsteadOf rules still apply on future operations.
+	// If we left origin = file:///cache..., push would target the RO PVC.
+	cmd := exec.Command("git", "-C", result.Path, "remote", "get-url", "origin")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("get-url origin: %v", err)
+	}
+	gotOrigin := strings.TrimSpace(string(out))
+	if gotOrigin != sourceRepo {
+		t.Errorf("origin url = %q, want %q (the original repo URL, not the file:// cache path)", gotOrigin, sourceRepo)
+	}
+
+	// The bare must stay untouched. `git worktree add` would have created
+	// refs/heads/agent/* in the bare; the shared-clone path must not.
+	// This is the actual property that lets us mount the bare RO.
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	cmd = exec.Command("git", "-C", barePath, "for-each-ref", "--format=%(refname)", "refs/heads/agent/")
+	out, _ = cmd.Output()
+	if got := strings.TrimSpace(string(out)); got != "" {
+		t.Errorf("bare must remain pristine in shared-clone mode; found agent refs: %s", got)
+	}
+}
+
+func TestCreateSharedClone_MissingFromCache(t *testing.T) {
+	t.Parallel()
+	cache := New(t.TempDir(), testLogger())
+	_, err := cache.CreateSharedClone(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     "https://github.com/nope/missing.git",
+		WorkDir:     t.TempDir(),
+		AgentName:   "x",
+		TaskID:      "t",
+	})
+	if err == nil {
+		t.Fatal("expected error for repo not in cache, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found in cache") {
+		t.Errorf("expected 'not found in cache' in error; got %v", err)
+	}
+}
+
+func TestCreateSharedClone_RefreshesReusedWorkdir(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+
+	// First task on this issue: fresh clone.
+	first, err := cache.CreateSharedClone(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "Lambda",
+		TaskID:      "11111111-1111-1111-1111-111111111111",
+	})
+	if err != nil {
+		t.Fatalf("first checkout: %v", err)
+	}
+
+	// Simulate the agent leaving uncommitted changes in the workdir, then
+	// a follow-up task lands on the same issue PVC.
+	if err := os.WriteFile(filepath.Join(first.Path, "stray.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatalf("write stray: %v", err)
+	}
+
+	second, err := cache.CreateSharedClone(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "Lambda",
+		TaskID:      "22222222-2222-2222-2222-222222222222",
+	})
+	if err != nil {
+		t.Fatalf("second checkout: %v", err)
+	}
+
+	if second.Path != first.Path {
+		t.Errorf("reused workdir should use same path: first=%q second=%q", first.Path, second.Path)
+	}
+	if second.BranchName == first.BranchName {
+		t.Errorf("second task must get a different branch name; both got %q", second.BranchName)
+	}
+	// `git clean -fd` should have removed the stray file.
+	if _, err := os.Stat(filepath.Join(second.Path, "stray.txt")); err == nil {
+		t.Errorf("stray file from prior task was not cleaned")
+	}
+}

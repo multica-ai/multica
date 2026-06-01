@@ -75,6 +75,10 @@ type repoCacheBackend interface {
 	Lookup(workspaceID, url string) string
 	Sync(workspaceID string, repos []repocache.RepoInfo) error
 	CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error)
+	// CreateSharedClone is the read-only-cache equivalent of CreateWorktree,
+	// used by the controller-mode single-task runner (Plan F.1) where the
+	// bare lives on a PVC mounted RO and `git worktree add` would fail.
+	CreateSharedClone(params repocache.WorktreeParams) (*repocache.WorktreeResult, error)
 }
 
 // Daemon is the local agent runtime that polls for and executes tasks.

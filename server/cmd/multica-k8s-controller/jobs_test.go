@@ -280,6 +280,22 @@ func TestDispatchJob_WithRepoCache(t *testing.T) {
 	if gcMount == nil || gcMount.MountPath != "/home/multica/.gitconfig" || gcMount.SubPath != ".gitconfig" {
 		t.Errorf("gitconfig mount wrong: %+v", gcMount)
 	}
+
+	// MULTICA_REPOCACHE_DIR tells the worker daemon that the bare cache
+	// is mounted RO and externally managed, so it should swap in the
+	// controller-mode /repo/checkout handler (Cache.CreateSharedClone).
+	var sawEnv bool
+	for _, e := range runtask.Env {
+		if e.Name == "MULTICA_REPOCACHE_DIR" {
+			sawEnv = true
+			if e.Value != "/repos" {
+				t.Errorf("MULTICA_REPOCACHE_DIR = %q, want /repos", e.Value)
+			}
+		}
+	}
+	if !sawEnv {
+		t.Errorf("MULTICA_REPOCACHE_DIR env missing — worker daemon won't enter controller mode")
+	}
 }
 
 // TestDispatchJob_RepoCacheDisabled is the explicit "fallback to direct origin
@@ -314,6 +330,11 @@ func TestDispatchJob_RepoCacheDisabled(t *testing.T) {
 	}
 	if hasVolume(pod.Volumes, "gitconfig") {
 		t.Errorf("gitconfig volume present despite disabled")
+	}
+	for _, e := range pod.Containers[0].Env {
+		if e.Name == "MULTICA_REPOCACHE_DIR" {
+			t.Errorf("MULTICA_REPOCACHE_DIR leaked despite repocache disabled — worker daemon would enter controller mode without a cache mount")
+		}
 	}
 }
 

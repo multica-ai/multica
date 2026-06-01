@@ -175,6 +175,74 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 	}
 }
 
+// controllerRepoCheckoutHandler is the controller-mode (Plan F.1) variant of
+// repoCheckoutHandler. It's registered by SingleTaskRunner when the runner
+// detects MULTICA_REPOCACHE_DIR — meaning the bare clones are externally
+// managed by the multica-repocache Deployment and mounted ReadOnly into
+// this worker pod.
+//
+// Differences from the daemon-mode handler:
+//   - No ensureRepoReady: there's no per-daemon workspaceState, no refresh
+//     loop, and no point checking workspaceRepoAllowed because the gitconfig
+//     mounted into this pod already constrains which URLs can be rewritten
+//     into the cache. The controller validates the workspace's repo list
+//     when generating the gitconfig.
+//   - Uses Cache.CreateSharedClone instead of CreateWorktree: a `git worktree
+//     add` against a RO bare fails because git writes worktree metadata into
+//     the bare. The shared-clone path uses alternates + a writable .git in
+//     the workdir.
+//   - Co-authored-by defaults to true. The workspace setting lives on the
+//     server and the worker daemon has no synced view of it; controller-mode
+//     workers haven't historically read it. A future patch can plumb this
+//     through the task payload if needed.
+func (d *Daemon) controllerRepoCheckoutHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req repoCheckoutRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.URL == "" {
+			http.Error(w, "url is required", http.StatusBadRequest)
+			return
+		}
+		if req.WorkspaceID == "" {
+			http.Error(w, "workspace_id is required", http.StatusBadRequest)
+			return
+		}
+		if req.WorkDir == "" {
+			http.Error(w, "workdir is required", http.StatusBadRequest)
+			return
+		}
+		if d.repoCache == nil {
+			http.Error(w, "repo cache not initialized", http.StatusInternalServerError)
+			return
+		}
+
+		result, err := d.repoCache.CreateSharedClone(repocache.WorktreeParams{
+			WorkspaceID:         req.WorkspaceID,
+			RepoURL:             req.URL,
+			WorkDir:             req.WorkDir,
+			Ref:                 req.Ref,
+			AgentName:           req.AgentName,
+			TaskID:              req.TaskID,
+			CoAuthoredByEnabled: true,
+		})
+		if err != nil {
+			d.logger.Error("controller repo checkout failed", "url", req.URL, "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	}
+}
+
 // serveHealth runs the health HTTP server on the given listener.
 // Blocks until ctx is cancelled.
 func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {

@@ -216,6 +216,10 @@ func (c *blockingLookupRepoCache) CreateWorktree(repocache.WorktreeParams) (*rep
 	return nil, nil
 }
 
+func (c *blockingLookupRepoCache) CreateSharedClone(repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return nil, nil
+}
+
 func (c *blockingLookupRepoCache) waitForLookup(t *testing.T) {
 	t.Helper()
 	select {
