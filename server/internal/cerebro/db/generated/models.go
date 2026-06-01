@@ -1196,6 +1196,7 @@ type SkillChangeRequest struct {
 	ReviewComment   string             `json:"review_comment"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	WorkSessionID   pgtype.UUID        `json:"work_session_id"`
 }
 
 type SkillFile struct {

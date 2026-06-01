@@ -24,11 +24,13 @@ WHERE id = $1
 FOR UPDATE;
 
 -- name: CreateSkillChangeRequest :one
+-- CEREBRO-PATCH(skill-change-request-session): FIR-2627 — work_session_id links
+-- the change request back to the agent run that proposed it.
 INSERT INTO skill_change_request (
     skill_id, title, description, base_version, proposed_version,
-    proposed_content, proposed_files, proposed_by
+    proposed_content, proposed_files, proposed_by, work_session_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: ReviewSkillChangeRequest :one
