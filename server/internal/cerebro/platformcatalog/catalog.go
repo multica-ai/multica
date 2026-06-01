@@ -591,6 +591,23 @@ var catalog = []Capability{
 			"DELETE /api/cerebro/projects/{projectId}/status-model/",
 		},
 	},
+	{
+		Key:         "manage_sprints",
+		Title:       "Manage sprints",
+		Category:    CategoryProjects,
+		Description: "Create, edit, or delete sprints, sprint settings, and recurring tasks for a project, and assign issues to a sprint.",
+		Ops: []string{
+			"POST /api/cerebro/projects/{projectID}/sprints/",
+			"PUT /api/cerebro/sprints/{sprintID}/",
+			"DELETE /api/cerebro/sprints/{sprintID}/",
+			"PUT /api/cerebro/issues/{issueID}/sprint/",
+			"PUT /api/cerebro/projects/{projectID}/sprint-settings/",
+			"DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
+			"POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/",
+			"PUT /api/cerebro/sprint-recurring-tasks/{id}/",
+			"DELETE /api/cerebro/sprint-recurring-tasks/{id}/",
+		},
+	},
 
 	// --- Workspace (medlemmer, settings, integrationer) ----------------------
 	{
