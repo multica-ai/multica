@@ -15,6 +15,12 @@ type AppConfig struct {
 	AllowSignup    bool   `json:"allow_signup"`
 	GoogleClientID string `json:"google_client_id,omitempty"`
 
+	// Casdoor SSO config. Returned at runtime so the frontend can render the
+	// "Sign in with SSO" button without requiring a rebuild when operators
+	// enable/disable Casdoor.
+	CasdoorEnabled bool   `json:"casdoor_enabled"`
+	CasdoorLoginUrl string `json:"casdoor_login_url,omitempty"`
+
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
 	// into the frontend bundle via NEXT_PUBLIC_*) means self-hosted
@@ -31,8 +37,10 @@ type AppConfig struct {
 // to anonymous callers — never user- or tenant-scoped data.
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
-		AllowSignup:    os.Getenv("ALLOW_SIGNUP") != "false",
-		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"),
+		AllowSignup:      os.Getenv("ALLOW_SIGNUP") != "false",
+		GoogleClientID:   os.Getenv("GOOGLE_CLIENT_ID"),
+		CasdoorEnabled:   os.Getenv("NEXT_PUBLIC_CASDOOR_ENABLED") == "true",
+		CasdoorLoginUrl:  os.Getenv("NEXT_PUBLIC_CASDOOR_LOGIN_URL"),
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()
