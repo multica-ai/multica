@@ -215,6 +215,15 @@ func DispatchJob(ctx context.Context, k kubernetes.Interface, namespace string, 
 			corev1.VolumeMount{Name: "repocache", MountPath: rc.MountPath, ReadOnly: true},
 			corev1.VolumeMount{Name: "gitconfig", MountPath: "/home/multica/.gitconfig", SubPath: ".gitconfig", ReadOnly: true},
 		)
+		// Signal to the worker daemon that the repocache is mounted
+		// externally and read-only. The daemon switches /repo/checkout to
+		// a controller-mode handler that uses `git clone --shared` from
+		// the bare clone (no fetch, no `git worktree add` since the bare
+		// is RO) and then resets origin to the original URL so the
+		// gitconfig's insteadOf / pushInsteadOf rules still apply.
+		runtaskEnv = append(runtaskEnv,
+			corev1.EnvVar{Name: "MULTICA_REPOCACHE_DIR", Value: rc.MountPath},
+		)
 	}
 
 	if cb.Enabled {

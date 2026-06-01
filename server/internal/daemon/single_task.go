@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"time"
@@ -41,7 +42,15 @@ func NewSingleTaskRunner(cfg Config, logger *slog.Logger) (*SingleTaskRunner, er
 		return nil, fmt.Errorf("WorkspacesRoot is required")
 	}
 
+	// In controller mode (Plan F.1), the multica-repocache Deployment manages
+	// the bare clones on a shared PVC mounted at MULTICA_REPOCACHE_DIR (RO).
+	// Pointing the cache root at that mount lets repoCache.Lookup find the
+	// same bare clones the controller already references in the per-task
+	// gitconfig CM — no separate per-worker cache, no duplicate clones.
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
+	if v := os.Getenv("MULTICA_REPOCACHE_DIR"); v != "" {
+		cacheRoot = v
+	}
 	client := NewClient(cfg.ServerBaseURL)
 	client.SetVersion(cfg.CLIVersion)
 
@@ -80,7 +89,15 @@ func NewSingleTaskRunner(cfg Config, logger *slog.Logger) (*SingleTaskRunner, er
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(time.Now()))
-	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
+	// In controller mode, the repocache is mounted RO and managed externally.
+	// `git worktree add` would write into the bare and fail, so swap in a
+	// handler that does `git clone --shared` instead. Daemon mode keeps the
+	// original handler because that flow owns the bare and uses worktrees.
+	if os.Getenv("MULTICA_REPOCACHE_DIR") != "" {
+		mux.HandleFunc("/repo/checkout", d.controllerRepoCheckoutHandler())
+	} else {
+		mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
+	}
 	srv := &http.Server{Handler: mux}
 	go func() {
 		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
