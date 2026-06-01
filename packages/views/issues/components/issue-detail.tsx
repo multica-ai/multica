@@ -957,7 +957,13 @@ export function IssueDetail({
   const linkedCommentId = router.searchParams.get("comment")?.trim() || null;
   // Sidebar "jump to comment" sets this to switch the timeline from Virtuoso
   // to flat rendering (so the target element is guaranteed in the DOM).
+  // It must NOT feed into useIssueTimeline's aroundCommentId — the data is
+  // already loaded; we only need to flip rendering mode and scroll.
   const [sidebarRequestedId, setSidebarRequestedId] = useState<string | undefined>(undefined);
+  // aroundCommentId: only external sources (inbox highlight or URL deep-link)
+  // that may require fetching a different page of the timeline.
+  const aroundCommentId = (highlightCommentId ?? linkedCommentId) ?? undefined;
+  // requestedCommentId: drives flat rendering + scrollIntoView (includes sidebar).
   const requestedCommentId = (highlightCommentId ?? sidebarRequestedId ?? linkedCommentId) ?? undefined;
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
@@ -1323,7 +1329,7 @@ export function IssueDetail({
     timeline, loading: timelineLoading,
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
-  } = useIssueTimeline(resolvedId, user?.id, requestedCommentId);
+  } = useIssueTimeline(resolvedId, user?.id, aroundCommentId);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
