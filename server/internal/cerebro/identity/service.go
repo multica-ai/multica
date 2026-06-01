@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/identitysync"
 	"github.com/multica-ai/multica/server/internal/handler"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -17,8 +18,13 @@ import (
 // Service holds the auto-provisioning logic + settings CRUD. Concrete type
 // behind the upstream IdentityProvisionerInvoker seam.
 type Service struct {
-	cerebro  *cerebrodb.Queries
-	upstream *db.Queries
+	cerebro     *cerebrodb.Queries
+	upstream    *db.Queries
+	groupSyncer workspaceGroupSyncer
+}
+
+type workspaceGroupSyncer interface {
+	SyncWorkspaceNow(ctx context.Context, workspaceID pgtype.UUID) (identitysync.SyncResult, error)
 }
 
 // New constructs a Service. Both query handles must be non-nil — the cerebro
@@ -26,6 +32,10 @@ type Service struct {
 // member row.
 func New(cerebro *cerebrodb.Queries, upstream *db.Queries) *Service {
 	return &Service{cerebro: cerebro, upstream: upstream}
+}
+
+func NewWithGroupSyncer(cerebro *cerebrodb.Queries, upstream *db.Queries, groupSyncer workspaceGroupSyncer) *Service {
+	return &Service{cerebro: cerebro, upstream: upstream, groupSyncer: groupSyncer}
 }
 
 // Compile-time assertion that *Service satisfies the upstream seam.
@@ -118,6 +128,7 @@ func (s *Service) ProvisionMembershipForNewUser(
 	}
 	out := handler.ProvisionMembershipResult{}
 	var firstErr error
+	syncWorkspaces := make([]pgtype.UUID, 0, len(matches))
 	for _, m := range matches {
 		role := m.DefaultRole
 		if _, ok := allowedRoles[role]; !ok {
@@ -140,6 +151,9 @@ func (s *Service) ProvisionMembershipForNewUser(
 			continue
 		}
 		out.WorkspaceIDs = append(out.WorkspaceIDs, m.WorkspaceID)
+		if m.GoogleWorkspaceSyncEnabled {
+			syncWorkspaces = append(syncWorkspaces, m.WorkspaceID)
+		}
 
 		// Place the user in the workspace's configured default group so they
 		// land with working permissions from the first login. Best-effort and
@@ -175,6 +189,13 @@ func (s *Service) ProvisionMembershipForNewUser(
 	if len(out.WorkspaceIDs) > 0 {
 		if _, err := s.upstream.MarkUserOnboarded(ctx, user.ID); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("mark user onboarded %s: %w", uuidString(user.ID), err)
+		}
+	}
+	if s.groupSyncer != nil {
+		for _, workspaceID := range syncWorkspaces {
+			if _, err := s.groupSyncer.SyncWorkspaceNow(ctx, workspaceID); err != nil && firstErr == nil {
+				firstErr = fmt.Errorf("sync Google Workspace groups for workspace %s: %w", uuidString(workspaceID), err)
+			}
 		}
 	}
 	return out, firstErr
