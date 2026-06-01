@@ -653,6 +653,21 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n")
 	}
 
+	// CEREBRO-PATCH(skill-governance-norm): FIR-2655 — make "propose, don't
+	// directly edit" the norm for skills an agent does not own, and point at the
+	// MCP governance tools that back the flow.
+	b.WriteString("## Skill Governance — propose, don't edit\n\n")
+	b.WriteString("Skills are owned and versioned. Each skill has an owner and a set of approvers, and a change request workflow that keeps its history auditable.\n\n")
+	b.WriteString("**The norm: if you want to change a skill you do not own, PROPOSE the change — do not edit it in place.** Open a versioned change request; the owner/approvers review it; on approval it is applied atomically and snapshotted as a new version. Editing a skill you don't own directly (e.g. `multica skill update`) bypasses review and is the wrong default.\n\n")
+	b.WriteString("When your MCP server exposes the skill governance tools, use them:\n\n")
+	b.WriteString("- `skill_list` / `skill_get` — find the skill and read its current content + `current_version` before proposing.\n")
+	b.WriteString("- `skill_propose_change` — submit a change request: a title, a description of WHAT changed and WHY, a `proposed_version` (semver strictly greater than current), and the edited content. Nothing changes until an approver approves.\n")
+	b.WriteString("- `skill_list_change_requests` — list proposals: without a skill, the pending ones awaiting your review; with a skill, its full history.\n")
+	b.WriteString("- `skill_review_change_request` — owners/approvers approve or reject a proposal (approve applies it and snapshots a new version).\n")
+	b.WriteString("- `skill_list_versions` / `skill_list_forks` — inspect a skill's version history and forks.\n")
+	b.WriteString("- `skill_fork` — branch a skill into a new owned copy when you want a different direction rather than improving the original in place.\n\n")
+	b.WriteString("Without MCP, drive the same flow from the skill's page in the Multica web UI. Either way: propose and let the owner review — that is how skill changes are meant to land.\n\n")
+
 	b.WriteString("## Mentions\n\n")
 	b.WriteString("Mention links are **side-effecting actions**, not just formatting:\n\n")
 	b.WriteString("- `[MUL-123](mention://issue/<issue-id>)` — clickable link to an issue (safe, no side effect)\n")

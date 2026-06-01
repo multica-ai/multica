@@ -1403,6 +1403,38 @@
       "gate": "via:POST /api/groups/{id}/capabilities"
     },
     {
+      "id": "skill_fork",
+      "gate": "via:POST /api/skills/{id}/forks"
+    },
+    {
+      "id": "skill_get",
+      "exempt": "read-only — GET /api/skills/{id} (+ /files) carry their own auth, no mutation"
+    },
+    {
+      "id": "skill_list",
+      "exempt": "read-only — GET /api/skills, no mutation"
+    },
+    {
+      "id": "skill_list_change_requests",
+      "exempt": "read-only — GET /api/skills/change-requests (+ per-skill), no mutation"
+    },
+    {
+      "id": "skill_list_forks",
+      "exempt": "read-only — GET /api/skills/{id}/forks, no mutation"
+    },
+    {
+      "id": "skill_list_versions",
+      "exempt": "read-only — GET /api/skills/{id}/versions, no mutation"
+    },
+    {
+      "id": "skill_propose_change",
+      "gate": "via:POST /api/skills/{id}/change-requests"
+    },
+    {
+      "id": "skill_review_change_request",
+      "gate": "via:POST /api/skills/change-requests/{crId}/review"
+    },
+    {
       "id": "update_artifact",
       "gate": "via:PUT /api/artifacts/{id}"
     },

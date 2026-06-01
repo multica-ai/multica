@@ -105,6 +105,8 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	registerGrantTools(srv, client, workspaceID, actorID, actorType)
 	// CEREBRO-PATCH(mcp-credentials-tools): credential governance MCP tools (JEH-1199 + JEH-1217 live-wire).
 	registerCredentialTools(srv, client, workspaceID)
+	// CEREBRO-PATCH(mcp-skill-governance-tools): FIR-2655 skill ownership/change-request/version/fork MCP tools.
+	registerSkillGovernanceTools(srv, client)
 
 	// -----------------------------------------------------------------------
 	// list_issues
