@@ -409,3 +409,96 @@ The run with the skill passes if the agent:
 ### Why this belongs in a skill
 
 Discovery is a conditional workflow. It should not live in the always-on brief because it only matters when the user needs a skill but does not know which one. It also needs product-specific guidance: discovery is not installation; Multica import remains the final source of truth.
+
+
+## `multica-skill-authoring`
+
+`multica-skill-authoring` exists because creating or updating a skill is not just writing Markdown. A Multica skill is durable workspace behavior: it has a trigger contract, reusable procedure, verification path, and optional supporting files that future agents will load on demand.
+
+### Purpose
+
+The skill teaches the agent how to decide whether a requested method deserves to become a skill, then create or update the workspace skill with the current Multica CLI. It also marks the future `--bundle-dir` workflow as the preferred path once that CLI support lands.
+
+### Platform contract
+
+The current workspace authoring surface is:
+
+```bash
+multica skill create --name <name> --description <description> --content <path-or-text> --output json
+multica skill update <skill-id> --content <path-or-text> --output json
+multica skill files upsert <skill-id> --path <relative-path> --content <path-or-text>
+multica skill files delete <skill-id> <file-id>
+multica skill get <skill-id> --output json
+```
+
+The source of truth is `server/cmd/multica/cmd_skill.go`, which exposes skill create/update/get and file upsert/delete, backed by `server/internal/handler/skill.go`.
+
+The intended future bundle workflow is:
+
+```bash
+multica skill create --bundle-dir <dir> --output json
+multica skill update <skill-id> --bundle-dir <dir> --output json
+```
+
+Until that lands, the skill must teach the current workaround: create/update main content, upsert supporting files one by one, then verify by reading the skill back.
+
+### Without this skill
+
+A prompt like this exercises the failure:
+
+```text
+Turn this workflow into a reusable Multica skill, include the reference template, and update it later if the process changes.
+```
+
+Without the skill, the agent may:
+
+- write a one-off note instead of a workspace skill;
+- create a vague skill whose `description` does not tell agents when to load it;
+- omit verification and assume the create/update succeeded;
+- put secrets, PR numbers, issue numbers, run timestamps, or temporary session notes into durable skill content;
+- paste large examples into `SKILL.md` instead of supporting files;
+- ignore the current CLI limitation and claim `--bundle-dir` already exists.
+
+### Failure mode
+
+The failure is durable. A bad skill pollutes future agent runs: it triggers at the wrong time, teaches stale facts, leaks sensitive or temporary data, or hides reusable assets in an oversized `SKILL.md` body. Unlike a bad issue comment, a bad skill keeps being rediscovered and reused.
+
+### With this skill
+
+With the skill, the agent must:
+
+1. Confirm the workflow is reusable and not one-run progress.
+2. Write a focused `SKILL.md` with frontmatter, a clear "Use when ..." description, steps, failure modes, verification, and source of truth.
+3. Keep secrets, PR numbers, issue numbers, and temporary session notes out of the skill.
+4. Put large reusable references, templates, scripts, or assets into supporting files.
+5. Use the current CLI create/update/files workaround.
+6. Run `multica skill get <skill-id> --output json` after writing and verify the returned content/files.
+7. Prefer `--bundle-dir` once that follow-up CLI support exists.
+
+### Test scenario
+
+Use this prompt for an A/B evaluation:
+
+```text
+Create a Multica skill from this repeated code review workflow. Include a reusable checklist and a reference template. Do not include this PR number or today's run notes.
+```
+
+The run without the skill fails if the agent:
+
+- writes only a comment or local file and does not create/update a workspace skill;
+- includes temporary PR/session details in the skill;
+- produces a description that cannot act as a trigger condition;
+- forgets supporting files or verification;
+- claims a future bundle-dir command exists before it is implemented.
+
+The run with the skill passes if the agent:
+
+- creates or updates through `multica skill create` / `multica skill update`;
+- uses `skill files upsert` for reusable supporting files;
+- verifies by reading the skill back;
+- excludes secrets and temporary facts;
+- clearly marks `--bundle-dir` as the future preferred path, not the current command.
+
+### Why this belongs in a skill
+
+Authoring is a conditional workflow. It should not live in the always-on brief, but it is important enough to be platform guidance because bad skills become durable agent behavior. The skill keeps the prompt lean while giving agents a concrete method when the user asks to create or maintain skills.

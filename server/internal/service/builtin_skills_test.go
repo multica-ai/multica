@@ -255,6 +255,43 @@ func TestSkillDiscoverySkillCoversFindVerifyImportContracts(t *testing.T) {
 	}
 }
 
+func TestSkillAuthoringSkillCoversCreateUpdateMaintainContracts(t *testing.T) {
+	skill, ok := findSkill(t, "multica-skill-authoring")
+	if !ok {
+		return
+	}
+	fm, body, _ := splitFrontmatter(skill.Content)
+
+	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
+		t.Errorf("user-invocable = %q, want false (skill authoring guidance triggers from context)", got)
+	}
+	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
+		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
+	}
+
+	mustContain := []string{
+		"multica skill create --name <name> --description <description> --content <path-or-text> --output json",
+		"multica skill update <skill-id> --content <path-or-text> --output json",
+		"multica skill files upsert <skill-id> --path <relative-path> --content <path-or-text>",
+		"multica skill files delete <skill-id> <file-id>",
+		"multica skill get <skill-id> --output json",
+		"SKILL.md",
+		"frontmatter",
+		"supporting files",
+		"secrets",
+		"PR numbers",
+		"--bundle-dir",
+		"current workaround",
+		"source of truth",
+		"verify by reading it back",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("skill-authoring skill missing %q", want)
+		}
+	}
+}
+
 func findSkill(t *testing.T, name string) (AgentSkillData, bool) {
 	t.Helper()
 	for _, s := range loadBuiltinSkills() {
