@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -327,6 +328,37 @@ func TestOrchestrateDecomposesEmptyParent(t *testing.T) {
 	}
 	if !strings.Contains(content, "squad leader") {
 		t.Errorf("explanation should address the squad leader, got: %s", content)
+	}
+}
+
+// TestOrchestrationLeaderDispatchCarriesHumanOrigin: the engine's leader dispatch
+// must stamp the issue's human owner as original_user_id, so the leader can wake a
+// downstream verifier/QA agent — without it the handoff is saved but never started
+// and the flow stalls one step short.
+func TestOrchestrationLeaderDispatchCarriesHumanOrigin(t *testing.T) {
+	fx := newOrchestrationFixture(t)
+	ctx := context.Background()
+
+	// CEREBRO-PATCH(orchestration-handoff-provenance): FIR-2564 — resolver finds the
+	// human creator, and the dispatched leader task carries it as original_user_id.
+	actor, ok := testHandler.resolveOrchestrationActor(ctx, fx.parent)
+	if !ok || uuidToString(actor) != testUserID {
+		t.Fatalf("resolveOrchestrationActor = %s ok=%v; want %s", uuidToString(actor), ok, testUserID)
+	}
+
+	testHandler.enqueueOrchestrationLeaderTask(ctx, fx.parent, pgtype.UUID{})
+
+	var originalUserID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT original_user_id::text FROM agent_task_queue
+		   WHERE issue_id = $1 AND agent_id = $2
+		   ORDER BY created_at DESC LIMIT 1`,
+		uuidToString(fx.parent.ID), fx.leaderID,
+	).Scan(&originalUserID); err != nil {
+		t.Fatalf("load leader task: %v", err)
+	}
+	if originalUserID != testUserID {
+		t.Errorf("leader task original_user_id = %s, want %s", originalUserID, testUserID)
 	}
 }
 
