@@ -86,10 +86,12 @@ func (h *Handler) ProcessPullRequestEvent(ctx context.Context, evt NormalizedPRE
 			continue
 		}
 		if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
-			IssueID:       issue.ID,
-			PullRequestID: pr.ID,
-			LinkedByType:  strToText("system"),
-			LinkedByID:    pgtype.UUID{},
+			IssueID:             issue.ID,
+			PullRequestID:       pr.ID,
+			CloseIntent:         false,
+			LinkedByType:        strToText("system"),
+			LinkedByID:          pgtype.UUID{},
+			PreserveCloseIntent: false,
 		}); err != nil {
 			slog.Warn("pr: link failed", "err", err, "provider", evt.Provider)
 			continue
@@ -99,16 +101,12 @@ func (h *Handler) ProcessPullRequestEvent(ctx context.Context, evt NormalizedPRE
 		// Auto-done logic: only if enabled and the event is terminal.
 		if autoDoneEnabled && (evt.State == "merged" || evt.State == "closed") &&
 			issue.Status != "done" && issue.Status != "cancelled" {
-			counts, err := h.Queries.GetSiblingPullRequestStateCountsForIssue(ctx, db.GetSiblingPullRequestStateCountsForIssueParams{
-				IssueID: issue.ID,
-				ID:      pr.ID,
-			})
+			counts, err := h.Queries.GetIssuePullRequestCloseAggregate(ctx, issue.ID)
 			if err != nil {
-				slog.Warn("pr: count sibling states failed", "err", err, "issue_id", uuidToString(issue.ID))
+				slog.Warn("pr: count linked pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
 				continue
 			}
-			anyMerged := evt.State == "merged" || counts.MergedCount > 0
-			if counts.OpenCount == 0 && anyMerged {
+			if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
 				h.advanceIssueToDone(ctx, issue, workspaceID)
 			}
 		}

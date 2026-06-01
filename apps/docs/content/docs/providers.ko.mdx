@@ -1,0 +1,127 @@
+---
+title: AI 코딩 도구 대조표
+description: Multica는 12개의 AI 코딩 도구를 지원합니다. 모두 동일한 인터페이스를 구현하지만, 기능 세부사항은 크게 다릅니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica는 **12개의 AI 코딩 도구**를 기본 지원합니다. 이들은 모두 동일한 인터페이스(대기열 적재, 디스패치, 실행, 결과 반환)를 구현하므로, 같은 Multica 보드에서 어느 것이든 구동할 수 있습니다. **하지만 기능 세부사항은 크게 다릅니다**: 세션 재개가 실제로 동작하는지, MCP를 지원하는지, 스킬 파일이 어디에 위치하는지, 모델을 어떻게 선택하는지. 이 페이지가 전체 대조표입니다.
+
+에이전트를 생성할 때 도구를 고르는 방법은 [에이전트 생성 및 구성](/agents-create)을 참고하세요.
+
+## 기능 대조 매트릭스
+
+| 도구 | 공급사 | 세션 재개 | MCP | 스킬 주입 경로 | 모델 선택 |
+|---|---|---|---|---|---|
+| **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | Antigravity CLI 자체 내부에서 관리 |
+| **Claude Code** | Anthropic | ✅ | **✅ (실제로 사용하는 유일한 도구)** | `.claude/skills/` | 정적 + flag |
+| **Codex** | OpenAI | ⚠️ 코드는 존재하지만 도달 불가 | ❌ | `$CODEX_HOME/skills/` | 정적 |
+| **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 정적 (계정 권한으로 결정) |
+| **Cursor** | Anysphere | ⚠️ 코드는 존재하지만 사용 불가 | ❌ | `.cursor/skills/` | 동적 탐색 |
+| **Gemini** | Google | ❌ | ❌ | `.agent_context/skills/` | 정적 |
+| **Hermes** | Nous Research | ✅ | ❌ | `.agent_context/skills/` (fallback) | 동적 탐색 |
+| **Kimi** | Moonshot | ✅ | ❌ | `.kimi/skills/` | 동적 탐색 |
+| **Kiro CLI** | Amazon | ✅ | ❌ | `.kiro/skills/` | 동적 탐색 |
+| **OpenCode** | SST | ✅ | ❌ | `.opencode/skills/` | 동적 탐색 |
+| **OpenClaw** | 오픈소스 | ✅ | ❌ | `.agent_context/skills/` (fallback) | 에이전트에 바인딩되어 작업마다 전환 불가 |
+| **Pi** | Inflection AI | ✅ (세션이 파일 경로) | ❌ | `.pi/skills/` | 동적 탐색 |
+
+## 각 도구의 용도
+
+### Antigravity
+
+Google에서 제공합니다. CLI 바이너리 이름은 `agy`입니다. Google의 Antigravity 서비스와 연동되며 Gemini 기반의 기본 모델을 함께 제공합니다. **세션 재개가 동작합니다** — `--conversation <id>`를 통해서이며, stdout이 구조화된 이벤트 스트림이 아니라 일반 텍스트이기 때문에 데몬이 CLI의 로그 파일에서 conversation UUID를 캡처합니다. `--model` flag는 없습니다 — 모델 선택은 Antigravity CLI 설정 안에 있으므로, Multica는 이 제공자에 대해 에이전트별 모델 선택기를 비활성화합니다. 스킬은 `.agents/skills/`에 들어갑니다(CLI가 Gemini CLI의 워크스페이스 스킬 레이아웃을 그대로 따릅니다 — [Antigravity 마이그레이션 문서](https://antigravity.google/docs/gcli-migration) 참고).
+
+### Claude Code
+
+Anthropic에서 제공합니다. **신규 사용자에게 첫 번째 선택지**이며, 가장 완전한 기능 세트를 갖추고 있습니다: 세션 재개가 실제로 동작하고, **11개 중 MCP 구성을 진정으로 읽는 유일한 도구**이며, `--max-turns`와 `--append-system-prompt` 같은 세부 조정 flag를 지원합니다. Anthropic API 키가 필요합니다.
+
+### Codex
+
+OpenAI에서 제공합니다. JSON-RPC 2.0을 사용하고, 상태 유지 능력이 더 강하며, 더 세밀한 승인 메커니즘(`exec_command` 및 `patch_apply`에 대한 수동 승인)을 갖추고 있습니다. **세션 재개 코드는 존재하지만 현재 도달할 수 없습니다** — 재개가 필요하다면 Claude Code나 ACP 계열 중 하나를 선택하세요.
+
+### Copilot
+
+GitHub에서 제공합니다. 모델 라우팅은 GitHub 계정 권한을 거칩니다 — 도구가 직접 모델을 선택하지 않고, GitHub가 어떤 모델을 제공할지 결정합니다. `.github/skills/`에 스킬을 두는 것은 GitHub CLI의 기본 탐색 메커니즘입니다.
+
+### Cursor
+
+Anysphere에서 제공하며, Cursor 에디터에 대응하는 CLI입니다. **세션 재개 코드는 존재하지만 실제로는 동작하지 않습니다** — Cursor CLI 이벤트 스트림이 세션 ID를 반환하지 않으므로, 전달하는 재개 값은 항상 무효입니다. 재개가 필요하다면 다른 것을 선택하세요.
+
+### Gemini
+
+Google에서 제공하며, Gemini 2.5 및 3 시리즈를 지원합니다. **세션 재개도 MCP도 지원하지 않습니다** — 긴 컨텍스트 기억이 필요 없는 일회성 작업에 적합합니다.
+
+### Hermes
+
+Nous Research에서 제공합니다. ACP 프로토콜을 사용합니다(Kimi와 전송 계층을 공유합니다). 세션 재개가 동작합니다. 하지만 **스킬 주입 경로는 전용 경로가 아니라 범용 fallback**(`.agent_context/skills/`)입니다 — Hermes CLI 자체가 이 경로를 읽지 않으면 스킬이 적용되지 않을 수 있습니다. 테스트로 확인하세요.
+
+### Kimi
+
+Moonshot에서 제공하며, 중국 시장을 겨냥합니다. Hermes와 ACP 프로토콜을 공유하지만, 스킬 경로 `.kimi/skills/`는 Kimi CLI의 기본 탐색 메커니즘으로 Hermes의 fallback과는 다릅니다.
+
+### Kiro CLI
+
+Amazon에서 제공합니다. `kiro-cli acp`를 통해 stdio 위에서 ACP를 사용합니다. 세션 재개는 ACP `session/load`로 동작하고, 모델 선택은 `session/set_model`로 동작하며, 스킬은 프로젝트 수준 기본 탐색을 위해 `.kiro/skills/`로 복사됩니다.
+
+### OpenCode
+
+SST에서 제공하는 오픈소스입니다. 사용 가능한 모델을 동적으로 탐색합니다(CLI의 구성 파일을 스캔). 세션 재개가 동작합니다. **자신의 모델 카탈로그를 커스터마이징하고 싶은, 만지작거리기 좋아하는 사용자에게 적합합니다.**
+
+### OpenClaw
+
+오픈소스 프로젝트이며, CLI 에이전트 오케스트레이터입니다. **모델이 에이전트 계층에 바인딩됩니다**(`openclaw agents add --model`) — 작업마다 재정의할 수 없습니다. 구성이 엄격하게 통제됩니다: 사용자는 `--model`이나 `--system-prompt`를 전달할 수 없으며, 에이전트 등록 구성이 결정합니다.
+
+### Pi
+
+Inflection AI에서 제공하며, 미니멀합니다. **세션 재개 방식이 특이합니다** — 세션 ID가 문자열 ID가 아니라 디스크상의 파일 경로(`~/.pi/...`)입니다. 다른 도구에서는 재개 id가 CLI가 반환하는 문자열이지만, Pi에서는 재개 id가 세션 파일 그 자체입니다.
+
+## 세션 재개: 실제로 지원하는 도구
+
+세션 재개 메커니즘은 [작업](/tasks#can-a-task-continue-from-the-previous-context)에서 다룹니다. 다음은 도구별 **정확한 현재 상태**입니다:
+
+| 상태 | 도구 | 의미 |
+|---|---|---|
+| ✅ 실제로 동작 | Antigravity, Claude Code, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi | 재개 id를 전달하면 이전 컨텍스트에서 이어집니다 |
+| ⚠️ 코드는 존재하지만 도달 불가 | Codex, Cursor | 코드에 재개 경로가 있지만 실제로는 도달하지 않습니다(Codex는 조용히 폴백하고, Cursor는 세션 id를 반환하지 않습니다) — **미지원으로 간주하세요** |
+| ❌ 없음 | Gemini | CLI에 재개 메커니즘이 없습니다 |
+
+**의사결정을 위해**: 워크플로에서 에이전트가 작업 간에 컨텍스트를 유지해야 한다면(실패 재시도, 수동 재실행, 대화형 반복), ✅ 행에 있는 도구만 선택하세요.
+
+## MCP 구성: Claude Code만 실제로 읽음
+
+**12개 도구 중 `mcp_config`를 실제로 소비하는 것은 Claude Code뿐입니다**. 나머지 11개는 이 필드를 받아들이지만 **완전히 무시합니다** — 오류도, 경고도 없으며, 구성이 그저 효과를 내지 못합니다.
+
+<Callout type="warning">
+에이전트 구성에서 `mcp_config`를 설정했더라도 Claude Code 외의 도구를 선택하면, MCP 서버가 해당 에이전트에 **아무런 효과**도 미치지 않습니다. 현재 MCP 연동은 Claude Code만 지원합니다.
+</Callout>
+
+## 스킬 파일이 위치하는 곳
+
+각 도구는 **자체** 스킬 탐색 경로를 사용합니다. 작업이 실행되기 전에 Multica 데몬이 워크스페이스의 스킬 파일을 해당 경로로 복사합니다:
+
+| 도구 | 경로 | 기본 탐색 여부 |
+|---|---|---|
+| Claude Code | `.claude/skills/` | ✅ 기본 |
+| Codex | `$CODEX_HOME/skills/` | ✅ 기본 |
+| Copilot | `.github/skills/` | ✅ 기본 |
+| Cursor | `.cursor/skills/` | ✅ 기본 |
+| Kimi | `.kimi/skills/` | ✅ 기본 |
+| Kiro CLI | `.kiro/skills/` | ✅ 기본 |
+| OpenCode | `.opencode/skills/` | ✅ 기본 |
+| Pi | `.pi/skills/` | ✅ 기본 |
+| Antigravity | `.agents/skills/` | ✅ 기본 (Gemini CLI의 워크스페이스 레이아웃을 따름 — [Antigravity 문서](https://antigravity.google/docs/gcli-migration) 참고) |
+| Gemini | `.agent_context/skills/` | ⚠️ 범용 fallback |
+| Hermes | `.agent_context/skills/` | ⚠️ 범용 fallback |
+| OpenClaw | `.agent_context/skills/` | ⚠️ 범용 fallback |
+
+fallback 경로를 쓰는 도구가 실제로 이 디렉터리를 읽는지는 해당 도구 자체의 문서에 따라 달라지며 — 보장되지 않습니다. Gemini / Hermes / OpenClaw에서 스킬이 적용되지 않는다면, 먼저 이 점을 확인하세요.
+
+스킬의 생성과 사용은 [스킬](/skills)을 참고하세요.
+
+## 다음
+
+- [에이전트 생성 및 구성](/agents-create) — 에이전트에 사용할 도구를 선택하세요
+- [작업](/tasks) — 작업 생명주기와 세션 재개 메커니즘
+- [데몬과 런타임](/daemon-runtimes) — 도구가 실행되는 곳과 Multica에 연결되는 방식
+- [에이전트 런타임 설치](/install-agent-runtime) — 지원되는 12개 도구 각각의 설치 및 인증

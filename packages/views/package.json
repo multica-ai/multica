@@ -29,6 +29,7 @@
     "./members": "./members/index.ts",
     "./inbox": "./inbox/index.ts",
     "./runtimes": "./runtimes/index.ts",
+    "./billing": "./billing/index.ts",
     "./dashboard": "./dashboard/index.ts",
     "./agent-dashboard": "./agent-dashboard/index.ts",
     "./squads": "./squads/index.ts",
@@ -66,6 +67,7 @@
     "@tiptap/extension-document": "^3.22.1",
     "@tiptap/extension-image": "^3.22.1",
     "@tiptap/extension-link": "^3.22.1",
+    "@tiptap/extension-list": "^3.22.1",
     "@tiptap/extension-mention": "^3.22.1",
     "@tiptap/extension-paragraph": "^3.22.1",
     "@tiptap/extension-placeholder": "^3.22.1",
@@ -96,6 +98,7 @@
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "catalog:",
+    "rehype-sanitize": "^6.0.0",
     "sonner": "^2.0.7"
   },
   "peerDependencies": {
@@ -109,6 +112,7 @@
     "zustand": "catalog:"
   },
   "devDependencies": {
+    "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
@@ -118,7 +122,6 @@
     "@vitejs/plugin-react": "catalog:",
     "eslint-plugin-i18next": "catalog:",
     "jsdom": "catalog:",
-    "rehype-sanitize": "^6.0.0",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

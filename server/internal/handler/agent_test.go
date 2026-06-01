@@ -782,6 +782,134 @@ func TestUpdateAgentEnv_PreservesSentinelValues(t *testing.T) {
 	}
 }
 
+// TestAgentEnv_MemberOwnerAllowed verifies that a workspace member (non-admin)
+// who is the agent's owner can GET and PUT the agent's env vars (OPE-1927).
+func TestAgentEnv_MemberOwnerAllowed(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	suffix := uuid.NewString()
+
+	// Create a separate user with "member" role.
+	memberEmail := "env-member-owner-" + suffix + "@multica.test"
+	var memberUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Env Member Owner', $1)
+		RETURNING id
+	`, memberEmail).Scan(&memberUserID); err != nil {
+		t.Fatalf("create member user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, memberUserID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, memberUserID); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+
+	// Create an agent owned by the member user.
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4,
+			'', '{"SECRET":"s3cr3t"}'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, "env-member-owner-agent-"+suffix, handlerTestRuntimeID(t), memberUserID).Scan(&agentID); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	// GET /api/agents/{id}/env as the member-owner should succeed.
+	req := newRequest("GET", "/api/agents/"+agentID+"/env", nil)
+	req.Header.Set("X-User-ID", memberUserID)
+	req = withURLParam(req, "id", agentID)
+	w := httptest.NewRecorder()
+	testHandler.GetAgentEnv(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET env as member-owner: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp AgentEnvResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.CustomEnv["SECRET"] != "s3cr3t" {
+		t.Errorf("expected SECRET=s3cr3t, got %v", resp.CustomEnv)
+	}
+
+	// PUT /api/agents/{id}/env as the member-owner should succeed.
+	req = newRequest("PUT", "/api/agents/"+agentID+"/env", map[string]any{
+		"custom_env": map[string]string{"SECRET": "rotated", "NEW_KEY": "v"},
+	})
+	req.Header.Set("X-User-ID", memberUserID)
+	req = withURLParam(req, "id", agentID)
+	w = httptest.NewRecorder()
+	testHandler.UpdateAgentEnv(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT env as member-owner: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestAgentEnv_NonOwnerMemberRejected verifies that a workspace member who
+// is NOT the agent's owner gets 403 (OPE-1927).
+func TestAgentEnv_NonOwnerMemberRejected(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	suffix := uuid.NewString()
+
+	// Create a member who does NOT own the agent.
+	otherEmail := "env-non-owner-" + suffix + "@multica.test"
+	var otherUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Env Non Owner', $1)
+		RETURNING id
+	`, otherEmail).Scan(&otherUserID); err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, otherUserID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, otherUserID); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+
+	// Agent owned by testUserID (workspace owner), not by otherUserID.
+	agentID := createHandlerTestAgent(t, "env-non-owner-agent-"+suffix, nil)
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"K":"v"}' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("seed env: %v", err)
+	}
+
+	// GET as non-owner member should be rejected.
+	req := newRequest("GET", "/api/agents/"+agentID+"/env", nil)
+	req.Header.Set("X-User-ID", otherUserID)
+	req = withURLParam(req, "id", agentID)
+	w := httptest.NewRecorder()
+	testHandler.GetAgentEnv(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("GET env as non-owner member: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestUpdateAgent_RejectsCustomEnvInBody(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -996,6 +1124,143 @@ func TestUpdateAgent_KeepsMcpConfigForMemberActor(t *testing.T) {
 	}
 	if resp.McpConfigRedacted {
 		t.Errorf("UpdateAgent response should NOT mark mcp_config redacted for member actor")
+	}
+}
+
+// TestUpdateAgent_PreservesSkillsInResponse is the regression for #3459:
+// updating only description/instructions used to return "skills": []
+// because the handler skipped the skill reload that GetAgent does. The
+// DB row was always preserved; the response just lied about it, which
+// scared users into manually re-running `agent skills set` and risked
+// scripted clients writing the empty set back. We assert (a) the
+// response carries the bound skills, (b) the DB row is unchanged, and
+// (c) GetAgent reports the same shape so the two endpoints don't drift.
+func TestUpdateAgent_PreservesSkillsInResponse(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID := createHandlerTestAgent(t, "update-preserves-skills-agent", nil)
+	skillA := insertHandlerTestSkill(t, "update-preserve-a", "alpha body")
+	skillB := insertHandlerTestSkill(t, "update-preserve-b", "beta body")
+	for _, sid := range []string{skillA, skillB} {
+		if _, err := testPool.Exec(ctx,
+			`INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`,
+			agentID, sid,
+		); err != nil {
+			t.Fatalf("attach skill %s: %v", sid, err)
+		}
+	}
+
+	req := newRequest(http.MethodPut, "/api/agents/"+agentID, map[string]any{
+		"description": "metadata-only update",
+	})
+	req = withURLParam(req, "id", agentID)
+	w := httptest.NewRecorder()
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	gotIDs := map[string]bool{}
+	for _, s := range resp.Skills {
+		gotIDs[s.ID] = true
+	}
+	for _, want := range []string{skillA, skillB} {
+		if !gotIDs[want] {
+			t.Errorf("UpdateAgent response missing skill %s; got %+v", want, resp.Skills)
+		}
+	}
+
+	// Defence in depth: the junction table must be untouched too. Without
+	// this check a future regression that DOES wipe agent_skill rows but
+	// reloads them into the response would silently pass.
+	var rowCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM agent_skill WHERE agent_id = $1`,
+		agentID,
+	).Scan(&rowCount); err != nil {
+		t.Fatalf("count agent_skill: %v", err)
+	}
+	if rowCount != 2 {
+		t.Errorf("agent_skill row count: expected 2, got %d", rowCount)
+	}
+
+	// GetAgent must agree with UpdateAgent on the skill list — otherwise
+	// CLI users will see one shape from the mutation and a different one
+	// on the very next read.
+	getReq := newRequest(http.MethodGet, "/api/agents/"+agentID, nil)
+	getReq = withURLParam(getReq, "id", agentID)
+	getW := httptest.NewRecorder()
+	testHandler.GetAgent(getW, getReq)
+	if getW.Code != http.StatusOK {
+		t.Fatalf("GetAgent: expected 200, got %d: %s", getW.Code, getW.Body.String())
+	}
+	var getResp AgentResponse
+	if err := json.NewDecoder(getW.Body).Decode(&getResp); err != nil {
+		t.Fatalf("decode GetAgent: %v", err)
+	}
+	if len(getResp.Skills) != len(resp.Skills) {
+		t.Errorf("GetAgent skill count %d != UpdateAgent skill count %d",
+			len(getResp.Skills), len(resp.Skills))
+	}
+}
+
+// TestArchiveRestoreAgent_PreservesSkillsInResponse is the sister
+// regression for #3459: ArchiveAgent / RestoreAgent share the same
+// agentToResponse path as UpdateAgent and previously also returned
+// "skills": [] regardless of what was in the junction table. The
+// archive/restore broadcasts are the only place where mobile clients
+// learn about state flips, so an empty skills array there would propagate
+// to every connected client until the next refetch.
+func TestArchiveRestoreAgent_PreservesSkillsInResponse(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID := createHandlerTestAgent(t, "archive-preserves-skills-agent", nil)
+	skillID := insertHandlerTestSkill(t, "archive-preserve", "body")
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`,
+		agentID, skillID,
+	); err != nil {
+		t.Fatalf("attach skill: %v", err)
+	}
+
+	archiveReq := newRequest(http.MethodPost, "/api/agents/"+agentID+"/archive", nil)
+	archiveReq = withURLParam(archiveReq, "id", agentID)
+	archiveW := httptest.NewRecorder()
+	testHandler.ArchiveAgent(archiveW, archiveReq)
+	if archiveW.Code != http.StatusOK {
+		t.Fatalf("ArchiveAgent: expected 200, got %d: %s", archiveW.Code, archiveW.Body.String())
+	}
+	var archived AgentResponse
+	if err := json.NewDecoder(archiveW.Body).Decode(&archived); err != nil {
+		t.Fatalf("decode archive: %v", err)
+	}
+	if len(archived.Skills) != 1 || archived.Skills[0].ID != skillID {
+		t.Errorf("ArchiveAgent: expected 1 skill %s, got %+v", skillID, archived.Skills)
+	}
+
+	restoreReq := newRequest(http.MethodPost, "/api/agents/"+agentID+"/restore", nil)
+	restoreReq = withURLParam(restoreReq, "id", agentID)
+	restoreW := httptest.NewRecorder()
+	testHandler.RestoreAgent(restoreW, restoreReq)
+	if restoreW.Code != http.StatusOK {
+		t.Fatalf("RestoreAgent: expected 200, got %d: %s", restoreW.Code, restoreW.Body.String())
+	}
+	var restored AgentResponse
+	if err := json.NewDecoder(restoreW.Body).Decode(&restored); err != nil {
+		t.Fatalf("decode restore: %v", err)
+	}
+	if len(restored.Skills) != 1 || restored.Skills[0].ID != skillID {
+		t.Errorf("RestoreAgent: expected 1 skill %s, got %+v", skillID, restored.Skills)
 	}
 }
 

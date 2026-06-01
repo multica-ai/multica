@@ -58,6 +58,8 @@
     "my_agents": "我的智能体",
     "others": "其他",
     "no_agents": "暂无智能体",
+    "search_placeholder": "搜索智能体...",
+    "no_match": "无匹配结果",
     "active_group": "进行中",
     "archived_group_other": "{{count}} 条已归档"
   },
@@ -98,6 +100,7 @@
       "offline": "离线",
       "reconnecting": "重连中",
       "queued": "排队中",
+      "waiting_local_directory": "等待本地目录释放",
       "starting_up": "启动中",
       "thinking": "思考中",
       "typing": "输入中"

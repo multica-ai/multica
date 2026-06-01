@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import {
   useQuery,
   useQueryClient,
@@ -70,10 +70,9 @@ export function useIssueTimeline(
 
   const query = useQuery(issueTimelineOptions(issueId, aroundCommentId));
   const { data, isLoading: loading } = query;
+  const [submitting, setSubmitting] = useState(false);
 
   const timeline = useMemo<TimelineEntry[]>(() => data ?? [], [data]);
-
-  const [submitting, setSubmitting] = useState(false);
 
   // Stable mutation handles. TanStack v5 returns a fresh result wrapper from
   // useMutation per render, but the inner mutateAsync / mutate functions are
@@ -270,7 +269,7 @@ export function useIssueTimeline(
       if (!content.trim()) return;
       if (submitting) throw new Error("Comment submission already in progress");
       if (!userId) {
-        toast.error("Failed to send comment");
+        toast.error(t(($) => $.comment.login_required));
         throw new Error("Cannot submit comment without an authenticated user");
       }
       setSubmitting(true);
@@ -282,18 +281,16 @@ export function useIssueTimeline(
             ? err.message
             : t(($) => $.comment.send_failed),
         );
-      } finally {
-        setSubmitting(false);
       }
     },
-    [userId, submitting, createComment, t],
+    [userId, createComment, t],
   );
 
   const submitReply = useCallback(
     async (parentId: string, content: string, attachmentIds?: string[]) => {
       if (!content.trim()) return;
       if (!userId) {
-        toast.error("Failed to send reply");
+        toast.error(t(($) => $.comment.login_required));
         throw new Error("Cannot submit reply without an authenticated user");
       }
       try {
@@ -315,7 +312,7 @@ export function useIssueTimeline(
   );
 
   const editComment = useCallback(
-    async (commentId: string, content: string, attachmentIds?: string[]) => {
+    async (commentId: string, content: string, attachmentIds: string[]) => {
       try {
         await updateComment({ commentId, content, attachmentIds });
       } catch (err) {
@@ -441,7 +438,6 @@ export function useIssueTimeline(
   return {
     timeline: optimisticTimeline,
     loading,
-    submitting,
     submitComment,
     submitReply,
     editComment,

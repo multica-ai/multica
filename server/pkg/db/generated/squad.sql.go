@@ -386,7 +386,7 @@ LEFT JOIN agent_runtime ar
 LEFT JOIN agent_task_queue atq
        ON sm.member_type = 'agent'
       AND atq.agent_id = sm.member_id
-      AND atq.status IN ('dispatched', 'running')
+      AND atq.status IN ('dispatched', 'running', 'waiting_local_directory')
 LEFT JOIN issue i
        ON i.id = atq.issue_id
 WHERE sm.squad_id = $1

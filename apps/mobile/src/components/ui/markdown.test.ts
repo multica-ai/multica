@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getIssueMentionId,
+  parseMobileIssueLink,
   parseFileCardLine,
   parseMobileFileCardHtml,
   preprocessMobileMarkdown,
@@ -75,6 +76,41 @@ describe("mobile markdown preprocessing", () => {
   it("extracts issue mention ids for renderer navigation", () => {
     expect(getIssueMentionId("mention://issue/issue-1")).toBe("issue-1");
     expect(getIssueMentionId("mention://member/user-1")).toBeNull();
+  });
+
+  it("parses trusted Multica issue links for native navigation", () => {
+    expect(
+      parseMobileIssueLink(
+        "https://multica.wujieai.com/openharness/issues/OPE-744",
+        ["https://multica.wujieai.com"],
+      ),
+    ).toEqual({
+      workspaceSlug: "openharness",
+      issueId: "OPE-744",
+      commentId: undefined,
+    });
+  });
+
+  it("parses trusted issue links with comment deep-link params", () => {
+    expect(
+      parseMobileIssueLink(
+        "https://multica.wujieai.com/openharness/issues/OPE-744?comment=27a21862-583c-4680-a736-ae29f97f5e38",
+        ["https://multica.wujieai.com"],
+      ),
+    ).toEqual({
+      workspaceSlug: "openharness",
+      issueId: "OPE-744",
+      commentId: "27a21862-583c-4680-a736-ae29f97f5e38",
+    });
+  });
+
+  it.each([
+    "https://example.com/openharness/issues/OPE-744",
+    "https://multica.wujieai.com/issues/OPE-744",
+    "https://multica.wujieai.com/openharness/issues/OPE-744/properties",
+    "multica://openharness/issues/OPE-744",
+  ])("does not parse untrusted or unsupported issue links: %s", (href) => {
+    expect(parseMobileIssueLink(href, ["https://multica.wujieai.com"])).toBeNull();
   });
 
   it("leaves file syntax inside fenced and inline code unchanged", () => {

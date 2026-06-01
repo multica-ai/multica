@@ -199,6 +199,14 @@ Every Go handler in `server/internal/handler/` follows these rules. The conventi
 
 When adding a `Queries.Delete*` or `Queries.Update*` call, ask: "Where did this UUID come from?" If the answer is "raw user input that hasn't been validated," route it through `parseUUIDOrBadRequest` or a loader first.
 
+### Dependency Declaration Rule
+
+Every workspace (`apps/` and `packages/` directories) must explicitly declare all directly imported external packages in its own `package.json`. Relying on pnpm hoist to resolve undeclared imports (phantom deps) is prohibited — it causes production build failures when pnpm creates peer-dep variants.
+
+- Use `"pkg": "catalog:"` to reference the shared version from `pnpm-workspace.yaml`.
+- CI enforces this via `eslint-plugin-import-x/no-extraneous-dependencies`.
+- Exception: `apps/mobile/` uses pinned versions (not `catalog:`) for packages tied to its own React/Expo version.
+
 ### Package Boundary Rules
 
 These are hard constraints. Violating them breaks the cross-platform architecture:
@@ -361,6 +369,30 @@ test("example", async ({ page }) => {
 
 - Use atomic commits grouped by logical intent.
 - Conventional format: `feat(scope)`, `fix(scope)`, `refactor(scope)`, `docs`, `test(scope)`, `chore(scope)`.
+
+## Fork Feature Development & Test Case Convention
+
+Every Fork feature MUST be tracked in `testcase/case/` before or alongside merge.
+
+### When you develop a new Fork feature (or close an OPE-* issue)
+
+1.  Create or update a file at `testcase/case/tc-NNN-<description>.md`.
+2.  Keep numbering sequential — pick the next available NNN.
+3.  Required content:
+    - Associated OPE-* issue IDs and Gitee PR numbers (`!NNN`).
+    - One-line feature summary.
+    - List of affected source files/directories.
+    - Commit SHA list (maintainer can fill later if cherry-picking isn't done yet).
+
+### Why
+
+- This file is the **canonical Fork feature list** used by the Fork-submission autopilot.
+- Missing testcase entries cause the autopilot to overlook features during cherry-pick.
+- The baseline-sync autopilot (Part B) audits `testcase/` against `origin/main` as a safety net, but **you should not rely on the safety net alone** — update `testcase/` proactively.
+
+### If you merge a Fork feature and forget
+
+The baseline-sync autopilot will detect the gap and open a Gitee PR to add the missing testcase entry. That is a fallback, not the primary workflow.
 
 ## Minimum Pre-Push Checks
 

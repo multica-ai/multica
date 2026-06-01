@@ -222,7 +222,7 @@ describe("ApiClient", () => {
     expect(headers["X-Client-OS"]).toBeUndefined();
   });
 
-  it("uses the Cloud Runtime node API contract and forwards bootstrap PAT on create", async () => {
+  it("uses the Cloud Runtime node API contract", async () => {
     const node = {
       id: "node-1",
       owner_id: "user-1",
@@ -265,7 +265,6 @@ describe("ApiClient", () => {
     expect(listCall[0]).toBe(
       "https://api.example.test/api/cloud-runtime/nodes?limit=20&offset=5",
     );
-    expect((listCall[1]!.headers as Record<string, string>)["X-User-PAT"]).toBeUndefined();
     expect(createCall[0]).toBe(
       "https://api.example.test/api/cloud-runtime/nodes",
     );
@@ -276,7 +275,6 @@ describe("ApiClient", () => {
         name: "gpu-dev-01",
       }),
     });
-    expect((createCall[1]!.headers as Record<string, string>)["X-User-PAT"]).toBeUndefined();
   });
 
   it("falls back when Cloud Runtime node responses drift", async () => {

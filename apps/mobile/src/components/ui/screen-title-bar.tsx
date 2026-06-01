@@ -1,21 +1,48 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft } from "lucide-react-native";
 import { colors, radii, spacing } from "../../theme/tokens";
 
+const TITLE_DOUBLE_PRESS_DELAY_MS = 300;
+
 export function ScreenTitleBar({
   onBack,
+  onTitleDoublePress,
   right,
   title,
 }: {
   onBack: () => void;
+  onTitleDoublePress?: () => void;
   right?: ReactNode;
   title: string;
 }) {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
+  const lastTitlePressAtRef = useRef(0);
+
+  const handleTitlePress = () => {
+    if (!onTitleDoublePress) return;
+    const now = Date.now();
+    if (now - lastTitlePressAtRef.current <= TITLE_DOUBLE_PRESS_DELAY_MS) {
+      lastTitlePressAtRef.current = 0;
+      onTitleDoublePress();
+      return;
+    }
+    lastTitlePressAtRef.current = now;
+  };
+
+  const titleContent = (
+    <Text
+      adjustsFontSizeToFit
+      minimumFontScale={0.82}
+      numberOfLines={1}
+      style={styles.titleBarTitle}
+    >
+      {title}
+    </Text>
+  );
 
   return (
     <View style={[styles.titleBar, { paddingTop: Math.max(insets.top, spacing.sm) }]}>
@@ -31,16 +58,23 @@ export function ScreenTitleBar({
         >
           <ChevronLeft color={colors.foreground} size={22} />
         </Pressable>
-        <View pointerEvents="none" style={styles.titleBarTitleWrap}>
-          <Text
-            adjustsFontSizeToFit
-            minimumFontScale={0.82}
-            numberOfLines={1}
-            style={styles.titleBarTitle}
+        {onTitleDoublePress ? (
+          <Pressable
+            accessibilityLabel={title}
+            accessibilityRole="button"
+            onPress={handleTitlePress}
+            style={({ pressed }) => [
+              styles.titleBarTitleWrap,
+              pressed && styles.buttonPressed,
+            ]}
           >
-            {title}
-          </Text>
-        </View>
+            {titleContent}
+          </Pressable>
+        ) : (
+          <View pointerEvents="none" style={styles.titleBarTitleWrap}>
+            {titleContent}
+          </View>
+        )}
         <View style={styles.titleBarSideSpacer}>{right}</View>
       </View>
     </View>

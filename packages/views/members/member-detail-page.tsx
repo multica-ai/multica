@@ -6,6 +6,7 @@ import type { MemberRole } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions } from "@multica/core/workspace/queries";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { PageHeader } from "../layout/page-header";
@@ -56,7 +57,7 @@ export function MemberDetailPage({ userId }: { userId: string }) {
         <ActorAvatarBase
           name={member.name}
           initials={initials}
-          avatarUrl={member.avatar_url}
+          avatarUrl={resolvePublicFileUrl(member.avatar_url)}
           size={44}
           className="rounded-full"
         />

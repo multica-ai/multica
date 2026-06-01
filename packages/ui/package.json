@@ -19,6 +19,7 @@
     "./hooks/*": "./hooks/*.ts",
     "./lib/utils": "./lib/utils.ts",
     "./lib/data-table": "./lib/data-table.ts",
+    "./lib/code-style": "./lib/code-style.ts",
     "./i18n-types": "./types/i18next.ts",
     "./styles/tokens.css": "./styles/tokens.css",
     "./styles/base.css": "./styles/base.css"
@@ -44,6 +45,7 @@
     "recharts": "3.8.0",
     "rehype-katex": "catalog:",
     "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "catalog:",
@@ -61,6 +63,7 @@
     "react-i18next": "catalog:"
   },
   "devDependencies": {
+    "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@testing-library/react": "catalog:",
     "@vitejs/plugin-react": "catalog:",

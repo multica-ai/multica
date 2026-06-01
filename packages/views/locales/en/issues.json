@@ -48,7 +48,9 @@
     "squads_group": "Squads",
     "issue_count_one": "{{count}} issue",
     "issue_count_other": "{{count}} issues",
-    "reset": "Reset all filters"
+    "reset": "Reset all filters",
+    "active_count_one": "{{count}} filter",
+    "active_count_other": "{{count}} filters"
   },
   "display": {
     "tooltip": "Display settings",
@@ -59,6 +61,8 @@
     "descending_title": "Descending",
     "group_status": "Status",
     "group_assignee": "Assignee",
+    "group_parent": "Parent issue",
+    "group_project": "Project",
     "sort_manual": "Manual",
     "sort_priority": "Priority",
     "sort_start_date": "Start date",
@@ -78,10 +82,12 @@
     "tooltip_board": "Board view",
     "tooltip_list": "List view",
     "tooltip_gantt": "Gantt view",
+    "tooltip_swimlane": "Swimlane view",
     "section": "View",
     "board": "Board",
     "list": "List",
-    "gantt": "Gantt"
+    "gantt": "Gantt",
+    "swimlane": "Swimlane"
   },
   "gantt": {
     "header_issue": "Issue",
@@ -120,13 +126,22 @@
     "empty_status": "No issues",
     "add_issue_tooltip": "Add issue"
   },
+  "swimlane": {
+    "no_parent": "No parent",
+    "other_parents": "Other parents",
+    "no_project": "No project",
+    "no_assignee": "Unassigned",
+    "open_parent": "Open parent issue",
+    "toggle_collapse": "Toggle lane"
+  },
   "board": {
     "hidden_columns_label": "Hidden columns",
     "hide_column": "Hide column",
     "show_column": "Show column",
     "add_issue_tooltip": "Add issue",
     "empty_column": "No issues",
-    "empty_grouping": "No matching issues"
+    "empty_grouping": "No matching issues",
+    "ordered_by": "Board ordered by {{field}}"
   },
   "detail": {
     "not_found": "This issue does not exist or has been deleted in this workspace.",
@@ -207,6 +222,7 @@
     "clear_history_description": "This will permanently delete all comments and task run records. This action cannot be undone.",
     "clear_history_cancel": "Cancel",
     "clear_history_confirm": "Clear",
+    "clear_history_failed": "Failed to clear history",
     "workdir_path_copied": "Workdir path copied",
     "workdir_path_copy_failed": "Failed to copy workdir path",
     "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent"
@@ -272,6 +288,7 @@
     "update_failed": "Failed to update comment",
     "send_failed": "Failed to send comment",
     "send_reply_failed": "Failed to send reply",
+    "login_required": "Please log in to continue",
     "delete_failed": "Failed to delete comment",
     "reply_count_one": "{{count}} reply",
     "reply_count_other": "{{count}} replies",
@@ -308,6 +325,7 @@
   "agent_live": {
     "is_working": "{{name}} is working",
     "is_queued": "{{name}} is queued",
+    "is_waiting_local_directory": "{{name}} is waiting for the local directory",
     "queued_elapsed_prefix": "queued for {{elapsed}}",
     "fallback_name": "Agent",
     "tool_count_one": "{{count}} tool",
@@ -316,6 +334,15 @@
     "stop_button": "Stop",
     "stop_tooltip": "Stop agent",
     "cancel_failed": "Failed to cancel task"
+  },
+  "agent_stream": {
+    "runs": "Runs",
+    "collapse": "Collapse",
+    "no_runs": "No runs yet",
+    "other_runs": "Other runs",
+    "no_other_runs": "No other runs.",
+    "no_local_stream": "No local agent stream yet.",
+    "jump_to_comment": "Jump to comment"
   },
   "execution_log": {
     "section": "Execution log",
@@ -337,6 +364,7 @@
     "trigger_initial": "Initial run",
     "status_queued": "Queued",
     "status_dispatched": "Starting",
+    "status_waiting_local_directory": "Waiting for local directory",
     "status_running": "Working",
     "status_completed": "Completed",
     "status_failed": "Failed",

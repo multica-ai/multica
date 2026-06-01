@@ -73,7 +73,7 @@ Open http://localhost:3000 in your browser. The Docker self-host stack defaults 
 - **Without email configured:** the verification code is generated server-side and printed to the backend container logs (look for `[DEV] Verification code for ...:`). Useful for one-off testing on a single machine.
 - **Deterministic local/private testing:** set `APP_ENV=development` and `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env`, then restart the backend. This fixed code is ignored when `APP_ENV=production`.
 
-Changes to `ALLOW_SIGNUP` and `GOOGLE_CLIENT_ID` also take effect after restarting the backend / compose stack. The web UI reads both from `/api/config` at runtime, so no web rebuild is needed.
+Changes to `ALLOW_SIGNUP`, `DISABLE_WORKSPACE_CREATION`, and `GOOGLE_CLIENT_ID` also take effect after restarting the backend / compose stack. The web UI reads all three from `/api/config` at runtime, so no web rebuild is needed. See [Advanced Configuration → Signup Controls](SELF_HOSTING_ADVANCED.md#signup-controls-optional) for the recommended sequence to lock down workspace creation.
 
 > **Warning:** do **not** set `MULTICA_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
 
@@ -139,7 +139,7 @@ multica daemon status
 
 ## Kubernetes Deployment (Alternative)
 
-If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose using the Helm chart at [`deploy/helm/multica/`](deploy/helm/multica/). It targets a typical k3s / k8s setup with an Ingress controller and a default `ReadWriteOnce` StorageClass — authored against k3s + Traefik + `local-path`, and should work on any cluster with minor tweaks.
+If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/multica-ai/charts/multica` or the source chart at [`deploy/helm/multica/`](deploy/helm/multica/). It targets a typical k3s / k8s setup with an Ingress controller and a default `ReadWriteOnce` StorageClass — authored against k3s + Traefik + `local-path`, and should work on any cluster with minor tweaks.
 
 The chart creates the following resources in the target namespace:
 
@@ -196,15 +196,29 @@ Leave optional values empty for now — you can fill them in later (see [Step 5 
 ### Step 4 — Install the chart
 
 ```bash
-helm install multica deploy/helm/multica -n multica
+helm install multica oci://ghcr.io/multica-ai/charts/multica \
+  --version <chart-version> \
+  -n multica
 ```
 
-To override defaults, copy `deploy/helm/multica/values.yaml`, edit it, and pass it with `-f`:
+Released chart versions strip the leading `v` from the Git tag. For example, release tag `v0.3.5` publishes chart version `0.3.5`; the chart defaults the backend and frontend image tags to `v0.3.5`.
+
+To override defaults, export the chart values, edit them, and pass them with `-f`:
 
 ```bash
-cp deploy/helm/multica/values.yaml my-values.yaml
+helm show values oci://ghcr.io/multica-ai/charts/multica \
+  --version <chart-version> > my-values.yaml
 # edit my-values.yaml — e.g. change ingress hosts, image tags, resource limits
-helm install multica deploy/helm/multica -n multica -f my-values.yaml
+helm install multica oci://ghcr.io/multica-ai/charts/multica \
+  --version <chart-version> \
+  -n multica \
+  -f my-values.yaml
+```
+
+When developing from a checkout, use the local chart path instead:
+
+```bash
+helm install multica deploy/helm/multica -n multica
 ```
 
 Watch the pods come up:
@@ -245,14 +259,16 @@ The chart defaults to `APP_ENV=production` (set in `values.yaml` under `backend.
 - **Deterministic local/private testing:** set `backend.config.appEnv: development` in your values file and `MULTICA_DEV_VERIFICATION_CODE=888888` in the Secret, then `helm upgrade` and restart. This fixed code is ignored when `APP_ENV=production`.
 
   ```bash
-  helm upgrade multica deploy/helm/multica -n multica \
+  helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+    --version <chart-version> \
+    -n multica \
     -f my-values.yaml --set backend.config.appEnv=development
   kubectl -n multica patch secret multica-secrets --type=merge \
     -p '{"stringData":{"MULTICA_DEV_VERIFICATION_CODE":"888888"}}'
   kubectl -n multica rollout restart deploy/multica-backend
   ```
 
-`ALLOW_SIGNUP` and `GOOGLE_CLIENT_ID` likewise live under `backend.config.*` in `values.yaml`. After `helm upgrade`, the backend pod will roll automatically because the ConfigMap hash changes; the web UI reads both from `/api/config` at runtime, so no web rebuild is needed.
+`ALLOW_SIGNUP`, `DISABLE_WORKSPACE_CREATION`, and `GOOGLE_CLIENT_ID` likewise live under `backend.config.*` in `values.yaml` (as `allowSignup`, `disableWorkspaceCreation`, and `googleClientId`). After `helm upgrade`, the backend pod will roll automatically because the ConfigMap hash changes; the web UI reads all three from `/api/config` at runtime, so no web rebuild is needed.
 
 > **Warning:** do **not** set `MULTICA_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
 
@@ -270,13 +286,22 @@ Make sure the machine running the daemon has the same `/etc/hosts` (or DNS) entr
 
 ### Updating
 
-To pull the latest images without changing the chart version:
+To pull the latest images without changing the chart version when your values still use the mutable `latest` image tag:
 
 ```bash
 kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend
 ```
 
-To pin a specific Multica release, set the image tags in your values file:
+To upgrade to a specific Multica release, upgrade to the matching chart version. The released chart defaults its app images to the matching Git tag:
+
+```bash
+helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+  --version <chart-version> \
+  -n multica \
+  -f my-values.yaml
+```
+
+If you need to override the app images independently from the chart version, set the image tags in your values file:
 
 ```yaml
 images:
@@ -286,10 +311,13 @@ images:
     tag: v0.2.4
 ```
 
-Then upgrade:
+Then run the same upgrade command with `-f my-values.yaml`:
 
 ```bash
-helm upgrade multica deploy/helm/multica -n multica -f my-values.yaml
+helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+  --version <chart-version> \
+  -n multica \
+  -f my-values.yaml
 ```
 
 To roll back if an upgrade goes sideways:
@@ -297,6 +325,8 @@ To roll back if an upgrade goes sideways:
 ```bash
 helm -n multica rollback multica
 ```
+
+> **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** Same migration guard as the Docker path — see [Usage Dashboard Rollup → Option C](#option-c--backfill-history-first-then-schedule). Run the backfill against the same database the chart is using (`kubectl -n multica exec deploy/multica-backend -- ./backfill_task_usage_hourly --sleep-between-slices=2s`), then restart the backend deployment to re-apply migrations.
 
 ### Tearing down
 
@@ -309,6 +339,57 @@ kubectl delete namespace multica
 ```
 
 ---
+
+## Usage Dashboard Rollup (Required)
+
+Starting with `v0.3.5`, the Usage / Runtime dashboards read from a derived `task_usage_hourly` table rather than directly from `task_usage`. Raw `task_usage` rows are written by the backend on every task, but the dashboard only sees data after `rollup_task_usage_hourly()` runs and aggregates them into `task_usage_hourly`.
+
+**The bundled `pgvector/pgvector:pg17` image does NOT include `pg_cron`.** If nothing schedules the rollup, the dashboard will stay at zero forever even though `task_usage` is populated. You have three supported options — pick one before relying on the dashboard.
+
+> **Upgrading from `v0.3.4` to `v0.3.5+`** with existing `task_usage` history: migration `103` is fail-closed and will abort `migrate up` with `refusing to drop legacy daily rollups: …`. Run `backfill_task_usage_hourly` first (Option C below), then re-run the upgrade. **Fresh installs** are exempted by that guard and migrate cleanly — but the dashboard will still stay at zero until you pick Option A or Option B.
+
+### Option A — External cron / systemd-timer (simplest)
+
+Schedule a 5-minute job that calls `rollup_task_usage_hourly()`. It is idempotent and watermark-driven, so a missed tick catches up on the next run.
+
+```bash
+# /etc/cron.d/multica-rollup — every 5 minutes
+*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
+  exec -T postgres psql -U multica -d multica \
+  -c "SELECT rollup_task_usage_hourly();" >/dev/null
+```
+
+Or as a systemd timer + service if you prefer that surface. The function returns the number of (upserted + deleted-empty) rows; it's safe to call concurrently with itself (an advisory lock makes overlapping runs no-op) and safe to call alongside `backfill_task_usage_hourly`.
+
+### Option B — Swap Postgres for an image that ships `pg_cron`
+
+If you'd rather have Postgres schedule itself, replace `pgvector/pgvector:pg17` in `docker-compose.selfhost.yml` with an image that bundles both `pgvector` and `pg_cron` (e.g. `supabase/postgres`, or your own build of `pgvector/pgvector` with `pg_cron` added and `shared_preload_libraries=pg_cron` set on the server). Then, once:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+SELECT cron.schedule(
+  'rollup_task_usage_hourly',
+  '*/5 * * * *',
+  $$SELECT rollup_task_usage_hourly()$$
+);
+```
+
+`shared_preload_libraries` requires a Postgres restart to take effect — set it in `postgresql.conf` (or via the image's documented mechanism) before bringing the container up.
+
+### Option C — Backfill history first, then schedule
+
+If you're upgrading from `v0.3.4 → v0.3.5+` and already have `task_usage` rows (or you just want the dashboard to show historical data on a fresh install that you've been running for a while), run the bundled backfill command once before scheduling the rollup:
+
+```bash
+# Backfills task_usage_hourly from all historical task_usage rows and stamps
+# the rollup watermark. Idempotent — safe to re-run.
+docker compose -f docker-compose.selfhost.yml exec backend \
+  ./backfill_task_usage_hourly --sleep-between-slices=2s
+```
+
+On a database with years of data this can scan tens of millions of rows; `--sleep-between-slices=2s` throttles the read pressure. Use `--months-back N` (plus `--force-partial`) if you only want the last N months. Once it finishes, set up Option A or Option B so new buckets keep flowing.
+
+After upgrading, re-run `migrate up` (or restart the backend container — migrations run automatically on startup) to apply migration `103` cleanly.
 
 ## Stopping Services
 
@@ -349,6 +430,8 @@ docker compose -f docker-compose.selfhost.yml up -d
 
 Pin `MULTICA_IMAGE_TAG` in `.env` to an exact version like `v0.2.4` if you want to stay on a specific release. Migrations run automatically on backend startup.
 If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` or `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
+
+> **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** That's migration `103`'s fail-closed guard: it requires `task_usage_hourly` to be seeded before the legacy daily rollups are dropped. Run `backfill_task_usage_hourly` first, then re-run the upgrade. Full instructions in [Usage Dashboard Rollup → Option C](#option-c--backfill-history-first-then-schedule).
 
 ---
 

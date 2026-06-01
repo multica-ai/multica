@@ -472,7 +472,7 @@ function TaskRow({
         {hasIssue && (
           <Tooltip>
             <TooltipTrigger
-              render={<AppLink href={paths.issueDetail(task.issue_id)} />}
+              render={<AppLink href={paths.issueDetail(issue?.identifier ?? task.issue_id)} />}
               aria-label={t(($) => $.tab_body.activity.open_issue_aria)}
               className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
             >

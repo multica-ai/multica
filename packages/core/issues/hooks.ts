@@ -170,10 +170,14 @@ export function useTaskMessagesQueries(_workspaceId: string, taskIds: string[]) 
 }
 
 
-export function useIssueTimelineEntries(_workspaceId: string, issueId: string) {
+export function useIssueTimelineEntries(_workspaceId: string, issueId: string, aroundCommentId?: string) {
   return useQuery({
-    queryKey: issueKeys.timeline(issueId),
-    queryFn: () => api.listTimeline(issueId),
+    queryKey: aroundCommentId
+      ? [...issueKeys.timeline(issueId), aroundCommentId]
+      : issueKeys.timeline(issueId),
+    queryFn: () => aroundCommentId
+      ? api.listTimeline(issueId, { mode: "around", id: aroundCommentId })
+      : api.listTimeline(issueId),
     select: (entries): TimelineEntry[] => (Array.isArray(entries) ? entries : []),
     enabled: !!issueId,
   });

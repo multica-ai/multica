@@ -266,9 +266,12 @@ func stageFakeAgent(t *testing.T) string {
 	}
 	t.Setenv("PATH", binDir)
 	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
-	// Clear any inherited env-var override so the test sees the URL-based
+	// Clear any inherited env-var overrides so the test sees the URL-based
 	// default, not whatever the developer happens to have exported.
 	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "")
+	t.Setenv("MULTICA_UPDATE_MANIFEST_URL", "")
+	// Use a clean HOME so no real ~/.multica/config.json leaks in.
+	t.Setenv("HOME", t.TempDir())
 	return binDir
 }
 
@@ -287,6 +290,73 @@ func TestLoadConfig_AutoUpdateDefault_SelfHostOff(t *testing.T) {
 	}
 	if cfg.AutoUpdateEnabled {
 		t.Fatalf("AutoUpdateEnabled = true for self-host (localhost) server, want false")
+	}
+}
+
+// TestLoadConfig_AutoUpdateDefault_SelfHostWithManifestURL verifies OPE-1936:
+// when a self-host deployment has update_manifest_url configured, auto-update
+// defaults to enabled because the manifest points to their own fork builds,
+// not upstream GitHub releases.
+func TestLoadConfig_AutoUpdateDefault_SelfHostWithManifestURLEnv(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_UPDATE_MANIFEST_URL", "https://example.com/manifest.json")
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://multica.wujieai.com",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.AutoUpdateEnabled {
+		t.Fatalf("AutoUpdateEnabled = false for self-host with MULTICA_UPDATE_MANIFEST_URL set, want true")
+	}
+}
+
+// TestLoadConfig_AutoUpdateDefault_SelfHostWithManifestURLConfig verifies the
+// same OPE-1936 behavior when the manifest URL is configured via CLI config
+// file rather than env var.
+func TestLoadConfig_AutoUpdateDefault_SelfHostWithManifestURLConfig(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_UPDATE_MANIFEST_URL", "")
+	// Write a CLI config with update_manifest_url set.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".multica")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	configData := `{"update_manifest_url": "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configData), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://multica.wujieai.com",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.AutoUpdateEnabled {
+		t.Fatalf("AutoUpdateEnabled = false for self-host with update_manifest_url in config, want true")
+	}
+}
+
+// TestLoadConfig_AutoUpdateDefault_SelfHostManifestStillOverridable ensures
+// MULTICA_DAEMON_AUTO_UPDATE=false can still disable auto-update even when a
+// manifest URL is configured.
+func TestLoadConfig_AutoUpdateDefault_SelfHostManifestStillOverridable(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_UPDATE_MANIFEST_URL", "https://example.com/manifest.json")
+	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "false")
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://multica.wujieai.com",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.AutoUpdateEnabled {
+		t.Fatalf("AutoUpdateEnabled = true with MULTICA_DAEMON_AUTO_UPDATE=false, want false (env override wins)")
 	}
 }
 
@@ -598,5 +668,100 @@ func TestLoadConfig_SkipsLoginShellWhenLookPathSucceeds(t *testing.T) {
 		t.Fatalf("login shell was invoked even though exec.LookPath found every agent — laziness broken")
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("unexpected error stat-ing marker file: %v", err)
+	}
+}
+
+func TestLoadConfig_UsesCodexDesktopAppBundleFallback(t *testing.T) {
+	pathDir := t.TempDir()
+	fakeCodex := filepath.Join(pathDir, "Codex.app", "Contents", "Resources", "codex")
+	if err := os.MkdirAll(filepath.Dir(fakeCodex), 0o755); err != nil {
+		t.Fatalf("mkdir fake Codex bundle: %v", err)
+	}
+	if err := os.WriteFile(fakeCodex, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake Codex bundle CLI: %v", err)
+	}
+
+	oldBundlePaths := codexDesktopAppBundlePaths
+	codexDesktopAppBundlePaths = func() []string { return []string{fakeCodex} }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("MULTICA_CODEX_MODEL", "gpt-5")
+	pinNonCodexAgentsToMissingPaths(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := cfg.Agents["codex"]
+	if !ok {
+		t.Fatalf("expected codex agent from Desktop app bundle fallback, got %#v", cfg.Agents)
+	}
+	if got.Path != fakeCodex {
+		t.Fatalf("codex path = %q, want %q", got.Path, fakeCodex)
+	}
+	if got.Model != "gpt-5" {
+		t.Fatalf("codex model = %q, want gpt-5", got.Model)
+	}
+}
+
+func TestLoadConfig_CodexDesktopFallbackDoesNotOverrideExplicitPath(t *testing.T) {
+	pathDir := t.TempDir()
+	fakeCodex := filepath.Join(pathDir, "Codex.app", "Contents", "Resources", "codex")
+	if err := os.MkdirAll(filepath.Dir(fakeCodex), 0o755); err != nil {
+		t.Fatalf("mkdir fake Codex bundle: %v", err)
+	}
+	if err := os.WriteFile(fakeCodex, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake Codex bundle CLI: %v", err)
+	}
+
+	oldBundlePaths := codexDesktopAppBundlePaths
+	codexDesktopAppBundlePaths = func() []string { return []string{fakeCodex} }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("MULTICA_CODEX_PATH", filepath.Join(t.TempDir(), "missing-codex"))
+	pinNonCodexAgentsToMissingPaths(t)
+	fakeClaude := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(fakeClaude, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	t.Setenv("MULTICA_CLAUDE_PATH", fakeClaude)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got, ok := cfg.Agents["codex"]; ok {
+		t.Fatalf("explicit missing MULTICA_CODEX_PATH should not fall back to Desktop bundle, got %#v", got)
+	}
+}
+
+func pinNonCodexAgentsToMissingPaths(t *testing.T) {
+	t.Helper()
+	missingDir := t.TempDir()
+	for _, name := range []string{
+		"MULTICA_CLAUDE_PATH",
+		"MULTICA_OPENCODE_PATH",
+		"MULTICA_OPENCLAW_PATH",
+		"MULTICA_HERMES_PATH",
+		"MULTICA_GEMINI_PATH",
+		"MULTICA_PI_PATH",
+		"MULTICA_CURSOR_PATH",
+		"MULTICA_COPILOT_PATH",
+		"MULTICA_KIMI_PATH",
+		"MULTICA_KIRO_PATH",
+	} {
+		t.Setenv(name, filepath.Join(missingDir, strings.ToLower(name)))
 	}
 }

@@ -32,7 +32,7 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import { PageHeader } from "../../layout/page-header";
+import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -77,6 +77,7 @@ import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
+import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
 import { CommentInput, type CommentInputRef } from "./comment-input";
 import type { ReplyInputRef } from "./reply-input";
@@ -89,7 +90,7 @@ import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
@@ -954,9 +955,17 @@ export function IssueDetail({
   const id = issueId;
   const router = useNavigation();
   const linkedCommentId = router.searchParams.get("comment")?.trim() || null;
-  const requestedCommentId = (highlightCommentId ?? linkedCommentId) ?? undefined;
+  // Sidebar "jump to comment" sets this to switch the timeline from Virtuoso
+  // to flat rendering (so the target element is guaranteed in the DOM).
+  // It must NOT feed into useIssueTimeline's aroundCommentId — the data is
+  // already loaded; we only need to flip rendering mode and scroll.
+  const [sidebarRequestedId, setSidebarRequestedId] = useState<string | undefined>(undefined);
+  // aroundCommentId: only external sources (inbox highlight or URL deep-link)
+  // that may require fetching a different page of the timeline.
+  const aroundCommentId = (highlightCommentId ?? linkedCommentId) ?? undefined;
+  // requestedCommentId: drives flat rendering + scrollIntoView (includes sidebar).
+  const requestedCommentId = (highlightCommentId ?? sidebarRequestedId ?? linkedCommentId) ?? undefined;
   const user = useAuthStore((s) => s.user);
-  const workspace = useCurrentWorkspace();
   const paths = useWorkspacePaths();
 
   // Issue navigation — read from TQ list cache
@@ -1116,16 +1125,18 @@ export function IssueDetail({
   }, []);
   const didHighlightRef = useRef<string | null>(null);
 
-  // Scroll to and briefly highlight a comment — used by ExecutionLogSection
-  // when clicking a comment-triggered run's trigger text.
+  // Navigate by the canonical trigger_comment_id, then let the deep-link
+  // timeline path fetch the exact target if it is not currently mounted.
   const handleHighlightComment = useCallback((commentId: string) => {
-    const el = document.getElementById(`comment-${commentId}`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      setHighlightedId(commentId);
-      setTimeout(() => setHighlightedId(null), 2000);
-    }
-  }, []);
+    // Update URL without triggering a router navigation/data fetch
+    const url = paths.issueDetail(id, { commentId });
+    window.history.replaceState(window.history.state, "", url);
+    // Reset guard so the scroll-into-view effect fires even for repeated targets
+    didHighlightRef.current = null;
+    // Switch timeline to flat rendering (disables Virtuoso) so the target
+    // element is guaranteed to be in the DOM when the useEffect scrolls.
+    setSidebarRequestedId(commentId);
+  }, [id, paths]);
 
   const [clearHistoryDialogOpen, setClearHistoryDialogOpen] = useState(false);
   const clearHistoryMutation = useClearIssueHistory();
@@ -1318,7 +1329,7 @@ export function IssueDetail({
     timeline, loading: timelineLoading,
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
-  } = useIssueTimeline(resolvedId, user?.id, requestedCommentId);
+  } = useIssueTimeline(resolvedId, user?.id, aroundCommentId);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
@@ -1507,7 +1518,7 @@ export function IssueDetail({
   // Project segment in the breadcrumb. The issue's project_id is the source of
   // truth — same URL renders the same breadcrumb regardless of entry path.
   const issueProjectId = issue?.project_id;
-  const { data: breadcrumbProject = null, isError: breadcrumbProjectError } = useQuery({
+  const { data: breadcrumbProject = null } = useQuery({
     ...projectDetailOptions(wsId, issueProjectId ?? ""),
     enabled: !!issueProjectId,
   });
@@ -1858,8 +1869,8 @@ export function IssueDetail({
       });
       toast.success(`Cleared ${result.comments_deleted} comments, ${result.tasks_deleted} task runs`);
       setClearHistoryDialogOpen(false);
-    } catch {
-      toast.error("Failed to clear history");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.detail.clear_history_failed));
     }
   };
 
@@ -1932,6 +1943,7 @@ export function IssueDetail({
       {/* Properties */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
@@ -2134,6 +2146,7 @@ export function IssueDetail({
       {parentIssue && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${parentIssueOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setParentIssueOpen(!parentIssueOpen)}
           >
@@ -2159,6 +2172,7 @@ export function IssueDetail({
       {githubSettings.prSidebar && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
           >
@@ -2172,6 +2186,7 @@ export function IssueDetail({
       {/* Details */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setDetailsOpen(!detailsOpen)}
         >
@@ -2201,6 +2216,7 @@ export function IssueDetail({
       {usage && usage.task_count > 0 && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${tokenUsageOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setTokenUsageOpen(!tokenUsageOpen)}
           >
@@ -2334,19 +2350,42 @@ export function IssueDetail({
   };
 
   const sidebarContent = (
-    <Tabs defaultValue="stream" className="flex h-full min-h-0 flex-col">
+    <Tabs defaultValue="runs" className="flex h-full min-h-0 flex-col">
       <TabsList className="mb-3 grid w-full grid-cols-2">
-        <TabsTrigger value="stream">Stream</TabsTrigger>
+        <TabsTrigger value="runs">Runs</TabsTrigger>
         <TabsTrigger value="properties">Properties</TabsTrigger>
       </TabsList>
-      <TabsContent value="stream" keepMounted className="mt-0 min-h-0 flex-1">
-        <AgentStreamSidebar issueId={issue.id} />
+      <TabsContent value="runs" keepMounted className="mt-0 min-h-0 flex-1">
+        <AgentStreamSidebar issueId={issue.id} onHighlightComment={handleHighlightComment} />
       </TabsContent>
       <TabsContent value="properties" keepMounted className="mt-0 min-h-0 flex-1 overflow-y-auto">
         {propertiesContent}
       </TabsContent>
     </Tabs>
   );
+  // Breadcrumb shows the single most-direct container, never a fabricated chain.
+  // project_id and parent_issue_id are orthogonal (a sub-issue can live in a
+  // different project than its parent), so we never render both: parent wins,
+  // else project, else nothing. The project is still shown in the properties
+  // panel. The workspace name is intentionally absent — "all issues" is a view,
+  // not a container.
+  const breadcrumbSegments: BreadcrumbSegment[] = parentIssue
+    ? [{ href: paths.issueDetail(parentIssue.id), label: parentIssue.identifier }]
+    : breadcrumbProject
+      ? [
+          {
+            href: paths.projectDetail(breadcrumbProject.id),
+            className: "flex items-center gap-1 min-w-0 max-w-72",
+            label: (
+              <>
+                <ProjectIcon project={breadcrumbProject} size="sm" />
+                <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
+              </>
+            ),
+          },
+        ]
+      : [];
+
   const detailContent = (
     <div
       ref={detailRootRef}
@@ -2354,59 +2393,20 @@ export function IssueDetail({
       onMouseUp={handleSelectionGestureEnd}
       onKeyUp={handleSelectionGestureEnd}
     >
-        <PageHeader className="gap-2 bg-background text-sm">
-          <div className="flex flex-1 items-center gap-1.5 min-w-0">
-            {workspace && (
-              <>
-                <AppLink
-                  href={paths.issues()}
-                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                >
-                  {workspace.name}
-                </AppLink>
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              </>
-            )}
-            {issueProjectId && (
-              <>
-                {breadcrumbProject ? (
-                  <AppLink
-                    href={paths.projectDetail(breadcrumbProject.id)}
-                    className="flex items-center gap-1 min-w-0 max-w-72 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <ProjectIcon project={breadcrumbProject} size="sm" />
-                    <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
-                  </AppLink>
-                ) : breadcrumbProjectError ? (
-                  <span className="italic text-muted-foreground/70 shrink-0">
-                    {t(($) => $.detail.breadcrumb_project_unknown)}
-                  </span>
-                ) : (
-                  <Skeleton className="h-3.5 w-20 shrink-0" />
-                )}
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              </>
-            )}
-            {parentIssue && (
-              <>
-                <AppLink
-                  href={paths.issueDetail(parentIssue.identifier)}
-                  className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
-                >
-                  {parentIssue.identifier}
-                </AppLink>
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              </>
-            )}
-            <span className="text-muted-foreground tabular-nums shrink-0">
-              {issue.identifier}
-            </span>
-            <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-            <span className="truncate font-medium text-foreground">
-              {issue.title}
-            </span>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
+        <BreadcrumbHeader
+          segments={breadcrumbSegments}
+          leaf={
+            <AppLink
+              href={paths.issueDetail(issue.id)}
+              className="flex min-w-0 transition-opacity hover:opacity-80"
+            >
+              <span className="truncate font-medium text-foreground">
+                {issue.identifier} {issue.title}
+              </span>
+            </AppLink>
+          }
+          actions={
+            <>
             {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
               <Tooltip>
                 <TooltipTrigger
@@ -2491,8 +2491,9 @@ export function IssueDetail({
               />
               <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
             </Tooltip>
-          </div>
-        </PageHeader>
+            </>
+          }
+        />
 
         {/* Content — scrollable */}
         <div className="flex flex-1 min-h-0">
@@ -2691,6 +2692,7 @@ export function IssueDetail({
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
                   onClick={handleToggleSubscribe}
                   className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
@@ -2729,6 +2731,8 @@ export function IssueDetail({
                 </Popover>
               </div>
             </div>
+
+            <LocalDirectoryHint projectId={issue?.project_id} />
 
             {/* Agent live output — sticky banner in the activity section,
                 keyed by issue id so switching issues remounts the card and

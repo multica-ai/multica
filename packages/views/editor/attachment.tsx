@@ -223,6 +223,7 @@ export function Attachment({
           filename={state.filename}
           onPreview={openPreview}
           onDownload={handleDownload}
+          onDelete={editable ? onDelete : undefined}
         />
         {preview.modal}
       </>
@@ -239,6 +240,7 @@ export function Attachment({
         uploading={state.uploading}
         onPreview={openPreview}
         onDownload={handleDownload}
+        onDelete={editable ? onDelete : undefined}
       />
       {preview.modal}
     </>

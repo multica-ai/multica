@@ -9,7 +9,7 @@ import (
 )
 
 type AppConfig struct {
-	CdnDomain          string `json:"cdn_domain"`
+	CdnDomain string `json:"cdn_domain"`
 	// Public auth config consumed by the web app at runtime so self-hosted
 	// deployments do not need to rebuild the frontend image when operators
 	// toggle signup or wire Google OAuth.
@@ -19,6 +19,12 @@ type AppConfig struct {
 	DingTalkClientID   string `json:"dingtalk_client_id"`
 	DingTalkOAuthScope string `json:"dingtalk_oauth_scope"`
 	HideEmailLogin     bool   `json:"hide_email_login"`
+	// WorkspaceCreationDisabled mirrors the server-side
+	// DISABLE_WORKSPACE_CREATION env var so the UI can hide every
+	// "Create workspace" affordance on self-hosted instances. Omitted
+	// from the JSON when false to keep responses identical to the
+	// previous shape for the common managed-cloud case (#3433).
+	WorkspaceCreationDisabled bool `json:"workspace_creation_disabled,omitempty"`
 
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
@@ -36,12 +42,13 @@ type AppConfig struct {
 // to anonymous callers — never user- or tenant-scoped data.
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
-		GoogleClientID:     strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
-		GoogleIOSClientID:  strings.TrimSpace(os.Getenv("GOOGLE_IOS_CLIENT_ID")),
-		DingTalkClientID:   strings.TrimSpace(os.Getenv("DINGTALK_CLIENT_ID")),
-		DingTalkOAuthScope: strings.TrimSpace(os.Getenv("DINGTALK_OAUTH_SCOPE")),
-		HideEmailLogin:     os.Getenv("NEXT_PUBLIC_HIDE_EMAIL_LOGIN") == "true",
-		AllowSignup:        os.Getenv("ALLOW_SIGNUP") != "false",
+		GoogleClientID:            strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
+		GoogleIOSClientID:         strings.TrimSpace(os.Getenv("GOOGLE_IOS_CLIENT_ID")),
+		DingTalkClientID:          strings.TrimSpace(os.Getenv("DINGTALK_CLIENT_ID")),
+		DingTalkOAuthScope:        strings.TrimSpace(os.Getenv("DINGTALK_OAUTH_SCOPE")),
+		HideEmailLogin:            os.Getenv("NEXT_PUBLIC_HIDE_EMAIL_LOGIN") == "true",
+		AllowSignup:               os.Getenv("ALLOW_SIGNUP") != "false",
+		WorkspaceCreationDisabled: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()

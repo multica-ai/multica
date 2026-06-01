@@ -832,6 +832,74 @@ func TestShouldCleanTaskDir_KindDispatch(t *testing.T) {
 	}
 }
 
+func TestShouldCleanTaskDir_EmptyParentIDFallsBackToOrphanMTime(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		meta *execenv.GCMeta
+	}{
+		{
+			name: "legacy issue meta",
+			meta: &execenv.GCMeta{WorkspaceID: "ws"},
+		},
+		{
+			name: "issue meta",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindIssue, WorkspaceID: "ws"},
+		},
+		{
+			name: "chat meta",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindChat, WorkspaceID: "ws"},
+		},
+		{
+			name: "autopilot run meta",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, WorkspaceID: "ws"},
+		},
+		{
+			name: "quick create meta",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindQuickCreate, WorkspaceID: "ws"},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			requests := 0
+			mux := http.NewServeMux()
+			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				http.Error(w, "unexpected request", http.StatusBadRequest)
+			})
+
+			d := newGCTestDaemon(t, mux)
+			d.cfg.GCOrphanTTL = 365 * 24 * time.Hour
+			taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", tc.name, tc.meta)
+
+			got := d.shouldCleanTaskDir(context.Background(), taskDir)
+			if got != gcActionSkip {
+				t.Fatalf("empty parent id should skip while under orphan TTL, got %d", got)
+			}
+			if requests != 0 {
+				t.Fatalf("empty parent id should not call gc-check endpoint, got %d requests", requests)
+			}
+
+			old := time.Now().Add(-400 * 24 * time.Hour)
+			if err := os.Chtimes(taskDir, old, old); err != nil {
+				t.Fatalf("chtimes: %v", err)
+			}
+			got = d.shouldCleanTaskDir(context.Background(), taskDir)
+			if got != gcActionOrphan {
+				t.Fatalf("empty parent id over orphan TTL should orphan, got %d", got)
+			}
+			if requests != 0 {
+				t.Fatalf("empty parent id should not call gc-check endpoint after mtime fallback, got %d requests", requests)
+			}
+		})
+	}
+}
+
 // TestShouldCleanTaskDir_ChatHardDeletedFreshMtime locks acceptance #3:
 // when a user hard-deletes a chat session, the workdir must be reclaimed
 // on the next GC cycle (≤ GCInterval), not deferred to GCOrphanTTL. A
@@ -968,4 +1036,98 @@ func TestGCMetaForTask(t *testing.T) {
 			t.Fatal("expected gcMetaForTask to return ok=false for task with no IDs")
 		}
 	})
+}
+
+// TestShouldCleanTaskDir_LocalDirectoryNeverClean confirms the GC loop
+// never removes the envRoot of a local_directory task even when the parent
+// issue is long-since done. Artifact-pattern cleanup is the most that
+// should ever happen, so output/ and logs/ stay around for the user.
+func TestShouldCleanTaskDir_LocalDirectoryNeverClean(t *testing.T) {
+	t.Parallel()
+	issueID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":     "done",
+			"updated_at": time.Now().Add(-30 * 24 * time.Hour),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "local-task", &execenv.GCMeta{
+		Kind:           execenv.GCKindIssue,
+		IssueID:        issueID,
+		WorkspaceID:    "ws1",
+		CompletedAt:    time.Now().Add(-30 * 24 * time.Hour),
+		LocalDirectory: true,
+	})
+
+	got := d.shouldCleanTaskDir(context.Background(), taskDir)
+	if got == gcActionClean {
+		t.Fatalf("expected local_directory task to never return gcActionClean, got gcActionClean")
+	}
+	// Either skip (no patterns configured) or artifact cleanup is OK —
+	// what matters is that gcActionClean never fires for local_directory.
+	if got != gcActionCleanArtifacts && got != gcActionSkip {
+		t.Fatalf("unexpected action for local_directory done issue: %d", got)
+	}
+}
+
+// TestShouldCleanTaskDir_LocalDirectoryNeverOrphan confirms that even when
+// the parent issue 404s (would normally fall through to mtime-based orphan
+// cleanup) a local_directory task's envRoot is preserved.
+func TestShouldCleanTaskDir_LocalDirectoryNeverOrphan(t *testing.T) {
+	t.Parallel()
+	issueID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCOrphanTTL = 0 // any age is "stale" enough to orphan
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "local-orphan", &execenv.GCMeta{
+		Kind:           execenv.GCKindIssue,
+		IssueID:        issueID,
+		WorkspaceID:    "ws1",
+		LocalDirectory: true,
+	})
+
+	got := d.shouldCleanTaskDir(context.Background(), taskDir)
+	if got == gcActionOrphan || got == gcActionClean {
+		t.Fatalf("expected local_directory orphan to be skipped, got %d", got)
+	}
+}
+
+// TestShouldCleanTaskDir_LocalDirectoryFalsePreservesNormalClean is the
+// negative control: a regular (non-local_directory) task whose parent issue
+// is done + over TTL must still be reclaimed via gcActionClean.
+func TestShouldCleanTaskDir_LocalDirectoryFalsePreservesNormalClean(t *testing.T) {
+	t.Parallel()
+	issueID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":     "done",
+			"updated_at": time.Now().Add(-30 * 24 * time.Hour),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "normal-task", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-30 * 24 * time.Hour),
+		// LocalDirectory unset (false).
+	})
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionClean {
+		t.Fatalf("expected gcActionClean for normal task, got %d", got)
+	}
 }

@@ -19,39 +19,10 @@ import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
 import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
+import { sortTaskRunsByCreatedAtAsc, sortTaskRunsByCreatedAtDesc } from "../utils/task-runs";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { RetryWithNoteDialog } from "./retry-with-note-dialog";
-
-// ─── Agent group coloring ──────────────────────────────────────────────────
-// 8-color palette; each unique agent_id gets a stable color based on
-// first-appearance order (sorted by created_at).
-
-const AGENT_COLORS = [
-  "border-l-blue-500",
-  "border-l-emerald-500",
-  "border-l-amber-500",
-  "border-l-violet-500",
-  "border-l-rose-500",
-  "border-l-cyan-500",
-  "border-l-orange-500",
-  "border-l-fuchsia-500",
-];
-
-function useAgentColorMap(tasks: AgentTask[]): Map<string, string> | null {
-  return useMemo(() => {
-    const map = new Map<string, string>();
-    const sorted = [...tasks].sort(
-      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-    );
-    for (const t of sorted) {
-      if (t.agent_id && !map.has(t.agent_id)) {
-        map.set(t.agent_id, AGENT_COLORS[map.size % AGENT_COLORS.length]!);
-      }
-    }
-    // Only show colors when there are multiple agents
-    return map.size > 1 ? map : null;
-  }, [tasks]);
-}
+import { useAgentColorMap } from "./task-agent-colors";
 
 // Mask gradient that fades the trigger-summary text into transparency at
 // the right edge. Mirrors the pattern used by the desktop tab bar
@@ -92,15 +63,6 @@ interface ExecutionLogSectionProps {
   onHighlightComment?: (commentId: string) => void;
 }
 
-// Past-runs sort priority: failed first (needs attention), then
-// cancelled (procedural noise), then completed (the boring 'done'
-// case sinks to the bottom). Within each group, newest first.
-const PAST_STATUS_RANK: Record<string, number> = {
-  failed: 0,
-  cancelled: 1,
-  completed: 2,
-};
-
 export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLogSectionProps) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
@@ -119,52 +81,53 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
     refetchOnWindowFocus: false,
   });
 
-  const agentColorMap = useAgentColorMap(tasks);
+  const chronologicalTasks = useMemo(
+    () => sortTaskRunsByCreatedAtAsc(tasks),
+    [tasks],
+  );
+
+  // Display order: newest first (descending) — matches sidebar behavior.
+  const displayTasks = useMemo(
+    () => sortTaskRunsByCreatedAtDesc(tasks),
+    [tasks],
+  );
+
+  const agentColorMap = useAgentColorMap(chronologicalTasks);
 
   // Run index: sequential #1, #2, #3 across all tasks, ordered by created_at.
   // The index is an identity label — it stays stable when filtering.
+  // #1 = earliest run, regardless of display order.
   const taskIndexMap = useMemo(() => {
-    const sorted = [...tasks].sort(
-      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-    );
     const map = new Map<string, number>();
-    sorted.forEach((t, i) => map.set(t.id, i + 1));
+    chronologicalTasks.forEach((t, i) => map.set(t.id, i + 1));
     return map;
-  }, [tasks]);
+  }, [chronologicalTasks]);
 
   const { getAgentName } = useActorName();
 
   const activeTasks = useMemo(
     () =>
-      tasks.filter(
+      displayTasks.filter(
         (t) =>
           t.status === "queued" ||
           t.status === "dispatched" ||
+          // Daemon-parked task on a busy local_directory — still active
+          // (waiting on a path lock), not terminal. Surfacing it here is
+          // what tells the user the agent is alive and will resume.
+          t.status === "waiting_local_directory" ||
           t.status === "running",
       ),
-    [tasks],
+    [displayTasks],
   );
 
   const pastTasks = useMemo(() => {
-    const past = tasks.filter(
+    return displayTasks.filter(
       (t) =>
         t.status === "completed" ||
         t.status === "failed" ||
         t.status === "cancelled",
     );
-    // Stable sort: failed first, cancelled second, completed last.
-    // Within group: newest completed_at first (fall back to created_at
-    // for malformed rows missing completed_at).
-    return [...past].sort((a, b) => {
-      const rankDiff =
-        (PAST_STATUS_RANK[a.status] ?? 99) -
-        (PAST_STATUS_RANK[b.status] ?? 99);
-      if (rankDiff !== 0) return rankDiff;
-      const at = a.completed_at ?? a.created_at;
-      const bt = b.completed_at ?? b.created_at;
-      return new Date(bt).getTime() - new Date(at).getTime();
-    });
-  }, [tasks]);
+  }, [displayTasks]);
 
   // Filter runs by agent name or trigger summary text
   const matchesFilter = useMemo(() => {
@@ -191,6 +154,7 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
   return (
     <div>
       <button
+        type="button"
         className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${
           open ? "" : "text-muted-foreground hover:text-foreground"
         }`}
@@ -305,6 +269,9 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
 const STATUS_TONE: Record<AgentTask["status"], string> = {
   queued: "text-warning",
   dispatched: "text-warning",
+  // Same tone as queued/dispatched — visually "stopped" so users see the
+  // task is parked, but distinguished by the status label.
+  waiting_local_directory: "text-warning",
   running: "text-info",
   completed: "text-success",
   failed: "text-destructive",
@@ -318,7 +285,10 @@ function activeTimeText(task: AgentTask, timeAgo: (dateStr: string) => string): 
   if (task.status === "running" && task.started_at) {
     return timeAgo(task.started_at);
   }
-  if (task.status === "dispatched" && task.dispatched_at) {
+  if (
+    (task.status === "dispatched" || task.status === "waiting_local_directory") &&
+    task.dispatched_at
+  ) {
     return timeAgo(task.dispatched_at);
   }
   return timeAgo(task.created_at);
@@ -371,10 +341,13 @@ function useStatusLabel(status: AgentTask["status"]): string {
   switch (status) {
     case "queued": return t(($) => $.execution_log.status_queued);
     case "dispatched": return t(($) => $.execution_log.status_dispatched);
+    case "waiting_local_directory":
+      return t(($) => $.execution_log.status_waiting_local_directory);
     case "running": return t(($) => $.execution_log.status_running);
     case "completed": return t(($) => $.execution_log.status_completed);
     case "failed": return t(($) => $.execution_log.status_failed);
     case "cancelled": return t(($) => $.execution_log.status_cancelled);
+    default: return status;
   }
 }
 
@@ -614,7 +587,6 @@ function RowShell({
       }`}
     >
       {runIndex != null && (
-        // eslint-disable-next-line i18next/no-literal-string
         <span className="shrink-0 w-5 text-right text-[10px] font-mono tabular-nums text-muted-foreground/60">
           #{runIndex}
         </span>
