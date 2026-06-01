@@ -15,17 +15,38 @@ spec:
       # reboots the cluster after the rds-cluster.yaml change applies, which
       # is what loads pg_cron into the postmaster and lets migration 103
       # (drop_legacy_daily_rollups) pass its fail-closed guard.
+      #
+      # IMPORTANT: shared_preload_libraries is an authoritative list, not a
+      # set-union. The Aurora default cluster parameter group preloads
+      # pg_stat_statements (powers RDS Performance Insights / slow-query
+      # telemetry) — if you write just "pg_cron" here, pg_stat_statements
+      # disappears at the next reboot. Always keep the comma-separated list
+      # of every extension the cluster currently preloads, in addition to
+      # any new ones being added.
       - name: shared_preload_libraries
-        value: pg_cron
+        value: pg_stat_statements,pg_cron
         applyMethod: pending-reboot
 
-      # Dynamic — pg_cron schedules cron jobs in the database named here.
-      # Defaults to `postgres`; our app DB is `agentfarm`, so the jobs
-      # registered by migration 076 / rollup_task_usage_hourly() would not
-      # be visible without this.
+      # pg_cron schedules cron jobs in the database named here. Defaults to
+      # `postgres`; our app DB is `agentfarm`, so the jobs registered by
+      # migration 076 / rollup_task_usage_hourly() would not be visible
+      # without this.
+      #
+      # NOTE: must be `pending-reboot` on the initial set even though pg_cron
+      # docs describe it as dynamic. Reason: the `cron.*` parameter family
+      # is registered by the pg_cron extension during postmaster startup,
+      # so until the reboot that loads pg_cron into shared_preload_libraries
+      # actually runs, RDS treats every `cron.*` parameter as static (its
+      # catalog has no entry to mark it dynamic yet). Setting it `immediate`
+      # makes ModifyDBClusterParameterGroup reject the whole batch with:
+      #   InvalidParameterCombination: cannot use immediate apply method
+      #   for static parameter
+      # After the maintenance-window reboot loads pg_cron, this can be
+      # flipped to `immediate` in a follow-up PR if we ever need to change
+      # the database name without another reboot.
       - name: cron.database_name
         value: agentfarm
-        applyMethod: immediate
+        applyMethod: pending-reboot
 
     tags:
       Owner: DevOps
