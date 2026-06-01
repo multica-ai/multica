@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
-import { ApiError, setApiInstance } from "@multica/core/api";
+import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api";
 import enCommon from "../../locales/en/common.json";
 import enSkills from "../../locales/en/skills.json";
@@ -257,7 +257,82 @@ describe("CreateSkillDialog", () => {
     });
   });
 
-  it("prompts for URL import conflicts and retries with overwrite when checked", async () => {
+  it("discovers multiple URL skills and imports the selected ones through batch import", async () => {
+    const user = userEvent.setup();
+    const importedSkill = {
+      id: "skill-1",
+      workspace_id: "ws-1",
+      name: "foo",
+      description: "Foo helper",
+      content: "foo",
+      config: {},
+      files: [],
+      created_by: "user-1",
+      created_at: "2026-05-29T00:00:00Z",
+      updated_at: "2026-05-29T00:00:00Z",
+    };
+    const discoverImportSkills = vi.fn().mockResolvedValue({
+      skills: [
+        {
+          name: "foo",
+          description: "Foo helper",
+          content: "---\nname: foo\n---\nfoo",
+          config: { origin: { type: "gitee", path: "skills/foo" } },
+          files: [{ path: "guide.md", content: "guide" }],
+          source_path: "skills/foo/SKILL.md",
+        },
+        {
+          name: "bar",
+          description: "Bar helper",
+          content: "---\nname: bar\n---\nbar",
+          config: { origin: { type: "gitee", path: "skills/bar" } },
+          files: [],
+          source_path: "skills/bar/SKILL.md",
+        },
+      ],
+    });
+    const batchImportSkills = vi.fn().mockResolvedValue({
+      created: [importedSkill],
+      skipped: [],
+    });
+
+    setApiInstance({
+      discoverImportSkills,
+      batchImportSkills,
+    } as unknown as ApiClient);
+
+    renderDialog();
+
+    await user.click(screen.getByRole("button", { name: /Import from URL/i }));
+    await user.type(screen.getByLabelText("Skill URL"), "https://gitee.com/acme/skills");
+    await user.click(screen.getByRole("button", { name: /^Import$/i }));
+
+    expect(await screen.findByText("foo")).toBeInTheDocument();
+    expect(screen.getByText("bar")).toBeInTheDocument();
+    expect(discoverImportSkills).toHaveBeenCalledWith({
+      url: "https://gitee.com/acme/skills",
+    });
+
+    await user.click(screen.getByRole("button", { name: /bar Bar helper/i }));
+
+    await user.click(screen.getByRole("button", { name: /Import 1 Skill/i }));
+
+    await waitFor(() => {
+      expect(batchImportSkills).toHaveBeenCalledWith({
+        skills: [
+          {
+            name: "foo",
+            description: "Foo helper",
+            content: "---\nname: foo\n---\nfoo",
+            config: { origin: { type: "gitee", path: "skills/foo" } },
+            files: [{ path: "guide.md", content: "guide" }],
+          },
+        ],
+      });
+    });
+  });
+
+  it("prompts for URL discovery conflicts and sends overwrite only for checked skills", async () => {
     const user = userEvent.setup();
     const importedSkill = {
       id: "skill-1",
@@ -271,16 +346,22 @@ describe("CreateSkillDialog", () => {
       created_at: "2026-05-29T00:00:00Z",
       updated_at: "2026-05-29T00:00:00Z",
     };
-    const importSkill = vi
-      .fn()
-      .mockRejectedValueOnce(
-        new ApiError("a skill with this name already exists", 409, "Conflict", {
-          error: "a skill with this name already exists",
+    const discoverImportSkills = vi.fn().mockResolvedValue({
+      skills: [
+        {
           name: "Gitee Helper",
           description: "Updated from Gitee",
-        }),
-      )
-      .mockResolvedValueOnce(importedSkill);
+          content: "updated",
+          config: { origin: { type: "gitee", path: "helper" } },
+          files: [],
+          source_path: "helper/SKILL.md",
+        },
+      ],
+    });
+    const batchImportSkills = vi.fn().mockResolvedValue({
+      created: [importedSkill],
+      skipped: [],
+    });
     mockSkillListOptions.mockReturnValue({
       queryKey: ["workspaces", "ws-1", "skills"],
       queryFn: () =>
@@ -299,7 +380,8 @@ describe("CreateSkillDialog", () => {
     });
 
     setApiInstance({
-      importSkill,
+      discoverImportSkills,
+      batchImportSkills,
     } as unknown as ApiClient);
 
     renderDialog();
@@ -309,10 +391,7 @@ describe("CreateSkillDialog", () => {
     await user.click(screen.getByRole("button", { name: /^Import$/i }));
 
     expect(await screen.findByText("Skill name conflicts")).toBeInTheDocument();
-    expect(importSkill).toHaveBeenCalledTimes(1);
-    expect(importSkill).toHaveBeenCalledWith({
-      url: "https://gitee.com/acme/helper",
-    });
+    expect(batchImportSkills).not.toHaveBeenCalled();
 
     const conflictCheckbox = screen
       .getAllByText("Gitee Helper")
@@ -324,11 +403,18 @@ describe("CreateSkillDialog", () => {
     await user.click(screen.getByRole("button", { name: /Continue import/i }));
 
     await waitFor(() => {
-      expect(importSkill).toHaveBeenCalledTimes(2);
-    });
-    expect(importSkill).toHaveBeenLastCalledWith({
-      url: "https://gitee.com/acme/helper",
-      overwrite: true,
+      expect(batchImportSkills).toHaveBeenCalledWith({
+        skills: [
+          {
+            name: "Gitee Helper",
+            description: "Updated from Gitee",
+            content: "updated",
+            config: { origin: { type: "gitee", path: "helper" } },
+            files: [],
+            overwrite: true,
+          },
+        ],
+      });
     });
   });
 });

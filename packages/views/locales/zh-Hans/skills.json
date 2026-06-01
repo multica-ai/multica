@@ -220,6 +220,8 @@
       "importing_gitee": "正在从 Gitee 导入...",
       "name_conflict_hint": "导入的 skill 名称已存在——请先删除已有的再重试。",
       "conflict_dialog_description": "这个导入的 skill 与工作区中已有 skill 重名。勾选覆盖会更新已有 skill；不勾选则跳过。",
+      "rescan": "重新扫描",
+      "no_skills_error": "这个 URL 下未找到 SKILL.md 文件。",
       "fallback_error": "导入失败",
       "cancel": "取消",
       "toast_imported": "已导入 skill"

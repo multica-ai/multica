@@ -440,6 +440,14 @@ export interface BatchImportSkillsResponse {
   skipped: string[];
 }
 
+export interface DiscoveredImportSkill extends CreateSkillRequest {
+  source_path: string;
+}
+
+export interface DiscoverImportSkillsResponse {
+  skills: DiscoveredImportSkill[];
+}
+
 export type RuntimePingStatus = "pending" | "running" | "completed" | "failed" | "timeout";
 
 export interface RuntimePing {

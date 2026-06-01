@@ -208,6 +208,8 @@
       "importing_gitee": "Importing from Gitee…",
       "name_conflict_hint": " The imported skill's name already exists — delete the existing one before retrying.",
       "conflict_dialog_description": "This imported skill matches an existing workspace skill. Choose overwrite to update it; leave it unchecked to skip.",
+      "rescan": "Scan again",
+      "no_skills_error": "No SKILL.md files found at this URL.",
       "fallback_error": "Import failed",
       "cancel": "Cancel",
       "toast_imported": "Skill imported"

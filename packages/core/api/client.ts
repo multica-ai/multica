@@ -45,6 +45,7 @@ import type {
   UpdateSkillRequest,
   SetAgentSkillsRequest,
   BatchImportSkillsResponse,
+  DiscoverImportSkillsResponse,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
@@ -1936,6 +1937,13 @@ export class ApiClient {
 
   async importSkill(data: { url: string; gitee_token?: string; overwrite?: boolean }): Promise<Skill> {
     return this.fetch("/api/skills/import", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async discoverImportSkills(data: { url: string; gitee_token?: string }): Promise<DiscoverImportSkillsResponse> {
+    return this.fetch("/api/skills/import/discover", {
       method: "POST",
       body: JSON.stringify(data),
     });
