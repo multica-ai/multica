@@ -529,124 +529,126 @@ function CommentCardImpl({
   const isHighlighted = highlightedCommentId === entry.id;
 
   return (
-    <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
-      {onCollapseResolved && (
-        <button
-          type="button"
-          onClick={onCollapseResolved}
-          className="flex w-full items-center justify-between border-b border-border/50 px-4 py-2.5 text-left text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
-          aria-label={t(($) => $.comment.resolve.collapse)}
-        >
-          <span className="flex items-center gap-2">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            {t(($) => $.comment.resolve.collapse)}
-          </span>
-          <ChevronRight className="h-3.5 w-3.5 -rotate-90" />
-        </button>
-      )}
+    <Card className={cn("!py-0 !gap-0 overflow-clip transition-colors duration-700", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
       <Collapsible open={open} onOpenChange={handleOpenChange}>
-        {/* Header — always visible, acts as toggle */}
-        <div className="px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            <CollapsibleTrigger className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
-              <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
-            </CollapsibleTrigger>
-            <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
-            <span className="shrink-0 cursor-pointer text-sm font-medium">
-              {getActorName(entry.actor_type, entry.actor_id)}
-            </span>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="shrink-0 text-xs text-muted-foreground cursor-default">
-                    {timeAgo(entry.created_at)}
-                  </span>
-                }
-              />
-              <TooltipContent side="top">
-                {new Date(entry.created_at).toLocaleString()}
-              </TooltipContent>
-            </Tooltip>
-
-            {!open && contentPreview && (
-              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                {contentPreview}
+        <div className={cn(open && "sticky top-0 z-20 border-b border-border/50 bg-card")}>
+          {onCollapseResolved && (
+            <button
+              type="button"
+              onClick={onCollapseResolved}
+              className="flex w-full items-center justify-between border-b border-border/50 px-4 py-2.5 text-left text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+              aria-label={t(($) => $.comment.resolve.collapse)}
+            >
+              <span className="flex items-center gap-2">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {t(($) => $.comment.resolve.collapse)}
               </span>
-            )}
-            {!open && replyCount > 0 && (
-              <span className="shrink-0 text-xs text-muted-foreground">
-                {t(($) => $.comment.reply_count, { count: replyCount })}
+              <ChevronRight className="h-3.5 w-3.5 -rotate-90" />
+            </button>
+          )}
+          {/* Header — always visible, acts as toggle */}
+          <div className="px-4 py-3">
+            <div className="flex items-center gap-2.5">
+              <CollapsibleTrigger className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
+                <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
+              </CollapsibleTrigger>
+              <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
+              <span className="shrink-0 cursor-pointer text-sm font-medium">
+                {getActorName(entry.actor_type, entry.actor_id)}
               </span>
-            )}
-
-            {open && (
-              <div className="ml-auto flex items-center gap-0.5">
-                <QuickEmojiPicker
-                  onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
-                  align="end"
-                />
-              <DropdownMenu>
-                <DropdownMenuTrigger
+              <Tooltip>
+                <TooltipTrigger
                   render={
-                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
+                    <span className="shrink-0 text-xs text-muted-foreground cursor-default">
+                      {timeAgo(entry.created_at)}
+                    </span>
                   }
                 />
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => {
-                    copyMarkdown(entry.content ?? "");
-                    toast.success(t(($) => $.comment.copied_toast));
-                  }}>
-                    <Copy className="h-3.5 w-3.5" />
-                    {t(($) => $.comment.copy_action)}
-                  </DropdownMenuItem>
-                  {onResolveToggle && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => onResolveToggle(entry.id, !entry.resolved_at)}>
-                        {entry.resolved_at ? (
-                          <>
-                            <RotateCcw className="h-3.5 w-3.5" />
-                            {t(($) => $.comment.resolve.unresolve_action)}
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            {t(($) => $.comment.resolve.resolve_action)}
-                          </>
+                <TooltipContent side="top">
+                  {new Date(entry.created_at).toLocaleString()}
+                </TooltipContent>
+              </Tooltip>
+
+              {!open && contentPreview && (
+                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                  {contentPreview}
+                </span>
+              )}
+              {!open && replyCount > 0 && (
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {t(($) => $.comment.reply_count, { count: replyCount })}
+                </span>
+              )}
+
+              {open && (
+                <div className="ml-auto flex items-center gap-0.5">
+                  <QuickEmojiPicker
+                    onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
+                    align="end"
+                  />
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    }
+                  />
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => {
+                      copyMarkdown(entry.content ?? "");
+                      toast.success(t(($) => $.comment.copied_toast));
+                    }}>
+                      <Copy className="h-3.5 w-3.5" />
+                      {t(($) => $.comment.copy_action)}
+                    </DropdownMenuItem>
+                    {onResolveToggle && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => onResolveToggle(entry.id, !entry.resolved_at)}>
+                          {entry.resolved_at ? (
+                            <>
+                              <RotateCcw className="h-3.5 w-3.5" />
+                              {t(($) => $.comment.resolve.unresolve_action)}
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              {t(($) => $.comment.resolve.resolve_action)}
+                            </>
+                          )}
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    {(canEditEntry || canDeleteEntry) && (
+                      <>
+                        <DropdownMenuSeparator />
+                        {canEditEntry && (
+                          <DropdownMenuItem onClick={edit.startEdit}>
+                            <Pencil className="h-3.5 w-3.5" />
+                            {t(($) => $.comment.edit_action)}
+                          </DropdownMenuItem>
                         )}
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                  {(canEditEntry || canDeleteEntry) && (
-                    <>
-                      <DropdownMenuSeparator />
-                      {canEditEntry && (
-                        <DropdownMenuItem onClick={edit.startEdit}>
-                          <Pencil className="h-3.5 w-3.5" />
-                          {t(($) => $.comment.edit_action)}
-                        </DropdownMenuItem>
-                      )}
-                      {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
-                      {canDeleteEntry && (
-                        <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
-                          <Trash2 className="h-3.5 w-3.5" />
-                          {t(($) => $.comment.delete_action)}
-                        </DropdownMenuItem>
-                      )}
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <DeleteCommentDialog
-                open={confirmDelete}
-                onOpenChange={setConfirmDelete}
-                onConfirm={() => onDelete(entry.id)}
-                hasReplies
-              />
-              </div>
-            )}
+                        {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
+                        {canDeleteEntry && (
+                          <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {t(($) => $.comment.delete_action)}
+                          </DropdownMenuItem>
+                        )}
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <DeleteCommentDialog
+                  open={confirmDelete}
+                  onOpenChange={setConfirmDelete}
+                  onConfirm={() => onDelete(entry.id)}
+                  hasReplies
+                />
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
