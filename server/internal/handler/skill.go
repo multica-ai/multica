@@ -476,6 +476,7 @@ type DiscoveredImportSkill struct {
 	Config      any                      `json:"config,omitempty"`
 	Files       []CreateSkillFileRequest `json:"files,omitempty"`
 	SourcePath  string                   `json:"source_path"`
+	SourceURL   string                   `json:"source_url"`
 }
 
 type DiscoverImportSkillsResponse struct {
@@ -575,6 +576,7 @@ func (s *importedSkill) createRequest(overwrite bool) CreateSkillRequest {
 func (s *importedSkill) discoveredResponse() DiscoveredImportSkill {
 	req := s.createRequest(false)
 	sourcePath, _ := s.origin["path"].(string)
+	sourceURL, _ := s.origin["source_url"].(string)
 	if sourcePath == "" {
 		sourcePath = "SKILL.md"
 	} else {
@@ -587,6 +589,28 @@ func (s *importedSkill) discoveredResponse() DiscoveredImportSkill {
 		Config:      req.Config,
 		Files:       req.Files,
 		SourcePath:  sourcePath,
+		SourceURL:   sourceURL,
+	}
+}
+
+func (s *importedSkill) discoveredMetadata(sourceURL string) DiscoveredImportSkill {
+	sourcePath, _ := s.origin["path"].(string)
+	if sourcePath == "" {
+		sourcePath = "SKILL.md"
+	} else {
+		sourcePath += "/SKILL.md"
+	}
+	config := map[string]any{}
+	if s.origin != nil {
+		config["origin"] = s.origin
+	}
+	return DiscoveredImportSkill{
+		Name:        s.name,
+		Description: s.description,
+		Content:     s.content,
+		Config:      config,
+		SourcePath:  sourcePath,
+		SourceURL:   sourceURL,
 	}
 }
 
@@ -1121,6 +1145,15 @@ func findSkillDirFromConventionalPrefixes(httpClient *http.Client, owner, repo, 
 	return findMatchingSkillDirByFrontmatter(httpClient, rawPrefix, skillName, remaining)
 }
 
+func shouldSkipSkillDiscoveryDir(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case ".agents", ".claude", ".codex", ".opencode", ".openclaw", ".pi":
+		return false
+	default:
+		return skillbundle.ShouldSkipDir(name)
+	}
+}
+
 func importedSkillsFromGitHubPaths(httpClient *http.Client, rawURL string, spec githubSpec, rawPrefix string, skillPaths []string) ([]*importedSkill, error) {
 	sort.Strings(skillPaths)
 	result := make([]*importedSkill, 0, len(skillPaths))
@@ -1184,6 +1217,85 @@ func fetchGitHubSkillList(httpClient *http.Client, rawURL string) ([]*importedSk
 	return importedSkillsFromGitHubPaths(httpClient, rawURL, spec, rawPrefix, skillPaths)
 }
 
+func discoverGitHubSkillMetadata(httpClient *http.Client, rawURL string) ([]DiscoveredImportSkill, error) {
+	spec, err := parseGitHubURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if len(spec.refSegments) > 0 {
+		if err := resolveGitHubRefAndPath(httpClient, &spec); err != nil {
+			return nil, err
+		}
+	}
+	if spec.ref == "" {
+		spec.ref = fetchGitHubDefaultBranch(httpClient, spec.owner, spec.repo)
+	}
+	rawPrefix := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
+		url.PathEscape(spec.owner), url.PathEscape(spec.repo), escapeRefPath(spec.ref))
+
+	skillMdPath := "SKILL.md"
+	if spec.skillDir != "" {
+		skillMdPath = spec.skillDir + "/SKILL.md"
+	}
+	if body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, skillMdPath)); err == nil {
+		return []DiscoveredImportSkill{buildGitHubDiscoveredSkill(rawURL, spec, body)}, nil
+	}
+
+	skillPaths, err := listGitHubSkillMdPaths(httpClient, spec.owner, spec.repo, spec.skillDir, spec.ref)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect %s/%s@%s for skill directories: %w", spec.owner, spec.repo, spec.ref, err)
+	}
+	if len(skillPaths) == 0 {
+		if spec.skillDir == "" {
+			return nil, fmt.Errorf("SKILL.md not found at the root of %s/%s@%s. For multi-skill repositories, point to a specific directory using github.com/%s/%s/tree/%s/<skill-dir>",
+				spec.owner, spec.repo, spec.ref, spec.owner, spec.repo, spec.ref)
+		}
+		return nil, fmt.Errorf("SKILL.md not found at %s in %s/%s@%s",
+			skillMdPath, spec.owner, spec.repo, spec.ref)
+	}
+
+	sort.Strings(skillPaths)
+	discovered := make([]DiscoveredImportSkill, 0, len(skillPaths))
+	for _, skillPath := range skillPaths {
+		body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, skillPath))
+		if err != nil {
+			return nil, fmt.Errorf("SKILL.md not found at %s in %s/%s@%s: %w",
+				skillPath, spec.owner, spec.repo, spec.ref, err)
+		}
+		candidate := spec
+		candidate.skillDir = skillDirFromSkillFilePath(skillPath)
+		discovered = append(discovered, buildGitHubDiscoveredSkill(rawURL, candidate, body))
+	}
+	return discovered, nil
+}
+
+func buildGitHubDiscoveredSkill(rawURL string, spec githubSpec, skillMdBody []byte) DiscoveredImportSkill {
+	name, description := parseSkillFrontmatter(string(skillMdBody))
+	if name == "" {
+		if spec.skillDir != "" {
+			name = filepath.Base(spec.skillDir)
+		} else {
+			name = spec.repo
+		}
+	}
+	sourceURL := buildGitWebTreeURL("github.com", spec.owner, spec.repo, spec.ref, spec.skillDir)
+	imported := &importedSkill{
+		name:        name,
+		description: description,
+		content:     string(skillMdBody),
+		origin: map[string]any{
+			"type":       "github",
+			"source_url": sourceURL,
+			"requested":  rawURL,
+			"owner":      spec.owner,
+			"repo":       spec.repo,
+			"ref":        spec.ref,
+			"path":       spec.skillDir,
+		},
+	}
+	return imported.discoveredMetadata(sourceURL)
+}
+
 func listGitHubSkillMdPaths(httpClient *http.Client, owner, repo, repoPath, ref string) ([]string, error) {
 	apiURL := buildGitHubContentsURL(owner, repo, repoPath, ref)
 	resp, err := doGitHubAPIGet(httpClient, apiURL)
@@ -1220,7 +1332,7 @@ func collectGitHubSkillMdPaths(httpClient *http.Client, entries []githubContentE
 		if entry.Type != "dir" {
 			continue
 		}
-		if skillbundle.ShouldSkipDir(entry.Name) {
+		if shouldSkipSkillDiscoveryDir(entry.Name) {
 			continue
 		}
 
@@ -1842,6 +1954,15 @@ func buildGiteeContentsURL(owner, repo, repoPath, ref string) string {
 	return base + "/" + strings.Join(escapedParts, "/") + "?ref=" + url.QueryEscape(ref)
 }
 
+func buildGitWebTreeURL(host, owner, repo, ref, repoPath string) string {
+	base := fmt.Sprintf("https://%s/%s/%s/tree/%s",
+		host, url.PathEscape(owner), url.PathEscape(repo), escapeRefPath(ref))
+	if repoPath == "" {
+		return base
+	}
+	return base + "/" + strings.TrimPrefix(buildRawGitHubURL("", repoPath), "/")
+}
+
 func fetchFromGitee(httpClient *http.Client, rawURL, giteeToken string) (*importedSkill, error) {
 	skills, err := fetchGiteeSkillList(httpClient, rawURL, giteeToken)
 	if err != nil {
@@ -1920,6 +2041,87 @@ func importedSkillsFromGiteePaths(httpClient *http.Client, rawURL string, spec g
 		result = append(result, imported)
 	}
 	return result, nil
+}
+
+func discoverGiteeSkillMetadata(httpClient *http.Client, rawURL, giteeToken string) ([]DiscoveredImportSkill, error) {
+	spec, err := parseGitHubURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if len(spec.refSegments) > 0 {
+		if err := resolveGiteeRefAndPath(httpClient, &spec, giteeToken); err != nil {
+			return nil, err
+		}
+	}
+	if spec.ref == "" {
+		ref, err := fetchGiteeDefaultBranch(httpClient, spec.owner, spec.repo, giteeToken)
+		if err != nil {
+			return nil, err
+		}
+		spec.ref = ref
+	}
+
+	skillMdPath := "SKILL.md"
+	if spec.skillDir != "" {
+		skillMdPath = spec.skillDir + "/SKILL.md"
+	}
+	if body, err := fetchGiteeFile(httpClient, spec.owner, spec.repo, spec.ref, skillMdPath, giteeToken); err == nil {
+		return []DiscoveredImportSkill{buildGiteeDiscoveredSkill(rawURL, spec, body)}, nil
+	}
+
+	skillPaths, err := listGiteeSkillMdPaths(httpClient, spec.owner, spec.repo, spec.skillDir, spec.ref, giteeToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect %s/%s@%s for skill directories: %w", spec.owner, spec.repo, spec.ref, err)
+	}
+	if len(skillPaths) == 0 {
+		if spec.skillDir == "" {
+			return nil, fmt.Errorf("SKILL.md not found at the root of %s/%s@%s. For multi-skill repositories, point to a specific directory using gitee.com/%s/%s/tree/%s/<skill-dir>",
+				spec.owner, spec.repo, spec.ref, spec.owner, spec.repo, spec.ref)
+		}
+		return nil, fmt.Errorf("SKILL.md not found at %s in %s/%s@%s",
+			skillMdPath, spec.owner, spec.repo, spec.ref)
+	}
+
+	sort.Strings(skillPaths)
+	discovered := make([]DiscoveredImportSkill, 0, len(skillPaths))
+	for _, skillPath := range skillPaths {
+		body, err := fetchGiteeFile(httpClient, spec.owner, spec.repo, spec.ref, skillPath, giteeToken)
+		if err != nil {
+			return nil, fmt.Errorf("SKILL.md not found at %s in %s/%s@%s: %w",
+				skillPath, spec.owner, spec.repo, spec.ref, err)
+		}
+		candidate := spec
+		candidate.skillDir = skillDirFromSkillFilePath(skillPath)
+		discovered = append(discovered, buildGiteeDiscoveredSkill(rawURL, candidate, body))
+	}
+	return discovered, nil
+}
+
+func buildGiteeDiscoveredSkill(rawURL string, spec githubSpec, skillMdBody []byte) DiscoveredImportSkill {
+	name, description := parseSkillFrontmatter(string(skillMdBody))
+	if name == "" {
+		if spec.skillDir != "" {
+			name = filepath.Base(spec.skillDir)
+		} else {
+			name = spec.repo
+		}
+	}
+	sourceURL := buildGitWebTreeURL("gitee.com", spec.owner, spec.repo, spec.ref, spec.skillDir)
+	imported := &importedSkill{
+		name:        name,
+		description: description,
+		content:     string(skillMdBody),
+		origin: map[string]any{
+			"type":       "gitee",
+			"source_url": sourceURL,
+			"requested":  rawURL,
+			"owner":      spec.owner,
+			"repo":       spec.repo,
+			"ref":        spec.ref,
+			"path":       spec.skillDir,
+		},
+	}
+	return imported.discoveredMetadata(sourceURL)
 }
 
 func buildGiteeImportedSkill(httpClient *http.Client, rawURL string, spec githubSpec, skillMdBody []byte, giteeToken string) (*importedSkill, error) {
@@ -2021,7 +2223,7 @@ func collectGiteeSkillMdPaths(httpClient *http.Client, entries []githubContentEn
 				*out = append(*out, entry.Path)
 			}
 		case "dir":
-			if skillbundle.ShouldSkipDir(entry.Name) {
+			if shouldSkipSkillDiscoveryDir(entry.Name) {
 				continue
 			}
 			subURL := buildGiteeContentsURL(owner, repo, entry.Path, ref)
@@ -2342,43 +2544,36 @@ func (h *Handler) DiscoverImportSkills(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
-	var imported []*importedSkill
+	resp := DiscoverImportSkillsResponse{}
 	switch source {
 	case sourceClawHub:
 		skill, err := fetchFromClawHub(httpClient, normalized)
-		if err == nil {
-			imported = []*importedSkill{skill}
-		}
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
+		resp.Skills = []DiscoveredImportSkill{skill.discoveredResponse()}
 	case sourceSkillsSh:
 		skill, err := fetchFromSkillsSh(httpClient, normalized)
-		if err == nil {
-			imported = []*importedSkill{skill}
-		}
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
+		resp.Skills = []DiscoveredImportSkill{skill.discoveredResponse()}
 	case sourceGitHub:
-		imported, err = fetchGitHubSkillList(httpClient, normalized)
+		skills, err := discoverGitHubSkillMetadata(httpClient, normalized)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
+		resp.Skills = skills
 	case sourceGitee:
-		imported, err = fetchGiteeSkillList(httpClient, normalized, req.GiteeToken)
+		skills, err := discoverGiteeSkillMetadata(httpClient, normalized, req.GiteeToken)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-	}
-
-	resp := DiscoverImportSkillsResponse{Skills: make([]DiscoveredImportSkill, 0, len(imported))}
-	for _, skill := range imported {
-		resp.Skills = append(resp.Skills, skill.discoveredResponse())
+		resp.Skills = skills
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

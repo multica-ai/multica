@@ -442,6 +442,7 @@ export interface BatchImportSkillsResponse {
 
 export interface DiscoveredImportSkill extends CreateSkillRequest {
   source_path: string;
+  source_url: string;
 }
 
 export interface DiscoverImportSkillsResponse {

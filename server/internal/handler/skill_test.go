@@ -970,6 +970,83 @@ func TestFetchGitHubSkillList_RepoRootDiscoversMultipleSkillDirectories(t *testi
 	}
 }
 
+func TestDiscoverGitHubSkillMetadata_AllowsAgentSkillContainersAndDoesNotFetchSupportingFiles(t *testing.T) {
+	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/contents":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{Name: ".agents", Path: ".agents", Type: "dir", URL: "https://api.github.com/repos/acme/skills/contents/.agents?ref=main"},
+					{Name: "__pycache__", Path: "__pycache__", Type: "dir", URL: "https://api.github.com/repos/acme/skills/contents/__pycache__?ref=main"},
+				})
+			case "/repos/acme/skills/contents/.agents":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{Name: "skills", Path: ".agents/skills", Type: "dir", URL: "https://api.github.com/repos/acme/skills/contents/.agents/skills?ref=main"},
+				})
+			case "/repos/acme/skills/contents/.agents/skills":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{Name: "foo", Path: ".agents/skills/foo", Type: "dir", URL: "https://api.github.com/repos/acme/skills/contents/.agents/skills/foo?ref=main"},
+					{Name: "bar", Path: ".agents/skills/bar", Type: "dir", URL: "https://api.github.com/repos/acme/skills/contents/.agents/skills/bar?ref=main"},
+				})
+			case "/repos/acme/skills/contents/.agents/skills/foo":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{Name: "SKILL.md", Path: ".agents/skills/foo/SKILL.md", Type: "file", DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/.agents/skills/foo/SKILL.md"},
+					{Name: "guide.md", Path: ".agents/skills/foo/guide.md", Type: "file", DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/.agents/skills/foo/guide.md"},
+				})
+			case "/repos/acme/skills/contents/.agents/skills/bar":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{Name: "SKILL.md", Path: ".agents/skills/bar/SKILL.md", Type: "file", DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/.agents/skills/bar/SKILL.md"},
+				})
+			case "/repos/acme/skills/contents/__pycache__":
+				t.Fatalf("ignored directory was fetched: %s", r.URL.Path)
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/skills/main/SKILL.md":
+				http.NotFound(w, r)
+			case "/acme/skills/main/.agents/skills/foo/SKILL.md":
+				w.Write([]byte("---\nname: foo\ndescription: Foo helper\n---\nfoo"))
+			case "/acme/skills/main/.agents/skills/bar/SKILL.md":
+				w.Write([]byte("---\nname: bar\n---\nbar"))
+			case "/acme/skills/main/.agents/skills/foo/guide.md":
+				t.Fatal("supporting file should not be fetched during discovery")
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	skills, err := discoverGitHubSkillMetadata(client, "https://github.com/acme/skills")
+	if err != nil {
+		t.Fatalf("discoverGitHubSkillMetadata: %v", err)
+	}
+	if len(skills) != 2 {
+		t.Fatalf("len(skills) = %d, want 2", len(skills))
+	}
+	if skills[0].Name != "bar" || skills[1].Name != "foo" {
+		t.Fatalf("skill names = [%s %s], want [bar foo]", skills[0].Name, skills[1].Name)
+	}
+	if skills[1].SourcePath != ".agents/skills/foo/SKILL.md" {
+		t.Fatalf("source_path = %q, want .agents/skills/foo/SKILL.md", skills[1].SourcePath)
+	}
+	if skills[1].SourceURL != "https://github.com/acme/skills/tree/main/.agents/skills/foo" {
+		t.Fatalf("source_url = %q", skills[1].SourceURL)
+	}
+	if len(skills[1].Files) != 0 {
+		t.Fatalf("files = %+v, want none during discovery", skills[1].Files)
+	}
+	if containsString(*requests, "api.github.com /repos/acme/skills/contents/__pycache__?ref=main") {
+		t.Fatalf("ignored dirs should not be requested, got %v", *requests)
+	}
+}
+
 func TestFetchFromGitHub_BlobURLImportsSpecificSkill(t *testing.T) {
 	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Header.Get("X-Test-Original-Host") {
@@ -1757,7 +1834,78 @@ func TestFetchGiteeSkillList_RepoRootDiscoversMultipleSkillDirectories(t *testin
 	}
 }
 
-func TestDiscoverImportSkills_ReturnsBatchImportPayload(t *testing.T) {
+func TestDiscoverGiteeSkillMetadata_AllowsAgentSkillContainersAndDoesNotFetchSupportingFiles(t *testing.T) {
+	client, requests := newGiteeFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Test-Original-Host") != "gitee.com" {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v5/repos/acme/skills":
+			writeJSON(w, http.StatusOK, map[string]any{"default_branch": "master"})
+		case "/api/v5/repos/acme/skills/contents":
+			writeJSON(w, http.StatusOK, []githubContentEntry{
+				{Name: ".agents", Path: ".agents", Type: "dir"},
+				{Name: "__pycache__", Path: "__pycache__", Type: "dir"},
+			})
+		case "/api/v5/repos/acme/skills/contents/.agents":
+			writeJSON(w, http.StatusOK, []githubContentEntry{
+				{Name: "skills", Path: ".agents/skills", Type: "dir"},
+			})
+		case "/api/v5/repos/acme/skills/contents/.agents/skills":
+			writeJSON(w, http.StatusOK, []githubContentEntry{
+				{Name: "foo", Path: ".agents/skills/foo", Type: "dir"},
+				{Name: "bar", Path: ".agents/skills/bar", Type: "dir"},
+			})
+		case "/api/v5/repos/acme/skills/contents/.agents/skills/foo":
+			writeJSON(w, http.StatusOK, []githubContentEntry{
+				{Name: "SKILL.md", Path: ".agents/skills/foo/SKILL.md", Type: "file"},
+				{Name: "guide.md", Path: ".agents/skills/foo/guide.md", Type: "file"},
+			})
+		case "/api/v5/repos/acme/skills/contents/.agents/skills/bar":
+			writeJSON(w, http.StatusOK, []githubContentEntry{
+				{Name: "SKILL.md", Path: ".agents/skills/bar/SKILL.md", Type: "file"},
+			})
+		case "/acme/skills/raw/master/SKILL.md":
+			http.NotFound(w, r)
+		case "/acme/skills/raw/master/.agents/skills/foo/SKILL.md":
+			w.Write([]byte("---\nname: foo\ndescription: Foo helper\n---\nfoo"))
+		case "/acme/skills/raw/master/.agents/skills/bar/SKILL.md":
+			w.Write([]byte("---\nname: bar\n---\nbar"))
+		case "/acme/skills/raw/master/.agents/skills/foo/guide.md":
+			t.Fatal("supporting file should not be fetched during discovery")
+		case "/api/v5/repos/acme/skills/contents/__pycache__":
+			t.Fatalf("ignored directory was fetched: %s", r.URL.Path)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	skills, err := discoverGiteeSkillMetadata(client, "https://gitee.com/acme/skills", "")
+	if err != nil {
+		t.Fatalf("discoverGiteeSkillMetadata: %v", err)
+	}
+	if len(skills) != 2 {
+		t.Fatalf("len(skills) = %d, want 2", len(skills))
+	}
+	if skills[0].Name != "bar" || skills[1].Name != "foo" {
+		t.Fatalf("skill names = [%s %s], want [bar foo]", skills[0].Name, skills[1].Name)
+	}
+	if skills[1].SourcePath != ".agents/skills/foo/SKILL.md" {
+		t.Fatalf("source_path = %q, want .agents/skills/foo/SKILL.md", skills[1].SourcePath)
+	}
+	if skills[1].SourceURL != "https://gitee.com/acme/skills/tree/master/.agents/skills/foo" {
+		t.Fatalf("source_url = %q", skills[1].SourceURL)
+	}
+	if len(skills[1].Files) != 0 {
+		t.Fatalf("files = %+v, want none during discovery", skills[1].Files)
+	}
+	if containsString(*requests, "gitee.com /api/v5/repos/acme/skills/contents/__pycache__?ref=master") {
+		t.Fatalf("ignored dirs should not be requested, got %v", *requests)
+	}
+}
+
+func TestDiscoverImportSkills_GiteeUsesLightweightMetadata(t *testing.T) {
 	client, _ := newGiteeFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Test-Original-Host") != "gitee.com" {
 			http.NotFound(w, r)
@@ -1768,23 +1916,27 @@ func TestDiscoverImportSkills_ReturnsBatchImportPayload(t *testing.T) {
 			writeJSON(w, http.StatusOK, map[string]any{"default_branch": "master"})
 		case "/api/v5/repos/acme/skills/contents":
 			writeJSON(w, http.StatusOK, []githubContentEntry{
-				{Name: "skills", Path: "skills", Type: "dir"},
+				{Name: ".agents", Path: ".agents", Type: "dir"},
 			})
-		case "/api/v5/repos/acme/skills/contents/skills":
+		case "/api/v5/repos/acme/skills/contents/.agents":
 			writeJSON(w, http.StatusOK, []githubContentEntry{
-				{Name: "foo", Path: "skills/foo", Type: "dir"},
+				{Name: "skills", Path: ".agents/skills", Type: "dir"},
 			})
-		case "/api/v5/repos/acme/skills/contents/skills/foo":
+		case "/api/v5/repos/acme/skills/contents/.agents/skills":
 			writeJSON(w, http.StatusOK, []githubContentEntry{
-				{Name: "SKILL.md", Path: "skills/foo/SKILL.md", Type: "file"},
-				{Name: "guide.md", Path: "skills/foo/guide.md", Type: "file"},
+				{Name: "foo", Path: ".agents/skills/foo", Type: "dir"},
+			})
+		case "/api/v5/repos/acme/skills/contents/.agents/skills/foo":
+			writeJSON(w, http.StatusOK, []githubContentEntry{
+				{Name: "SKILL.md", Path: ".agents/skills/foo/SKILL.md", Type: "file"},
+				{Name: "guide.md", Path: ".agents/skills/foo/guide.md", Type: "file"},
 			})
 		case "/acme/skills/raw/master/SKILL.md":
 			http.NotFound(w, r)
-		case "/acme/skills/raw/master/skills/foo/SKILL.md":
-			w.Write([]byte("---\nname: foo\ndescription: nested skill\n---\nbody"))
-		case "/acme/skills/raw/master/skills/foo/guide.md":
-			w.Write([]byte("guide"))
+		case "/acme/skills/raw/master/.agents/skills/foo/SKILL.md":
+			w.Write([]byte("---\nname: foo\ndescription: Foo helper\n---\nfoo"))
+		case "/acme/skills/raw/master/.agents/skills/foo/guide.md":
+			t.Fatal("supporting file should not be fetched by discovery endpoint")
 		default:
 			http.NotFound(w, r)
 		}
@@ -1813,18 +1965,17 @@ func TestDiscoverImportSkills_ReturnsBatchImportPayload(t *testing.T) {
 		t.Fatalf("len(skills) = %d, want 1", len(resp.Skills))
 	}
 	skill := resp.Skills[0]
-	if skill.Name != "foo" || skill.Description != "nested skill" {
+	if skill.Name != "foo" || skill.Description != "Foo helper" {
 		t.Fatalf("skill = %+v", skill)
 	}
-	if skill.SourcePath != "skills/foo/SKILL.md" {
-		t.Fatalf("source_path = %q, want skills/foo/SKILL.md", skill.SourcePath)
+	if skill.SourcePath != ".agents/skills/foo/SKILL.md" {
+		t.Fatalf("source_path = %q, want .agents/skills/foo/SKILL.md", skill.SourcePath)
 	}
-	if len(skill.Files) != 1 || skill.Files[0].Path != "guide.md" || skill.Files[0].Content != "guide" {
-		t.Fatalf("files = %+v", skill.Files)
+	if skill.SourceURL != "https://gitee.com/acme/skills/tree/master/.agents/skills/foo" {
+		t.Fatalf("source_url = %q", skill.SourceURL)
 	}
-	origin, ok := skill.Config.(map[string]any)["origin"].(map[string]any)
-	if !ok || origin["type"] != "gitee" || origin["path"] != "skills/foo" {
-		t.Fatalf("origin = %#v", skill.Config)
+	if len(skill.Files) != 0 {
+		t.Fatalf("files = %+v, want none during discovery", skill.Files)
 	}
 }
 

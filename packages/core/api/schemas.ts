@@ -6,6 +6,7 @@ import type {
   AutoSubscribePreferenceResponse,
   Attachment,
   CreateAgentFromTemplateResponse,
+  DiscoverImportSkillsResponse,
   GroupedIssuesResponse,
   IssueLabelsResponse,
   ListIssuesResponse,
@@ -607,6 +608,27 @@ const RuntimeUsageByHourSchema = z.object({
 }).loose();
 
 export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
+
+const DiscoveredImportSkillSchema = z.object({
+  name: z.string().default(""),
+  description: z.string().default(""),
+  content: z.string().default(""),
+  config: z.record(z.string(), z.unknown()).optional(),
+  files: z.array(z.object({
+    path: z.string(),
+    content: z.string(),
+  }).passthrough()).default([]),
+  source_path: z.string().default(""),
+  source_url: z.string().default(""),
+}).passthrough();
+
+export const DiscoverImportSkillsResponseSchema = z.object({
+  skills: z.array(DiscoveredImportSkillSchema).default([]),
+}).passthrough();
+
+export const EMPTY_DISCOVER_IMPORT_SKILLS_RESPONSE: DiscoverImportSkillsResponse = {
+  skills: [],
+};
 
 // ---------------------------------------------------------------------------
 // Agent template catalog — `/api/agent-templates*` and the

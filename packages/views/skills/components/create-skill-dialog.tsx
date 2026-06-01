@@ -710,6 +710,11 @@ function LocalDirectoryForm({
 
 type DetectedSource = "clawhub" | "skills.sh" | "github" | "gitee" | null;
 
+type DiscoveredSkillSelection = {
+  key: string;
+  skill: DiscoveredImportSkill;
+};
+
 function detectUrlSource(url: string): DetectedSource {
   const u = url.trim().toLowerCase();
   if (u.includes("clawhub.ai")) return "clawhub";
@@ -748,23 +753,30 @@ function SourceCard({
   );
 }
 
-function importConflictItems(skills: CreateSkillRequest[]): SkillConflictItem[] {
-  return skills.map((skill, index) => ({
-    key: `${skill.name}-${index}`,
+function buildDiscoveredSkillKey(name: string, index: number): string {
+  return `${name}-${index}`;
+}
+
+function selectedDiscoveredSkills(
+  skills: DiscoveredImportSkill[],
+  selectedKeys: Set<string>,
+): DiscoveredSkillSelection[] {
+  return skills
+    .map((skill, index) => ({
+      key: buildDiscoveredSkillKey(skill.name, index),
+      skill,
+    }))
+    .filter(({ key }) => selectedKeys.has(key));
+}
+
+function importConflictItemsFromDiscovered(
+  skills: DiscoveredSkillSelection[],
+): SkillConflictItem[] {
+  return skills.map(({ key, skill }) => ({
+    key,
     name: skill.name,
     description: skill.description,
   }));
-}
-
-function toCreateSkillRequest(skill: DiscoveredImportSkill): CreateSkillRequest {
-  return {
-    name: skill.name,
-    description: skill.description,
-    content: skill.content,
-    config: skill.config,
-    files: skill.files,
-    overwrite: skill.overwrite,
-  };
 }
 
 function SkillCandidateList({
@@ -790,7 +802,7 @@ function SkillCandidateList({
   return (
     <div className="space-y-1.5">
       {skills.map((skill, index) => {
-        const key = `${skill.name}-${index}`;
+        const key = buildDiscoveredSkillKey(skill.name, index);
         const checked = selectedKeys.has(key);
         return (
           <div
@@ -905,31 +917,32 @@ function UrlForm({
     }
   };
 
-  const runBatchImport = async (
-    skillsToImport: CreateSkillRequest[],
+  const runURLImports = async (
+    skillsToImport: DiscoveredSkillSelection[],
+    overwriteKeysToApply: Set<string>,
     skippedConflicts: SkillConflictItem[],
   ) => {
-    const skippedNames = skippedConflicts.map((skill) => skill.name);
-    if (skillsToImport.length === 0) {
-      setBatchResult({ created: [], skipped: skippedNames });
-      await qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-      return;
+    const created: Skill[] = [];
+    const skipped = skippedConflicts.map((skill) => skill.name);
+    for (const { key, skill } of skillsToImport) {
+      const imported = await api.importSkill({
+        url: skill.source_url,
+        ...(source === "gitee" && giteeToken.trim()
+          ? { gitee_token: giteeToken.trim() }
+          : {}),
+        overwrite: overwriteKeysToApply.has(key) || undefined,
+      });
+      created.push(imported);
+      seedAfterCreate(qc, wsId, imported);
     }
-    const result = await api.batchImportSkills({ skills: skillsToImport });
-    setBatchResult({
-      created: result.created,
-      skipped: [...skippedNames, ...result.skipped],
-    });
+    setBatchResult({ created, skipped });
     await Promise.all([
       qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) }),
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) }),
     ]);
-    for (const skill of result.created) {
-      qc.setQueryData(skillDetailOptions(wsId, skill.id).queryKey, skill);
-    }
     toast.success(
       t(($) => $.create.local.toast_imported, {
-        count: result.created.length,
+        count: created.length,
       }),
     );
   };
@@ -959,9 +972,9 @@ function UrlForm({
         return;
       }
       setDiscoveredSkills(result.skills);
-      setSelectedKeys(new Set(result.skills.map((skill, index) => `${skill.name}-${index}`)));
+      setSelectedKeys(new Set(result.skills.map((skill, index) => buildDiscoveredSkillKey(skill.name, index))));
       if (result.skills.length === 1) {
-        await importSelectedSkills(result.skills, new Set([`${result.skills[0]!.name}-0`]));
+        await importSelectedSkills(result.skills, new Set([buildDiscoveredSkillKey(result.skills[0]!.name, 0)]));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t(($) => $.create.url.fallback_error));
@@ -974,14 +987,12 @@ function UrlForm({
     sourceSkills = discoveredSkills,
     sourceSelectedKeys = selectedKeys,
   ) => {
-    const selected = sourceSkills.filter((skill, index) =>
-      sourceSelectedKeys.has(`${skill.name}-${index}`),
-    );
+    const selected = selectedDiscoveredSkills(sourceSkills, sourceSelectedKeys);
     if (selected.length === 0) return;
     setLoading(true);
     setError("");
     try {
-      const detectedConflicts = importConflictItems(selected).filter((skill) =>
+      const detectedConflicts = importConflictItemsFromDiscovered(selected).filter((skill) =>
         workspaceSkillsByName.has(buildConflictKey(skill.name)),
       );
       if (detectedConflicts.length > 0) {
@@ -989,7 +1000,7 @@ function UrlForm({
         setOverwriteKeys(new Set());
         return;
       }
-      await runBatchImport(selected.map(toCreateSkillRequest), []);
+      await runURLImports(selected, new Set(), []);
     } catch (err) {
       setError(err instanceof Error ? err.message : t(($) => $.create.url.fallback_error));
     } finally {
@@ -1016,17 +1027,11 @@ function UrlForm({
   };
 
   const handleConfirmConflicts = async () => {
-    const selected = discoveredSkills.filter((skill, index) =>
-      selectedKeys.has(`${skill.name}-${index}`),
-    );
+    const selected = selectedDiscoveredSkills(discoveredSkills, selectedKeys);
     const conflictKeys = new Set(conflicts.map((skill) => skill.key));
     const skillsToImport = selected
-      .map((skill, index) => ({ skill, key: `${skill.name}-${index}` }))
       .filter(({ key }) => !conflictKeys.has(key) || overwriteKeys.has(key))
-      .map(({ skill, key }) => ({
-        ...toCreateSkillRequest(skill),
-        overwrite: overwriteKeys.has(key) || undefined,
-      }));
+      .map(({ key, skill }) => ({ key, skill }));
     const skippedConflicts = conflicts.filter((skill) => !overwriteKeys.has(skill.key));
 
     setConflicts([]);
@@ -1034,7 +1039,7 @@ function UrlForm({
     setLoading(true);
     setError("");
     try {
-      await runBatchImport(skillsToImport, skippedConflicts);
+      await runURLImports(skillsToImport, overwriteKeys, skippedConflicts);
     } catch (err) {
       setError(err instanceof Error ? err.message : t(($) => $.create.url.fallback_error));
     } finally {
