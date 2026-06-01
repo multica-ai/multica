@@ -1,23 +1,22 @@
 "use client";
 
-import { ChevronRight, UserRound } from "lucide-react";
+import { UserRound } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type { MemberRole } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { PageHeader } from "../layout/page-header";
-import { WorkspaceAvatar } from "../workspace/workspace-avatar";
+import { BreadcrumbHeader } from "../layout/breadcrumb-header";
 import { ActorIssuesPanel } from "../common/actor-issues-panel";
 import { useT } from "../i18n";
 
 export function MemberDetailPage({ userId }: { userId: string }) {
   const { t } = useT("members");
+  const paths = useWorkspacePaths();
   const wsId = useWorkspaceId();
-  const workspace = useCurrentWorkspace();
   const { data: members = [], isLoading } = useQuery(memberListOptions(wsId));
   const member = members.find((m) => m.user_id === userId) ?? null;
 
@@ -28,7 +27,14 @@ export function MemberDetailPage({ userId }: { userId: string }) {
   if (!member) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
-        <MemberBreadcrumb workspaceName={workspace?.name} title={t(($) => $.detail.breadcrumb_fallback)} />
+        <BreadcrumbHeader
+          segments={[{ href: paths.members(), label: t(($) => $.detail.members_breadcrumb) }]}
+          leaf={
+            <span className="truncate font-medium text-foreground">
+              {t(($) => $.detail.breadcrumb_fallback)}
+            </span>
+          }
+        />
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <UserRound className="h-8 w-8 text-muted-foreground" />
           <div>
@@ -51,7 +57,14 @@ export function MemberDetailPage({ userId }: { userId: string }) {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <MemberBreadcrumb workspaceName={workspace?.name} title={member.name} />
+      <BreadcrumbHeader
+        segments={[{ href: paths.members(), label: t(($) => $.detail.members_breadcrumb) }]}
+        leaf={
+          <span className="truncate font-medium text-foreground">
+            {member.name}
+          </span>
+        }
+      />
 
       <div className="flex shrink-0 items-center gap-3 border-b px-6 py-4">
         <ActorAvatarBase
@@ -77,30 +90,6 @@ export function MemberDetailPage({ userId }: { userId: string }) {
   );
 }
 
-function MemberBreadcrumb({
-  workspaceName,
-  title,
-}: {
-  workspaceName: string | undefined;
-  title: string;
-}) {
-  const { t } = useT("members");
-  return (
-    <PageHeader className="gap-1.5">
-      <WorkspaceAvatar name={workspaceName ?? "W"} size="sm" />
-      <span className="text-sm text-muted-foreground">
-        {workspaceName ?? t(($) => $.detail.workspace_fallback)}
-      </span>
-      <ChevronRight className="h-3 w-3 text-muted-foreground" />
-      <span className="text-sm text-muted-foreground">
-        {t(($) => $.detail.members_breadcrumb)}
-      </span>
-      <ChevronRight className="h-3 w-3 text-muted-foreground" />
-      <span className="truncate text-sm font-medium">{title}</span>
-    </PageHeader>
-  );
-}
-
 function RoleBadge({ role }: { role: MemberRole }) {
   const { t } = useT("members");
   return (
@@ -117,9 +106,11 @@ function RoleBadge({ role }: { role: MemberRole }) {
 function MemberDetailSkeleton() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="px-5">
-        <Skeleton className="h-5 w-52" />
-      </PageHeader>
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <Skeleton className="h-4 w-16" />
+        <Skeleton className="h-4 w-3" />
+        <Skeleton className="h-4 w-24" />
+      </div>
       <div className="flex shrink-0 items-center gap-3 border-b px-6 py-4">
         <Skeleton className="h-11 w-11 rounded-full" />
         <div className="flex-1 space-y-2">

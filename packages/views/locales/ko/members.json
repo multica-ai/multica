@@ -12,7 +12,6 @@
     "more_agents_other": "외 에이전트 {{count}}개"
   },
   "detail": {
-    "workspace_fallback": "워크스페이스",
     "members_breadcrumb": "멤버",
     "breadcrumb_fallback": "멤버",
     "not_found_title": "멤버를 찾을 수 없습니다",
