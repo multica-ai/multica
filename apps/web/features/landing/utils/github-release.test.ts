@@ -1,153 +1,148 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchLatestRelease } from "./github-release";
 
-const SAMPLE_LATEST_ASSET = {
-  name: "multica-desktop-0.2.14-mac-arm64.dmg",
-  browser_download_url:
-    "https://github.com/multica-ai/multica/releases/download/v0.2.14/multica-desktop-0.2.14-mac-arm64.dmg",
-};
+const BASE = "https://multica.lilithgames.com/api/downloads";
 
-const SAMPLE_PREV_ASSET = {
-  name: "multica-desktop-0.2.13-mac-arm64.dmg",
-  browser_download_url:
-    "https://github.com/multica-ai/multica/releases/download/v0.2.13/multica-desktop-0.2.13-mac-arm64.dmg",
-};
+const MAC_YML = `version: 0.2.53
+files:
+  - url: multica-desktop-0.2.53-mac-arm64.zip
+    sha512: aaa
+    size: 1
+  - url: multica-desktop-0.2.53-mac-arm64.dmg
+    sha512: bbb
+    size: 2
+path: multica-desktop-0.2.53-mac-arm64.zip
+sha512: aaa
+releaseDate: '2026-06-01T08:17:40.274Z'
+`;
 
-function releasePayload(overrides: {
-  tag: string;
-  publishedMinutesAgo?: number;
-  asset?: { name: string; browser_download_url: string };
-  prerelease?: boolean;
-  draft?: boolean;
-}) {
-  const published = new Date(
-    Date.now() - (overrides.publishedMinutesAgo ?? 0) * 60_000,
-  ).toISOString();
-  return {
-    tag_name: overrides.tag,
-    published_at: published,
-    html_url: `https://github.com/multica-ai/multica/releases/tag/${overrides.tag}`,
-    prerelease: overrides.prerelease ?? false,
-    draft: overrides.draft ?? false,
-    assets: overrides.asset ? [overrides.asset] : [],
-  };
-}
+const WIN_YML = `version: 0.2.53
+files:
+  - url: multica-desktop-0.2.53-windows-x64.exe
+    sha512: ccc
+    size: 3
+path: multica-desktop-0.2.53-windows-x64.exe
+releaseDate: '2026-06-01T08:17:40.274Z'
+`;
 
-function mockFetchWithReleases(releases: unknown[]) {
-  const fetchMock = vi.fn().mockResolvedValue(
-    new Response(JSON.stringify(releases), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
+const LINUX_YML = `version: 0.2.53
+files:
+  - url: multica-desktop-0.2.53-linux-x86_64.AppImage
+    sha512: ddd
+    size: 4
+  - url: multica-desktop-0.2.53-linux-amd64.deb
+    sha512: eee
+    size: 5
+  - url: multica-desktop-0.2.53-linux-x86_64.rpm
+    sha512: fff
+    size: 6
+releaseDate: '2026-06-01T08:17:40.274Z'
+`;
+
+// map: manifest filename -> yml body (200) or status code (failure).
+function mockManifests(map: Record<string, string | number>) {
+  const fetchMock = vi.fn(async (url: string | URL) => {
+    const name = String(url).replace(`${BASE}/`, "");
+    const entry = map[name];
+    if (typeof entry === "string") {
+      return new Response(entry, { status: 200 });
+    }
+    return new Response("not found", {
+      status: typeof entry === "number" ? entry : 404,
+    });
+  });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("fetchLatestRelease", () => {
-  it("uses previous release when latest was published within the fresh window", async () => {
-    mockFetchWithReleases([
-      releasePayload({
-        tag: "v0.2.14",
-        publishedMinutesAgo: 10,
-        asset: SAMPLE_LATEST_ASSET,
-      }),
-      releasePayload({
-        tag: "v0.2.13",
-        publishedMinutesAgo: 60 * 24,
-        asset: SAMPLE_PREV_ASSET,
-      }),
-    ]);
+  it("builds OSS installer URLs from the latest-*.yml manifests", async () => {
+    mockManifests({
+      "latest-mac.yml": MAC_YML,
+      "latest.yml": WIN_YML,
+      "latest-linux.yml": LINUX_YML,
+    });
 
-    const result = await fetchLatestRelease();
-    expect(result.version).toBe("v0.2.13");
-    expect(result.assets.macArm64Dmg).toBe(
-      `https://multica.lilithgames.com/api/downloads/${SAMPLE_PREV_ASSET.name}`,
+    const r = await fetchLatestRelease();
+    expect(r.version).toBe("0.2.53");
+    expect(r.htmlUrl).toBeNull();
+    expect(r.assets.macArm64Zip).toBe(
+      `${BASE}/multica-desktop-0.2.53-mac-arm64.zip`,
+    );
+    expect(r.assets.macArm64Dmg).toBe(
+      `${BASE}/multica-desktop-0.2.53-mac-arm64.dmg`,
+    );
+    expect(r.assets.winX64Exe).toBe(
+      `${BASE}/multica-desktop-0.2.53-windows-x64.exe`,
+    );
+    expect(r.assets.linuxAmd64AppImage).toBe(
+      `${BASE}/multica-desktop-0.2.53-linux-x86_64.AppImage`,
+    );
+    expect(r.assets.linuxAmd64Deb).toBe(
+      `${BASE}/multica-desktop-0.2.53-linux-amd64.deb`,
+    );
+    expect(r.assets.linuxAmd64Rpm).toBe(
+      `${BASE}/multica-desktop-0.2.53-linux-x86_64.rpm`,
     );
   });
 
-  it("uses latest release once it is older than the fresh window", async () => {
-    mockFetchWithReleases([
-      releasePayload({
-        tag: "v0.2.14",
-        publishedMinutesAgo: 120,
-        asset: SAMPLE_LATEST_ASSET,
-      }),
-      releasePayload({
-        tag: "v0.2.13",
-        publishedMinutesAgo: 60 * 24,
-        asset: SAMPLE_PREV_ASSET,
-      }),
-    ]);
-
-    const result = await fetchLatestRelease();
-    expect(result.version).toBe("v0.2.14");
-    expect(result.assets.macArm64Dmg).toBe(
-      `https://multica.lilithgames.com/api/downloads/${SAMPLE_LATEST_ASSET.name}`,
-    );
-  });
-
-  it("falls back to latest when there is no previous release", async () => {
-    mockFetchWithReleases([
-      releasePayload({
-        tag: "v0.0.1",
-        publishedMinutesAgo: 5,
-        asset: SAMPLE_LATEST_ASSET,
-      }),
-    ]);
-
-    const result = await fetchLatestRelease();
-    expect(result.version).toBe("v0.0.1");
-  });
-
-  it("skips prereleases and drafts in the candidate list", async () => {
-    mockFetchWithReleases([
-      releasePayload({
-        tag: "v0.2.15-rc.1",
-        publishedMinutesAgo: 30,
-        prerelease: true,
-      }),
-      releasePayload({
-        tag: "v0.2.14",
-        publishedMinutesAgo: 120,
-        asset: SAMPLE_LATEST_ASSET,
-      }),
-    ]);
-
-    const result = await fetchLatestRelease();
-    expect(result.version).toBe("v0.2.14");
-  });
-
-  it("returns an empty release shape when the API errors", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response("rate limited", { status: 403 }),
-    );
+  it("reads manifests from the in-cluster backend when REMOTE_API_URL is set, but keeps public download links", async () => {
+    vi.stubEnv("REMOTE_API_URL", "http://multica-server:8080");
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const u = String(url);
+      if (u === "http://multica-server:8080/api/downloads/latest-mac.yml") {
+        return new Response(MAC_YML, { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
     vi.stubGlobal("fetch", fetchMock);
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const result = await fetchLatestRelease();
-    expect(result).toEqual({
+    const r = await fetchLatestRelease();
+    // Manifest fetched from the in-cluster backend, not the public host.
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://multica-server:8080/api/downloads/latest-mac.yml",
+      expect.anything(),
+    );
+    // ...but the download link the browser gets stays on the public host.
+    expect(r.assets.macArm64Dmg).toBe(
+      `${BASE}/multica-desktop-0.2.53-mac-arm64.dmg`,
+    );
+  });
+
+  it("drops a platform whose manifest is missing but keeps the rest", async () => {
+    mockManifests({
+      "latest-mac.yml": MAC_YML,
+      "latest.yml": 404,
+      "latest-linux.yml": 404,
+    });
+
+    const r = await fetchLatestRelease();
+    expect(r.version).toBe("0.2.53");
+    expect(r.assets.macArm64Dmg).toBe(
+      `${BASE}/multica-desktop-0.2.53-mac-arm64.dmg`,
+    );
+    expect(r.assets.winX64Exe).toBeUndefined();
+    expect(r.assets.linuxAmd64AppImage).toBeUndefined();
+  });
+
+  it("degrades to an empty release when every manifest fails", async () => {
+    mockManifests({
+      "latest-mac.yml": 503,
+      "latest.yml": 503,
+      "latest-linux.yml": 503,
+    });
+
+    const r = await fetchLatestRelease();
+    expect(r).toEqual({
       version: null,
       publishedAt: null,
       htmlUrl: null,
       assets: {},
     });
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
-  });
-
-  it("returns an empty release shape when all candidates are filtered out", async () => {
-    mockFetchWithReleases([
-      releasePayload({ tag: "v0.2.15-rc.1", prerelease: true }),
-      releasePayload({ tag: "v0.2.14-draft", draft: true }),
-    ]);
-
-    const result = await fetchLatestRelease();
-    expect(result.version).toBeNull();
-    expect(result.assets).toEqual({});
   });
 });

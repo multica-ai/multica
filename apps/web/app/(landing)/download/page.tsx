@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import { fetchLatestRelease } from "@/features/landing/utils/github-release";
 import { DownloadClient } from "./download-client";
 
-// Vercel ISR: the server fetch inside fetchLatestRelease carries
-// `next: { revalidate: 300 }`, which makes GitHub API cost at most
-// one request per region per 5 minutes. Page-level revalidate mirrors
-// that window so the first paint also refreshes every 5 minutes.
-export const revalidate = 300;
+// Render at request time, not at build. The release manifests are
+// fetched from the in-cluster backend (REMOTE_API_URL), which isn't
+// reachable during `next build`; a build-time prerender would bake an
+// empty "version unavailable" page. The fetch itself still carries
+// `next: { revalidate: 300 }`, so repeated requests are served from the
+// fetch cache for 5 minutes.
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Download Multica",

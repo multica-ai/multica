@@ -1,26 +1,26 @@
 import {
   parseReleaseAssets,
   type DownloadAssets,
+  DOWNLOAD_BASE_URL,
 } from "./parse-release-assets";
 
 /**
- * Server-side fetcher for the latest Multica release, designed to
- * run inside a Next.js server component. Response is cached by the
- * Next.js fetch cache for 5 minutes (Vercel ISR) so hitting /download
- * costs at most one GitHub API call per region per 5 minutes.
+ * Server-side fetcher for the latest desktop release, designed to run
+ * inside a Next.js server component. It reads the electron-updater
+ * `latest-*.yml` manifests Lilith publishes to the OSS download proxy
+ * — the same source the desktop auto-updater polls — NOT the upstream
+ * GitHub releases. Upstream GitHub versions diverge from what Lilith
+ * actually ships, so sourcing from there would surface installer URLs
+ * that don't exist on our OSS bucket.
  *
- * Desktop assets don't all land at the same time: CI uploads Linux
- * and Windows within a minute of each other, but macOS is packaged
- * manually (notarization credentials aren't wired into CI yet) and
- * lands tens of minutes later. To avoid showing the half-filled
- * mid-flight state on /download, the fetcher pulls the two most
- * recent releases and falls back to the previous one for the first
- * hour after publish. Empirically full desktop uploads complete in
- * ~20 min; 1 h gives 3x buffer for commonly-variable manual steps.
+ * Responses are cached by the Next.js fetch cache for 5 minutes, so
+ * hitting /download costs at most one manifest fetch per region per
+ * 5 minutes.
  *
- * On any failure (network, rate limit, malformed payload) returns a
- * `null`-shaped result and logs — the page degrades to a "version
- * unavailable" view rather than 500ing.
+ * Lilith ships mac-arm64, windows-x64 and linux-amd64 today, so only
+ * three manifests exist. A missing manifest (404) simply drops that
+ * platform; if every manifest fails (network, malformed payload) the
+ * page degrades to a "version unavailable" view rather than 500ing.
  */
 
 export interface LatestRelease {
@@ -30,78 +30,100 @@ export interface LatestRelease {
   assets: DownloadAssets;
 }
 
-const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/multica-ai/multica/releases?per_page=2";
+// electron-updater manifests published to OSS, one per platform family.
+const MANIFESTS = ["latest-mac.yml", "latest.yml", "latest-linux.yml"];
 
 const REVALIDATE_SECONDS = 300;
 
-const FRESH_RELEASE_WINDOW_MS = 60 * 60 * 1000;
-
-interface GitHubReleasePayload {
-  tag_name?: string;
-  published_at?: string;
-  html_url?: string;
-  prerelease?: boolean;
-  draft?: boolean;
-  assets?: Array<{ name: string; browser_download_url: string }>;
+// Manifests are read server-side, so the request must hit an endpoint
+// the web pod can actually reach. The public download host sits behind
+// an ALB whose IP-whitelist ACL blocks in-cluster egress, so we fetch
+// the manifests through the in-cluster backend (REMOTE_API_URL). The
+// download links handed to the browser still use the public
+// DOWNLOAD_BASE_URL — the browser reaches that fine. Falls back to the
+// public host for local dev, where there's no backend service.
+function manifestBaseUrl(): string {
+  const api = process.env.REMOTE_API_URL;
+  return api ? `${api.replace(/\/+$/, "")}/api/downloads` : DOWNLOAD_BASE_URL;
 }
 
 export async function fetchLatestRelease(): Promise<LatestRelease> {
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
-  // Optional PAT for local development and self-hosted deploys where
-  // the shared outbound IP keeps hitting the 60-requests/hour
-  // unauthenticated limit. Vercel's fetch cache is shared across all
-  // regions so production rarely needs this — but the env var lets
-  // anyone running the site locally avoid the rate-limit dance. Never
-  // prefix this with `NEXT_PUBLIC_`; the token must stay server-side.
-  const token = process.env.GITHUB_TOKEN;
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
+  const manifests = await Promise.all(MANIFESTS.map(fetchManifest));
+
+  const filenames: string[] = [];
+  let version: string | null = null;
+  let publishedAt: string | null = null;
+  for (const m of manifests) {
+    if (!m) continue;
+    version ??= m.version;
+    publishedAt ??= m.releaseDate;
+    filenames.push(...m.files);
   }
 
-  try {
-    const res = await fetch(GITHUB_RELEASES_URL, {
-      next: { revalidate: REVALIDATE_SECONDS },
-      headers,
-    });
-    if (!res.ok) {
-      throw new Error(`GitHub API responded ${res.status}`);
-    }
-    const data = (await res.json()) as GitHubReleasePayload[];
-
-    // Defensive filter — Multica doesn't publish prereleases or drafts
-    // today, but the endpoint returns them if that ever changes. A
-    // prerelease shadowing a stable version on /download would be a
-    // regression.
-    const stable = data.filter((r) => !r.prerelease && !r.draft);
-    const latest = stable[0];
-    if (!latest) {
-      return emptyRelease();
-    }
-    const previous = stable[1];
-    const chosen =
-      previous && isWithinFreshWindow(latest) ? previous : latest;
-
-    return {
-      version: chosen.tag_name ?? null,
-      publishedAt: chosen.published_at ?? null,
-      htmlUrl: chosen.html_url ?? null,
-      assets: parseReleaseAssets(chosen.assets ?? []),
-    };
-  } catch (err) {
-    console.warn("[download] fetchLatestRelease failed:", err);
+  if (filenames.length === 0) {
     return emptyRelease();
+  }
+
+  return {
+    version,
+    publishedAt,
+    // No public release-notes page exists for Lilith builds; the UI
+    // falls back to a generic link when this is null.
+    htmlUrl: null,
+    assets: parseReleaseAssets(filenames.map((name) => ({ name }))),
+  };
+}
+
+interface Manifest {
+  version: string | null;
+  releaseDate: string | null;
+  files: string[];
+}
+
+async function fetchManifest(name: string): Promise<Manifest | null> {
+  try {
+    const res = await fetch(`${manifestBaseUrl()}/${name}`, {
+      next: { revalidate: REVALIDATE_SECONDS },
+    });
+    // A 404 just means that platform isn't published — not an error.
+    if (!res.ok) return null;
+    return parseManifest(await res.text());
+  } catch (err) {
+    console.warn(`[download] fetch ${name} failed:`, err);
+    return null;
   }
 }
 
-function isWithinFreshWindow(release: GitHubReleasePayload): boolean {
-  if (!release.published_at) return false;
-  const publishedAt = Date.parse(release.published_at);
-  if (Number.isNaN(publishedAt)) return false;
-  return Date.now() - publishedAt < FRESH_RELEASE_WINDOW_MS;
+/**
+ * Minimal scanner for electron-updater's YAML manifests. We only need
+ * `version`, `releaseDate` and the `files[].url` installer names, so a
+ * line scan is enough and avoids pulling in a YAML dependency.
+ */
+function parseManifest(text: string): Manifest {
+  let version: string | null = null;
+  let releaseDate: string | null = null;
+  const files: string[] = [];
+  for (const line of text.split("\n")) {
+    const v = /^version:\s*(.+?)\s*$/.exec(line);
+    if (v) {
+      version = stripQuotes(v[1]);
+      continue;
+    }
+    const d = /^releaseDate:\s*(.+?)\s*$/.exec(line);
+    if (d) {
+      releaseDate = stripQuotes(d[1]);
+      continue;
+    }
+    // `url:` only appears under `files:` (the top-level primary file is
+    // keyed `path:`), so this collects exactly the installer filenames.
+    const f = /^\s*-?\s*url:\s*(.+?)\s*$/.exec(line);
+    if (f) files.push(stripQuotes(f[1]));
+  }
+  return { version, releaseDate, files };
+}
+
+function stripQuotes(s: string | undefined): string {
+  return (s ?? "").replace(/^['"]|['"]$/g, "");
 }
 
 function emptyRelease(): LatestRelease {

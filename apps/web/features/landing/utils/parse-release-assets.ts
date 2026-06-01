@@ -1,5 +1,5 @@
 /**
- * Parses the GitHub Releases API asset array into a structured
+ * Parses a list of desktop installer filenames into a structured
  * download asset map. Skips auxiliary files (blockmaps, update
  * manifests, checksums) and the CLI tarballs — only desktop
  * installer artifacts are relevant on the /download page.
@@ -13,9 +13,8 @@
  * on the format; we normalize to amd64 and arm64.
  */
 
-export interface GitHubAsset {
+export interface ReleaseAsset {
   name: string;
-  browser_download_url: string;
 }
 
 export interface DownloadAssets {
@@ -34,12 +33,13 @@ export interface DownloadAssets {
 const DESKTOP_ARTIFACT_RE =
   /^multica-desktop-[^-]+-(mac|windows|linux)-([a-z0-9_]+)\.(dmg|zip|exe|AppImage|deb|rpm)$/i;
 
-// Installer downloads are served by the Go backend's OSS proxy, not
-// GitHub. The asset name equals the OSS object filename (see
-// apps/desktop/electron-builder.yml + the downloads handler in
-// server/internal/handler/downloads.go), so we reconstruct the URL
-// from the name instead of using the GitHub `browser_download_url`.
-const DOWNLOAD_BASE_URL = "https://multica.lilithgames.com/api/downloads";
+// Installer downloads (and the latest-*.yml manifests they're parsed
+// from) are served by the Go backend's OSS proxy. The asset name
+// equals the OSS object filename (see apps/desktop/electron-builder.yml
+// + the downloads handler in server/internal/handler/downloads.go), so
+// we build each URL straight from the filename.
+export const DOWNLOAD_BASE_URL =
+  "https://multica.lilithgames.com/api/downloads";
 
 function normalizeLinuxArch(arch: string): "amd64" | "arm64" | null {
   const a = arch.toLowerCase();
@@ -48,7 +48,7 @@ function normalizeLinuxArch(arch: string): "amd64" | "arm64" | null {
   return null;
 }
 
-export function parseReleaseAssets(raw: GitHubAsset[]): DownloadAssets {
+export function parseReleaseAssets(raw: ReleaseAsset[]): DownloadAssets {
   const out: DownloadAssets = {};
   for (const asset of raw) {
     const name = asset.name;
