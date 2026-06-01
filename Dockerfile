@@ -28,7 +28,9 @@ RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/backfill_task_us
 # --- Runtime stage ---
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata
+# git is required by the FIR-2656 skill archive sync worker (no-op unless
+# CEREBRO_SKILLS_SYNC_REPO/_TOKEN are set).
+RUN apk add --no-cache ca-certificates tzdata git
 
 WORKDIR /app
 
