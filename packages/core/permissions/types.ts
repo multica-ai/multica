@@ -50,3 +50,34 @@ export const ALLOW: Decision = {
 export function deny(reason: DecisionReason, message: string): Decision {
   return { allowed: false, reason, message };
 }
+
+export type GovernanceDomain =
+  | "workspace"
+  | "project"
+  | "agent"
+  | "autopilot"
+  | "skill_squad"
+  | "issue_metadata";
+
+export type GovernanceStrategy =
+  | "automatic"
+  | "approval_required"
+  | "denied";
+
+export interface GovernanceAction {
+  id: string;
+  domain: GovernanceDomain;
+  strategy: GovernanceStrategy;
+  description: string;
+  audit: boolean;
+}
+
+export interface GovernanceDecision {
+  action_id: string;
+  domain: GovernanceDomain;
+  strategy: GovernanceStrategy;
+  allowed: boolean;
+  requires_approval: boolean;
+  reason: string;
+  audit: boolean;
+}

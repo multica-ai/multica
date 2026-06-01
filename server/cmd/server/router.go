@@ -530,6 +530,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Squad leader evaluation (writes to activity_log)
 			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
 
+			// Governance policy, approvals, and audit trail for high-risk
+			// workspace/project automation actions.
+			r.Route("/api/governance", func(r chi.Router) {
+				r.Get("/policy", h.GetGovernancePolicy)
+				r.Get("/approvals", h.ListGovernanceApprovals)
+				r.Post("/approvals", h.CreateGovernanceApproval)
+				r.Get("/audits", h.ListGovernanceAudits)
+			})
+
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
 				r.Get("/", h.ListAutopilots)

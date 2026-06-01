@@ -314,6 +314,40 @@ type GithubPullRequestCheckSuite struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type GovernanceApproval struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ActionID           string             `json:"action_id"`
+	TargetType         string             `json:"target_type"`
+	TargetID           pgtype.UUID        `json:"target_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	ApprovalSourceType string             `json:"approval_source_type"`
+	ApprovalSourceID   pgtype.UUID        `json:"approval_source_id"`
+	ApprovedByType     string             `json:"approved_by_type"`
+	ApprovedByID       pgtype.UUID        `json:"approved_by_id"`
+	Reason             string             `json:"reason"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt         pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type GovernanceAudit struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ActionID           string             `json:"action_id"`
+	TargetType         string             `json:"target_type"`
+	TargetID           pgtype.UUID        `json:"target_id"`
+	ActorType          string             `json:"actor_type"`
+	ActorID            pgtype.UUID        `json:"actor_id"`
+	BeforeSummary      []byte             `json:"before_summary"`
+	AfterSummary       []byte             `json:"after_summary"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	ApprovalID         pgtype.UUID        `json:"approval_id"`
+	ApprovalSourceType pgtype.Text        `json:"approval_source_type"`
+	ApprovalSourceID   pgtype.UUID        `json:"approval_source_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
 type InboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`

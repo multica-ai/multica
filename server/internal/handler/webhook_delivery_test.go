@@ -22,6 +22,7 @@ const testSigningSecret = "this-is-a-test-secret-32-chars-x"
 
 func setSigningSecretViaHandler(t *testing.T, apID, triggerID, secret string) {
 	t.Helper()
+	createGovernanceApprovalForTarget(t, "autopilot.webhook.rotate", "autopilot_trigger", triggerID)
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", fmt.Sprintf("/api/autopilots/%s/triggers/%s/signing-secret", apID, triggerID), map[string]any{
 		"signing_secret": secret,
@@ -322,6 +323,7 @@ func TestSigningSecret_EmptyClearsSecret(t *testing.T) {
 	setSigningSecretViaHandler(t, apID, trig.ID, testSigningSecret)
 
 	// Now clear with empty string.
+	createGovernanceApprovalForTarget(t, "autopilot.webhook.rotate", "autopilot_trigger", trig.ID)
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/autopilots/"+apID+"/triggers/"+trig.ID+"/signing-secret", map[string]any{
 		"signing_secret": "",

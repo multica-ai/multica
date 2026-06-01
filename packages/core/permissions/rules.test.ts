@@ -10,6 +10,10 @@ import {
   canEditAgent,
   canEditComment,
   canEditSkill,
+  evaluateGovernanceAction,
+  evaluateGovernanceActions,
+  governanceActions,
+  governanceRoleTemplates,
   canManageMembers,
   canUpdateWorkspaceSettings,
 } from "./rules";
@@ -136,6 +140,110 @@ describe("canEditAgent", () => {
     const orphan = makeAgent({ owner_id: null });
     expect(canEditAgent(orphan, { userId: BOB, role: "admin" }).allowed).toBe(
       true,
+    );
+  });
+});
+
+describe("governance policy", () => {
+  it("defines the required role templates and domains", () => {
+    const managementTeam = governanceRoleTemplates.find(
+      (role) => role.id === "management_team",
+    );
+    expect(managementTeam).toBeDefined();
+    expect(managementTeam?.domains).toEqual([
+      "workspace",
+      "project",
+      "agent",
+      "autopilot",
+      "skill_squad",
+      "issue_metadata",
+    ]);
+  });
+
+  it("allows automatic low-risk actions for workspace members", () => {
+    const action = governanceActions.find(
+      (candidate) => candidate.id === "issue.status.remediate",
+    );
+    expect(action).toBeDefined();
+
+    const decision = evaluateGovernanceAction(action!, {
+      userId: ALICE,
+      role: "member",
+    });
+    expect(decision.allowed).toBe(true);
+    expect(decision.requires_approval).toBe(false);
+    expect(decision.reason).toBe("automatic_action_allowed");
+  });
+
+  it("requires approval and admin role for high-risk actions", () => {
+    const action = governanceActions.find(
+      (candidate) => candidate.id === "agent.create",
+    );
+    expect(action).toBeDefined();
+
+    expect(
+      evaluateGovernanceAction(action!, {
+        userId: ALICE,
+        role: "member",
+        approved: true,
+      }),
+    ).toMatchObject({
+      allowed: false,
+      requires_approval: true,
+      reason: "requires_workspace_admin_or_owner",
+    });
+
+    expect(
+      evaluateGovernanceAction(action!, {
+        userId: ALICE,
+        role: "admin",
+      }),
+    ).toMatchObject({
+      allowed: false,
+      requires_approval: true,
+      reason: "approval_required",
+    });
+
+    expect(
+      evaluateGovernanceAction(action!, {
+        userId: ALICE,
+        role: "admin",
+        approved: true,
+      }),
+    ).toMatchObject({
+      allowed: true,
+      requires_approval: false,
+      reason: "approved_action_allowed",
+    });
+  });
+
+  it("keeps hard boundaries denied even with owner role and approval", () => {
+    const action = governanceActions.find(
+      (candidate) => candidate.id === "secret.reveal",
+    );
+    expect(action).toBeDefined();
+
+    expect(
+      evaluateGovernanceAction(action!, {
+        userId: ALICE,
+        role: "owner",
+        approved: true,
+      }),
+    ).toMatchObject({
+      allowed: false,
+      requires_approval: false,
+      reason: "hard_boundary",
+    });
+  });
+
+  it("returns sorted decisions for every action", () => {
+    const decisions = evaluateGovernanceActions({
+      userId: ALICE,
+      role: "owner",
+    });
+    expect(decisions).toHaveLength(governanceActions.length);
+    expect(decisions.map((decision) => decision.action_id)).toContain(
+      "workspace.rules.update_cross_project",
     );
   });
 });

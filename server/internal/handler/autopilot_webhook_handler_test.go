@@ -677,6 +677,8 @@ func TestRotateWebhookToken_ReplacesOldToken(t *testing.T) {
 	trig := createWebhookTriggerViaHandler(t, apID)
 	oldToken := *trig.WebhookToken
 
+	createGovernanceApprovalForTarget(t, "autopilot.webhook.rotate", "autopilot_trigger", trig.ID)
+
 	w := httptest.NewRecorder()
 	req := newRequest("POST", fmt.Sprintf("/api/autopilots/%s/triggers/%s/rotate-webhook-token", apID, trig.ID), nil)
 	req = withURLParams(req, "id", apID, "triggerId", trig.ID)
