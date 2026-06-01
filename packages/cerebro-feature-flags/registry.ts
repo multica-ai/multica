@@ -16,6 +16,7 @@ export type CerebroFlagKey =
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
   | "cerebro_inbox_action_grouping"
+  | "cerebro_inbox_pinned_filter"
   | "cerebro_voice_dictation_enabled"
   | "cerebro_voice_output_enabled"
   | "cerebro_voice_summary_enabled"
@@ -76,6 +77,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
   cerebro_inbox_action_grouping: true,
+  cerebro_inbox_pinned_filter: true,
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,
   cerebro_voice_summary_enabled: false,
@@ -289,6 +291,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Add a \"Group by → Action\" option to the inbox that buckets items by what to do next (Act now / Watching / Waiting / Calm) instead of by status. Default grouping for new users; switch it off or pick another grouping from the inbox's Group by menu.",
+  },
+  {
+    key: "cerebro_inbox_pinned_filter",
+    label: "Inbox pinned filter",
+    group: "inbox",
+    description:
+      "Add a \"Pinned\" option to the inbox view dropdown that shows only items tied to something you pinned — the item's own issue, that issue's parent, or its project, plus pinned channels and DMs. Off removes the option from the dropdown.",
   },
   {
     key: "cerebro_voice_dictation_enabled",
