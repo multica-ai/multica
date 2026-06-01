@@ -245,6 +245,25 @@ func (q *Queries) GetCerebroSprintForIssue(ctx context.Context, issueID pgtype.U
 	return i, err
 }
 
+const getCerebroSprintRecurringIssueCreator = `-- name: GetCerebroSprintRecurringIssueCreator :one
+SELECT user_id FROM member
+WHERE workspace_id = $1
+  AND role IN ('owner', 'admin')
+ORDER BY (role = 'owner') DESC, created_at ASC
+LIMIT 1
+`
+
+// Returns a stable user_id to use as creator on issues the sweeper clones
+// from a recurring task. The sweeper runs without a user session, so we
+// attribute creation to the oldest workspace owner. Falls back to any
+// admin if no owner exists.
+func (q *Queries) GetCerebroSprintRecurringIssueCreator(ctx context.Context, workspaceID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getCerebroSprintRecurringIssueCreator, workspaceID)
+	var user_id pgtype.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
 const getCerebroSprintRecurringTask = `-- name: GetCerebroSprintRecurringTask :one
 SELECT id, workspace_id, project_id,
        cadence_unit, cadence_count,
@@ -314,6 +333,27 @@ func (q *Queries) GetCerebroSprintSettings(ctx context.Context, projectID pgtype
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getCerebroSprintsFlagForWorkspace = `-- name: GetCerebroSprintsFlagForWorkspace :one
+
+SELECT enabled FROM cerebro_feature_flags
+WHERE workspace_id = $1
+  AND user_id = '00000000-0000-0000-0000-000000000000'
+  AND flag_key = 'cerebro_sprints'
+`
+
+// ===========================================================================
+// sweeper helpers
+// ===========================================================================
+// Returns the workspace-level value of the cerebro_sprints feature flag.
+// pgx.ErrNoRows means the flag has never been set and the default (OFF)
+// applies — the sweeper treats that as "skip this workspace".
+func (q *Queries) GetCerebroSprintsFlagForWorkspace(ctx context.Context, workspaceID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, getCerebroSprintsFlagForWorkspace, workspaceID)
+	var enabled bool
+	err := row.Scan(&enabled)
+	return enabled, err
 }
 
 const getLatestCerebroSprintByProject = `-- name: GetLatestCerebroSprintByProject :one
