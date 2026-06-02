@@ -1,4 +1,5 @@
 {{- $backendImageTag := default .Chart.AppVersion .Values.images.backend.tag -}}
+{{- if .Values.backend.uploads.persistence.enabled -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -7,7 +8,8 @@ metadata:
     {{- include "multica.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
 spec:
-  accessModes: [ReadWriteOnce]
+  accessModes:
+    {{- toYaml .Values.backend.uploads.persistence.accessModes | nindent 4 }}
   resources:
     requests:
       storage: {{ .Values.backend.uploads.persistence.size | quote }}
@@ -15,6 +17,7 @@ spec:
   storageClassName: {{ . | quote }}
   {{- end }}
 ---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -66,9 +69,11 @@ spec:
           env:
             - name: DATABASE_URL
               value: {{ include "multica.databaseUrl" . | quote }}
+          {{- if .Values.backend.uploads.persistence.enabled }}
           volumeMounts:
             - name: uploads
               mountPath: /app/data/uploads
+          {{- end }}
           # The entrypoint runs `./migrate up` before serving traffic. On a
           # cold cluster (Postgres still coming up) this can take minutes. The
           # startupProbe holds off liveness/readiness until /healthz is OK,
@@ -95,10 +100,12 @@ spec:
             periodSeconds: 30
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
+      {{- if .Values.backend.uploads.persistence.enabled }}
       volumes:
         - name: uploads
           persistentVolumeClaim:
             claimName: {{ include "multica.backend.fullname" . }}-uploads
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service
