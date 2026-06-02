@@ -56,6 +56,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     plugins: [
       "expo-router",
+      [
+        "expo-audio",
+        {
+          microphonePermission:
+            "Allow Multica to record short voice messages for Agent chat transcription.",
+        },
+      ],
       "expo-secure-store",
       "@react-native-community/datetimepicker",
       "react-native-enriched-markdown",

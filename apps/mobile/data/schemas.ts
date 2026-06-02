@@ -287,6 +287,15 @@ export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> =
   created_at: z.string().default(""),
 }).loose();
 
+export const SpeechTranscribeResponseSchema = z.object({
+  transcript: z.string().default(""),
+}).loose();
+
+export const SpeechSynthesizeResponseSchema = z.object({
+  audio_base64: z.string(),
+  content_type: z.string().default("audio/mpeg"),
+}).loose();
+
 // Live timeline emitted by the agent runtime while a task is running. Each
 // row is one execution step (thinking / tool_use / tool_result / text /
 // error). Mirrors web's TaskMessagePayload type and the WS `task:message`

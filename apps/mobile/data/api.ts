@@ -111,6 +111,8 @@ import {
   SearchIssuesResponseSchema,
   SearchProjectsResponseSchema,
   SendChatMessageResponseSchema,
+  SpeechSynthesizeResponseSchema,
+  SpeechTranscribeResponseSchema,
   SquadListSchema,
   TaskMessageListSchema,
   EMPTY_TASK_MESSAGE_LIST,
@@ -144,6 +146,15 @@ export interface FileAsset {
   uri: string;
   name: string;
   type: string;
+}
+
+export interface SpeechTranscribeResponse {
+  transcript: string;
+}
+
+export interface SpeechSynthesizeResponse {
+  audio_base64: string;
+  content_type: string;
 }
 
 /** Web mirrors this from `packages/core/constants/upload.ts`. Mobile keeps
@@ -1065,6 +1076,86 @@ class ApiClient {
         issues: parsed.error.issues,
       });
       throw new ApiError("Send message response invalid", 0, raw);
+    }
+    return parsed.data;
+  }
+
+  async transcribeSpeech(asset: FileAsset): Promise<SpeechTranscribeResponse> {
+    const rid = createRequestId();
+    const start = Date.now();
+    const path = "/api/speech/transcribe";
+
+    const headers: Record<string, string> = {
+      "X-Client-Platform": "mobile",
+      "X-Client-OS": "ios",
+      "X-Client-Version": "0.1.0",
+      "X-Request-ID": rid,
+    };
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    const slug = getCurrentSlug();
+    if (slug) headers["X-Workspace-Slug"] = slug;
+
+    const formData = new FormData();
+    formData.append(
+      "file",
+      { uri: asset.uri, name: asset.name, type: asset.type } as never,
+    );
+
+    console.log(`[api] → POST ${path}`, { rid, filename: asset.name });
+    const res = await fetch(`${API_URL}${path}`, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+    const duration = Date.now() - start;
+
+    if (!res.ok) {
+      if (res.status === 401) this.options.onUnauthorized?.();
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        body = undefined;
+      }
+      const message =
+        (body && typeof body === "object" && "error" in body
+          ? String((body as { error: unknown }).error)
+          : null) ?? `Transcription failed: ${res.status}`;
+      console.error(`[api] ← ${res.status} ${path}`, {
+        rid,
+        duration: `${duration}ms`,
+        error: message,
+      });
+      throw new ApiError(message, res.status, body);
+    }
+
+    console.log(`[api] ← ${res.status} ${path}`, {
+      rid,
+      duration: `${duration}ms`,
+    });
+    const json: unknown = await res.json();
+    const parsed = SpeechTranscribeResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      console.error(`[api] ← shape mismatch ${path}`, {
+        rid,
+        error: parsed.error.message,
+      });
+      throw new ApiError("Transcription response invalid", res.status, json);
+    }
+    return parsed.data;
+  }
+
+  async synthesizeSpeech(text: string): Promise<SpeechSynthesizeResponse> {
+    const raw = await this.fetch<unknown>("/api/speech/synthesize", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+    const parsed = SpeechSynthesizeResponseSchema.safeParse(raw);
+    if (!parsed.success) {
+      console.error("[api] ← shape mismatch POST /api/speech/synthesize", {
+        issues: parsed.error.issues,
+      });
+      throw new ApiError("Speech synthesis response invalid", 0, raw);
     }
     return parsed.data;
   }

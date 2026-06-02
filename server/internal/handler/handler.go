@@ -80,6 +80,15 @@ type Config struct {
 	// return 503 instead of attempting to dial a hard-coded private service.
 	CloudRuntimeFleetURL     string
 	CloudRuntimeFleetTimeout time.Duration
+	Speech                   SpeechConfig
+}
+
+type SpeechConfig struct {
+	TranscribeURL string
+	SynthesizeURL string
+	APIKey        string
+	Mock          bool
+	HTTPClient    *http.Client
 }
 
 type cloudRuntimeProxy interface {
@@ -112,6 +121,7 @@ type Handler struct {
 	WebhookRateLimiter    WebhookRateLimiter
 	WebhookIPRateLimiter  WebhookRateLimiter
 	CloudRuntime          cloudRuntimeProxy
+	Speech                SpeechProxy
 	cfg                   Config
 }
 
@@ -157,6 +167,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 			BaseURL: cfg.CloudRuntimeFleetURL,
 			Timeout: cfg.CloudRuntimeFleetTimeout,
 		}),
+		Speech: NewHTTPSpeechProxy(cfg.Speech),
 		cfg: cfg,
 	}
 }
