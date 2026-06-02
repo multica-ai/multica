@@ -15,11 +15,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/wallts-ai/wallts/server/internal/events"
-	"github.com/wallts-ai/wallts/server/internal/realtime"
-	"github.com/wallts-ai/wallts/server/internal/service"
-	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
-	"github.com/wallts-ai/wallts/server/pkg/protocol"
+	"github.com/dwickyfp/wallts/server/internal/events"
+	"github.com/dwickyfp/wallts/server/internal/realtime"
+	"github.com/dwickyfp/wallts/server/internal/service"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/pkg/protocol"
 )
 
 var testHandler *Handler

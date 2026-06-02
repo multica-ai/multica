@@ -4,10 +4,10 @@ This file provides guidance to AI agents when working with code in this reposito
 
 > **Single source of truth:** This file is a concise pointer document.
 > All authoritative architecture, coding rules, commands, and conventions
-> live in **multica.md** at the project root. Read that file first.
+> live in **wallts-upstream.md** at the project root. Read that file first.
 >
 > **CLAUDE.md** is preserved for Claude Code compatibility and contains
-> provider-specific notes. For Multica-managed agents, **multica.md** is
+> provider-specific notes. For Wallts-managed agents, **wallts-upstream.md** is
 > the authoritative context source.
 
 ## Quick Reference
@@ -48,4 +48,4 @@ make test             # Go tests
 make check            # Full verification pipeline
 ```
 
-See **multica.md** for the complete command reference and all coding rules.
+See **wallts-upstream.md** for the complete command reference and all coding rules.

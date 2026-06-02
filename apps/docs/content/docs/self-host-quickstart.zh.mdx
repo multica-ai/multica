@@ -23,7 +23,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 </Callout>
 
 ```bash
-git clone https://github.com/wallts-ai/wallts.git
+git clone https://github.com/dwickyfp/wallts.git
 cd wallts
 make selfhost
 ```
@@ -220,7 +220,7 @@ docker compose -f docker-compose.selfhost.yml exec backend \
 
 `--sleep-between-slices=2s` 用来在繁忙的数据库上限制读压力。回填跑完后重启后端容器（migration 在启动时自动跑），升级就能继续。
 
-完整参考（含 Kubernetes `CronJob` 模板和升级顺序）见仓库的 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/wallts-ai/wallts/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)。
+完整参考（含 Kubernetes `CronJob` 模板和升级顺序）见仓库的 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/dwickyfp/wallts/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)。
 
 ## Kubernetes 部署（替代方案）
 
@@ -243,7 +243,7 @@ kubectl -n wallts create secret generic wallts-secrets \
 再装 chart：
 
 ```bash
-git clone https://github.com/wallts-ai/wallts.git
+git clone https://github.com/dwickyfp/wallts.git
 cd wallts
 helm install wallts deploy/helm/wallts -n wallts
 ```
@@ -267,7 +267,7 @@ wallts setup self-host \
 
 只想拉最新镜像、不动 chart：`kubectl -n wallts rollout restart deploy/wallts-backend deploy/wallts-frontend`。要锁到某个 Wallts 版本，就在 values 文件里设 `images.backend.tag` / `images.frontend.tag`，再 `helm upgrade`。`helm -n wallts uninstall wallts` 只删工作负载，PVC 和 Secret 都保留；`kubectl delete namespace wallts` 才会全清。
 
-完整参考——三种登录方式、为了绕过 web 镜像 build-time 写死的 `REMOTE_API_URL` 而加的 `backend` ExternalName 别名、资源限制、TLS——都在仓库的 [`SELF_HOSTING.md`](https://github.com/wallts-ai/wallts/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative)。
+完整参考——三种登录方式、为了绕过 web 镜像 build-time 写死的 `REMOTE_API_URL` 而加的 `backend` ExternalName 别名、资源限制、TLS——都在仓库的 [`SELF_HOSTING.md`](https://github.com/dwickyfp/wallts/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative)。
 
 ## 常见问题
 

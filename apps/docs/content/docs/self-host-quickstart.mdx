@@ -23,7 +23,7 @@ Agent **execution** still relies on the [daemon](/daemon-runtimes) you run local
 </Callout>
 
 ```bash
-git clone https://github.com/wallts-ai/wallts.git
+git clone https://github.com/dwickyfp/wallts.git
 cd wallts
 make selfhost
 ```
@@ -221,7 +221,7 @@ docker compose -f docker-compose.selfhost.yml exec backend \
 
 `--sleep-between-slices=2s` throttles read pressure on a busy DB. After it finishes, restart the backend container (migrations run on startup) and the upgrade completes.
 
-Full reference — including the Kubernetes `CronJob` template and the upgrade order — lives in the repo's [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/wallts-ai/wallts/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
+Full reference — including the Kubernetes `CronJob` template and the upgrade order — lives in the repo's [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/dwickyfp/wallts/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
 
 ## Kubernetes deployment (alternative)
 
@@ -244,7 +244,7 @@ kubectl -n wallts create secret generic wallts-secrets \
 Then install the chart:
 
 ```bash
-git clone https://github.com/wallts-ai/wallts.git
+git clone https://github.com/dwickyfp/wallts.git
 cd wallts
 helm install wallts deploy/helm/wallts -n wallts
 ```
@@ -268,7 +268,7 @@ wallts setup self-host \
 
 To pull the latest images without changing the chart, `kubectl -n wallts rollout restart deploy/wallts-backend deploy/wallts-frontend`. To pin a specific Wallts release, set `images.backend.tag` / `images.frontend.tag` in your values file and `helm upgrade`. `helm -n wallts uninstall wallts` removes the workloads but keeps the PVCs and Secret; `kubectl delete namespace wallts` wipes everything.
 
-The full reference — three login modes, the `backend` ExternalName workaround for the build-time-baked `REMOTE_API_URL` in the web image, resource limits, and TLS — lives in the repo's [`SELF_HOSTING.md`](https://github.com/wallts-ai/wallts/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative).
+The full reference — three login modes, the `backend` ExternalName workaround for the build-time-baked `REMOTE_API_URL` in the web image, resource limits, and TLS — lives in the repo's [`SELF_HOSTING.md`](https://github.com/dwickyfp/wallts/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative).
 
 ## Common issues
 

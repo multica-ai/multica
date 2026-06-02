@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/wallts-ai/wallts/server/internal/auth"
-	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/internal/auth"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 // Daemon context keys.

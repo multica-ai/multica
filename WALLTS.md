@@ -2,19 +2,19 @@
 
 > **Primary context file for agents working on the WALLTS project.**
 > This is the authoritative source for architecture, conventions, commands, and coding rules.
-> Do NOT modify AGENTS.md, CLAUDE.md, or multica.md — those are upstream artifacts.
+> Do NOT modify AGENTS.md, CLAUDE.md, or wallts-upstream.md — those are upstream artifacts.
 > Read this file first; only reference upstream files if you need a detail not covered here.
 
 ## Project Overview
 
-WALLTS is a fork of [Multica](https://github.com/multica-ai/multica) — an AI-native task management platform where AI agents are first-class teammates.
+WALLTS is a fork of [Wallts](https://github.com/dwickyfp/wallts) — an AI-native task management platform where AI agents are first-class teammates.
 
 - Agents can be assigned issues, create issues, comment, and change status
 - Supports local (daemon) and cloud agent runtimes
 - Built for 2-10 person AI-native teams
 
-> **Note:** This codebase is maintained independently. Upstream `multica.md` and `CLAUDE.md`
-> contain Multica-branded content. For WALLTS work, this file is the source of truth.
+> **Note:** This codebase is maintained independently. Upstream `wallts-upstream.md` and `CLAUDE.md`
+> contain Wallts-branded content. For WALLTS work, this file is the source of truth.
 
 ## Conventions Reference
 
@@ -77,7 +77,7 @@ Strict split between server state and client state.
 ## Sharing Principles
 
 - **Web and desktop** share business logic, components, hooks, stores, and views through `packages/core/`, `packages/ui/`, and `packages/views/`.
-- **Mobile (`apps/mobile/`) is independent.** It shares only **types and pure functions** from `@multica/core/`, with `import type` for types (zero runtime coupling).
+- **Mobile (`apps/mobile/`) is independent.** It shares only **types and pure functions** from `@wallts/core/`, with `import type` for types (zero runtime coupling).
 
 ## Commands
 
@@ -104,15 +104,15 @@ pnpm test             # TS tests (Vitest, all packages + apps via turbo)
 make server           # Run Go server only (port 8080)
 make daemon           # Run local daemon
 make build            # Build server + CLI binaries to server/bin/
-make cli ARGS="..."   # Run multica CLI
+make cli ARGS="..."   # Run wallts CLI
 make test             # Go tests
 make sqlc             # Regenerate sqlc code
 make migrate-up       # Run database migrations
 make migrate-down     # Rollback migrations
 
 # Single tests
-pnpm --filter @multica/views exec vitest run auth/login-page.test.tsx
-pnpm --filter @multica/core exec vitest run runtimes/version.test.ts
+pnpm --filter @wallts/views exec vitest run auth/login-page.test.tsx
+pnpm --filter @wallts/core exec vitest run runtimes/version.test.ts
 cd server && go test ./internal/handler/ -run TestName
 
 # E2E (requires backend + frontend running)
@@ -124,8 +124,8 @@ pnpm dev:mobile:staging          # Metro, staging env
 pnpm ios:mobile                  # Native build + install dev-client to iOS Simulator
 
 # Desktop build & package
-pnpm --filter @multica/desktop build      # Compile TS → JS
-pnpm --filter @multica/desktop package    # Package into .app/.dmg/.exe
+pnpm --filter @wallts/desktop build      # Compile TS → JS
+pnpm --filter @wallts/desktop package    # Package into .app/.dmg/.exe
 
 # shadcn
 pnpm ui:add badge                # Adds component to packages/ui/components/ui/
@@ -186,7 +186,7 @@ Every workspace must explicitly declare all directly imported external packages 
 ### Package Boundary Rules
 
 - `packages/core/` — zero react-dom, zero localStorage (use StorageAdapter), zero process.env, zero UI libraries.
-- `packages/ui/` — zero `@multica/core` imports.
+- `packages/ui/` — zero `@wallts/core` imports.
 - `packages/views/` — zero `next/*` imports, zero `react-router-dom` imports, zero stores.
 - `apps/web/platform/` — the only place for Next.js APIs.
 - `apps/desktop/src/renderer/src/platform/` — the only place for react-router-dom navigation wiring.
@@ -226,7 +226,7 @@ Rules for `apps/mobile/` live in `apps/mobile/CLAUDE.md`. Read it before touchin
 
 ### Workspace context
 
-`setCurrentWorkspace(slug, uuid)` from `@multica/core/platform` is the single source of truth.
+`setCurrentWorkspace(slug, uuid)` from `@wallts/core/platform` is the single source of truth.
 
 ### Tab isolation
 
@@ -234,7 +234,7 @@ Tabs are grouped per workspace in `stores/tab-store.ts`.
 
 ### Drag region (macOS)
 
-Every full-window desktop view must mount `<DragStrip />` from `@multica/views/platform`.
+Every full-window desktop view must mount `<DragStrip />` from `@wallts/views/platform`.
 
 ## UI/UX Rules
 

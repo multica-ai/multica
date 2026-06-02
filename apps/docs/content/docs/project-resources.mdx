@@ -163,7 +163,7 @@ From the **CLI**:
 # operation, so you never end up with a project that has half its resources.
 wallts project create \
   --title "Agent UX 2026" \
-  --repo https://github.com/wallts-ai/wallts
+  --repo https://github.com/dwickyfp/wallts
 
 # Manage resources later
 wallts project resource list <project-id>
@@ -196,7 +196,7 @@ A structured pass-through of the API response, written into the agent's working 
       "id": "…",
       "resource_type": "github_repo",
       "resource_ref": {
-        "url": "https://github.com/wallts-ai/wallts",
+        "url": "https://github.com/dwickyfp/wallts",
         "default_branch_hint": "main"
       }
     }
@@ -217,7 +217,7 @@ This issue belongs to **Agent UX 2026**.
 
 Project resources (also written to `.wallts/project/resources.json`):
 
-- **GitHub repo**: https://github.com/wallts-ai/wallts (default branch: `main`)
+- **GitHub repo**: https://github.com/dwickyfp/wallts (default branch: `main`)
 
 Resources are pointers — open them only when relevant to the task. For
 `github_repo` resources, use `wallts repo checkout <url>` to fetch the code.

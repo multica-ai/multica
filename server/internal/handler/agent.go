@@ -16,12 +16,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/wallts-ai/wallts/server/internal/logger"
-	"github.com/wallts-ai/wallts/server/internal/mcpvalidate"
-	"github.com/wallts-ai/wallts/server/internal/service"
-	"github.com/wallts-ai/wallts/server/pkg/agent"
-	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
-	"github.com/wallts-ai/wallts/server/pkg/protocol"
+	"github.com/dwickyfp/wallts/server/internal/logger"
+	"github.com/dwickyfp/wallts/server/internal/mcpvalidate"
+	"github.com/dwickyfp/wallts/server/internal/service"
+	"github.com/dwickyfp/wallts/server/pkg/agent"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/pkg/protocol"
 )
 
 // Mirrors AGENT_DESCRIPTION_MAX_LENGTH in packages/core/agents/constants.ts

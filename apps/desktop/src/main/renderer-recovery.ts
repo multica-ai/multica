@@ -86,7 +86,7 @@ export function createElectronReloadPrompt(
       buttons: ["Reload", "Dismiss"],
       defaultId: 0,
       cancelId: 1,
-      title: "Multica needs to reload",
+      title: "Wallts needs to reload",
       message: rendererRecoveryMessage(payload.kind),
       detail: rendererRecoveryDetail(payload),
     });

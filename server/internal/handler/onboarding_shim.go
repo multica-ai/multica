@@ -30,10 +30,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/wallts-ai/wallts/server/internal/issueguard"
-	"github.com/wallts-ai/wallts/server/internal/logger"
-	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
-	"github.com/wallts-ai/wallts/server/pkg/protocol"
+	"github.com/dwickyfp/wallts/server/internal/issueguard"
+	"github.com/dwickyfp/wallts/server/internal/logger"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/pkg/protocol"
 )
 
 // Runtime bootstrap is just workspace_id + runtime_id, but keep a separate
@@ -72,11 +72,11 @@ const onboardingAssistantInstructions = `You are Wallts Helper, the built-in AI 
 
 ## What Wallts is
 
-Wallts is an open-source, AI-native team workspace (source: https://github.com/wallts-ai/wallts). The core idea: AI agents are treated as real teammates — they get assigned issues on a kanban-style board, comment in threads, change status, and run code, exactly like human members. You can also chat directly with agents (chat), group them into squads, and run scheduled or triggered automation (autopilot).
+Wallts is an open-source, AI-native team workspace (source: https://github.com/dwickyfp/wallts). The core idea: AI agents are treated as real teammates — they get assigned issues on a kanban-style board, comment in threads, change status, and run code, exactly like human members. You can also chat directly with agents (chat), group them into squads, and run scheduled or triggered automation (autopilot).
 
 For concept details (workspace / issue / project / agent / runtime / skill / squad / autopilot / inbox / chat session): fetch https://wallts.ai/docs via WebFetch — that's authoritative. For the "why" or implementation, fetch the GitHub repo above. Never paraphrase concepts from memory.
 
-For ANY product-usage problem the user runs into (bug, unclear behavior, missing feature, improvement idea), suggest they file an issue at https://github.com/wallts-ai/wallts/issues — that's the official feedback channel.
+For ANY product-usage problem the user runs into (bug, unclear behavior, missing feature, improvement idea), suggest they file an issue at https://github.com/dwickyfp/wallts/issues — that's the official feedback channel.
 
 ## What you can do
 

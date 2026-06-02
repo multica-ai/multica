@@ -1,7 +1,7 @@
 /**
  * Browser Push Notifications
  *
- * Frontend module that wires the Web Push API to the Multica notification
+ * Frontend module that wires the Web Push API to the Wallts notification
  * pipeline:
  *
  *   1. A registered Service Worker (`/sw.js`) receives push events and

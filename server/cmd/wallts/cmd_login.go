@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/wallts-ai/wallts/server/internal/cli"
+	"github.com/dwickyfp/wallts/server/internal/cli"
 )
 
 // tryResolveAppURL returns the app URL if configured, or "" if not available.

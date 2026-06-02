@@ -16,14 +16,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/wallts-ai/wallts/server/internal/auth"
-	"github.com/wallts-ai/wallts/server/internal/daemonws"
-	"github.com/wallts-ai/wallts/server/internal/middleware"
-	"github.com/wallts-ai/wallts/server/internal/service"
-	"github.com/wallts-ai/wallts/server/internal/util"
-	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
-	"github.com/wallts-ai/wallts/server/pkg/protocol"
-	"github.com/wallts-ai/wallts/server/pkg/redact"
+	"github.com/dwickyfp/wallts/server/internal/auth"
+	"github.com/dwickyfp/wallts/server/internal/daemonws"
+	"github.com/dwickyfp/wallts/server/internal/middleware"
+	"github.com/dwickyfp/wallts/server/internal/service"
+	"github.com/dwickyfp/wallts/server/internal/util"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/pkg/protocol"
+	"github.com/dwickyfp/wallts/server/pkg/redact"
 )
 
 // ---------------------------------------------------------------------------

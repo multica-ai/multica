@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/wallts-ai/wallts/server/internal/logger"
-	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/internal/logger"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 // Public, unauthenticated endpoint for the landing-page "Contact Sales"

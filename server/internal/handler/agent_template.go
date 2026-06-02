@@ -14,11 +14,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/wallts-ai/wallts/server/internal/agenttmpl"
-	"github.com/wallts-ai/wallts/server/internal/logger"
-	"github.com/wallts-ai/wallts/server/internal/util"
-	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
-	"github.com/wallts-ai/wallts/server/pkg/protocol"
+	"github.com/dwickyfp/wallts/server/internal/agenttmpl"
+	"github.com/dwickyfp/wallts/server/internal/logger"
+	"github.com/dwickyfp/wallts/server/internal/util"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/pkg/protocol"
 )
 
 // agentTemplates is the in-memory catalog loaded once at package init. We

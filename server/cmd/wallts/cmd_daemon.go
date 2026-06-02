@@ -16,10 +16,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/wallts-ai/wallts/server/internal/cli"
-	"github.com/wallts-ai/wallts/server/internal/daemon"
-	logger_pkg "github.com/wallts-ai/wallts/server/internal/logger"
-	"github.com/wallts-ai/wallts/server/internal/util"
+	"github.com/dwickyfp/wallts/server/internal/cli"
+	"github.com/dwickyfp/wallts/server/internal/daemon"
+	logger_pkg "github.com/dwickyfp/wallts/server/internal/logger"
+	"github.com/dwickyfp/wallts/server/internal/util"
 )
 
 var daemonCmd = &cobra.Command{

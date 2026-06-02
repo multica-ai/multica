@@ -12,13 +12,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/wallts-ai/wallts/server/internal/events"
-	"github.com/wallts-ai/wallts/server/internal/mention"
-	"github.com/wallts-ai/wallts/server/internal/realtime"
-	"github.com/wallts-ai/wallts/server/internal/util"
-	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
-	"github.com/wallts-ai/wallts/server/pkg/protocol"
-	"github.com/wallts-ai/wallts/server/pkg/redact"
+	"github.com/dwickyfp/wallts/server/internal/events"
+	"github.com/dwickyfp/wallts/server/internal/mention"
+	"github.com/dwickyfp/wallts/server/internal/realtime"
+	"github.com/dwickyfp/wallts/server/internal/util"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/pkg/protocol"
+	"github.com/dwickyfp/wallts/server/pkg/redact"
 )
 
 type TaskService struct {

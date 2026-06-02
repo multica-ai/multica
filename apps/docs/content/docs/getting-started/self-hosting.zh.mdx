@@ -25,7 +25,7 @@ Two commands to set up everything:
 
 ```bash
 # Install CLI + provision self-host server
-curl -fsSL https://raw.githubusercontent.com/wallts-ai/wallts/main/scripts/install.sh | bash -s -- --with-server
+curl -fsSL https://raw.githubusercontent.com/dwickyfp/wallts/main/scripts/install.sh | bash -s -- --with-server
 
 # Configure CLI, authenticate, and start the daemon
 wallts setup self-host
@@ -34,7 +34,7 @@ wallts setup self-host
 This installs the CLI, checks out the latest self-host assets, pulls the official Wallts images from GHCR, and configures everything for localhost. Then open http://localhost:3000 and pick a login method: configure `RESEND_API_KEY` in `.env` for email-based codes (recommended), or leave Resend unset and copy the generated code from backend logs. See [Step 2 — Log In](#step-2--log-in) for details.
 
 <Callout>
-If the self-host server is already running and you only need the CLI on a macOS/Linux machine, install it with Homebrew: `brew install wallts-ai/tap/wallts`.
+If the self-host server is already running and you only need the CLI on a macOS/Linux machine, install it with Homebrew: `brew install dwickyfp/tap/wallts`.
 </Callout>
 
 <Callout>
@@ -46,7 +46,7 @@ For a step-by-step setup, see below.
 ### Step 1 — Start the Server
 
 ```bash
-git clone https://github.com/wallts-ai/wallts.git
+git clone https://github.com/dwickyfp/wallts.git
 cd wallts
 make selfhost
 ```
@@ -87,7 +87,7 @@ The daemon runs on your local machine (not inside Docker). It detects installed 
 ### a) Install the CLI and an AI agent
 
 ```bash
-brew install wallts-ai/tap/wallts
+brew install dwickyfp/tap/wallts
 ```
 
 You also need at least one AI agent CLI:
@@ -143,7 +143,7 @@ Pick one supported path before relying on the Usage / Runtime dashboard:
 - **Postgres with `pg_cron`**: swap the bundled Postgres image for one that ships `pg_cron`, set `shared_preload_libraries=pg_cron`, then `SELECT cron.schedule('rollup_task_usage_hourly', '*/5 * * * *', 'SELECT rollup_task_usage_hourly()')` once.
 - **Backfill historical data**: required on the `v0.3.4 → v0.3.5+` upgrade path when the database already has `task_usage` rows — migration `103` is fail-closed and will abort `migrate up` with `refusing to drop legacy daily rollups: ...` until the hourly table is seeded. Run `./backfill_task_usage_hourly --sleep-between-slices=2s` inside the backend container, then re-run the upgrade and configure one of the schedules above.
 
-Full reference (Compose + Kubernetes templates, flag descriptions, upgrade order) lives in [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/wallts-ai/wallts/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
+Full reference (Compose + Kubernetes templates, flag descriptions, upgrade order) lives in [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/dwickyfp/wallts/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
 
 ## Stopping Services
 

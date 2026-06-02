@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Note for Multica agents:** The authoritative context source for this repository is **multica.md** at the project root. This file is preserved for Claude Code (claude.ai/code) compatibility. Multica-managed agents should read multica.md instead.
+> **Note for Wallts agents:** The authoritative context source for this repository is **wallts-upstream.md** at the project root. This file is preserved for Claude Code (claude.ai/code) compatibility. Wallts-managed agents should read wallts-upstream.md instead.
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Conventions reference

@@ -86,7 +86,7 @@
     },
     "push": {
       "title": "浏览器推送通知",
-      "description": "即使 Multica 在后台，也能接收原生浏览器提醒。需要浏览器允许推送通知。",
+      "description": "即使 Wallts 在后台，也能接收原生浏览器提醒。需要浏览器允许推送通知。",
       "label": "启用浏览器推送",
       "hint": "提及、分配、Agent 运行和 CI 失败时会收到通知。",
       "device_count": "已在 {{count}} 台设备上启用。",
