@@ -51,10 +51,10 @@ type FirtalGatewayRuntimeConfig struct {
 	MaxConcurrency int
 	WorkspaceIDs   []pgtype.UUID
 
-	// ToolsEnabledAgentIDs is the per-agent allowlist for the POC tool-loop.
-	// Populated from MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS. Agents not in
-	// this list see the unchanged chat-only behaviour — no `tools` parameter is
-	// sent and no tool_calls are dispatched.
+	// ToolsEnabledAgentIDs is loaded from MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS
+	// for backward compatibility only. Tool-loop gating uses the runtime tools
+	// cascade (see FirtalGatewayExecutor.agentHasCallableTools); this list is
+	// no longer consulted at execution time (FIR-2761).
 	ToolsEnabledAgentIDs []pgtype.UUID
 
 	// MaxToolRounds overrides firtalGatewayMaxToolRounds when > 0. Loaded from
@@ -91,8 +91,8 @@ func (c FirtalGatewayRuntimeConfig) costSavingHoldoutPct() int {
 	return pct
 }
 
-// ToolsEnabledForAgent reports whether the per-agent allowlist includes
-// agentID. An empty list means tools are disabled for everyone.
+// ToolsEnabledForAgent reports whether agentID appears in ToolsEnabledAgentIDs.
+// Deprecated for execution: kept for config parsing tests only.
 func (c FirtalGatewayRuntimeConfig) ToolsEnabledForAgent(agentID pgtype.UUID) bool {
 	if !agentID.Valid {
 		return false

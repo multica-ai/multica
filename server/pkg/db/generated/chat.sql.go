@@ -90,18 +90,19 @@ func (q *Queries) CreateChatSession(ctx context.Context, arg CreateChatSessionPa
 }
 
 const createOrGetQueuedChatTask = `-- name: CreateOrGetQueuedChatTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
-VALUES ($1, $2, NULL, 'queued', $3, $4)
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id, original_user_id)
+VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
 ON CONFLICT (chat_session_id) WHERE status = 'queued' AND chat_session_id IS NOT NULL
 DO UPDATE SET priority = agent_task_queue.priority
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, title, model_override
 `
 
 type CreateOrGetQueuedChatTaskParams struct {
-	AgentID       pgtype.UUID `json:"agent_id"`
-	RuntimeID     pgtype.UUID `json:"runtime_id"`
-	Priority      int32       `json:"priority"`
-	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	AgentID        pgtype.UUID `json:"agent_id"`
+	RuntimeID      pgtype.UUID `json:"runtime_id"`
+	Priority       int32       `json:"priority"`
+	ChatSessionID  pgtype.UUID `json:"chat_session_id"`
+	OriginalUserID pgtype.UUID `json:"original_user_id"`
 }
 
 // Race-safe enqueue with coalescing. Inserts a queued chat task; if one is
@@ -110,12 +111,14 @@ type CreateOrGetQueuedChatTaskParams struct {
 // (migration 057). The DO UPDATE branch is a no-op write — the assignment
 // to priority is what makes RETURNING surface the existing row instead of
 // producing zero rows.
+// CEREBRO-PATCH(chat-task-original-user-id): seed original_user_id so chat tasks use the cerebro_runtime_tool cascade (same as issue tasks).
 func (q *Queries) CreateOrGetQueuedChatTask(ctx context.Context, arg CreateOrGetQueuedChatTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createOrGetQueuedChatTask,
 		arg.AgentID,
 		arg.RuntimeID,
 		arg.Priority,
 		arg.ChatSessionID,
+		arg.OriginalUserID,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(

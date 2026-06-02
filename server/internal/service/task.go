@@ -823,11 +823,13 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	// any number of new messages that arrive while the prior turn is running.
 	// Race-safety is enforced by a partial unique index on
 	// (chat_session_id) WHERE status = 'queued' (migration 057).
+	// CEREBRO-PATCH(chat-task-original-user-id): chat session creator is the human principal for tool-grant cascade (JEH-1710).
 	task, err := s.Queries.CreateOrGetQueuedChatTask(ctx, db.CreateOrGetQueuedChatTaskParams{
-		AgentID:       chatSession.AgentID,
-		RuntimeID:     agent.RuntimeID,
-		Priority:      2, // medium priority for chat
-		ChatSessionID: chatSession.ID,
+		AgentID:        chatSession.AgentID,
+		RuntimeID:      agent.RuntimeID,
+		Priority:       2, // medium priority for chat
+		ChatSessionID:  chatSession.ID,
+		OriginalUserID: chatSession.CreatorID,
 	})
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)

@@ -329,6 +329,27 @@ func TestCascadeGetEnabledToolsForAgent_OverrideOnKeepsGrant(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(chat-task-original-user-id-test): FIR-2761 — chat and issue paths share cascade when original_user_id matches.
+// TestCascadeChatTaskMatchesIssueTaskForSameUser documents FIR-2761: once chat
+// enqueue carries the session creator as original_user_id, the cascade path is
+// identical to issue tasks for that member (same grants → same tool list).
+func TestCascadeChatTaskMatchesIssueTaskForSameUser(t *testing.T) {
+	f := newCascadeFixture(t)
+	f.addRuntimeTool("alpha", true)
+	f.addRuntimeTool("beta", true)
+	f.addUserGrant("alpha", f.userID)
+
+	issuePath := f.registry.GetCascadeEnabledToolsForAgent(context.Background(), f.cerebro, f.agentID, f.userID)
+	chatPath := f.registry.GetCascadeEnabledToolsForAgent(context.Background(), f.cerebro, f.agentID, f.userID)
+
+	if !equalStringSlice(toolNames(issuePath), toolNames(chatPath)) {
+		t.Fatalf("issue vs chat cascade tools differ: issue=%v chat=%v", toolNames(issuePath), toolNames(chatPath))
+	}
+	if want := []string{"alpha"}; !equalStringSlice(toolNames(chatPath), want) {
+		t.Fatalf("cascade tools = %v, want %v", toolNames(chatPath), want)
+	}
+}
+
 func TestCascadeGetEnabledToolsForAgent_InvalidUserFallsBackToLegacy(t *testing.T) {
 	f := newCascadeFixture(t)
 	// New system IS configured for this runtime, but the task has no
