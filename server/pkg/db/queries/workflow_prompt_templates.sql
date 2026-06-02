@@ -21,6 +21,8 @@ RETURNING *;
 UPDATE workflow_prompt_templates
 SET content = COALESCE(sqlc.narg('content'), content),
     name = COALESCE(sqlc.narg('name'), name),
+    stage = COALESCE(sqlc.narg('stage'), stage),
+    is_default = COALESCE(sqlc.narg('is_default')::boolean, is_default),
     version = version + 1,
     updated_at = now()
 WHERE id = @id
@@ -55,6 +57,21 @@ INSERT INTO workflow_prompt_overrides (
     sqlc.narg('project_id'),
     @override_content
 )
+RETURNING *;
+
+-- name: UpsertWorkflowPromptOverride :one
+INSERT INTO workflow_prompt_overrides (
+    template_id, agent_id, project_id, override_content
+) VALUES (
+    @template_id,
+    sqlc.narg('agent_id'),
+    sqlc.narg('project_id'),
+    @override_content
+)
+ON CONFLICT (template_id,
+    COALESCE(agent_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid))
+DO UPDATE SET override_content = EXCLUDED.override_content
 RETURNING *;
 
 -- name: DeleteWorkflowPromptOverride :exec

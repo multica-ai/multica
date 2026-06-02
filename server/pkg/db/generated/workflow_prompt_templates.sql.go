@@ -254,20 +254,30 @@ const updateWorkflowPromptTemplate = `-- name: UpdateWorkflowPromptTemplate :one
 UPDATE workflow_prompt_templates
 SET content = COALESCE($1, content),
     name = COALESCE($2, name),
+    stage = COALESCE($3, stage),
+    is_default = COALESCE($4::boolean, is_default),
     version = version + 1,
     updated_at = now()
-WHERE id = $3
+WHERE id = $5
 RETURNING id, workspace_id, stage, name, content, is_default, version, created_at, updated_at
 `
 
 type UpdateWorkflowPromptTemplateParams struct {
-	Content pgtype.Text `json:"content"`
-	Name    pgtype.Text `json:"name"`
-	ID      pgtype.UUID `json:"id"`
+	Content   pgtype.Text `json:"content"`
+	Name      pgtype.Text `json:"name"`
+	Stage     pgtype.Text `json:"stage"`
+	IsDefault pgtype.Bool `json:"is_default"`
+	ID        pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateWorkflowPromptTemplate(ctx context.Context, arg UpdateWorkflowPromptTemplateParams) (WorkflowPromptTemplate, error) {
-	row := q.db.QueryRow(ctx, updateWorkflowPromptTemplate, arg.Content, arg.Name, arg.ID)
+	row := q.db.QueryRow(ctx, updateWorkflowPromptTemplate,
+		arg.Content,
+		arg.Name,
+		arg.Stage,
+		arg.IsDefault,
+		arg.ID,
+	)
 	var i WorkflowPromptTemplate
 	err := row.Scan(
 		&i.ID,
@@ -279,6 +289,47 @@ func (q *Queries) UpdateWorkflowPromptTemplate(ctx context.Context, arg UpdateWo
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertWorkflowPromptOverride = `-- name: UpsertWorkflowPromptOverride :one
+INSERT INTO workflow_prompt_overrides (
+    template_id, agent_id, project_id, override_content
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4
+)
+ON CONFLICT (template_id,
+    COALESCE(agent_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid))
+DO UPDATE SET override_content = EXCLUDED.override_content
+RETURNING id, template_id, agent_id, project_id, override_content
+`
+
+type UpsertWorkflowPromptOverrideParams struct {
+	TemplateID      pgtype.UUID `json:"template_id"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+	ProjectID       pgtype.UUID `json:"project_id"`
+	OverrideContent string      `json:"override_content"`
+}
+
+func (q *Queries) UpsertWorkflowPromptOverride(ctx context.Context, arg UpsertWorkflowPromptOverrideParams) (WorkflowPromptOverride, error) {
+	row := q.db.QueryRow(ctx, upsertWorkflowPromptOverride,
+		arg.TemplateID,
+		arg.AgentID,
+		arg.ProjectID,
+		arg.OverrideContent,
+	)
+	var i WorkflowPromptOverride
+	err := row.Scan(
+		&i.ID,
+		&i.TemplateID,
+		&i.AgentID,
+		&i.ProjectID,
+		&i.OverrideContent,
 	)
 	return i, err
 }
