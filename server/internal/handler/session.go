@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/dwickyfp/wallts/server/pkg/session"
 )
 
 // SessionResponse is the JSON shape for a session resource.
@@ -26,48 +26,32 @@ type SessionResponse struct {
 	Version             int       `json:"version"`
 }
 
-// scanSession scans a single session row from pgx.Rows into a SessionResponse.
-func scanSession(row interface {
-	Scan(dest ...any) error
-}) (SessionResponse, error) {
-	var (
-		id         pgtype.UUID
-		issueID    pgtype.UUID
-		agentID    pgtype.UUID
-		runNum     int
-		isActive   bool
-		summary    pgtype.Text
-		workDir    pgtype.Text
-		branch     pgtype.Text
-		filesMod   []string
-		createdAt  time.Time
-		lastActive time.Time
-		ver        int
-	)
-	if err := row.Scan(&id, &issueID, &agentID, &runNum, &isActive,
-		&summary, &workDir, &branch, &filesMod,
-		&createdAt, &lastActive, &ver); err != nil {
-		return SessionResponse{}, err
-	}
+// sessionToResponse converts a session.Session to the handler's JSON shape.
+func sessionToResponse(s *session.Session) SessionResponse {
 	return SessionResponse{
-		ID:                  uuidToString(id),
-		IssueID:             uuidToString(issueID),
-		AgentID:             uuidToString(agentID),
-		RunNumber:           runNum,
-		IsActive:            isActive,
-		ConversationSummary: textToPtr(summary),
-		WorkingDirectory:    textToPtr(workDir),
-		Branch:              textToPtr(branch),
-		FilesModified:       filesMod,
-		CreatedAt:           createdAt,
-		LastActiveAt:        lastActive,
-		Version:             ver,
-	}, nil
+		ID:                  s.ID.String(),
+		IssueID:             s.IssueID.String(),
+		AgentID:             s.AgentID.String(),
+		RunNumber:           s.RunNumber,
+		IsActive:            s.IsActive,
+		ConversationSummary: s.ConversationSummary,
+		WorkingDirectory:    s.WorkingDirectory,
+		Branch:              s.Branch,
+		FilesModified:       s.FilesModified,
+		CreatedAt:           s.CreatedAt,
+		LastActiveAt:        s.LastActiveAt,
+		Version:             s.Version,
+	}
 }
 
 // ListSessions returns all sessions for a given issue.
 // GET /api/agent-sessions?issue_id=<uuid>
 func (h *Handler) ListSessions(w http.ResponseWriter, r *http.Request) {
+	if h.SessionService == nil {
+		writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
 	issueIDRaw := r.URL.Query().Get("issue_id")
 	if issueIDRaw == "" {
 		writeError(w, http.StatusBadRequest, "issue_id is required")
@@ -78,32 +62,15 @@ func (h *Handler) ListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, qErr := h.DB.Query(r.Context(), `
-		SELECT id, issue_id, agent_id, run_number, is_active,
-			conversation_summary, working_directory, branch,
-			files_modified, created_at, last_active_at, version
-		FROM agent_sessions
-		WHERE issue_id = $1
-		ORDER BY agent_id, run_number DESC
-	`, issueID)
-	if qErr != nil {
-		writeError(w, http.StatusInternalServerError, "query sessions: "+qErr.Error())
+	sessions, err := h.SessionService.ListSessions(r.Context(), uuid.UUID(issueID.Bytes))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query sessions: "+err.Error())
 		return
 	}
-	defer rows.Close()
 
-	out := []SessionResponse{}
-	for rows.Next() {
-		sess, err := scanSession(rows)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "scan session: "+err.Error())
-			return
-		}
-		out = append(out, sess)
-	}
-	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "iterate sessions: "+err.Error())
-		return
+	out := make([]SessionResponse, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, sessionToResponse(s))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -111,24 +78,22 @@ func (h *Handler) ListSessions(w http.ResponseWriter, r *http.Request) {
 // GetSession returns a single session by ID.
 // GET /api/agent-sessions/{sessionId}
 func (h *Handler) GetSession(w http.ResponseWriter, r *http.Request) {
+	if h.SessionService == nil {
+		writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
 	sessionID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "sessionId"), "sessionId")
 	if !ok {
 		return
 	}
 
-	row := h.DB.QueryRow(r.Context(), `
-		SELECT id, issue_id, agent_id, run_number, is_active,
-			conversation_summary, working_directory, branch,
-			files_modified, created_at, last_active_at, version
-		FROM agent_sessions
-		WHERE id = $1
-	`, sessionID)
-	sess, err := scanSession(row)
+	s, err := h.SessionService.GetSession(r.Context(), uuid.UUID(sessionID.Bytes))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, sess)
+	writeJSON(w, http.StatusOK, sessionToResponse(s))
 }
 
 // ResetSession deactivates all active sessions for a given issue+agent.

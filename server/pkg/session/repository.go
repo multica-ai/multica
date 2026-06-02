@@ -99,7 +99,7 @@ func (r *Repository) getActiveSession(ctx context.Context, issueID, agentID uuid
 func (r *Repository) UpdateState(ctx context.Context, sessionID uuid.UUID, state json.RawMessage, summary *string, filesModified []string, workingDir *string, branch *string, expectedVersion int) error {
 	query := `
 		UPDATE agent_sessions
-		SET state = $2,
+		SET state = COALESCE($2, state),
 			conversation_summary = $3,
 			files_modified = $4,
 			working_directory = $5,
@@ -212,4 +212,66 @@ func toStringPtr(v pgtype.Text) *string {
 		return nil
 	}
 	return &v.String
+}
+
+// ListByIssue returns all sessions for a given issue, ordered by agent_id, run_number DESC.
+func (r *Repository) ListByIssue(ctx context.Context, issueID uuid.UUID) ([]*Session, error) {
+	query := `
+		SELECT id, issue_id, agent_id, run_number, state,
+			conversation_summary, working_directory, branch,
+			files_modified, is_active, created_at, last_active_at,
+			expires_at, version
+		FROM agent_sessions
+		WHERE issue_id = $1
+		ORDER BY agent_id, run_number DESC`
+
+	rows, err := r.pool.Query(ctx, query, issueID)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions by issue: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []*Session
+	for rows.Next() {
+		s := &Session{}
+		if err := rows.Scan(
+			&s.ID, &s.IssueID, &s.AgentID, &s.RunNumber, &s.State,
+			&s.ConversationSummary, &s.WorkingDirectory, &s.Branch,
+			&s.FilesModified, &s.IsActive, &s.CreatedAt, &s.LastActiveAt,
+			&s.ExpiresAt, &s.Version,
+		); err != nil {
+			return nil, fmt.Errorf("scan session: %w", err)
+		}
+		sessions = append(sessions, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sessions: %w", err)
+	}
+	return sessions, nil
+}
+
+// GetByID returns a single session by its primary key.
+func (r *Repository) GetByID(ctx context.Context, sessionID uuid.UUID) (*Session, error) {
+	query := `
+		SELECT id, issue_id, agent_id, run_number, state,
+			conversation_summary, working_directory, branch,
+			files_modified, is_active, created_at, last_active_at,
+			expires_at, version
+		FROM agent_sessions
+		WHERE id = $1`
+
+	s := &Session{}
+	err := r.pool.QueryRow(ctx, query, sessionID).Scan(
+		&s.ID, &s.IssueID, &s.AgentID, &s.RunNumber, &s.State,
+		&s.ConversationSummary, &s.WorkingDirectory, &s.Branch,
+		&s.FilesModified, &s.IsActive, &s.CreatedAt, &s.LastActiveAt,
+		&s.ExpiresAt, &s.Version,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, fmt.Errorf("get session by id: %w", err)
+	}
+	return s, nil
 }

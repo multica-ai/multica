@@ -504,3 +504,84 @@ func TestChildDoneSelfTriggerGuard_SquadParentDifferentSquadSameLeader(t *testin
 		t.Errorf("expected 0 pending leader tasks on parent (cross-squad shared-leader guard), got %d", got)
 	}
 }
+
+// setWorkspaceSettingsDirect bypasses the UpdateWorkspace HTTP handler by
+// writing to the workspace settings column directly via SQL. This is
+// cleaner than going through the HTTP handler for a single-flag toggle.
+func setWorkspaceSettingsDirect(t *testing.T, workspaceID string, settings map[string]any) {
+	t.Helper()
+	b, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE workspace SET settings = $2 WHERE id = $1`,
+		workspaceID, b,
+	); err != nil {
+		t.Fatalf("set workspace settings: %v", err)
+	}
+}
+
+// TestChildDoneSkippedWhenParentTaggingDisabled — when the workspace has
+// disable_parent_tagging=true in its settings JSON, the child-to-done
+// transition must NOT produce a system comment on the parent. The child
+// itself still completes normally. This is the S3-F1 / #3594 feature.
+func TestChildDoneSkippedWhenParentTaggingDisabled(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	// Enable the opt-out on the workspace.
+	setWorkspaceSettingsDirect(t, testWorkspaceID, map[string]any{
+		"disable_parent_tagging": true,
+	})
+	t.Cleanup(func() {
+		// Restore default (empty settings) so other tests are unaffected.
+		setWorkspaceSettingsDirect(t, testWorkspaceID, map[string]any{})
+	})
+
+	updateChildStatus(t, fx.child.ID, "done")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
+		t.Errorf("expected 0 system comments when disable_parent_tagging=true, got %d", got)
+	}
+}
+
+// TestChildDoneFiresWhenParentTaggingExplicitlyFalse — setting the flag to
+// false (the default) must still produce the system comment. This guards
+// against the check being accidentally inverted.
+func TestChildDoneFiresWhenParentTaggingExplicitlyFalse(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	setWorkspaceSettingsDirect(t, testWorkspaceID, map[string]any{
+		"disable_parent_tagging": false,
+	})
+	t.Cleanup(func() {
+		setWorkspaceSettingsDirect(t, testWorkspaceID, map[string]any{})
+	})
+
+	updateChildStatus(t, fx.child.ID, "done")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Errorf("expected 1 system comment when disable_parent_tagging=false, got %d", got)
+	}
+}
+
+// TestChildDoneFiresWhenSettingsOmitFlag — if the workspace settings JSON
+// does not contain the disable_parent_tagging key at all, the default is
+// preserved (notification fires). This is the backward-compat test.
+func TestChildDoneFiresWhenSettingsOmitFlag(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	// Set some unrelated setting — the flag key is absent.
+	setWorkspaceSettingsDirect(t, testWorkspaceID, map[string]any{
+		"unrelated_setting": "hello",
+	})
+	t.Cleanup(func() {
+		setWorkspaceSettingsDirect(t, testWorkspaceID, map[string]any{})
+	})
+
+	updateChildStatus(t, fx.child.ID, "done")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Errorf("expected 1 system comment when flag absent from settings, got %d", got)
+	}
+}

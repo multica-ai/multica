@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -31,6 +32,12 @@ import (
 //     and there is nothing to "trigger" on a human assignee. Skipping the
 //     comment entirely (Bohan's call on MUL-2538) also sidesteps the
 //     mention question — no comment, no mention, no inbox row.
+//   - the workspace must not have opted out via
+//     `settings.disable_parent_tagging=true` (S3-F1 / #3594). When set,
+//     the whole pipeline — system comment, assignee mention, leader task,
+//     inbox row — is suppressed. The child still updates its own status
+//     normally. Default (and any unreadable / unset value) preserves the
+//     legacy path so the flag is strictly opt-in.
 //
 // The comment is inserted directly via db.Queries (not through the
 // CreateComment HTTP handler) so it bypasses the generic on_comment trigger
@@ -70,6 +77,14 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// comment is just noise and there is no agent task to trigger. Skip the
 	// whole notification (comment + mention + inbox row) — MUL-2538.
 	if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
+		return
+	}
+	// Workspace opt-out (S3-F1 / #3594): when the workspace has set
+	// `settings.disable_parent_tagging=true`, suppress the whole notification
+	// pipeline (system comment + assignee mention + leader task). The child
+	// still updates its own status normally. A failed settings read is treated
+	// as "not set" so a transient DB blip never blocks a legitimate notification.
+	if h.isParentTaggingDisabled(ctx, parent.WorkspaceID) {
 		return
 	}
 
@@ -384,4 +399,26 @@ func childAssigneeIsSquad(child db.Issue, squadID pgtype.UUID) bool {
 		return false
 	}
 	return uuidToString(child.AssigneeID) == uuidToString(squadID)
+}
+
+// isParentTaggingDisabled reads the workspace's `settings.disable_parent_tagging`
+// boolean. When true, automatic parent-issue notification on child completion
+// is suppressed (system comment, mention link, assignee task — all of it).
+// Returns false on any error (workspace not found, malformed JSON, missing key)
+// so the notification path is the safe default.
+func (h *Handler) isParentTaggingDisabled(ctx context.Context, workspaceID pgtype.UUID) bool {
+	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
+	if err != nil || ws.Settings == nil {
+		return false
+	}
+	var settings map[string]any
+	if json.Unmarshal(ws.Settings, &settings) != nil {
+		return false
+	}
+	v, ok := settings["disable_parent_tagging"]
+	if !ok {
+		return false
+	}
+	b, ok := v.(bool)
+	return ok && b
 }
