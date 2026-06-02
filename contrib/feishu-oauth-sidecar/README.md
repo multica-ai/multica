@@ -81,6 +81,19 @@ Wire the skill into any agent that should be able to act as a user in Feishu (as
 skill in Multica, or drop `skill/SKILL.md` into the agent's skill set). Then the agent can
 run Feishu operations on behalf of whoever created the issue.
 
+> **Registering the skill in Multica — set the body via `content`, never as a `SKILL.md` file.**
+> When creating the skill, pass the SKILL.md body to the skill's **content** field:
+> ```bash
+> multica skill create --name feishu-as-user --content "$(cat skill/SKILL.md)"
+> ```
+> Do **not** add the body as a supporting file named `SKILL.md` (e.g. via
+> `multica skill files upsert --path SKILL.md`). The daemon's execenv writes the skill's
+> `content` to `<workdir>/.../skills/<slug>/SKILL.md` and then writes each supporting file;
+> a supporting file also named `SKILL.md` produces a second write to the same path, which the
+> sidecar-manifest guard rejects (`refuse to overwrite pre-existing path`), breaking execenv
+> setup for **every** agent assigned the skill. Keep `files` for real bundled assets
+> (scripts/templates) only. (Learned the hard way in a self-hosted deployment.)
+
 ## The agent skill (identity resolution + safety)
 
 `skill/SKILL.md` is the heart of the integration. Key design points learned in production:
