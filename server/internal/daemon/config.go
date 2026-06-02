@@ -352,15 +352,6 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// server uses these at register time to merge any pre-UUID runtime rows
 	// for this machine into the new UUID-keyed row and delete the stale ones.
 	legacyDaemonIDs := LegacyDaemonIDs(host, profile)
-	// Pre-change (#1220) daemon identity was stored per profile, which means
-	// the same machine could end up with multiple leftover daemon.id files
-	// — e.g. ~/.multica/daemon.id (default) plus ~/.multica/profiles/<x>/
-	// daemon.id. Surface those UUIDs so the server can merge their runtime
-	// rows into the canonical machine UUID. Fatal-free: a broken profiles
-	// dir shouldn't block startup.
-	if uuids, err := LegacyDaemonUUIDs(); err == nil {
-		legacyDaemonIDs = append(legacyDaemonIDs, uuids...)
-	}
 	// Strip anything that collides with the resolved daemon_id (e.g. when
 	// the user explicitly pins MULTICA_DAEMON_ID=<hostname>, or when the
 	// canonical id was itself promoted from a pre-change profile file).
