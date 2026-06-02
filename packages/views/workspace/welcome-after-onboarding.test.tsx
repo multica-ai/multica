@@ -24,7 +24,7 @@ const TEST_RESOURCES = {
 const mockUser = {
   id: "user-1",
   name: "Test",
-  email: "test@multica.ai",
+  email: "test@wallts.ai",
   avatar_url: null,
   onboarded_at: "2026-01-01T00:00:00Z",
   onboarding_questionnaire: {},

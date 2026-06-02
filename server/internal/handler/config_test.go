@@ -93,8 +93,8 @@ func TestGetConfigUsesFrontendOriginForSameOriginDaemonSetup(t *testing.T) {
 }
 
 func TestGetConfigOmitsOfficialCloudDaemonSetup(t *testing.T) {
-	t.Setenv("MULTICA_PUBLIC_URL", "https://api.multica.ai")
-	t.Setenv("FRONTEND_ORIGIN", "https://multica.ai")
+	t.Setenv("MULTICA_PUBLIC_URL", "https://api.wallts.ai")
+	t.Setenv("FRONTEND_ORIGIN", "https://wallts.ai")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
@@ -122,17 +122,17 @@ func TestURLHostEqualsCanonicalizesCommonHostForms(t *testing.T) {
 		raw  string
 		want bool
 	}{
-		{name: "full URL", raw: "https://api.multica.ai", want: true},
-		{name: "bare host", raw: "api.multica.ai", want: true},
-		{name: "host port", raw: "api.multica.ai:8080", want: true},
-		{name: "trailing dot", raw: "https://api.multica.ai.", want: true},
+		{name: "full URL", raw: "https://api.wallts.ai", want: true},
+		{name: "bare host", raw: "api.wallts.ai", want: true},
+		{name: "host port", raw: "api.wallts.ai:8080", want: true},
+		{name: "trailing dot", raw: "https://api.wallts.ai.", want: true},
 		{name: "different host", raw: "https://evil.example", want: false},
 		{name: "empty", raw: "", want: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := urlHostEquals(tt.raw, "api.multica.ai"); got != tt.want {
+			if got := urlHostEquals(tt.raw, "api.wallts.ai"); got != tt.want {
 				t.Fatalf("urlHostEquals(%q): want %v, got %v", tt.raw, tt.want, got)
 			}
 		})

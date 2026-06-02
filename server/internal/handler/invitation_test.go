@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const invitationTestEmail = "invitation-test@multica.ai"
+const invitationTestEmail = "invitation-test@wallts.ai"
 
 func clearInvitationsForTestWorkspace(t *testing.T) {
 	t.Helper()

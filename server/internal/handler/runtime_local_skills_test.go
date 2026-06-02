@@ -50,7 +50,7 @@ func createRuntimeLocalSkillTestRuntime(t *testing.T, ownerID string) string {
 func createRuntimeLocalSkillTestMember(t *testing.T, role string) string {
 	t.Helper()
 
-	email := fmt.Sprintf("runtime-local-skills-%d@multica.ai", time.Now().UnixNano())
+	email := fmt.Sprintf("runtime-local-skills-%d@wallts.ai", time.Now().UnixNano())
 	name := fmt.Sprintf("Runtime Local Skills %s", role)
 
 	var userID string

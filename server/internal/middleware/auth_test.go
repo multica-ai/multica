@@ -50,7 +50,7 @@ func generateToken(claims jwt.MapClaims, secret []byte) string {
 func validClaims() jwt.MapClaims {
 	return jwt.MapClaims{
 		"sub":   "test-user-id",
-		"email": "test@multica.ai",
+		"email": "test@wallts.ai",
 		"exp":   time.Now().Add(time.Hour).Unix(),
 	}
 }
@@ -187,8 +187,8 @@ func TestAuth_ValidToken(t *testing.T) {
 	if gotUserID != "test-user-id" {
 		t.Fatalf("expected X-User-ID 'test-user-id', got '%s'", gotUserID)
 	}
-	if gotEmail != "test@multica.ai" {
-		t.Fatalf("expected X-User-Email 'test@multica.ai', got '%s'", gotEmail)
+	if gotEmail != "test@wallts.ai" {
+		t.Fatalf("expected X-User-Email 'test@wallts.ai', got '%s'", gotEmail)
 	}
 }
 

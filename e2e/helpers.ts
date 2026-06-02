@@ -2,7 +2,7 @@ import { type Page } from "@playwright/test";
 import { TestApiClient } from "./fixtures";
 
 const DEFAULT_E2E_NAME = "E2E User";
-const DEFAULT_E2E_EMAIL = "e2e@multica.ai";
+const DEFAULT_E2E_EMAIL = "e2e@wallts.ai";
 const DEFAULT_E2E_WORKSPACE = "e2e-workspace";
 
 /**

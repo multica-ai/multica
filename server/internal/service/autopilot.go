@@ -707,7 +707,7 @@ func (s *AutopilotService) publishRunDone(workspaceID string, run db.AutopilotRu
 
 
 
-// autopilotAssigneeAnalytics builds the PostHog assignee descriptor for an
+// autopilotAssigneeAnalytics builds the analytics assignee descriptor for an
 // autopilot. For squad autopilots agent_id is best-effort the resolved
 // leader (so per-agent funnels stay consistent); a resolve error degrades
 // to the raw assignee_id rather than dropping the event — incomplete data

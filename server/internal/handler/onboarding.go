@@ -80,7 +80,7 @@ func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 
 	// Validate workspace_id if supplied; we don't write with it, but a
 	// malformed value should fail fast rather than silently land in
-	// PostHog as a junk dimension.
+	// analytics as a junk dimension.
 	if req.WorkspaceID != "" {
 		wsUUID, ok := parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id")
 		if !ok {

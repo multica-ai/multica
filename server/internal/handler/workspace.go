@@ -227,7 +227,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	wsID := uuidToString(ws.ID)
 
-	// "Is this the user's first workspace?" is derived in PostHog by looking
+	// "Is this the user's first workspace?" is derived in analytics by looking
 	// at whether they have a prior workspace_created event, not stamped at
 	// emit time. Stamping here would race under concurrent creates without
 	// a schema change, and the event stream answers the question exactly.

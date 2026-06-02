@@ -181,7 +181,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 // sets on the first pageview (UTM + referrer bundle). The frontend writes
 // a JSON string URL-encoded into the cookie value — Go does not
 // auto-decode Cookie.Value, so we have to unescape here before the string
-// lands in PostHog. Missing cookie / decode failures collapse to the
+// lands in analytics. Missing cookie / decode failures collapse to the
 // empty string; that simply omits signup_source from the event rather
 // than sending percent-encoded garbage. Never fall back to r.Referer() —
 // the frontend has already sanitised attribution and a raw referer can
