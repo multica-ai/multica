@@ -95,6 +95,10 @@ android {
         versionCode 5
         versionName "0.1.2"
 
+        manifestPlaceholders = [
+            GETUI_APPID: "zopkAIG3P07bN78Q5CHck8",
+        ]
+
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
     signingConfigs {
@@ -179,4 +183,6 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+    implementation 'com.getui:gtsdk:3.3.13.0'
+    implementation 'com.getui:gtc:3.3.1.0'
 }

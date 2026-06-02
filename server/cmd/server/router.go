@@ -370,6 +370,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/me/notification-webhooks/{webhookId}/test", h.TestMyNotificationWebhook)
 		r.Get("/api/me/notification-preferences", h.GetMyNotificationPreferences)
 		r.Patch("/api/me/notification-preferences", h.UpdateMyNotificationPreference)
+		r.Put("/api/me/mobile-push/registrations", h.UpsertMyMobilePushRegistration)
+		r.Delete("/api/me/mobile-push/registrations/{installationId}", h.DisableMyMobilePushRegistration)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)

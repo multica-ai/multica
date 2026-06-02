@@ -579,6 +579,20 @@ type MentionFrequency struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
+type MobilePushRegistration struct {
+	ID               pgtype.UUID        `json:"id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	InstallationID   string             `json:"installation_id"`
+	Platform         string             `json:"platform"`
+	Provider         string             `json:"provider"`
+	ProviderClientID string             `json:"provider_client_id"`
+	AppVersion       pgtype.Text        `json:"app_version"`
+	Enabled          bool               `json:"enabled"`
+	LastSeenAt       pgtype.Timestamptz `json:"last_seen_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type NotificationChannelPreference struct {
 	ID         pgtype.UUID        `json:"id"`
 	UserID     pgtype.UUID        `json:"user_id"`

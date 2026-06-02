@@ -163,6 +163,8 @@ import type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  MobilePushRegistrationResponse,
+  UpsertMobilePushRegistrationRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -247,6 +249,8 @@ import {
   EMPTY_CREATE_BILLING_CHECKOUT_SESSION_RESPONSE,
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
+  EMPTY_MOBILE_PUSH_REGISTRATION_RESPONSE,
+  MobilePushRegistrationResponseSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1916,6 +1920,32 @@ export class ApiClient {
 
   async archiveCompletedInbox(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/archive-completed", { method: "POST" });
+  }
+
+  async upsertMobilePushRegistration(
+    request: UpsertMobilePushRegistrationRequest,
+  ): Promise<MobilePushRegistrationResponse> {
+    const response = await this.fetch("/api/me/mobile-push/registrations", {
+      method: "PUT",
+      body: JSON.stringify(request),
+    });
+    return parseWithFallback(
+      response,
+      MobilePushRegistrationResponseSchema,
+      EMPTY_MOBILE_PUSH_REGISTRATION_RESPONSE,
+      { endpoint: "PUT /api/me/mobile-push/registrations" },
+    );
+  }
+
+  async disableMobilePushRegistration(
+    installationId: string,
+    provider = "getui",
+  ): Promise<void> {
+    const search = new URLSearchParams({ provider });
+    await this.fetch(
+      `/api/me/mobile-push/registrations/${encodeURIComponent(installationId)}?${search}`,
+      { method: "DELETE" },
+    );
   }
 
   // Notification preferences
