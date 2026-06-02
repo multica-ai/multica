@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -219,13 +218,6 @@ func (h *Handler) CreateContactSales(w http.ResponseWriter, r *http.Request) {
 			"use_case", useCase,
 		)...)
 
-	h.Analytics.Capture(analytics.ContactSalesSubmitted(
-		inquiryID,
-		companySize,
-		countryRegion,
-		useCase,
-		goals != "",
-	))
 
 	writeJSON(w, http.StatusCreated, ContactSalesResponse{
 		ID:        inquiryID,

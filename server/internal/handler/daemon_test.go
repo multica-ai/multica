@@ -3211,7 +3211,7 @@ func installFreshMembershipCache(t *testing.T) {
 // deletes it on test cleanup. Returns the user id as a string.
 func createEphemeralUser(t *testing.T, label string) string {
 	t.Helper()
-	email := fmt.Sprintf("membership-cache-%s-%s@multica.ai", label, uuid.NewString())
+	email := fmt.Sprintf("membership-cache-%s-%s@wallts.ai", label, uuid.NewString())
 	var userID string
 	if err := testPool.QueryRow(context.Background(), `
 		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id

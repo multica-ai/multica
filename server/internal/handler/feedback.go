@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -117,14 +116,6 @@ func (h *Handler) CreateFeedback(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("feedback submitted", append(logger.RequestAttrs(r), "feedback_id", uuidToString(fb.ID))...)
 
-	h.Analytics.Capture(analytics.FeedbackSubmitted(
-		userID,
-		uuidToString(fb.WorkspaceID),
-		len(message),
-		feedbackImageRegex.MatchString(message),
-		platform,
-		version,
-	))
 
 	writeJSON(w, http.StatusCreated, FeedbackResponse{
 		ID:        uuidToString(fb.ID),

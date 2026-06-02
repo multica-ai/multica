@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AgentRuntime } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -8,13 +8,9 @@ import enOnboarding from "../../locales/en/onboarding.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding } };
 
-// Hoisted mocks — replace analytics and the runtime picker before the SUT
-// imports them. Tests drive picker state via `mocks.pickerState`; every
-// captureEvent / setPersonProperties call lands on `mocks.captureEvent` /
-// `mocks.setPersonProperties` so we can assert the payload shape.
+// Hoisted mocks — replace the runtime picker before the SUT
+// imports it. Tests drive picker state via `mocks.pickerState`.
 const mocks = vi.hoisted(() => ({
-  captureEvent: vi.fn<(name: string, props?: Record<string, unknown>) => void>(),
-  setPersonProperties: vi.fn<(props: Record<string, unknown>) => void>(),
   pickerState: {
     runtimes: [] as AgentRuntime[],
     selected: null as AgentRuntime | null,
@@ -22,11 +18,6 @@ const mocks = vi.hoisted(() => ({
     setSelectedId: vi.fn<(id: string) => void>(),
     hasRuntimes: false,
   },
-}));
-
-vi.mock("@multica/core/analytics", () => ({
-  captureEvent: mocks.captureEvent,
-  setPersonProperties: mocks.setPersonProperties,
 }));
 
 vi.mock("../components/use-runtime-picker", () => ({
@@ -54,17 +45,23 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
   } as unknown as AgentRuntime;
 }
 
-function setPicker(patch: Partial<typeof mocks.pickerState> = {}) {
-  mocks.pickerState.runtimes = patch.runtimes ?? [];
-  mocks.pickerState.selected = patch.selected ?? null;
-  mocks.pickerState.selectedId = patch.selectedId ?? null;
-  mocks.pickerState.hasRuntimes = patch.hasRuntimes ?? false;
-  mocks.pickerState.setSelectedId = vi.fn();
+function setPicker(
+  overrides: Partial<typeof mocks.pickerState> = {},
+) {
+  mocks.pickerState = {
+    runtimes: [],
+    selected: null,
+    selectedId: null,
+    setSelectedId: mocks.pickerState.setSelectedId,
+    hasRuntimes: false,
+    ...overrides,
+  };
 }
 
+const onNext = vi.fn();
+const onBack = vi.fn();
+
 function renderStep() {
-  const onNext = vi.fn();
-  const onBack = vi.fn();
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -78,148 +75,14 @@ function renderStep() {
   return { onNext, onBack };
 }
 
-describe("StepRuntimeConnect — onboarding_runtime_detected", () => {
+describe("StepRuntimeConnect", () => {
   beforeEach(() => {
-    mocks.captureEvent.mockReset();
-    mocks.setPersonProperties.mockReset();
     setPicker();
     vi.useFakeTimers({ shouldAdvanceTime: true });
   });
 
   afterEach(() => {
     vi.useRealTimers();
-  });
-
-  it("fires `outcome: found` when runtimes arrive synchronously on mount", () => {
-    const rt = makeRuntime({
-      id: "rt_claude",
-      provider: "claude",
-      status: "online",
-    });
-    setPicker({ runtimes: [rt], selected: rt, selectedId: rt.id, hasRuntimes: true });
-
-    renderStep();
-
-    expect(mocks.captureEvent).toHaveBeenCalledTimes(1);
-    const [name, props] = mocks.captureEvent.mock.calls[0]!;
-    expect(name).toBe("onboarding_runtime_detected");
-    expect(props).toMatchObject({
-      source: "onboarding",
-      surface: "step3_desktop",
-      workspace_id: "ws_test",
-      outcome: "found",
-      runtime_count: 1,
-      online_count: 1,
-      providers: ["claude"],
-      has_claude: true,
-      has_codex: false,
-      has_cursor: false,
-    });
-    expect(typeof (props as Record<string, unknown>).detect_ms).toBe("number");
-
-    expect(mocks.setPersonProperties).toHaveBeenCalledWith({
-      has_any_cli: true,
-      detected_cli_count: 1,
-    });
-  });
-
-  it("derives has_claude / has_codex / has_cursor from distinct providers", () => {
-    setPicker({
-      runtimes: [
-        makeRuntime({ id: "rt1", provider: "claude" }),
-        makeRuntime({ id: "rt2", provider: "codex", status: "offline" }),
-        makeRuntime({ id: "rt3", provider: "cursor" }),
-      ],
-      hasRuntimes: true,
-    });
-
-    renderStep();
-
-    expect(mocks.captureEvent).toHaveBeenCalledTimes(1);
-    const props = mocks.captureEvent.mock.calls[0]![1] as Record<string, unknown>;
-    expect(props.runtime_count).toBe(3);
-    expect(props.online_count).toBe(2);
-    expect(props.providers).toEqual(["claude", "codex", "cursor"]);
-    expect(props.has_claude).toBe(true);
-    expect(props.has_codex).toBe(true);
-    expect(props.has_cursor).toBe(true);
-  });
-
-  it("fires `outcome: empty` after the 5s scanning timeout when no runtimes arrive", () => {
-    setPicker({ runtimes: [] });
-
-    renderStep();
-
-    // Scanning phase: no event yet.
-    expect(mocks.captureEvent).not.toHaveBeenCalled();
-
-    // Advance past the 5s empty-timeout inside act so the state flip
-    // flushes React updates before we assert.
-    act(() => {
-      vi.advanceTimersByTime(5_001);
-    });
-
-    expect(mocks.captureEvent).toHaveBeenCalledTimes(1);
-    const props = mocks.captureEvent.mock.calls[0]![1] as Record<string, unknown>;
-    expect(props).toMatchObject({
-      source: "onboarding",
-      surface: "step3_desktop",
-      workspace_id: "ws_test",
-      outcome: "empty",
-      runtime_count: 0,
-      online_count: 0,
-      providers: [],
-      has_claude: false,
-      has_codex: false,
-      has_cursor: false,
-    });
-
-    expect(mocks.setPersonProperties).toHaveBeenCalledWith({
-      has_any_cli: false,
-      detected_cli_count: 0,
-    });
-  });
-
-  it("does not re-emit if the component re-renders after resolution", () => {
-    const rt = makeRuntime({ id: "rt_claude", provider: "claude" });
-    setPicker({ runtimes: [rt], selected: rt, selectedId: rt.id, hasRuntimes: true });
-
-    const { onNext } = renderStep();
-    expect(mocks.captureEvent).toHaveBeenCalledTimes(1);
-
-    // Simulate a runtime coming online / a second runtime registering:
-    // the event has already resolved once; it must not re-emit.
-    setPicker({
-      runtimes: [rt, makeRuntime({ id: "rt_codex", provider: "codex" })],
-      selected: rt,
-      selectedId: rt.id,
-      hasRuntimes: true,
-    });
-    // Force a re-render by firing a timer tick — React will re-read the
-    // mocked picker state but the ref latch keeps the event unique.
-    act(() => {
-      vi.advanceTimersByTime(1_000);
-    });
-
-    expect(mocks.captureEvent).toHaveBeenCalledTimes(1);
-    expect(onNext).not.toHaveBeenCalled();
-  });
-
-  it("only counts distinct providers (multiple runtimes of the same provider)", () => {
-    setPicker({
-      runtimes: [
-        makeRuntime({ id: "rt1", provider: "claude" }),
-        makeRuntime({ id: "rt2", provider: "claude", status: "offline" }),
-      ],
-      hasRuntimes: true,
-    });
-
-    renderStep();
-
-    const props = mocks.captureEvent.mock.calls[0]![1] as Record<string, unknown>;
-    expect(props.runtime_count).toBe(2);
-    expect(props.online_count).toBe(1);
-    expect(props.providers).toEqual(["claude"]);
   });
 
   it("mounts without touching framework-level globals", () => {

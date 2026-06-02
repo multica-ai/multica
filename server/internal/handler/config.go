@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/multica-ai/multica/server/internal/analytics"
 )
 
 type AppConfig struct {
@@ -20,11 +19,6 @@ type AppConfig struct {
 	// Public daemon setup config consumed by the web app at runtime.
 	DaemonServerURL string `json:"daemon_server_url,omitempty"`
 	DaemonAppURL    string `json:"daemon_app_url,omitempty"`
-
-	// PostHog public config for the frontend.
-	PosthogKey           string `json:"posthog_key"`
-	PosthogHost          string `json:"posthog_host"`
-	AnalyticsEnvironment string `json:"analytics_environment"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -43,14 +37,6 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Re-read from env on every request so operators can rotate keys via
 	// secret refresh without a server restart.
-	if v := os.Getenv("ANALYTICS_DISABLED"); v != "true" && v != "1" {
-		config.PosthogKey = os.Getenv("POSTHOG_API_KEY")
-		config.PosthogHost = os.Getenv("POSTHOG_HOST")
-		config.AnalyticsEnvironment = analytics.EnvironmentFromEnv()
-		if config.PosthogHost == "" && config.PosthogKey != "" {
-			config.PosthogHost = "https://us.i.posthog.com"
-		}
-	}
 
 	writeJSON(w, http.StatusOK, config)
 }
@@ -79,10 +65,10 @@ func normalizePublicURL(raw string) string {
 }
 
 func isOfficialCloudDaemonConfig(serverURL, appURL string) bool {
-	if !urlHostEquals(serverURL, "api.multica.ai") {
+	if !urlHostEquals(serverURL, "api.wallts.ai") {
 		return false
 	}
-	return urlHostEquals(appURL, "multica.ai") || urlHostEquals(appURL, "app.multica.ai")
+	return urlHostEquals(appURL, "wallts.ai") || urlHostEquals(appURL, "app.wallts.ai")
 }
 
 func urlHostEquals(raw, want string) bool {

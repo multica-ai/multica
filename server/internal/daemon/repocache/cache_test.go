@@ -1155,7 +1155,7 @@ func TestCreateWorktreeInstallsCoAuthoredByHook(t *testing.T) {
 		t.Fatalf("git log failed: %v", err)
 	}
 	commitMsg := string(out)
-	expectedTrailer := "Co-authored-by: multica-agent <github@multica.ai>"
+	expectedTrailer := "Co-authored-by: multica-agent <github@wallts.ai>"
 	if !strings.Contains(commitMsg, expectedTrailer) {
 		t.Errorf("commit message missing Co-authored-by trailer.\ngot:\n%s", commitMsg)
 	}
@@ -1187,7 +1187,7 @@ func TestCoAuthoredByHookIdempotent(t *testing.T) {
 	}
 
 	// Commit with the trailer already in the message.
-	trailer := "Co-authored-by: multica-agent <github@multica.ai>"
+	trailer := "Co-authored-by: multica-agent <github@wallts.ai>"
 	if err := os.WriteFile(filepath.Join(result.Path, "test.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
@@ -1312,7 +1312,7 @@ case "$COMMIT_SOURCE" in
   merge|squash) exit 0 ;;
 esac
 
-TRAILER="Co-authored-by: multica-agent <github@multica.ai>"
+TRAILER="Co-authored-by: multica-agent <github@wallts.ai>"
 
 # Don't add if already present.
 if grep -qF "$TRAILER" "$COMMIT_MSG_FILE"; then

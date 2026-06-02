@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -26,7 +25,6 @@ const (
 const (
 	DaemonAuthPathDaemonToken = "daemon_token"
 	DaemonAuthPathPAT         = "pat"
-	DaemonAuthPathCloudPAT    = "cloud_pat"
 	DaemonAuthPathJWT         = "jwt"
 )
 
@@ -43,7 +41,7 @@ func DaemonIDFromContext(ctx context.Context) string {
 }
 
 // DaemonAuthPathFromContext returns which token kind authenticated this
-// request — "daemon_token", "pat", "cloud_pat", or "jwt" — for telemetry.
+// request — "daemon_token", "pat", or "jwt" — for telemetry.
 // Empty when the request did not pass through DaemonAuth.
 func DaemonAuthPathFromContext(ctx context.Context) string {
 	p, _ := ctx.Value(ctxKeyDaemonAuthPath).(string)
@@ -70,13 +68,8 @@ func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) contex
 //     regular Auth middleware, so a single hot PAT used by both human CLI
 //     and a daemon converges on one DB round-trip per AuthCacheTTL window.
 //
-// cloudPAT is optional; when non-nil, tokens with the mcn_ prefix are
-// validated by calling the Multica Cloud Fleet service (X-User-ID gets the
-// returned owner_id). When nil, mcn_ tokens are rejected at the prefix
-// branch — same fail-closed contract as the regular Auth middleware.
-//
 // Cache misses fall back to the original DB-backed behavior.
-func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
+func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// X-Actor-Source is server-set only — strip any
@@ -145,46 +138,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				return
 			}
 
-			// Cloud Node PAT: "mcn_" prefix. Mirrors the mcn_ branch
-			// in Auth — Multica Cloud Fleet is authoritative, we only
-			// surface the resolved owner_id as X-User-ID for the
-			// downstream daemon handlers (which then check workspace
-			// membership the usual way). Same fail-closed semantics:
-			// no Fleet URL configured → 401, Fleet unreachable → 503.
-			// We additionally require the owner_id to map to a real
-			// local user — see the Auth comment for the rationale.
-			if strings.HasPrefix(tokenString, auth.CloudPATPrefix) {
-				if cloudPAT == nil {
-					slog.Warn("daemon_auth: mcn_ token presented but cloud verifier not configured", "path", r.URL.Path)
-					writeError(w, http.StatusUnauthorized, "invalid token")
-					return
-				}
-				identity, err := cloudPAT.Verify(r.Context(), tokenString, ownerLookupFor(queries))
-				if err != nil {
-					if errors.Is(err, auth.ErrCloudPATInvalid) {
-						slog.Warn("daemon_auth: cloud rejected mcn_ token", "path", r.URL.Path, "error", err)
-						writeError(w, http.StatusUnauthorized, "invalid token")
-						return
-					}
-					slog.Warn("daemon_auth: cloud pat verify unavailable", "path", r.URL.Path, "error", err)
-					writeError(w, http.StatusServiceUnavailable, "cloud pat verifier unavailable")
-					return
-				}
-				r.Header.Set("X-User-ID", identity.OwnerID)
-				// Mirror the regular Auth middleware: tag the auth
-				// path so any downstream guard (handler.
-				// RequireHumanActor and friends) can recognize this
-				// request as a machine credential rather than a
-				// human PAT. Daemon routes don't currently use these
-				// guards, but keeping the stamp uniform with Auth
-				// avoids a future surprise where an endpoint moved
-				// or shared between the two middlewares would behave
-				// differently depending on which one routed it.
-				r.Header.Set("X-Actor-Source", "cloud_pat")
-				ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathCloudPAT)
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
-			}
+
 
 			// Fallback: PAT tokens ("mul_" prefix).
 			if strings.HasPrefix(tokenString, "mul_") {

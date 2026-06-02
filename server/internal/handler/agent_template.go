@@ -15,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/agenttmpl"
-	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -287,10 +286,6 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	}
 
 	creatorUUID := parseUUID(ownerID)
-	isFirstAgent := false
-	if existing, listErr := h.Queries.ListAgents(r.Context(), wsUUID); listErr == nil {
-		isFirstAgent = len(existing) == 0
-	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -553,15 +548,6 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
 
-	h.Analytics.Capture(analytics.AgentCreated(
-		ownerID,
-		workspaceID,
-		uuidToString(agent.ID),
-		runtime.Provider,
-		runtime.RuntimeMode,
-		tmpl.Slug, // template slug doubles as the analytics template field
-		isFirstAgent,
-	))
 
 	slog.Info("agent created from template",
 		append(logger.RequestAttrs(r),

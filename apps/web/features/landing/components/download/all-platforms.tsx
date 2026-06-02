@@ -1,16 +1,12 @@
 import Link from "next/link";
-import {
-  captureDownloadInitiated,
-  type DownloadInitiatedPayload,
-} from "@multica/core/analytics";
 import { useLocale } from "../../i18n";
 import type { DetectResult } from "../../utils/os-detect";
 import type { DownloadAssets } from "../../utils/parse-release-assets";
 import { AppleIcon, LinuxIcon, WindowsIcon } from "./os-icons";
 
-type Platform = DownloadInitiatedPayload["platform"];
-type Arch = DownloadInitiatedPayload["arch"];
-type Format = DownloadInitiatedPayload["format"];
+type Platform = "mac" | "windows" | "linux";
+type Arch = "arm64" | "x64";
+type Format = "dmg" | "zip" | "exe" | "appimage" | "deb" | "rpm";
 
 interface Props {
   assets: DownloadAssets;
@@ -38,23 +34,8 @@ export function AllPlatforms({
   const { t } = useLocale();
   const d = t.download.allPlatforms;
 
-  const trackClick = (platform: Platform, arch: Arch, format: Format) => {
-    if (!version) return;
-    captureDownloadInitiated({
-      platform,
-      arch,
-      format,
-      version,
-      // Manual pick from the matrix — Hero is the primary CTA.
-      primary_cta: false,
-      // True only when the row matches what we guessed client-side.
-      // Lets us measure detect accuracy from the miss rate on this
-      // event alone (no need to cross-join to download_page_viewed).
-      matched_detect:
-        !!detected &&
-        detected.os === platform &&
-        detected.arch === arch,
-    });
+  const trackClick = (_platform: Platform, _arch: Arch, _format: Format) => {
+    // Analytics removed — no-op
   };
 
   return (

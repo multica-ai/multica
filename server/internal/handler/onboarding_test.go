@@ -45,7 +45,7 @@ func newWaitlistRequest(userID string, body map[string]string) *http.Request {
 }
 
 func TestJoinCloudWaitlistRecordsEmailAndReason(t *testing.T) {
-	userID := newWaitlistTestUser(t, "waitlist-ok@multica.ai")
+	userID := newWaitlistTestUser(t, "waitlist-ok@wallts.ai")
 
 	w := httptest.NewRecorder()
 	req := newWaitlistRequest(userID, map[string]string{
@@ -84,7 +84,7 @@ func TestJoinCloudWaitlistRecordsEmailAndReason(t *testing.T) {
 }
 
 func TestJoinCloudWaitlistAllowsEmptyReason(t *testing.T) {
-	userID := newWaitlistTestUser(t, "waitlist-noreason@multica.ai")
+	userID := newWaitlistTestUser(t, "waitlist-noreason@wallts.ai")
 
 	w := httptest.NewRecorder()
 	req := newWaitlistRequest(userID, map[string]string{
@@ -107,7 +107,7 @@ func TestJoinCloudWaitlistAllowsEmptyReason(t *testing.T) {
 }
 
 func TestJoinCloudWaitlistMissingEmailReturns400(t *testing.T) {
-	userID := newWaitlistTestUser(t, "waitlist-missing@multica.ai")
+	userID := newWaitlistTestUser(t, "waitlist-missing@wallts.ai")
 
 	cases := []map[string]string{
 		{},               // empty body
@@ -127,7 +127,7 @@ func TestJoinCloudWaitlistMissingEmailReturns400(t *testing.T) {
 }
 
 func TestJoinCloudWaitlistRejectsOverlongReason(t *testing.T) {
-	userID := newWaitlistTestUser(t, "waitlist-long@multica.ai")
+	userID := newWaitlistTestUser(t, "waitlist-long@wallts.ai")
 
 	w := httptest.NewRecorder()
 	req := newWaitlistRequest(userID, map[string]string{
@@ -141,7 +141,7 @@ func TestJoinCloudWaitlistRejectsOverlongReason(t *testing.T) {
 }
 
 func TestJoinCloudWaitlistSecondCallOverwrites(t *testing.T) {
-	userID := newWaitlistTestUser(t, "waitlist-overwrite@multica.ai")
+	userID := newWaitlistTestUser(t, "waitlist-overwrite@wallts.ai")
 
 	// First submission.
 	w := httptest.NewRecorder()
@@ -549,7 +549,7 @@ func TestBootstrapOnboardingNoRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Try Multica first",
-		"https://multica.ai/docs/install-agent-runtime",
+		"https://wallts.ai/docs/install-agent-runtime",
 		"npm i -g @openai/codex",
 	} {
 		if !strings.Contains(description, want) {
@@ -653,7 +653,7 @@ func TestBootstrapOnboardingNoRuntimeUsesChineseGuideForChineseUsers(t *testing.
 	}
 	for _, want := range []string{
 		"先体验项目管理功能",
-		"https://multica.ai/docs/install-agent-runtime",
+		"https://wallts.ai/docs/install-agent-runtime",
 		"中文用户建议先装 Kimi CLI",
 		"kimi --version",
 	} {

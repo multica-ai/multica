@@ -279,7 +279,7 @@ export function GitHubTab() {
                 <p className="text-sm text-muted-foreground">
                   {t(($) => $.github.feature_co_author_description_prefix)}{" "}
                   <code className="rounded bg-muted px-1 py-0.5 text-xs">
-                    {"Co-authored-by: multica-agent <github@multica.ai>"}
+                    {"Co-authored-by: multica-agent <github@wallts.ai>"}
                   </code>{" "}
                   {t(($) => $.github.feature_co_author_description_suffix)}
                 </p>
