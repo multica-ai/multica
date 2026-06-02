@@ -40,6 +40,7 @@ import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
+import { ProjectUpdatesTab } from "./project-updates-tab";
 import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
@@ -293,6 +294,7 @@ function ProjectIssuesSurface({
   filter: MyIssuesFilter;
 }) {
   const wsId = useWorkspaceId();
+  const [contentTab, setContentTab] = useState<"issues" | "updates">("issues");
   const viewMode = useViewStore((s) => s.viewMode);
   const grouping = useViewStore((s) => s.grouping);
   const sortBy = useViewStore((s) => s.sortBy);
@@ -366,19 +368,46 @@ function ProjectIssuesSurface({
 
   return (
     <>
-      <IssuesHeader scopedIssues={projectIssues} allowGantt />
-      <ProjectIssuesContent
-        projectId={projectId}
-        projectIssues={projectIssues}
-        assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
-        assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
-        assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
-        scope={scope}
-        filter={filter}
-        sort={sort}
-        ganttIssues={ganttIssues}
-      />
-      <BatchActionToolbar />
+      <div className="flex items-center gap-1 border-b border-border px-3">
+        <button
+          type="button"
+          onClick={() => setContentTab("issues")}
+          className={cn(
+            "border-b-2 px-3 py-2 text-sm",
+            contentTab === "issues" ? "border-foreground text-foreground" : "border-transparent text-muted-foreground",
+          )}
+        >
+          Issues
+        </button>
+        <button
+          type="button"
+          onClick={() => setContentTab("updates")}
+          className={cn(
+            "border-b-2 px-3 py-2 text-sm",
+            contentTab === "updates" ? "border-foreground text-foreground" : "border-transparent text-muted-foreground",
+          )}
+        >
+          Updates
+        </button>
+      </div>
+      {contentTab === "issues" && (
+        <>
+          <IssuesHeader scopedIssues={projectIssues} allowGantt />
+          <ProjectIssuesContent
+            projectId={projectId}
+            projectIssues={projectIssues}
+            assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
+            assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
+            assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
+            scope={scope}
+            filter={filter}
+            sort={sort}
+            ganttIssues={ganttIssues}
+          />
+          <BatchActionToolbar />
+        </>
+      )}
+      {contentTab === "updates" && <ProjectUpdatesTab wsId={wsId} projectId={projectId} />}
     </>
   );
 }
