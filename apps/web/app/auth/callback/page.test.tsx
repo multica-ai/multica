@@ -29,9 +29,6 @@ const makeUser = (
   email: "test@multica.ai",
   avatar_url: null,
   onboarded_at: null,
-  // Default to a non-empty source so the existing tests don't trip the
-  // source-backfill detour. Tests that need the detour pass an empty
-  // questionnaire explicitly.
   onboarding_questionnaire: { source: ["search"] },
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
