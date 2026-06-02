@@ -2,6 +2,7 @@
 
 import {
   Bot,
+  Archive,
   type LucideIcon,
   Inbox,
   CalendarDays,
@@ -33,6 +34,7 @@ export const navigationGroups: WorkspaceNavGroup[] = [
       { href: "/notifications", label: "Inbox", icon: Inbox },
       { href: "/my-work", label: "My Work", icon: CircleUser },
       { href: "/issues", label: "Issues", icon: ListTodo },
+      { href: "/issues/archived", label: "Archived", icon: Archive },
     ],
   },
   {
@@ -64,7 +66,9 @@ export const workspaceFooterNav: WorkspaceNavItem[] = [
 export function isWorkspaceNavActive(pathname: string, href: string): boolean {
   switch (href) {
     case "/issues":
-      return pathname === "/issues" || pathname.startsWith("/issues/");
+      return pathname === "/issues" || (pathname.startsWith("/issues/") && pathname !== "/issues/archived");
+    case "/issues/archived":
+      return pathname === "/issues/archived";
     case "/board":
       return pathname === "/board";
     case "/notifications":

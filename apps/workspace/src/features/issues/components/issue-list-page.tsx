@@ -476,7 +476,11 @@ function IssueListFiltersRow({
   );
 }
 
-function IssueListPageContent() {
+function IssueListPageContent({
+  archived = false,
+}: {
+  archived?: boolean;
+}) {
   const workspace = useWorkspaceStore((state) => state.workspace);
   const scope = useIssuesScopeStore((state) => state.scope);
   const setViewMode = useViewStore((state) => state.setViewMode);
@@ -525,8 +529,9 @@ function IssueListPageContent() {
       ...(startTo ? { start_to: startTo } : {}),
       ...(endFrom ? { end_from: endFrom } : {}),
       ...(endTo ? { end_to: endTo } : {}),
+      ...(archived ? { archived: true } : {}),
     };
-  }, [debouncedSearch, projectId, labelFilters, labelFilterMode, dueFrom, dueTo, startFrom, startTo, endFrom, endTo]);
+  }, [archived, debouncedSearch, projectId, labelFilters, labelFilterMode, dueFrom, dueTo, startFrom, startTo, endFrom, endTo]);
 
   const issuesQuery = useIssuesListQuery(queryParams);
   const allIssues = issuesQuery.data?.issues ?? [];
@@ -629,7 +634,7 @@ function IssueListPageContent() {
           {workspace?.name ?? "Workspace"}
         </span>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className="text-sm font-medium">Issues</span>
+        <span className="text-sm font-medium">{archived ? "Archived Issues" : "Issues"}</span>
       </div>
 
       <IssueListFiltersRow
@@ -679,7 +684,7 @@ function IssueListPageContent() {
       {issues.length === 0 ? (
         <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
           <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-          <p className="text-sm">{hasServerFilters ? "No issues match your search" : "No issues match your current filters"}</p>
+          <p className="text-sm">{archived ? "No archived issues" : hasServerFilters ? "No issues match your search" : "No issues match your current filters"}</p>
           <p className="text-xs">
             {hasServerFilters
               ? "Try clearing one or more filters to broaden the result set."
@@ -697,10 +702,10 @@ function IssueListPageContent() {
   );
 }
 
-export function IssueListPage() {
+export function IssueListPage({ archived = false }: { archived?: boolean } = {}) {
   return (
     <ViewStoreProvider store={issueListViewStore}>
-      <IssueListPageContent />
+      <IssueListPageContent archived={archived} />
     </ViewStoreProvider>
   );
 }

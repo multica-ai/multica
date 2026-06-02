@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, Trash2, Bot, Tag, CalendarClock } from "lucide-react";
+import { X, Archive, Bot, Tag, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,11 +37,11 @@ export function BatchActionToolbar() {
   const [statusOpen, setStatusOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [labelModalOpen, setLabelModalOpen] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { batchUpdateIssues, batchDeleteIssues } = useIssueMutations();
+  const { batchUpdateIssues, batchArchiveIssues } = useIssueMutations();
 
   if (count === 0) return null;
 
@@ -59,17 +59,17 @@ export function BatchActionToolbar() {
     }
   };
 
-  const handleBatchDelete = async () => {
+  const handleBatchArchive = async () => {
     setLoading(true);
     try {
-      await batchDeleteIssues(ids);
+      await batchArchiveIssues(ids);
       clear();
-      toast.success(`Deleted ${count} issue${count > 1 ? "s" : ""}`);
+      toast.success(`Archived ${count} issue${count > 1 ? "s" : ""}`);
     } catch {
-      toast.error("Failed to delete issues");
+      toast.error("Failed to archive issues");
     } finally {
       setLoading(false);
-      setDeleteOpen(false);
+      setArchiveOpen(false);
     }
   };
 
@@ -163,16 +163,15 @@ export function BatchActionToolbar() {
           align="center"
         />
 
-        {/* Delete */}
+        {/* Archive */}
         <Button
           variant="ghost"
           size="sm"
           disabled={loading}
-          onClick={() => setDeleteOpen(true)}
-          className="text-destructive hover:text-destructive"
+          onClick={() => setArchiveOpen(true)}
         >
-          <Trash2 className="size-3.5 mr-1" />
-          Delete
+          <Archive className="size-3.5 mr-1" />
+          Archive
         </Button>
 
         <div className="w-px h-5 bg-border mx-1" />
@@ -202,24 +201,22 @@ export function BatchActionToolbar() {
         </Button>
       </div>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      <AlertDialog open={archiveOpen} onOpenChange={setArchiveOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {count} issue{count > 1 ? "s" : ""}?
+              Archive {count} issue{count > 1 ? "s" : ""}?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the
-              selected issue{count > 1 ? "s" : ""} and all associated data.
+              Selected issue{count > 1 ? "s" : ""} will leave active views, but history and related data will be preserved.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleBatchDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleBatchArchive}
             >
-              Delete
+              Archive
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -239,4 +236,3 @@ export function BatchActionToolbar() {
     </>
   );
 }
-

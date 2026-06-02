@@ -12,6 +12,7 @@ import type {
   UpdateAgentRequest,
   AgentTask,
   AgentRuntime,
+  CreateRuntimeRequest,
   InboxItem,
   IssueSubscriber,
   Comment,
@@ -250,6 +251,8 @@ export class ApiClient {
     if (params?.end_from) search.set("end_from", params.end_from);
     if (params?.end_to) search.set("end_to", params.end_to);
     if (params?.view) search.set("view", params.view);
+    if (params?.archived) search.set("archived", "true");
+    if (params?.include_archived) search.set("include_archived", "true");
     // Label filtering uses repeated query params to match backend array parsing.
     for (const labelId of params?.label_ids ?? []) {
       search.append("label_ids", labelId);
@@ -356,6 +359,14 @@ export class ApiClient {
     await this.fetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
+  async archiveIssue(id: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/archive`, { method: "POST" });
+  }
+
+  async restoreIssue(id: string): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/restore`, { method: "POST" });
+  }
+
   async addIssueLabel(id: string, data: { label_id?: string; name?: string; color?: string }): Promise<Issue> {
     return this.fetch(`/api/issues/${id}/labels`, {
       method: "POST",
@@ -422,6 +433,13 @@ export class ApiClient {
 
   async batchDeleteIssues(issueIds: string[]): Promise<{ deleted: number }> {
     return this.fetch("/api/issues/batch-delete", {
+      method: "POST",
+      body: JSON.stringify({ issue_ids: issueIds }),
+    });
+  }
+
+  async batchArchiveIssues(issueIds: string[]): Promise<{ archived: number }> {
+    return this.fetch("/api/issues/batch-archive", {
       method: "POST",
       body: JSON.stringify({ issue_ids: issueIds }),
     });
@@ -554,6 +572,13 @@ export class ApiClient {
     return this.fetch(`/api/runtimes?${search}`);
   }
 
+  async createRuntime(data: CreateRuntimeRequest): Promise<AgentRuntime> {
+    return this.fetch("/api/runtimes", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   async getRuntimeUsage(runtimeId: string, params?: { days?: number }): Promise<RuntimeUsage[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
@@ -624,6 +649,21 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/archive`, { method: "POST" });
   }
 
+  async handleInbox(id: string): Promise<InboxItem> {
+    return this.fetch(`/api/inbox/${id}/handle`, { method: "POST" });
+  }
+
+  async dismissInbox(id: string): Promise<InboxItem> {
+    return this.fetch(`/api/inbox/${id}/dismiss`, { method: "POST" });
+  }
+
+  async snoozeInbox(id: string, snoozedUntil: string): Promise<InboxItem> {
+    return this.fetch(`/api/inbox/${id}/snooze`, {
+      method: "POST",
+      body: JSON.stringify({ snoozed_until: snoozedUntil }),
+    });
+  }
+
   async getUnreadInboxCount(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/unread-count");
   }
@@ -640,8 +680,23 @@ export class ApiClient {
     return this.fetch("/api/inbox/archive-all-read", { method: "POST" });
   }
 
-  async archiveCompletedInbox(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/archive-completed", { method: "POST" });
+  async handleCompletedInbox(): Promise<{ count: number }> {
+    return this.fetch("/api/inbox/handle-completed", { method: "POST" });
+  }
+
+  async batchHandleInbox(): Promise<{ count: number }> {
+    return this.fetch("/api/inbox/batch-handle", { method: "POST" });
+  }
+
+  async batchDismissInbox(): Promise<{ count: number }> {
+    return this.fetch("/api/inbox/batch-dismiss", { method: "POST" });
+  }
+
+  async batchSnoozeInbox(snoozedUntil: string): Promise<{ count: number }> {
+    return this.fetch("/api/inbox/batch-snooze", {
+      method: "POST",
+      body: JSON.stringify({ snoozed_until: snoozedUntil }),
+    });
   }
 
   // Workspaces

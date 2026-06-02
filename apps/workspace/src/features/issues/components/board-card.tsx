@@ -8,11 +8,11 @@ import type { Issue, UpdateIssueRequest } from "@/shared/types";
 import {
   CalendarDays,
   Calendar,
+  Archive,
   Check,
   Copy,
   Link2,
   MoreHorizontal,
-  Trash2,
   UserMinus,
 } from "lucide-react";
 import {
@@ -77,7 +77,7 @@ function PickerWrapper({ children }: { children: React.ReactNode }) {
 
 function BoardCardActions({ issue }: { issue: Issue }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const { updateIssue, deleteIssue, isMutating } = useIssueMutations();
+  const { updateIssue, archiveIssue, isMutating } = useIssueMutations();
   const members = useWorkspaceStore((s) => s.members);
   const agents = useWorkspaceStore((s) => s.agents);
   const user = useAuthStore((s) => s.user);
@@ -94,8 +94,8 @@ function BoardCardActions({ issue }: { issue: Issue }) {
   );
 
   const handleDelete = async () => {
-    await deleteIssue(issue.id).catch(() =>
-      toast.error("Failed to delete issue"),
+    await archiveIssue(issue.id).catch(() =>
+      toast.error("Failed to archive issue"),
     );
   };
 
@@ -299,13 +299,10 @@ function BoardCardActions({ issue }: { issue: Issue }) {
 
           <DropdownMenuSeparator />
 
-          {/* Delete */}
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => setDeleteOpen(true)}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            Delete issue
+          {/* Archive */}
+          <DropdownMenuItem onClick={() => setDeleteOpen(true)}>
+            <Archive className="h-3.5 w-3.5" />
+            Archive issue
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -314,10 +311,9 @@ function BoardCardActions({ issue }: { issue: Issue }) {
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete issue</AlertDialogTitle>
+            <AlertDialogTitle>Archive issue</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete this issue and all its comments. This
-              action cannot be undone.
+              This issue will leave active views. Its comments, attachments, labels, and history will be preserved.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -325,9 +321,8 @@ function BoardCardActions({ issue }: { issue: Issue }) {
             <AlertDialogAction
               onClick={handleDelete}
               disabled={isMutating}
-              className="bg-destructive text-white hover:bg-destructive/90"
             >
-              {isMutating ? "Deleting..." : "Delete"}
+              {isMutating ? "Archiving..." : "Archive"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -167,6 +167,41 @@ export function useIssueMutations() {
     },
   });
 
+  const archiveIssueMutation = useMutation({
+    mutationFn: async ({ issueId }: { issueId: string }) => api.archiveIssue(issueId),
+    onMutate: async ({ issueId }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.issues.all() });
+      const previousLists = queryClient.getQueriesData<ListIssuesResponse>({
+        predicate: (query) => query.queryKey[0] === "issues" && query.queryKey[1] === "lists",
+      });
+      const previousDetail = queryClient.getQueryData<Issue | null>(queryKeys.issues.detail(issueId)) ?? null;
+
+      patchIssueLists(queryClient, workspaceId, (issues) => removeIssueFromList(issues, issueId));
+      patchIssueDetail(queryClient, issueId, (issue) => (issue ? { ...issue, archived_at: new Date().toISOString() } : issue));
+      return { previousLists, previousDetail };
+    },
+    onError: (_error, variables, context) => {
+      context?.previousLists.forEach(([key, value]) => {
+        queryClient.setQueryData(key, value);
+      });
+      queryClient.setQueryData(queryKeys.issues.detail(variables.issueId), context?.previousDetail ?? null);
+    },
+    onSuccess: (issue) => {
+      patchIssueLists(queryClient, workspaceId, (issues) => removeIssueFromList(issues, issue.id));
+      queryClient.setQueryData(queryKeys.issues.detail(issue.id), issue);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
+      if (workspaceId) void queryClient.invalidateQueries({ queryKey: queryKeys.inbox.all(workspaceId) });
+    },
+  });
+
+  const restoreIssueMutation = useMutation({
+    mutationFn: async ({ issueId }: { issueId: string }) => api.restoreIssue(issueId),
+    onSuccess: (issue) => {
+      queryClient.setQueryData(queryKeys.issues.detail(issue.id), issue);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
+    },
+  });
+
   const batchUpdateMutation = useMutation({
     mutationFn: async ({ issueIds, updates }: { issueIds: string[]; updates: Partial<UpdateIssueRequest> }) => {
       await api.batchUpdateIssues(issueIds, updates);
@@ -223,14 +258,49 @@ export function useIssueMutations() {
     },
   });
 
+  const batchArchiveMutation = useMutation({
+    mutationFn: async ({ issueIds }: { issueIds: string[] }) => {
+      await api.batchArchiveIssues(issueIds);
+      return issueIds;
+    },
+    onMutate: async ({ issueIds }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.issues.all() });
+      const previousLists = queryClient.getQueriesData<ListIssuesResponse>({
+        predicate: (query) => query.queryKey[0] === "issues" && query.queryKey[1] === "lists",
+      });
+
+      patchIssueLists(queryClient, workspaceId, (issues) =>
+        issues.filter((issue) => !issueIds.includes(issue.id)),
+      );
+
+      issueIds.forEach((issueId) => {
+        patchIssueDetail(queryClient, issueId, (issue) => (issue ? { ...issue, archived_at: new Date().toISOString() } : issue));
+      });
+
+      return { previousLists };
+    },
+    onError: (_error, _variables, context) => {
+      context?.previousLists.forEach(([key, value]) => {
+        queryClient.setQueryData(key, value);
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
+      if (workspaceId) void queryClient.invalidateQueries({ queryKey: queryKeys.inbox.all(workspaceId) });
+    },
+  });
+
   return {
     createIssue: (data: CreateIssueRequest) => createIssueMutation.mutateAsync(data),
     updateIssue: (issueId: string, updates: Partial<UpdateIssueRequest>) =>
       updateIssueMutation.mutateAsync({ issueId, updates }),
     deleteIssue: (issueId: string) => deleteIssueMutation.mutateAsync({ issueId }),
+    archiveIssue: (issueId: string) => archiveIssueMutation.mutateAsync({ issueId }),
+    restoreIssue: (issueId: string) => restoreIssueMutation.mutateAsync({ issueId }),
     batchUpdateIssues: (issueIds: string[], updates: Partial<UpdateIssueRequest>) =>
       batchUpdateMutation.mutateAsync({ issueIds, updates }),
     batchDeleteIssues: (issueIds: string[]) => batchDeleteMutation.mutateAsync({ issueIds }),
+    batchArchiveIssues: (issueIds: string[]) => batchArchiveMutation.mutateAsync({ issueIds }),
     addIssueLabel: (issueId: string, data: { labelId?: string; name?: string; color?: string }) =>
       addIssueLabelMutation.mutateAsync({ issueId, ...data }),
     removeIssueLabel: (issueId: string, labelId: string) =>
@@ -243,8 +313,11 @@ export function useIssueMutations() {
       createIssueMutation.isPending ||
       updateIssueMutation.isPending ||
       deleteIssueMutation.isPending ||
+      archiveIssueMutation.isPending ||
+      restoreIssueMutation.isPending ||
       batchUpdateMutation.isPending ||
       batchDeleteMutation.isPending ||
+      batchArchiveMutation.isPending ||
       addIssueLabelMutation.isPending ||
       removeIssueLabelMutation.isPending ||
       addIssueDependencyMutation.isPending ||

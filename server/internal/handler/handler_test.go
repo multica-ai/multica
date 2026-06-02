@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -159,6 +160,101 @@ func withURLParam(req *http.Request, key, value string) *http.Request {
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 }
 
+func createHandlerTestIssue(t *testing.T, title string) IssueResponse {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":    title,
+		"status":   "todo",
+		"priority": "medium",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("CreateIssue: decode failed: %v", err)
+	}
+	return created
+}
+
+func listHandlerTestIssues(t *testing.T, path string) []IssueResponse {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", path, nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Issues []IssueResponse `json:"issues"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("ListIssues: decode failed: %v", err)
+	}
+	return resp.Issues
+}
+
+func issueListContains(issues []IssueResponse, issueID string) bool {
+	for _, issue := range issues {
+		if issue.ID == issueID {
+			return true
+		}
+	}
+	return false
+}
+
+func createHandlerTestInboxItem(t *testing.T, issueID string, title string) db.InboxItem {
+	t.Helper()
+
+	item, err := testHandler.Queries.CreateInboxItem(context.Background(), db.CreateInboxItemParams{
+		WorkspaceID:   parseUUID(testWorkspaceID),
+		RecipientType: "member",
+		RecipientID:   parseUUID(testUserID),
+		Type:          "issue_update",
+		Severity:      "info",
+		IssueID:       parseUUID(issueID),
+		Title:         title,
+		Body:          pgtype.Text{String: "Handler test inbox item", Valid: true},
+		ActorType:     pgtype.Text{String: "member", Valid: true},
+		ActorID:       parseUUID(testUserID),
+		Details:       []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateInboxItem: %v", err)
+	}
+	return item
+}
+
+func listHandlerTestInboxItems(t *testing.T) []db.ListInboxItemsRow {
+	t.Helper()
+
+	items, err := testHandler.Queries.ListInboxItems(context.Background(), db.ListInboxItemsParams{
+		WorkspaceID:   parseUUID(testWorkspaceID),
+		RecipientType: "member",
+		RecipientID:   parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("ListInboxItems: %v", err)
+	}
+	return items
+}
+
+func inboxListContains(items []db.ListInboxItemsRow, itemID pgtype.UUID) bool {
+	expected := uuidToString(itemID)
+	for _, item := range items {
+		if uuidToString(item.ID) == expected {
+			return true
+		}
+	}
+	return false
+}
+
 func assertTimestampPtrEqual(t *testing.T, actual *string, expected string, field string) {
 	t.Helper()
 	if actual == nil {
@@ -271,6 +367,194 @@ func TestIssueCRUD(t *testing.T) {
 	testHandler.GetIssue(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("GetIssue after delete: expected 404, got %d", w.Code)
+	}
+}
+
+func TestIssueArchiveRestoreAndInboxDismiss(t *testing.T) {
+	issue := createHandlerTestIssue(t, "Archive restore test")
+	inboxItem := createHandlerTestInboxItem(t, issue.ID, "Archive should dismiss this inbox item")
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("POST", "/api/issues/"+issue.ID+"/archive", nil), "id", issue.ID)
+	testHandler.ArchiveIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ArchiveIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var archived IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&archived); err != nil {
+		t.Fatalf("ArchiveIssue: decode failed: %v", err)
+	}
+	if archived.ArchivedAt == nil {
+		t.Fatal("ArchiveIssue: archived_at should be set")
+	}
+	if archived.ArchivedBy == nil || *archived.ArchivedBy != testUserID {
+		t.Fatalf("ArchiveIssue: archived_by = %#v, want %q", archived.ArchivedBy, testUserID)
+	}
+
+	defaultIssues := listHandlerTestIssues(t, "/api/issues?workspace_id="+testWorkspaceID)
+	if issueListContains(defaultIssues, issue.ID) {
+		t.Fatal("ListIssues default: archived issue should be hidden")
+	}
+
+	archivedIssues := listHandlerTestIssues(t, "/api/issues?workspace_id="+testWorkspaceID+"&archived=true")
+	if !issueListContains(archivedIssues, issue.ID) {
+		t.Fatal("ListIssues archived=true: archived issue should be visible")
+	}
+
+	storedInbox, err := testHandler.Queries.GetInboxItemInWorkspace(context.Background(), db.GetInboxItemInWorkspaceParams{
+		ID:          inboxItem.ID,
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetInboxItemInWorkspace: %v", err)
+	}
+	if storedInbox.TriageStatus != "dismissed" || !storedInbox.DismissedAt.Valid {
+		t.Fatalf("ArchiveIssue: inbox item should be dismissed, got status=%q dismissed_at_valid=%v", storedInbox.TriageStatus, storedInbox.DismissedAt.Valid)
+	}
+	if inboxListContains(listHandlerTestInboxItems(t), inboxItem.ID) {
+		t.Fatal("ListInboxItems: dismissed inbox item should be hidden")
+	}
+
+	w = httptest.NewRecorder()
+	req = withURLParam(newRequest("POST", "/api/issues/"+issue.ID+"/restore", nil), "id", issue.ID)
+	testHandler.RestoreIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("RestoreIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var restored IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&restored); err != nil {
+		t.Fatalf("RestoreIssue: decode failed: %v", err)
+	}
+	if restored.ArchivedAt != nil || restored.ArchivedBy != nil {
+		t.Fatalf("RestoreIssue: archive fields should be cleared, got archived_at=%#v archived_by=%#v", restored.ArchivedAt, restored.ArchivedBy)
+	}
+
+	defaultIssues = listHandlerTestIssues(t, "/api/issues?workspace_id="+testWorkspaceID)
+	if !issueListContains(defaultIssues, issue.ID) {
+		t.Fatal("ListIssues default: restored issue should be visible")
+	}
+}
+
+func TestInboxTriageHandleDismissAndSnooze(t *testing.T) {
+	issue := createHandlerTestIssue(t, "Inbox triage source")
+	firstItem := createHandlerTestInboxItem(t, issue.ID, "First triage item")
+	siblingItem := createHandlerTestInboxItem(t, issue.ID, "Sibling triage item")
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("POST", "/api/inbox/"+uuidToString(firstItem.ID)+"/handle", nil), "id", uuidToString(firstItem.ID))
+	testHandler.HandleInboxItem(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("HandleInboxItem: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	for _, itemID := range []pgtype.UUID{firstItem.ID, siblingItem.ID} {
+		stored, err := testHandler.Queries.GetInboxItemInWorkspace(context.Background(), db.GetInboxItemInWorkspaceParams{
+			ID:          itemID,
+			WorkspaceID: parseUUID(testWorkspaceID),
+		})
+		if err != nil {
+			t.Fatalf("GetInboxItemInWorkspace handled item: %v", err)
+		}
+		if stored.TriageStatus != "handled" || !stored.HandledAt.Valid || !stored.Read {
+			t.Fatalf("HandleInboxItem: item %s should be handled/read, got status=%q handled_at_valid=%v read=%v", uuidToString(itemID), stored.TriageStatus, stored.HandledAt.Valid, stored.Read)
+		}
+		if inboxListContains(listHandlerTestInboxItems(t), itemID) {
+			t.Fatalf("ListInboxItems: handled item %s should be hidden", uuidToString(itemID))
+		}
+	}
+
+	dismissIssue := createHandlerTestIssue(t, "Inbox dismiss source")
+	dismissItem := createHandlerTestInboxItem(t, dismissIssue.ID, "Dismiss triage item")
+	w = httptest.NewRecorder()
+	req = withURLParam(newRequest("POST", "/api/inbox/"+uuidToString(dismissItem.ID)+"/dismiss", nil), "id", uuidToString(dismissItem.ID))
+	testHandler.DismissInboxItem(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DismissInboxItem: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	storedDismissed, err := testHandler.Queries.GetInboxItemInWorkspace(context.Background(), db.GetInboxItemInWorkspaceParams{
+		ID:          dismissItem.ID,
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetInboxItemInWorkspace dismissed item: %v", err)
+	}
+	if storedDismissed.TriageStatus != "dismissed" || !storedDismissed.DismissedAt.Valid {
+		t.Fatalf("DismissInboxItem: item should be dismissed, got status=%q dismissed_at_valid=%v", storedDismissed.TriageStatus, storedDismissed.DismissedAt.Valid)
+	}
+	if inboxListContains(listHandlerTestInboxItems(t), dismissItem.ID) {
+		t.Fatal("ListInboxItems: dismissed item should be hidden")
+	}
+
+	snoozeIssue := createHandlerTestIssue(t, "Inbox snooze source")
+	snoozeItem := createHandlerTestInboxItem(t, snoozeIssue.ID, "Snooze triage item")
+	snoozedUntil := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	w = httptest.NewRecorder()
+	req = withURLParam(newRequest("POST", "/api/inbox/"+uuidToString(snoozeItem.ID)+"/snooze", map[string]any{
+		"snoozed_until": snoozedUntil,
+	}), "id", uuidToString(snoozeItem.ID))
+	testHandler.SnoozeInboxItem(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("SnoozeInboxItem: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	storedSnoozed, err := testHandler.Queries.GetInboxItemInWorkspace(context.Background(), db.GetInboxItemInWorkspaceParams{
+		ID:          snoozeItem.ID,
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetInboxItemInWorkspace snoozed item: %v", err)
+	}
+	if storedSnoozed.TriageStatus != "snoozed" || !storedSnoozed.SnoozedUntil.Valid {
+		t.Fatalf("SnoozeInboxItem: item should be snoozed, got status=%q snoozed_until_valid=%v", storedSnoozed.TriageStatus, storedSnoozed.SnoozedUntil.Valid)
+	}
+	if inboxListContains(listHandlerTestInboxItems(t), snoozeItem.ID) {
+		t.Fatal("ListInboxItems: future snoozed item should be hidden")
+	}
+
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE inbox_item
+		SET snoozed_until = now() - interval '1 minute'
+		WHERE id = $1
+	`, snoozeItem.ID); err != nil {
+		t.Fatalf("force due snoozed item: %v", err)
+	}
+	if !inboxListContains(listHandlerTestInboxItems(t), snoozeItem.ID) {
+		t.Fatal("ListInboxItems: due snoozed item should be visible")
+	}
+
+	completedIssue := createHandlerTestIssue(t, "Inbox completed source")
+	completedItem := createHandlerTestInboxItem(t, completedIssue.ID, "Completed issue triage item")
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE issue
+		SET status = 'done'
+		WHERE id = $1
+	`, parseUUID(completedIssue.ID)); err != nil {
+		t.Fatalf("mark issue done: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/inbox/handle-completed", nil)
+	testHandler.HandleCompletedInbox(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("HandleCompletedInbox: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	storedCompleted, err := testHandler.Queries.GetInboxItemInWorkspace(context.Background(), db.GetInboxItemInWorkspaceParams{
+		ID:          completedItem.ID,
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetInboxItemInWorkspace completed item: %v", err)
+	}
+	if storedCompleted.Archived {
+		t.Fatal("HandleCompletedInbox: item should remain unarchived")
+	}
+	if storedCompleted.TriageStatus != "handled" || !storedCompleted.HandledAt.Valid {
+		t.Fatalf("HandleCompletedInbox: item should be handled, got status=%q handled_at_valid=%v", storedCompleted.TriageStatus, storedCompleted.HandledAt.Valid)
+	}
+	if inboxListContains(listHandlerTestInboxItems(t), completedItem.ID) {
+		t.Fatal("ListInboxItems: handled completed item should be hidden")
 	}
 }
 
@@ -1876,6 +2160,78 @@ func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "workspace not found") {
 		t.Fatalf("DaemonRegister: expected workspace not found error, got %s", w.Body.String())
+	}
+}
+
+func TestCreateAgentRuntimeCreatesGithubCopilotCloudRuntime(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/runtimes", map[string]any{
+		"provider": "github_copilot",
+	})
+
+	testHandler.CreateAgentRuntime(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAgentRuntime: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var runtime AgentRuntimeResponse
+	if err := json.NewDecoder(w.Body).Decode(&runtime); err != nil {
+		t.Fatalf("CreateAgentRuntime: decode response: %v", err)
+	}
+
+	if runtime.Provider != "github_copilot" {
+		t.Fatalf("CreateAgentRuntime: provider = %q, want github_copilot", runtime.Provider)
+	}
+	if runtime.RuntimeMode != "cloud" {
+		t.Fatalf("CreateAgentRuntime: runtime_mode = %q, want cloud", runtime.RuntimeMode)
+	}
+	if runtime.Status != "online" {
+		t.Fatalf("CreateAgentRuntime: status = %q, want online", runtime.Status)
+	}
+	if runtime.Name == "" {
+		t.Fatal("CreateAgentRuntime: expected runtime name")
+	}
+}
+
+func TestCreateAgentAcceptsGithubCopilotCloudRuntime(t *testing.T) {
+	runtimeW := httptest.NewRecorder()
+	runtimeReq := newRequest("POST", "/api/runtimes", map[string]any{
+		"provider": "github_copilot",
+	})
+
+	testHandler.CreateAgentRuntime(runtimeW, runtimeReq)
+	if runtimeW.Code != http.StatusCreated {
+		t.Fatalf("CreateAgentRuntime: expected 201, got %d: %s", runtimeW.Code, runtimeW.Body.String())
+	}
+
+	var runtime AgentRuntimeResponse
+	if err := json.NewDecoder(runtimeW.Body).Decode(&runtime); err != nil {
+		t.Fatalf("CreateAgentRuntime: decode response: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents", CreateAgentRequest{
+		Name:        "Copilot Agent",
+		Description: "Cloud runtime test",
+		RuntimeID:   runtime.ID,
+		Visibility:  "workspace",
+	})
+
+	testHandler.CreateAgent(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAgent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var agent AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&agent); err != nil {
+		t.Fatalf("CreateAgent: decode response: %v", err)
+	}
+
+	if agent.RuntimeMode != "cloud" {
+		t.Fatalf("CreateAgent: runtime_mode = %q, want cloud", agent.RuntimeMode)
+	}
+	if agent.RuntimeID != runtime.ID {
+		t.Fatalf("CreateAgent: runtime_id = %q, want %q", agent.RuntimeID, runtime.ID)
 	}
 }
 
