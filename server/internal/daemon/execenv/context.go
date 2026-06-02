@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/runcontext"
 )
 
 // writeContextFiles renders and writes .agent_context/issue_context.md and
@@ -52,6 +55,10 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 		}
 	}
 
+	if err := writeRunContext(workDir, ctx, manifest); err != nil {
+		return fmt.Errorf("write run context: %w", err)
+	}
+
 	if len(ctx.AgentSkills) > 0 {
 		skillsDir, err := resolveSkillsDir(workDir, provider, manifest)
 		if err != nil {
@@ -74,6 +81,50 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 		return fmt.Errorf("write project resources: %w", err)
 	}
 
+	return nil
+}
+
+func runContextPath(workDir string) string {
+	return filepath.Join(workDir, ".multica", "run", "context.json")
+}
+
+func writeRunContext(workDir string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
+	path := runContextPath(workDir)
+	dir := filepath.Dir(path)
+	if err := recordMkdirAll(dir, 0o755, manifest); err != nil {
+		return err
+	}
+	created := false
+	if _, err := os.Lstat(path); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		created = true
+	}
+
+	payload := runcontext.BuildFile(
+		runcontext.TaskFields{
+			ID:          ctx.TaskID,
+			Kind:        ctx.TaskKind,
+			Attempt:     ctx.TaskAttempt,
+			MaxAttempts: ctx.TaskMaxAttempts,
+		},
+		runcontext.IssueSnapshot{
+			Issue:      ctx.IssueSnapshot,
+			Parent:     ctx.ParentSnapshot,
+			Properties: ctx.Properties,
+		},
+	)
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return err
+	}
+	if manifest != nil && created {
+		manifest.Files = append(manifest.Files, path)
+	}
 	return nil
 }
 
@@ -402,6 +453,7 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("## Quick Start\n\n")
 	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
+	b.WriteString("Machine-readable first-class fields are also available via `MULTICA_RUN_CONTEXT` -> `.multica/run/context.json`; treat that file as the dispatch-time snapshot.\n\n")
 
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Agent Skills\n\n")

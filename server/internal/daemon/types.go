@@ -1,6 +1,10 @@
 package daemon
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/multica-ai/multica/server/internal/runcontext"
+)
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
@@ -34,11 +38,18 @@ type ProjectResourceData struct {
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
-	ID          string `json:"id"`
-	AgentID     string `json:"agent_id"`
-	RuntimeID   string `json:"runtime_id"`
-	IssueID     string `json:"issue_id"`
-	WorkspaceID string `json:"workspace_id"`
+	ID          string                   `json:"id"`
+	AgentID     string                   `json:"agent_id"`
+	RuntimeID   string                   `json:"runtime_id"`
+	IssueID     string                   `json:"issue_id"`
+	WorkspaceID string                   `json:"workspace_id"`
+	Status      string                   `json:"status"`
+	Priority    int32                    `json:"priority"`
+	Attempt     int32                    `json:"attempt"`
+	MaxAttempts int32                    `json:"max_attempts"`
+	Issue       *runcontext.IssueFields  `json:"issue,omitempty"`
+	Parent      *runcontext.ParentFields `json:"parent,omitempty"`
+	Properties  json.RawMessage          `json:"properties,omitempty"`
 	// WorkspaceContext mirrors workspace.context (the per-workspace system
 	// prompt set in Settings → General). Server populates this on every claim
 	// regardless of task kind so the daemon can inject `## Workspace Context`
@@ -85,6 +96,7 @@ type Task struct {
 	// Empty when the server-side runtime has no owning user — the daemon
 	// then falls back to its own token. See MUL-2600.
 	AuthToken string `json:"auth_token,omitempty"`
+	Kind      string `json:"kind,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

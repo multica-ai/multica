@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/runcontext"
 )
 
 // RepoContextForEnv describes a workspace repo available for checkout.
@@ -58,6 +60,13 @@ type PrepareParams struct {
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
 	IssueID                 string
+	TaskID                  string
+	TaskKind                string
+	TaskAttempt             int32
+	TaskMaxAttempts         int32
+	IssueSnapshot           *runcontext.IssueFields
+	ParentSnapshot          *runcontext.ParentFields
+	Properties              json.RawMessage
 	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
 	NewCommentCount         int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)
 	NewCommentsSince        string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
@@ -121,6 +130,9 @@ type Environment struct {
 	// on "may I remove WorkDir as scratch?" must check this — for example
 	// the GC loop never deletes the user's directory.
 	LocalDirectory bool
+	// RunContextPath is the machine-readable context JSON path exported to the
+	// agent via MULTICA_RUN_CONTEXT.
+	RunContextPath string
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
 	// OpenclawConfigPath is the path to the per-task synthesized OpenClaw
@@ -194,6 +206,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		RootDir:        envRoot,
 		WorkDir:        workDir,
 		LocalDirectory: params.LocalWorkDir != "",
+		RunContextPath: runContextPath(workDir),
 		logger:         logger,
 	}
 
@@ -292,6 +305,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		RootDir:        rootDir,
 		WorkDir:        params.WorkDir,
 		LocalDirectory: params.LocalDirectory,
+		RunContextPath: runContextPath(params.WorkDir),
 		logger:         logger,
 	}
 

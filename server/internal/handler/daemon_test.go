@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/runcontext"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -1890,6 +1891,108 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 	}
 	if len(resp.Task.Repos) != 1 || !strings.HasSuffix(resp.Task.Repos[0].URL, "workspace-fallback") {
 		t.Fatalf("expected workspace fallback repo, got %+v", resp.Task.Repos)
+	}
+}
+
+func TestClaimTask_IssueRunContextSnapshotIncluded(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+
+	var parentIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_id, creator_type, number, position
+		) VALUES ($1, 'live parent title', 'backlog', 'medium', $2, 'member', 88110, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&parentIssueID); err != nil {
+		t.Fatalf("create parent issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, parentIssueID) })
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_id, creator_type, number, position, parent_issue_id
+		) VALUES ($1, 'live child title', 'todo', 'high', $2, 'member', 88111, 0, $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, parentIssueID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	snapshot, err := json.Marshal(runcontext.IssueSnapshot{
+		Issue: &runcontext.IssueFields{
+			ID:            issueID,
+			Identifier:    "SNAP-88111",
+			Title:         "snapshot child title",
+			Status:        "in_review",
+			Priority:      "urgent",
+			ParentIssueID: parentIssueID,
+			ProjectID:     "project-snapshot",
+		},
+		Parent: &runcontext.ParentFields{
+			ID:         parentIssueID,
+			Identifier: "SNAP-88110",
+			Title:      "snapshot parent title",
+			Status:     "done",
+		},
+		Properties: json.RawMessage(`{"orchestration":{"dispatch_reason":"snapshot-test"}}`),
+	})
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, context
+		) VALUES ($1, $2, $3, 'queued', 0, $4::jsonb)
+		RETURNING id
+	`, agentID, runtimeID, issueID, snapshot).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-run-context")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			Issue      *runcontext.IssueFields  `json:"issue"`
+			Parent     *runcontext.ParentFields `json:"parent"`
+			Properties json.RawMessage          `json:"properties"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Task == nil || resp.Task.Issue == nil || resp.Task.Parent == nil {
+		t.Fatalf("expected issue + parent run context, got %+v", resp.Task)
+	}
+	if resp.Task.Issue.Identifier != "SNAP-88111" || resp.Task.Issue.Title != "snapshot child title" || resp.Task.Issue.Status != "in_review" || resp.Task.Issue.Priority != "urgent" || resp.Task.Issue.ProjectID != "project-snapshot" {
+		t.Fatalf("issue snapshot did not round-trip: %+v", resp.Task.Issue)
+	}
+	if resp.Task.Parent.Identifier != "SNAP-88110" || resp.Task.Parent.Title != "snapshot parent title" || resp.Task.Parent.Status != "done" {
+		t.Fatalf("parent snapshot did not round-trip: %+v", resp.Task.Parent)
+	}
+	if string(resp.Task.Properties) != `{"orchestration":{"dispatch_reason":"snapshot-test"}}` {
+		t.Fatalf("unexpected properties payload: %s", string(resp.Task.Properties))
 	}
 }
 

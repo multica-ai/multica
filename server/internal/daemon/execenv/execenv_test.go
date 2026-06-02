@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/runcontext"
 )
 
 func testLogger() *slog.Logger {
@@ -313,7 +315,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name != ".agent_context" && name != "CLAUDE.md" && name != ".claude" {
+		if name != ".agent_context" && name != ".multica" && name != "CLAUDE.md" && name != ".claude" {
 			t.Errorf("unexpected entry in workdir: %s", name)
 		}
 	}
@@ -340,7 +342,20 @@ func TestWriteContextFiles(t *testing.T) {
 	dir := t.TempDir()
 
 	ctx := TaskContextForEnv{
-		IssueID: "test-issue-id-1234",
+		IssueID:         "test-issue-id-1234",
+		TaskID:          "task-1234",
+		TaskKind:        "direct",
+		TaskAttempt:     1,
+		TaskMaxAttempts: 2,
+		IssueSnapshot: &runcontext.IssueFields{
+			ID:         "test-issue-id-1234",
+			Identifier: "TST-1234",
+			Title:      "Write run context",
+			Status:     "todo",
+			Priority:   "high",
+			ProjectID:  "project-1",
+		},
+		Properties: json.RawMessage(`{"orchestration":{"recommended_worker":"Codex"}}`),
 		AgentSkills: []SkillContextForEnv{
 			{
 				Name:    "Go Conventions",
@@ -394,6 +409,43 @@ func TestWriteContextFiles(t *testing.T) {
 	}
 	if string(supportFile) != "package main" {
 		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
+	}
+
+	runContextRaw, err := os.ReadFile(filepath.Join(dir, ".multica", "run", "context.json"))
+	if err != nil {
+		t.Fatalf("failed to read run context: %v", err)
+	}
+	var runCtx struct {
+		Task struct {
+			ID          string `json:"id"`
+			Kind        string `json:"kind"`
+			Attempt     int32  `json:"attempt"`
+			MaxAttempts int32  `json:"max_attempts"`
+		} `json:"task"`
+		Issue *struct {
+			Identifier string `json:"identifier"`
+			Status     string `json:"status"`
+			Priority   string `json:"priority"`
+			ProjectID  string `json:"project_id"`
+		} `json:"issue"`
+		Properties json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(runContextRaw, &runCtx); err != nil {
+		t.Fatalf("run context unmarshal: %v\n%s", err, string(runContextRaw))
+	}
+	if runCtx.Task.ID != "task-1234" || runCtx.Task.Kind != "direct" || runCtx.Task.Attempt != 1 || runCtx.Task.MaxAttempts != 2 {
+		t.Fatalf("unexpected task payload in run context: %+v", runCtx.Task)
+	}
+	if runCtx.Issue == nil || runCtx.Issue.Identifier != "TST-1234" || runCtx.Issue.Status != "todo" || runCtx.Issue.Priority != "high" || runCtx.Issue.ProjectID != "project-1" {
+		t.Fatalf("unexpected issue payload in run context: %+v", runCtx.Issue)
+	}
+	var properties map[string]any
+	if err := json.Unmarshal(runCtx.Properties, &properties); err != nil {
+		t.Fatalf("properties unmarshal: %v", err)
+	}
+	orchestration, _ := properties["orchestration"].(map[string]any)
+	if orchestration["recommended_worker"] != "Codex" {
+		t.Fatalf("unexpected properties payload: %+v", properties)
 	}
 }
 
@@ -604,6 +656,7 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"core agent loop and common issue create/update tasks",
 		"`multica <command> --help`",
 		"multica issue get <id> --output json",
+		"multica issue context --output json",
 		"multica issue comment list <issue-id>",
 		"multica issue create --title",
 		"multica issue update <id>",
@@ -1178,7 +1231,7 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name != ".agent_context" && name != "AGENTS.md" {
+		if name != ".agent_context" && name != ".multica" && name != "AGENTS.md" {
 			t.Errorf("unexpected entry in workdir: %s", name)
 		}
 	}

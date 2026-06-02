@@ -63,7 +63,7 @@ var runtimeGOOS = runtime.GOOS
 //
 // CR/LF and other whitespace control bytes collapse to a single space; other
 // C0 controls and DEL are dropped; markdown structural characters that have
-// meaning in inline context (`*`, `_`, “ ` “, `\`, `[`, `]`, `<`) are
+// meaning in inline context (`*`, `_`, '`', `\`, `[`, `]`, `<`) are
 // backslash-escaped. Trailing whitespace is trimmed.
 func sanitizeNameForBriefMarkdown(name string) string {
 	var b strings.Builder
@@ -427,6 +427,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("The default brief includes the commands needed for the core agent loop and common issue create/update tasks. For everything else, run `multica --help`, `multica <command> --help`, or `multica <command> <subcommand> --help`; prefer `--output json` when the command supports it.\n\n")
 	b.WriteString("### Core\n")
 	b.WriteString("- `multica issue get <id> --output json` — Get full issue details.\n")
+	b.WriteString("- `multica issue context --output json` — Print the current daemon run context from `MULTICA_RUN_CONTEXT`.\n")
 	b.WriteString("- `multica issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] --output json` — List comments on an issue. Default returns the full flat timeline (server cap 2000). On busy issues prefer the thread-aware reads: `--thread <comment-id>` returns one conversation (root + every reply); `--thread <id> --tail N` caps replies to the N most recent (root is always included, even at `--tail 0`); `--recent N` returns the N most recently active threads. `--before` / `--before-id` walks older replies under `--thread --tail` (stderr label: `Next reply cursor`) or older threads under `--recent` (stderr label: `Next thread cursor`). `--since` is for incremental polling and may combine with `--thread` (with or without `--tail`) or `--recent`.\n")
 	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated.\n")
 	b.WriteString("- `multica issue update <id> [--title X] [--description X | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent.\n")
@@ -501,6 +502,14 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		} else {
 			b.WriteString("This project has no resources attached yet.\n\n")
 		}
+	}
+
+	if ctx.TaskID != "" || ctx.IssueID != "" {
+		b.WriteString("## Run Context\n\n")
+		b.WriteString("The daemon injects first-class run metadata as env vars and a machine-readable JSON file before you read issue prose or comments.\n\n")
+		b.WriteString("- `MULTICA_RUN_CONTEXT` points at `.multica/run/context.json` and contains top-level `task`, `issue`, `parent`, and `properties` keys.\n")
+		b.WriteString("- `MULTICA_ISSUE_ID`, `MULTICA_ISSUE_KEY`, `MULTICA_ISSUE_PARENT_ID`, `MULTICA_ISSUE_PROJECT_ID`, `MULTICA_ISSUE_PRIORITY`, `MULTICA_ISSUE_STATUS`, `MULTICA_TASK_KIND`, `MULTICA_TASK_ATTEMPT`, and `MULTICA_TASK_MAX_ATTEMPTS` mirror the same first-class fields.\n")
+		b.WriteString("- Treat this JSON as the dispatch-time snapshot. If you need the latest state before posting results, refresh with `multica issue get`.\n\n")
 	}
 
 	// Issue Metadata semantics — emitted only for tasks that operate on a real

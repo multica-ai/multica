@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/runcontext"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -102,6 +103,45 @@ func (s *TaskService) buildCommentTriggerSummary(ctx context.Context, commentID 
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: summary, Valid: true}
+}
+
+func (s *TaskService) buildIssueTaskSnapshot(ctx context.Context, issue db.Issue) ([]byte, error) {
+	workspace, err := s.Queries.GetWorkspace(ctx, issue.WorkspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("load workspace for task snapshot: %w", err)
+	}
+
+	snapshot := runcontext.IssueSnapshot{
+		Issue: &runcontext.IssueFields{
+			ID:            util.UUIDToString(issue.ID),
+			Identifier:    runcontext.FormatIssueIdentifier(workspace.IssuePrefix, issue.Number),
+			Title:         issue.Title,
+			Status:        issue.Status,
+			Priority:      issue.Priority,
+			ParentIssueID: util.UUIDToString(issue.ParentIssueID),
+			ProjectID:     util.UUIDToString(issue.ProjectID),
+		},
+		Properties: runcontext.EmptyProperties(),
+	}
+
+	if issue.ParentIssueID.Valid {
+		parent, err := s.Queries.GetIssue(ctx, issue.ParentIssueID)
+		if err != nil {
+			return nil, fmt.Errorf("load parent issue for task snapshot: %w", err)
+		}
+		snapshot.Parent = &runcontext.ParentFields{
+			ID:         util.UUIDToString(parent.ID),
+			Identifier: runcontext.FormatIssueIdentifier(workspace.IssuePrefix, parent.Number),
+			Title:      parent.Title,
+			Status:     parent.Status,
+		}
+	}
+
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("marshal task snapshot: %w", err)
+	}
+	return data, nil
 }
 
 func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus, wakeups ...TaskWakeupNotifier) *TaskService {
@@ -422,11 +462,18 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
+	taskSnapshot, err := s.buildIssueTaskSnapshot(ctx, issue)
+	if err != nil {
+		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+		return db.AgentTaskQueue{}, err
+	}
+
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           issue.AssigneeID,
 		RuntimeID:         agent.RuntimeID,
 		IssueID:           issue.ID,
 		Priority:          priorityToInt(issue.Priority),
+		Context:           taskSnapshot,
 		TriggerCommentID:  triggerCommentID,
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
@@ -485,11 +532,18 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
+	taskSnapshot, err := s.buildIssueTaskSnapshot(ctx, issue)
+	if err != nil {
+		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
+		return db.AgentTaskQueue{}, err
+	}
+
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           agentID,
 		RuntimeID:         agent.RuntimeID,
 		IssueID:           issue.ID,
 		Priority:          priorityToInt(issue.Priority),
+		Context:           taskSnapshot,
 		TriggerCommentID:  triggerCommentID,
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		IsLeaderTask:      pgtype.Bool{Bool: isLeader, Valid: isLeader},
