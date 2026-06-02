@@ -32,6 +32,7 @@ const (
 	// truly stuck runs (dockerd hang) while leaving headroom for long writes.
 	// Set WALLTS_AGENT_IDLE_WATCHDOG=0 to disable.
 	DefaultAgentIdleWatchdog       = 30 * time.Minute
+	DefaultAutoUpdateCheckInterval = 6 * time.Hour
 	DefaultRuntimeName             = "Local Agent"
 	DefaultWorkspaceSyncInterval   = 30 * time.Second
 	DefaultHealthPort              = 19514
@@ -76,6 +77,8 @@ type Config struct {
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
+	AutoUpdateEnabled              bool          // enable automatic CLI update checks
+	AutoUpdateCheckInterval        time.Duration // how often to check for CLI updates (default: 6h)
 	ClaudeArgs                     []string
 	CodexArgs                      []string
 }
@@ -272,6 +275,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 
+	// Auto-update config: env > defaults
+	autoUpdateEnabled := os.Getenv("WALLTS_DAEMON_AUTO_UPDATE") == "true" || os.Getenv("WALLTS_DAEMON_AUTO_UPDATE") == "1"
+	autoUpdateInterval, err := durationFromEnv("WALLTS_DAEMON_AUTO_UPDATE_INTERVAL", DefaultAutoUpdateCheckInterval)
+	if err != nil {
+		return Config{}, err
+	}
+
 	maxConcurrentTasks, err := intFromEnv("WALLTS_DAEMON_MAX_CONCURRENT_TASKS", DefaultMaxConcurrentTasks)
 	if err != nil {
 		return Config{}, err
@@ -389,6 +399,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AgentTimeout:                   agentTimeout,
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		AgentIdleWatchdog:              agentIdleWatchdog,
+		AutoUpdateEnabled:              autoUpdateEnabled,
+		AutoUpdateCheckInterval:        autoUpdateInterval,
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
 	}, nil
