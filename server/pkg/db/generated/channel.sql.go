@@ -1074,6 +1074,35 @@ func (q *Queries) UpdateChannelThreadTitle(ctx context.Context, arg UpdateChanne
 	return i, err
 }
 
+const updateChannelMessage = `-- name: UpdateChannelMessage :one
+UPDATE channel_message SET content = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id
+`
+
+type UpdateChannelMessageParams struct {
+	ID      pgtype.UUID `json:"id"`
+	Content string      `json:"content"`
+}
+
+func (q *Queries) UpdateChannelMessage(ctx context.Context, arg UpdateChannelMessageParams) (ChannelMessage, error) {
+	row := q.db.QueryRow(ctx, updateChannelMessage, arg.ID, arg.Content)
+	var i ChannelMessage
+	err := row.Scan(
+		&i.ID,
+		&i.ThreadID,
+		&i.ChannelID,
+		&i.WorkspaceID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ReplyToID,
+	)
+	return i, err
+}
+
 const upsertChannelMember = `-- name: UpsertChannelMember :one
 INSERT INTO channel_member (channel_id, user_id, role)
 VALUES ($1, $2, COALESCE($3, 'member'))

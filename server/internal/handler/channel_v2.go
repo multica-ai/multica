@@ -345,6 +345,8 @@ func (h *Handler) RemoveChannelMember(w http.ResponseWriter, r *http.Request) {
 }
 
 // ConvertMessageToIssue converts a channel message into an issue.
+// If the message does not already have a thread, one is created implicitly so
+// that the spec invariant "Issue is produced from a thread" always holds.
 func (h *Handler) ConvertMessageToIssue(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
@@ -439,15 +441,32 @@ func (h *Handler) ConvertMessageToIssue(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Link to source channel and thread if one exists.
-	threadID := pgtype.UUID{}
-	if thread, terr := qtx.GetThreadByRootMessage(r.Context(), msgUUID); terr == nil {
-		threadID = thread.ID
+	// Ensure thread exists: if no thread yet, create one implicitly.
+	thread, terr := qtx.GetThreadByRootMessage(r.Context(), msgUUID)
+	if terr != nil {
+		// No thread yet — create one anchored to this message.
+		threadTitle := msg.Content
+		if len(threadTitle) > 50 {
+			threadTitle = threadTitle[:50]
+		}
+		thread, err = qtx.CreateChannelThread(r.Context(), db.CreateChannelThreadParams{
+			ChannelID:     cctx.channel.ID,
+			WorkspaceID:   wsUUID,
+			Title:         threadTitle,
+			CreatedBy:     userUUID,
+			RootMessageID: msgUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create thread for issue")
+			return
+		}
 	}
+
+	// Link the issue to the source channel and thread.
 	qtx.LinkIssueSource(r.Context(), db.LinkIssueSourceParams{
 		ID:              issue.ID,
 		SourceChannelID: cctx.channel.ID,
-		SourceThreadID:  threadID,
+		SourceThreadID:  thread.ID,
 	})
 
 	if err := tx.Commit(r.Context()); err != nil {
@@ -455,10 +474,16 @@ func (h *Handler) ConvertMessageToIssue(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Post "created from thread" system activity (best-effort, outside tx).
+	issue.SourceChannelID = cctx.channel.ID
+	issue.SourceThreadID = thread.ID
+	h.linkIssueToThreadActivity(r.Context(), &issue, thread)
+
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"issue_id":     uuidToString(issue.ID),
 		"issue_number": issue.Number,
 		"title":        issue.Title,
+		"thread_id":    uuidToString(thread.ID),
 	})
 }
 
@@ -518,5 +543,184 @@ func (h *Handler) GetChannelContext(w http.ResponseWriter, r *http.Request) {
 		Members:  memberResp,
 		Messages: msgResp,
 	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---------- Message Update / Delete ----------
+
+// UpdateChannelMessage updates a message's content. Only the original author
+// or a channel manager may update a message.
+func (h *Handler) UpdateChannelMessage(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	cctx, ok := h.loadChannelContext(w, r, wsUUID, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	msgID := chi.URLParam(r, "msgId")
+	msgUUID, ok := parseUUIDOrBadRequest(w, msgID, "message id")
+	if !ok {
+		return
+	}
+	msg, err := h.Queries.GetChannelMessage(r.Context(), msgUUID)
+	if err != nil || uuidToString(msg.ChannelID) != uuidToString(cctx.channel.ID) {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	// Permission: only the author or a channel manager can update.
+	userID := requestUserID(r)
+	isAuthor := msg.AuthorID.Valid && uuidToString(msg.AuthorID) == userID
+	if !isAuthor && !cctx.canManage() {
+		writeError(w, http.StatusForbidden, "you can only edit your own messages")
+		return
+	}
+
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	content := strings.TrimSpace(req.Content)
+	if content == "" {
+		writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+
+	updated, err := h.Queries.UpdateChannelMessage(r.Context(), db.UpdateChannelMessageParams{
+		ID:      msgUUID,
+		Content: content,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update message")
+		return
+	}
+	resp := channelMessageToV2Response(updated, 0)
+	h.publish(protocol.EventChannelMessageUpdated, workspaceID, "member", userID, map[string]any{
+		"message":    resp,
+		"channel_id": uuidToString(cctx.channel.ID),
+	})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// DeleteChannelMessage deletes a message. Only the original author or a channel
+// manager may delete a message.
+func (h *Handler) DeleteChannelMessage(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	cctx, ok := h.loadChannelContext(w, r, wsUUID, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	msgID := chi.URLParam(r, "msgId")
+	msgUUID, ok := parseUUIDOrBadRequest(w, msgID, "message id")
+	if !ok {
+		return
+	}
+	msg, err := h.Queries.GetChannelMessage(r.Context(), msgUUID)
+	if err != nil || uuidToString(msg.ChannelID) != uuidToString(cctx.channel.ID) {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	userID := requestUserID(r)
+	isAuthor := msg.AuthorID.Valid && uuidToString(msg.AuthorID) == userID
+	if !isAuthor && !cctx.canManage() {
+		writeError(w, http.StatusForbidden, "you can only delete your own messages")
+		return
+	}
+
+	if err := h.Queries.DeleteChannelMessage(r.Context(), msgUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete message")
+		return
+	}
+	h.publish(protocol.EventChannelMessageDeleted, workspaceID, "member", userID, map[string]any{
+		"message_id": msgID,
+		"channel_id": uuidToString(cctx.channel.ID),
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "message_id": msgID})
+}
+
+// ---------- Thread Get / Update ----------
+
+// GetChannelThread returns a single thread by ID.
+func (h *Handler) GetChannelThreadByID(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
+	if !ok {
+		return
+	}
+	cctx, ok := h.loadChannelContext(w, r, wsUUID, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	thread, ok := h.loadThreadInChannel(w, r, cctx.channel.ID)
+	if !ok {
+		return
+	}
+	issues, _ := h.Queries.ListThreadIssues(r.Context(), thread.ID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"thread": channelThreadToResponse(thread),
+		"issues": threadIssuesToResponse(issues),
+	})
+}
+
+// UpdateChannelThread updates a thread's title.
+func (h *Handler) UpdateChannelThread(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	cctx, ok := h.loadChannelContext(w, r, wsUUID, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	thread, ok := h.loadThreadInChannel(w, r, cctx.channel.ID)
+	if !ok {
+		return
+	}
+
+	// Permission: thread creator or channel manager.
+	userID := requestUserID(r)
+	isCreator := thread.CreatedBy.Valid && uuidToString(thread.CreatedBy) == userID
+	if !isCreator && !cctx.canManage() {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+
+	var req struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+
+	updated, err := h.Queries.UpdateChannelThreadTitle(r.Context(), db.UpdateChannelThreadTitleParams{
+		ID:    thread.ID,
+		Title: title,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update thread")
+		return
+	}
+	resp := channelThreadToResponse(updated)
+	h.publish(protocol.EventChannelThreadUpdated, workspaceID, "member", userID, map[string]any{
+		"thread":     resp,
+		"channel_id": uuidToString(cctx.channel.ID),
+	})
 	writeJSON(w, http.StatusOK, resp)
 }

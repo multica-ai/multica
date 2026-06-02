@@ -126,8 +126,9 @@ const (
 	EventChannelMemberLeft  = "channel:member_left"
 	EventChannelThreadCreated = "channel_thread:created"
 	EventChannelThreadUpdated = "channel_thread:updated"
-	EventChannelThreadDeleted = "channel_thread:deleted"
+	EventChannelThreadDeleted  = "channel_thread:deleted"
 	EventChannelMessageCreated = "channel_message:created"
+	EventChannelMessageUpdated = "channel_message:updated"
 	EventChannelMessageDeleted = "channel_message:deleted"
 
 	// Daemon events

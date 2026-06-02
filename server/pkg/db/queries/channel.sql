@@ -127,6 +127,11 @@ INSERT INTO channel_message (thread_id, channel_id, workspace_id, author_type, a
 VALUES ($1, $2, $3, $4, sqlc.narg('author_id'), $5)
 RETURNING *;
 
+-- name: UpdateChannelMessage :one
+UPDATE channel_message SET content = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: DeleteChannelMessage :exec
 DELETE FROM channel_message WHERE id = $1;
 

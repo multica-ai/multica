@@ -619,6 +619,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/messages", h.ListChannelMessages)
 					r.Post("/messages", h.SendChannelMessage)
 					r.Route("/messages/{msgId}", func(r chi.Router) {
+						r.Patch("/", h.UpdateChannelMessage)
+						r.Delete("/", h.DeleteChannelMessage)
 						r.Post("/reply", h.ReplyToMessage)
 						r.Get("/thread", h.GetMessageThread)
 						r.Post("/convert-issue", h.ConvertMessageToIssue)
@@ -627,6 +629,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/threads", h.ListChannelThreads)
 					r.Post("/threads", h.CreateChannelThread)
 					r.Route("/threads/{threadId}", func(r chi.Router) {
+						r.Get("/", h.GetChannelThreadByID)
+						r.Patch("/", h.UpdateChannelThread)
 						r.Get("/messages", h.ListThreadMessages)
 						r.Post("/messages", h.CreateChannelMessage)
 						r.Delete("/", h.DeleteChannelThread)
