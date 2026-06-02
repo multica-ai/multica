@@ -86,6 +86,16 @@ interface TabStore {
   updateTab: (tabId: string, patch: Partial<Pick<Tab, "path" | "title" | "icon">>) => void;
   /** Patch history tracking of a tab. Finds across groups. */
   updateTabHistory: (tabId: string, historyIndex: number, historyLength: number) => void;
+  /** Recreate the active tab's router at the same path after a route-level crash. */
+  reloadActiveTab: () => void;
+  /**
+   * Close the active tab. The always-safe escape from a route-level crash:
+   * unlike reloadActiveTab (recreates the same crashing path) or navigating
+   * to a "safe" route (which may itself be the route that crashed), closing
+   * destroys the crashing router entirely and falls back to a sibling tab
+   * (or a reseeded default if it was the last tab).
+   */
+  closeActiveTab: () => void;
   /**
    * Reorder within the active workspace's group only. Clamped so a tab can
    * never cross the pinned / unpinned boundary — a drag that would move a
@@ -473,6 +483,38 @@ export const useTabStore = create<TabStore>()(
             [slug]: { ...group, tabs: nextTabs },
           },
         });
+      },
+
+      reloadActiveTab() {
+        const { activeWorkspaceSlug, byWorkspace } = get();
+        if (!activeWorkspaceSlug) return;
+        const group = byWorkspace[activeWorkspaceSlug];
+        if (!group) return;
+        const index = group.tabs.findIndex((t) => t.id === group.activeTabId);
+        if (index < 0) return;
+        const current = group.tabs[index];
+        const nextTabs = [...group.tabs];
+        nextTabs[index] = {
+          ...current,
+          router: createTabRouter(current.path),
+          historyIndex: 0,
+          historyLength: 1,
+        };
+        set({
+          byWorkspace: {
+            ...byWorkspace,
+            [activeWorkspaceSlug]: { ...group, tabs: nextTabs },
+          },
+        });
+        window.setTimeout(() => current.router.dispose(), 0);
+      },
+
+      closeActiveTab() {
+        const { activeWorkspaceSlug, byWorkspace, closeTab } = get();
+        if (!activeWorkspaceSlug) return;
+        const group = byWorkspace[activeWorkspaceSlug];
+        if (!group) return;
+        closeTab(group.activeTabId);
       },
 
       moveTab(fromIndex, toIndex) {
