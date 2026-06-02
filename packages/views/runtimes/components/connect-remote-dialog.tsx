@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronRight, Copy, Terminal } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -17,17 +17,26 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 type Step = "instructions" | "success";
+type ConnectMode = "computer" | "custom";
 
 const INSTALL_CMD =
   "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
 const CLOUD_SERVER_URL = "https://api.multica.ai";
 const CLOUD_APP_URL = "https://multica.ai";
+const CUSTOM_PROMPT_PLACEHOLDER = "{{prompt}}";
+const DEFAULT_CUSTOM_PROVIDER = "king";
+const DEFAULT_CUSTOM_NAME = "Code King";
+const DEFAULT_CUSTOM_PATH = "king";
+const DEFAULT_CUSTOM_ARGS = `-p\n${CUSTOM_PROMPT_PLACEHOLDER}`;
 
 function normalizeCommandURL(url: string | undefined) {
   return url?.trim().replace(/\/+$/, "") ?? "";
@@ -53,6 +62,53 @@ multica config set app_url ${CLOUD_APP_URL}
 multica login --token <YOUR_TOKEN>
 multica daemon start`,
   };
+}
+
+function normalizeCustomProvider(provider: string) {
+  const cleaned = provider
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return cleaned || "custom";
+}
+
+function customAgentArgsFromText(argsText: string) {
+  return argsText
+    .split(/\r?\n/)
+    .map((arg) => arg.trim())
+    .filter(Boolean);
+}
+
+function shellSingleQuote(value: string) {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function customAgentEnvJSON({
+  provider,
+  name,
+  path,
+  args,
+}: {
+  provider: string;
+  name: string;
+  path: string;
+  args: string[];
+}) {
+  const normalizedProvider = normalizeCustomProvider(provider);
+  return JSON.stringify([
+    {
+      provider: normalizedProvider,
+      name: name.trim() || normalizedProvider,
+      path: path.trim() || normalizedProvider,
+      args,
+    },
+  ]);
+}
+
+function customAgentEnvCommand(envJSON: string) {
+  return `export MULTICA_CUSTOM_AGENTS=${shellSingleQuote(envJSON)}
+multica daemon restart`;
 }
 
 export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
@@ -188,6 +244,7 @@ function CommandStep({
 
 function InstructionsStep({ onClose }: { onClose: () => void }) {
   const { t } = useT("runtimes");
+  const [mode, setMode] = useState<ConnectMode>("computer");
   const daemonServerUrl = useConfigStore((s) => s.daemonServerUrl);
   const daemonAppUrl = useConfigStore((s) => s.daemonAppUrl);
   const { setupCmd, tokenCmd } = daemonCommands(daemonServerUrl, daemonAppUrl);
@@ -200,33 +257,34 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
         <DialogDescription className="text-xs text-balance">
           {t(($) => $.connect.description)}
         </DialogDescription>
+        <div className="mt-3 inline-flex w-fit rounded-lg border bg-muted p-0.5">
+          <Button
+            type="button"
+            size="sm"
+            variant={mode === "computer" ? "secondary" : "ghost"}
+            className="h-7 rounded-md px-2.5 text-xs"
+            onClick={() => setMode("computer")}
+          >
+            {t(($) => $.connect.computer_tab)}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={mode === "custom" ? "secondary" : "ghost"}
+            className="h-7 rounded-md px-2.5 text-xs"
+            onClick={() => setMode("custom")}
+          >
+            {t(($) => $.connect.custom_tab)}
+          </Button>
+        </div>
       </DialogHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-        <div className="space-y-4">
-          <CommandStep
-            n={1}
-            label={t(($) => $.connect.step1_label)}
-            cmd={INSTALL_CMD}
-            copyAria={t(($) => $.connect.copy_aria)}
-          />
-
-          <div>
-            <CommandStep
-              n={2}
-              label={t(($) => $.connect.step2_label)}
-              cmd={setupCmd}
-              copyAria={t(($) => $.connect.copy_aria)}
-            />
-            <p className="mt-1.5 text-[11px] leading-[1.55] text-muted-foreground">
-              {t(($) => $.connect.step2_hint)}
-            </p>
-          </div>
-
-          <LiveListening />
-
-          <TroubleshootingDetails tokenCmd={tokenCmd} />
-        </div>
+        {mode === "computer" ? (
+          <ComputerInstructions setupCmd={setupCmd} tokenCmd={tokenCmd} />
+        ) : (
+          <CustomRuntimeInstructions />
+        )}
       </div>
 
       <DialogFooter className="m-0 rounded-b-xl border-t bg-muted/30 px-6 py-3">
@@ -235,6 +293,140 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
         </Button>
       </DialogFooter>
     </>
+  );
+}
+
+function ComputerInstructions({
+  setupCmd,
+  tokenCmd,
+}: {
+  setupCmd: string;
+  tokenCmd: string;
+}) {
+  const { t } = useT("runtimes");
+  return (
+    <div className="space-y-4">
+      <CommandStep
+        n={1}
+        label={t(($) => $.connect.step1_label)}
+        cmd={INSTALL_CMD}
+        copyAria={t(($) => $.connect.copy_aria)}
+      />
+
+      <div>
+        <CommandStep
+          n={2}
+          label={t(($) => $.connect.step2_label)}
+          cmd={setupCmd}
+          copyAria={t(($) => $.connect.copy_aria)}
+        />
+        <p className="mt-1.5 text-[11px] leading-[1.55] text-muted-foreground">
+          {t(($) => $.connect.step2_hint)}
+        </p>
+      </div>
+
+      <LiveListening />
+
+      <TroubleshootingDetails tokenCmd={tokenCmd} />
+    </div>
+  );
+}
+
+function CustomRuntimeInstructions() {
+  const { t } = useT("runtimes");
+  const [provider, setProvider] = useState(DEFAULT_CUSTOM_PROVIDER);
+  const [name, setName] = useState(DEFAULT_CUSTOM_NAME);
+  const [path, setPath] = useState(DEFAULT_CUSTOM_PATH);
+  const [argsText, setArgsText] = useState(DEFAULT_CUSTOM_ARGS);
+
+  // Custom runtime V1 deliberately mirrors the daemon's environment JSON.
+  // Web only helps build machine-local configuration here; the daemon still
+  // owns executable lookup and argv execution because PATH and filesystem
+  // access are properties of the runtime host, not workspace data.
+  const customEnvJSON = useMemo(
+    () =>
+      customAgentEnvJSON({
+        provider,
+        name,
+        path,
+        args: customAgentArgsFromText(argsText),
+      }),
+    [argsText, name, path, provider],
+  );
+  const customEnvCommand = useMemo(
+    () => customAgentEnvCommand(customEnvJSON),
+    [customEnvJSON],
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border bg-muted/30 px-3 py-2.5 text-xs leading-[1.55] text-muted-foreground">
+        {t(($) => $.connect.custom_description)}
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="custom-runtime-provider" className="text-xs">
+            {t(($) => $.connect.custom_provider_label)}
+          </Label>
+          <Input
+            id="custom-runtime-provider"
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            className="font-mono text-sm"
+            spellCheck={false}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="custom-runtime-name" className="text-xs">
+            {t(($) => $.connect.custom_name_label)}
+          </Label>
+          <Input
+            id="custom-runtime-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="custom-runtime-path" className="text-xs">
+          {t(($) => $.connect.custom_path_label)}
+        </Label>
+        <Input
+          id="custom-runtime-path"
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+          className="font-mono text-sm"
+          spellCheck={false}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="custom-runtime-args" className="text-xs">
+          {t(($) => $.connect.custom_args_label)}
+        </Label>
+        <Textarea
+          id="custom-runtime-args"
+          value={argsText}
+          onChange={(e) => setArgsText(e.target.value)}
+          className="min-h-20 resize-y font-mono text-sm"
+          spellCheck={false}
+        />
+        <p className="text-[11px] leading-[1.55] text-muted-foreground">
+          {t(($) => $.connect.custom_args_hint)}
+        </p>
+      </div>
+
+      <CommandStep
+        n={1}
+        label={t(($) => $.connect.custom_env_label)}
+        cmd={customEnvCommand}
+        copyAria={t(($) => $.connect.copy_aria)}
+      />
+
+      <LiveListening />
+    </div>
   );
 }
 
@@ -268,7 +460,6 @@ function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
           <li className="flex items-center gap-1.5">
             <span>{t(($) => $.connect.trouble_check_status)}</span>
             {/* CLI command — literal shell string, not i18n content. */}
-            {/* eslint-disable-next-line i18next/no-literal-string */}
             <code
               className={cn(
                 "rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground",
@@ -281,7 +472,6 @@ function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
           <li className="flex items-center gap-1.5">
             <span>{t(($) => $.connect.trouble_view_logs)}</span>
             {/* CLI command — literal shell string, not i18n content. */}
-            {/* eslint-disable-next-line i18next/no-literal-string */}
             <code
               className={cn(
                 "rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground",

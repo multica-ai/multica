@@ -9,7 +9,42 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestRuntimeToResponseUsesMetadataLaunchHeaderForCustomRuntime(t *testing.T) {
+	rt := db.AgentRuntime{
+		Name:        "Code King",
+		RuntimeMode: "remote",
+		Provider:    "king",
+		Status:      "online",
+		Metadata:    []byte(`{"launch_header":"king -p {{prompt}}"}`),
+		Visibility:  "private",
+	}
+
+	resp := runtimeToResponse(rt)
+
+	if resp.LaunchHeader != "king -p {{prompt}}" {
+		t.Fatalf("LaunchHeader = %q, want custom metadata launch header", resp.LaunchHeader)
+	}
+}
+
+func TestRuntimeToResponsePrefersBuiltinLaunchHeader(t *testing.T) {
+	rt := db.AgentRuntime{
+		Name:        "Claude",
+		RuntimeMode: "remote",
+		Provider:    "claude",
+		Status:      "online",
+		Metadata:    []byte(`{"launch_header":"custom override"}`),
+		Visibility:  "private",
+	}
+
+	resp := runtimeToResponse(rt)
+
+	if resp.LaunchHeader != "claude -p" {
+		t.Fatalf("LaunchHeader = %q, want built-in launch header", resp.LaunchHeader)
+	}
+}
 
 func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
 	tests := []struct {

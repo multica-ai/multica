@@ -104,6 +104,7 @@ type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, agy)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
+	Custom         *CustomInvocation // non-nil for user-configured local CLI runtimes
 }
 
 // New creates a Backend for the given agent type.
@@ -139,6 +140,9 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "antigravity":
 		return &antigravityBackend{cfg: cfg}, nil
 	default:
+		if cfg.Custom != nil {
+			return &customBackend{cfg: cfg}, nil
+		}
 		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity)", agentType)
 	}
 }
@@ -146,6 +150,14 @@ func New(agentType string, cfg Config) (Backend, error) {
 // DetectVersion runs the agent CLI with --version and returns the output.
 func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 	return detectCLIVersion(ctx, executablePath)
+}
+
+// DetectVersionWithArgs runs the agent CLI with caller-provided version args.
+// Custom runtimes use this because not every local agent exposes `--version`;
+// built-in runtimes keep using DetectVersion so their minimum-version gates
+// stay tied to the upstream CLI contract Multica knows how to drive.
+func DetectVersionWithArgs(ctx context.Context, executablePath string, args []string) (string, error) {
+	return detectCLIVersionWithArgs(ctx, executablePath, args)
 }
 
 // launchHeaders maps each supported agent type to the user-visible skeleton

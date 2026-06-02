@@ -46,6 +46,14 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
+	launchHeader := agent.LaunchHeader(rt.Provider)
+	if launchHeader == "" {
+		if m, ok := metadata.(map[string]any); ok {
+			if v, ok := m["launch_header"].(string); ok {
+				launchHeader = v
+			}
+		}
+	}
 
 	return AgentRuntimeResponse{
 		ID:           uuidToString(rt.ID),
@@ -54,7 +62,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Name:         rt.Name,
 		RuntimeMode:  rt.RuntimeMode,
 		Provider:     rt.Provider,
-		LaunchHeader: agent.LaunchHeader(rt.Provider),
+		LaunchHeader: launchHeader,
 		Status:       rt.Status,
 		DeviceInfo:   rt.DeviceInfo,
 		Metadata:     metadata,

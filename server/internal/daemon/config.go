@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-shellwords"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 const (
@@ -219,6 +221,30 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// the backend would silently ignore, and don't lead users to set it.
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", ""); ok {
 		agents["antigravity"] = e
+	}
+	customAgents, err := loadCustomAgentsFromEnv(func(cmd string) (string, bool) {
+		if _, err := exec.LookPath(cmd); err == nil {
+			return cmd, true
+		}
+		if strings.ContainsAny(cmd, "/\\") {
+			return "", false
+		}
+		if !isSafeAgentName(cmd) {
+			return "", false
+		}
+		if path, ok := resolveAgentsViaLoginShell([]string{cmd})[cmd]; ok {
+			return path, true
+		}
+		return "", false
+	})
+	if err != nil {
+		return Config{}, err
+	}
+	for provider, entry := range customAgents {
+		if _, exists := agents[provider]; exists {
+			return Config{}, fmt.Errorf("custom agent provider %q is reserved by a built-in runtime", provider)
+		}
+		agents[provider] = entry
 	}
 	if len(agents) == 0 {
 		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or agy and ensure it is on PATH")
@@ -547,6 +573,89 @@ func shellArgsFromEnv(name string) ([]string, error) {
 		return nil, fmt.Errorf("invalid %s: %w", name, err)
 	}
 	return args, nil
+}
+
+type customAgentEnvEntry struct {
+	Provider    string    `json:"provider"`
+	Name        string    `json:"name"`
+	Path        string    `json:"path"`
+	Args        []string  `json:"args"`
+	VersionArgs *[]string `json:"version_args"`
+}
+
+type agentPathResolver func(cmd string) (string, bool)
+
+// loadCustomAgentsFromEnv parses MULTICA_CUSTOM_AGENTS. This is deliberately
+// an env-var bridge, not the final product shape: it unblocks local
+// experimentation and contributions while keeping the runtime contract
+// explicit. A future Web/server-backed custom-runtime editor should persist
+// the same fields, then deliver them to the daemon through a managed config
+// source instead of asking users to export JSON by hand.
+func loadCustomAgentsFromEnv(resolve agentPathResolver) (map[string]AgentEntry, error) {
+	raw := strings.TrimSpace(os.Getenv("MULTICA_CUSTOM_AGENTS"))
+	if raw == "" {
+		return nil, nil
+	}
+	var entries []customAgentEnvEntry
+	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+		return nil, fmt.Errorf("invalid MULTICA_CUSTOM_AGENTS: %w", err)
+	}
+	out := make(map[string]AgentEntry, len(entries))
+	for i, entry := range entries {
+		provider := strings.ToLower(strings.TrimSpace(entry.Provider))
+		if !isSafeAgentName(provider) {
+			return nil, fmt.Errorf("invalid MULTICA_CUSTOM_AGENTS[%d].provider: must match [A-Za-z0-9._-]+", i)
+		}
+		if isBuiltinProvider(provider) {
+			return nil, fmt.Errorf("custom agent provider %q is reserved by a built-in runtime", provider)
+		}
+		if _, exists := out[provider]; exists {
+			return nil, fmt.Errorf("duplicate custom agent provider %q", provider)
+		}
+		path := strings.TrimSpace(entry.Path)
+		if path == "" {
+			return nil, fmt.Errorf("invalid MULTICA_CUSTOM_AGENTS[%d].path: must be non-empty", i)
+		}
+		resolvedPath, ok := resolve(path)
+		if !ok {
+			return nil, fmt.Errorf("custom agent provider %q executable not found at %q", provider, path)
+		}
+		args := append([]string(nil), entry.Args...)
+		versionArgs := []string(nil)
+		skipVersion := false
+		if entry.VersionArgs != nil {
+			versionArgs = append([]string(nil), (*entry.VersionArgs)...)
+			skipVersion = len(versionArgs) == 0
+		}
+		displayName := strings.TrimSpace(entry.Name)
+		if displayName == "" {
+			displayName = strings.ToUpper(provider[:1]) + provider[1:]
+		}
+		out[provider] = AgentEntry{
+			Path:         resolvedPath,
+			DisplayName:  displayName,
+			LaunchHeader: customLaunchHeader(path, args),
+			Custom:       &agent.CustomInvocation{Args: args},
+			VersionArgs:  versionArgs,
+			SkipVersion:  skipVersion,
+		}
+	}
+	return out, nil
+}
+
+func customLaunchHeader(path string, args []string) string {
+	parts := append([]string{path}, args...)
+	return strings.Join(parts, " ")
+}
+
+func isBuiltinProvider(provider string) bool {
+	switch provider {
+	case "claude", "codex", "opencode", "openclaw", "hermes",
+		"gemini", "pi", "cursor", "copilot", "kimi", "kiro", "antigravity":
+		return true
+	default:
+		return false
+	}
 }
 
 // defaultAgentCommandNames lists the command names the agent probe loop tries

@@ -2,6 +2,11 @@ package agent
 
 import (
 	"context"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -46,6 +51,22 @@ func TestNewReturnsAntigravityBackend(t *testing.T) {
 	}
 	if _, ok := b.(*antigravityBackend); !ok {
 		t.Fatalf("expected *antigravityBackend, got %T", b)
+	}
+}
+
+func TestNewReturnsCustomBackendWhenInvocationConfigured(t *testing.T) {
+	t.Parallel()
+	b, err := New("king", Config{
+		ExecutablePath: "/nonexistent/king",
+		Custom: &CustomInvocation{
+			Args: []string{"-p", "{{prompt}}"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New(custom) error: %v", err)
+	}
+	if _, ok := b.(*customBackend); !ok {
+		t.Fatalf("expected *customBackend, got %T", b)
 	}
 }
 
@@ -97,4 +118,90 @@ func TestLaunchHeaderReturnsEmptyForUnknownType(t *testing.T) {
 	if header := LaunchHeader("made-up-agent"); header != "" {
 		t.Errorf("expected empty header for unknown type, got %q", header)
 	}
+}
+
+func TestCustomBackendPassesPromptViaPlaceholderArg(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	dir := t.TempDir()
+	recordPath := filepath.Join(dir, "args.txt")
+	fakePath := filepath.Join(dir, "king")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+printf '%s\n' "$@" > "$KING_RECORD"
+printf 'done: %s\n' "$2"
+`))
+	t.Setenv("KING_RECORD", recordPath)
+
+	backend, err := New("king", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Custom: &CustomInvocation{
+			Args: []string{"-p", "{{prompt}}"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New(custom): %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "ship it", ExecOptions{Cwd: dir})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	result := <-session.Result
+
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	if strings.TrimSpace(result.Output) != "done: ship it" {
+		t.Fatalf("output = %q", result.Output)
+	}
+	if got := strings.TrimSpace(readTestFile(t, recordPath)); got != "-p\nship it" {
+		t.Fatalf("argv record = %q", got)
+	}
+}
+
+func TestCustomBackendPassesPromptViaStdinWhenNoPlaceholder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	dir := t.TempDir()
+	fakePath := filepath.Join(dir, "king")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+input="$(cat)"
+printf 'stdin: %s\n' "$input"
+`))
+
+	backend, err := New("king", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Custom: &CustomInvocation{
+			Args: []string{"run"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New(custom): %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "read me", ExecOptions{Cwd: dir})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	result := <-session.Result
+
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	if strings.TrimSpace(result.Output) != "stdin: read me" {
+		t.Fatalf("output = %q", result.Output)
+	}
+}
+
+func readTestFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
 }

@@ -258,6 +258,106 @@ func TestLoadConfig_AutoUpdateDefault_SelfHostOff(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_CustomAgentsFromEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	binDir := stageFakeAgent(t)
+	kingPath := filepath.Join(binDir, "king")
+	if err := os.WriteFile(kingPath, []byte("#!/bin/sh\nprintf 'king 1.2.3\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write fake king: %v", err)
+	}
+	t.Setenv("MULTICA_CUSTOM_AGENTS", `[
+		{
+			"provider": "king",
+			"name": "Code King",
+			"path": "king",
+			"args": ["-p", "{{prompt}}"]
+		}
+	]`)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	entry, ok := cfg.Agents["king"]
+	if !ok {
+		t.Fatalf("expected custom king agent, got %#v", cfg.Agents)
+	}
+	if entry.Path != "king" {
+		t.Fatalf("custom path = %q, want king", entry.Path)
+	}
+	if entry.DisplayName != "Code King" {
+		t.Fatalf("display name = %q, want Code King", entry.DisplayName)
+	}
+	if entry.Custom == nil {
+		t.Fatal("custom invocation is nil")
+	}
+	if !reflect.DeepEqual(entry.Custom.Args, []string{"-p", "{{prompt}}"}) {
+		t.Fatalf("custom args = %#v", entry.Custom.Args)
+	}
+	if entry.SkipVersion {
+		t.Fatal("custom agent with default version probe should not skip version")
+	}
+}
+
+func TestLoadConfig_CustomAgentsCanSkipVersionProbe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	binDir := stageFakeAgent(t)
+	kingPath := filepath.Join(binDir, "king")
+	if err := os.WriteFile(kingPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake king: %v", err)
+	}
+	t.Setenv("MULTICA_CUSTOM_AGENTS", `[{
+		"provider": "king",
+		"path": "king",
+		"args": ["-p", "{{prompt}}"],
+		"version_args": []
+	}]`)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	entry := cfg.Agents["king"]
+	if entry.Custom == nil {
+		t.Fatal("custom invocation is nil")
+	}
+	if !entry.SkipVersion {
+		t.Fatal("custom agent with empty version_args should skip version probe")
+	}
+}
+
+func TestLoadConfig_CustomAgentsRejectBuiltinProvider(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_CUSTOM_AGENTS", `[{
+		"provider": "claude",
+		"path": "king",
+		"args": ["-p", "{{prompt}}"]
+	}]`)
+
+	_, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("expected LoadConfig to reject custom agent overriding builtin provider")
+	}
+	if !strings.Contains(err.Error(), "provider \"claude\" is reserved") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // TestLoadConfig_AutoUpdateDefault_CloudOn confirms the symmetric case: a
 // daemon pointed at Multica's hosted cloud keeps the historical opt-in
 // auto-update default. We pass the WSS form of the URL to also exercise that
