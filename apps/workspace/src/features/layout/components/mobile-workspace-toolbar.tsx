@@ -5,16 +5,25 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIssueDraftStore } from "@/features/issues/stores/draft-store";
 import { useModalStore } from "@/features/modals";
-import { useWorkspaceStore } from "@/features/workspace";
+import { PomodoroStatusPill } from "@/features/time-tracking";
+import { usePathname } from "@/shared/router";
+import { getWorkspacePageTitle } from "../navigation";
 
+/**
+ * Shows a small draft indicator on the mobile issue creation control.
+ */
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
   if (!hasDraft) return null;
   return <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-brand" />;
 }
 
+/**
+ * Renders the mobile shell toolbar with the current page title and compact global actions.
+ */
 export function MobileWorkspaceToolbar() {
-  const workspaceName = useWorkspaceStore((s) => s.workspace?.name);
+  const pathname = usePathname();
+  const pageTitle = getWorkspacePageTitle(pathname);
 
   return (
     <div className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-3 backdrop-blur md:hidden">
@@ -24,10 +33,10 @@ export function MobileWorkspaceToolbar() {
       />
       <div className="min-w-0 flex-1">
         <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          Workspace
+          Page
         </span>
         <span className="block truncate text-sm font-semibold">
-          {workspaceName ?? "Workspace"}
+          {pageTitle}
         </span>
       </div>
       <Tooltip>
@@ -41,6 +50,7 @@ export function MobileWorkspaceToolbar() {
         </TooltipTrigger>
         <TooltipContent side="bottom">New issue</TooltipContent>
       </Tooltip>
+      <PomodoroStatusPill />
     </div>
   );
 }

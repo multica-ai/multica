@@ -9,6 +9,7 @@ import { useWorkspaceStore } from "@/features/workspace";
 import { GlobalSearchDialog, useSearchStore } from "@/features/search";
 import { usePathname, useRouter } from "@/shared/router";
 import { AppSidebar } from "./app-sidebar";
+import { DesktopWorkspaceHeader } from "./desktop-workspace-header";
 import { MobileWorkspaceToolbar } from "./mobile-workspace-toolbar";
 
 export function DashboardLayout({
@@ -59,6 +60,7 @@ export function DashboardLayout({
       <AppSidebar />
       <SidebarInset className="overflow-hidden">
         <MobileWorkspaceToolbar />
+        <DesktopWorkspaceHeader />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {workspace ? (
             children
