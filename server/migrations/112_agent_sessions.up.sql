@@ -25,9 +25,11 @@ CREATE INDEX idx_sessions_active
     ON agent_sessions(issue_id, agent_id)
     WHERE is_active = true;
 
--- Efficient cleanup of expired sessions.
+-- Efficient cleanup of stale sessions.  The CleanupExpired query filters on
+-- `last_active_at < cutoff WHERE is_active = true`, so the index column must
+-- be last_active_at (not expires_at) to allow a partial-index-only scan.
 CREATE INDEX idx_sessions_expiry
-    ON agent_sessions(expires_at)
+    ON agent_sessions(last_active_at)
     WHERE is_active = true;
 
 -- Chronological ordering of runs per issue+agent.
