@@ -182,12 +182,12 @@ func (h *Handler) UpdateProjectUpdate(w http.ResponseWriter, r *http.Request) {
 
 	var health pgtype.Text
 	if req.Health != nil {
-		h := strings.TrimSpace(*req.Health)
-		if !validProjectHealth(h) {
+		hv := strings.TrimSpace(*req.Health)
+		if !validProjectHealth(hv) {
 			writeError(w, http.StatusBadRequest, "health must be one of on_track, at_risk, off_track")
 			return
 		}
-		health = pgtype.Text{String: h, Valid: true}
+		health = pgtype.Text{String: hv, Valid: true}
 	}
 	var body pgtype.Text
 	if req.Body != nil {
