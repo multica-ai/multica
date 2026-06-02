@@ -13,7 +13,6 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	defer func() { testHandler.Storage = origStorage }()
 
 	t.Setenv("ALLOW_SIGNUP", "false")
-	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
 	t.Setenv("POSTHOG_API_KEY", "phc_test")
 	t.Setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
 	t.Setenv("MULTICA_PUBLIC_URL", "https://api.example.com/")
@@ -37,9 +36,6 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 	if cfg.AllowSignup {
 		t.Fatalf("allow_signup: want false, got true")
-	}
-	if cfg.GoogleClientID != "google-client-id" {
-		t.Fatalf("google_client_id: want google-client-id, got %q", cfg.GoogleClientID)
 	}
 	if cfg.PosthogKey != "phc_test" {
 		t.Fatalf("posthog_key: want phc_test, got %q", cfg.PosthogKey)

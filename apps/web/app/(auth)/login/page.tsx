@@ -4,7 +4,6 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
-import { useConfigStore } from "@multica/core/config";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import {
   paths,
@@ -29,11 +28,7 @@ import { LoginPage, validateCliCallback } from "@multica/views/auth";
 import { useT } from "@multica/views/i18n";
 
 /**
- * Pick where a logged-in user with no explicit `?next=` should land.
- * Un-onboarded users with pending invitations on their email get routed to
- * the batch /invitations page; everyone else falls through to the standard
- * resolver. A network blip on listMyInvitations is non-fatal — we fall
- * through rather than trap the user on an error screen.
+ * Pick where a logged-in user with no explicit ?next= should land.
  */
 async function resolveLoggedInDestination(
   qc: QueryClient,
@@ -58,7 +53,6 @@ function LoginPageContent() {
   const router = useRouter();
   const qc = useQueryClient();
   const { t } = useT("auth");
-  const googleClientId = useConfigStore((state) => state.googleClientId);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -67,26 +61,15 @@ function LoginPageContent() {
   const cliState = searchParams.get("cli_state") || "";
   const platform = searchParams.get("platform");
   const isDesktopHandoff = platform === "desktop" && !cliCallbackRaw;
-  // `next` carries a protected URL the user was originally headed to
-  // (e.g. /invite/{id}). With URL-driven workspaces there is no legacy
-  // "/issues" default — if `next` is absent we decide after login based on
-  // the user's workspace list. Sanitize first so a crafted `?next=https://evil`
-  // cannot bounce the user off-origin after a successful login.
   const nextUrl = sanitizeNextUrl(searchParams.get("next"));
 
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
   const [desktopError, setDesktopError] = useState("");
   const hasOnboarded = useHasOnboarded();
 
-  // Already authenticated — honor ?next= or fall back to first workspace
-  // (or /onboarding if the user has none). Skip this entire path when
-  // the user arrived to authorize the CLI.
   useEffect(() => {
     if (isLoading || !user || cliCallbackRaw) return;
     if (isDesktopHandoff) {
-      // Desktop opened the browser for login but the web session is already
-      // authenticated — mint a bearer token from the cookie session and hand
-      // it off via deep link instead of silently redirecting to the workspace.
       api
         .issueCliToken()
         .then(({ token }) => {
@@ -113,8 +96,6 @@ function LoginPageContent() {
   }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, hasOnboarded, qc]);
 
   const handleSuccess = async () => {
-    // Read the latest user snapshot directly — the closure's `hasOnboarded`
-    // was captured before login completed and would be stale here.
     const currentUser = useAuthStore.getState().user;
     const onboarded = currentUser?.onboarded_at != null;
     if (nextUrl) {
@@ -126,18 +107,6 @@ function LoginPageContent() {
     router.push(dest);
   };
 
-  // Build Google OAuth state: encode platform + next URL so the callback
-  // can redirect to the right place after login.
-  const googleState = [
-    platform === "desktop" ? "platform:desktop" : "",
-    nextUrl ? `next:${nextUrl}` : "",
-  ]
-    .filter(Boolean)
-    .join(",") || undefined;
-
-  // While the desktop handoff is in progress (or has produced a token/error),
-  // render a dedicated screen instead of flashing the login form or redirecting
-  // away to a workspace page.
   if (isDesktopHandoff && user) {
     if (desktopError) {
       return (
@@ -188,15 +157,6 @@ function LoginPageContent() {
   return (
     <LoginPage
       onSuccess={handleSuccess}
-      google={
-        googleClientId
-          ? {
-              clientId: googleClientId,
-              redirectUri: `${window.location.origin}/auth/callback`,
-              state: googleState,
-            }
-          : undefined
-      }
       cliCallback={
         cliCallbackRaw && validateCliCallback(cliCallbackRaw)
           ? { url: cliCallbackRaw, state: cliState }
