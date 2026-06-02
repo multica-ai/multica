@@ -69,6 +69,53 @@ func (q *Queries) GetLatestReviewPerPRByIssue(ctx context.Context, issueID pgtyp
 	return items, nil
 }
 
+const getUnapprovedLinkedPRsByIssue = `-- name: GetUnapprovedLinkedPRsByIssue :many
+SELECT pr.id, pr.pr_number, pr.repo_owner, pr.repo_name, pr.html_url AS pr_html_url
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE ipr.issue_id = $1
+AND NOT EXISTS (
+    SELECT 1 FROM github_pr_review r
+    WHERE r.pr_id = pr.id AND r.state = 'approved'
+)
+`
+
+type GetUnapprovedLinkedPRsByIssueRow struct {
+	ID        pgtype.UUID `json:"id"`
+	PrNumber  int32       `json:"pr_number"`
+	RepoOwner string      `json:"repo_owner"`
+	RepoName  string      `json:"repo_name"`
+	PrHtmlUrl string      `json:"pr_html_url"`
+}
+
+// For each PR linked to the issue, return those that have no 'approved' review.
+// Empty result means all linked PRs are approved (or no PRs are linked).
+func (q *Queries) GetUnapprovedLinkedPRsByIssue(ctx context.Context, issueID pgtype.UUID) ([]GetUnapprovedLinkedPRsByIssueRow, error) {
+	rows, err := q.db.Query(ctx, getUnapprovedLinkedPRsByIssue, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetUnapprovedLinkedPRsByIssueRow{}
+	for rows.Next() {
+		var i GetUnapprovedLinkedPRsByIssueRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PrNumber,
+			&i.RepoOwner,
+			&i.RepoName,
+			&i.PrHtmlUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPRReviewsByIssue = `-- name: ListPRReviewsByIssue :many
 SELECT
     r.id, r.pr_id, r.review_id, r.reviewer_login, r.reviewer_avatar_url,

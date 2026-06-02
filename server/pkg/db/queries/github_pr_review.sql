@@ -51,3 +51,15 @@ JOIN github_pull_request pr ON pr.id = r.pr_id
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 WHERE ipr.issue_id = $1
 ORDER BY r.pr_id, r.reviewer_login, r.submitted_at DESC;
+
+-- name: GetUnapprovedLinkedPRsByIssue :many
+-- For each PR linked to the issue, return those that have no 'approved' review.
+-- Empty result means all linked PRs are approved (or no PRs are linked).
+SELECT pr.id, pr.pr_number, pr.repo_owner, pr.repo_name, pr.html_url AS pr_html_url
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE ipr.issue_id = $1
+AND NOT EXISTS (
+    SELECT 1 FROM github_pr_review r
+    WHERE r.pr_id = pr.id AND r.state = 'approved'
+);

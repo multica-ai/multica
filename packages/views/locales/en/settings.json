@@ -9,9 +9,9 @@
     "language": {
       "title": "Language",
       "english": "English",
-      "chinese": "中文",
-      "korean": "한국어",
-      "japanese": "日本語",
+      "chinese": "\u4e2d\u6587",
+      "korean": "\ud55c\uad6d\uc5b4",
+      "japanese": "\u65e5\u672c\u8a9e",
       "sync_failed": "Language saved on this device, but failed to sync to your account. Other devices may show the previous language."
     },
     "timezone": {
@@ -43,7 +43,7 @@
     "click_avatar_hint": "Click to upload avatar",
     "name_label": "Name",
     "profile_description_label": "About you",
-    "profile_description_hint": "Shared with agents working on your behalf — role, stack, preferences, anything you'd tell a new collaborator on day one.",
+    "profile_description_hint": "Shared with agents working on your behalf \u2014 role, stack, preferences, anything you'd tell a new collaborator on day one.",
     "profile_description_placeholder": "e.g. Backend engineer (Go + Postgres). Prefer terse PRs and tests alongside the change.",
     "profile_description_too_long": "Profile is too long (max {{max}} characters; currently {{count}}).",
     "save": "Update Profile",
@@ -55,7 +55,7 @@
   },
   "notifications": {
     "title": "Inbox Notifications",
-    "description": "Control which events generate inbox notifications. Muted event types are silently filtered — you can still see them by visiting the issue directly.",
+    "description": "Control which events generate inbox notifications. Muted event types are silently filtered \u2014 you can still see them by visiting the issue directly.",
     "toast_failed": "Failed to update notification settings",
     "groups": {
       "assignments": {
@@ -102,10 +102,10 @@
     "toast_create_failed": "Failed to create token",
     "toast_revoked": "Token revoked",
     "toast_revoke_failed": "Failed to revoke token",
-    "metadata_prefix": "{{prefix}}... · Created {{created}} · {{lastUsed}}",
+    "metadata_prefix": "{{prefix}}... \u00b7 Created {{created}} \u00b7 {{lastUsed}}",
     "last_used_with_date": "Last used {{date}}",
     "last_used_never": "Never used",
-    "expires_with_date": " · Expires {{date}}",
+    "expires_with_date": " \u00b7 Expires {{date}}",
     "revoke_aria": "Revoke {{name}}",
     "revoke_tooltip": "Revoke",
     "revoke_dialog": {
@@ -136,7 +136,7 @@
     "issue_prefix_label": "Issue prefix",
     "issue_prefix_hint": "Used in issue numbers like {{example}}.",
     "prefix_confirm_title": "Change issue prefix?",
-    "prefix_confirm_description": "All issues will be renumbered from {{oldPrefix}}-N to {{newPrefix}}-N. External references — pull request titles, branch names, links in docs and chat — that use {{oldPrefix}}-N will stop resolving.",
+    "prefix_confirm_description": "All issues will be renumbered from {{oldPrefix}}-N to {{newPrefix}}-N. External references \u2014 pull request titles, branch names, links in docs and chat \u2014 that use {{oldPrefix}}-N will stop resolving.",
     "save": "Save",
     "saving": "Saving...",
     "manage_hint": "Only admins and owners can update workspace settings.",
@@ -193,10 +193,10 @@
     "connection_identifier_example": "MUL-123",
     "connected_to": "Connected to {{login}}",
     "connect_github": "Connect GitHub",
-    "connect_opening": "Opening…",
+    "connect_opening": "Opening\u2026",
     "connect_disabled_tooltip": "GitHub App is not configured on this server",
     "disconnect": "Disconnect",
-    "disconnecting": "Disconnecting…",
+    "disconnecting": "Disconnecting\u2026",
     "disconnect_confirm_title": "Disconnect GitHub App",
     "disconnect_confirm_description": "Multica will stop receiving webhooks for this installation. Existing PR mirrors and links are kept; reconnect any time to resume updates.",
     "disconnect_confirm_cancel": "Cancel",
@@ -220,8 +220,10 @@
     "feature_auto_link_description": "Match PR titles, bodies, and branch names against issue identifiers and create the link automatically.",
     "section_repositories": "Repositories",
     "repositories_shortcut_label": "Repository URLs live in the Repositories tab",
-    "repositories_shortcut_link": "Manage repositories →",
-    "toast_failed": "Failed to update GitHub settings"
+    "repositories_shortcut_link": "Manage repositories \u2192",
+    "toast_failed": "Failed to update GitHub settings",
+    "feature_pr_approval_gate_label": "Require PR approval before Done",
+    "feature_pr_approval_gate_description": "When enabled, issues cannot be marked as Done unless all linked pull requests have at least one approved review."
   },
   "repositories": {
     "section_title": "Repositories",
@@ -252,9 +254,9 @@
       "check_section_title": "Check for updates",
       "check_section_description": "Trigger a check now instead of waiting for the next automatic poll. Available updates download in the background and show a restart prompt when ready.",
       "up_to_date": "You're on the latest version.",
-      "downloading": "v{{version}} is downloading in the background — you'll be notified when it's ready to install.",
+      "downloading": "v{{version}} is downloading in the background \u2014 you'll be notified when it's ready to install.",
       "check_now": "Check now",
-      "checking": "Checking…"
+      "checking": "Checking\u2026"
     }
   },
   "members": {
@@ -283,7 +285,7 @@
     "confirm_action": "Confirm",
     "change_role": "Change role",
     "remove_action": "Remove from workspace",
-    "cannot_demote_last_owner_title": "Promote another member to owner first — a workspace must keep at least one owner.",
+    "cannot_demote_last_owner_title": "Promote another member to owner first \u2014 a workspace must keep at least one owner.",
     "cannot_demote_last_owner": "Cannot demote the last owner",
     "roles": {
       "owner": {
