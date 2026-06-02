@@ -1273,21 +1273,21 @@ export class ApiClient {
 
   // Agent sessions
   async listSessionsByIssue(issueId: string): Promise<AgentSession[]> {
-    const raw = await this.fetch<unknown>(\`/api/issues/${issueId}/sessions\`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/sessions`);
     return parseWithFallback<AgentSession[]>(raw, AgentSessionListSchema, EMPTY_AGENT_SESSION_LIST, {
       endpoint: "GET /api/issues/:id/sessions",
     });
   }
 
   async getSessionDetail(sessionId: string): Promise<AgentSessionDetail> {
-    const raw = await this.fetch<unknown>(\`/api/sessions/${sessionId}\`);
+    const raw = await this.fetch<unknown>(`/api/sessions/${sessionId}`);
     return parseWithFallback<AgentSessionDetail>(raw, AgentSessionDetailSchema, EMPTY_AGENT_SESSION_DETAIL, {
       endpoint: "GET /api/sessions/:id",
     });
   }
 
   async resetSession(sessionId: string): Promise<void> {
-    await this.fetch(\`/api/sessions/${sessionId}/reset\`, { method: "POST" });
+    await this.fetch(`/api/sessions/${sessionId}/reset`, { method: "POST" });
   }
 
   // Inbox
