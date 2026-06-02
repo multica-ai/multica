@@ -18,7 +18,7 @@ import { useT } from "../../i18n";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export interface MepServerEditorProps {
+export interface McpServerEditorProps {
   /** Current config value (null = no config). */
   value: McpServers | null;
   /** Called when the user modifies the config. Receives null to clear. */
@@ -357,7 +357,7 @@ function AddKeyValueRow({
 
 // ── McpServerEditor ─────────────────────────────────────────────────────────
 
-export function McpServerEditor({ value, onChange }: MepServerEditorProps) {
+export function McpServerEditor({ value, onChange }: McpServerEditorProps) {
   const { t } = useT("agents");
 
   const rows: ServerRow[] = useMemo(() => {
