@@ -11,6 +11,12 @@ vi.mock("@multica/core/api", () => ({
   },
 }));
 
+vi.mock("@multica/core/auth", () => {
+  const state = { user: { id: "u1" } };
+  const useAuthStore = (selector: (s: typeof state) => unknown) => selector(state);
+  return { useAuthStore };
+});
+
 function wrap(ui: React.ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);

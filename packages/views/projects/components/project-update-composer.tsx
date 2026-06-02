@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ProjectHealth } from "@multica/core/types/project";
 import { useCreateProjectUpdate } from "@multica/core/projects";
-import { ContentEditor } from "../../editor";
+import { ContentEditor, type ContentEditorRef } from "../../editor";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -20,18 +20,23 @@ const HEALTH_OPTIONS: { value: ProjectHealth; label: string; dot: string }[] = [
 
 export function ProjectUpdateComposer({ wsId, projectId }: ProjectUpdateComposerProps) {
   const [health, setHealth] = useState<ProjectHealth>("on_track");
-  const [body, setBody] = useState("");
+  const [hasBody, setHasBody] = useState(false);
   const [resetKey, setResetKey] = useState(0);
+  const editorRef = useRef<ContentEditorRef>(null);
   const createUpdate = useCreateProjectUpdate(wsId, projectId);
 
   const submit = () => {
     if (createUpdate.isPending) return;
+    // Read the authoritative value straight from the editor — the debounced
+    // onUpdate may not have flushed the final keystrokes yet.
+    const body = (editorRef.current?.getMarkdown() ?? "").trim();
+    if (!body) return;
     createUpdate.mutate(
       { health, body },
       {
         onSuccess: () => {
-          setBody("");
           setHealth("on_track");
+          setHasBody(false);
           setResetKey((k) => k + 1);
         },
       },
@@ -59,13 +64,14 @@ export function ProjectUpdateComposer({ wsId, projectId }: ProjectUpdateComposer
       <div className="mt-3">
         <ContentEditor
           key={`update-composer-${resetKey}`}
+          ref={editorRef}
           defaultValue=""
           placeholder="Write a project update…"
-          onUpdate={(markdown) => setBody(markdown)}
+          onUpdate={(markdown) => setHasBody(markdown.trim().length > 0)}
         />
       </div>
       <div className="mt-3 flex justify-end">
-        <Button size="sm" onClick={submit} disabled={createUpdate.isPending}>
+        <Button size="sm" onClick={submit} disabled={createUpdate.isPending || !hasBody}>
           {createUpdate.isPending ? "Posting…" : "Post update"}
         </Button>
       </div>

@@ -1,17 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { projectUpdatesOptions, useDeleteProjectUpdate } from "@multica/core/projects";
+import { useAuthStore } from "@multica/core/auth";
 import { ProjectUpdateComposer } from "./project-update-composer";
 import { ProjectUpdateCard } from "./project-update-card";
 
 interface ProjectUpdatesTabProps {
   wsId: string;
   projectId: string;
-  canModerate?: boolean;
 }
 
-export function ProjectUpdatesTab({ wsId, projectId, canModerate }: ProjectUpdatesTabProps) {
+export function ProjectUpdatesTab({ wsId, projectId }: ProjectUpdatesTabProps) {
   const { data: updates = [], isLoading } = useQuery(projectUpdatesOptions(wsId, projectId));
   const deleteUpdate = useDeleteProjectUpdate(wsId, projectId);
+  const currentUserId = useAuthStore((s) => s.user?.id);
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4">
       <ProjectUpdateComposer wsId={wsId} projectId={projectId} />
@@ -26,7 +27,10 @@ export function ProjectUpdatesTab({ wsId, projectId, canModerate }: ProjectUpdat
           <ProjectUpdateCard
             key={u.id}
             update={u}
-            canModerate={canModerate}
+            // An author can remove their own update.
+            canModerate={
+              !!currentUserId && u.author_type === "member" && u.author_id === currentUserId
+            }
             onDelete={(id) => deleteUpdate.mutate(id)}
           />
         ))
