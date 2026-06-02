@@ -289,6 +289,7 @@ func recordNotification(
 	}
 	recordCustomWebhookDeliveries(ctx, queries, recipientID, event, payloadSnapshot)
 	recordOpenclawWeixinDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+	recordMobilePushDeliveries(ctx, queries, recipientID, event, payloadSnapshot)
 }
 
 func recordMentionDingTalkDelivery(
@@ -390,6 +391,14 @@ func recordMentionDingTalkDelivery(
 			"error", err,
 		)
 	}
+}
+
+func isNotificationMutedForUser(ctx context.Context, queries *db.Queries, recipientID string, workspaceID string, notificationType string) bool {
+	if _, ok := notifTypeToGroup[notificationType]; !ok {
+		return false
+	}
+	prefs := loadUserPrefs(ctx, queries, workspaceID, []string{recipientID})
+	return isNotifMuted(prefs[recipientID], notificationType)
 }
 
 // recordDingTalkTaskDelivery creates a pending DingTalk delivery for task events
@@ -712,6 +721,82 @@ func recordOpenclawWeixinDelivery(
 			"recipient_id", recipientID,
 			"error", err,
 		)
+	}
+}
+
+func recordMobilePushDeliveries(
+	ctx context.Context,
+	queries *db.Queries,
+	recipientID string,
+	event db.NotificationEvent,
+	payloadSnapshot []byte,
+) {
+	if isNotificationMutedForUser(ctx, queries, recipientID, util.UUIDToString(event.WorkspaceID), event.Type) {
+		return
+	}
+
+	if event.CommentID.Valid {
+		exists, err := queries.ExistsDeliveryByCommentAndChannel(ctx, db.ExistsDeliveryByCommentAndChannelParams{
+			RecipientUserID: event.RecipientUserID,
+			CommentID:       event.CommentID,
+			Channel:         "mobile_push",
+		})
+		if err != nil {
+			slog.Error("failed to check mobile_push dedup",
+				"recipient_id", recipientID,
+				"comment_id", util.UUIDToString(event.CommentID),
+				"error", err,
+			)
+		}
+		if exists {
+			return
+		}
+	}
+
+	registrations, err := queries.ListEnabledMobilePushRegistrationsByUser(ctx, db.ListEnabledMobilePushRegistrationsByUserParams{
+		UserID:   parseUUID(recipientID),
+		Provider: "getui",
+		Platform: "android",
+	})
+	if err != nil {
+		slog.Error("failed to load mobile push registrations",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	for _, registration := range registrations {
+		payload := map[string]any{
+			"registration_id":    util.UUIDToString(registration.ID),
+			"provider":           registration.Provider,
+			"provider_client_id": registration.ProviderClientID,
+			"notification_event": json.RawMessage(payloadSnapshot),
+		}
+		mobilePushPayload, err := json.Marshal(payload)
+		if err != nil {
+			mobilePushPayload = payloadSnapshot
+		}
+
+		if _, err := queries.CreateTargetedNotificationDelivery(ctx, db.CreateTargetedNotificationDeliveryParams{
+			NotificationEventID: event.ID,
+			Channel:             "mobile_push",
+			TargetType:          "mobile_push_registration",
+			TargetID:            registration.ID,
+			Status:              "pending",
+			AttemptCount:        0,
+			LastError:           pgtype.Text{},
+			PayloadSnapshot:     mobilePushPayload,
+			SentAt:              pgtype.Timestamptz{},
+		}); err != nil {
+			slog.Error("failed to create mobile_push delivery record",
+				"notification_event_id", util.UUIDToString(event.ID),
+				"recipient_id", recipientID,
+				"mobile_push_registration_id", util.UUIDToString(registration.ID),
+				"error", err,
+			)
+		}
 	}
 }
 
@@ -1831,6 +1916,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 
 		recordOpenclawWeixinDelivery(ctx, queries, recipientID, event, payloadSnapshot)
 		recordDingTalkTaskDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+		recordMobilePushDeliveries(ctx, queries, recipientID, event, payloadSnapshot)
 	})
 
 	// task:failed — notify all subscribers except the agent
@@ -1954,6 +2040,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			} else {
 				recordOpenclawWeixinDelivery(ctx, queries, recipientID, event, payloadSnapshot)
 				recordDingTalkTaskDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+				recordMobilePushDeliveries(ctx, queries, recipientID, event, payloadSnapshot)
 			}
 		}
 	})

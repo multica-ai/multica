@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	notifyutil "github.com/multica-ai/multica/server/internal/notify"
@@ -39,6 +41,11 @@ func cleanupNotificationDispatchData(t *testing.T) {
 		DELETE FROM external_account_binding WHERE user_id = $1
 	`, testUserID); err != nil {
 		t.Fatalf("delete external_account_binding: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		DELETE FROM mobile_push_registration WHERE user_id = $1
+	`, testUserID); err != nil {
+		t.Fatalf("delete mobile_push_registration: %v", err)
 	}
 }
 
@@ -159,6 +166,80 @@ func loadNotificationDeliveryByEvent(t *testing.T, eventID string) db.Notificati
 		t.Fatalf("expected 1 delivery for event %s, got %d", eventID, len(deliveries))
 	}
 	return deliveries[0]
+}
+
+func seedPendingMobilePushDelivery(t *testing.T, cid string) (string, string) {
+	t.Helper()
+
+	queries := db.New(testPool)
+	registration, err := queries.UpsertMobilePushRegistration(context.Background(), db.UpsertMobilePushRegistrationParams{
+		UserID:           util.MustParseUUID(testUserID),
+		InstallationID:   "dispatch-install-" + cid,
+		Platform:         "android",
+		Provider:         "getui",
+		ProviderClientID: cid,
+		AppVersion:       pgtype.Text{},
+	})
+	if err != nil {
+		t.Fatalf("UpsertMobilePushRegistration: %v", err)
+	}
+
+	eventPayload := map[string]any{
+		"type":             "mentioned",
+		"title":            "dispatcher issue",
+		"summary":          "please review this change",
+		"body":             "please review this change",
+		"link":             "https://app.multica.test/test/issues/123",
+		"issue_identifier": "OPE-20",
+	}
+	payloadSnapshot, err := json.Marshal(map[string]any{
+		"registration_id":    util.UUIDToString(registration.ID),
+		"provider":           "getui",
+		"provider_client_id": cid,
+		"notification_event": eventPayload,
+	})
+	if err != nil {
+		t.Fatalf("marshal mobile push payload: %v", err)
+	}
+
+	event, err := queries.CreateNotificationEvent(context.Background(), db.CreateNotificationEventParams{
+		WorkspaceID:     util.MustParseUUID(testWorkspaceID),
+		RecipientUserID: util.MustParseUUID(testUserID),
+		Type:            "mentioned",
+		Severity:        "info",
+		IssueID:         pgtype.UUID{},
+		CommentID:       pgtype.UUID{},
+		ActorType:       util.StrToText("member"),
+		ActorID:         util.MustParseUUID(testUserID),
+		Title:           "dispatcher issue",
+		Body:            util.StrToText("please review this change"),
+		Link:            util.StrToText("https://app.multica.test/test/issues/123"),
+		Details:         []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateNotificationEvent: %v", err)
+	}
+
+	delivery, err := queries.CreateTargetedNotificationDelivery(context.Background(), db.CreateTargetedNotificationDeliveryParams{
+		NotificationEventID: event.ID,
+		Channel:             "mobile_push",
+		TargetType:          "mobile_push_registration",
+		TargetID:            registration.ID,
+		Status:              "pending",
+		AttemptCount:        0,
+		LastError:           pgtype.Text{},
+		PayloadSnapshot:     payloadSnapshot,
+		SentAt:              pgtype.Timestamptz{},
+	})
+	if err != nil {
+		t.Fatalf("CreateTargetedNotificationDelivery: %v", err)
+	}
+
+	return util.UUIDToString(event.ID), util.UUIDToString(delivery.ID)
+}
+
+func getuiDispatchFutureMillis() string {
+	return strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10)
 }
 
 func TestBuildDingTalkDeliveryMarkdown_SanitizesMentionLinks(t *testing.T) {
@@ -324,6 +405,133 @@ func TestDispatchPendingDingTalkDeliveries_MarksSent(t *testing.T) {
 	}
 	if messageCalls != 1 {
 		t.Fatalf("expected 1 message call, got %d", messageCalls)
+	}
+}
+
+func TestDispatchPendingMobilePushDeliveries_MarksSent(t *testing.T) {
+	cleanupNotificationDispatchData(t)
+	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
+
+	var authCalls int
+	var pushCalls int
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v2/getui-dispatch-app/auth":
+			authCalls++
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode getui auth body: %v", err)
+			}
+			if body["appkey"] != "getui-dispatch-key" || body["timestamp"] == "" || body["sign"] == "" {
+				t.Fatalf("unexpected getui auth body: %#v", body)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":0,"msg":"","data":{"expire_time":"` + getuiDispatchFutureMillis() + `","token":"dispatch-token"}}`))
+		case "/v2/getui-dispatch-app/push/single/cid":
+			pushCalls++
+			if got := r.Header.Get("token"); got != "dispatch-token" {
+				t.Fatalf("expected getui token %q, got %q", "dispatch-token", got)
+			}
+			var body struct {
+				RequestID string `json:"request_id"`
+				Settings  struct {
+					TTL int64 `json:"ttl"`
+				} `json:"settings"`
+				Audience struct {
+					CID []string `json:"cid"`
+				} `json:"audience"`
+				PushMessage struct {
+					Notification struct {
+						Title     string `json:"title"`
+						Body      string `json:"body"`
+						ClickType string `json:"click_type"`
+					} `json:"notification"`
+				} `json:"push_message"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode getui push body: %v", err)
+			}
+			if len(body.Audience.CID) != 1 || body.Audience.CID[0] != "cid-dispatch" {
+				t.Fatalf("expected cid-dispatch audience, got %#v", body.Audience.CID)
+			}
+			if body.Settings.TTL != int64(getuiPushTTL/time.Millisecond) {
+				t.Fatalf("expected ttl %d, got %d", int64(getuiPushTTL/time.Millisecond), body.Settings.TTL)
+			}
+			if body.PushMessage.Notification.Title != "OPE-20 · dispatcher issue" {
+				t.Fatalf("unexpected title: %q", body.PushMessage.Notification.Title)
+			}
+			if body.PushMessage.Notification.Body != "please review this change" {
+				t.Fatalf("unexpected body: %q", body.PushMessage.Notification.Body)
+			}
+			if body.PushMessage.Notification.ClickType != "none" {
+				t.Fatalf("unexpected click_type: %q", body.PushMessage.Notification.ClickType)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":0,"msg":"","data":{"task-dispatch":{"cid-dispatch":"successed_online"}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(apiServer.Close)
+
+	t.Setenv("GETUI_APP_ID", "getui-dispatch-app")
+	t.Setenv("GETUI_APP_KEY", "getui-dispatch-key")
+	t.Setenv("GETUI_MASTER_SECRET", "getui-dispatch-secret")
+	t.Setenv("GETUI_BASE_URL", apiServer.URL+"/v2")
+
+	eventID, _ := seedPendingMobilePushDelivery(t, "cid-dispatch")
+
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil, nil)
+
+	delivery := loadNotificationDeliveryByEvent(t, eventID)
+	if delivery.Status != "sent" {
+		t.Fatalf("expected mobile push delivery status sent, got %q", delivery.Status)
+	}
+	if delivery.AttemptCount != 1 {
+		t.Fatalf("expected attempt_count 1, got %d", delivery.AttemptCount)
+	}
+	if !delivery.SentAt.Valid {
+		t.Fatal("expected sent_at to be populated")
+	}
+	if authCalls != 1 || pushCalls != 1 {
+		t.Fatalf("expected one auth and one push, got auth=%d push=%d", authCalls, pushCalls)
+	}
+}
+
+func TestDispatchPendingMobilePushDeliveries_CancelsDisabledRegistration(t *testing.T) {
+	cleanupNotificationDispatchData(t)
+	t.Cleanup(func() { cleanupNotificationDispatchData(t) })
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("getui API should not be called for disabled registration: %s", r.URL.Path)
+	}))
+	t.Cleanup(apiServer.Close)
+
+	t.Setenv("GETUI_APP_ID", "getui-disabled-app")
+	t.Setenv("GETUI_APP_KEY", "getui-disabled-key")
+	t.Setenv("GETUI_MASTER_SECRET", "getui-disabled-secret")
+	t.Setenv("GETUI_BASE_URL", apiServer.URL+"/v2")
+
+	eventID, _ := seedPendingMobilePushDelivery(t, "cid-disabled")
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE mobile_push_registration
+		SET enabled = false
+		WHERE user_id = $1
+	`, testUserID); err != nil {
+		t.Fatalf("disable mobile_push_registration: %v", err)
+	}
+
+	dispatchPendingNotificationDeliveries(context.Background(), db.New(testPool), nil, nil)
+
+	delivery := loadNotificationDeliveryByEvent(t, eventID)
+	if delivery.Status != "cancelled" {
+		t.Fatalf("expected mobile push delivery status cancelled, got %q", delivery.Status)
+	}
+	if delivery.AttemptCount != 1 {
+		t.Fatalf("expected attempt_count 1 after claim, got %d", delivery.AttemptCount)
+	}
+	if !delivery.LastError.Valid || !strings.Contains(delivery.LastError.String, "disabled") {
+		t.Fatalf("expected disabled last_error, got %#v", delivery.LastError)
 	}
 }
 

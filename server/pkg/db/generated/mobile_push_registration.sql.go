@@ -31,6 +31,31 @@ func (q *Queries) DisableMobilePushRegistration(ctx context.Context, arg Disable
 	return err
 }
 
+const getMobilePushRegistration = `-- name: GetMobilePushRegistration :one
+SELECT id, user_id, installation_id, platform, provider, provider_client_id, app_version, enabled, last_seen_at, created_at, updated_at
+FROM mobile_push_registration
+WHERE id = $1
+`
+
+func (q *Queries) GetMobilePushRegistration(ctx context.Context, id pgtype.UUID) (MobilePushRegistration, error) {
+	row := q.db.QueryRow(ctx, getMobilePushRegistration, id)
+	var i MobilePushRegistration
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.InstallationID,
+		&i.Platform,
+		&i.Provider,
+		&i.ProviderClientID,
+		&i.AppVersion,
+		&i.Enabled,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getMobilePushRegistrationByInstallation = `-- name: GetMobilePushRegistrationByInstallation :one
 SELECT id, user_id, installation_id, platform, provider, provider_client_id, app_version, enabled, last_seen_at, created_at, updated_at
 FROM mobile_push_registration
@@ -62,6 +87,54 @@ func (q *Queries) GetMobilePushRegistrationByInstallation(ctx context.Context, a
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listEnabledMobilePushRegistrationsByUser = `-- name: ListEnabledMobilePushRegistrationsByUser :many
+SELECT id, user_id, installation_id, platform, provider, provider_client_id, app_version, enabled, last_seen_at, created_at, updated_at
+FROM mobile_push_registration
+WHERE user_id = $1
+  AND provider = $2
+  AND platform = $3
+  AND enabled = true
+ORDER BY last_seen_at DESC
+`
+
+type ListEnabledMobilePushRegistrationsByUserParams struct {
+	UserID   pgtype.UUID `json:"user_id"`
+	Provider string      `json:"provider"`
+	Platform string      `json:"platform"`
+}
+
+func (q *Queries) ListEnabledMobilePushRegistrationsByUser(ctx context.Context, arg ListEnabledMobilePushRegistrationsByUserParams) ([]MobilePushRegistration, error) {
+	rows, err := q.db.Query(ctx, listEnabledMobilePushRegistrationsByUser, arg.UserID, arg.Provider, arg.Platform)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobilePushRegistration{}
+	for rows.Next() {
+		var i MobilePushRegistration
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.InstallationID,
+			&i.Platform,
+			&i.Provider,
+			&i.ProviderClientID,
+			&i.AppVersion,
+			&i.Enabled,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertMobilePushRegistration = `-- name: UpsertMobilePushRegistration :one

@@ -26,6 +26,8 @@ const (
 	dingTalkDeliveryMaxAttempts   = 3
 	emailDeliveryMaxAttempts      = 3
 	webhookDeliveryMaxAttempts    = 3
+	getuiDeliveryMaxAttempts      = 3
+	getuiPushTTL                  = 2 * time.Hour
 	dingTalkMarkdownTitleLimit    = 80
 	dingTalkMarkdownTextLimit     = 1800
 )
@@ -71,6 +73,13 @@ type customWebhookDeliveryPayload struct {
 	NotificationEvent json.RawMessage `json:"notification_event"`
 }
 
+type mobilePushDeliveryPayload struct {
+	RegistrationID    string          `json:"registration_id"`
+	Provider          string          `json:"provider"`
+	ProviderClientID  string          `json:"provider_client_id"`
+	NotificationEvent json.RawMessage `json:"notification_event"`
+}
+
 func runNotificationDeliveryDispatcher(ctx context.Context, queries *db.Queries, emailSvc *service.EmailService, daemonHub *daemonws.Hub) {
 	ticker := time.NewTicker(notificationDispatchInterval)
 	defer ticker.Stop()
@@ -98,6 +107,11 @@ func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Quer
 			}
 			dingtalkReady = false
 		}
+	}
+	getuiCfg, err := notifyutil.LoadGetuiConfig()
+	getuiReady := err == nil
+	if err != nil && !errors.Is(err, notifyutil.ErrGetuiNotConfigured) {
+		slog.Warn("notification dispatcher: failed to load getui config", "error", err)
 	}
 
 	deliveries, err := queries.ListNotificationDeliveriesByStatus(ctx, "pending")
@@ -127,6 +141,12 @@ func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Quer
 		case "openclaw_weixin":
 			dispatched++
 			processOpenclawWeixinDelivery(ctx, queries, daemonHub, delivery)
+		case "mobile_push":
+			if !getuiReady {
+				continue
+			}
+			dispatched++
+			processMobilePushDelivery(ctx, queries, getuiCfg, delivery)
 		}
 	}
 }
@@ -350,6 +370,96 @@ func processCustomWebhookDelivery(ctx context.Context, queries *db.Queries, deli
 	}
 }
 
+func processMobilePushDelivery(ctx context.Context, queries *db.Queries, cfg notifyutil.GetuiConfig, delivery db.NotificationDelivery) {
+	claimed, err := queries.ClaimNotificationDelivery(ctx, db.ClaimNotificationDeliveryParams{
+		ID:       delivery.ID,
+		Status:   "pending",
+		Status_2: "pending",
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return
+		}
+		slog.Warn("notification dispatcher: failed to claim mobile push delivery",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var payload mobilePushDeliveryPayload
+	if err := json.Unmarshal(claimed.PayloadSnapshot, &payload); err != nil {
+		finalizeFailedMobilePushDelivery(ctx, queries, claimed, errors.New("invalid mobile push delivery payload"))
+		return
+	}
+	registrationID := strings.TrimSpace(payload.RegistrationID)
+	if registrationID == "" && claimed.TargetType == "mobile_push_registration" && claimed.TargetID.Valid {
+		registrationID = util.UUIDToString(claimed.TargetID)
+	}
+	if registrationID == "" {
+		finalizeFailedMobilePushDelivery(ctx, queries, claimed, errors.New("missing mobile push registration id"))
+		return
+	}
+
+	registrationUUID, err := util.ParseUUID(registrationID)
+	if err != nil {
+		finalizeFailedMobilePushDelivery(ctx, queries, claimed, fmt.Errorf("invalid mobile push registration id: %w", err))
+		return
+	}
+	registration, err := queries.GetMobilePushRegistration(ctx, registrationUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			cancelMobilePushDelivery(ctx, queries, claimed, "mobile push registration not found")
+			return
+		}
+		finalizeFailedMobilePushDelivery(ctx, queries, claimed, err)
+		return
+	}
+	if !registration.Enabled || registration.Provider != "getui" || registration.Platform != "android" {
+		cancelMobilePushDelivery(ctx, queries, claimed, "mobile push registration is disabled")
+		return
+	}
+
+	var eventPayload notificationEventPayload
+	if len(payload.NotificationEvent) > 0 {
+		if err := json.Unmarshal(payload.NotificationEvent, &eventPayload); err != nil {
+			finalizeFailedMobilePushDelivery(ctx, queries, claimed, errors.New("invalid nested notification payload"))
+			return
+		}
+	}
+	eventPayload = hydrateNotificationActorName(ctx, queries, claimed, eventPayload)
+
+	title := buildMobilePushTitle(eventPayload)
+	body := buildMobilePushBody(eventPayload, title)
+	requestID := strings.ReplaceAll(util.UUIDToString(claimed.ID), "-", "")
+	if len(requestID) > 32 {
+		requestID = requestID[:32]
+	}
+
+	if _, err := cfg.PushSingleByCID(ctx, notifyutil.GetuiPushMessage{
+		CID:       registration.ProviderClientID,
+		RequestID: requestID,
+		Title:     title,
+		Body:      body,
+		TTL:       int64(getuiPushTTL / time.Millisecond),
+	}); err != nil {
+		finalizeFailedMobilePushDelivery(ctx, queries, claimed, err)
+		return
+	}
+
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        claimed.ID,
+		Status:    "sent",
+		LastError: pgtype.Text{},
+		SentAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to mark mobile push delivery sent",
+			"delivery_id", util.UUIDToString(claimed.ID),
+			"error", err,
+		)
+	}
+}
+
 func buildCustomWebhookPayload(
 	delivery db.NotificationDelivery,
 	event db.NotificationEvent,
@@ -422,6 +532,47 @@ func finalizeFailedCustomWebhookDelivery(ctx context.Context, queries *db.Querie
 	)
 }
 
+func finalizeFailedMobilePushDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
+	nextStatus := "pending"
+	if delivery.AttemptCount >= getuiDeliveryMaxAttempts {
+		nextStatus = "failed"
+	}
+
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        delivery.ID,
+		Status:    nextStatus,
+		LastError: util.StrToText(truncateError(dispatchErr)),
+		SentAt:    pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to mark mobile push delivery failure",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+		return
+	}
+
+	slog.Warn("notification dispatcher: mobile push delivery failed",
+		"delivery_id", util.UUIDToString(delivery.ID),
+		"status", nextStatus,
+		"attempt_count", delivery.AttemptCount,
+		"error", dispatchErr,
+	)
+}
+
+func cancelMobilePushDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, reason string) {
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        delivery.ID,
+		Status:    "cancelled",
+		LastError: util.StrToText(reason),
+		SentAt:    pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to cancel mobile push delivery",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+	}
+}
+
 func finalizeFailedEmailDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
 	nextStatus := "pending"
 	if delivery.AttemptCount >= emailDeliveryMaxAttempts {
@@ -447,6 +598,29 @@ func finalizeFailedEmailDelivery(ctx context.Context, queries *db.Queries, deliv
 		"attempt_count", delivery.AttemptCount,
 		"error", dispatchErr,
 	)
+}
+
+func buildMobilePushTitle(event notificationEventPayload) string {
+	title := strings.TrimSpace(event.Title)
+	identifier := strings.TrimSpace(event.IssueIdentifier)
+	if title == "" {
+		title = EventTypeLabel(event.Type)
+	}
+	if identifier != "" && title != "" && title != identifier && !strings.HasPrefix(title, identifier+" ") && !strings.HasPrefix(title, identifier+" ·") {
+		return identifier + " · " + title
+	}
+	return firstValue(title, identifier, "Multica")
+}
+
+func buildMobilePushBody(event notificationEventPayload, title string) string {
+	body := ExtractSummary(event.Summary, event.Body, title, defaultIMSummaryMaxChars)
+	if body != "" && body != title {
+		return body
+	}
+	if actorName := strings.TrimSpace(event.ActorName); actorName != "" {
+		return "From: " + actorName
+	}
+	return "You have a new notification."
 }
 
 func loadDingTalkDispatchContext(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery) (dingtalkDeliveryPayload, notificationEventPayload, db.ExternalAccountBinding, error) {

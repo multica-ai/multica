@@ -33,3 +33,17 @@ FROM mobile_push_registration
 WHERE user_id = $1
   AND installation_id = $2
   AND provider = $3;
+
+-- name: GetMobilePushRegistration :one
+SELECT *
+FROM mobile_push_registration
+WHERE id = $1;
+
+-- name: ListEnabledMobilePushRegistrationsByUser :many
+SELECT *
+FROM mobile_push_registration
+WHERE user_id = $1
+  AND provider = $2
+  AND platform = $3
+  AND enabled = true
+ORDER BY last_seen_at DESC;
