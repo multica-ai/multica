@@ -69,7 +69,7 @@ export const baseOptions: BaseLayoutProps = {
     {
       icon: <MulticaMark />,
       text: externalLinkText("Multica"),
-      url: "https://multica.ai",
+      url: "https://wallts.ai",
       external: true,
     },
   ],

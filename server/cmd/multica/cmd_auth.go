@@ -17,16 +17,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 // loginTokenPrefixes are the token prefixes `multica login --token` accepts.
-// The CLI used to hardcode `mul_` only, which made it impossible to log in
-// with a Multica Cloud Node PAT (`mcn_`) even though the server happily
-// authenticates both kinds. Keep this list in sync with the prefix branches
-// in server/internal/middleware/auth.go.
-var loginTokenPrefixes = []string{"mul_", auth.CloudPATPrefix}
+// Keep this list in sync with the prefix branches in
+// server/internal/middleware/auth.go.
+var loginTokenPrefixes = []string{"mul_"}
 
 // validateLoginTokenPrefix returns nil if token starts with one of the
 // CLI-recognised PAT prefixes, or an error describing the accepted set.

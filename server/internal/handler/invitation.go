@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -154,12 +153,6 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publish(protocol.EventInvitationCreated, uuidToString(requester.WorkspaceID), "member", userID, eventPayload)
 
-	h.Analytics.Capture(analytics.TeamInviteSent(
-		uuidToString(requester.UserID),
-		uuidToString(requester.WorkspaceID),
-		email,
-		"email",
-	))
 
 	// Send invitation email (fire-and-forget).
 	if h.EmailService != nil && workspaceName != "" {
@@ -434,8 +427,7 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	// `member` and `onboarded_at` can never disagree. COALESCE in
 	// MarkUserOnboarded keeps the call idempotent for users joining
 	// additional workspaces after their first.
-	firstOnboardingCompletion := !user.OnboardedAt.Valid
-	onboardedUser, err := qtx.MarkUserOnboarded(r.Context(), user.ID)
+	_, err = qtx.MarkUserOnboarded(r.Context(), user.ID)
 	if err != nil {
 		slog.Warn("accept invitation: mark user onboarded failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", uuidToString(accepted.WorkspaceID))...)
 		writeError(w, http.StatusInternalServerError, "failed to mark user onboarded")
@@ -464,32 +456,6 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		"invitation_id": uuidToString(accepted.ID),
 		"member":        memberResp,
 	})
-
-	// days_since_invite rounds down to whole days so the funnel segments
-	// "accepted same day" cleanly from "accepted later". inv.CreatedAt is
-	// the invitation row's insertion time so this is safe to compute here.
-	var daysSinceInvite int64
-	if inv.CreatedAt.Valid {
-		daysSinceInvite = int64(time.Since(inv.CreatedAt.Time).Hours() / 24)
-	}
-	h.Analytics.Capture(analytics.TeamInviteAccepted(
-		userID,
-		wsID,
-		daysSinceInvite,
-	))
-	if firstOnboardingCompletion {
-		onboardedAt := ""
-		if onboardedUser.OnboardedAt.Valid {
-			onboardedAt = onboardedUser.OnboardedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
-		}
-		h.Analytics.Capture(analytics.OnboardingCompleted(
-			userID,
-			wsID,
-			analytics.OnboardingPathInviteAccept,
-			onboardedAt,
-			onboardedUser.CloudWaitlistEmail.Valid,
-		))
-	}
 
 	writeJSON(w, http.StatusOK, memberResp)
 }

@@ -53,12 +53,6 @@ func TestRequireHumanActor_BlocksMachineCredentials(t *testing.T) {
 		// An agent process holding its task-scoped token must not be
 		// able to read its owner's billing data.
 		{name: "task_token", actorSource: "task_token"},
-		// mcn_ cloud-node PAT — set in BOTH middleware/auth.go and
-		// middleware/daemon_auth.go's mcn_ branches. A cloud-runtime
-		// EC2 node operating on the owner's behalf is the same kind
-		// of machine credential as mat_ for billing-authorization
-		// purposes.
-		{name: "cloud_pat", actorSource: "cloud_pat"},
 	}
 
 	for _, tc := range cases {

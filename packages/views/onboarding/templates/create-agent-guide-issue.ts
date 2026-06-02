@@ -81,7 +81,7 @@ Now create an issue (or reassign an existing one) → set assignee = Multica Hel
 - **Skills** — reusable instruction packs you can attach to any agent.
 - **Squads** — groups of agents that can be assigned together.
 - **Autopilots** — scheduled or webhook-triggered runs.
-- **Docs** — https://multica.ai/docs.`;
+- **Docs** — https://wallts.ai/docs.`;
 }
 
 function zhBody(installRuntimeMention: string): string {
@@ -123,7 +123,7 @@ ${HELPER_INSTRUCTIONS.zh}
 - **Skills** —— 可复用的指令包，可挂到任何 agent 上。
 - **Squads** —— 可一起被分派的一组 agent。
 - **Autopilots** —— 定时或 webhook 触发的运行。
-- **文档** —— https://multica.ai/docs。`;
+- **文档** —— https://wallts.ai/docs。`;
 }
 
 function koBody(installRuntimeMention: string): string {
@@ -165,5 +165,5 @@ ${HELPER_INSTRUCTIONS.ko}
 - **Skills** — 어떤 agent에도 붙일 수 있는 재사용 instruction pack입니다.
 - **Squads** — 함께 배정할 수 있는 agent 그룹입니다.
 - **Autopilots** — 예약 또는 webhook으로 실행되는 작업입니다.
-- **Docs** — https://multica.ai/docs.`;
+- **Docs** — https://wallts.ai/docs.`;
 }

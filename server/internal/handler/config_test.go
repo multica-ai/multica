@@ -14,8 +14,6 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 
 	t.Setenv("ALLOW_SIGNUP", "false")
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
-	t.Setenv("POSTHOG_API_KEY", "phc_test")
-	t.Setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
 	t.Setenv("MULTICA_PUBLIC_URL", "https://api.example.com/")
 	t.Setenv("MULTICA_APP_URL", "https://app.example.com/")
 
@@ -40,15 +38,6 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 	if cfg.GoogleClientID != "google-client-id" {
 		t.Fatalf("google_client_id: want google-client-id, got %q", cfg.GoogleClientID)
-	}
-	if cfg.PosthogKey != "phc_test" {
-		t.Fatalf("posthog_key: want phc_test, got %q", cfg.PosthogKey)
-	}
-	if cfg.PosthogHost != "https://eu.i.posthog.com" {
-		t.Fatalf("posthog_host: want https://eu.i.posthog.com, got %q", cfg.PosthogHost)
-	}
-	if cfg.AnalyticsEnvironment != "dev" {
-		t.Fatalf("analytics_environment: want dev, got %q", cfg.AnalyticsEnvironment)
 	}
 	if cfg.WorkspaceCreationDisabled {
 		t.Fatalf("workspace_creation_disabled: want false by default, got true")

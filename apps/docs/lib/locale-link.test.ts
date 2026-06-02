@@ -33,11 +33,11 @@ describe("prefixLocale", () => {
   });
 
   it("leaves external URLs alone", () => {
-    expect(prefixLocale("https://multica.ai/download", "zh")).toBe(
-      "https://multica.ai/download",
+    expect(prefixLocale("https://wallts.ai/download", "zh")).toBe(
+      "https://wallts.ai/download",
     );
-    expect(prefixLocale("mailto:hello@multica.ai", "zh")).toBe(
-      "mailto:hello@multica.ai",
+    expect(prefixLocale("mailto:hello@wallts.ai", "zh")).toBe(
+      "mailto:hello@wallts.ai",
     );
     expect(prefixLocale("tel:+1234567890", "zh")).toBe("tel:+1234567890");
   });

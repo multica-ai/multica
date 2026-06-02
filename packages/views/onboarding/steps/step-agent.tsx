@@ -311,7 +311,7 @@ function AboutAgentsSide() {
       </p>
 
       <a
-        href="https://multica.ai/docs/agents-create"
+        href="https://wallts.ai/docs/agents-create"
         target="_blank"
         rel="noopener noreferrer"
         className="self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
