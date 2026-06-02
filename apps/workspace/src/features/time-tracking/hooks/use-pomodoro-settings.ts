@@ -9,6 +9,8 @@ export interface PomodoroSettings {
   auto_start_break: boolean;
   auto_start_work: boolean;
   sound_enabled: boolean;
+  /** Whether to play a subtle ticking sound while the timer is running. */
+  tick_enabled: boolean;
   /** Volume level between 0.0 and 1.0. */
   volume: number;
   white_noise: "none" | "brown" | "rain" | "cafe" | "pink";
@@ -22,6 +24,7 @@ const DEFAULT_SETTINGS: PomodoroSettings = {
   auto_start_break: false,
   auto_start_work: false,
   sound_enabled: true,
+  tick_enabled: true,
   volume: 0.8,
   white_noise: "none",
 };

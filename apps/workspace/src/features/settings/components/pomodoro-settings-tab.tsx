@@ -188,6 +188,24 @@ export function PomodoroSettingsTab() {
             />
           </div>
 
+          <div className="flex items-center justify-between">
+            <div>
+              <Label htmlFor="tick-enabled" className="cursor-pointer">
+                Tick Sound
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Play a subtle tick each second while the countdown is running.
+              </p>
+            </div>
+            <Switch
+              id="tick-enabled"
+              checked={settings.tick_enabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ tick_enabled: checked })
+              }
+            />
+          </div>
+
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>Volume</Label>
