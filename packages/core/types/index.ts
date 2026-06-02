@@ -38,6 +38,8 @@ export type {
   UpdateSkillRequest,
   SetAgentSkillsRequest,
   BatchImportSkillsResponse,
+  DiscoveredImportSkill,
+  DiscoverImportSkillsResponse,
   RuntimeUsage,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,

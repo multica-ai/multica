@@ -480,6 +480,7 @@ export interface CreateSkillRequest {
   content?: string;
   config?: Record<string, unknown>;
   files?: { path: string; content: string }[];
+  overwrite?: boolean;
 }
 
 export interface UpdateSkillRequest {
@@ -497,6 +498,15 @@ export interface SetAgentSkillsRequest {
 export interface BatchImportSkillsResponse {
   created: Skill[];
   skipped: string[];
+}
+
+export interface DiscoveredImportSkill extends CreateSkillRequest {
+  source_path: string;
+  source_url: string;
+}
+
+export interface DiscoverImportSkillsResponse {
+  skills: DiscoveredImportSkill[];
 }
 
 export type RuntimePingStatus = "pending" | "running" | "completed" | "failed" | "timeout";
@@ -918,6 +928,7 @@ export interface CreateRuntimeLocalSkillImportRequest {
   skill_key: string;
   name?: string;
   description?: string;
+  overwrite?: boolean;
 }
 
 export interface RuntimeLocalSkillImportRequest {

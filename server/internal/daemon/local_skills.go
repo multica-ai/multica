@@ -7,12 +7,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/skillbundle"
 )
 
 const (
-	maxLocalSkillFileSize   int64 = 1 << 20
-	maxLocalSkillBundleSize int64 = 8 << 20
-	maxLocalSkillFileCount        = 128
+	maxLocalSkillFileSize   int64 = skillbundle.MaxFileSize
+	maxLocalSkillBundleSize int64 = skillbundle.MaxBundleSize
+	maxLocalSkillFileCount        = skillbundle.MaxFileCount
 	// Cap how deep skill discovery descends below a runtime root. opencode
 	// stores skills two levels deep (e.g. `release/reporter/SKILL.md`); a
 	// few extra levels covers any realistic future layout while bounding
@@ -85,7 +87,10 @@ func localSkillRootsForProvider(provider string) ([]string, bool, error) {
 			filepath.Join(home, ".agents", "skills"),
 		}, true, nil
 	case "openclaw":
-		return []string{filepath.Join(home, ".openclaw", "skills")}, true, nil
+		return []string{
+			filepath.Join(home, ".openclaw", "workspace", "skills"),
+			filepath.Join(home, ".openclaw", "skills"),
+		}, true, nil
 	case "pi":
 		return []string{filepath.Join(home, ".pi", "agent", "skills")}, true, nil
 	case "cursor":
@@ -116,21 +121,6 @@ func claudeCommandsRoot(provider string) (string, error) {
 		return "", fmt.Errorf("resolve user home: %w", err)
 	}
 	return filepath.Join(home, ".claude", "commands"), nil
-}
-
-func isIgnoredLocalSkillEntry(name string) bool {
-	if name == "" {
-		return true
-	}
-	if strings.HasPrefix(name, ".") {
-		return true
-	}
-	switch strings.ToLower(name) {
-	case "license", "license.md", "license.txt":
-		return true
-	default:
-		return false
-	}
 }
 
 func normalizeLocalSkillKey(key string) (string, error) {
@@ -223,12 +213,9 @@ func collectLocalSkillFiles(skillDir string, includeContent bool) ([]SkillFileDa
 			return nil
 		}
 		if entry.IsDir() {
-			if isIgnoredLocalSkillEntry(entry.Name()) {
+			if skillbundle.ShouldSkipDir(entry.Name()) {
 				return filepath.SkipDir
 			}
-			return nil
-		}
-		if isIgnoredLocalSkillEntry(entry.Name()) || strings.EqualFold(entry.Name(), "SKILL.md") {
 			return nil
 		}
 
@@ -238,6 +225,9 @@ func collectLocalSkillFiles(skillDir string, includeContent bool) ([]SkillFileDa
 		}
 		rel = filepath.Clean(rel)
 		if rel == "." || filepath.IsAbs(rel) || strings.HasPrefix(rel, "..") {
+			return nil
+		}
+		if skillbundle.ShouldSkipFile(rel) {
 			return nil
 		}
 
@@ -356,7 +346,7 @@ func enumerateLocalSkills(
 
 	for _, entry := range entries {
 		name := entry.Name()
-		if isIgnoredLocalSkillEntry(name) {
+		if skillbundle.ShouldSkipDir(name) {
 			continue
 		}
 		path := filepath.Join(currentDir, name)
@@ -426,7 +416,7 @@ func enumerateClaudeCommands(root string, skills *[]runtimeLocalSkillSummary) {
 		if entry.IsDir() {
 			return nil
 		}
-		if isIgnoredLocalSkillEntry(entry.Name()) {
+		if skillbundle.ShouldSkipFile(entry.Name()) {
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(entry.Name()), ".md") {

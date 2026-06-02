@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/skillbundle"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type RuntimeLocalSkillRequestStatus string
@@ -66,7 +66,7 @@ type LocalSkillListStore interface {
 // runtime-local-skill import requests. Kept as a separate interface because the
 // Create signature carries import-specific fields (skill_key, optional rename).
 type LocalSkillImportStore interface {
-	Create(ctx context.Context, runtimeID, creatorID, skillKey string, name, description *string) (*RuntimeLocalSkillImportRequest, error)
+	Create(ctx context.Context, runtimeID, creatorID, skillKey string, name, description *string, overwrite bool) (*RuntimeLocalSkillImportRequest, error)
 	Get(ctx context.Context, id string) (*RuntimeLocalSkillImportRequest, error)
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
 	PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillImportRequest, error)
@@ -74,7 +74,7 @@ type LocalSkillImportStore interface {
 	// transitions them to running. Used by the heartbeat handler to deliver
 	// multiple imports per heartbeat cycle.
 	PopPendingBatch(ctx context.Context, runtimeID string, limit int) ([]*RuntimeLocalSkillImportRequest, error)
-	Complete(ctx context.Context, id string, skill SkillResponse) error
+	Complete(ctx context.Context, id string, skill SkillWithFilesResponse) error
 	Fail(ctx context.Context, id string, errMsg string) error
 }
 
@@ -148,8 +148,9 @@ type RuntimeLocalSkillImportRequest struct {
 	SkillKey     string                         `json:"skill_key"`
 	Name         *string                        `json:"name,omitempty"`
 	Description  *string                        `json:"description,omitempty"`
+	Overwrite    bool                           `json:"overwrite,omitempty"`
 	Status       RuntimeLocalSkillRequestStatus `json:"status"`
-	Skill        *SkillResponse                 `json:"skill,omitempty"`
+	Skill        *SkillWithFilesResponse        `json:"skill,omitempty"`
 	Error        string                         `json:"error,omitempty"`
 	CreatedAt    time.Time                      `json:"created_at"`
 	UpdatedAt    time.Time                      `json:"updated_at"`
@@ -277,7 +278,7 @@ func NewInMemoryLocalSkillImportStore() *InMemoryLocalSkillImportStore {
 	return &InMemoryLocalSkillImportStore{requests: make(map[string]*RuntimeLocalSkillImportRequest)}
 }
 
-func (s *InMemoryLocalSkillImportStore) Create(_ context.Context, runtimeID, creatorID, skillKey string, name, description *string) (*RuntimeLocalSkillImportRequest, error) {
+func (s *InMemoryLocalSkillImportStore) Create(_ context.Context, runtimeID, creatorID, skillKey string, name, description *string, overwrite bool) (*RuntimeLocalSkillImportRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -293,6 +294,7 @@ func (s *InMemoryLocalSkillImportStore) Create(_ context.Context, runtimeID, cre
 		SkillKey:    skillKey,
 		Name:        name,
 		Description: description,
+		Overwrite:   overwrite,
 		Status:      RuntimeLocalSkillPending,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -384,7 +386,7 @@ func (s *InMemoryLocalSkillImportStore) PopPendingBatch(_ context.Context, runti
 	return result, nil
 }
 
-func (s *InMemoryLocalSkillImportStore) Complete(_ context.Context, id string, skill SkillResponse) error {
+func (s *InMemoryLocalSkillImportStore) Complete(_ context.Context, id string, skill SkillWithFilesResponse) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -412,6 +414,7 @@ type CreateRuntimeLocalSkillImportRequest struct {
 	SkillKey    string  `json:"skill_key"`
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
+	Overwrite   bool    `json:"overwrite,omitempty"`
 }
 
 type reportedRuntimeLocalSkill struct {
@@ -549,6 +552,7 @@ func (h *Handler) InitiateImportLocalSkill(w http.ResponseWriter, r *http.Reques
 		strings.TrimSpace(req.SkillKey),
 		cleanOptionalString(req.Name),
 		cleanOptionalString(req.Description),
+		req.Overwrite,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue local skill import: "+err.Error())
@@ -709,13 +713,15 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 
 	files := make([]CreateSkillFileRequest, 0, len(body.Skill.Files))
 	for _, f := range body.Skill.Files {
-		if !validateFilePath(f.Path) {
+		path, ok := skillbundle.NormalizePath(f.Path)
+		if !ok || skillbundle.ShouldSkipFile(path) {
 			continue
 		}
+		f.Path = path
 		files = append(files, f)
 	}
 
-	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
+	input := skillCreateInput{
 		WorkspaceID: rt.WorkspaceID,
 		CreatorID:   creatorUUID,
 		Name:        name,
@@ -730,7 +736,16 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 			},
 		},
 		Files: files,
-	})
+	}
+
+	overwroteExisting := false
+	resp, err := h.createSkillWithFiles(r.Context(), input)
+	if err != nil {
+		if req.Overwrite && isUniqueViolation(err) {
+			resp, err = h.overwriteSkillWithFiles(r.Context(), input)
+			overwroteExisting = err == nil
+		}
+	}
 	if err != nil {
 		failMsg := err.Error()
 		if isUniqueViolation(err) {
@@ -745,24 +760,33 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp.SkillResponse); err != nil {
-		// We already wrote the Skill to Postgres. If the store-side Complete
-		// fails we can't leave that Skill orphaned: the daemon will retry on
-		// 5xx and re-create it, which blows up on the unique-name constraint
-		// and looks to the user like "import keeps failing". Roll back our
-		// side-effects so the retry lands on a clean slate.
-		slog.Error("local skill import Complete failed — rolling back created skill",
-			"error", err, "request_id", requestID, "skill_id", resp.ID)
-		if delErr := h.Queries.DeleteSkill(r.Context(), db.DeleteSkillParams{
-			ID:          parseUUID(resp.ID),
-			WorkspaceID: rt.WorkspaceID,
-		}); delErr != nil {
-			slog.Warn("orphan skill rollback failed", "error", delErr, "skill_id", resp.ID)
+	if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp); err != nil {
+		if overwroteExisting {
+			// The Skill UUID is intentionally preserved for overwrites. If the
+			// async store update fails, let the daemon retry the same idempotent
+			// update instead of deleting an existing skill that may be attached
+			// to agents.
+			slog.Error("local skill import Complete failed after overwrite",
+				"error", err, "request_id", requestID, "skill_id", resp.ID)
+		} else {
+			// We already wrote the Skill to Postgres. If the store-side Complete
+			// fails we can't leave that Skill orphaned: the daemon will retry on
+			// 5xx and re-create it, which blows up on the unique-name constraint
+			// and looks to the user like "import keeps failing". Roll back our
+			// side-effects so the retry lands on a clean slate.
+			slog.Error("local skill import Complete failed — rolling back created skill",
+				"error", err, "request_id", requestID, "skill_id", resp.ID)
+			if delErr := h.Queries.DeleteSkill(r.Context(), db.DeleteSkillParams{
+				ID:          parseUUID(resp.ID),
+				WorkspaceID: rt.WorkspaceID,
+			}); delErr != nil {
+				slog.Warn("orphan skill rollback failed", "error", delErr, "skill_id", resp.ID)
+			}
 		}
 		writeError(w, http.StatusInternalServerError, "failed to persist import completion")
 		return
 	}
-	h.publish(protocol.EventSkillCreated, uuidToString(rt.WorkspaceID), "member", req.CreatorID, map[string]any{"skill": resp})
+	h.publish(skillImportEvent(overwroteExisting), uuidToString(rt.WorkspaceID), "member", req.CreatorID, map[string]any{"skill": resp})
 	slog.Debug("runtime local skill imported", "runtime_id", runtimeID, "request_id", requestID, "skill_id", resp.ID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

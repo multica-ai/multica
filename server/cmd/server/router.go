@@ -712,6 +712,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListSkills)
 				r.Post("/", h.CreateSkill)
 				r.Post("/import", h.ImportSkill)
+				r.Post("/import/discover", h.DiscoverImportSkills)
 				r.Post("/batch-import", h.BatchImportSkills)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetSkill)

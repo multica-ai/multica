@@ -45,6 +45,7 @@ import type {
   UpdateSkillRequest,
   SetAgentSkillsRequest,
   BatchImportSkillsResponse,
+  DiscoverImportSkillsResponse,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
@@ -200,6 +201,7 @@ import {
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
+  EMPTY_DISCOVER_IMPORT_SKILLS_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_ISSUE_LABELS_RESPONSE,
   EMPTY_LIST_LABELS_RESPONSE,
@@ -212,6 +214,7 @@ import {
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   GroupedIssuesResponseSchema,
+  DiscoverImportSkillsResponseSchema,
   IssueLabelsResponseSchema,
   LabelSchema,
   ListIssuesResponseSchema,
@@ -2129,10 +2132,20 @@ export class ApiClient {
     await this.fetch(`/api/skills/${id}`, { method: "DELETE" });
   }
 
-  async importSkill(data: { url: string; gitee_token?: string }): Promise<Skill> {
+  async importSkill(data: { url: string; gitee_token?: string; overwrite?: boolean }): Promise<Skill> {
     return this.fetch("/api/skills/import", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  async discoverImportSkills(data: { url: string; gitee_token?: string }): Promise<DiscoverImportSkillsResponse> {
+    const raw = await this.fetch<unknown>("/api/skills/import/discover", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, DiscoverImportSkillsResponseSchema, EMPTY_DISCOVER_IMPORT_SKILLS_RESPONSE, {
+      endpoint: "POST /api/skills/import/discover",
     });
   }
 
