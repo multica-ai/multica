@@ -262,6 +262,14 @@
   margin: 0 0.125rem;
 }
 
+/* Slash command pills */
+.rich-text-editor .slash-command {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+  margin: 0 0.125rem;
+}
+
 /* Strong / emphasis */
 .rich-text-editor strong {
   font-weight: 600;

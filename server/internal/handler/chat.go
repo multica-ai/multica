@@ -684,32 +684,57 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 // Task cancellation (user-facing, with ownership check)
 // ---------------------------------------------------------------------------
 
-// CancelTaskByUser cancels a task after verifying the requesting user owns
-// the associated chat session or issue within the current workspace.
+// CancelTaskByUser cancels a task the caller is allowed to act on within the
+// current workspace.
+//
+// Tenancy is enforced uniformly through the task's owning agent: every
+// agent_task_queue row carries a NOT NULL agent_id (ON DELETE CASCADE, so the
+// agent always exists), and agents are workspace-scoped. GetAgentTaskInWorkspace
+// is therefore the single tenant guard that works regardless of which optional
+// source FK (issue / chat_session / autopilot_run) is set — which is what makes
+// run_only autopilot tasks and quick_create tasks (whose issue does not exist
+// yet) cancellable at all. Keying cancellation off issue_id / chat_session_id
+// alone is exactly what 404'd these tasks before (MUL-2827).
+//
+// On top of tenancy, two privacy models layer on:
+//   - a chat task is private to the member who started the conversation, so
+//     only that creator may cancel it;
+//   - every other task surfaces on the agent Activity tab and the workspace
+//     task snapshot, both of which hide private agents from members without
+//     access. Cancellation mirrors that gate via canAccessPrivateAgent so the
+//     id-only endpoint is never more permissive than the surface that exposes
+//     the task.
 func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	taskID := chi.URLParam(r, "taskId")
 	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task id")
 	if !ok {
 		return
 	}
 
-	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
+	task, err := h.Queries.GetAgentTaskInWorkspace(r.Context(), db.GetAgentTaskInWorkspaceParams{
+		ID:          taskUUID,
+		WorkspaceID: wsUUID,
+	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
 	}
 
-	// Verify ownership: for chat tasks, check workspace + creator;
-	// for issue tasks, verify the issue belongs to the current workspace.
 	if task.ChatSessionID.Valid {
+		// Chat privacy: only the member who opened the conversation may
+		// cancel its task, even though the workspace is shared.
 		cs, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
 			ID:          task.ChatSessionID,
-			WorkspaceID: parseUUID(workspaceID),
+			WorkspaceID: wsUUID,
 		})
 		if err != nil {
 			writeError(w, http.StatusNotFound, "task not found")
@@ -719,15 +744,23 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "not your task")
 			return
 		}
-	} else if task.IssueID.Valid {
-		issue, err := h.Queries.GetIssue(r.Context(), task.IssueID)
-		if err != nil || uuidToString(issue.WorkspaceID) != workspaceID {
+	} else {
+		// Issue / autopilot / quick_create tasks are all visible on the
+		// agent Activity tab + workspace snapshot, which gate private
+		// agents. Mirror that gate here.
+		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          task.AgentID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
 		}
-	} else {
-		writeError(w, http.StatusNotFound, "task not found")
-		return
+		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+			writeError(w, http.StatusForbidden, "you do not have access to this agent")
+			return
+		}
 	}
 
 	cancelled, err := h.TaskService.CancelTask(r.Context(), taskUUID)

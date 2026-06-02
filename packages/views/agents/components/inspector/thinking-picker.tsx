@@ -11,8 +11,8 @@ import { useT } from "../../../i18n";
 
 /**
  * Per-agent reasoning/effort picker (MUL-2339). Renders only when the
- * current model exposes a non-empty `supported_levels` set — Claude and
- * Codex today; every other provider gets nothing. The catalog is daemon-
+ * current model exposes a non-empty `supported_levels` set — Claude, Codex,
+ * and OpenCode today; every other provider gets nothing. The catalog is daemon-
  * discovered, so the value/label pairs match each CLI's own UI (`Low`,
  * `Extra high`, …) verbatim; never normalised across providers.
  *

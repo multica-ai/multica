@@ -57,6 +57,10 @@
     "searching": "Searching...",
     "no_results": "No results"
   },
+  "slash_command": {
+    "no_skills_configured": "No skills configured",
+    "no_results": "No matching skills"
+  },
   "code_block": {
     "copy_code": "Copy code",
     "show_preview": "Show preview",

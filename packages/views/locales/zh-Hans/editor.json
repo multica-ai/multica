@@ -57,6 +57,10 @@
     "searching": "搜索中...",
     "no_results": "无结果"
   },
+  "slash_command": {
+    "no_skills_configured": "暂无配置的技能",
+    "no_results": "没有匹配的技能"
+  },
   "code_block": {
     "copy_code": "复制代码",
     "show_preview": "显示预览",

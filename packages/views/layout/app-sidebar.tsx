@@ -474,7 +474,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   render={
                     <SidebarMenuButton>
                       <span className="relative">
-                        <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
+                        <WorkspaceAvatar name={workspace?.name ?? "M"} avatarUrl={workspace?.avatar_url} size="sm" />
                         {myInvitations.length > 0 && (
                           <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
@@ -520,7 +520,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           <AppLink href={paths.workspace(ws.slug).issues()} />
                         }
                       >
-                        <WorkspaceAvatar name={ws.name} size="sm" />
+                        <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
                         <span className="flex-1 truncate">{ws.name}</span>
                         {ws.id === workspace?.id && (
                           <Check className="h-3.5 w-3.5 text-primary" />

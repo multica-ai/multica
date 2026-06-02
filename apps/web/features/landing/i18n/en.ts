@@ -293,6 +293,32 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.13",
+        date: "2026-06-01",
+        title: "Skill Search and CLI Updates",
+        changes: [],
+        features: [
+          "The CLI can now search Skills and list pull requests linked to an Issue, making release checks and automation audits easier from the terminal",
+          "Teams can change squad member roles from the CLI without opening the app",
+          "Agent lists can be filtered by runtime machine, so teams can quickly find the agents tied to a device or local service",
+          "SMTP relays now support secure SMTPS connections on port 465",
+          "OpenCode runtimes can use MCP settings saved on an agent",
+          "OpenCode agents now expose model variants as thinking controls and pass the selected effort through the runtime",
+        ],
+        improvements: [
+          "Mobile Issue headers now use cleaner controls that stay easier to reach on small screens",
+          "Chat history rows show running states and actions more predictably",
+          "Importing the same Skill twice now reports a clear result instead of interrupting the flow",
+        ],
+        fixes: [
+          "Replies stay attached to the exact comment they were sent under",
+          "Claude runs are less likely to stall while prompts are being sent",
+          "Self-hosted local runtime setup links now point users to the right addresses",
+          "MCP setup guidance and runtime support checks now match what the product can run",
+          "Execution logs now clear active-row highlights after the related work finishes",
+        ],
+      },
+      {
         version: "0.3.12",
         date: "2026-05-29",
         title: "Issue Session Resume and Korean Support",

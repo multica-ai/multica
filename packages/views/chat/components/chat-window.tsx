@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, ChevronRight, Plus, Check, Trash2, Pencil, Loader2, Square } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Trash2, Pencil, Loader2, Square } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -74,9 +74,8 @@ export function ChatWindow() {
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  // Single sessions cache. The dropdown groups locally into "active" /
-  // "archived" — eliminating the separate active/all queries that used
-  // to drift during the WS-invalidate window.
+  // Single sessions cache — eliminates the separate active/all queries
+  // that used to drift during the WS-invalidate window.
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
   const { data: rawMessages, isLoading: messagesLoading } = useQuery(
     chatMessagesOptions(activeSessionId ?? ""),
@@ -99,9 +98,9 @@ export function ChatWindow() {
   const pendingTaskId = pendingTask?.task_id ?? null;
 
   // Legacy archived sessions (the old soft-archive feature was removed but
-  // pre-existing rows with status='archived' may still exist) render as
-  // read-only: dropdown keeps showing them under "archived", but ChatInput
-  // is disabled and the server still rejects POST /messages for them.
+  // pre-existing rows with status='archived' may still exist) are excluded
+  // from the history dropdown. If one is still the active session, ChatInput
+  // is disabled and the server still rejects POST /messages for it.
   const currentSession = activeSessionId
     ? sessions.find((s) => s.id === activeSessionId)
     : null;
@@ -691,10 +690,9 @@ function AgentMenuItem({
 }
 
 /**
- * Session dropdown: groups all sessions into "active" and "archived". The
- * archived branch is collapsed by default and only mounts on demand to
- * keep the menu compact when the user has many old chats. Selecting a
- * session from a different agent implicitly switches the agent too
+ * Session dropdown: a flat "Chat history" list of all non-archived
+ * sessions. Selecting a session from a different agent implicitly
+ * switches the agent too
  * (sessions are bound 1:1 to an agent). "New chat" lives in the header's
  * ⊕ button, not inside this dropdown.
  */
@@ -716,18 +714,14 @@ function SessionDropdown({
   const title = activeSession?.title?.trim() || t(($) => $.window.untitled);
   const triggerAgent = activeSession ? agentById.get(activeSession.agent_id) ?? null : null;
 
-  const { active, archived } = useMemo(() => {
-    const active: ChatSession[] = [];
-    const archived: ChatSession[] = [];
-    for (const s of sessions) {
-      if (s.status === "archived") archived.push(s);
-      else active.push(s);
-    }
-    return { active, archived };
-  }, [sessions]);
+  // The old soft-archive feature was removed. Pre-existing rows with
+  // status='archived' are legacy dead data and are excluded from history.
+  const historySessions = useMemo(
+    () => sessions.filter((s) => s.status !== "archived"),
+    [sessions],
+  );
 
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [showArchived, setShowArchived] = useState(false);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [confirmingStopId, setConfirmingStopId] = useState<string | null>(null);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
@@ -895,9 +889,7 @@ function SessionDropdown({
         ? t(($) => $.session_history.row_subtitle.completed)
         : showUnread
           ? t(($) => $.session_history.row_subtitle.new_reply)
-          : session.status === "archived"
-            ? t(($) => $.session_history.row_subtitle.archived_label)
-            : formatTimeAgo(session.updated_at);
+          : formatTimeAgo(session.updated_at);
 
     return (
       <div
@@ -918,7 +910,6 @@ function SessionDropdown({
           "group/history-row relative flex min-h-11 min-w-0 cursor-default items-center gap-2 overflow-hidden rounded-md py-1.5 pl-2 pr-2 outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring",
           isCurrent && "bg-accent/70",
           isConfirmingAction && "bg-destructive/5 hover:bg-destructive/5",
-          session.status === "archived" && "opacity-75",
         )}
       >
         {isCurrent && <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-brand" />}
@@ -933,7 +924,7 @@ function SessionDropdown({
         ) : (
           <span className="size-6 shrink-0" />
         )}
-        <div className={cn("min-w-0 flex-1", !isRenaming && !isConfirmingAction && "pr-28")}>
+        <div className="min-w-0 flex-1">
           {isRenaming ? (
             <SessionRenameInput
               initialValue={session.title ?? ""}
@@ -1036,8 +1027,8 @@ function SessionDropdown({
               </button>
             </div>
           ) : (
-            <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center">
-              <div className="flex h-7 min-w-16 items-center justify-end gap-1.5 text-xs text-muted-foreground transition-opacity group-hover/history-row:opacity-0">
+            <div className="flex shrink-0 items-center">
+              <div className="flex h-7 items-center justify-end gap-1.5 text-xs text-muted-foreground group-hover/history-row:hidden">
                 {isRunning && <Loader2 className="size-3 animate-spin" />}
                 {showCompleted && !isRunning && <Check className="size-3 text-emerald-500" />}
                 {showUnread && !isRunning && !showCompleted && (
@@ -1049,7 +1040,7 @@ function SessionDropdown({
                 )}
                 <span className={cn("truncate", (showUnread || showCompleted || isRunning) && "font-medium text-foreground")}>{trailingStatus}</span>
               </div>
-              <div className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/history-row:opacity-100">
+              <div className="hidden h-7 items-center gap-0.5 group-hover/history-row:flex">
                 {isRunning && pendingTask && (
                   <button
                     type="button"
@@ -1164,49 +1155,17 @@ function SessionDropdown({
           className="max-h-96 w-auto min-w-[max(16rem,var(--anchor-width,16rem))] max-w-96 gap-0 overflow-y-auto p-1"
           onClick={(e) => e.stopPropagation()}
         >
-          {sessions.length === 0 ? (
+          {historySessions.length === 0 ? (
             <div className="px-2 py-1.5 text-xs text-muted-foreground">
               {t(($) => $.window.no_previous)}
             </div>
           ) : (
-            <>
-              {active.length > 0 && (
-                <div role="group" aria-label={t(($) => $.window.active_group)}>
-                  <div className="px-1.5 py-1 text-xs font-medium text-muted-foreground">
-                    {t(($) => $.window.active_group)}
-                  </div>
-                  {active.map(renderRow)}
-                </div>
-              )}
-              {archived.length > 0 && (
-                <>
-                  {active.length > 0 && <div className="-mx-1 my-1 h-px bg-border" />}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setShowArchived((v) => !v);
-                    }}
-                    className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring"
-                    aria-expanded={showArchived}
-                  >
-                    {showArchived ? (
-                      <ChevronDown className="size-3" />
-                    ) : (
-                      <ChevronRight className="size-3" />
-                    )}
-                    <span>
-                      {t(($) => $.window.archived_group, { count: archived.length })}
-                    </span>
-                  </button>
-                  {showArchived && (
-                    <div role="group" aria-label={t(($) => $.window.archived_group, { count: archived.length })}>
-                      {archived.map(renderRow)}
-                    </div>
-                  )}
-                </>
-              )}
-            </>
+            <div role="group" aria-label={t(($) => $.window.history_group)}>
+              <div className="px-1.5 py-1 text-xs font-medium text-muted-foreground">
+                {t(($) => $.window.history_group)}
+              </div>
+              {historySessions.map(renderRow)}
+            </div>
           )}
         </PopoverContent>
       </Popover>

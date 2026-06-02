@@ -28,12 +28,13 @@ export {
   type QuestionnaireRaw,
 } from "./user-context";
 
-type ContentLang = "en" | "zh" | "ko";
+type ContentLang = "en" | "zh" | "ko" | "ja";
 
 const CONTENT_LANG_BY_LOCALE: Record<SupportedLocale, ContentLang> = {
   en: "en",
   "zh-Hans": "zh",
   ko: "ko",
+  ja: "ja",
 };
 
 /**

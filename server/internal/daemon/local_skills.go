@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/skill"
 )
 
 const (
@@ -128,26 +130,6 @@ func relativizeHomePath(path string) string {
 		return filepath.ToSlash("~" + string(filepath.Separator) + strings.TrimPrefix(path, prefix))
 	}
 	return filepath.ToSlash(path)
-}
-
-func parseLocalSkillFrontmatter(content string) (name, description string) {
-	if !strings.HasPrefix(content, "---") {
-		return "", ""
-	}
-	end := strings.Index(content[3:], "---")
-	if end < 0 {
-		return "", ""
-	}
-	frontmatter := content[3 : 3+end]
-	for _, line := range strings.Split(frontmatter, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "name:") {
-			name = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "name:")), "\"'")
-		} else if strings.HasPrefix(line, "description:") {
-			description = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "description:")), "\"'")
-		}
-	}
-	return name, description
 }
 
 func readLocalSkillMainFile(skillDir string) (string, error) {
@@ -336,7 +318,7 @@ func enumerateLocalSkills(
 			if err != nil {
 				continue
 			}
-			skillName, description := parseLocalSkillFrontmatter(content)
+			skillName, description := skill.ParseSkillFrontmatter(content)
 			if skillName == "" {
 				skillName = filepath.Base(path)
 			}
@@ -394,7 +376,7 @@ func loadRuntimeLocalSkillBundle(provider, skillKey string) (*runtimeLocalSkillB
 	if err != nil {
 		return nil, true, err
 	}
-	name, description := parseLocalSkillFrontmatter(content)
+	name, description := skill.ParseSkillFrontmatter(content)
 	if name == "" {
 		name = filepath.Base(skillDir)
 	}

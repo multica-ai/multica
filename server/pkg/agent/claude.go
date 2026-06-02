@@ -610,18 +610,24 @@ const (
 // only block args that would break the communication protocol, not every
 // possible dangerous flag. Workspace members are trusted to configure agents
 // sensibly, same as with custom_env.
+//
+// Shell quoting is stripped from each arg before processing: users commonly
+// type custom_args in config fields using shell syntax (e.g.
+// --deny-tool='write'). Since the daemon spawns processes directly without a
+// shell, those quotes would otherwise be passed literally to the child process,
+// which typically rejects them as unrecognised flag values.
 func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *slog.Logger) []string {
 	if len(args) == 0 {
 		return args
 	}
 	filtered := make([]string, 0, len(args))
 	skip := false
-	for _, arg := range args {
+	for _, raw := range args {
 		if skip {
 			skip = false
 			continue
 		}
-		// Check if this arg is a blocked flag or starts with "blockedFlag=".
+		arg := unshellQuoteArg(raw)
 		flag := arg
 		hasInlineValue := false
 		if idx := strings.Index(arg, "="); idx > 0 {
@@ -640,6 +646,44 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *
 		filtered = append(filtered, arg)
 	}
 	return filtered
+}
+
+// unshellQuoteArg strips a single layer of shell-style single or double quotes
+// from an argument. It handles two forms:
+//
+//   - --flag='value' or --flag="value" → --flag=value
+//   - 'standalone' or "standalone"     → standalone
+//
+// Only flag-style args (`-x=…`, `--flag=…`) get inline value unquoting. Plain
+// assignment syntax like `model="o3"` is left alone because the quotes may be
+// semantic for the child process (for example Codex `-c model="o3"`). Only
+// matching outer quotes are stripped; no escape processing is done.
+func unshellQuoteArg(arg string) string {
+	if strings.HasPrefix(arg, "-") {
+		if idx := strings.Index(arg, "="); idx > 0 {
+			value := arg[idx+1:]
+			if unquoted, ok := stripSurroundingQuotes(value); ok {
+				return arg[:idx+1] + unquoted
+			}
+			return arg
+		}
+	}
+	if unquoted, ok := stripSurroundingQuotes(arg); ok {
+		return unquoted
+	}
+	return arg
+}
+
+// stripSurroundingQuotes removes a matching outer pair of single or double
+// quotes from s and returns (unquoted, true). Returns (s, false) if s does not
+// start and end with the same quote character.
+func stripSurroundingQuotes(s string) (string, bool) {
+	if len(s) >= 2 {
+		if (s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"') {
+			return s[1 : len(s)-1], true
+		}
+	}
+	return s, false
 }
 
 // writeMcpConfigToTemp writes raw MCP config JSON to a temporary file and returns

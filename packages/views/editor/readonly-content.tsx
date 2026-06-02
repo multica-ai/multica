@@ -66,7 +66,7 @@ const sanitizeSchema = {
   ...defaultSchema,
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "mention"],
+    href: [...(defaultSchema.protocols?.href ?? []), "mention", "slash"],
   },
   attributes: {
     ...defaultSchema.attributes,
@@ -95,6 +95,7 @@ const sanitizeSchema = {
 
 function urlTransform(url: string): string {
   if (url.startsWith("mention://")) return url;
+  if (url.startsWith("slash://skill/")) return url;
   return defaultUrlTransform(url);
 }
 
@@ -137,6 +138,10 @@ function ReadonlyLink({
   children?: React.ReactNode;
 }) {
   const slug = useWorkspaceSlug();
+
+  if (href?.startsWith("slash://skill/")) {
+    return <span className="slash-command">{children}</span>;
+  }
 
   if (isMentionHref(href)) {
     const match = href.match(/^mention:\/\/(member|agent|issue|all)\/(.+)$/);

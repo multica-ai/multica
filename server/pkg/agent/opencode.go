@@ -19,6 +19,7 @@ import (
 var opencodeBlockedArgs = map[string]blockedArgMode{
 	"--format":                       blockedWithValue,  // json output format for daemon communication
 	"--dir":                          blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
+	"--variant":                      blockedWithValue,  // owned by agent.thinking_level
 	"--dangerously-skip-permissions": blockedStandalone, // daemon manages non-interactive permission prompts
 }
 
@@ -66,6 +67,9 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
+	}
+	if opts.ThinkingLevel != "" {
+		args = append(args, "--variant", opts.ThinkingLevel)
 	}
 	if opts.SystemPrompt != "" {
 		args = append(args, "--prompt", opts.SystemPrompt)

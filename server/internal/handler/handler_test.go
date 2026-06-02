@@ -1844,6 +1844,145 @@ func TestSetAgentSkillsRejectsMalformedSkillID(t *testing.T) {
 	}
 }
 
+func TestAddAgentSkillsPreservesExistingAssignments(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Add Skill Preserves Existing", nil)
+	existingSkillID := insertHandlerTestSkill(t, "add-preserve-existing", "existing body")
+	newSkillID := insertHandlerTestSkill(t, "add-preserve-new", "new body")
+
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`,
+		agentID, existingSkillID,
+	); err != nil {
+		t.Fatalf("seed existing skill assignment: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents/"+agentID+"/skills/add", map[string]any{
+		"skill_ids": []string{newSkillID},
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.AddAgentSkills(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("AddAgentSkills: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp []SkillSummaryResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	assertSkillIDsPresent(t, resp, existingSkillID, newSkillID)
+	assertAgentSkillRowCount(t, agentID, 2)
+}
+
+func TestAddAgentSkillsAddsMultipleAndIsIdempotent(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Add Multiple Skills", nil)
+	skillA := insertHandlerTestSkill(t, "add-multiple-a", "a body")
+	skillB := insertHandlerTestSkill(t, "add-multiple-b", "b body")
+
+	for attempt := 0; attempt < 2; attempt++ {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/agents/"+agentID+"/skills/add", map[string]any{
+			"skill_ids": []string{skillA, skillB},
+		})
+		req = withURLParam(req, "id", agentID)
+		testHandler.AddAgentSkills(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("AddAgentSkills attempt %d: expected 200, got %d: %s", attempt+1, w.Code, w.Body.String())
+		}
+	}
+
+	assertAgentSkillRowCount(t, agentID, 2)
+}
+
+func TestAddAgentSkillsRejectsMalformedSkillID(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Add Malformed Skill Assignment", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents/"+agentID+"/skills/add", map[string]any{
+		"skill_ids": []string{"not-a-uuid"},
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.AddAgentSkills(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("AddAgentSkills: expected 400 for malformed skill_ids, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAddAgentSkillsRejectsCrossWorkspaceSkillID(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Add Cross Workspace Skill", nil)
+	foreignSkillID := insertHandlerTestSkillInForeignWorkspace(t, "add-cross-workspace", "foreign body")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents/"+agentID+"/skills/add", map[string]any{
+		"skill_ids": []string{foreignSkillID},
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.AddAgentSkills(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("AddAgentSkills: expected 404 for cross-workspace skill_id, got %d: %s", w.Code, w.Body.String())
+	}
+	assertAgentSkillRowCount(t, agentID, 0)
+}
+
+func insertHandlerTestSkillInForeignWorkspace(t *testing.T, namePrefix, content string) string {
+	t.Helper()
+	ctx := context.Background()
+	slug := "foreign-skill-" + strings.ToLower(strings.ReplaceAll(t.Name(), "_", "-"))
+
+	var workspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, "Foreign Skill Workspace "+t.Name(), slug, "", "FSW").Scan(&workspaceID); err != nil {
+		t.Fatalf("insert foreign workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
+	})
+
+	name := namePrefix + "-" + t.Name()
+	var skillID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+		VALUES ($1, $2, $3, $4, '{}'::jsonb, $5)
+		RETURNING id
+	`, workspaceID, name, "fixture", content, testUserID).Scan(&skillID); err != nil {
+		t.Fatalf("insert foreign skill: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM skill WHERE id = $1`, skillID)
+	})
+	return skillID
+}
+
+func assertSkillIDsPresent(t *testing.T, skills []SkillSummaryResponse, wantIDs ...string) {
+	t.Helper()
+	got := make(map[string]bool, len(skills))
+	for _, s := range skills {
+		got[s.ID] = true
+	}
+	for _, want := range wantIDs {
+		if !got[want] {
+			t.Fatalf("response missing skill %s; got %+v", want, skills)
+		}
+	}
+}
+
+func assertAgentSkillRowCount(t *testing.T, agentID string, want int) {
+	t.Helper()
+	var got int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM agent_skill WHERE agent_id = $1`,
+		agentID,
+	).Scan(&got); err != nil {
+		t.Fatalf("count agent_skill: %v", err)
+	}
+	if got != want {
+		t.Fatalf("agent_skill row count: got %d, want %d", got, want)
+	}
+}
+
 func TestAgentCRUD(t *testing.T) {
 	// List agents
 	w := httptest.NewRecorder()
