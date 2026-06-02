@@ -74,14 +74,14 @@ UPDATE workflow_node SET
     description = COALESCE(sqlc.narg('description'), description),
     position_x = COALESCE(sqlc.narg('position_x')::float, position_x),
     position_y = COALESCE(sqlc.narg('position_y')::float, position_y),
-    format_schema = sqlc.narg('format_schema'),
+    format_schema = COALESCE(sqlc.narg('format_schema'), format_schema),
     worker_type = COALESCE(sqlc.narg('worker_type'), worker_type),
-    worker_id = sqlc.narg('worker_id'),
+    worker_id = COALESCE(sqlc.narg('worker_id'), worker_id),
     worker_instructions = COALESCE(sqlc.narg('worker_instructions'), worker_instructions),
     critic_type = COALESCE(sqlc.narg('critic_type'), critic_type),
-    critic_id = sqlc.narg('critic_id'),
+    critic_id = COALESCE(sqlc.narg('critic_id'), critic_id),
     critic_instructions = COALESCE(sqlc.narg('critic_instructions'), critic_instructions),
-    critic_api_url = sqlc.narg('critic_api_url'),
+    critic_api_url = COALESCE(sqlc.narg('critic_api_url'), critic_api_url),
     sort_order = COALESCE(sqlc.narg('sort_order')::int, sort_order),
     updated_at = now()
 WHERE id = $1
@@ -183,5 +183,55 @@ RETURNING *;
 UPDATE workflow_run SET
     status = 'cancelled',
     completed_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- =====================
+-- Template queries
+-- =====================
+
+-- name: ListTemplates :many
+SELECT * FROM workflow
+WHERE is_template = TRUE
+ORDER BY created_at DESC;
+
+-- name: ListWorkflowsExcludingTemplates :many
+SELECT * FROM workflow
+WHERE workspace_id = $1 AND is_template = FALSE
+  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3;
+
+-- name: SetWorkflowTemplate :one
+UPDATE workflow SET
+    is_template = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: CountWorkflowsBySourceTemplate :one
+SELECT count(*)::bigint FROM workflow
+WHERE source_template_id = $1;
+
+-- name: CreateWorkflowFromTemplate :one
+INSERT INTO workflow (
+    workspace_id, title, description, status, max_retries,
+    created_by_type, created_by_id, is_template, source_template_id
+) VALUES (
+    $1, $2, sqlc.narg('description'), $3, $4, $5, $6, FALSE, $7
+) RETURNING *;
+
+-- =====================
+-- Workflow admin management
+-- =====================
+
+-- name: ListWorkflowAdminUsers :many
+SELECT * FROM "user"
+WHERE can_manage_workflows = TRUE
+ORDER BY name ASC;
+
+-- name: SetUserWorkflowAdmin :one
+UPDATE "user" SET
+    can_manage_workflows = $2
 WHERE id = $1
 RETURNING *;

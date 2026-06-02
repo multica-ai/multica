@@ -15,6 +15,8 @@ import {
   useUpdateWorkflow,
   useDeleteWorkflow,
   useDeleteEdge,
+  useToggleWorkflowTemplate,
+  useWorkflowAdmins,
 } from "@multica/core/workflows/queries";
 import { useWorkflowEditorStore } from "@multica/core/workflows/store";
 import { useNavigation } from "../../navigation";
@@ -24,6 +26,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { useT } from "../../i18n";
+import { useAuthStore } from "@multica/core/auth";
 import { DAGCanvas } from "./dag-canvas";
 import { NodeConfigPanel } from "./node-config-panel";
 import { computeAutoLayout } from "./dag-canvas";
@@ -59,6 +62,10 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   const deleteEdgeMutation = useDeleteEdge(wsId, id!);
   const updateWorkflowMutation = useUpdateWorkflow(wsId);
   const deleteWorkflowMutation = useDeleteWorkflow(wsId);
+  const toggleTemplate = useToggleWorkflowTemplate(wsId!);
+  const { data: workflowAdmins = [] } = useWorkflowAdmins();
+  const userId = useAuthStore((s) => s.user?.id ?? null);
+  const isWorkflowAdmin = userId ? workflowAdmins.some((a) => a.id === userId) : false;
 
   // Merge cached edits into nodes for instant visual feedback
   const displayNodes = nodes.map((n) => {
@@ -230,11 +237,32 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
               {workflow.title}
             </h1>
           )}
+          {workflow?.is_template && (
+            <Badge variant="outline" className="text-[10px] px-1.5 h-4 shrink-0">模板</Badge>
+          )}
           <Badge variant="secondary" className="text-[10px] px-1.5 h-4 shrink-0">
             {t(($) => ($.status as Record<string, string>)[workflow.status as WorkflowStatus] ?? workflow.status)}
           </Badge>
         </div>
         <div className="flex items-center gap-1">
+          {isWorkflowAdmin && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                const newIsTemplate = !workflow.is_template;
+                const action = newIsTemplate ? "设为模板" : "取消模板";
+                if (!confirm(`${action}？`)) return;
+                await toggleTemplate.mutateAsync({
+                  id: id,
+                  isTemplate: newIsTemplate,
+                });
+              }}
+              disabled={toggleTemplate.isPending}
+            >
+              {workflow.is_template ? "取消模板" : "设为模板"}
+            </Button>
+          )}
           <Button
             variant={mode === "view" ? "outline" : "secondary"}
             size="sm"
@@ -266,7 +294,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
             size="sm"
             variant={workflow?.status === "active" ? "secondary" : "default"}
             onClick={handleActivateWorkflow}
-            disabled={updateWorkflowMutation.isPending}
+            disabled={updateWorkflowMutation.isPending || workflow?.is_template}
           >
             <Power className="h-3.5 w-3.5 mr-1" />
             {workflow?.status === "active" ? t(($) => $.detail.deactivate) : t(($) => $.detail.activate)}

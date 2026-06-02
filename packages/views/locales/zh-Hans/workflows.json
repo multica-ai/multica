@@ -19,7 +19,8 @@
       "active": "启用",
       "draft": "草稿",
       "paused": "暂停",
-      "archived": "归档"
+      "archived": "归档",
+      "template": "模板"
     }
   },
   "status": {

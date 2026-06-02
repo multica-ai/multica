@@ -19,7 +19,8 @@ import (
 type CreateWorkflowRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
-	Template    string `json:"template"`
+	Template    string `json:"template"`    // legacy "ai-coding" compat
+	TemplateID  string `json:"template_id"` // UUID of template to clone from
 }
 
 type UpdateWorkflowRequest struct {
@@ -69,17 +70,19 @@ type CreateEdgeRequest struct {
 // ── Response types ───────────────────────────────────────────────────────────
 
 type WorkflowResponse struct {
-	ID            string `json:"id"`
-	WorkspaceID   string `json:"workspace_id"`
-	Title         string `json:"title"`
-	Description   string `json:"description"`
-	Status        string `json:"status"`
-	MaxRetries    int32  `json:"max_retries"`
-	CreatedByType string `json:"created_by_type"`
-	CreatedByID   string `json:"created_by_id"`
-	NodeCount     int64  `json:"node_count"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	ID               string `json:"id"`
+	WorkspaceID      string `json:"workspace_id"`
+	Title            string `json:"title"`
+	Description      string `json:"description"`
+	Status           string `json:"status"`
+	MaxRetries       int32  `json:"max_retries"`
+	CreatedByType    string `json:"created_by_type"`
+	CreatedByID      string `json:"created_by_id"`
+	NodeCount        int64  `json:"node_count"`
+	IsTemplate       bool   `json:"is_template"`
+	SourceTemplateID string `json:"source_template_id"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 type WorkflowNodeResponse struct {
@@ -111,21 +114,38 @@ type WorkflowEdgeResponse struct {
 	CreatedAt    string          `json:"created_at"`
 }
 
+type ToggleTemplateRequest struct {
+	IsTemplate bool `json:"is_template"`
+}
+
+type UpdateWorkflowAdminsRequest struct {
+	UserIDs []string `json:"user_ids"`
+}
+
+type WorkflowAdminResponse struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Email              string `json:"email"`
+	CanManageWorkflows bool   `json:"can_manage_workflows"`
+}
+
 // ── Converters ───────────────────────────────────────────────────────────────
 
 func workflowToResponse(wf db.Workflow, nodeCount int64) WorkflowResponse {
 	return WorkflowResponse{
-		ID:            uuidToString(wf.ID),
-		WorkspaceID:   uuidToString(wf.WorkspaceID),
-		Title:         wf.Title,
-		Description:   wf.Description,
-		Status:        wf.Status,
-		MaxRetries:    wf.MaxRetries,
-		CreatedByType: wf.CreatedByType,
-		CreatedByID:   uuidToString(wf.CreatedByID),
-		NodeCount:     nodeCount,
-		CreatedAt:     timestampToString(wf.CreatedAt),
-		UpdatedAt:     timestampToString(wf.UpdatedAt),
+		ID:               uuidToString(wf.ID),
+		WorkspaceID:      uuidToString(wf.WorkspaceID),
+		Title:            wf.Title,
+		Description:      wf.Description,
+		Status:           wf.Status,
+		MaxRetries:       wf.MaxRetries,
+		CreatedByType:    wf.CreatedByType,
+		CreatedByID:      uuidToString(wf.CreatedByID),
+		NodeCount:        nodeCount,
+		IsTemplate:       wf.IsTemplate,
+		SourceTemplateID: uuidToString(wf.SourceTemplateID),
+		CreatedAt:        timestampToString(wf.CreatedAt),
+		UpdatedAt:        timestampToString(wf.UpdatedAt),
 	}
 }
 
@@ -172,15 +192,23 @@ func (h *Handler) loadWorkflowInWorkspace(w http.ResponseWriter, r *http.Request
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID := parseUUID(workspaceID)
 
+	// Try workspace-scoped lookup first.
 	wf, err := h.Queries.GetWorkflowInWorkspace(r.Context(), db.GetWorkflowInWorkspaceParams{
 		ID:          wfID,
 		WorkspaceID: wsUUID,
 	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "workflow not found")
-		return db.Workflow{}, false
+	if err == nil {
+		return wf, true
 	}
-	return wf, true
+
+	// Fallback: global lookup — allow cross-workspace access to templates.
+	wf, err = h.Queries.GetWorkflow(r.Context(), wfID)
+	if err == nil && wf.IsTemplate {
+		return wf, true
+	}
+
+	writeError(w, http.StatusNotFound, "workflow not found")
+	return db.Workflow{}, false
 }
 
 // ── Workflow CRUD ────────────────────────────────────────────────────────────
@@ -189,11 +217,28 @@ func (h *Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID := parseUUID(workspaceID)
 
-	workflows, err := h.Queries.ListWorkflows(r.Context(), db.ListWorkflowsParams{
-		WorkspaceID: wsUUID,
-		Limit:       100,
-		Offset:      0,
-	})
+	templateFilter := r.URL.Query().Get("template")
+
+	var workflows []db.Workflow
+	var err error
+
+	switch templateFilter {
+	case "true":
+		workflows, err = h.Queries.ListTemplates(r.Context())
+	case "false":
+		workflows, err = h.Queries.ListWorkflowsExcludingTemplates(r.Context(), db.ListWorkflowsExcludingTemplatesParams{
+			WorkspaceID: wsUUID,
+			Limit:       100,
+			Offset:      0,
+		})
+	default:
+		workflows, err = h.Queries.ListWorkflows(r.Context(), db.ListWorkflowsParams{
+			WorkspaceID: wsUUID,
+			Limit:       100,
+			Offset:      0,
+		})
+	}
+
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list workflows")
 		return
@@ -228,6 +273,27 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	wsUUID := parseUUID(workspaceID)
 	creatorUUID := parseUUID(userID)
 
+	// Handle template-based creation via template_id.
+	if req.TemplateID != "" {
+		tplID, ok := parseUUIDOrBadRequest(w, req.TemplateID, "template_id")
+		if !ok {
+			return
+		}
+		cloned, _, _, err := h.WorkflowService.CloneWorkflowFromTemplate(
+			r.Context(), tplID, wsUUID, req.Title, req.Description,
+			"member", creatorUUID,
+		)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to clone template: %v", err))
+			return
+		}
+		count, _ := h.Queries.CountWorkflowNodes(r.Context(), cloned.ID)
+		resp := workflowToResponse(cloned, count)
+		h.publish(protocol.EventWorkflowCreated, workspaceID, "member", userID, map[string]any{"workflow": resp})
+		writeJSON(w, http.StatusCreated, resp)
+		return
+	}
+
 	wf, err := h.Queries.CreateWorkflow(r.Context(), db.CreateWorkflowParams{
 		WorkspaceID:   wsUUID,
 		Title:         req.Title,
@@ -244,10 +310,10 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 
 	resp := workflowToResponse(wf, 0)
 
-		// If a template is requested, create pre-configured nodes + edges.
-		if req.Template == "ai-coding" {
-			h.createAICodingTemplate(r.Context(), wf.ID)
-		}
+	// If a template is requested, create pre-configured nodes + edges.
+	if req.Template == "ai-coding" {
+		h.createAICodingTemplate(r.Context(), wf.ID)
+	}
 	h.publish(protocol.EventWorkflowCreated, workspaceID, "member", userID, map[string]any{"workflow": resp})
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -359,6 +425,19 @@ func (h *Handler) DeleteWorkflow(w http.ResponseWriter, r *http.Request) {
 
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, _ := requireUserID(w, r)
+
+	// If this is a template, check for derived workflows.
+	if wf.IsTemplate {
+		count, err := h.Queries.CountWorkflowsBySourceTemplate(r.Context(), wf.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check template usage")
+			return
+		}
+		if count > 0 {
+			writeError(w, http.StatusConflict, fmt.Sprintf("template has %d derived workflows, cannot delete", count))
+			return
+		}
+	}
 
 	if err := h.Queries.DeleteWorkflow(r.Context(), wf.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete workflow")
@@ -624,6 +703,172 @@ func (h *Handler) DeleteWorkflowEdge(w http.ResponseWriter, r *http.Request) {
 
 	h.publish(protocol.EventWorkflowUpdated, workspaceID, "member", userID, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"deleted": edgeID})
+}
+
+// ── Template ───────────────────────────────────────────────────────────────────
+
+// ToggleWorkflowTemplate toggles a workflow's is_template flag.
+// Only members with can_manage_workflows can toggle.
+func (h *Handler) ToggleWorkflowTemplate(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	wf, ok := h.loadWorkflowInWorkspace(w, r, id)
+	if !ok {
+		return
+	}
+
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, _ := requireUserID(w, r)
+	userUUID := parseUUID(userID)
+
+	// Check can_manage_workflows permission on the user (global, not workspace-scoped).
+	currentUser, err := h.Queries.GetUser(r.Context(), userUUID)
+	if err != nil || !currentUser.CanManageWorkflows {
+		writeError(w, http.StatusForbidden, "only workflow admins can manage templates")
+		return
+	}
+
+	var req ToggleTemplateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// If setting as template, workflow must be active.
+	if req.IsTemplate && wf.Status != "active" {
+		writeError(w, http.StatusBadRequest, "workflow must be active to set as template")
+		return
+	}
+
+	updated, err := h.Queries.SetWorkflowTemplate(r.Context(), db.SetWorkflowTemplateParams{
+		ID:         wf.ID,
+		IsTemplate: req.IsTemplate,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to toggle template")
+		return
+	}
+
+	count, _ := h.Queries.CountWorkflowNodes(r.Context(), updated.ID)
+	resp := workflowToResponse(updated, count)
+	h.publish(protocol.EventWorkflowUpdated, workspaceID, "member", userID, map[string]any{"workflow": resp})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ── Workflow Admins ────────────────────────────────────────────────────────────
+
+func userToAdminResponse(u db.User) WorkflowAdminResponse {
+	return WorkflowAdminResponse{
+		ID:                 uuidToString(u.ID),
+		Name:               u.Name,
+		Email:              u.Email,
+		CanManageWorkflows: u.CanManageWorkflows,
+	}
+}
+
+// ListWorkflowAdmins returns all users with can_manage_workflows = TRUE.
+func (h *Handler) ListWorkflowAdmins(w http.ResponseWriter, r *http.Request) {
+	admins, err := h.Queries.ListWorkflowAdminUsers(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list workflow admins")
+		return
+	}
+
+	resp := make([]WorkflowAdminResponse, 0, len(admins))
+	for _, a := range admins {
+		resp = append(resp, userToAdminResponse(a))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"admins": resp})
+}
+
+// UpdateWorkflowAdmins sets can_manage_workflows for the specified users and
+// unsets it for all others. Only existing workflow admins can call this.
+func (h *Handler) UpdateWorkflowAdmins(w http.ResponseWriter, r *http.Request) {
+	userID, _ := requireUserID(w, r)
+	userUUID := parseUUID(userID)
+
+	// Only existing workflow admins can manage workflow admins.
+	currentUser, err := h.Queries.GetUser(r.Context(), userUUID)
+	if err != nil || !currentUser.CanManageWorkflows {
+		writeError(w, http.StatusForbidden, "only workflow admins can manage workflow admins")
+		return
+	}
+
+	var req UpdateWorkflowAdminsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Validate all user_ids are valid UUIDs and build set for O(1) lookup.
+	chosen := make(map[string]bool, len(req.UserIDs))
+	for _, id := range req.UserIDs {
+		if _, ok := parseUUIDOrBadRequest(w, id, "user_id"); !ok {
+			return
+		}
+		chosen[id] = true
+	}
+
+	// Get all current workflow admin users and update each.
+	allAdmins, err := h.Queries.ListWorkflowAdminUsers(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list workflow admins")
+		return
+	}
+
+	var result []WorkflowAdminResponse
+	for _, u := range allAdmins {
+		shouldBeAdmin := chosen[uuidToString(u.ID)]
+		if u.CanManageWorkflows != shouldBeAdmin {
+			updated, err := h.Queries.SetUserWorkflowAdmin(r.Context(), db.SetUserWorkflowAdminParams{
+				ID:                 u.ID,
+				CanManageWorkflows: shouldBeAdmin,
+			})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update user")
+				return
+			}
+			result = append(result, userToAdminResponse(updated))
+		} else {
+			result = append(result, userToAdminResponse(u))
+		}
+	}
+
+	h.publish(protocol.EventWorkflowUpdated, "", "member", userID, map[string]any{"admins": result})
+	writeJSON(w, http.StatusOK, map[string]any{"admins": result})
+}
+
+// InviteWorkflowAdmin looks up a user by email and grants them workflow admin permission.
+func (h *Handler) InviteWorkflowAdmin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" {
+		writeError(w, http.StatusBadRequest, "email is required")
+		return
+	}
+
+	user, err := h.Queries.GetUserByEmail(r.Context(), req.Email)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+
+	if user.CanManageWorkflows {
+		// Already an admin — return success with current state
+		writeJSON(w, http.StatusOK, userToAdminResponse(user))
+		return
+	}
+
+	updated, err := h.Queries.SetUserWorkflowAdmin(r.Context(), db.SetUserWorkflowAdminParams{
+		ID:                 user.ID,
+		CanManageWorkflows: true,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set workflow admin")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, userToAdminResponse(updated))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

@@ -593,7 +593,8 @@ type User struct {
 	Language                pgtype.Text        `json:"language"`
 	ProfileDescription      string             `json:"profile_description"`
 	// User-preferred IANA timezone for report rendering (Viewing tz). NULL means "use the browser-detected tz at render time". Affects dashboards, charts, and any "today" label shown to this user. Does not affect data materialisation — all rollups remain in UTC.
-	Timezone pgtype.Text `json:"timezone"`
+	Timezone           pgtype.Text `json:"timezone"`
+	CanManageWorkflows bool        `json:"can_manage_workflows"`
 }
 
 type VerificationCode struct {
@@ -632,16 +633,18 @@ type WebhookDelivery struct {
 }
 
 type Workflow struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Title         string             `json:"title"`
-	Description   string             `json:"description"`
-	Status        string             `json:"status"`
-	MaxRetries    int32              `json:"max_retries"`
-	CreatedByType string             `json:"created_by_type"`
-	CreatedByID   pgtype.UUID        `json:"created_by_id"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Title            string             `json:"title"`
+	Description      string             `json:"description"`
+	Status           string             `json:"status"`
+	MaxRetries       int32              `json:"max_retries"`
+	CreatedByType    string             `json:"created_by_type"`
+	CreatedByID      pgtype.UUID        `json:"created_by_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	IsTemplate       bool               `json:"is_template"`
+	SourceTemplateID pgtype.UUID        `json:"source_template_id"`
 }
 
 type WorkflowEdge struct {

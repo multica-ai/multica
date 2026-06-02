@@ -33,7 +33,8 @@
       "github": "GitHub",
       "integrations": "集成",
       "labs": "实验室",
-      "members": "成员"
+      "members": "成员",
+      "workflow-admins": "Workflow 管理员"
     }
   },
   "account": {
@@ -293,5 +294,14 @@
         "description": "创建并处理 issue"
       }
     }
+  },
+  "workflow_admins": {
+    "section_title": "Workflow 管理员（{{count}}）",
+    "save": "保存",
+    "saving": "保存中...",
+    "toast_saved": "已保存 Workflow 管理员",
+    "toast_save_failed": "保存 Workflow 管理员失败",
+    "permission_denied": "你没有管理 Workflow 管理员的权限。",
+    "empty_hint": "暂无成员。请先邀请成员加入工作区。"
   }
 }

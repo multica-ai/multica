@@ -309,6 +309,10 @@ func textToString(t pgtype.Text) string {
 	return ""
 }
 
+func textToPgText(s string) pgtype.Text {
+	return pgtype.Text{String: s, Valid: true}
+}
+
 // CancelRun cancels all active node_runs and marks the run as cancelled.
 func (s *WorkflowService) CancelRun(ctx context.Context, runID pgtype.UUID) error {
 	return s.runInTx(ctx, func(qtx *db.Queries) error {
@@ -1086,3 +1090,144 @@ const (
 	EventWorkflowNodeRunBlocked  = "workflow:node_run_blocked"
 	EventWorkflowNodeRunReviewed = "workflow:node_run_reviewed"
 )
+
+// ── Template management ──────────────────────────────────────────────────────
+
+// CloneWorkflowFromTemplate creates a new workflow by cloning a template's nodes
+// and edges within a single transaction. The new workflow is created with
+// is_template=false, source_template_id=templateID, status="draft".
+// Returns the created workflow, its nodes, and edges.
+func (s *WorkflowService) CloneWorkflowFromTemplate(
+	ctx context.Context,
+	templateID pgtype.UUID,
+	workspaceID pgtype.UUID,
+	title string,
+	description string,
+	creatorType string,
+	creatorID pgtype.UUID,
+) (db.Workflow, []db.WorkflowNode, []db.WorkflowEdge, error) {
+	var newWorkflow db.Workflow
+	var newNodes []db.WorkflowNode
+	var newEdges []db.WorkflowEdge
+
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		// 1. Verify the template exists and is actually a template.
+		tmpl, err := qtx.GetWorkflow(ctx, templateID)
+		if err != nil {
+			return fmt.Errorf("template workflow not found: %w", err)
+		}
+		if !tmpl.IsTemplate {
+			return fmt.Errorf("workflow %s is not a template", util.UUIDToString(templateID))
+		}
+
+		// 2. Create the new workflow from template.
+		desc := pgtype.Text{String: description, Valid: true}
+		wf, err := qtx.CreateWorkflowFromTemplate(ctx, db.CreateWorkflowFromTemplateParams{
+			WorkspaceID:      workspaceID,
+			Title:            title,
+			Description:      desc,
+			Status:           "draft",
+			MaxRetries:       tmpl.MaxRetries,
+			CreatedByType:    creatorType,
+			CreatedByID:      creatorID,
+			SourceTemplateID: templateID,
+		})
+		if err != nil {
+			return fmt.Errorf("create workflow from template: %w", err)
+		}
+		newWorkflow = wf
+
+		// 3. Clone all template nodes with new UUIDs and new workflow_id.
+		tmplNodes, err := qtx.ListWorkflowNodes(ctx, templateID)
+		if err != nil {
+			return fmt.Errorf("list template nodes: %w", err)
+		}
+		oldToNew := make(map[string]pgtype.UUID, len(tmplNodes))
+		for _, node := range tmplNodes {
+			n, err := qtx.CreateWorkflowNode(ctx, db.CreateWorkflowNodeParams{
+				WorkflowID:         wf.ID,
+				Title:              node.Title,
+				Description:        textToPgText(node.Description),
+				PositionX:          node.PositionX,
+				PositionY:          node.PositionY,
+				FormatSchema:       node.FormatSchema,
+				WorkerType:         node.WorkerType,
+				WorkerID:           node.WorkerID,
+				WorkerInstructions: textToPgText(node.WorkerInstructions),
+				CriticType:         node.CriticType,
+				CriticID:           node.CriticID,
+				CriticInstructions: textToPgText(node.CriticInstructions),
+				CriticApiUrl:       node.CriticApiUrl,
+				SortOrder:          node.SortOrder,
+			})
+			if err != nil {
+				return fmt.Errorf("clone node %s: %w", node.Title, err)
+			}
+			oldToNew[util.UUIDToString(node.ID)] = n.ID
+			newNodes = append(newNodes, n)
+		}
+
+		// 4. Clone all template edges with remapped node IDs.
+		tmplEdges, err := qtx.ListWorkflowEdges(ctx, templateID)
+		if err != nil {
+			return fmt.Errorf("list template edges: %w", err)
+		}
+		for _, edge := range tmplEdges {
+			newSrc, ok := oldToNew[util.UUIDToString(edge.SourceNodeID)]
+			if !ok {
+				continue
+			}
+			newTgt, ok := oldToNew[util.UUIDToString(edge.TargetNodeID)]
+			if !ok {
+				continue
+			}
+			e, err := qtx.CreateWorkflowEdge(ctx, db.CreateWorkflowEdgeParams{
+				WorkflowID:   wf.ID,
+				SourceNodeID: newSrc,
+				TargetNodeID: newTgt,
+				Condition:    edge.Condition,
+			})
+			if err != nil {
+				return fmt.Errorf("clone edge: %w", err)
+			}
+			newEdges = append(newEdges, e)
+		}
+		return nil
+	})
+	if err != nil {
+		return db.Workflow{}, nil, nil, err
+	}
+	return newWorkflow, newNodes, newEdges, nil
+}
+
+// SetWorkflowTemplate toggles the is_template flag on a workflow.
+func (s *WorkflowService) SetWorkflowTemplate(ctx context.Context, workflowID pgtype.UUID, isTemplate bool) (db.Workflow, error) {
+	return s.Queries.SetWorkflowTemplate(ctx, db.SetWorkflowTemplateParams{
+		ID:         workflowID,
+		IsTemplate: isTemplate,
+	})
+}
+
+// DeleteWorkflowWithTemplateCheck checks whether a template workflow has
+// derived workflows (via source_template_id). If count > 0, it returns an
+// error. Callers should use this before deleting a template workflow.
+func (s *WorkflowService) DeleteWorkflowWithTemplateCheck(ctx context.Context, workflowID pgtype.UUID) error {
+	count, err := s.Queries.CountWorkflowsBySourceTemplate(ctx, workflowID)
+	if err != nil {
+		return fmt.Errorf("count derived workflows: %w", err)
+	}
+	if count > 0 {
+		return fmt.Errorf("template has %d derived workflows, cannot delete", count)
+	}
+	return nil
+}
+
+// CanManageWorkflows checks whether the given user has the
+// can_manage_workflows permission bit set (global, not workspace-scoped).
+func (s *WorkflowService) CanManageWorkflows(ctx context.Context, userID pgtype.UUID) (bool, error) {
+	user, err := s.Queries.GetUser(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("get user: %w", err)
+	}
+	return user.CanManageWorkflows, nil
+}

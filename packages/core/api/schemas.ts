@@ -633,6 +633,8 @@ const WorkflowSchema = z.object({
   created_by_type: z.string().default("member"),
   created_by_id: z.string().default(""),
   node_count: z.number().default(0),
+  is_template: z.boolean().default(false),
+  source_template_id: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -656,6 +658,8 @@ export const EMPTY_WORKFLOW: Workflow = {
   created_by_type: "member",
   created_by_id: "",
   node_count: 0,
+  is_template: false,
+  source_template_id: null,
   created_at: "",
   updated_at: "",
 };
@@ -793,3 +797,18 @@ export const MyWorkflowTasksResponseSchema = z.object({
 }).loose();
 
 export const EMPTY_MY_WORKFLOW_TASKS_RESPONSE = { node_runs: [], total: 0 };
+
+// ---------------------------------------------------------------------------
+// Workflow admins schemas
+// ---------------------------------------------------------------------------
+
+export const WorkflowAdminsResponseSchema = z.object({
+  admins: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    email: z.string(),
+    can_manage_workflows: z.boolean().default(false),
+  }).loose()).default([]),
+}).loose();
+
+export const EMPTY_WORKFLOW_ADMINS_RESPONSE = { admins: [] };

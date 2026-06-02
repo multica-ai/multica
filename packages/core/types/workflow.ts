@@ -18,6 +18,8 @@ export interface Workflow {
   created_by_type: string;
   created_by_id: string;
   node_count: number;
+  is_template: boolean;
+  source_template_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -93,6 +95,7 @@ export interface CreateWorkflowRequest {
   title: string;
   description?: string;
   template?: string;
+  template_id?: string;
 }
 
 export interface UpdateWorkflowRequest {
@@ -161,4 +164,19 @@ export interface ListWorkflowRunsResponse {
 export interface MyWorkflowTaskResponse {
   node_runs: WorkflowNodeRun[];
   total: number;
+}
+
+export interface ToggleTemplateRequest {
+  is_template: boolean;
+}
+
+export interface WorkflowAdmin {
+  id: string;
+  name: string;
+  email: string;
+  can_manage_workflows: boolean;
+}
+
+export interface UpdateWorkflowAdminsRequest {
+  user_ids: string[];
 }
