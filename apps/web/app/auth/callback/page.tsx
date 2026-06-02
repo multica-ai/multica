@@ -5,10 +5,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import { needsSourceBackfill } from "@multica/core/onboarding";
 import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
-import { readSourceBackfillDismissCount } from "@multica/views/onboarding";
 import {
   Card,
   CardHeader,
@@ -102,27 +100,11 @@ function CallbackContent() {
 
           // 3. Default: hand off to the resolver (onboarding for first-timers,
           //    first workspace for returning users, /workspaces/new for
-          //    onboarded users with zero workspaces).
-          const dest = resolvePostAuthDestination(wsList, onboarded);
-
-          // 4. Source-backfill detour: onboarded users who never recorded
-          //    where they heard about us get one prompt before landing on
-          //    `dest`. Predicate consults the per-user dismiss counter
-          //    from the same localStorage bucket the prompt writes to —
-          //    otherwise a user who already hit the close-X cap on this
-          //    browser would still be force-routed through /onboarding/
-          //    source on every login (the route page would then bounce
-          //    them onward once auth/workspace state settles, but only
-          //    after flashing a blank detour and re-firing the
-          //    `source_backfill_shown` event).
-          const dismissCount = readSourceBackfillDismissCount(
-            loggedInUser.id,
-          );
-          if (needsSourceBackfill(loggedInUser, dismissCount)) {
-            router.push(paths.sourceBackfill(dest));
-            return;
-          }
-          router.push(dest);
+          //    onboarded users with zero workspaces). Source-attribution
+          //    backfill for onboarded users with no recorded source is
+          //    handled by `<SourceBackfillModal />` inside the dashboard
+          //    shell — not a route detour, so we route straight to dest.
+          router.push(resolvePostAuthDestination(wsList, onboarded));
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");

@@ -2,13 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { NewWorkspacePage } from "@multica/views/workspace/new-workspace-page";
 import { InvitePage } from "@multica/views/invite";
 import { InvitationsPage } from "@multica/views/invitations";
-import {
-  OnboardingFlow,
-  SourceBackfillView,
-  useSourceBackfillDismissCount,
-} from "@multica/views/onboarding";
+import { OnboardingFlow } from "@multica/views/onboarding";
 import { useNavigation } from "@multica/views/navigation";
-import { useAuthStore } from "@multica/core/auth";
 import { paths } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
@@ -42,8 +37,6 @@ function WindowOverlayInner() {
   const close = useWindowOverlayStore((s) => s.close);
   const { push } = useNavigation();
   const { data: wsList = [] } = useQuery(workspaceListOptions());
-  const userId = useAuthStore((s) => s.user?.id ?? null);
-  const [, bumpDismissCount] = useSourceBackfillDismissCount(userId);
 
   if (!overlay) return null;
 
@@ -67,15 +60,6 @@ function WindowOverlayInner() {
         />
       )}
       {overlay.type === "invitations" && <InvitationsPage />}
-      {overlay.type === "source-backfill" && (
-        <SourceBackfillView
-          onComplete={() => close()}
-          onClose={() => {
-            bumpDismissCount();
-            close();
-          }}
-        />
-      )}
       {overlay.type === "onboarding" && (
         <OnboardingFlow
           onComplete={(ws, issueId) => {

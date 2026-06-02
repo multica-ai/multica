@@ -3,8 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { pickLocale, type SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
-import { needsSourceBackfill, useWelcomeStore } from "@multica/core/onboarding";
-import { useSourceBackfillDismissCount } from "@multica/views/onboarding";
+import { useWelcomeStore } from "@multica/core/onboarding";
 import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import { useHasOnboarded } from "@multica/core/paths";
@@ -192,38 +191,6 @@ function AppContent() {
     return undefined;
   }, [user, workspaceListFetched, wsCount, workspaces, hasOnboarded, qc]);
 
-  // Source-backfill prompt for already-onboarded users whose
-  // questionnaire never recorded a source. Opens at most once per
-  // (session, user) — once dispatched, the close-X path bumps a
-  // localStorage counter (read inside the view), and the per-session
-  // ref below prevents re-opening on every Zustand tick after the user
-  // closes it. The predicate already gates out users whose dismiss
-  // count hit the cap, so the next session honors the user's decision
-  // without us needing to re-check here.
-  const sourceBackfillDispatchedRef = useRef<string | null>(null);
-  const [sourceBackfillDismissCount] = useSourceBackfillDismissCount(
-    user?.id ?? null,
-  );
-  useEffect(() => {
-    if (!user) {
-      sourceBackfillDispatchedRef.current = null;
-      return;
-    }
-    if (sourceBackfillDispatchedRef.current === user.id) return;
-    if (!workspaceListFetched) return;
-    if (!hasOnboarded || wsCount === 0) return;
-    if (!needsSourceBackfill(user, sourceBackfillDismissCount)) return;
-    const { overlay, open: openOverlay } = useWindowOverlayStore.getState();
-    if (overlay) return;
-    sourceBackfillDispatchedRef.current = user.id;
-    openOverlay({ type: "source-backfill" });
-  }, [
-    user,
-    workspaceListFetched,
-    wsCount,
-    hasOnboarded,
-    sourceBackfillDismissCount,
-  ]);
 
   // Validate persisted tab state against the current user's workspace list,
   // and pick an active workspace if none is set. Runs in useLayoutEffect
