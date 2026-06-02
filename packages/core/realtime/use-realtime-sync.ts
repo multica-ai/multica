@@ -261,6 +261,14 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       },
+      // project_update:created/updated/deleted — invalidate the per-project
+      // updates list AND the project list/detail so derived health (computed
+      // from the latest update) refreshes. projectKeys.all covers all three
+      // (list, detail, and the nested updates key under detail).
+      project_update: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      },
       squad: () => {
         const wsId = getCurrentWsId();
         if (wsId) {
