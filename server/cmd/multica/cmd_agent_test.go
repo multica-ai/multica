@@ -509,6 +509,19 @@ func TestAgentAvatarHappyPath(t *testing.T) {
 		t.Fatalf("write test png: %v", err)
 	}
 
+	var putCalled bool
+	putServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		putCalled = true
+		if r.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", r.Method)
+		}
+		if got := r.Header.Get("Content-Type"); got != "image/png" {
+			t.Errorf("expected signed Content-Type image/png, got %q", got)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer putServer.Close()
+
 	var gotPaths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPaths = append(gotPaths, r.URL.Path)
@@ -533,7 +546,24 @@ func TestAgentAvatarHappyPath(t *testing.T) {
 			} else {
 				t.Errorf("unexpected method: %s", r.Method)
 			}
-		case "/api/upload-file":
+		case "/api/attachments/upload/initiate":
+			if r.Method != http.MethodPost {
+				t.Errorf("expected POST, got %s", r.Method)
+			}
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			if body["content_type"] != "image/png" {
+				t.Errorf("unexpected content_type: %v", body["content_type"])
+			}
+			if body["issue_id"] != nil || body["comment_id"] != nil || body["chat_session_id"] != nil {
+				t.Errorf("expected unbound avatar upload context, got: %v", body)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"upload_url":   putServer.URL + "/object",
+				"upload_token": "token-1",
+				"headers":      map[string]string{"Content-Type": "image/png"},
+			})
+		case "/api/attachments/upload/complete":
 			if r.Method != http.MethodPost {
 				t.Errorf("expected POST, got %s", r.Method)
 			}
@@ -563,8 +593,11 @@ func TestAgentAvatarHappyPath(t *testing.T) {
 		t.Fatalf("runAgentAvatar: %v", err)
 	}
 
-	if len(gotPaths) != 3 {
-		t.Fatalf("expected 3 API calls, got %d: %v", len(gotPaths), gotPaths)
+	if !putCalled {
+		t.Fatal("expected direct PUT to be called")
+	}
+	if strings.Join(gotPaths, ",") != "/api/agents/agent-123,/api/attachments/upload/initiate,/api/attachments/upload/complete,/api/agents/agent-123" {
+		t.Fatalf("unexpected API paths: %v", gotPaths)
 	}
 }
 
@@ -678,7 +711,7 @@ func TestAgentAvatarUploadFailure(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/agents/agent-123":
 			json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
-		case "/api/upload-file":
+		case "/api/attachments/upload/initiate":
 			w.WriteHeader(http.StatusInternalServerError)
 			io.WriteString(w, "upload failed")
 		default:
@@ -716,6 +749,14 @@ func TestAgentAvatarUpdateFailure(t *testing.T) {
 		t.Fatalf("write test png: %v", err)
 	}
 
+	putServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer putServer.Close()
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/agents/agent-123":
@@ -725,7 +766,12 @@ func TestAgentAvatarUpdateFailure(t *testing.T) {
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]any{"id": "agent-123", "name": "TestAgent"})
-		case "/api/upload-file":
+		case "/api/attachments/upload/initiate":
+			json.NewEncoder(w).Encode(map[string]any{
+				"upload_url":   putServer.URL + "/object",
+				"upload_token": "token-1",
+			})
+		case "/api/attachments/upload/complete":
 			json.NewEncoder(w).Encode(map[string]any{
 				"id":  "att-456",
 				"url": "https://cdn.example.com/avatars/agent-123.png",
