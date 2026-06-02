@@ -1345,3 +1345,74 @@ func TestListFieldOptionsReturnsNilWhenNoInlineOptionsAnywhere(t *testing.T) {
 		t.Fatalf("expected nil, got %#v", opts)
 	}
 }
+
+// fakeFeishuTaskService records reconcileSyncedIssueTasks side effects so the
+// cancel-only-on-terminal-status contract can be verified without a database.
+type fakeFeishuTaskService struct {
+	cancelled []pgtype.UUID
+	enqueued  []pgtype.UUID
+}
+
+func (f *fakeFeishuTaskService) CancelTasksForIssue(_ context.Context, issueID pgtype.UUID) error {
+	f.cancelled = append(f.cancelled, issueID)
+	return nil
+}
+
+func (f *fakeFeishuTaskService) EnqueueTaskForIssue(_ context.Context, issue db.Issue, _ ...pgtype.UUID) (db.AgentTaskQueue, error) {
+	f.enqueued = append(f.enqueued, issue.ID)
+	return db.AgentTaskQueue{}, nil
+}
+
+func issueWithID(seed byte) pgtype.UUID {
+	var u pgtype.UUID
+	for i := range u.Bytes {
+		u.Bytes[i] = seed + byte(i)
+	}
+	u.Valid = true
+	return u
+}
+
+func TestReconcileSyncedIssueTasksCancelsOnTerminalStatus(t *testing.T) {
+	for _, status := range []string{"done", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			fake := &fakeFeishuTaskService{}
+			svc := &FeishuProjectSyncService{TaskService: fake}
+			issue := db.Issue{ID: issueWithID(1), Status: status}
+
+			svc.reconcileSyncedIssueTasks(context.Background(), issue)
+
+			if len(fake.cancelled) != 1 {
+				t.Fatalf("terminal status %q: cancelled %d times, want 1", status, len(fake.cancelled))
+			}
+			if len(fake.enqueued) != 0 {
+				t.Fatalf("terminal status %q: enqueued %d times, want 0", status, len(fake.enqueued))
+			}
+		})
+	}
+}
+
+// Regression: a non-terminal sync (e.g. an assignee change) must NOT cancel
+// running tasks. Previously reconcileSyncedIssueTasks cancelled tasks whenever
+// the assignee differed from the prior value, killing in-progress agent work.
+func TestReconcileSyncedIssueTasksDoesNotCancelOnNonTerminalStatus(t *testing.T) {
+	for _, status := range []string{"todo", "in_progress", "backlog"} {
+		t.Run(status, func(t *testing.T) {
+			fake := &fakeFeishuTaskService{}
+			svc := &FeishuProjectSyncService{TaskService: fake}
+			// Assignee is a member (not an agent), so enqueue short-circuits
+			// without touching the database — isolating the cancel decision.
+			issue := db.Issue{
+				ID:           issueWithID(2),
+				Status:       status,
+				AssigneeType: pgtype.Text{String: "member", Valid: true},
+				AssigneeID:   issueWithID(9),
+			}
+
+			svc.reconcileSyncedIssueTasks(context.Background(), issue)
+
+			if len(fake.cancelled) != 0 {
+				t.Fatalf("non-terminal status %q: cancelled %d times, want 0", status, len(fake.cancelled))
+			}
+		})
+	}
+}
