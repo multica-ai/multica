@@ -135,6 +135,52 @@ multica daemon status
 3. Go to **Settings → Agents** and create a new agent
 4. Create an issue and assign it to your agent — it will pick up the task automatically
 
+### Optional — Speech ASR/TTS
+
+Voice input/output is server-proxied. Mobile clients never receive provider keys, and the backend does not log raw audio bytes, full transcripts, or provider credentials.
+
+V1 self-host supports these modes:
+
+| Mode | Env | Use case |
+|---|---|---|
+| Disabled | `MULTICA_SPEECH_MODE=disabled` | Default. Speech endpoints return `provider_missing` with HTTP 501 so clients can fall back to typed text. |
+| Mock | `MULTICA_SPEECH_MODE=mock` | Local demo mode. Returns deterministic fake ASR/TTS without calling a paid provider. |
+| External | `MULTICA_SPEECH_MODE=external` | BYO/self-host provider adapter. The backend forwards requests to the configured ASR/TTS URLs with an optional bearer token. |
+
+Official hosted speech provider support is intentionally not enabled in self-host V1. Run an external adapter instead, or keep speech disabled until your deployment has reviewed provider data processing, retention, and billing terms.
+
+For an external adapter, configure:
+
+```bash
+MULTICA_SPEECH_MODE=external
+MULTICA_SPEECH_TRANSCRIBE_URL=https://speech.example.com/transcribe
+MULTICA_SPEECH_SYNTHESIZE_URL=https://speech.example.com/synthesize
+MULTICA_SPEECH_API_KEY=replace-with-your-provider-token
+MULTICA_SPEECH_TIMEOUT=45s
+MULTICA_SPEECH_MAX_AUDIO_BYTES=10485760
+MULTICA_SPEECH_MAX_TEXT_RUNES=4000
+MULTICA_SPEECH_RATE_LIMIT=20
+MULTICA_SPEECH_RATE_WINDOW=1m
+```
+
+`MULTICA_SPEECH_TRANSCRIBE_URL` receives a multipart `file` upload plus `workspace_id` and `user_id` fields, and must return JSON like `{"transcript":"..."}`. `MULTICA_SPEECH_SYNTHESIZE_URL` receives JSON with `workspace_id`, `user_id`, `text`, and optional `voice`, and must return `{"audio_base64":"...","content_type":"audio/mpeg"}`.
+
+Recoverable speech errors include:
+
+| Code | HTTP | Meaning |
+|---|---:|---|
+| `provider_missing` | 501 | Speech is disabled or required adapter URL is missing. |
+| `quota_exceeded` | 429 | Upstream provider returned quota/rate/billing exhaustion. |
+| `provider_timeout` | 504 | Provider did not respond within `MULTICA_SPEECH_TIMEOUT`. |
+| `rate_limited` | 429 | Per-user/workspace speech request budget exceeded. |
+| `audio_too_large` | 413 | Upload exceeded `MULTICA_SPEECH_MAX_AUDIO_BYTES`. |
+| `unsupported_format` | 415 | Upload content type is not an accepted audio format. |
+| `empty_transcript` | 422 | ASR returned only empty text. |
+| `text_too_long` | 413 | TTS text exceeded `MULTICA_SPEECH_MAX_TEXT_RUNES`. |
+| `provider_failed` | 502 | Upstream provider failed without a more specific recoverable reason. |
+
+Data retention follows the normal chat behavior: audio is not saved by the speech proxy itself. If the client separately uploads audio as an attachment, it is retained and deletable under the attachment rules for that workspace. ASR text sent as a chat message becomes part of chat history; do not enable external speech until that retention boundary is acceptable for your deployment.
+
 ---
 
 ## Kubernetes Deployment (Alternative)

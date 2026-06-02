@@ -93,6 +93,7 @@ func (l *memoryWebhookRateLimiter) Allow(_ context.Context, key string) bool {
 const (
 	webhookLimiterKeyPrefix   = "mul:webhook:rate:"
 	webhookIPLimiterKeyPrefix = "mul:webhook:ip:"
+	speechLimiterKeyPrefix    = "mul:speech:rate:"
 )
 
 // webhookLimiterAllowSrc runs the slide-window check atomically on Redis:
@@ -146,6 +147,10 @@ func NewRedisWebhookRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) Webhook
 // Lua script, different key namespace so the two budgets don't interfere.
 func NewRedisWebhookIPRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) WebhookRateLimiter {
 	return &redisWebhookRateLimiter{cfg: cfg, rdb: rdb, keyPrefix: webhookIPLimiterKeyPrefix}
+}
+
+func NewRedisSpeechRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) WebhookRateLimiter {
+	return &redisWebhookRateLimiter{cfg: cfg, rdb: rdb, keyPrefix: speechLimiterKeyPrefix}
 }
 
 // NewMemoryWebhookIPRateLimiter is the in-memory per-IP variant used when no

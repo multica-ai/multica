@@ -102,3 +102,7 @@ Edit `EXPO_PUBLIC_API_URL` in `.env.staging`, `.env.production`, or `.env.develo
 - For an installed **Release build**: re-run the `ios:mobile:device:staging:release` command — the value is baked into the embedded bundle at build time.
 
 For local backend testing, use your Mac's LAN IP (`ipconfig getifaddr en0`), not `localhost`.
+
+## Voice backend behavior
+
+The iOS client records short audio locally and sends it only to the Multica backend speech proxy. It does not receive ASR/TTS provider keys. If the backend has speech disabled or the provider is unavailable, speech calls return typed recoverable errors such as `provider_missing`, `rate_limited`, `quota_exceeded`, or `provider_timeout`; the app should let the user continue by typing the message.

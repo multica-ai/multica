@@ -84,11 +84,16 @@ type Config struct {
 }
 
 type SpeechConfig struct {
+	Mode          string
 	TranscribeURL string
 	SynthesizeURL string
 	APIKey        string
 	Mock          bool
 	HTTPClient    *http.Client
+	Timeout       time.Duration
+	MaxAudioBytes int64
+	MaxTextRunes  int
+	RateLimit     WebhookRateLimit
 }
 
 type cloudRuntimeProxy interface {
@@ -122,6 +127,7 @@ type Handler struct {
 	WebhookIPRateLimiter  WebhookRateLimiter
 	CloudRuntime          cloudRuntimeProxy
 	Speech                SpeechProxy
+	SpeechRateLimiter     WebhookRateLimiter
 	cfg                   Config
 }
 
@@ -163,6 +169,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Analytics:             analyticsClient,
 		WebhookRateLimiter:    NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
 		WebhookIPRateLimiter:  NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
+		SpeechRateLimiter:     NewMemoryWebhookRateLimiter(defaultSpeechRateLimit(cfg.Speech)),
 		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
 			BaseURL: cfg.CloudRuntimeFleetURL,
 			Timeout: cfg.CloudRuntimeFleetTimeout,

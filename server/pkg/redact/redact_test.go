@@ -56,6 +56,15 @@ func TestRedactOpenAIKey(t *testing.T) {
 	}
 }
 
+func TestRedactSpeechProviderKey(t *testing.T) {
+	t.Parallel()
+	input := "MULTICA_SPEECH_API_KEY=provider-secret-token-123"
+	got := Text(input)
+	if strings.Contains(got, "provider-secret-token-123") {
+		t.Fatalf("speech provider key not redacted: %s", got)
+	}
+}
+
 func TestRedactSlackToken(t *testing.T) {
 	t.Parallel()
 	input := "token: xoxb-123456789012-1234567890123-AbCdEfGhIjKl"
