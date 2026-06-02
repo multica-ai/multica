@@ -1571,6 +1571,16 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.IssueKind = issue.Kind // CEREBRO-PATCH(agent-task-issue-kind): surface issue.kind so trace upload labels channel/dm runs (FIR-2438)
+			// CEREBRO-PATCH(agent-task-issue-title): FIR-2763 M1 — stamp display
+			// titles so trace upload can write human-readable names instead of
+			// bare UUIDs. Parent lookup is best-effort: a missing parent leaves
+			// ParentIssueTitle empty (registry stores null, UI falls back to ID).
+			resp.IssueTitle = issue.Title
+			if issue.ParentIssueID.Valid {
+				if parent, perr := h.Queries.GetIssue(r.Context(), issue.ParentIssueID); perr == nil {
+					resp.ParentIssueTitle = parent.Title
+				}
+			}
 			// CEREBRO-PATCH(persona-spawn-subject): JEH-1080 — resolve the spawning user + groups for the persona-hook facts.
 			sub := cerebropersona.ResolveSpawnSubject(r.Context(), h.GroupPermissions, issue)
 			resp.PersonaSpawnUserID = sub.UserID
