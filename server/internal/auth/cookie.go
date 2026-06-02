@@ -152,6 +152,9 @@ func SetAuthCookies(w http.ResponseWriter, token string) error {
 	ttl := AuthTokenTTL()
 	now := time.Now()
 
+	// SameSite=Lax allows the cookie to be sent in same-site iframe
+	// navigations (e.g. multica-web embedded in costrict-web under the
+	// same origin). Strict would block it, causing a second login.
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    token,
@@ -161,7 +164,7 @@ func SetAuthCookies(w http.ResponseWriter, token string) error {
 		Expires:  now.Add(ttl),
 		HttpOnly: true,
 		Secure:   secure,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 	})
 
 	csrfToken, err := generateCSRFToken(token)
@@ -178,7 +181,7 @@ func SetAuthCookies(w http.ResponseWriter, token string) error {
 		Expires:  now.Add(ttl),
 		HttpOnly: false,
 		Secure:   secure,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 	})
 
 	return nil
@@ -198,7 +201,7 @@ func ClearAuthCookies(w http.ResponseWriter) {
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
 		Secure:   secure,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 	})
 
 	http.SetCookie(w, &http.Cookie{
@@ -210,7 +213,7 @@ func ClearAuthCookies(w http.ResponseWriter) {
 		Expires:  time.Unix(0, 0),
 		HttpOnly: false,
 		Secure:   secure,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 	})
 }
 
