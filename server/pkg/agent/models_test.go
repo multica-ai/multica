@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -331,6 +333,76 @@ anthropic/claude-sonnet-4-6
 	}
 	if models[1].Thinking == nil || len(models[1].Thinking.SupportedLevels) != 2 {
 		t.Fatalf("expected second model variants, got %+v", models[1].Thinking)
+	}
+}
+
+func TestParseOpenCodeModelsMalformedVerboseBlockKeepsFollowingModels(t *testing.T) {
+	input := `openai/gpt-5
+{
+  "id": "gpt-5",
+  "reasoning": true,
+  "variants": {
+    "high": {}
+  }
+anthropic/claude-sonnet-4-6
+{
+  "id": "claude-sonnet-4-6",
+  "reasoning": true,
+  "variants": {
+    "high": {},
+    "max": {}
+  }
+}
+`
+	models := parseOpenCodeModels(input)
+	if len(models) != 2 {
+		t.Fatalf("expected both model rows to survive malformed JSON, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "openai/gpt-5" {
+		t.Fatalf("unexpected first model: %+v", models[0])
+	}
+	if models[0].Thinking != nil {
+		t.Fatalf("malformed first JSON block should not annotate thinking: %+v", models[0].Thinking)
+	}
+	if models[1].ID != "anthropic/claude-sonnet-4-6" {
+		t.Fatalf("unexpected second model: %+v", models[1])
+	}
+	if models[1].Thinking == nil || len(models[1].Thinking.SupportedLevels) != 2 {
+		t.Fatalf("valid following JSON block should still annotate thinking: %+v", models[1].Thinking)
+	}
+}
+
+func TestDiscoverOpenCodeModelsFallsBackWhenVerboseFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "opencode")
+	script := `#!/bin/sh
+if [ "$1" = "models" ] && [ "$2" = "--verbose" ]; then
+  exit 2
+fi
+if [ "$1" = "models" ]; then
+  cat <<'EOF'
+PROVIDER/MODEL                     CONTEXT  MAX_OUT
+openai/gpt-4o                      128000   16384
+EOF
+  exit 0
+fi
+exit 1
+`
+	writeTestExecutable(t, fake, []byte(script))
+
+	models, err := discoverOpenCodeModels(context.Background(), fake)
+	if err != nil {
+		t.Fatalf("discoverOpenCodeModels: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected fallback non-verbose model, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "openai/gpt-4o" || models[0].Thinking != nil {
+		t.Fatalf("unexpected fallback model: %+v", models[0])
 	}
 }
 

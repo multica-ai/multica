@@ -130,7 +130,7 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 			return discoverKiroModels(ctx, executablePath)
 		})
 	case "opencode":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
 		})
 	case "pi":
@@ -186,6 +186,13 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 	modelCache[key] = modelCacheEntry{models: models, expiresAt: time.Now().Add(modelCacheTTL)}
 	modelCacheMu.Unlock()
 	return models, nil
+}
+
+func discoveryCacheKey(providerType, executablePath string) string {
+	if executablePath == "" {
+		return providerType
+	}
+	return providerType + ":" + executablePath
 }
 
 // ── Static catalogs ──
@@ -367,43 +374,41 @@ func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model
 // that object contains `variants`, each enabled variant becomes a thinking
 // level that the backend later passes through `opencode run --variant`.
 func parseOpenCodeModels(output string) []Model {
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	lines := strings.Split(output, "\n")
 	var models []Model
 	indexByID := map[string]int{}
-	currentID := ""
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			continue
 		}
-		if id := parseOpenCodeModelIDLine(line); id != "" {
-			if _, seen := indexByID[id]; seen {
-				currentID = id
-				continue
-			}
-			provider := ""
-			if i := strings.Index(id, "/"); i > 0 {
-				provider = id[:i]
-			}
-			indexByID[id] = len(models)
-			models = append(models, Model{ID: id, Label: id, Provider: provider})
-			currentID = id
+		id := parseOpenCodeModelIDLine(line)
+		if id == "" {
 			continue
+		}
+		idx, seen := indexByID[id]
+		if !seen {
+			provider := ""
+			if slash := strings.Index(id, "/"); slash > 0 {
+				provider = id[:slash]
+			}
+			idx = len(models)
+			indexByID[id] = idx
+			models = append(models, Model{ID: id, Label: id, Provider: provider})
 		}
 
-		if currentID == "" || !strings.HasPrefix(line, "{") {
+		next := i + 1
+		for next < len(lines) && strings.TrimSpace(lines[next]) == "" {
+			next++
+		}
+		if next >= len(lines) || !strings.HasPrefix(strings.TrimSpace(lines[next]), "{") {
 			continue
 		}
-		raw := collectOpenCodeModelJSON(scanner, line)
-		if !json.Valid(raw) {
-			currentID = ""
-			continue
-		}
-		if idx, ok := indexByID[currentID]; ok {
+		raw, resumeAt := collectOpenCodeModelJSON(lines, next)
+		if json.Valid(raw) {
 			annotateOpenCodeModelMetadata(&models[idx], raw)
 		}
-		currentID = ""
+		i = resumeAt - 1
 	}
 	return models
 }
@@ -414,6 +419,9 @@ func parseOpenCodeModelIDLine(line string) string {
 		return ""
 	}
 	id := fields[0]
+	if strings.HasPrefix(id, `"`) || strings.HasPrefix(id, "{") || strings.HasPrefix(id, "[") {
+		return ""
+	}
 	if !strings.Contains(id, "/") {
 		return ""
 	}
@@ -424,14 +432,22 @@ func parseOpenCodeModelIDLine(line string) string {
 	return id
 }
 
-func collectOpenCodeModelJSON(scanner *bufio.Scanner, firstLine string) []byte {
+func collectOpenCodeModelJSON(lines []string, start int) ([]byte, int) {
 	var b strings.Builder
-	b.WriteString(firstLine)
-	for !json.Valid([]byte(b.String())) && scanner.Scan() {
-		b.WriteByte('\n')
-		b.WriteString(scanner.Text())
+	for i := start; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if i > start && parseOpenCodeModelIDLine(line) != "" {
+			return []byte(b.String()), i
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(lines[i])
+		if json.Valid([]byte(b.String())) {
+			return []byte(b.String()), i + 1
+		}
 	}
-	return []byte(b.String())
+	return []byte(b.String()), len(lines)
 }
 
 type opencodeModelMetadata struct {
