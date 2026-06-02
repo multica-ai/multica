@@ -1591,7 +1591,7 @@ export function IssueDetail({
     if (!el) return;
 
     didHighlightRef.current = requestedCommentId;
-    el.scrollIntoView({ block: "center" });
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
 
     setHighlightedId(requestedCommentId);
     const fade = window.setTimeout(() => setHighlightedId(null), 2500);
