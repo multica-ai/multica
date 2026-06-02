@@ -12,6 +12,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
+// fetchLatestReleaseFn is the function used to fetch the latest GitHub release.
+// Exported as a variable so tests can replace it with a mock.
+var fetchLatestReleaseFn = cli.FetchLatestRelease
+
 var runtimeCmd = &cobra.Command{
 	Use:   "runtime",
 	Short: "Work with agent runtimes",
@@ -192,7 +196,7 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 
 	// Resolve target version.
 	if latest {
-		rel, err := cli.FetchLatestRelease()
+		rel, err := fetchLatestReleaseFn()
 		if err != nil {
 			return fmt.Errorf("fetch latest release: %w", err)
 		}
@@ -278,21 +282,22 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 		var completed, failed, timedOut int
 		done := make(map[string]bool)
 
-		for len(done) < len(pending) {
-			select {
-			case <-pollCtx.Done():
-				// Mark remaining as timed out.
-				for _, u := range pending {
-					if !done[u.updateID] {
-						timedOut++
-						u.update["status"] = "timeout"
-						u.update["error"] = "timed out waiting for update"
-						done[u.updateID] = true
-						results = append(results, u)
-					}
+	pollLoop:
+	for len(done) < len(pending) {
+		select {
+		case <-pollCtx.Done():
+			// Mark remaining as timed out.
+			for _, u := range pending {
+				if !done[u.updateID] {
+					timedOut++
+					u.update["status"] = "timeout"
+					u.update["error"] = "timed out waiting for update"
+					done[u.updateID] = true
+					results = append(results, u)
 				}
-				break
-			case <-time.After(2 * time.Second):
+			}
+			break pollLoop
+		case <-time.After(2 * time.Second):
 				for _, u := range pending {
 					if done[u.updateID] {
 						continue
@@ -362,6 +367,9 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 
 	// Non-wait mode output.
 	if output == "json" {
+		if len(results) == 1 && !all {
+			return cli.PrintJSON(os.Stdout, results[0].update)
+		}
 		var allResults []map[string]any
 		for _, r := range results {
 			allResults = append(allResults, r.update)
