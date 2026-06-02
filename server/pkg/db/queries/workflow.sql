@@ -191,30 +191,30 @@ RETURNING *;
 -- =====================
 
 -- name: ListTemplates :many
-SELECT * FROM workflow
+SELECT * FROM multica_workflow
 WHERE is_template = TRUE
 ORDER BY created_at DESC;
 
 -- name: ListWorkflowsExcludingTemplates :many
-SELECT * FROM workflow
+SELECT * FROM multica_workflow
 WHERE workspace_id = $1 AND is_template = FALSE
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: SetWorkflowTemplate :one
-UPDATE workflow SET
+UPDATE multica_workflow SET
     is_template = $2,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: CountWorkflowsBySourceTemplate :one
-SELECT count(*)::bigint FROM workflow
+SELECT count(*)::bigint FROM multica_workflow
 WHERE source_template_id = $1;
 
 -- name: CreateWorkflowFromTemplate :one
-INSERT INTO workflow (
+INSERT INTO multica_workflow (
     workspace_id, title, description, status, max_retries,
     created_by_type, created_by_id, is_template, source_template_id
 ) VALUES (
@@ -226,12 +226,12 @@ INSERT INTO workflow (
 -- =====================
 
 -- name: ListWorkflowAdminUsers :many
-SELECT * FROM "user"
+SELECT * FROM multica_user
 WHERE can_manage_workflows = TRUE
 ORDER BY name ASC;
 
 -- name: SetUserWorkflowAdmin :one
-UPDATE "user" SET
+UPDATE multica_user SET
     can_manage_workflows = $2
 WHERE id = $1
 RETURNING *;

@@ -1105,10 +1105,10 @@ func (s *WorkflowService) CloneWorkflowFromTemplate(
 	description string,
 	creatorType string,
 	creatorID pgtype.UUID,
-) (db.Workflow, []db.WorkflowNode, []db.WorkflowEdge, error) {
-	var newWorkflow db.Workflow
-	var newNodes []db.WorkflowNode
-	var newEdges []db.WorkflowEdge
+) (db.MulticaWorkflow, []db.MulticaWorkflowNode, []db.MulticaWorkflowEdge, error) {
+	var newWorkflow db.MulticaWorkflow
+	var newNodes []db.MulticaWorkflowNode
+	var newEdges []db.MulticaWorkflowEdge
 
 	err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		// 1. Verify the template exists and is actually a template.
@@ -1195,13 +1195,13 @@ func (s *WorkflowService) CloneWorkflowFromTemplate(
 		return nil
 	})
 	if err != nil {
-		return db.Workflow{}, nil, nil, err
+		return db.MulticaWorkflow{}, nil, nil, err
 	}
 	return newWorkflow, newNodes, newEdges, nil
 }
 
 // SetWorkflowTemplate toggles the is_template flag on a workflow.
-func (s *WorkflowService) SetWorkflowTemplate(ctx context.Context, workflowID pgtype.UUID, isTemplate bool) (db.Workflow, error) {
+func (s *WorkflowService) SetWorkflowTemplate(ctx context.Context, workflowID pgtype.UUID, isTemplate bool) (db.MulticaWorkflow, error) {
 	return s.Queries.SetWorkflowTemplate(ctx, db.SetWorkflowTemplateParams{
 		ID:         workflowID,
 		IsTemplate: isTemplate,

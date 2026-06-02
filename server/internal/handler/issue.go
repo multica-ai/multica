@@ -2983,7 +2983,7 @@ func (h *Handler) syncSubIssueForNodeRun(ctx context.Context, nodeRun db.Multica
 
 // injectDownstreamContext appends the current node run's output to downstream
 // sub-issue descriptions so the next agents have context from prior steps.
-func (h *Handler) injectDownstreamContext(ctx context.Context, run db.WorkflowRun, nodeRun db.WorkflowNodeRun) {
+func (h *Handler) injectDownstreamContext(ctx context.Context, run db.MulticaWorkflowRun, nodeRun db.MulticaWorkflowNodeRun) {
 	// Only inject if this node has output to share.
 	if len(nodeRun.WorkerOutput) == 0 {
 		return

@@ -605,8 +605,8 @@ type MulticaUser struct {
 	ProfileDescription      string             `json:"profile_description"`
 	// User-preferred IANA timezone for report rendering (Viewing tz). NULL means "use the browser-detected tz at render time". Affects dashboards, charts, and any "today" label shown to this user. Does not affect data materialisation — all rollups remain in UTC.
 	Timezone           pgtype.Text `json:"timezone"`
-	CanManageWorkflows bool        `json:"can_manage_workflows"`
 	SubjectID          pgtype.Text `json:"subject_id"`
+	CanManageWorkflows bool        `json:"can_manage_workflows"`
 }
 
 type MulticaVerificationCode struct {
