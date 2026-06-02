@@ -49,3 +49,14 @@ SELECT project_id,
 FROM issue
 WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;
+
+-- name: GetLatestUpdatesForProjects :many
+-- One row per project that has at least one update: the most recent update's
+-- health and created_at. Used to derive each project's current health in list/detail.
+SELECT DISTINCT ON (project_id)
+    project_id,
+    health,
+    created_at AS last_update_at
+FROM project_update
+WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
+ORDER BY project_id, created_at DESC;
