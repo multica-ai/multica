@@ -2,18 +2,18 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Key, Trash2, Copy, Check } from "lucide-react";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import type { PersonalAccessToken } from "@multica/core/types";
-import { Input } from "@multica/ui/components/ui/input";
-import { Button } from "@multica/ui/components/ui/button";
-import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@wallts/ui/components/ui/tooltip";
+import type { PersonalAccessToken } from "@wallts/core/types";
+import { Input } from "@wallts/ui/components/ui/input";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Card, CardContent } from "@wallts/ui/components/ui/card";
 import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem,
-} from "@multica/ui/components/ui/select";
+} from "@wallts/ui/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +21,7 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@multica/ui/components/ui/dialog";
+} from "@wallts/ui/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,10 +31,10 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
+} from "@wallts/ui/components/ui/alert-dialog";
+import { Skeleton } from "@wallts/ui/components/ui/skeleton";
 import { toast } from "sonner";
-import { api } from "@multica/core/api";
+import { api } from "@wallts/core/api";
 import { useT } from "../../i18n";
 
 const EXPIRY_KEYS = ["30", "90", "365", "never"] as const;

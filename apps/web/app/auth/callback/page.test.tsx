@@ -10,7 +10,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-vi.mock("@multica/core/paths", () => ({
+vi.mock("@wallts/core/paths", () => ({
   paths: { login: () => "/login" },
 }));
 

@@ -7,7 +7,7 @@ description: |
 type: application
 version: 0.1.0
 appVersion: "latest"
-home: https://github.com/dwickyfp/wallts
+home: https://wallts.ai
 sources:
   - https://github.com/dwickyfp/wallts
 keywords:

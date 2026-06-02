@@ -13,8 +13,8 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	defer func() { testHandler.Storage = origStorage }()
 
 	t.Setenv("ALLOW_SIGNUP", "false")
-	t.Setenv("MULTICA_PUBLIC_URL", "https://api.example.com/")
-	t.Setenv("MULTICA_APP_URL", "https://app.example.com/")
+	t.Setenv("WALLTS_PUBLIC_URL", "https://api.example.com/")
+	t.Setenv("WALLTS_APP_URL", "https://app.example.com/")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
@@ -47,7 +47,7 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 }
 
 func TestGetConfigUsesAppURLForSameOriginDaemonSetup(t *testing.T) {
-	t.Setenv("MULTICA_APP_URL", "https://multica.internal.example/")
+	t.Setenv("WALLTS_APP_URL", "https://wallts.internal.example/")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
@@ -61,16 +61,16 @@ func TestGetConfigUsesAppURLForSameOriginDaemonSetup(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
 		t.Fatalf("decode config: %v", err)
 	}
-	if cfg.DaemonServerURL != "https://multica.internal.example" {
+	if cfg.DaemonServerURL != "https://wallts.internal.example" {
 		t.Fatalf("daemon_server_url: want same-origin URL, got %q", cfg.DaemonServerURL)
 	}
-	if cfg.DaemonAppURL != "https://multica.internal.example" {
+	if cfg.DaemonAppURL != "https://wallts.internal.example" {
 		t.Fatalf("daemon_app_url: want app URL, got %q", cfg.DaemonAppURL)
 	}
 }
 
 func TestGetConfigUsesFrontendOriginForSameOriginDaemonSetup(t *testing.T) {
-	t.Setenv("FRONTEND_ORIGIN", "https://multica.internal.example/")
+	t.Setenv("FRONTEND_ORIGIN", "https://wallts.internal.example/")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
@@ -84,16 +84,16 @@ func TestGetConfigUsesFrontendOriginForSameOriginDaemonSetup(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
 		t.Fatalf("decode config: %v", err)
 	}
-	if cfg.DaemonServerURL != "https://multica.internal.example" {
+	if cfg.DaemonServerURL != "https://wallts.internal.example" {
 		t.Fatalf("daemon_server_url: want same-origin URL, got %q", cfg.DaemonServerURL)
 	}
-	if cfg.DaemonAppURL != "https://multica.internal.example" {
+	if cfg.DaemonAppURL != "https://wallts.internal.example" {
 		t.Fatalf("daemon_app_url: want frontend origin, got %q", cfg.DaemonAppURL)
 	}
 }
 
 func TestGetConfigOmitsOfficialCloudDaemonSetup(t *testing.T) {
-	t.Setenv("MULTICA_PUBLIC_URL", "https://api.wallts.ai")
+	t.Setenv("WALLTS_PUBLIC_URL", "https://api.wallts.ai")
 	t.Setenv("FRONTEND_ORIGIN", "https://wallts.ai")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)

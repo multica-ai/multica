@@ -8,7 +8,7 @@
   <true/>
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
   <true/>
-  <!-- Required so the app can spawn the bundled `multica` Go binary and
+  <!-- Required so the app can spawn the bundled `wallts` Go binary and
        any other child processes (e.g. agent CLIs) without Gatekeeper
        blocking exec. -->
   <key>com.apple.security.cs.disable-library-validation</key>

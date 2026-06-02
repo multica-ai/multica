@@ -19,13 +19,13 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "Organization",
-      name: "Multica",
+      name: "Wallts",
       url: "https://www.wallts.ai",
-      sameAs: ["https://github.com/multica-ai/multica"],
+      sameAs: ["https://github.com/wallts-ai/wallts"],
     },
     {
       "@type": "SoftwareApplication",
-      name: "Multica",
+      name: "Wallts",
       applicationCategory: "ProjectManagement",
       operatingSystem: "Web",
       description:

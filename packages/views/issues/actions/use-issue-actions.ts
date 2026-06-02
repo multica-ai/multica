@@ -3,17 +3,17 @@
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { Issue, UpdateIssueRequest } from "@multica/core/types";
-import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
-import { useModalStore } from "@multica/core/modals";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
-import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
+import type { Issue, UpdateIssueRequest } from "@wallts/core/types";
+import { useAuthStore } from "@wallts/core/auth";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { useWorkspacePaths } from "@wallts/core/paths";
+import { useModalStore } from "@wallts/core/modals";
+import { useUpdateIssue } from "@wallts/core/issues/mutations";
+import { pinListOptions, useCreatePin, useDeletePin } from "@wallts/core/pins";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
-const BACKLOG_HINT_LS_KEY = "multica:backlog-agent-hint-dismissed";
+const BACKLOG_HINT_LS_KEY = "wallts:backlog-agent-hint-dismissed";
 
 export interface UseIssueActionsResult {
   isPinned: boolean;

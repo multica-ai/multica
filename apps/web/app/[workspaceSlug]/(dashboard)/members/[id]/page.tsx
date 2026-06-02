@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { MemberDetailPage } from "@multica/views/members";
+import { MemberDetailPage } from "@wallts/views/members";
 
 export default function MemberDetailRoute({
   params,

@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { QuestionnaireAnswers } from "@multica/core/onboarding";
-import { I18nProvider } from "@multica/core/i18n/react";
+import type { QuestionnaireAnswers } from "@wallts/core/onboarding";
+import { I18nProvider } from "@wallts/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enOnboarding from "../../locales/en/onboarding.json";
 import { StepRole } from "./step-role";

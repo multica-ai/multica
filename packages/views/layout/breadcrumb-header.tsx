@@ -2,7 +2,7 @@
 
 import { Fragment, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 import { PageHeader } from "./page-header";
 import { AppLink } from "../navigation";
 

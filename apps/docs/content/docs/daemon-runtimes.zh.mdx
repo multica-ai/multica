@@ -1,21 +1,21 @@
 ---
 title: 守护进程与运行时
-description: 智能体不在 Multica 服务器上运行——它们跑在你自己的机器上。
+description: 智能体不在 Wallts 服务器上运行——它们跑在你自己的机器上。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Mermaid } from "@/components/mermaid";
 
-在 Multica 里，[智能体](/agents) **不**在我们的服务器上运行——它们跑在你自己的机器上，由一个叫**守护进程**（daemon）的小程序调用本地安装的 [AI 编程工具](/providers)。Multica 服务器只做协调：存 [issue](/issues)、排 [任务](/tasks)、派发给正确的**运行时**（runtime = 守护进程 × 一款 AI 编程工具）。
+在 Wallts 里，[智能体](/agents) **不**在我们的服务器上运行——它们跑在你自己的机器上，由一个叫**守护进程**（daemon）的小程序调用本地安装的 [AI 编程工具](/providers)。Wallts 服务器只做协调：存 [issue](/issues)、排 [任务](/tasks)、派发给正确的**运行时**（runtime = 守护进程 × 一款 AI 编程工具）。
 
-这个结构带来 Multica 和 Linear / Jira 最大的差别：**你的 API 密钥、工具链、代码目录都留在本地**，Multica 服务器一个都看不到。"我的智能体不工作"类问题几乎都是本地问题——守护进程没启动、某款 AI 工具没装、密钥过期——请先从本地查起；定位指引见 [故障排查](/troubleshooting)。
+这个结构带来 Wallts 和 Linear / Jira 最大的差别：**你的 API 密钥、工具链、代码目录都留在本地**，Wallts 服务器一个都看不到。"我的智能体不工作"类问题几乎都是本地问题——守护进程没启动、某款 AI 工具没装、密钥过期——请先从本地查起；定位指引见 [故障排查](/troubleshooting)。
 
 ## 启动守护进程
 
-守护进程是 Multica CLI 的一部分。装好 [Multica CLI](/cli) 后，在自己机器上跑：
+守护进程是 Wallts CLI 的一部分。装好 [Wallts CLI](/cli) 后，在自己机器上跑：
 
 ```bash
-multica daemon start
+wallts daemon start
 ```
 
 启动后它会做四件事：
@@ -29,19 +29,19 @@ multica daemon start
 
 | 命令 | 作用 |
 |---|---|
-| `multica daemon start` | 启动（默认后台，加 `--foreground` 前台运行）|
-| `multica daemon stop` | 停止 |
-| `multica daemon restart` | 重启 |
-| `multica daemon status` | 查看状态 |
-| `multica daemon logs` | 查看日志（加 `-f` 跟随）|
+| `wallts daemon start` | 启动（默认后台，加 `--foreground` 前台运行）|
+| `wallts daemon stop` | 停止 |
+| `wallts daemon restart` | 重启 |
+| `wallts daemon status` | 查看状态 |
+| `wallts daemon logs` | 查看日志（加 `-f` 跟随）|
 
 完整 CLI 参考见 [CLI 命令速查](/cli)。
 
-**桌面应用自带守护进程。**用 [桌面应用](/desktop-app) 就不必手动 `multica daemon start`——它启动时会自动拉起守护进程。哪种方式更适合你的工作流，详见 [桌面应用](/desktop-app) 页面。
+**桌面应用自带守护进程。**用 [桌面应用](/desktop-app) 就不必手动 `wallts daemon start`——它启动时会自动拉起守护进程。哪种方式更适合你的工作流，详见 [桌面应用](/desktop-app) 页面。
 
 ## 为什么一台机器会有多个运行时
 
-运行时不是一个服务器，也不是一个容器——它是「**守护进程 × 一款 AI 编程工具**」的组合。举例：你在一台 MacBook 上启动守护进程，本机装了 Claude Code 和 Codex；你是两个工作区的成员。那么 Multica 会注册 4 个运行时：
+运行时不是一个服务器，也不是一个容器——它是「**守护进程 × 一款 AI 编程工具**」的组合。举例：你在一台 MacBook 上启动守护进程，本机装了 Claude Code 和 Codex；你是两个工作区的成员。那么 Wallts 会注册 4 个运行时：
 
 <Mermaid chart={`
 graph TD
@@ -56,15 +56,15 @@ graph TD
 
 - **一个守护进程可以对应多个运行时**——装了多款工具、加入了多个工作区，每个组合就各一个
 - **同一个守护进程在同一个工作区同一款工具上只会有一条运行时**——重启守护进程不会产生重复记录
-- Multica 界面的 **Runtimes** 页面列的就是这些行
+- Wallts 界面的 **Runtimes** 页面列的就是这些行
 
 <Callout type="info">
-**云端运行时即将开放**，目前处于等待名单阶段。上线后，你无需在本地运行守护进程，即可在 Multica Cloud 上直接执行智能体任务。在 [下载页面](https://multica.ai/download) 登记邮箱以获取通知。
+**云端运行时即将开放**，目前处于等待名单阶段。上线后，你无需在本地运行守护进程，即可在 Wallts Cloud 上直接执行智能体任务。在 [下载页面](https://wallts.ai/download) 登记邮箱以获取通知。
 </Callout>
 
 ## 运行时什么时候被判定为离线
 
-Multica 用心跳判断运行时是否在线。三个关键数字：
+Wallts 用心跳判断运行时是否在线。三个关键数字：
 
 | 事件 | 阈值 |
 |---|---|
@@ -75,14 +75,14 @@ Multica 用心跳判断运行时是否在线。三个关键数字：
 失联不是永久的——守护进程只要再次发出心跳就立刻回到在线，运行时记录也会保留。重启守护进程不会丢运行时。
 
 <Callout type="warning">
-**失联的运行时上正在跑的执行任务会被标记为失败**（失败原因 `runtime_offline`）。对可重试的来源（issue、chat），Multica 会自动重新排队；Autopilots 触发的任务不自动重试。详见 [执行任务 → 哪些失败会自动重试](/tasks#哪些失败会自动重试哪些不会)。
+**失联的运行时上正在跑的执行任务会被标记为失败**（失败原因 `runtime_offline`）。对可重试的来源（issue、chat），Wallts 会自动重新排队；Autopilots 触发的任务不自动重试。详见 [执行任务 → 哪些失败会自动重试](/tasks#哪些失败会自动重试哪些不会)。
 </Callout>
 
 ## 一次能并发跑多少任务
 
-Multica 对并发有两层限额：
+Wallts 对并发有两层限额：
 
-- **守护进程层**：默认 **20 个执行任务并发**（环境变量 `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` 可调）
+- **守护进程层**：默认 **20 个执行任务并发**（环境变量 `WALLTS_DAEMON_MAX_CONCURRENT_TASKS` 可调）
 - **智能体层**：每个智能体默认 **6 个执行任务并发**（智能体配置里改）
 
 两层中更紧的那层生效。如果你的守护进程已经在跑 20 个任务，即使某个智能体还有余量，新的任务也要等。
@@ -99,9 +99,9 @@ Multica 对并发有两层限额：
 
 遇到「我的智能体不工作」类问题，先过一遍这三步：
 
-1. 跑 `multica daemon status`，确认守护进程在运行且在线
-2. 跑 `multica daemon logs -f`，看是否有错误
-3. 去 Multica 界面的 **Runtimes** 页面，确认你的运行时显示「在线」
+1. 跑 `wallts daemon status`，确认守护进程在运行且在线
+2. 跑 `wallts daemon logs -f`，看是否有错误
+3. 去 Wallts 界面的 **Runtimes** 页面，确认你的运行时显示「在线」
 
 更多场景见 [Troubleshooting](/troubleshooting)。
 

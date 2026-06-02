@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/multica-ai/multica/server/internal/session"
+	"github.com/dwickyfp/wallts/server/internal/session"
 )
 
 // testDB returns a connection pool for the test database.

@@ -6,7 +6,7 @@ description: The unit of work for every agent run, with a clear state machine, t
 import { Callout } from "fumadocs-ui/components/callout";
 import { Mermaid } from "@/components/mermaid";
 
-A **task** is the unit of every [agent](/agents) run — [assigning an issue to an agent](/assigning-issues), [@-mentioning an agent in a comment](/mentioning-agents), sending a message in [chat](/chat), or an [Autopilot](/autopilots) firing on schedule all produce a task. Multica puts it in a queue; a [daemon](/daemon-runtimes) picks it up and hands it off to the corresponding [AI coding tool](/providers), then writes the result back to the server when it finishes.
+A **task** is the unit of every [agent](/agents) run — [assigning an issue to an agent](/assigning-issues), [@-mentioning an agent in a comment](/mentioning-agents), sending a message in [chat](/chat), or an [Autopilot](/autopilots) firing on schedule all produce a task. Wallts puts it in a queue; a [daemon](/daemon-runtimes) picks it up and hands it off to the corresponding [AI coding tool](/providers), then writes the result back to the server when it finishes.
 
 Tasks and [issues](/issues) are two different objects. A single issue can be assigned, @-mentioned, and manually rerun many times — each produces a **new** task.
 
@@ -33,7 +33,7 @@ graph LR
 
 ## What happens when a task times out
 
-The Multica server scans every 30 seconds. Two kinds of timeout trigger a failure:
+The Wallts server scans every 30 seconds. Two kinds of timeout trigger a failure:
 
 | Situation | Timeout |
 |---|---|
@@ -46,7 +46,7 @@ Both timeouts use failure reason `timeout` and **retry automatically** (next sec
 
 Failures fall into two categories: **retryable** and **non-retryable**.
 
-**Retryable** (Multica automatically requeues):
+**Retryable** (Wallts automatically requeues):
 
 - `runtime_offline` — the daemon went missing after the task was dispatched
 - `runtime_recovery` — the daemon crashed and restarted, reclaiming tasks it didn't finish
@@ -72,7 +72,7 @@ Automatic retry also has two extra conditions:
 A **manual rerun** is one you trigger from the CLI or the API (`POST /api/issues/{id}/rerun`):
 
 ```bash
-multica issue rerun <issue-id>
+wallts issue rerun <issue-id>
 ```
 
 Behavior:
@@ -101,7 +101,7 @@ If an issue-triggered task fails (and no automatic retry succeeds) because the i
 
 Yes — as long as the AI coding tool supports session resumption.
 
-Multica pins the session ID **twice** during a task: once at the start (when the AI tool returns its first system message), and once at the end (on completion or failure). The first lets the daemon recover if it crashes mid-run; the second is reserved for the next **automatic retry**, where that ID is passed back so the agent can pick up the previous conversation and file state. **Manual rerun deliberately skips this** and starts a fresh session — see [Manual rerun vs. automatic retry](#manual-rerun-vs-automatic-retry).
+Wallts pins the session ID **twice** during a task: once at the start (when the AI tool returns its first system message), and once at the end (on completion or failure). The first lets the daemon recover if it crashes mid-run; the second is reserved for the next **automatic retry**, where that ID is passed back so the agent can pick up the previous conversation and file state. **Manual rerun deliberately skips this** and starts a fresh session — see [Manual rerun vs. automatic retry](#manual-rerun-vs-automatic-retry).
 
 But **which AI coding tools actually support this** varies a lot:
 

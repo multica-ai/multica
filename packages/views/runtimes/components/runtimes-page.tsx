@@ -9,23 +9,23 @@ import {
   Server,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
-import { useUpdatableRuntimeIds } from "@multica/core/runtimes/hooks";
-import { useWSEvent } from "@multica/core/realtime";
-import { agentListOptions } from "@multica/core/workspace/queries";
-import { Button } from "@multica/ui/components/ui/button";
-import { Input } from "@multica/ui/components/ui/input";
+import { useAuthStore } from "@wallts/core/auth";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { agentTaskSnapshotOptions } from "@wallts/core/agents";
+import { runtimeListOptions, runtimeKeys } from "@wallts/core/runtimes/queries";
+import { useUpdatableRuntimeIds } from "@wallts/core/runtimes/hooks";
+import { useWSEvent } from "@wallts/core/realtime";
+import { agentListOptions } from "@wallts/core/workspace/queries";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Input } from "@wallts/ui/components/ui/input";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-} from "@multica/ui/components/ui/resizable";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { cn } from "@multica/ui/lib/utils";
+} from "@wallts/ui/components/ui/resizable";
+import { Skeleton } from "@wallts/ui/components/ui/skeleton";
+import { useIsMobile } from "@wallts/ui/hooks/use-mobile";
+import { cn } from "@wallts/ui/lib/utils";
 import { PageHeader } from "../../layout/page-header";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { ProviderLogo } from "./provider-logo";
@@ -104,7 +104,7 @@ export function RuntimesPage({
   }, []);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "multica_runtimes_layout",
+    id: "wallts_runtimes_layout",
   });
   const isMobile = useIsMobile();
 

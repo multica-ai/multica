@@ -11,8 +11,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
-import { useDeleteIssue } from "@multica/core/issues/mutations";
+} from "@wallts/ui/components/ui/alert-dialog";
+import { useDeleteIssue } from "@wallts/core/issues/mutations";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 

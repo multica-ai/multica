@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Issue, IssueAssigneeGroup } from "@multica/core/types";
+import type { Issue, IssueAssigneeGroup } from "@wallts/core/types";
 import { filterRunningAssigneeGroups } from "./project-issue-filters";
 
 function issue(id: string): Issue {

@@ -8,7 +8,7 @@ name: Mobile Verify
 # - apps/mobile/**                — the app itself
 # - packages/core/**              — mobile imports types AND pure functions
 #                                   (agents, markdown, permissions, api/schemas, …),
-#                                   not only @multica/core/types
+#                                   not only @wallts/core/types
 # - package.json / pnpm-lock.yaml — install graph
 # - pnpm-workspace.yaml           — catalog versions
 # - turbo.json                    — turbo task pipeline
@@ -62,4 +62,4 @@ jobs:
         run: pnpm install
 
       - name: Type check and lint
-        run: pnpm exec turbo typecheck lint --filter=@multica/mobile
+        run: pnpm exec turbo typecheck lint --filter=@wallts/mobile

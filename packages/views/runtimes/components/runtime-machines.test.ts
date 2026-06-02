@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentRuntime } from "@multica/core/types";
+import type { AgentRuntime } from "@wallts/core/types";
 import {
   buildRuntimeMachines,
   filterRuntimeMachines,

@@ -9,7 +9,7 @@
  *     first highlight() call triggers init, subsequent calls reuse the
  *     same Promise.
  *   - Native engine via `react-native-shiki-engine` (JSI + Oniguruma C++).
- *     Requires the New Architecture, which Multica mobile already runs on.
+ *     Requires the New Architecture, which Wallts mobile already runs on.
  *   - Top 12 languages are pre-registered at init for an AI/dev-tooling
  *     surface (TS/JS/TSX/JSX/Python/Go/Rust/Bash/JSON/YAML/SQL/Markdown).
  *     Unknown languages return `null` from highlight() so the caller

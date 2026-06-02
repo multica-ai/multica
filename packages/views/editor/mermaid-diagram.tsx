@@ -118,7 +118,7 @@ function getMermaidLayout(svg: string): MermaidLayout {
 // excessive empty space; web.dev's CLS guidance recommends reserving any
 // such space upfront so async content doesn't shift surrounding layout.
 const MERMAID_SKELETON_HEIGHT_PX = 280;
-const MERMAID_LAYOUT_CACHE_PREFIX = "multica:mermaid:layout:";
+const MERMAID_LAYOUT_CACHE_PREFIX = "wallts:mermaid:layout:";
 
 // DJB2 — small, fast, sufficient for sessionStorage cache keys. The chart
 // text itself is too unwieldy as a key (length, special chars), and a

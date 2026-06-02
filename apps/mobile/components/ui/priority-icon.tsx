@@ -12,7 +12,7 @@
  *     animation polish iteration).
  */
 import Svg, { Line, Rect } from "react-native-svg";
-import type { IssuePriority } from "@multica/core/types";
+import type { IssuePriority } from "@wallts/core/types";
 
 const BARS: Record<IssuePriority, number> = {
   urgent: 4,

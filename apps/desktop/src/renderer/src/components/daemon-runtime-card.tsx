@@ -8,10 +8,10 @@ import {
   ScrollText,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { runtimeListOptions } from "@multica/core/runtimes";
-import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { Button } from "@multica/ui/components/ui/button";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { runtimeListOptions } from "@wallts/core/runtimes";
+import { agentTaskSnapshotOptions } from "@wallts/core/agents";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@multica/ui/components/ui/dialog";
+} from "@wallts/ui/components/ui/dialog";
 import { toast } from "sonner";
 import { DaemonPanel } from "./daemon-panel";
 import type { DaemonStatus } from "../../../shared/daemon-types";

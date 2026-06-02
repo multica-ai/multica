@@ -16,17 +16,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/daemonws"
-	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/handler"
-	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
-	"github.com/multica-ai/multica/server/internal/middleware"
-	"github.com/multica-ai/multica/server/internal/realtime"
-	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/internal/storage"
-	"github.com/multica-ai/multica/server/internal/util"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/internal/auth"
+	"github.com/wallts-ai/wallts/server/internal/daemonws"
+	"github.com/wallts-ai/wallts/server/internal/events"
+	"github.com/wallts-ai/wallts/server/internal/handler"
+	obsmetrics "github.com/wallts-ai/wallts/server/internal/metrics"
+	"github.com/wallts-ai/wallts/server/internal/middleware"
+	"github.com/wallts-ai/wallts/server/internal/realtime"
+	"github.com/wallts-ai/wallts/server/internal/service"
+	"github.com/wallts-ai/wallts/server/internal/storage"
+	"github.com/wallts-ai/wallts/server/internal/util"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
 )
 
 var defaultOrigins = []string{
@@ -59,7 +59,7 @@ func allowedOrigins() []string {
 }
 
 // parseTrustedProxies parses a comma-separated list of CIDR prefixes from the
-// MULTICA_TRUSTED_PROXIES env var. Invalid entries are dropped with a single
+// WALLTS_TRUSTED_PROXIES env var. Invalid entries are dropped with a single
 // warn-line per entry rather than crashing the server — a typo in one CIDR
 // shouldn't take the whole API down. Returns nil for empty input, which the
 // rate limiter treats as "trust no proxy headers, use RemoteAddr only".
@@ -76,7 +76,7 @@ func parseTrustedProxies(raw string) []netip.Prefix {
 		}
 		p, err := netip.ParsePrefix(s)
 		if err != nil {
-			slog.Warn("MULTICA_TRUSTED_PROXIES: ignoring invalid CIDR",
+			slog.Warn("WALLTS_TRUSTED_PROXIES: ignoring invalid CIDR",
 				"value", s, "error", err)
 			continue
 		}
@@ -134,8 +134,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
 		DisableWorkspaceCreation: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
-		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
-		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
+		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("WALLTS_PUBLIC_URL")), "/"),
+		TrustedProxies:           parseTrustedProxies(os.Getenv("WALLTS_TRUSTED_PROXIES")),
 
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, signupConfig, daemonHub)
@@ -260,7 +260,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// purpose: the bearer token in the URL path IS the credential. Workspace
 	// context is derived from the trigger row, never from request headers.
 	r.Post("/api/webhooks/autopilots/{token}", h.HandleAutopilotWebhook)
-	// GitHub App webhook (no Multica auth — requests are authenticated via
+	// GitHub App webhook (no Wallts auth — requests are authenticated via
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
 	r.Get("/api/github/setup", h.GitHubSetupCallback)

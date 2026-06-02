@@ -2,7 +2,7 @@ import "i18next";
 // Pulls in the `ui` namespace augmentation owned by packages/ui — see
 // packages/ui/types/i18next.ts. Side-effect import is required for views'
 // typecheck program to see ui's contribution to `I18nResources`.
-import "@multica/ui/i18n-types";
+import "@wallts/ui/i18n-types";
 import type common from "../locales/en/common.json";
 import type auth from "../locales/en/auth.json";
 import type settings from "../locales/en/settings.json";
@@ -41,7 +41,7 @@ import type billing from "../locales/en/billing.json";
 // type literal inside CustomTypeOptions) so other packages can contribute
 // namespaces via declaration merging. See packages/ui/types/i18next.d.ts —
 // it adds the `ui` namespace there, which lets packages/ui typecheck the
-// selector form standalone without depending on @multica/views.
+// selector form standalone without depending on @wallts/views.
 declare global {
   interface I18nResources {
     common: typeof common;

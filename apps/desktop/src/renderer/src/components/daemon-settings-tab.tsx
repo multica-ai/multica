@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
-import { Button } from "@multica/ui/components/ui/button";
-import { Switch } from "@multica/ui/components/ui/switch";
-import { cn } from "@multica/ui/lib/utils";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Switch } from "@wallts/ui/components/ui/switch";
+import { cn } from "@wallts/ui/lib/utils";
 import type { DaemonPrefs, DaemonStatus } from "../../../shared/daemon-types";
 import {
   DAEMON_STATE_COLORS,
@@ -115,8 +115,8 @@ export function DaemonSettingsTab() {
             {cliInstalled === null
               ? "Checking…"
               : cliInstalled
-                ? "multica CLI is installed and available in PATH."
-                : "multica CLI not found. Install it to enable daemon management."}
+                ? "wallts CLI is installed and available in PATH."
+                : "wallts CLI not found. Install it to enable daemon management."}
           </p>
           {cliInstalled === false && (
             <Button
@@ -125,7 +125,7 @@ export function DaemonSettingsTab() {
               className="mt-2"
               onClick={() =>
                 window.desktopAPI.openExternal(
-                  "https://github.com/multica-ai/multica#cli-installation",
+                  "https://github.com/dwickyfp/wallts#cli-installation",
                 )
               }
             >

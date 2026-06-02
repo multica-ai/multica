@@ -1,5 +1,5 @@
 {
-  "extends": "@multica/tsconfig/react-library.json",
+  "extends": "@wallts/tsconfig/react-library.json",
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": ".",

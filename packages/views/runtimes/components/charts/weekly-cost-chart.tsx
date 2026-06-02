@@ -11,7 +11,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
-} from "@multica/ui/components/ui/chart";
+} from "@wallts/ui/components/ui/chart";
 import type { WeeklyCostStackData } from "../../utils";
 import { useT } from "../../../i18n";
 

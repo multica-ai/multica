@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Braces, Eraser, Loader2, Lock, Save, Shapes } from "lucide-react";
-import type { Agent } from "@multica/core/types";
-import type { McpServers } from "@multica/core/agents/mcp-validate";
-import { validateMcpConfig } from "@multica/core/agents/mcp-validate";
-import { Button } from "@multica/ui/components/ui/button";
-import { Textarea } from "@multica/ui/components/ui/textarea";
+import type { Agent } from "@wallts/core/types";
+import type { McpServers } from "@wallts/core/agents/mcp-validate";
+import { validateMcpConfig } from "@wallts/core/agents/mcp-validate";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Textarea } from "@wallts/ui/components/ui/textarea";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
 import { McpServerEditor } from "../mcp-server-editor";

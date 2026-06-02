@@ -9,7 +9,7 @@ import { useTheme } from "next-themes";
  * Dynamic-imports the mermaid package so it's only loaded on pages that
  * actually use it (~400 KB). Re-renders when the page theme flips.
  *
- * Themed to pick up Multica design tokens at runtime via getComputedStyle,
+ * Themed to pick up Wallts design tokens at runtime via getComputedStyle,
  * so the diagram tracks both light / dark mode and any future token changes
  * without a rebuild.
  */

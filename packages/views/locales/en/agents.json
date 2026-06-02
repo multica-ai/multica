@@ -39,7 +39,7 @@
   },
   "empty": {
     "title": "No agents yet",
-    "description": "Create an agent and assign it issues, like any teammate. Local agents run on your machine; cloud agents run on Multica's runtime."
+    "description": "Create an agent and assign it issues, like any teammate. Local agents run on your machine; cloud agents run on Wallts's runtime."
   },
   "no_matches": {
     "title": "No matches",

@@ -22,7 +22,7 @@ export const useAgentsViewStore = create<AgentsViewState>()(
       setScope: (scope) => set({ scope }),
     }),
     {
-      name: "multica_agents_view",
+      name: "wallts_agents_view",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
       partialize: (state) => ({ scope: state.scope }),
       // On rehydrate, if the new workspace has no persisted value, reset to

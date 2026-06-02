@@ -18,7 +18,7 @@ import { FlatList, Pressable, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
-import type { Label } from "@multica/core/types";
+import type { Label } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { labelListOptions } from "@/data/queries/labels";
 import { useWorkspaceStore } from "@/data/workspace-store";

@@ -6,11 +6,11 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/handler"
-	"github.com/multica-ai/multica/server/internal/util"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/dwickyfp/wallts/server/internal/events"
+	"github.com/dwickyfp/wallts/server/internal/handler"
+	"github.com/dwickyfp/wallts/server/internal/util"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/pkg/protocol"
 )
 
 // mention represents a parsed @mention from markdown content (local alias).
@@ -144,7 +144,7 @@ func loadUserPrefs(
 // the issue as "the user no longer needs to triage past failures." When a
 // status change lands on one of these, any pre-existing task_failed inbox
 // rows for the issue are archived so the inbox stays a fresh-signal surface.
-// `in_review` is included because in Multica's agent flow that's the most
+// `in_review` is included because in Wallts's agent flow that's the most
 // reliable "work delivered" handoff — and a status flip back to in_progress
 // will simply produce new task_failed rows that surface normally.
 var terminalStatusForTaskFailedDismiss = map[string]bool{

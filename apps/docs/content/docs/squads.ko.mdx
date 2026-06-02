@@ -52,18 +52,18 @@ import { Callout } from "fumadocs-ui/components/callout";
 CLI에서의 동등한 명령:
 
 ```bash
-multica squad create --name "Frontend Team" --leader frontend-lead-agent
-multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agent --role "Owns Tailwind / shadcn surface"
+wallts squad create --name "Frontend Team" --leader frontend-lead-agent
+wallts squad member add <squad-id> --member-id <agent-or-user-uuid> --type agent --role "Owns Tailwind / shadcn surface"
 ```
 
 ## 스쿼드에 할당된 이슈가 실행되는 방식
 
-`backlog`가 아닌 이슈가 스쿼드에 할당되면, Multica는 즉시 **리더 에이전트**를 위한 `task`를 대기열에 넣습니다(모든 멤버를 위해서가 아닙니다). 그다음 흐름은 다음과 같습니다.
+`backlog`가 아닌 이슈가 스쿼드에 할당되면, Wallts는 즉시 **리더 에이전트**를 위한 `task`를 대기열에 넣습니다(모든 멤버를 위해서가 아닙니다). 그다음 흐름은 다음과 같습니다.
 
 1. **리더가 작업을 가져갑니다.** 에이전트 런타임이 다음 폴링에서 작업을 가져가며, 이는 다른 에이전트 할당과 동일합니다.
-2. **리더가 브리핑을 받습니다.** 작업을 가져가는 순간, Multica는 리더의 시스템 프롬프트에 세 개의 섹션을 덧붙입니다. 아래 [리더가 매 턴마다 보는 내용](#what-the-leader-sees-on-every-turn)을 참고하세요.
+2. **리더가 브리핑을 받습니다.** 작업을 가져가는 순간, Wallts는 리더의 시스템 프롬프트에 세 개의 섹션을 덧붙입니다. 아래 [리더가 매 턴마다 보는 내용](#what-the-leader-sees-on-every-turn)을 참고하세요.
 3. **리더가 하나의 위임 댓글을 작성합니다.** 그 댓글은 명단에 있는 정확한 멘션 마크다운을 사용해 선택된 멤버를 `@`로 멘션합니다. 이 멘션은 멘션된 각 에이전트를 위한 새 `task`를 트리거합니다.
-4. **리더가 평가를 기록합니다** — `multica squad activity <issue-id> action --reason "..."`를 통해 기록합니다. 이는 이슈의 활동 타임라인에 항목을 작성하여, 리더가 실제로 트리거를 평가했음을 사람이 확인할 수 있게 합니다.
+4. **리더가 평가를 기록합니다** — `wallts squad activity <issue-id> action --reason "..."`를 통해 기록합니다. 이는 이슈의 활동 타임라인에 항목을 작성하여, 리더가 실제로 트리거를 평가했음을 사람이 확인할 수 있게 합니다.
 5. **리더가 멈춥니다.** 리더는 구현 작업을 직접 하지 않습니다. 위임받은 멤버가 다시 글을 올리면, 리더가 다시 트리거되어 업데이트를 읽고 다음 단계를 위임하거나, 에스컬레이션하거나, 침묵을 지킵니다.
 
 이슈가 **`backlog`** 상태이면 리더는 트리거되지 않습니다. `backlog`는 주차장이며, 직접 에이전트에게 할당할 때와 동일한 규칙이 적용됩니다.
@@ -74,7 +74,7 @@ multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agen
 
 - **Squad Operating Protocol** — 하드코딩된 규칙 모음: 이슈를 읽고, `@`멘션으로 위임하고, 간결하게(이슈 본문을 다시 말하지 마세요. 담당자가 직접 읽을 수 있습니다) 작성하고, 매 턴 평가를 기록하며, **배정 후 멈춥니다**. 이 프로토콜은 시스템이 관리하며 편집할 수 없습니다.
 - **Squad Roster** — 리더 자신의 행과, 보관되지 않은 멤버마다 한 행씩으로 구성됩니다. 각 행에는 리더가 붙여넣어야 할 정확한 멘션 마크다운(`[@Name](mention://agent/<uuid>)` 또는 `[@Name](mention://member/<uuid>)`)이 담겨 있습니다. 일반 텍스트 `@name`을 입력하면 아무도 트리거되지 않습니다.
-- **Squad Instructions** — 이 스쿼드를 위한 사용자 지정 안내입니다(스쿼드 상세 페이지에서 설정하거나 `multica squad update --instructions`로 설정). 라우팅 규칙("DB 작업은 Alice에게, 프런트엔드는 Bob에게"), 에스컬레이션 정책, 또는 이슈 자체에 없는 그 밖의 사항 중 리더가 알아야 할 내용을 적는 데 사용하세요.
+- **Squad Instructions** — 이 스쿼드를 위한 사용자 지정 안내입니다(스쿼드 상세 페이지에서 설정하거나 `wallts squad update --instructions`로 설정). 라우팅 규칙("DB 작업은 Alice에게, 프런트엔드는 Bob에게"), 에스컬레이션 정책, 또는 이슈 자체에 없는 그 밖의 사항 중 리더가 알아야 할 내용을 적는 데 사용하세요.
 
 ## 리더가 다시 트리거되는 경우
 
@@ -104,7 +104,7 @@ multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agen
 
 **이슈를 스쿼드에서 다른 담당자로 재할당하는 것**은 다른 모든 담당자 변경과 동일하게 동작합니다. 이슈의 활성 작업(리더의 것 포함)이 모두 취소되고, 새 담당자(에이전트, 멤버, 또는 다른 스쿼드)가 대기열에 들어갑니다. "담당자를 바꾸지 않고 스쿼드만 제거하는" 별도의 동작은 없습니다. 다른 담당자를 고르세요.
 
-**스쿼드 보관**(`multica squad delete <id>`, 또는 상세 페이지의 Archive 버튼):
+**스쿼드 보관**(`wallts squad delete <id>`, 또는 상세 페이지의 Archive 버튼):
 
 1. **현재 스쿼드에 할당된 이슈를 리더 에이전트에게 이전**하여, 작업이 멈추는 대신 구체적인 에이전트를 상대로 계속 진행되도록 합니다.
 2. 스쿼드에 `archived_at` / `archived_by`를 표시합니다. 행은 보존되므로 과거의 활동 항목이 여전히 해석되지만, 스쿼드는 목록, 선택기, @멘션 드롭다운에서 사라집니다.
@@ -116,18 +116,18 @@ multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agen
 
 | 명령 | 용도 |
 |---|---|
-| `multica squad list` | 워크스페이스의 스쿼드 목록 표시 |
-| `multica squad get <id>` | 한 스쿼드의 이름, 리더, 설명, 지침 표시 |
-| `multica squad create --name "..." --leader <agent>` | 스쿼드 생성(owner / admin) |
-| `multica squad update <id> [--name X] [--description X] [--instructions X] [--leader Y] [--avatar-url Z]` | 하나 이상의 필드 업데이트 |
-| `multica squad delete <id>` | 보관(소프트 삭제) — 할당된 이슈를 리더에게 이전 |
-| `multica squad member list <id>` | 스쿼드의 멤버 목록 표시 |
-| `multica squad member add <id> --member-id <uuid> --type agent\|member [--role "..."]` | 멤버 추가(owner / admin) |
-| `multica squad member set-role <id> --member-id <uuid> --member-type agent\|member --role "..."` | 멤버를 제거하지 않고 역할 변경 |
-| `multica squad member remove <id> --member-id <uuid> --type agent\|member` | 멤버 제거(리더는 제거할 수 없습니다 — 먼저 리더를 변경하세요) |
-| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | 리더 에이전트가 매 턴 종료 시 기록 |
+| `wallts squad list` | 워크스페이스의 스쿼드 목록 표시 |
+| `wallts squad get <id>` | 한 스쿼드의 이름, 리더, 설명, 지침 표시 |
+| `wallts squad create --name "..." --leader <agent>` | 스쿼드 생성(owner / admin) |
+| `wallts squad update <id> [--name X] [--description X] [--instructions X] [--leader Y] [--avatar-url Z]` | 하나 이상의 필드 업데이트 |
+| `wallts squad delete <id>` | 보관(소프트 삭제) — 할당된 이슈를 리더에게 이전 |
+| `wallts squad member list <id>` | 스쿼드의 멤버 목록 표시 |
+| `wallts squad member add <id> --member-id <uuid> --type agent\|member [--role "..."]` | 멤버 추가(owner / admin) |
+| `wallts squad member set-role <id> --member-id <uuid> --member-type agent\|member --role "..."` | 멤버를 제거하지 않고 역할 변경 |
+| `wallts squad member remove <id> --member-id <uuid> --type agent\|member` | 멤버 제거(리더는 제거할 수 없습니다 — 먼저 리더를 변경하세요) |
+| `wallts squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | 리더 에이전트가 매 턴 종료 시 기록 |
 
-`--leader`는 에이전트 이름이나 UUID를 받습니다. 그 밖의 ID는 `multica agent list --output json`, `multica workspace member list --output json`, `multica squad list --output json`에서 가져옵니다.
+`--leader`는 에이전트 이름이나 UUID를 받습니다. 그 밖의 ID는 `wallts agent list --output json`, `wallts workspace member list --output json`, `wallts squad list --output json`에서 가져옵니다.
 
 ## 다음
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Skill } from "@multica/core/types";
+import type { Skill } from "@wallts/core/types";
 import { canEditSkill } from "./use-can-edit-skill";
 
 function makeSkill(createdBy: string | null): Skill {

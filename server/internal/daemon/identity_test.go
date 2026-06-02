@@ -23,7 +23,7 @@ func TestEnsureDaemonID_Persists(t *testing.T) {
 		t.Fatalf("EnsureDaemonID returned non-UUID: %q", first)
 	}
 
-	path := filepath.Join(home, ".multica", "daemon.id")
+	path := filepath.Join(home, ".wallts", "daemon.id")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("daemon.id not written: %v", err)
@@ -58,8 +58,8 @@ func TestEnsureDaemonID_SharedAcrossProfiles(t *testing.T) {
 	}
 
 	// Profile-scoped file must not be created under the new layout — the
-	// only source of truth is ~/.multica/daemon.id.
-	profileFile := filepath.Join(home, ".multica", "profiles", "staging", "daemon.id")
+	// only source of truth is ~/.wallts/daemon.id.
+	profileFile := filepath.Join(home, ".wallts", "profiles", "staging", "daemon.id")
 	if _, err := os.Stat(profileFile); !os.IsNotExist(err) {
 		t.Fatalf("profile-scoped daemon.id should not be created, stat err: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestEnsureDaemonID_PromotesPreChangeProfileFile(t *testing.T) {
 
 	// Seed a per-profile daemon.id the way pre-#1220 daemons laid it out.
 	legacyID := uuid.Must(uuid.NewV7()).String()
-	profileDir := filepath.Join(home, ".multica", "profiles", "staging")
+	profileDir := filepath.Join(home, ".wallts", "profiles", "staging")
 	if err := os.MkdirAll(profileDir, 0o755); err != nil {
 		t.Fatalf("mkdir profile: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestEnsureDaemonID_PromotesPreChangeProfileFile(t *testing.T) {
 	}
 
 	// The canonical file now holds that same UUID.
-	data, err := os.ReadFile(filepath.Join(home, ".multica", "daemon.id"))
+	data, err := os.ReadFile(filepath.Join(home, ".wallts", "daemon.id"))
 	if err != nil {
 		t.Fatalf("read canonical file: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestEnsureDaemonID_RegeneratesCorruptFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	dir := filepath.Join(home, ".multica")
+	dir := filepath.Join(home, ".wallts")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -133,8 +133,8 @@ func TestLegacyDaemonUUIDs_ScansProfileDirs(t *testing.T) {
 
 	uuidA := uuid.Must(uuid.NewV7()).String()
 	uuidB := uuid.Must(uuid.NewV7()).String()
-	for name, id := range map[string]string{"prod": uuidA, "desktop-multica": uuidB} {
-		dir := filepath.Join(home, ".multica", "profiles", name)
+	for name, id := range map[string]string{"prod": uuidA, "desktop-wallts": uuidB} {
+		dir := filepath.Join(home, ".wallts", "profiles", name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", name, err)
 		}
@@ -144,7 +144,7 @@ func TestLegacyDaemonUUIDs_ScansProfileDirs(t *testing.T) {
 	}
 
 	// A profile directory with a corrupt file must be skipped, not fail.
-	corruptDir := filepath.Join(home, ".multica", "profiles", "corrupt")
+	corruptDir := filepath.Join(home, ".wallts", "profiles", "corrupt")
 	if err := os.MkdirAll(corruptDir, 0o755); err != nil {
 		t.Fatalf("mkdir corrupt: %v", err)
 	}

@@ -8,17 +8,17 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@multica/ui/components/ui/select";
-import { useTheme } from "@multica/ui/components/common/theme-provider";
-import { cn } from "@multica/ui/lib/utils";
+} from "@wallts/ui/components/ui/select";
+import { useTheme } from "@wallts/ui/components/common/theme-provider";
+import { cn } from "@wallts/ui/lib/utils";
 import {
   DEFAULT_LOCALE,
   SUPPORTED_LOCALES,
   type SupportedLocale,
-} from "@multica/core/i18n";
-import { useLocaleAdapter } from "@multica/core/i18n/react";
-import { useAuthStore } from "@multica/core/auth";
-import { api } from "@multica/core/api";
+} from "@wallts/core/i18n";
+import { useLocaleAdapter } from "@wallts/core/i18n/react";
+import { useAuthStore } from "@wallts/core/auth";
+import { api } from "@wallts/core/api";
 import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
 import { useT } from "../../i18n";
 

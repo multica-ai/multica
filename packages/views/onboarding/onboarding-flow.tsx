@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { setCurrentWorkspace } from "@multica/core/platform";
-import { useAuthStore } from "@multica/core/auth";
+import { setCurrentWorkspace } from "@wallts/core/platform";
+import { useAuthStore } from "@wallts/core/auth";
 import {
   completeOnboarding,
   ONBOARDING_STEP_ORDER,
@@ -12,9 +12,9 @@ import {
   useWelcomeStore,
   type OnboardingStep,
   type QuestionnaireAnswers,
-} from "@multica/core/onboarding";
-import { workspaceListOptions } from "@multica/core/workspace/queries";
-import type { AgentRuntime, Workspace } from "@multica/core/types";
+} from "@wallts/core/onboarding";
+import { workspaceListOptions } from "@wallts/core/workspace/queries";
+import type { AgentRuntime, Workspace } from "@wallts/core/types";
 import { StepWelcome } from "./steps/step-welcome";
 import { StepSource } from "./steps/step-source";
 import { StepRole } from "./steps/step-role";
@@ -95,7 +95,7 @@ function mergeQuestionnaire(
  *     the install-runtime / create-agent guide issues on landing.
  *   - Runtime-connected (runtime picked on Step 3): completeOnboarding
  *     marks onboarded; we push a {choice:"runtime", runtimeId} welcome
- *     signal and navigate. The welcome hook creates the Multica Helper
+ *     signal and navigate. The welcome hook creates the Wallts Helper
  *     agent on the picked runtime and shows the starter-card Modal.
  *
  * V3 contract: this file never touches createAgent / createIssue. The

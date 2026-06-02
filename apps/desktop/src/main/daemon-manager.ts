@@ -22,7 +22,7 @@ import { decideVersionAction } from "./version-decision";
 
 const DEFAULT_HEALTH_PORT = 19514;
 const POLL_INTERVAL_MS = 5_000;
-const PREFS_PATH = join(homedir(), ".multica", "desktop_prefs.json");
+const PREFS_PATH = join(homedir(), ".wallts", "desktop_prefs.json");
 const LOG_TAIL_RETRY_MS = 2_000;
 const LOG_TAIL_MAX_RETRIES = 5;
 
@@ -54,7 +54,7 @@ let activeProfile: ActiveProfile | null = null;
 // corrupting the JSON.
 let configWriteChain: Promise<void> = Promise.resolve();
 
-// Keep the Go impl in sync: server/cmd/multica/cmd_daemon.go healthPortForProfile.
+// Keep the Go impl in sync: server/cmd/wallts/cmd_daemon.go healthPortForProfile.
 function healthPortForProfile(profile: string): number {
   if (!profile) return DEFAULT_HEALTH_PORT;
   let sum = 0;
@@ -64,8 +64,8 @@ function healthPortForProfile(profile: string): number {
 
 function profileDir(profile: string): string {
   return profile
-    ? join(homedir(), ".multica", "profiles", profile)
-    : join(homedir(), ".multica");
+    ? join(homedir(), ".wallts", "profiles", profile)
+    : join(homedir(), ".wallts");
 }
 
 function profileConfigPath(profile: string): string {
@@ -76,7 +76,7 @@ function profileLogPath(profile: string): string {
   return join(profileDir(profile), "daemon.log");
 }
 
-// Sidecar file that records which Multica user the cached PAT in config.json
+// Sidecar file that records which Wallts user the cached PAT in config.json
 // was minted for. The Go CLI/daemon never read or write this file, so it
 // survives Go-side config rewrites. Used to detect user switches and mint a
 // fresh PAT instead of reusing a token that belongs to a previous user.
@@ -163,7 +163,7 @@ async function fetchHealthAtPort(
 
 // Desktop owns a dedicated CLI profile named after the target API host, so it
 // never reads or writes the user's hand-configured profiles. Profile dir:
-//   ~/.multica/profiles/desktop-<host>/
+//   ~/.wallts/profiles/desktop-<host>/
 function deriveProfileName(targetUrl: string): string {
   try {
     const url = new URL(targetUrl);
@@ -282,7 +282,7 @@ async function fetchHealth(): Promise<DaemonStatus> {
 }
 
 function findCliOnPath(): string | null {
-  const candidates = process.platform === "win32" ? ["multica.exe"] : ["multica"];
+  const candidates = process.platform === "win32" ? ["wallts.exe"] : ["wallts"];
   const paths = (process.env["PATH"] ?? "").split(
     process.platform === "win32" ? ";" : ":",
   );
@@ -302,14 +302,14 @@ function findCliOnPath(): string | null {
  * Returns the path to the CLI binary bundled inside the Desktop app.
  *
  * - Dev (`electron-vite dev`): `app.getAppPath()` → `apps/desktop`, resolving
- *   to `apps/desktop/resources/bin/multica`. `bundle-cli.mjs` populates this
+ *   to `apps/desktop/resources/bin/wallts`. `bundle-cli.mjs` populates this
  *   before dev starts, so iterating on Go changes is "make build → restart".
- * - Packaged: `app.getAppPath()` → `<Multica.app>/Contents/Resources/app.asar`.
+ * - Packaged: `app.getAppPath()` → `<Wallts.app>/Contents/Resources/app.asar`.
  *   electron-builder's `asarUnpack: resources/**` extracts the binary to
  *   `app.asar.unpacked/`, so we swap the path segment to execute it.
  */
 function bundledCliPath(): string {
-  const binName = process.platform === "win32" ? "multica.exe" : "multica";
+  const binName = process.platform === "win32" ? "wallts.exe" : "wallts";
   return join(app.getAppPath(), "resources", "bin", binName).replace(
     "app.asar",
     "app.asar.unpacked",
@@ -347,12 +347,12 @@ async function probeCliBinary(
 }
 
 /**
- * Returns a usable `multica` binary path. Priority:
+ * Returns a usable `wallts` binary path. Priority:
  *   1. Cached result from a previous successful resolve.
  *   2. Bundled binary shipped with the Desktop app (`bundle-cli.mjs`).
  *   3. Managed binary already installed in userData (`managedCliPath`).
  *   4. Download + install latest release into userData.
- *   5. `multica` on PATH (dev convenience / user-installed via brew).
+ *   5. `wallts` on PATH (dev convenience / user-installed via brew).
  * Returns `null` only when all of the above fail.
  *
  * Bundled is preferred so Desktop iterates in lockstep with Go changes in
@@ -511,7 +511,7 @@ async function mintPat(jwt: string): Promise<string> {
       Authorization: `Bearer ${jwt}`,
     },
     // Omit expires_in_days → server treats as null → non-expiring PAT.
-    body: JSON.stringify({ name: "Multica Desktop" }),
+    body: JSON.stringify({ name: "Wallts Desktop" }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -603,7 +603,7 @@ async function loadPrefs(): Promise<DaemonPrefs> {
 }
 
 async function savePrefs(prefs: DaemonPrefs): Promise<void> {
-  const dir = join(homedir(), ".multica");
+  const dir = join(homedir(), ".wallts");
   await mkdir(dir, { recursive: true });
   await writeFile(PREFS_PATH, JSON.stringify(prefs, null, 2), "utf-8");
 }
@@ -642,12 +642,12 @@ function profileArgs(active: ActiveProfile): string[] {
 // applied by fix-path in main/index.ts — as a top-level const it would
 // snapshot process.env at import time, before that block runs.
 function desktopSpawnEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
+  return { ...process.env, WALLTS_LAUNCHED_BY: "desktop" };
 }
 
 async function startDaemon(): Promise<{ success: boolean; error?: string }> {
   const bin = await resolveCliBinary();
-  if (!bin) return { success: false, error: "multica CLI is not installed" };
+  if (!bin) return { success: false, error: "wallts CLI is not installed" };
 
   const active = await ensureActiveProfile();
   const existing = await fetchHealthAtPort(active.port);
@@ -685,7 +685,7 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
 
 async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
   const bin = await resolveCliBinary();
-  if (!bin) return { success: false, error: "multica CLI is not installed" };
+  if (!bin) return { success: false, error: "wallts CLI is not installed" };
 
   const active = await ensureActiveProfile();
   currentState = "stopping";

@@ -15,7 +15,7 @@ There is no per-issue setup. The whole flow is identifier-driven.
 |---|---|
 | **Settings → GitHub** | Workspace admins see the GitHub tab with a master toggle, **Connect GitHub** button, and feature switches (PR sidebar, Co-authored-by, auto-link). After install you bounce back to the GitHub tab. |
 | **Issue sidebar → Pull requests** | Every PR auto-linked to this issue, with title, repo, state (`Open` / `Draft` / `Merged` / `Closed`), and author. Click a row to jump to the PR on GitHub. |
-| **Webhook (background)** | On every `pull_request` event, Multica upserts the PR row, scans the PR for issue identifiers, and (re)builds the link rows. Idempotent — replaying a delivery is a no-op. |
+| **Webhook (background)** | On every `pull_request` event, Wallts upserts the PR row, scans the PR for issue identifiers, and (re)builds the link rows. Idempotent — replaying a delivery is a no-op. |
 | **Auto-status on merge** | When a PR transitions to `merged`, every linked issue not already `Done` or `Cancelled` is moved to `Done`. The status change is timeline-logged with source `github_pr_merged`. |
 
 Only the PR itself is mirrored. Commits, branch refs without an open PR, and CI check states are **not** modeled. The integration is intentionally narrow.
@@ -51,15 +51,15 @@ The action is attributed to the `system` actor on the timeline. Subscribers of t
 
 - **Identifiers in commit messages** — only branch / title / body are scanned. A commit titled `MUL-123: fix login` does not auto-link unless the same string also appears in the PR title or body.
 - **Identifiers in PR comments** — only the PR's own metadata is scanned; later GitHub comments are ignored.
-- **PRs in repos the App isn't installed on** — without the App, Multica never receives the webhook.
-- **Manually linking a PR to an issue** — there is no UI for this yet. If your team's convention puts identifiers in a place Multica isn't reading, add them to the PR title or body.
+- **PRs in repos the App isn't installed on** — without the App, Wallts never receives the webhook.
+- **Manually linking a PR to an issue** — there is no UI for this yet. If your team's convention puts identifiers in a place Wallts isn't reading, add them to the PR title or body.
 
 ## Disconnecting
 
 In **Settings → GitHub** there is no installation list — you manage existing installations from GitHub directly:
 
-- **From GitHub** — uninstall the Multica GitHub App at `https://github.com/settings/installations` (personal) or `https://github.com/organizations/<org>/settings/installations` (org). Multica receives the `installation.deleted` webhook and drops the row in real time; any open Settings tab updates without a refresh.
-- **Disconnect from inside Multica is admin-only** — the Disconnect control on the GitHub tab is hidden for non-admins. It stays available even when the master GitHub switch is off, so admins can still revoke a stale installation after one-click-disabling the feature.
+- **From GitHub** — uninstall the Wallts GitHub App at `https://github.com/settings/installations` (personal) or `https://github.com/organizations/<org>/settings/installations` (org). Wallts receives the `installation.deleted` webhook and drops the row in real time; any open Settings tab updates without a refresh.
+- **Disconnect from inside Wallts is admin-only** — the Disconnect control on the GitHub tab is hidden for non-admins. It stays available even when the master GitHub switch is off, so admins can still revoke a stale installation after one-click-disabling the feature.
 
 After disconnect, mirrored PR rows stay in the database so historical issue sidebars still show what was linked, but no new webhook events from that installation will be accepted.
 
@@ -67,11 +67,11 @@ After disconnect, mirrored PR rows stay in the database so historical issue side
 
 - **Connect / disconnect** require workspace **owner or admin**. Members see the card description but no Connect button.
 - The **Pull requests** sidebar on an issue is visible to anyone who can read the issue — same permissions as the rest of issue detail.
-- The GitHub App requests **read-only** access to pull requests and metadata. Multica never pushes commits, comments, or status checks back to GitHub.
+- The GitHub App requests **read-only** access to pull requests and metadata. Wallts never pushes commits, comments, or status checks back to GitHub.
 
 ## Self-host setup
 
-If you're running Multica on Multica Cloud, the integration is already configured — skip this section.
+If you're running Wallts on Wallts Cloud, the integration is already configured — skip this section.
 
 For self-host, you create one GitHub App, point it at your server, and set two environment variables. The whole flow is below.
 
@@ -86,13 +86,13 @@ Fill in:
 
 | Field | Value |
 |---|---|
-| **GitHub App name** | Anything recognizable, e.g. `Multica` or `Multica (staging)`. |
-| **Homepage URL** | Your Multica frontend, e.g. `https://multica.example.com`. |
-| **Callback URL** | Leave blank — Multica doesn't use OAuth user identity. |
+| **GitHub App name** | Anything recognizable, e.g. `Wallts` or `Wallts (staging)`. |
+| **Homepage URL** | Your Wallts frontend, e.g. `https://wallts.example.com`. |
+| **Callback URL** | Leave blank — Wallts doesn't use OAuth user identity. |
 | **Setup URL** | `https://<api-host>/api/github/setup`. **Check "Redirect on update"**. |
 | **Webhook → Active** | Enabled. |
 | **Webhook URL** | `https://<api-host>/api/webhooks/github`. |
-| **Webhook secret** | Generate a long random string (e.g. `openssl rand -hex 32`). You'll paste the same value into Multica's env in step 2. |
+| **Webhook secret** | Generate a long random string (e.g. `openssl rand -hex 32`). You'll paste the same value into Wallts's env in step 2. |
 | **Permissions → Repository → Pull requests** | **Read-only**. |
 | **Permissions → Repository → Metadata** | Read-only (mandatory). |
 | **Subscribe to events** | Tick **Pull request**. |
@@ -100,11 +100,11 @@ Fill in:
 
 After **Create GitHub App**, note two things from the App's detail page:
 
-- The **public link** at the top — its tail is the slug. `https://github.com/apps/multica-acme` → slug = `multica-acme`.
+- The **public link** at the top — its tail is the slug. `https://github.com/apps/wallts-acme` → slug = `wallts-acme`.
 - The **webhook secret** you just generated (you can't read it back from GitHub later — save it now).
 
 <Callout type="warning">
-**Webhook secret ≠ Client secret.** The App settings page has both fields stacked together. The **Webhook secret** is what signs `pull_request` payloads — that's the one Multica needs. The **Client secret** is for OAuth and is not used by this integration. Mixing them up produces a confusing `401 invalid signature` on every webhook delivery.
+**Webhook secret ≠ Client secret.** The App settings page has both fields stacked together. The **Webhook secret** is what signs `pull_request` payloads — that's the one Wallts needs. The **Client secret** is for OAuth and is not used by this integration. Mixing them up produces a confusing `401 invalid signature` on every webhook delivery.
 </Callout>
 
 ### 2. Set environment variables
@@ -112,14 +112,14 @@ After **Create GitHub App**, note two things from the App's detail page:
 On the API server:
 
 ```dotenv
-GITHUB_APP_SLUG=multica-acme
+GITHUB_APP_SLUG=wallts-acme
 GITHUB_WEBHOOK_SECRET=<the webhook secret you generated>
 ```
 
 Both variables are required. If either is missing:
 
 - `Connect GitHub` in Settings is **disabled** and shows a "not configured" hint.
-- The `/api/webhooks/github` endpoint returns **`503 github webhooks not configured`** — Multica refuses to process events with no secret, rather than silently treating every signature as valid.
+- The `/api/webhooks/github` endpoint returns **`503 github webhooks not configured`** — Wallts refuses to process events with no secret, rather than silently treating every signature as valid.
 
 `FRONTEND_ORIGIN` must also be set (it already is for any production self-host); the setup callback bounces the user back to `<FRONTEND_ORIGIN>/settings?tab=github` after install.
 
@@ -137,7 +137,7 @@ Three tables get created: `github_installation`, `github_pull_request`, `issue_p
 
 ### 4. Connect from the UI
 
-In Multica:
+In Wallts:
 
 1. Open **Settings → GitHub** as an owner or admin.
 2. Click **Connect GitHub**. GitHub opens in a new tab.
@@ -172,7 +172,7 @@ curl -i -X POST https://<api-host>/api/webhooks/github \
 A few rough edges to be aware of today:
 
 - **No manual link UI yet** — the only way to link a PR is to have the identifier in its branch, title, or body.
-- **No CI / check state** — only the PR itself is mirrored. Build status, review comments, and reviewers are not surfaced in Multica.
+- **No CI / check state** — only the PR itself is mirrored. Build status, review comments, and reviewers are not surfaced in Wallts.
 - **No workspace-level config** for the merge → Done rule — it's a fixed default (`merged → done`, unless `cancelled`). Workspace-customizable mappings are a future addition.
 - **Multi-PR-to-one-issue is conservative on merge** — if two PRs both reference `MUL-123` and the first one merges, the issue is moved to `Done` immediately. A follow-up change to wait for all linked PRs to resolve before advancing is in progress.
 

@@ -2,14 +2,14 @@
 
 import { Suspense, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { paths } from "@multica/core/paths";
+import { paths } from "@wallts/core/paths";
 import {
   Card,
   CardHeader,
   CardTitle,
   CardDescription,
   CardContent,
-} from "@multica/ui/components/ui/card";
+} from "@wallts/ui/components/ui/card";
 import { Loader2 } from "lucide-react";
 
 /**

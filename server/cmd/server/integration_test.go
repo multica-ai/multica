@@ -17,9 +17,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/wallts-ai/wallts/server/internal/auth"
+	"github.com/wallts-ai/wallts/server/internal/events"
+	"github.com/wallts-ai/wallts/server/internal/realtime"
 )
 
 var (
@@ -43,7 +43,7 @@ func TestMain(m *testing.M) {
 	ctx := context.Background()
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+		dbURL = "postgres://wallts:wallts@localhost:5432/wallts?sslmode=disable"
 	}
 
 	pool, err := pgxpool.New(ctx, dbURL)

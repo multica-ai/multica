@@ -1,1 +1,1 @@
-export { SquadsPage as default } from "@multica/views/squads";
+export { SquadsPage as default } from "@wallts/views/squads";

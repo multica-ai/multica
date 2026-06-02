@@ -2,12 +2,12 @@
 
 import type { ReactNode } from "react";
 import { ArrowUp, Loader2, Square } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@multica/ui/components/ui/tooltip";
+} from "@wallts/ui/components/ui/tooltip";
 
 interface SubmitButtonProps {
   onClick: () => void;
@@ -19,7 +19,7 @@ interface SubmitButtonProps {
    * Tooltip shown over the send button when idle. Pass a string or a node
    * (e.g. `Send · ⌘↵`). Omit to render no tooltip.
    * Callers compose the shortcut hint themselves to keep this component
-   * free of `@multica/core` (platform-detection) and i18n imports.
+   * free of `@wallts/core` (platform-detection) and i18n imports.
    */
   tooltip?: ReactNode;
   /** Tooltip shown over the stop button while a run is in progress. */

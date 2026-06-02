@@ -107,7 +107,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// OpenCode's general inline-config injection mechanism that merges at
 	// "local" scope (after the project-config loop, before remote / managed
 	// configs). MCP is the only field we currently project there; if a
-	// future Multica field needs the same channel it would assemble a
+	// future Wallts field needs the same channel it would assemble a
 	// combined OpenCode config slice before the env append.
 	//
 	// This deliberately leaves <workdir>/opencode.json untouched — the

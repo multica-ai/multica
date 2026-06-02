@@ -1,8 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@multica/ui/styles/tokens.css";
-@import "@multica/ui/styles/base.css";
+@import "@wallts/ui/styles/tokens.css";
+@import "@wallts/ui/styles/base.css";
 
 @custom-variant dark (&:is(.dark *));
 

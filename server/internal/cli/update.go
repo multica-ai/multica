@@ -43,7 +43,7 @@ func MatchKnownBrewPrefix(path string) string {
 	return ""
 }
 
-// IsBrewInstall checks whether the running multica binary was installed via Homebrew.
+// IsBrewInstall checks whether the running wallts binary was installed via Homebrew.
 func IsBrewInstall() bool {
 	exePath, err := os.Executable()
 	if err != nil {

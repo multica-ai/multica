@@ -2,10 +2,10 @@
 
 import { type ReactNode, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
-import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import type { OnboardingStep } from "@multica/core/onboarding";
-import { DragStrip } from "@multica/views/platform";
+import { Button } from "@wallts/ui/components/ui/button";
+import { useScrollFade } from "@wallts/ui/hooks/use-scroll-fade";
+import type { OnboardingStep } from "@wallts/core/onboarding";
+import { DragStrip } from "@wallts/views/platform";
 import { StepHeader } from "../components/step-header";
 import {
   IconOptionCard,

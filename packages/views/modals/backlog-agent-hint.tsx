@@ -2,7 +2,7 @@
 
 import { toast } from "sonner";
 import { BacklogAgentHintDialog } from "../issues/components/backlog-agent-hint-dialog";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { useUpdateIssue } from "@wallts/core/issues/mutations";
 import { useT } from "../i18n";
 
 export function BacklogAgentHintModal({
@@ -23,7 +23,7 @@ export function BacklogAgentHintModal({
         if (!v) onClose();
       }}
       onDismissPermanently={() => {
-        localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
+        localStorage.setItem("wallts:backlog-agent-hint-dismissed", "true");
       }}
       onMoveToTodo={() => {
         if (issueId) {

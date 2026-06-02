@@ -8,7 +8,7 @@ import {
   PlugZap,
   type LucideIcon,
 } from "lucide-react";
-import type { AgentAvailability, Workload } from "@multica/core/agents";
+import type { AgentAvailability, Workload } from "@wallts/core/agents";
 
 // Visual mapping for the two presence dimensions, kept in matching shape
 // so consumers can pick which to render. The two are independent — the

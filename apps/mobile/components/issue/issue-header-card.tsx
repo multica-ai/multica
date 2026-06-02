@@ -12,7 +12,7 @@
  * reference screenshot.
  */
 import { View } from "react-native";
-import type { Issue } from "@multica/core/types";
+import type { Issue } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { AttributeRow } from "./attribute-row";
 import { AgentActivityRow } from "./agent-activity-row";

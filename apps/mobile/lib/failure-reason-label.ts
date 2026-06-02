@@ -10,7 +10,7 @@
  * or rendering the raw enum string, matching the root CLAUDE.md "Enum
  * drift downgrades, not crashes" rule.
  */
-import type { TaskFailureReason } from "@multica/core/types";
+import type { TaskFailureReason } from "@wallts/core/types";
 
 const LABELS: Record<TaskFailureReason, string> = {
   agent_error: "Agent execution error",

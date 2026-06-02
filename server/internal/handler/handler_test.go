@@ -15,11 +15,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/realtime"
-	"github.com/multica-ai/multica/server/internal/service"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/wallts-ai/wallts/server/internal/events"
+	"github.com/wallts-ai/wallts/server/internal/realtime"
+	"github.com/wallts-ai/wallts/server/internal/service"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/pkg/protocol"
 )
 
 var testHandler *Handler
@@ -38,7 +38,7 @@ func TestMain(m *testing.M) {
 	ctx := context.Background()
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+		dbURL = "postgres://wallts:wallts@localhost:5432/wallts?sslmode=disable"
 	}
 
 	pool, err := pgxpool.New(ctx, dbURL)

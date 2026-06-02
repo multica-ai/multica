@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// TestListSkills_OmitsContent guards the fix for GH multica-ai/multica#2174:
+// TestListSkills_OmitsContent guards the fix for GH dwickyfp/wallts#2174:
 // the workspace skill list endpoint must not ship the SKILL.md `content`
 // blob, which used to bloat the payload past CLI timeouts on workspaces with
 // many large skills. The detail endpoint still returns content (covered by
@@ -78,7 +78,7 @@ func TestGetSkill_IncludesContent(t *testing.T) {
 
 // TestListAgentSkills_OmitsContent: same constraint for the agent-scoped
 // listing — gpt-boy review of the original fix flagged this as a sister case
-// because `multica agent skills list` follows the same shape rules.
+// because `wallts agent skills list` follows the same shape rules.
 func TestListAgentSkills_OmitsContent(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "Handler Skill Summary Test", nil)
 	skillID := insertHandlerTestSkill(t, "agent-skill-omits-content", strings.Repeat("b", 1024))

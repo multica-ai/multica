@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import { useLocation, useNavigate, useRouteError } from "react-router-dom";
 import { AlertTriangle, RotateCw, Send, X } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
-import { useModalStore } from "@multica/core/modals";
+import { Button } from "@wallts/ui/components/ui/button";
+import { useModalStore } from "@wallts/core/modals";
 import { useTabStore } from "@/stores/tab-store";
 
 type DesktopAppInfo = {

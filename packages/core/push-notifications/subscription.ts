@@ -9,7 +9,7 @@
 import type { PushSubscriptionJSON } from "../types";
 
 const SERVICE_WORKER_PATH = "/sw.js";
-const APPLICATION_SERVER_KEY_STORAGE_KEY = "multica_vapid_public_key";
+const APPLICATION_SERVER_KEY_STORAGE_KEY = "wallts_vapid_public_key";
 
 // ---------------------------------------------------------------------------
 // Feature detection
@@ -33,7 +33,7 @@ export function isPushSupported(): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Register the Multica service worker. Returns the registration if
+ * Register the Wallts service worker. Returns the registration if
  * successful, `null` otherwise (e.g. unsupported browser or permission
  * denied at the OS level).
  */

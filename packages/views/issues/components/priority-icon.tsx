@@ -1,5 +1,5 @@
-import type { IssuePriority } from "@multica/core/types";
-import { PRIORITY_CONFIG } from "@multica/core/issues/config";
+import type { IssuePriority } from "@wallts/core/types";
+import { PRIORITY_CONFIG } from "@wallts/core/issues/config";
 
 export function PriorityIcon({
   priority,

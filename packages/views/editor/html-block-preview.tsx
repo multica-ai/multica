@@ -24,11 +24,11 @@ import {
   Eye,
   Maximize2,
 } from "lucide-react";
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 import {
   Dialog,
   DialogContent,
-} from "@multica/ui/components/ui/dialog";
+} from "@wallts/ui/components/ui/dialog";
 import { useT } from "../i18n";
 import { CodeBlockStatic } from "./code-block-static";
 import { HtmlPreviewBody } from "./html-preview-body";

@@ -42,8 +42,8 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func daemonSetupURLsFromEnv() (string, string) {
-	serverURL := normalizePublicURL(os.Getenv("MULTICA_PUBLIC_URL"))
-	appURL := normalizePublicURL(os.Getenv("MULTICA_APP_URL"))
+	serverURL := normalizePublicURL(os.Getenv("WALLTS_PUBLIC_URL"))
+	appURL := normalizePublicURL(os.Getenv("WALLTS_APP_URL"))
 	if appURL == "" {
 		appURL = normalizePublicURL(os.Getenv("FRONTEND_ORIGIN"))
 	}

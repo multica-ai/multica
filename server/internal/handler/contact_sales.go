@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/multica-ai/multica/server/internal/logger"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/internal/logger"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
 )
 
 // Public, unauthenticated endpoint for the landing-page "Contact Sales"
@@ -46,7 +46,7 @@ var contactSalesAllowedCompanySize = []string{
 }
 
 // contactSalesAllowedUseCase mirrors the "How do you plan to use or
-// collaborate with Multica?" dropdown.
+// collaborate with Wallts?" dropdown.
 var contactSalesAllowedUseCase = []string{
 	"evaluate",
 	"adopt_team",

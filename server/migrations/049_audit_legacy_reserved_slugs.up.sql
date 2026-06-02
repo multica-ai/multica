@@ -1,4 +1,4 @@
--- Audit `admin`, `multica`, `new`, `www` against the workspace.slug column.
+-- Audit `admin`, `wallts`, `new`, `www` against the workspace.slug column.
 --
 -- Follow-up to migration 047 (extended reserved slugs). 047 intentionally
 -- omitted these four slugs from its audit because each had one conflicting
@@ -6,7 +6,7 @@
 -- was deemed unacceptable. MUL-972 closed that loop on prd:
 --
 --   * `admin`   (99cd10e4-…) → renamed to `legacy-admin-99cd10e4`
---   * `multica` (dcd796aa-…) → renamed to `legacy-multica-dcd796aa`
+--   * `wallts` (dcd796aa-…) → renamed to `legacy-wallts-dcd796aa`
 --   * `new`     (e391e3ed-…) → renamed to `legacy-new-e391e3ed`
 --   * `www`     (5e8d38b2-…) → workspace deleted (was empty: 0 issues /
 --                              projects / agents, owner-only member)
@@ -37,7 +37,7 @@ BEGIN
   FROM workspace
   WHERE slug IN (
     'admin',
-    'multica',
+    'wallts',
     'new',
     'www'
   );

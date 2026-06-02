@@ -7,7 +7,7 @@ import { Document } from "@tiptap/extension-document";
 import { Paragraph } from "@tiptap/extension-paragraph";
 import { Text } from "@tiptap/extension-text";
 import Placeholder from "@tiptap/extension-placeholder";
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 import { useT } from "../i18n";
 import "./title-editor.css";
 

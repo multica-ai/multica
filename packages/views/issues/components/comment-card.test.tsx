@@ -7,7 +7,7 @@ const { getAttachmentTextContentMock } = vi.hoisted(() => ({
   getAttachmentTextContentMock: vi.fn(),
 }));
 
-vi.mock("@multica/core/api", () => ({
+vi.mock("@wallts/core/api", () => ({
   api: {
     getAttachmentTextContent: getAttachmentTextContentMock,
     getAttachment: vi.fn(),
@@ -32,8 +32,8 @@ vi.mock("../../navigation", () => ({
   }),
 }));
 
-vi.mock("@multica/core/paths", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@multica/core/paths")>();
+vi.mock("@wallts/core/paths", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@wallts/core/paths")>();
   return {
     ...actual,
     useWorkspaceSlug: () => "acme",

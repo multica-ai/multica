@@ -19,12 +19,12 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     headlineLine1: "\u4f60\u7684\u4e0b\u4e00\u6279\u5458\u5de5",
     headlineLine2: "\u4e0d\u662f\u4eba\u7c7b\u3002",
     subheading:
-      "Multica \u662f\u4e00\u4e2a\u5f00\u6e90\u5e73\u53f0\uff0c\u5c06\u7f16\u7801 智能体 \u53d8\u6210\u771f\u6b63\u7684\u961f\u53cb\u3002\u5206\u914d\u4efb\u52a1\u3001\u8ddf\u8e2a\u8fdb\u5ea6\u3001\u79ef\u7d2f\u6280\u80fd\u2014\u2014\u5728\u4e00\u4e2a\u5730\u65b9\u7ba1\u7406\u4f60\u7684\u4eba\u7c7b + 智能体 \u56e2\u961f\u3002",
+      "Wallts \u662f\u4e00\u4e2a\u5f00\u6e90\u5e73\u53f0\uff0c\u5c06\u7f16\u7801 智能体 \u53d8\u6210\u771f\u6b63\u7684\u961f\u53cb\u3002\u5206\u914d\u4efb\u52a1\u3001\u8ddf\u8e2a\u8fdb\u5ea6\u3001\u79ef\u7d2f\u6280\u80fd\u2014\u2014\u5728\u4e00\u4e2a\u5730\u65b9\u7ba1\u7406\u4f60\u7684\u4eba\u7c7b + 智能体 \u56e2\u961f\u3002",
     cta: "免费开始",
     downloadDesktop: "下载桌面端",
     talkToSales: "联系商务",
     worksWith: "支持",
-    imageAlt: "Multica \u770b\u677f\u89c6\u56fe\u2014\u2014\u4eba\u7c7b\u548c 智能体 \u534f\u540c\u7ba1\u7406\u4efb\u52a1",
+    imageAlt: "Wallts \u770b\u677f\u89c6\u56fe\u2014\u2014\u4eba\u7c7b\u548c 智能体 \u534f\u540c\u7ba1\u7406\u4efb\u52a1",
   },
 
   features: {
@@ -116,7 +116,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         {
           title: "\u9996\u6b21\u542f\u52a8\u81ea\u52a8\u6ce8\u518c",
           description:
-            "Multica \u626b\u63cf\u672c\u673a\u7684 12 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
+            "Wallts \u626b\u63cf\u672c\u673a\u7684 12 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
         description:
-          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 12 款支持的 AI 编程工具（Antigravity、Claude Code、Codex、Cursor、Copilot、Gemini、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi）。本机已安装的工具会被自动注册成运行时。",
+          "运行 wallts setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 12 款支持的 AI 编程工具（Antigravity、Claude Code、Codex、Cursor、Copilot、Gemini、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi）。本机已安装的工具会被自动注册成运行时。",
       },
       {
         title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a 智能体",
@@ -159,13 +159,13 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     headlineLine1: "\u5f00\u6e90",
     headlineLine2: "\u4e3a\u6240\u6709\u4eba\u3002",
     description:
-      "Multica \u5b8c\u5168\u5f00\u6e90\u3002\u5ba1\u67e5\u6bcf\u4e00\u884c\u4ee3\u7801\uff0c\u6309\u4f60\u7684\u65b9\u5f0f\u81ea\u6258\u7ba1\uff0c\u5851\u9020\u4eba\u7c7b + 智能体 \u534f\u4f5c\u7684\u672a\u6765\u3002",
+      "Wallts \u5b8c\u5168\u5f00\u6e90\u3002\u5ba1\u67e5\u6bcf\u4e00\u884c\u4ee3\u7801\uff0c\u6309\u4f60\u7684\u65b9\u5f0f\u81ea\u6258\u7ba1\uff0c\u5851\u9020\u4eba\u7c7b + 智能体 \u534f\u4f5c\u7684\u672a\u6765\u3002",
     cta: "\u5728 GitHub \u4e0a Star",
     highlights: [
       {
         title: "\u968f\u5904\u81ea\u6258\u7ba1",
         description:
-          "\u5728\u4f60\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u8fd0\u884c Multica\u3002Docker Compose\u3001\u5355\u4e2a\u4e8c\u8fdb\u5236\u6216 Kubernetes\u2014\u2014\u4f60\u7684\u6570\u636e\u6c38\u8fdc\u4e0d\u4f1a\u79bb\u5f00\u4f60\u7684\u7f51\u7edc\u3002",
+          "\u5728\u4f60\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u8fd0\u884c Wallts\u3002Docker Compose\u3001\u5355\u4e2a\u4e8c\u8fdb\u5236\u6216 Kubernetes\u2014\u2014\u4f60\u7684\u6570\u636e\u6c38\u8fdc\u4e0d\u4f1a\u79bb\u5f00\u4f60\u7684\u7f51\u7edc\u3002",
       },
       {
         title: "\u65e0\u4f9b\u5e94\u5546\u9501\u5b9a",
@@ -190,30 +190,30 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     headline: "\u95ee\u4e0e\u7b54\u3002",
     items: [
       {
-        question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
+        question: "Wallts \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:
-          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 12 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
+          "Wallts \u5f00\u7bb1\u5373\u7528\u652f\u6301 12 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
       },
       {
         question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
         answer:
-          "\u4e24\u8005\u90fd\u6709\u3002\u4f60\u53ef\u4ee5\u7528 Docker Compose \u6216 Kubernetes \u5728\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u81ea\u6258\u7ba1 Multica\uff0c\u4e5f\u53ef\u4ee5\u4f7f\u7528\u6211\u4eec\u7684\u6258\u7ba1\u4e91\u7248\u672c\u3002\u4f60\u7684\u6570\u636e\uff0c\u4f60\u9009\u62e9\u3002",
+          "\u4e24\u8005\u90fd\u6709\u3002\u4f60\u53ef\u4ee5\u7528 Docker Compose \u6216 Kubernetes \u5728\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u81ea\u6258\u7ba1 Wallts\uff0c\u4e5f\u53ef\u4ee5\u4f7f\u7528\u6211\u4eec\u7684\u6258\u7ba1\u4e91\u7248\u672c\u3002\u4f60\u7684\u6570\u636e\uff0c\u4f60\u9009\u62e9\u3002",
       },
       {
         question:
           "\u8fd9\u548c\u76f4\u63a5\u7528\u7f16\u7801 智能体 \u6709\u4ec0\u4e48\u533a\u522b\uff1f",
         answer:
-          "\u7f16\u7801 智能体 \u64c5\u957f\u6267\u884c\u3002Multica \u6dfb\u52a0\u7684\u662f\u7ba1\u7406\u5c42\uff1a\u4efb\u52a1\u961f\u5217\u3001\u56e2\u961f\u534f\u4f5c\u3001\u6280\u80fd\u590d\u7528\u3001\u8fd0\u884c\u65f6\u76d1\u63a7\uff0c\u4ee5\u53ca\u6bcf\u4e2a 智能体 \u5728\u505a\u4ec0\u4e48\u7684\u7edf\u4e00\u89c6\u56fe\u3002\u628a\u5b83\u60f3\u8c61\u6210\u4f60\u7684 智能体 \u7684\u9879\u76ee\u7ecf\u7406\u3002",
+          "\u7f16\u7801 智能体 \u64c5\u957f\u6267\u884c\u3002Wallts \u6dfb\u52a0\u7684\u662f\u7ba1\u7406\u5c42\uff1a\u4efb\u52a1\u961f\u5217\u3001\u56e2\u961f\u534f\u4f5c\u3001\u6280\u80fd\u590d\u7528\u3001\u8fd0\u884c\u65f6\u76d1\u63a7\uff0c\u4ee5\u53ca\u6bcf\u4e2a 智能体 \u5728\u505a\u4ec0\u4e48\u7684\u7edf\u4e00\u89c6\u56fe\u3002\u628a\u5b83\u60f3\u8c61\u6210\u4f60\u7684 智能体 \u7684\u9879\u76ee\u7ecf\u7406\u3002",
       },
       {
         question: "智能体 \u80fd\u81ea\u4e3b\u5904\u7406\u957f\u65f6\u95f4\u4efb\u52a1\u5417\uff1f",
         answer:
-          "\u53ef\u4ee5\u3002Multica \u7ba1\u7406\u5b8c\u6574\u7684\u4efb\u52a1\u751f\u547d\u5468\u671f\u2014\u2014\u5165\u961f\u3001\u9886\u53d6\u3001\u6267\u884c\u3001\u5b8c\u6210\u6216\u5931\u8d25\u3002智能体 \u4e3b\u52a8\u62a5\u544a\u963b\u585e\u5e76\u5b9e\u65f6\u63a8\u9001\u8fdb\u5ea6\u3002\u4f60\u53ef\u4ee5\u968f\u65f6\u67e5\u770b\uff0c\u4e5f\u53ef\u4ee5\u8ba9\u5b83\u4eec\u8fd0\u884c\u6574\u665a\u3002",
+          "\u53ef\u4ee5\u3002Wallts \u7ba1\u7406\u5b8c\u6574\u7684\u4efb\u52a1\u751f\u547d\u5468\u671f\u2014\u2014\u5165\u961f\u3001\u9886\u53d6\u3001\u6267\u884c\u3001\u5b8c\u6210\u6216\u5931\u8d25\u3002智能体 \u4e3b\u52a8\u62a5\u544a\u963b\u585e\u5e76\u5b9e\u65f6\u63a8\u9001\u8fdb\u5ea6\u3002\u4f60\u53ef\u4ee5\u968f\u65f6\u67e5\u770b\uff0c\u4e5f\u53ef\u4ee5\u8ba9\u5b83\u4eec\u8fd0\u884c\u6574\u665a\u3002",
       },
       {
         question: "\u6211\u7684\u4ee3\u7801\u5b89\u5168\u5417\uff1f智能体 \u5728\u54ea\u91cc\u6267\u884c\uff1f",
         answer:
-          "智能体 \u5728\u4f60\u7684\u673a\u5668\uff08\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\uff09\u6216\u4f60\u81ea\u5df1\u7684\u4e91\u57fa\u7840\u8bbe\u65bd\u4e0a\u6267\u884c\u3002\u4ee3\u7801\u6c38\u8fdc\u4e0d\u4f1a\u7ecf\u8fc7 Multica \u670d\u52a1\u5668\u3002\u5e73\u53f0\u53ea\u534f\u8c03\u4efb\u52a1\u72b6\u6001\u548c\u5e7f\u64ad\u4e8b\u4ef6\u3002",
+          "智能体 \u5728\u4f60\u7684\u673a\u5668\uff08\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\uff09\u6216\u4f60\u81ea\u5df1\u7684\u4e91\u57fa\u7840\u8bbe\u65bd\u4e0a\u6267\u884c\u3002\u4ee3\u7801\u6c38\u8fdc\u4e0d\u4f1a\u7ecf\u8fc7 Wallts \u670d\u52a1\u5668\u3002\u5e73\u53f0\u53ea\u534f\u8c03\u4efb\u52a1\u72b6\u6001\u548c\u5e7f\u64ad\u4e8b\u4ef6\u3002",
       },
       {
         question: "\u6211\u53ef\u4ee5\u8fd0\u884c\u591a\u5c11\u4e2a 智能体\uff1f",
@@ -243,7 +243,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "\u6587\u6863", href: "/docs/zh" },
           { label: "API", href: githubUrl },
-          { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
+          { label: "X (Twitter)", href: "https://x.com/WalltsAI" },
         ],
       },
       company: {
@@ -256,13 +256,13 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         ],
       },
     },
-    copyright: "\u00a9 {year} Multica. \u4fdd\u7559\u6240\u6709\u6743\u5229\u3002",
+    copyright: "\u00a9 {year} Wallts. \u4fdd\u7559\u6240\u6709\u6743\u5229\u3002",
   },
 
   about: {
-    title: "\u5173\u4e8e Multica",
+    title: "\u5173\u4e8e Wallts",
     nameLine: {
-      prefix: "Multica\u2014\u2014",
+      prefix: "Wallts\u2014\u2014",
       mul: "Mul",
       tiplexed: "tiplexed ",
       i: "I",
@@ -274,8 +274,8 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     paragraphs: [
       "\u8fd9\u4e2a\u540d\u5b57\u662f\u5728\u5411 20 \u4e16\u7eaa 60 \u5e74\u4ee3\u5177\u6709\u5f00\u521b\u610f\u4e49\u7684\u64cd\u4f5c\u7cfb\u7edf Multics \u81f4\u610f\u3002Multics \u9996\u521b\u4e86\u5206\u65f6\u7cfb\u7edf\uff0c\u8ba9\u591a\u4e2a\u7528\u6237\u80fd\u591f\u5171\u4eab\u540c\u4e00\u53f0\u673a\u5668\uff0c\u540c\u65f6\u53c8\u50cf\u5404\u81ea\u72ec\u5360\u5b83\u4e00\u6837\u4f7f\u7528\u3002Unix \u5219\u662f\u5728\u6709\u610f\u7b80\u5316 Multics \u7684\u57fa\u7840\u4e0a\u8bde\u751f\u7684\uff0c\u5f3a\u8c03\u4e00\u4e2a\u7528\u6237\u3001\u4e00\u4e2a\u4efb\u52a1\u3001\u4e00\u79cd\u4f18\u96c5\u7684\u54f2\u5b66\u3002",
-      "\u6211\u4eec\u8ba4\u4e3a\uff0c\u7c7b\u4f3c\u7684\u8f6c\u6298\u70b9\u6b63\u5728\u518d\u6b21\u51fa\u73b0\u3002\u51e0\u5341\u5e74\u6765\uff0c\u8f6f\u4ef6\u56e2\u961f\u4e00\u76f4\u5904\u4e8e\u4e00\u79cd\u5355\u7ebf\u7a0b\u7684\u5de5\u4f5c\u6a21\u5f0f\uff0c\u4e00\u4e2a\u5de5\u7a0b\u5e08\u5904\u7406\u4e00\u4e2a\u4efb\u52a1\uff0c\u4e00\u6b21\u53ea\u4e13\u6ce8\u4e8e\u4e00\u4e2a\u4e0a\u4e0b\u6587\u3002AI agents \u6539\u53d8\u4e86\u8fd9\u4e2a\u7b49\u5f0f\u3002Multica \u5c06\u201c\u5206\u65f6\u201d\u91cd\u65b0\u5e26\u56de\u8fd9\u4e2a\u65f6\u4ee3\uff0c\u53ea\u4e0d\u8fc7\u4eca\u5929\u5728\u7cfb\u7edf\u4e2d\u8fdb\u884c\u591a\u8def\u590d\u7528\u7684\u201c\u7528\u6237\u201d\uff0c\u65e2\u5305\u62ec\u4eba\u7c7b\uff0c\u4e5f\u5305\u62ec\u81ea\u4e3b\u4ee3\u7406\u3002",
-      "\u5728 Multica \u4e2d\uff0cagents \u662f\u4e00\u7ea7\u56e2\u961f\u6210\u5458\u3002\u5b83\u4eec\u4f1a\u88ab\u5206\u914d issue\uff0c\u6c47\u62a5\u8fdb\u5c55\uff0c\u63d0\u51fa\u963b\u585e\uff0c\u5e76\u4ea4\u4ed8\u4ee3\u7801\uff0c\u5c31\u50cf\u4eba\u7c7b\u540c\u4e8b\u4e00\u6837\u3002\u4efb\u52a1\u5206\u914d\u3001\u6d3b\u52a8\u65f6\u95f4\u7ebf\u3001\u4efb\u52a1\u751f\u547d\u5468\u671f\uff0c\u4ee5\u53ca\u8fd0\u884c\u65f6\u57fa\u7840\u8bbe\u65bd\uff0cMultica \u4ece\u7b2c\u4e00\u5929\u8d77\u5c31\u662f\u56f4\u7ed5\u8fd9\u4e00\u7406\u5ff5\u6784\u5efa\u7684\u3002",
+      "\u6211\u4eec\u8ba4\u4e3a\uff0c\u7c7b\u4f3c\u7684\u8f6c\u6298\u70b9\u6b63\u5728\u518d\u6b21\u51fa\u73b0\u3002\u51e0\u5341\u5e74\u6765\uff0c\u8f6f\u4ef6\u56e2\u961f\u4e00\u76f4\u5904\u4e8e\u4e00\u79cd\u5355\u7ebf\u7a0b\u7684\u5de5\u4f5c\u6a21\u5f0f\uff0c\u4e00\u4e2a\u5de5\u7a0b\u5e08\u5904\u7406\u4e00\u4e2a\u4efb\u52a1\uff0c\u4e00\u6b21\u53ea\u4e13\u6ce8\u4e8e\u4e00\u4e2a\u4e0a\u4e0b\u6587\u3002AI agents \u6539\u53d8\u4e86\u8fd9\u4e2a\u7b49\u5f0f\u3002Wallts \u5c06\u201c\u5206\u65f6\u201d\u91cd\u65b0\u5e26\u56de\u8fd9\u4e2a\u65f6\u4ee3\uff0c\u53ea\u4e0d\u8fc7\u4eca\u5929\u5728\u7cfb\u7edf\u4e2d\u8fdb\u884c\u591a\u8def\u590d\u7528\u7684\u201c\u7528\u6237\u201d\uff0c\u65e2\u5305\u62ec\u4eba\u7c7b\uff0c\u4e5f\u5305\u62ec\u81ea\u4e3b\u4ee3\u7406\u3002",
+      "\u5728 Wallts \u4e2d\uff0cagents \u662f\u4e00\u7ea7\u56e2\u961f\u6210\u5458\u3002\u5b83\u4eec\u4f1a\u88ab\u5206\u914d issue\uff0c\u6c47\u62a5\u8fdb\u5c55\uff0c\u63d0\u51fa\u963b\u585e\uff0c\u5e76\u4ea4\u4ed8\u4ee3\u7801\uff0c\u5c31\u50cf\u4eba\u7c7b\u540c\u4e8b\u4e00\u6837\u3002\u4efb\u52a1\u5206\u914d\u3001\u6d3b\u52a8\u65f6\u95f4\u7ebf\u3001\u4efb\u52a1\u751f\u547d\u5468\u671f\uff0c\u4ee5\u53ca\u8fd0\u884c\u65f6\u57fa\u7840\u8bbe\u65bd\uff0cWallts \u4ece\u7b2c\u4e00\u5929\u8d77\u5c31\u662f\u56f4\u7ed5\u8fd9\u4e00\u7406\u5ff5\u6784\u5efa\u7684\u3002",
       "\u548c\u5f53\u5e74\u7684 Multics \u4e00\u6837\uff0c\u8fd9\u4e00\u5224\u65ad\u5efa\u7acb\u5728\u201c\u591a\u8def\u590d\u7528\u201d\u4e4b\u4e0a\u3002\u4e00\u4e2a\u5c0f\u56e2\u961f\u4e0d\u8be5\u56e0\u4e3a\u4eba\u6570\u5c11\u5c31\u663e\u5f97\u80fd\u529b\u6709\u9650\u3002\u6709\u4e86\u5408\u9002\u7684\u7cfb\u7edf\uff0c\u4e24\u540d\u5de5\u7a0b\u5e08\u52a0\u4e0a\u4e00\u7ec4 agents\uff0c\u5c31\u80fd\u53d1\u6325\u51fa\u4e8c\u5341\u4eba\u56e2\u961f\u7684\u63a8\u8fdb\u901f\u5ea6\u3002",
       "\u8fd9\u4e2a\u5e73\u53f0\u662f\u5b8c\u5168\u5f00\u6e90\u5e76\u652f\u6301\u81ea\u6258\u7ba1\u7684\u3002\u4f60\u7684\u6570\u636e\u59cb\u7ec8\u4fdd\u7559\u5728\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e2d\u3002\u4f60\u53ef\u4ee5\u5ba1\u67e5\u6bcf\u4e00\u884c\u4ee3\u7801\uff0c\u6269\u5c55 API\uff0c\u63a5\u5165\u81ea\u5df1\u7684 LLM providers\uff0c\u4e5f\u53ef\u4ee5\u5411\u793e\u533a\u8d21\u732e\u4ee3\u7801\u3002",
     ],
@@ -284,7 +284,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
 
   changelog: {
     title: "\u66f4\u65b0\u65e5\u5fd7",
-    subtitle: "Multica \u7684\u6700\u65b0\u66f4\u65b0\u548c\u6539\u8fdb\u3002",
+    subtitle: "Wallts \u7684\u6700\u65b0\u66f4\u65b0\u548c\u6539\u8fdb\u3002",
     toc: "\u5386\u53f2\u7248\u672c",
     categories: {
       features: "新功能",
@@ -324,7 +324,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         changes: [],
         features: [
           "智能体在 Issue 评论区继续任务时，会接着之前的会话继续，不再新开会话，任务上下文可以保留下来",
-          "Multica 现在支持韩语界面、官网和文档，包含完整韩语文档与本地化日期显示",
+          "Wallts 现在支持韩语界面、官网和文档，包含完整韩语文档与本地化日期显示",
           "Issue 页面会在标题附近固定显示正在工作的智能体，多智能体同时工作时也能更清楚地查看",
           "智能体读取 Issue 讨论时可以先看到线程摘要、回复数量和最近活跃时间，更快找到需要跟进的上下文",
           "OpenClaw 运行环境现在可以使用智能体里保存的 MCP 设置，Claude Opus 4.8 也可用于模型选择和用量估算",
@@ -422,8 +422,8 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         title: "iOS 客户端、Helm 自托管与更顺畅的协作体验",
         changes: [],
         features: [
-          "Multica iOS 客户端发布官方首个可用版本，覆盖登录、工作区、收件箱、Issue、项目、聊天、评论、表情回应、在线状态和实时更新；目前暂未上架 App Store，需要用户自行打包安装",
-          "自托管团队现在可以通过 Helm 将 Multica 部署到 Kubernetes，Docker 安装也有更清晰的端口和 URL 配置",
+          "Wallts iOS 客户端发布官方首个可用版本，覆盖登录、工作区、收件箱、Issue、项目、聊天、评论、表情回应、在线状态和实时更新；目前暂未上架 App Store，需要用户自行打包安装",
+          "自托管团队现在可以通过 Helm 将 Wallts 部署到 Kubernetes，Docker 安装也有更清晰的端口和 URL 配置",
           "项目资源选择器新增仓库搜索，工作区仓库设置也可以保存描述，帮助智能体理解每个代码库",
           "运行时用量现在可以更准确识别 DeepSeek、Kimi K2.6、Zhipu GLM 和长上下文 Claude Opus 的费用",
           "官网新增使用场景页面能力，并让文档、更新日志和开始使用入口更清晰",
@@ -450,7 +450,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         features: [
           "父 Issue 会在子 Issue 完成时自动收到更新，并通知对应负责人",
           "Issue 列表新增实时智能体工作状态，支持详情查看和工作中筛选",
-          "新用户完成设置后，会进入由 Multica Helper 引导的欢迎体验",
+          "新用户完成设置后，会进入由 Wallts Helper 引导的欢迎体验",
           "官网新增 Contact Sales 流程，支持商务邮箱提交和防滥用保护",
           "桌面端支持 macOS 触控板前进/后退手势",
         ],
@@ -566,7 +566,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         ],
         improvements: [
           "Issue 操作失败时会显示更明确的错误原因，团队不用翻日志也能理解发生了什么",
-          "关联 GitHub 的 Pull Request 会在 Multica 内展示 CI 和合并冲突状态",
+          "关联 GitHub 的 Pull Request 会在 Wallts 内展示 CI 和合并冲突状态",
           "自托管部署获得更安全的默认配置，并补充反向代理、登录限制和本地服务的说明",
           "搜索结果排序更准确，也会展示更有帮助的摘要片段",
         ],
@@ -658,7 +658,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         title: "GitHub 集成、聊天附件与 Issue 定位优化",
         changes: [],
         features: [
-          "接入 GitHub 后，关联的 Pull Request 会显示在 Multica Issue 中，状态会同步到 Multica，关闭 PR 后会自动关闭对应 Issue",
+          "接入 GitHub 后，关联的 Pull Request 会显示在 Wallts Issue 中，状态会同步到 Wallts，关闭 PR 后会自动关闭对应 Issue",
           "聊天消息支持添加文件附件和图片预览",
           "Agent 和 runtime 可以设置公开或私有，方便控制团队可见范围",
           "停止单个 agent 任务前会先弹出确认，避免误操作",
@@ -669,7 +669,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "很长的 Issue 时间线滚动更顺畅",
           "反馈入口更明确地引导用户到 GitHub 参与讨论和反馈",
           "自托管 Caddy 配置文档补充实时连接要求",
-          "Linux 桌面端安装包恢复显示 Multica 应用图标",
+          "Linux 桌面端安装包恢复显示 Wallts 应用图标",
         ],
         fixes: [
           "下载附件时保留原始文件名",
@@ -755,7 +755,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         title: "Daemon 磁盘占用 CLI、Timeline 打磨与任务用量聚合提速",
         changes: [],
         features: [
-          "新增 `multica daemon disk-usage` CLI，按 task / workspace 维度查看磁盘占用",
+          "新增 `wallts daemon disk-usage` CLI，按 task / workspace 维度查看磁盘占用",
           "Skill Picker 弹窗新增搜索框，Agent 设置里挑技能更快",
           "Daemon GC 覆盖扩展到 chat、autopilot、quick-create 任务",
           "Issue 详情页面包屑直接显示 MUL-xxxx identifier",
@@ -771,7 +771,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "Linux 上 daemon self-restart 改走 `brew prefix` 软链，Homebrew Cellar 删除后不再让 runtime 失联",
           "CLI 短 ID 现在可以正确路由，复制粘贴的短前缀不再 404",
           "Windows 上非 ASCII 字符评论 / 描述输入新增 `--content-file` / `--description-file`",
-          "Windows / Linux 桌面端用 Multica asterisk 替换 Electron 默认占位图标",
+          "Windows / Linux 桌面端用 Wallts asterisk 替换 Electron 默认占位图标",
           "Timeline 中孤立的 reply 现在会被正确捞回展示",
           "Timeline 评论分页预算不再把 activity 算进去，避免活动多时挤掉真实评论",
         ],
@@ -839,8 +839,8 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         title: "Repo Checkout `--ref`、Hermes 历史回放修复与多副本 Model Picker",
         changes: [],
         features: [
-          "`multica repo checkout --ref` 支持按分支、tag 或指定 commit 拉取仓库",
-          "`multica agent avatar` 命令支持直接通过 CLI 上传 Agent 头像",
+          "`wallts repo checkout --ref` 支持按分支、tag 或指定 commit 拉取仓库",
+          "`wallts agent avatar` 命令支持直接通过 CLI 上传 Agent 头像",
           "Inbox 中已完成任务新增 archive 按钮，移除冗余的 mark-as-done 悬浮按钮",
         ],
         improvements: [
@@ -852,7 +852,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "新创建的 Agent 立刻在各处可见 —— 创建时即 hydrate Agent 缓存",
           "Hermes 在新一轮对话开始时不再重放上一轮答案 —— 历史 chunk 受单轮门禁限制",
           "Codex runtime 模型选择器开放 GPT-5.5 系列",
-          "`multica login --token <PAT>` 正确接收 PAT 作为参数值",
+          "`wallts login --token <PAT>` 正确接收 PAT 作为参数值",
           "CLI update 完成状态上报更可靠",
           "Session resume 按 runtime 正确守卫，避免跨 runtime 复用 session",
           "看板拖拽 Issue 时显示设置不再丢失",
@@ -875,7 +875,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         ],
         improvements: [
           "Daemon `/tasks/claim` 轮询走 Redis 空认领 fast-path，空闲态 DB 压力下降，长期 open 的 Issue 自动回收磁盘",
-          "Multica Agent 的 Git 提交自动追加 `Co-authored-by` trailer，归属更清晰",
+          "Wallts Agent 的 Git 提交自动追加 `Co-authored-by` trailer，归属更清晰",
           "Desktop 拦截 Cmd+R / Ctrl+R / F5 防止意外刷新，开发模式与 Updates 设置中均展示真实版本号",
         ],
         fixes: [
@@ -898,7 +898,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         ],
         improvements: [
           "Server 用 Redis 缓存 PAT / Daemon Token 校验，大型团队不再让 DB 抗下每次请求",
-          "后端支持通过 `MULTICA_CLAUDE_ARGS` / `MULTICA_CODEX_ARGS` 配置 Agent CLI 默认参数",
+          "后端支持通过 `WALLTS_CLAUDE_ARGS` / `WALLTS_CODEX_ARGS` 配置 Agent CLI 默认参数",
           "Manual 与 Agent 创建 Issue 共享同一个 Dialog 外壳，picker Agent 会被默认设为 assignee",
         ],
         fixes: [
@@ -959,9 +959,9 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         title: "Agent 自定义环境变量、更清晰的失败信息与一系列稳定性修复",
         changes: [],
         features: [
-          "`multica agent create/update --custom-env KEY=VALUE` 支持为 Agent 注入自定义环境变量",
+          "`wallts agent create/update --custom-env KEY=VALUE` 支持为 Agent 注入自定义环境变量",
           "Agent 失败信息会带上 Runtime CLI 的 stderr 末尾片段，排查 Runtime 报错更直接",
-          "CLI 更新下载超时支持配置，弱网下 `multica update` 不再被默认超时切断",
+          "CLI 更新下载超时支持配置，弱网下 `wallts update` 不再被默认超时切断",
         ],
         improvements: [
           "Daemon 把取消的任务上报为 `cancelled` 而非 `timeout`，并在按 Issue 取消任务时同步对齐 Agent 状态",
@@ -1038,7 +1038,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         changes: [],
         features: [
           "桌面应用跨平台打包——同一条发布流水线产出 macOS、Windows 和 Linux 安装包",
-          "新增 `multica update` 自更新命令——无需重装即可升级 CLI 和本地 Daemon",
+          "新增 `wallts update` 自更新命令——无需重装即可升级 CLI 和本地 Daemon",
           "Issue 看板所有状态列都支持分页（不再只是 Done 列），大积压下依然流畅",
         ],
         fixes: [
@@ -1055,7 +1055,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         title: "Agent 模型选择、Kimi Runtime 与自部署登录",
         changes: [],
         features: [
-          "Agent 新增 `model` 字段及按 Provider 聚合的模型下拉框——可在界面或通过 `multica agent create/update --model` 为每个 Agent 选择 LLM 模型，并从各 Runtime CLI 实时发现可用模型",
+          "Agent 新增 `model` 字段及按 Provider 聚合的模型下拉框——可在界面或通过 `wallts agent create/update --model` 为每个 Agent 选择 LLM 模型，并从各 Runtime CLI 实时发现可用模型",
           "新增 Kimi CLI Agent Runtime（Moonshot AI 的 `kimi-cli`，基于 ACP），支持模型选择、自动授权工具权限以及流式工具调用渲染",
           "评论和回复编辑器新增放大按钮，便于撰写长文本",
         ],
@@ -1203,7 +1203,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         title: "一键安装、自部署与稳定性",
         changes: [],
         features: [
-          "一键安装与配置——`curl | bash` 安装 CLI，`--with-server` 完整自部署，`multica setup` 配置连接环境",
+          "一键安装与配置——`curl | bash` 安装 CLI，`--with-server` 完整自部署，`wallts setup` 配置连接环境",
           "自部署存储——无 S3 时本地文件存储回退，支持自定义 S3 端点（MinIO）",
           "项目列表页支持行内编辑属性（优先级、状态、负责人）",
         ],
@@ -1349,7 +1349,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "打开的 Issue 不再分页限制全量加载，已关闭的 Issue 滚动分页",
           "JWT 和 CloudFront Cookie 有效期从 72 小时延长至 30 天",
           "重新登录后记住上次选择的工作区",
-          "守护进程确保 Agent 任务环境中 multica CLI 在 PATH 上",
+          "守护进程确保 Agent 任务环境中 wallts CLI 在 PATH 上",
           "新增 PR 模板和面向 Agent 的 CLI 安装指南",
         ],
       },
@@ -1478,29 +1478,29 @@ export function createZhDict(allowSignup: boolean): LandingDict {
   download: {
     hero: {
       macArm64: {
-        title: "Multica for macOS",
+        title: "Wallts for macOS",
         sub: "Apple Silicon · 内置 daemon，无需配置",
         primary: "下载 (.dmg)",
         altZip: "或下载 .zip",
       },
       macIntel: {
-        title: "Multica for macOS",
+        title: "Wallts for macOS",
         sub: "需要 Apple Silicon——暂不支持 Intel Mac。",
         disabledCta: "需要 Apple Silicon",
         intelHint: "在 Intel Mac 上？请使用下方 CLI——底层跑的是同一个 daemon。",
       },
       winX64: {
-        title: "Multica for Windows",
+        title: "Wallts for Windows",
         sub: "内置 daemon，无需配置",
         primary: "下载 (.exe)",
       },
       winArm64: {
-        title: "Multica for Windows",
+        title: "Wallts for Windows",
         sub: "ARM · 内置 daemon，无需配置",
         primary: "下载 (.exe)",
       },
       linux: {
-        title: "Multica for Linux",
+        title: "Wallts for Linux",
         sub: "内置 daemon，无需配置",
         primary: "下载 AppImage",
         altFormats: "或 .deb / .rpm",
@@ -1551,7 +1551,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
   contactSales: {
     pageTitle: "联系商务",
     pageDescription:
-      "了解如何在你的团队中落地 Multica 的人类 + 智能体协作工作流。",
+      "了解如何在你的团队中落地 Wallts 的人类 + 智能体协作工作流。",
     eyebrow: "联系商务",
     title: "先了解你的需求",
     subtitle: "在正式沟通之前，让我们为你定制最合适的方案。",
@@ -1568,10 +1568,10 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       companyName: "公司名称",
       companySize: "公司规模",
       countryRegion: "国家 / 地区",
-      useCase: "你打算如何使用 Multica 或与我们合作？",
+      useCase: "你打算如何使用 Wallts 或与我们合作？",
       goals: "你的目标或挑战",
       goalsHint:
-        "告诉我们你希望借助 Multica 达成什么目标，或正在面临的挑战。信息越详细，我们越能给到合适的支持。",
+        "告诉我们你希望借助 Wallts 达成什么目标，或正在面临的挑战。信息越详细，我们越能给到合适的支持。",
       selectPlaceholder: "请选择",
       submit: "提交",
       submitting: "正在提交…",
@@ -1585,7 +1585,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       { value: "1000+", label: "1,000 人以上" },
     ],
     useCases: [
-      { value: "evaluate", label: "正在为团队评估 Multica" },
+      { value: "evaluate", label: "正在为团队评估 Wallts" },
       { value: "adopt_team", label: "希望在团队 / 公司内推广使用" },
       { value: "self_host", label: "需要在自有基础设施上自托管" },
       { value: "integrate", label: "希望与现有工具集成" },
@@ -1637,22 +1637,22 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     ],
     consent: {
       intro:
-        "Multica, Inc. 尊重你的隐私。我们仅会将你的个人信息用于管理账户，以及提供你所请求的产品或服务。我们偶尔也希望与你分享产品更新、最佳实践或行业洞察，如果你愿意接收，请在下方勾选。",
+        "Wallts, Inc. 尊重你的隐私。我们仅会将你的个人信息用于管理账户，以及提供你所请求的产品或服务。我们偶尔也希望与你分享产品更新、最佳实践或行业洞察，如果你愿意接收，请在下方勾选。",
       outreach:
-        "我希望接收来自 Multica, Inc. 的一对一沟通，包括服务更新、支持咨询以及业务相关的跟进。",
+        "我希望接收来自 Wallts, Inc. 的一对一沟通，包括服务更新、支持咨询以及业务相关的跟进。",
       updates:
-        "我希望接收 Multica 的产品更新、洞察以及活动邀请。",
+        "我希望接收 Wallts 的产品更新、洞察以及活动邀请。",
       unsubscribe:
         "你可以随时取消订阅我们的邮件。关于我们如何处理你的数据以及隐私权利，请参阅",
       submitConsent:
-        "点击「提交」即表示你同意 Multica, Inc. 存储并处理你提交的信息，以便交付你请求的内容。",
+        "点击「提交」即表示你同意 Wallts, Inc. 存储并处理你提交的信息，以便交付你请求的内容。",
       privacyLinkLabel: "隐私政策。",
       privacyLinkHref: "/about",
     },
     success: {
       title: "已收到，谢谢！",
       message:
-        "Multica 团队会在三个工作日内回复你。在此期间，欢迎查看我们的文档，或在 GitHub 上为我们点个 Star。",
+        "Wallts 团队会在三个工作日内回复你。在此期间，欢迎查看我们的文档，或在 GitHub 上为我们点个 Star。",
       cta: "返回首页",
     },
     errors: {

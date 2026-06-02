@@ -14,14 +14,14 @@ import { Callout } from "fumadocs-ui/components/callout";
 준비가 끝나면 워크스페이스의 **에이전트** 페이지로 이동해 **+ New**를 클릭하거나 CLI를 사용하세요.
 
 ```bash
-multica agent create
+wallts agent create
 ```
 
 이 폼에는 필수 필드가 두 개뿐입니다. **이름**(워크스페이스 내에서 고유해야 함)과 **런타임**(= AI 코딩 도구 선택)입니다. 나머지 모든 필드는 아래에서 섹션별로 다룹니다.
 
 ## AI 코딩 도구 선택
 
-각 런타임은 특정 AI 코딩 도구를 기반으로 합니다. Multica는 그중 12개를 지원합니다. 가장 일반적인 선택지는 다음과 같습니다.
+각 런타임은 특정 AI 코딩 도구를 기반으로 합니다. Wallts는 그중 12개를 지원합니다. 가장 일반적인 선택지는 다음과 같습니다.
 
 | 도구 | 적합한 경우 |
 |---|---|
@@ -61,10 +61,10 @@ ANTHROPIC_API_KEY = sk-...
 ANTHROPIC_BASE_URL = https://my-proxy.example.com
 ```
 
-시스템에 핵심적인 변수는 재정의할 수 없습니다. `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `CODEX_HOME`, 그리고 `MULTICA_*`로 시작하는 모든 키는 데몬이 조용히 무시합니다(경고 로그는 남기지만 오류는 발생하지 않습니다).
+시스템에 핵심적인 변수는 재정의할 수 없습니다. `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `CODEX_HOME`, 그리고 `WALLTS_*`로 시작하는 모든 키는 데몬이 조용히 무시합니다(경고 로그는 남기지만 오류는 발생하지 않습니다).
 
 <Callout type="warning">
-**`custom_env`의 값은 Multica 서버 데이터베이스에 평문으로 저장됩니다.** 에이전트 list/get 응답은 더 이상 환경 변수 값을 전혀 포함하지 않으며, 불투명한 개수만 반환합니다. 실제 값을 읽으려면 워크스페이스 owner 또는 admin이 전용으로 감사되는 `GET /api/agents/{id}/env` 엔드포인트(CLI: `multica agent env get <id>`)를 호출해야 합니다. 작업을 실행 중인 에이전트는 호스트의 owner 자격 증명을 이용해 다른 에이전트의 환경 변수를 드러낼 수 없습니다. 이 엔드포인트는 에이전트 액터 세션을 거부합니다.
+**`custom_env`의 값은 Wallts 서버 데이터베이스에 평문으로 저장됩니다.** 에이전트 list/get 응답은 더 이상 환경 변수 값을 전혀 포함하지 않으며, 불투명한 개수만 반환합니다. 실제 값을 읽으려면 워크스페이스 owner 또는 admin이 전용으로 감사되는 `GET /api/agents/{id}/env` 엔드포인트(CLI: `wallts agent env get <id>`)를 호출해야 합니다. 작업을 실행 중인 에이전트는 호스트의 owner 자격 증명을 이용해 다른 에이전트의 환경 변수를 드러낼 수 없습니다. 이 엔드포인트는 에이전트 액터 세션을 거부합니다.
 
 **가치가 높은 secret은 `custom_env`에 넣지 마세요**(운영 데이터베이스 비밀번호, root 수준 토큰 등). 에이전트에는 **권한 범위가 제한된 전용 자격 증명**(읽기 전용 API 키, 단일 스코프 PAT)을 사용하고 정기적으로 교체하세요. 데이터베이스 백업과 DB 감사는 여전히 의미 있는 노출 표면으로 남아 있습니다.
 </Callout>

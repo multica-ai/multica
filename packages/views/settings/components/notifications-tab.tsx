@@ -1,26 +1,26 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
-import { useUpdateNotificationPreferences } from "@multica/core/notification-preferences/mutations";
-import type { NotificationGroupKey, NotificationPreferences } from "@multica/core/types";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { notificationPreferenceOptions } from "@wallts/core/notification-preferences/queries";
+import { useUpdateNotificationPreferences } from "@wallts/core/notification-preferences/mutations";
+import type { NotificationGroupKey, NotificationPreferences } from "@wallts/core/types";
 import {
   isPushSupported,
   getNotificationPermission,
   requestNotificationPermission,
   getExistingSubscription,
-} from "@multica/core/push-notifications/subscription";
+} from "@wallts/core/push-notifications/subscription";
 import {
   vapidPublicKeyOptions,
   pushSubscriptionOptions,
-} from "@multica/core/push-notifications/queries";
+} from "@wallts/core/push-notifications/queries";
 import {
   useSubscribePushNotifications,
   useUnsubscribePushNotifications,
-} from "@multica/core/push-notifications/mutations";
-import { Card, CardContent } from "@multica/ui/components/ui/card";
-import { Switch } from "@multica/ui/components/ui/switch";
+} from "@wallts/core/push-notifications/mutations";
+import { Card, CardContent } from "@wallts/ui/components/ui/card";
+import { Switch } from "@wallts/ui/components/ui/switch";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 import { useState, useEffect, useCallback } from "react";
@@ -141,7 +141,7 @@ export function NotificationsTab() {
  *
  * Toggles browser push notifications (Web Push API). When enabled, the
  * browser displays native OS notifications for mentions, assignments,
- * agent completions, and CI failures even when the Multica tab is not
+ * agent completions, and CI failures even when the Wallts tab is not
  * focused.
  *
  * Visibility:

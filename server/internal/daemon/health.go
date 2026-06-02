@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/dwickyfp/wallts/server/internal/daemon/repocache"
 )
 
 // HealthResponse is returned by the daemon's local health endpoint.
@@ -91,7 +91,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 }
 
 // shutdownHandler triggers a graceful daemon shutdown by cancelling the
-// top-level context. Used by `multica daemon stop` so we don't depend on
+// top-level context. Used by `wallts daemon stop` so we don't depend on
 // OS-signal delivery, which is unreliable on Windows once the daemon is
 // spawned with DETACHED_PROCESS (no shared console with the stop caller).
 // The listener is bound to 127.0.0.1 only, so only local processes can hit

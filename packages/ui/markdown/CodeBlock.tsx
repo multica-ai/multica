@@ -2,13 +2,13 @@ import * as React from 'react'
 import { codeToHtml, bundledLanguages, type BundledLanguage } from 'shiki'
 import { Copy, Check } from "lucide-react"
 import { useTranslation } from "react-i18next"
-import { Button } from "@multica/ui/components/ui/button"
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip"
-import { cn } from '@multica/ui/lib/utils'
+import { Button } from "@wallts/ui/components/ui/button"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@wallts/ui/components/ui/tooltip"
+import { cn } from '@wallts/ui/lib/utils'
 import {
   CODE_LIGATURE_CLASS,
   CODE_LIGATURE_DESCENDANT_CLASS,
-} from '@multica/ui/lib/code-style'
+} from '@wallts/ui/lib/code-style'
 
 export interface CodeBlockProps {
   code: string

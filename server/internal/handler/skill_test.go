@@ -522,8 +522,8 @@ func TestFetchFromSkillsSh_ReturnsActionableErrorForTruncatedTrees(t *testing.T)
 }
 
 func TestFetchFromSkillsSh_AnthropicPptxIntegration(t *testing.T) {
-	if os.Getenv("MULTICA_RUN_SKILLS_SH_INTEGRATION") == "" {
-		t.Skip("set MULTICA_RUN_SKILLS_SH_INTEGRATION=1 to run live GitHub integration test")
+	if os.Getenv("WALLTS_RUN_SKILLS_SH_INTEGRATION") == "" {
+		t.Skip("set WALLTS_RUN_SKILLS_SH_INTEGRATION=1 to run live GitHub integration test")
 	}
 
 	result, err := fetchFromSkillsSh(&http.Client{Timeout: 30 * time.Second}, "https://skills.sh/anthropics/skills/pptx")

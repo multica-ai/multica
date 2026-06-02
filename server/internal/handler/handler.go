@@ -15,16 +15,16 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/daemonws"
-	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/middleware"
-	"github.com/multica-ai/multica/server/internal/realtime"
-	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/internal/storage"
-	"github.com/multica-ai/multica/server/internal/util"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/session"
+	"github.com/wallts-ai/wallts/server/internal/auth"
+	"github.com/wallts-ai/wallts/server/internal/daemonws"
+	"github.com/wallts-ai/wallts/server/internal/events"
+	"github.com/wallts-ai/wallts/server/internal/middleware"
+	"github.com/wallts-ai/wallts/server/internal/realtime"
+	"github.com/wallts-ai/wallts/server/internal/service"
+	"github.com/wallts-ai/wallts/server/internal/storage"
+	"github.com/wallts-ai/wallts/server/internal/util"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/pkg/session"
 )
 
 // randomID returns a random 16-byte hex string used as a request ID for
@@ -69,7 +69,7 @@ type Config struct {
 	// TrustedProxies are CIDRs whose source IP we trust to set
 	// X-Forwarded-For / X-Real-IP. Empty means "trust nothing": the rate
 	// limiter uses r.RemoteAddr exclusively. Populated via the
-	// MULTICA_TRUSTED_PROXIES env var (comma-separated CIDRs, e.g.
+	// WALLTS_TRUSTED_PROXIES env var (comma-separated CIDRs, e.g.
 	// "10.0.0.0/8,127.0.0.1/32"). This is specifically to keep the per-IP
 	// webhook limiter from being bypassed by a spoofed XFF on deployments
 	// without a header-stripping reverse proxy in front.

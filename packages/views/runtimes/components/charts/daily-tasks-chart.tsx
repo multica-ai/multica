@@ -10,7 +10,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
-} from "@multica/ui/components/ui/chart";
+} from "@wallts/ui/components/ui/chart";
 import { useT } from "../../../i18n";
 
 // Two-segment stack — completed runs at the bottom (chart-1, primary

@@ -33,13 +33,13 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "onboarding",
 
   // Platform / marketing routes (current + likely-future)
-  // `multica` is reserved as the brand name to block impersonation workspaces.
+  // `wallts` is reserved as the brand name to block impersonation workspaces.
   // `www`, `new`, `home`, `homepage`, `dashboard` are confusables or
   // likely-future global landing/entry routes; `homepage` matches the existing
   // `/homepage` landing variant in apps/web.
   "api",
   "admin",
-  "multica",
+  "wallts",
   "www",
   "new",
   "home",

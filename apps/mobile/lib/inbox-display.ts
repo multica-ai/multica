@@ -6,7 +6,7 @@
  * the title a user sees in the mobile inbox MUST match what they see on
  * web for the same item. When the web version changes, sync this file.
  */
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem } from "@wallts/core/types";
 
 function singleLine(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();

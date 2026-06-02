@@ -14,7 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import type {
   GithubRepoResourceRef,
   ProjectResource,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { projectResourcesOptions } from "@/data/queries/projects";
 import { useDeleteProjectResource } from "@/data/mutations/projects";

@@ -37,15 +37,15 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@multica/ui/components/ui/context-menu";
-import { cn } from "@multica/ui/lib/utils";
+} from "@wallts/ui/components/ui/context-menu";
+import { cn } from "@wallts/ui/lib/utils";
 import {
   useTabStore,
   useActiveGroup,
   resolveRouteIcon,
   type Tab,
 } from "@/stores/tab-store";
-import { paths } from "@multica/core/paths";
+import { paths } from "@wallts/core/paths";
 
 const TAB_ICONS: Record<string, LucideIcon> = {
   Inbox,

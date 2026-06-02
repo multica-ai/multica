@@ -185,10 +185,10 @@ func TestEnsureCodexMultiAgentConfigEmptyFile(t *testing.T) {
 	if !strings.Contains(got, "features.multi_agent = false") {
 		t.Errorf("expected managed block to set features.multi_agent = false at root, got:\n%s", got)
 	}
-	if !strings.Contains(got, multicaMultiAgentBeginMarker) {
+	if !strings.Contains(got, walltsMultiAgentBeginMarker) {
 		t.Errorf("expected begin marker, got:\n%s", got)
 	}
-	if !strings.Contains(got, multicaMultiAgentEndMarker) {
+	if !strings.Contains(got, walltsMultiAgentEndMarker) {
 		t.Errorf("expected end marker, got:\n%s", got)
 	}
 	requireMultiAgentDisabled(t, parseTOML(t, got))
@@ -455,7 +455,7 @@ features.multi_agent = true
 		t.Fatalf("write fixture: %v", err)
 	}
 
-	t.Setenv(MulticaCodexMultiAgentEnv, "1")
+	t.Setenv(WalltsCodexMultiAgentEnv, "1")
 
 	if err := ensureCodexMultiAgentConfig(configPath, nil); err != nil {
 		t.Fatalf("ensureCodexMultiAgentConfig failed: %v", err)
@@ -471,7 +471,7 @@ features.multi_agent = true
 func TestCodexMultiAgentEnabledTruthy(t *testing.T) {
 	for _, v := range []string{"1", "true", "TRUE", "yes", "On"} {
 		t.Run(v, func(t *testing.T) {
-			t.Setenv(MulticaCodexMultiAgentEnv, v)
+			t.Setenv(WalltsCodexMultiAgentEnv, v)
 			if !codexMultiAgentEnabled() {
 				t.Errorf("expected %q to be truthy", v)
 			}
@@ -482,7 +482,7 @@ func TestCodexMultiAgentEnabledTruthy(t *testing.T) {
 func TestCodexMultiAgentEnabledFalsy(t *testing.T) {
 	for _, v := range []string{"", "0", "false", "no", "off", "anything else"} {
 		t.Run(v, func(t *testing.T) {
-			t.Setenv(MulticaCodexMultiAgentEnv, v)
+			t.Setenv(WalltsCodexMultiAgentEnv, v)
 			if codexMultiAgentEnabled() {
 				t.Errorf("expected %q to be falsy", v)
 			}
@@ -512,10 +512,10 @@ features.multi_agent = true
 
 	data, _ := os.ReadFile(configPath)
 	got := string(data)
-	if !strings.Contains(got, multicaManagedBeginMarker) {
+	if !strings.Contains(got, walltsManagedBeginMarker) {
 		t.Errorf("expected sandbox managed block, got:\n%s", got)
 	}
-	if !strings.Contains(got, multicaMultiAgentBeginMarker) {
+	if !strings.Contains(got, walltsMultiAgentBeginMarker) {
 		t.Errorf("expected multi-agent managed block, got:\n%s", got)
 	}
 	if strings.Contains(got, "features.multi_agent = true") {

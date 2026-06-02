@@ -92,14 +92,14 @@ vi.mock("@/stores/window-overlay-store", () => ({
   ),
 }));
 
-vi.mock("@multica/core/auth", () => ({
+vi.mock("@wallts/core/auth", () => ({
   useAuthStore: Object.assign(
     () => null,
     { getState: () => ({ logout: vi.fn() }) },
   ),
 }));
 
-vi.mock("@multica/core/paths", () => ({
+vi.mock("@wallts/core/paths", () => ({
   isReservedSlug: (s: string) =>
     ["login", "workspaces", "invite", "onboarding", "invitations"].includes(s),
 }));
@@ -136,7 +136,7 @@ import {
   DesktopNavigationProvider,
   TabNavigationProvider,
 } from "./navigation";
-import { useNavigation } from "@multica/views/navigation";
+import { useNavigation } from "@wallts/views/navigation";
 
 function captureAdapter(onAdapter: (adapter: ReturnType<typeof useNavigation>) => void) {
   function Probe() {

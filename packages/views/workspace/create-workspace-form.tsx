@@ -2,20 +2,20 @@
 
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
-import { Button } from "@multica/ui/components/ui/button";
-import { Card, CardContent } from "@multica/ui/components/ui/card";
-import { useCreateWorkspace } from "@multica/core/workspace/mutations";
-import type { Workspace } from "@multica/core/types";
-import { isImeComposing } from "@multica/core/utils";
+import { Input } from "@wallts/ui/components/ui/input";
+import { Label } from "@wallts/ui/components/ui/label";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Card, CardContent } from "@wallts/ui/components/ui/card";
+import { useCreateWorkspace } from "@wallts/core/workspace/mutations";
+import type { Workspace } from "@wallts/core/types";
+import { isImeComposing } from "@wallts/core/utils";
 import {
   WORKSPACE_SLUG_REGEX,
   isWorkspaceSlugConflict,
   nameToWorkspaceSlug,
 } from "./slug";
 import { useT } from "../i18n";
-import { isReservedSlug } from "@multica/core/paths";
+import { isReservedSlug } from "@wallts/core/paths";
 
 export interface CreateWorkspaceFormProps {
   onSuccess: (workspace: Workspace) => void | Promise<void>;

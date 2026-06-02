@@ -5,7 +5,7 @@
 import { Pressable, ScrollView, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
-import type { IssuePriority } from "@multica/core/types";
+import type { IssuePriority } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { PriorityIcon } from "@/components/ui/priority-icon";
 import { PRIORITY_LABEL } from "@/lib/issue-status";

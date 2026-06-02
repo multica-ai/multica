@@ -135,7 +135,7 @@ func TestListTimeline_MergesCommentsAndActivities(t *testing.T) {
 }
 
 // fetchTimelineWrapped exercises the legacy wrapped response shape that
-// stale Multica.app v0.2.26+ builds still expect — sending any of
+// stale Wallts.app v0.2.26+ builds still expect — sending any of
 // limit/before/after/around makes the server emit a TimelinePage-style
 // object (entries DESC, null cursors, has_more_*=false) instead of the new
 // flat array. Used to verify the boundary-compat path doesn't regress.

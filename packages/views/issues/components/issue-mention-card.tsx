@@ -1,7 +1,7 @@
 "use client";
 
 import { AppLink } from "../../navigation";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@wallts/core/paths";
 import { IssueChip } from "./issue-chip";
 
 interface IssueMentionCardProps {

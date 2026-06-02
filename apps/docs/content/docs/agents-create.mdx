@@ -14,14 +14,14 @@ Prerequisite: you already have at least one supported [AI coding tool](/provider
 Once that's in place, go to the **Agents** page in your workspace and click **+ New**, or use the CLI:
 
 ```bash
-multica agent create
+wallts agent create
 ```
 
 The form has only two required fields: **name** (unique within the workspace) and **runtime** (= pick an AI coding tool). Every other field is covered section by section below.
 
 ## Pick an AI coding tool
 
-Each runtime is backed by a specific AI coding tool. Multica supports 12 of them. The most common choices:
+Each runtime is backed by a specific AI coding tool. Wallts supports 12 of them. The most common choices:
 
 | Tool | Good for |
 |---|---|
@@ -61,10 +61,10 @@ ANTHROPIC_API_KEY = sk-...
 ANTHROPIC_BASE_URL = https://my-proxy.example.com
 ```
 
-System-critical variables cannot be overridden: `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `CODEX_HOME`, and any key starting with `MULTICA_*` are silently ignored by the daemon (with a warn log — no error).
+System-critical variables cannot be overridden: `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `CODEX_HOME`, and any key starting with `WALLTS_*` are silently ignored by the daemon (with a warn log — no error).
 
 <Callout type="warning">
-**Values in `custom_env` are stored in plaintext in Multica's server database.** Agent list/get responses no longer carry env values at all — only an opaque count. Reading values requires a workspace owner or admin to hit the dedicated, audited `GET /api/agents/{id}/env` endpoint (CLI: `multica agent env get <id>`). Agents running tasks can NOT use their host's owner credentials to reveal env on other agents — the endpoint denies agent-actor sessions.
+**Values in `custom_env` are stored in plaintext in Wallts's server database.** Agent list/get responses no longer carry env values at all — only an opaque count. Reading values requires a workspace owner or admin to hit the dedicated, audited `GET /api/agents/{id}/env` endpoint (CLI: `wallts agent env get <id>`). Agents running tasks can NOT use their host's owner credentials to reveal env on other agents — the endpoint denies agent-actor sessions.
 
 **Don't put high-value secrets in `custom_env`** (production database passwords, root-level tokens, etc.). Use **dedicated, limited-scope credentials** for agents (read-only API keys, single-scope PATs), and rotate them regularly. Database backups and DB audits remain a meaningful exposure surface.
 </Callout>

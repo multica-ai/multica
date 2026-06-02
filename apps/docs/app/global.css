@@ -7,14 +7,14 @@
 @source "../../../packages/ui/**/*.{ts,tsx}";
 
 /* ---------------------------------------------------------------------------
- * Multica Docs — editorial visual identity (v2)
+ * Wallts Docs — editorial visual identity (v2)
  *
  * Docs site is intentionally distinct from the product app: warm-paper
  * background, editorial serif headings (Source Serif 4), indigo accent,
  * ruled dividers. Product app keeps its cool-gray dense Linear-style; docs
  * reads like a literary publication. Same split as Stripe, Cursor, Linear.
  *
- * Implementation: docs-scoped token override on top of Multica tokens
+ * Implementation: docs-scoped token override on top of Wallts tokens
  * (whose @theme inline references read --background / --foreground / etc
  * at runtime, so re-pointing the vars cascades through fumadocs's full
  * --color-fd-* bridge below).
@@ -37,7 +37,7 @@
   --card-foreground: oklch(0.182 0.012 50);
   --popover: oklch(0.99 0.002 85);
   --popover-foreground: oklch(0.182 0.012 50);
-  --primary: oklch(0.55 0.16 255);              /* Multica brand */
+  --primary: oklch(0.55 0.16 255);              /* Wallts brand */
   --primary-foreground: oklch(0.985 0.008 85);
   --secondary: oklch(0.945 0.012 85);
   --secondary-foreground: oklch(0.182 0.012 50);
@@ -63,7 +63,7 @@
 }
 
 /* ---------------------------------------------------------------------------
- * Editorial palette — dark (warm dark, NOT Multica's cool dark)
+ * Editorial palette — dark (warm dark, NOT Wallts's cool dark)
  * ------------------------------------------------------------------------- */
 
 .dark {
@@ -75,7 +75,7 @@
   --card-foreground: oklch(0.95 0.012 85);
   --popover: oklch(0.22 0.008 50);
   --popover-foreground: oklch(0.95 0.012 85);
-  --primary: oklch(0.7 0.15 255);               /* Multica brand — dark */
+  --primary: oklch(0.7 0.15 255);               /* Wallts brand — dark */
   --primary-foreground: oklch(0.18 0.008 50);
   --secondary: oklch(0.24 0.008 50);
   --secondary-foreground: oklch(0.95 0.012 85);
@@ -102,7 +102,7 @@
 /* ---------------------------------------------------------------------------
  * Fumadocs slot bridge
  *
- * Map fumadocs's --color-fd-* slots to our (now warm) Multica tokens.
+ * Map fumadocs's --color-fd-* slots to our (now warm) Wallts tokens.
  * @theme inline keeps the var() reference live so the cascade resolves
  * at runtime — same pattern tokens.css uses.
  * ------------------------------------------------------------------------- */

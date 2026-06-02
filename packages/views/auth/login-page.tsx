@@ -9,19 +9,19 @@ import {
   CardDescription,
   CardContent,
   CardFooter,
-} from "@multica/ui/components/ui/card";
-import { Input } from "@multica/ui/components/ui/input";
-import { Button } from "@multica/ui/components/ui/button";
-import { Label } from "@multica/ui/components/ui/label";
+} from "@wallts/ui/components/ui/card";
+import { Input } from "@wallts/ui/components/ui/input";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Label } from "@wallts/ui/components/ui/label";
 import {
   InputOTP,
   InputOTPGroup,
   InputOTPSlot,
-} from "@multica/ui/components/ui/input-otp";
-import { useAuthStore } from "@multica/core/auth";
-import { workspaceKeys } from "@multica/core/workspace/queries";
-import { api } from "@multica/core/api";
-import type { User } from "@multica/core/types";
+} from "@wallts/ui/components/ui/input-otp";
+import { useAuthStore } from "@wallts/core/auth";
+import { workspaceKeys } from "@wallts/core/workspace/queries";
+import { api } from "@wallts/core/api";
+import type { User } from "@wallts/core/types";
 import { useT } from "../i18n";
 
 // ---------------------------------------------------------------------------
@@ -102,7 +102,7 @@ export function LoginPage({
         setStep("cli_confirm");
       })
       .catch(() => {
-        const token = localStorage.getItem("multica_token");
+        const token = localStorage.getItem("wallts_token");
         if (!token) return;
 
         api.setToken(token);
@@ -115,7 +115,7 @@ export function LoginPage({
           })
           .catch(() => {
             api.setToken(null);
-            localStorage.removeItem("multica_token");
+            localStorage.removeItem("wallts_token");
           });
       });
   }, [cliCallback]);
@@ -140,7 +140,7 @@ export function LoginPage({
       try {
         const { token, user } = await useAuthStore.getState().loginWithName(name.trim());
         if (cliCallback) {
-          localStorage.setItem("multica_token", token);
+          localStorage.setItem("wallts_token", token);
           api.setToken(token);
           onTokenObtained?.();
           redirectToCliCallback(cliCallback.url, token, cliCallback.state);
@@ -198,7 +198,7 @@ export function LoginPage({
       try {
         if (cliCallback) {
           const { token } = await api.verifyCode(email, value);
-          localStorage.setItem("multica_token", token);
+          localStorage.setItem("wallts_token", token);
           api.setToken(token);
           onTokenObtained?.();
           redirectToCliCallback(cliCallback.url, token, cliCallback.state);
@@ -244,7 +244,7 @@ export function LoginPage({
       let token: string;
 
       if (authSourceRef.current === "localStorage") {
-        const stored = localStorage.getItem("multica_token");
+        const stored = localStorage.getItem("wallts_token");
         if (!stored) throw new Error("token missing");
         token = stored;
       } else {

@@ -14,11 +14,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/agenttmpl"
-	"github.com/multica-ai/multica/server/internal/logger"
-	"github.com/multica-ai/multica/server/internal/util"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/wallts-ai/wallts/server/internal/agenttmpl"
+	"github.com/wallts-ai/wallts/server/internal/logger"
+	"github.com/wallts-ai/wallts/server/internal/util"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/pkg/protocol"
 )
 
 // agentTemplates is the in-memory catalog loaded once at package init. We

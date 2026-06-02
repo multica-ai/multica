@@ -25,13 +25,13 @@ vi.mock("@tanstack/react-query", async () => {
   };
 });
 
-vi.mock("@multica/core/hooks", () => ({
+vi.mock("@wallts/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
 const tzRef = vi.hoisted(() => ({ current: "UTC" as string | null }));
 
-vi.mock("@multica/core/auth", () => {
+vi.mock("@wallts/core/auth", () => {
   type AuthState = { user: { timezone: string | null } | null };
   const state = (): AuthState => ({ user: { timezone: tzRef.current } });
   const useAuthStore = Object.assign(
@@ -41,7 +41,7 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 
-vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
+vi.mock("@wallts/core/runtimes/custom-pricing-store", () => {
   const state = () => ({ pricings: {} });
   const useCustomPricingStore = Object.assign(
     (sel?: (s: ReturnType<typeof state>) => unknown) =>
@@ -60,7 +60,7 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
   });
 
   // The `tz` segment is the last element of every dashboard key
-  // (see dashboardKeys in @multica/core/dashboard/queries).
+  // (see dashboardKeys in @wallts/core/dashboard/queries).
   function tzSegments(): unknown[] {
     return queryKeys
       .filter((k) => k[0] === "dashboard")

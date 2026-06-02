@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Download } from "lucide-react";
-import { useAuthStore } from "@multica/core/auth";
+import { useAuthStore } from "@wallts/core/auth";
 import { useLocale } from "../i18n";
 import {
   ClaudeCodeLogo,

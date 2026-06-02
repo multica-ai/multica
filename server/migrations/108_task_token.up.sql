@@ -1,5 +1,5 @@
 -- task_token replaces the historical practice of injecting the daemon
--- owner's MULTICA_TOKEN (a workspace owner/admin PAT) into the agent
+-- owner's WALLTS_TOKEN (a workspace owner/admin PAT) into the agent
 -- process. That practice gave the agent full owner privileges via
 -- whatever credential the daemon happened to be using, which made
 -- agent-resource secrets reachable from the agent (MUL-2600).

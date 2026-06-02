@@ -1,4 +1,4 @@
-import reactConfig from "@multica/eslint-config/react";
+import reactConfig from "@wallts/eslint-config/react";
 import i18next from "eslint-plugin-i18next";
 
 // Global i18n protection. Every JSX text node in this package must pass

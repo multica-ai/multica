@@ -1,9 +1,9 @@
 {
   "fab": {
-    "running": "Multica is working...",
+    "running": "Wallts is working...",
     "unread_one": "{{count}} unread chat",
     "unread_other": "{{count}} unread chats",
-    "default": "Ask Multica"
+    "default": "Ask Wallts"
   },
   "input": {
     "placeholder_no_agent": "Create an agent to start chatting",
@@ -88,7 +88,7 @@
     "first_time_pillars_suffix": ".",
     "first_time_actions": "Ask for a summary, plan your day, or hand off a quick task.",
     "returning_title_named": "Hi, I'm {{name}}",
-    "returning_title_default": "Welcome to Multica",
+    "returning_title_default": "Welcome to Wallts",
     "returning_subtitle": "Try asking"
   },
   "starter_prompts": {
@@ -97,15 +97,15 @@
     "plan_next": "Plan what to work on next"
   },
   "context_anchor": {
-    "tooltip_disabled": "Nothing to share with Multica on this page",
-    "tooltip_off": "Let Multica know what you're viewing",
-    "tooltip_on_issue": "Multica knows you're viewing {{label}} · Click to turn off",
-    "tooltip_on_project": "Multica knows you're viewing project \"{{label}}\" · Click to turn off",
-    "card_tooltip_issue_with_subtitle": "Multica knows you're viewing {{label}} — {{subtitle}}",
-    "card_tooltip_issue": "Multica knows you're viewing {{label}}",
-    "card_tooltip_project": "Multica knows you're viewing project \"{{label}}\"",
+    "tooltip_disabled": "Nothing to share with Wallts on this page",
+    "tooltip_off": "Let Wallts know what you're viewing",
+    "tooltip_on_issue": "Wallts knows you're viewing {{label}} · Click to turn off",
+    "tooltip_on_project": "Wallts knows you're viewing project \"{{label}}\" · Click to turn off",
+    "card_tooltip_issue_with_subtitle": "Wallts knows you're viewing {{label}} — {{subtitle}}",
+    "card_tooltip_issue": "Wallts knows you're viewing {{label}}",
+    "card_tooltip_project": "Wallts knows you're viewing project \"{{label}}\"",
     "aria_stop": "Stop sharing current page",
-    "aria_start": "Share current page with Multica"
+    "aria_start": "Share current page with Wallts"
   },
   "no_agent_banner": "You need an agent to start chatting.",
   "offline_banner": {

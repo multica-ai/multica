@@ -22,7 +22,7 @@ func TestChoosePiInvocation_PassthroughForNonLauncher(t *testing.T) {
 		"-p",
 		"--mode", "json",
 		"--session", "/tmp/pi-session.jsonl",
-		"You are running as a chat assistant for a Multica workspace.\n\nUser message:\n我需要创建一个issue\n",
+		"You are running as a chat assistant for a Wallts workspace.\n\nUser message:\n我需要创建一个issue\n",
 	}
 
 	gotExec, gotArgs := choosePiInvocation(execName, lookedUp, args, logger)

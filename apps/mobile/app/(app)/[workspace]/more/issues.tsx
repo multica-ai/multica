@@ -25,7 +25,7 @@ import { Pressable, SectionList, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import type { Issue, IssuePriority, IssueStatus } from "@multica/core/types";
+import type { Issue, IssuePriority, IssueStatus } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 // Header chrome (back + "Issues" title) comes from the parent Stack

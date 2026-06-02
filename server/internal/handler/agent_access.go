@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/util"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/internal/util"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
 )
 
 // canAccessPrivateAgent gates the four protected surfaces for private

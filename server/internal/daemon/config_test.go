@@ -12,9 +12,9 @@ import (
 )
 
 func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
-	t.Setenv("MULTICA_GC_ARTIFACT_PATTERNS", "")
+	t.Setenv("WALLTS_GC_ARTIFACT_PATTERNS", "")
 	defaults := []string{"node_modules", ".next", ".turbo"}
-	got := patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", defaults)
+	got := patternsFromEnv("WALLTS_GC_ARTIFACT_PATTERNS", defaults)
 	if !reflect.DeepEqual(got, defaults) {
 		t.Fatalf("expected defaults %v, got %v", defaults, got)
 	}
@@ -26,8 +26,8 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 }
 
 func TestPatternsFromEnv_DropsSeparatorBearingEntries(t *testing.T) {
-	t.Setenv("MULTICA_GC_ARTIFACT_PATTERNS", "node_modules, .next ,foo/bar, ../etc, ,target")
-	got := patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", nil)
+	t.Setenv("WALLTS_GC_ARTIFACT_PATTERNS", "node_modules, .next ,foo/bar, ../etc, ,target")
+	got := patternsFromEnv("WALLTS_GC_ARTIFACT_PATTERNS", nil)
 	want := []string{"node_modules", ".next", "target"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected %v, got %v", want, got)
@@ -202,7 +202,7 @@ func stageFakeAgent(t *testing.T) string {
 		t.Fatalf("write fake claude: %v", err)
 	}
 	t.Setenv("PATH", binDir)
-	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("WALLTS_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
 	return binDir
 }
 
@@ -320,7 +320,7 @@ func TestResolveAgentsViaLoginShell_HardTimeoutOnBackgroundedStdout(t *testing.T
 
 // TestLoadConfig_SkipsLoginShellWhenLookPathSucceeds proves the laziness
 // requirement: if every agent CLI the operator cares about is already
-// resolvable via the daemon's PATH (or pinned to an explicit MULTICA_*_PATH),
+// resolvable via the daemon's PATH (or pinned to an explicit WALLTS_*_PATH),
 // the shell-fallback path must not run. We assert this by pointing SHELL at
 // a sentinel script that touches a marker file when invoked.
 func TestLoadConfig_SkipsLoginShellWhenLookPathSucceeds(t *testing.T) {
@@ -353,7 +353,7 @@ func TestLoadConfig_SkipsLoginShellWhenLookPathSucceeds(t *testing.T) {
 	// the fallback — except `claude` already resolves, and the user hasn't
 	// configured anything else, so the probe loop should be satisfied
 	// after the first probe alone.
-	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("WALLTS_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
 
 	if _, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:0",
@@ -392,8 +392,8 @@ func TestLoadConfig_UsesCodexDesktopAppBundleFallback(t *testing.T) {
 
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
-	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
-	t.Setenv("MULTICA_CODEX_MODEL", "gpt-5")
+	t.Setenv("WALLTS_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("WALLTS_CODEX_MODEL", "gpt-5")
 	pinNonCodexAgentsToMissingPaths(t)
 
 	cfg, err := LoadConfig(Overrides{
@@ -431,14 +431,14 @@ func TestLoadConfig_CodexDesktopFallbackDoesNotOverrideExplicitPath(t *testing.T
 
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
-	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
-	t.Setenv("MULTICA_CODEX_PATH", filepath.Join(t.TempDir(), "missing-codex"))
+	t.Setenv("WALLTS_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	t.Setenv("WALLTS_CODEX_PATH", filepath.Join(t.TempDir(), "missing-codex"))
 	pinNonCodexAgentsToMissingPaths(t)
 	fakeClaude := filepath.Join(t.TempDir(), "claude")
 	if err := os.WriteFile(fakeClaude, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fake claude: %v", err)
 	}
-	t.Setenv("MULTICA_CLAUDE_PATH", fakeClaude)
+	t.Setenv("WALLTS_CLAUDE_PATH", fakeClaude)
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:0",
@@ -448,7 +448,7 @@ func TestLoadConfig_CodexDesktopFallbackDoesNotOverrideExplicitPath(t *testing.T
 		t.Fatalf("LoadConfig: %v", err)
 	}
 	if got, ok := cfg.Agents["codex"]; ok {
-		t.Fatalf("explicit missing MULTICA_CODEX_PATH should not fall back to Desktop bundle, got %#v", got)
+		t.Fatalf("explicit missing WALLTS_CODEX_PATH should not fall back to Desktop bundle, got %#v", got)
 	}
 }
 
@@ -456,16 +456,16 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 	t.Helper()
 	missingDir := t.TempDir()
 	for _, name := range []string{
-		"MULTICA_CLAUDE_PATH",
-		"MULTICA_OPENCODE_PATH",
-		"MULTICA_OPENCLAW_PATH",
-		"MULTICA_HERMES_PATH",
-		"MULTICA_GEMINI_PATH",
-		"MULTICA_PI_PATH",
-		"MULTICA_CURSOR_PATH",
-		"MULTICA_COPILOT_PATH",
-		"MULTICA_KIMI_PATH",
-		"MULTICA_KIRO_PATH",
+		"WALLTS_CLAUDE_PATH",
+		"WALLTS_OPENCODE_PATH",
+		"WALLTS_OPENCLAW_PATH",
+		"WALLTS_HERMES_PATH",
+		"WALLTS_GEMINI_PATH",
+		"WALLTS_PI_PATH",
+		"WALLTS_CURSOR_PATH",
+		"WALLTS_COPILOT_PATH",
+		"WALLTS_KIMI_PATH",
+		"WALLTS_KIRO_PATH",
 	} {
 		t.Setenv(name, filepath.Join(missingDir, strings.ToLower(name)))
 	}

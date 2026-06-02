@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { IssuePriority, UpdateIssueRequest } from "@multica/core/types";
-import { PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import type { IssuePriority, UpdateIssueRequest } from "@wallts/core/types";
+import { PRIORITY_ORDER, PRIORITY_CONFIG } from "@wallts/core/issues/config";
 import { PriorityIcon } from "../priority-icon";
 import { PropertyPicker, PickerItem } from "./property-picker";
 import { useT } from "../../../i18n";

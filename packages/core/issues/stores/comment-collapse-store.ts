@@ -37,7 +37,7 @@ export const useCommentCollapseStore = create<CommentCollapseStore>()(
         }),
     }),
     {
-      name: "multica_comment_collapse",
+      name: "wallts_comment_collapse",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
     },
   ),

@@ -7,7 +7,7 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@multica/ui/components/ui/empty";
+} from "@wallts/ui/components/ui/empty";
 import { useT } from "../../i18n";
 
 // The Co-authored-by trailer toggle moved into the dedicated GitHub Settings

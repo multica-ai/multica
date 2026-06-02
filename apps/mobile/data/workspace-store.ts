@@ -17,7 +17,7 @@
 import { create } from "zustand";
 import * as SecureStore from "expo-secure-store";
 
-const SLUG_KEY = "multica_current_workspace_slug";
+const SLUG_KEY = "wallts_current_workspace_slug";
 
 interface WorkspaceState {
   currentWorkspaceId: string | null;

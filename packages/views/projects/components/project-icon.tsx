@@ -1,5 +1,5 @@
-import type { Project } from "@multica/core/types";
-import { cn } from "@multica/ui/lib/utils";
+import type { Project } from "@wallts/core/types";
+import { cn } from "@wallts/ui/lib/utils";
 
 export type ProjectIconSize = "sm" | "md" | "lg";
 

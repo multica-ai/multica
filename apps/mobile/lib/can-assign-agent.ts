@@ -4,7 +4,7 @@
  * — which in turn forwards to `packages/core/permissions/rules.ts:canAssignAgentToIssue`.
  *
  * We mirror (not import) per the apps/mobile/CLAUDE.md sharing rule: only
- * `import type` from @multica/core; logic is duplicated to keep mobile
+ * `import type` from @wallts/core; logic is duplicated to keep mobile
  * independent. Any rule change must be applied here too.
  *
  * Rule (mirrors backend `server/internal/handler/issue.go:1471-1490`):
@@ -14,7 +14,7 @@
  * Used by the chat agent picker to filter "agents I can talk to" and by
  * NoAgentBanner to detect the all-zero state.
  */
-import type { Agent } from "@multica/core/types";
+import type { Agent } from "@wallts/core/types";
 
 type MemberRoleLike = "owner" | "admin" | "member" | null | undefined;
 

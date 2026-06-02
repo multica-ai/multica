@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { preprocessLinks } from "@multica/ui/markdown/linkify";
+import { preprocessLinks } from "@wallts/ui/markdown/linkify";
 
 // The bug: linkify-it does not treat CJK full-width punctuation as a URL
 // boundary, so the href can swallow trailing punctuation and the Chinese
@@ -41,10 +41,10 @@ describe("preprocessLinks — CJK punctuation boundary", () => {
 
   it("handles the original bug report (PR link then 。 then more text)", () => {
     const out = preprocessLinks(
-      "已合并 PR #1623：https://github.com/multica-ai/multica/pull/1623。merge commit",
+      "已合并 PR #1623：https://github.com/dwickyfp/wallts/pull/1623。merge commit",
     );
     expect(out).toBe(
-      "已合并 PR #1623：[https://github.com/multica-ai/multica/pull/1623](https://github.com/multica-ai/multica/pull/1623)。merge commit",
+      "已合并 PR #1623：[https://github.com/dwickyfp/wallts/pull/1623](https://github.com/dwickyfp/wallts/pull/1623)。merge commit",
     );
   });
 

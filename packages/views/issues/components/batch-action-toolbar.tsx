@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,13 +13,13 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
-import type { UpdateIssueRequest } from "@multica/core/types";
-import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
-import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues/mutations";
+} from "@wallts/ui/components/ui/alert-dialog";
+import type { UpdateIssueRequest } from "@wallts/core/types";
+import { useIssueSelectionStore } from "@wallts/core/issues/stores/selection-store";
+import { useBatchUpdateIssues, useBatchDeleteIssues } from "@wallts/core/issues/mutations";
 import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
 import { useT } from "../../i18n";
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 
 export function BatchActionToolbar({
   placement = "fixed-bottom",

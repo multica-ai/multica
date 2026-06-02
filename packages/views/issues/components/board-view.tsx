@@ -13,12 +13,12 @@ import {
 } from "@dnd-kit/core";
 import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
-import type { Issue, IssueAssigneeGroup, IssueStatus } from "@multica/core/types";
-import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { AssigneeGroupedIssuesFilter, IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
-import { useViewStore } from "@multica/core/issues/stores/view-store-context";
-import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
-import { useActorName } from "@multica/core/workspace/hooks";
+import type { Issue, IssueAssigneeGroup, IssueStatus } from "@wallts/core/types";
+import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@wallts/core/issues/mutations";
+import type { AssigneeGroupedIssuesFilter, IssueSortParam, MyIssuesFilter } from "@wallts/core/issues/queries";
+import { useViewStore } from "@wallts/core/issues/stores/view-store-context";
+import type { IssueGrouping } from "@wallts/core/issues/stores/view-store";
+import { useActorName } from "@wallts/core/workspace/hooks";
 import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-column";
 import { BoardCardContent } from "./board-card";
 import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";

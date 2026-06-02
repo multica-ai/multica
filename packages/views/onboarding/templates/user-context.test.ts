@@ -24,7 +24,7 @@ const EN_LABELS: UserContextLabels = {
 const ZH_LABELS: UserContextLabels = {
   heading: "关于我",
   roleLabel: "角色",
-  useCaseLabel: "想用 Multica 做",
+  useCaseLabel: "想用 Wallts 做",
   listSeparator: "、",
   role: { engineer: "工程师", product: "产品经理", other: "其他" },
   useCase: {

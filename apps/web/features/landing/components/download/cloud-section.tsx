@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CloudWaitlistExpand } from "@multica/views/onboarding";
+import { CloudWaitlistExpand } from "@wallts/views/onboarding";
 import { useLocale } from "../../i18n";
 
 /**

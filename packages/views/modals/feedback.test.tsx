@@ -30,19 +30,19 @@ vi.mock("../i18n", () => ({
   }),
 }));
 
-vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "ws1" }) }));
-vi.mock("@multica/core/hooks/use-file-upload", () => ({
+vi.mock("@wallts/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "ws1" }) }));
+vi.mock("@wallts/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: vi.fn() }),
 }));
-vi.mock("@multica/core/api", () => ({ api: {} }));
-vi.mock("@multica/core/analytics", () => ({ captureFeedbackOpened: vi.fn() }));
+vi.mock("@wallts/core/api", () => ({ api: {} }));
+vi.mock("@wallts/core/analytics", () => ({ captureFeedbackOpened: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
-vi.mock("@multica/core/platform", () => ({
+vi.mock("@wallts/core/platform", () => ({
   formatShortcut: () => "⌘↵",
   modKey: "mod",
   enterKey: "enter",
 }));
-vi.mock("@multica/core/feedback", () => ({
+vi.mock("@wallts/core/feedback", () => ({
   useCreateFeedback: () => ({ isPending: false, mutateAsync: vi.fn() }),
   useFeedbackDraftStore: (selector: any) =>
     selector({ draft: { message: storedDraftMessage }, setDraft: vi.fn(), clearDraft: vi.fn() }),

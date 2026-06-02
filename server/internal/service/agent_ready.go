@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
 )
 
 // AgentReadiness reports whether an agent can accept new work right now.

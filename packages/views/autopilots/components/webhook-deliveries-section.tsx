@@ -18,24 +18,24 @@ import {
   autopilotDeliveriesOptions,
   autopilotDeliveryOptions,
   useReplayAutopilotDelivery,
-} from "@multica/core/autopilots";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { Button } from "@multica/ui/components/ui/button";
-import { Badge } from "@multica/ui/components/ui/badge";
+} from "@wallts/core/autopilots";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { Skeleton } from "@wallts/ui/components/ui/skeleton";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Badge } from "@wallts/ui/components/ui/badge";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
-} from "@multica/ui/components/ui/dialog";
-import { cn } from "@multica/ui/lib/utils";
+} from "@wallts/ui/components/ui/dialog";
+import { cn } from "@wallts/ui/lib/utils";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 import type {
   WebhookDelivery,
   WebhookDeliveryStatus,
   WebhookSignatureStatus,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 
 // --- Status visuals -------------------------------------------------------
 

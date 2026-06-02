@@ -4,7 +4,7 @@ import type { AutopilotTrigger } from "../types";
  * Compose a usable absolute webhook URL for a webhook trigger.
  *
  * Resolution order:
- *  1. trigger.webhook_url — present only when MULTICA_PUBLIC_URL is set on the
+ *  1. trigger.webhook_url — present only when WALLTS_PUBLIC_URL is set on the
  *     server. This is the authoritative form when available.
  *  2. apiBaseUrl + webhook_path — desktop apps and self-host setups where the
  *     server didn't mint an absolute URL but the client knows its API origin.

@@ -1,4 +1,4 @@
-import type { IssueAssigneeGroup } from "@multica/core/types";
+import type { IssueAssigneeGroup } from "@wallts/core/types";
 
 export function filterRunningAssigneeGroups(
   groups: IssueAssigneeGroup[] | undefined,

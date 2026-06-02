@@ -41,7 +41,7 @@ import { router, usePathname } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { TriggerRef } from "@rn-primitives/dropdown-menu";
-import type { User, Workspace } from "@multica/core/types";
+import type { User, Workspace } from "@wallts/core/types";
 import {
   DropdownMenu,
   DropdownMenuTrigger,

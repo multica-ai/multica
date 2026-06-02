@@ -6,7 +6,7 @@ const openModal = vi.fn();
 const reloadActiveTab = vi.fn();
 const closeActiveTab = vi.fn();
 
-vi.mock("@multica/core/modals", () => ({
+vi.mock("@wallts/core/modals", () => ({
   useModalStore: {
     getState: () => ({ open: openModal }),
   },

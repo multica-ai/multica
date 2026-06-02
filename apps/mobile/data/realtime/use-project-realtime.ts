@@ -24,7 +24,7 @@
  * `project:created` is not relevant to the per-record hook (no id match).
  */
 import { useQueryClient } from "@tanstack/react-query";
-import type { Issue } from "@multica/core/types";
+import type { Issue } from "@wallts/core/types";
 import { issueKeys } from "@/data/queries/issue-keys";
 import { projectKeys } from "@/data/queries/projects";
 import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";

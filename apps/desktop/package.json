@@ -1,18 +1,18 @@
 {
-  "name": "@multica/desktop",
-  "productName": "Multica",
+  "name": "@wallts/desktop",
+  "productName": "Wallts",
   "version": "0.1.0",
   "private": true,
-  "description": "Multica Desktop — native desktop client for the Multica platform.",
-  "homepage": "https://multica.ai",
+  "description": "Wallts Desktop — native desktop client for the Wallts platform.",
+  "homepage": "https://wallts.ai",
   "repository": {
     "type": "git",
-    "url": "https://github.com/multica-ai/multica.git",
+    "url": "https://github.com/dwickyfp/wallts.git",
     "directory": "apps/desktop"
   },
   "author": {
-    "name": "Multica",
-    "email": "support@multica.ai"
+    "name": "Wallts",
+    "email": "support@wallts.ai"
   },
   "license": "UNLICENSED",
   "main": "./out/main/index.js",
@@ -42,9 +42,9 @@
     "@fontsource-variable/inter": "^5.2.5",
     "@fontsource-variable/source-serif-4": "^5.2.9",
     "@fontsource/geist-mono": "^5.2.7",
-    "@multica/core": "workspace:*",
-    "@multica/ui": "workspace:*",
-    "@multica/views": "workspace:*",
+    "@wallts/core": "workspace:*",
+    "@wallts/ui": "workspace:*",
+    "@wallts/views": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "electron-updater": "^6.8.3",
     "fix-path": "^5.0.0",
@@ -59,8 +59,8 @@
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",
-    "@multica/eslint-config": "workspace:*",
-    "@multica/tsconfig": "workspace:*",
+    "@wallts/eslint-config": "workspace:*",
+    "@wallts/tsconfig": "workspace:*",
     "@tailwindcss/vite": "^4",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",

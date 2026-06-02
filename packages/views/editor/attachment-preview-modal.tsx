@@ -41,10 +41,10 @@ import { createPortal } from "react-dom";
 import {
   PreviewTooLargeError,
   PreviewUnsupportedError,
-} from "@multica/core/api";
+} from "@wallts/core/api";
 import { Download, ExternalLink, FileText, Loader2, X } from "lucide-react";
-import type { Attachment } from "@multica/core/types";
-import { paths, useWorkspaceSlug } from "@multica/core/paths";
+import type { Attachment } from "@wallts/core/types";
+import { paths, useWorkspaceSlug } from "@wallts/core/paths";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { openExternal } from "../platform";

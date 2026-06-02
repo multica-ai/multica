@@ -1,6 +1,6 @@
 {
   "title": "账单（测试页）",
-  "subtitle": "直接透传 multica-cloud 的 /api/v1/billing/*。不是正式 UI——只是把所有端点塞到一个页面方便验证 Stripe 流程。",
+  "subtitle": "直接透传 wallts-cloud 的 /api/v1/billing/*。不是正式 UI——只是把所有端点塞到一个页面方便验证 Stripe 流程。",
   "endpoints": {
     "balance": "GET /api/cloud-billing/balance",
     "transactions": "GET /api/cloud-billing/transactions",

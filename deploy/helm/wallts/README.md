@@ -11,7 +11,7 @@ helm install wallts ./deploy/helm/wallts
 # Install with external PostgreSQL
 helm install wallts ./deploy/helm/wallts \
   --set postgresql.enabled=false \
-  --set postgresql.external.databaseUrl="postgres://user:password@my-db-host:5432/multica?sslmode=require"
+  --set postgresql.external.databaseUrl="postgres://user:password@my-db-host:5432/wallts?sslmode=require"
 ```
 
 ## PostgreSQL Configuration
@@ -29,7 +29,7 @@ To disable the bundled instance and point at an external database:
 ```bash
 helm install wallts ./deploy/helm/wallts \
   --set postgresql.enabled=false \
-  --set postgresql.external.databaseUrl="postgres://user:password@my-db-host:5432/multica?sslmode=require"
+  --set postgresql.external.databaseUrl="postgres://user:password@my-db-host:5432/wallts?sslmode=require"
 ```
 
 Or in a custom values file:
@@ -38,7 +38,7 @@ Or in a custom values file:
 postgresql:
   enabled: false
   external:
-    databaseUrl: "postgres://user:***@my-db-host:5432/multica?sslmode=require"
+    databaseUrl: "postgres://user:***@my-db-host:5432/wallts?sslmode=require"
 ```
 
 When `postgresql.enabled=false`:
@@ -57,6 +57,6 @@ Dry-run the chart to verify it renders correctly with your values:
 ```bash
 helm template wallts ./deploy/helm/wallts \
   --set postgresql.enabled=false \
-  --set postgresql.external.databaseUrl="postgres://user:password@db:5432/multica?sslmode=disable" \
+  --set postgresql.external.databaseUrl="postgres://user:password@db:5432/wallts?sslmode=disable" \
   | kubectl apply --dry-run=client -f -
 ```

@@ -9,7 +9,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 在评论里 @ 一个智能体
 
-和 @ 成员一样——打 `@` 触发 picker，选一个智能体。发出评论后 Multica 会立刻给被 @ 的每个智能体入队一个 `task`，附带**这条评论**作为触发上下文。智能体收到任务时能读到：
+和 @ 成员一样——打 `@` 触发 picker，选一个智能体。发出评论后 Wallts 会立刻给被 @ 的每个智能体入队一个 `task`，附带**这条评论**作为触发上下文。智能体收到任务时能读到：
 
 - Issue 的完整信息（描述 + 所有历史评论）
 - 触发评论本身——作为它本次工作的起点
@@ -51,7 +51,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 智能体自己 @ 自己不会死循环
 
-智能体在执行中可以发评论，评论里也可能带 `@mention`。Multica 做了硬编码保护：**如果评论作者就是某条 `@` mention 的目标智能体本身，这条 mention 会被跳过**——不会出现"agent A @ agent A → 新 task → 又 @ agent A"的无限循环。
+智能体在执行中可以发评论，评论里也可能带 `@mention`。Wallts 做了硬编码保护：**如果评论作者就是某条 `@` mention 的目标智能体本身，这条 mention 会被跳过**——不会出现"agent A @ agent A → 新 task → 又 @ agent A"的无限循环。
 
 这条保护**只防直接自引用**。智能体 @ 另一个智能体（A @ B）正常触发；如果 B 在回应里又 @ A，A 会被再次触发——也就是说**间接递归不防**。给智能体写指令时注意不要让几个智能体之间互相 `@` 形成循环。
 

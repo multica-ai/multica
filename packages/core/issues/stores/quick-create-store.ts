@@ -49,7 +49,7 @@ export const useQuickCreateStore = create<QuickCreateState>()(
       setKeepOpen: (v) => set({ keepOpen: v }),
     }),
     {
-      name: "multica_quick_create",
+      name: "wallts_quick_create",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
     },
   ),

@@ -1,9 +1,9 @@
 "use client";
 
-import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
-import { useActorName } from "@multica/core/workspace/hooks";
+import { STATUS_CONFIG, PRIORITY_CONFIG } from "@wallts/core/issues/config";
+import { useActorName } from "@wallts/core/workspace/hooks";
 import { StatusIcon, PriorityIcon } from "../../issues/components";
-import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@multica/core/types";
+import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@wallts/core/types";
 import { getQuickCreateFailureDetail } from "./inbox-display";
 import { useT } from "../../i18n";
 

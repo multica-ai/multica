@@ -18,7 +18,7 @@ test("onboarding v2 — welcome → source → role → use_case (skip path)", a
 
   await page.goto("/login");
   await page.evaluate((t) => {
-    localStorage.setItem("multica_token", t);
+    localStorage.setItem("wallts_token", t);
   }, token);
   await page.goto("/onboarding");
   await page.waitForLoadState("networkidle");
@@ -31,7 +31,7 @@ test("onboarding v2 — welcome → source → role → use_case (skip path)", a
   await page.getByRole("button", { name: "Continue on web" }).click();
 
   // 2. Source step
-  await expect(page.getByText("How did you hear about Multica?")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText("How did you hear about Wallts?")).toBeVisible({ timeout: 10000 });
   await expect(page.getByText(`Step 1 of 6`)).toBeVisible();
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${SHOTS_DIR}/02-source.png` });
@@ -50,7 +50,7 @@ test("onboarding v2 — welcome → source → role → use_case (skip path)", a
   await page.getByRole("button", { name: "Skip" }).click();
 
   // 4. Use case step
-  await expect(page.getByText("What do you want to use Multica for?")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText("What do you want to use Wallts for?")).toBeVisible({ timeout: 10000 });
   await expect(page.getByText(`Step 3 of 6`)).toBeVisible();
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${SHOTS_DIR}/04-use-case.png` });
@@ -70,18 +70,18 @@ test("onboarding v2 — rage-skip all 3 questions", async ({ page }) => {
   const token = api.getToken();
 
   await page.goto("/login");
-  await page.evaluate((t) => localStorage.setItem("multica_token", t), token);
+  await page.evaluate((t) => localStorage.setItem("wallts_token", t), token);
   await page.goto("/onboarding");
   await page.waitForLoadState("networkidle");
 
   await page.getByRole("button", { name: "Continue on web" }).click();
-  await expect(page.getByText("How did you hear about Multica?")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText("How did you hear about Wallts?")).toBeVisible({ timeout: 10000 });
 
   // Skip × 3
   await page.getByRole("button", { name: "Skip" }).click();
   await expect(page.getByText("Which best describes you?")).toBeVisible({ timeout: 10000 });
   await page.getByRole("button", { name: "Skip" }).click();
-  await expect(page.getByText("What do you want to use Multica for?")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText("What do you want to use Wallts for?")).toBeVisible({ timeout: 10000 });
   await page.getByRole("button", { name: "Skip" }).click();
 
   // Lands on workspace step
@@ -91,21 +91,21 @@ test("onboarding v2 — rage-skip all 3 questions", async ({ page }) => {
 
 test("onboarding v2 — zh-Hans renders Chinese labels", async ({ page, context }) => {
   await context.addCookies([
-    { name: "multica-locale", value: "zh-Hans", url: "http://localhost:13442" },
+    { name: "wallts-locale", value: "zh-Hans", url: "http://localhost:13442" },
   ]);
   const api = new TestApiClient();
   await api.login(`zh-${Date.now()}@localhost`, "中文用户");
   const token = api.getToken();
 
   await page.goto("/login");
-  await page.evaluate((t) => localStorage.setItem("multica_token", t), token);
+  await page.evaluate((t) => localStorage.setItem("wallts_token", t), token);
   await page.goto("/onboarding");
   await page.waitForLoadState("networkidle");
 
   await page.getByRole("button").first().click().catch(() => {});
 
   // Source screen — Chinese question
-  await expect(page.getByText("你是从哪里了解到 Multica 的？")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText("你是从哪里了解到 Wallts 的？")).toBeVisible({ timeout: 10000 });
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${SHOTS_DIR}/07-source-zh.png` });
 });

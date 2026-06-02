@@ -58,7 +58,7 @@ func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
 	// Gemini CLI has no `models list` subcommand, so we expose the
 	// CLI's own aliases (auto / pro / flash / flash-lite) plus
 	// explicit version pins including Gemini 3. Regression guard
-	// for multica-ai/multica#1503 — Gemini 3 must be selectable.
+	// for dwickyfp/wallts#1503 — Gemini 3 must be selectable.
 	models := geminiStaticModels()
 	ids := map[string]Model{}
 	for _, m := range models {
@@ -87,7 +87,7 @@ func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
 
 func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 	// Codex CLI has no `models list` subcommand so the catalog is
-	// hand-maintained. Regression guard for multica-ai/multica#2009 —
+	// hand-maintained. Regression guard for dwickyfp/wallts#2009 —
 	// GPT-5.5 must be selectable, and the badge default must point at
 	// the latest release rather than lagging a version behind.
 	models := codexStaticModels()
@@ -158,7 +158,7 @@ func TestInferCopilotProvider(t *testing.T) {
 func TestCopilotStaticModelsExposesFullCatalog(t *testing.T) {
 	// GitHub Copilot CLI has no `models list` subcommand, so the
 	// catalog is hand-maintained from the official supported-models
-	// docs. Regression guard for multica-ai/multica#1948 — the
+	// docs. Regression guard for dwickyfp/wallts#1948 — the
 	// dropdown previously shipped only 2 models and used dashed IDs
 	// (`claude-sonnet-4-6`) which the CLI rejects. IDs must use the
 	// dotted form (`claude-sonnet-4.6`) that `copilot --model <id>`

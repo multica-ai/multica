@@ -17,9 +17,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/skill"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/dwickyfp/wallts/server/internal/skill"
+	db "github.com/dwickyfp/wallts/server/pkg/db/generated"
+	"github.com/dwickyfp/wallts/server/pkg/protocol"
 )
 
 // sanitizeNullBytes makes a string safe for a PostgreSQL TEXT column.
@@ -53,7 +53,7 @@ type SkillResponse struct {
 // SkillSummaryResponse is the list-endpoint shape: everything SkillResponse
 // has except `content`. SKILL.md bodies routinely run 50–200KB and shipping
 // them in list payloads bloats responses past CLI timeouts on high-latency
-// links (GH multica-ai/multica#2174). Detail endpoints still return the full
+// links (GH dwickyfp/wallts#2174). Detail endpoints still return the full
 // SkillResponse with content.
 type SkillSummaryResponse struct {
 	ID          string  `json:"id"`

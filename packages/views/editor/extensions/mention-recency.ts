@@ -11,7 +11,7 @@ import type { MentionItem } from "./mention-suggestion";
 
 type RecencyMap = Record<string, number>;
 
-const STORAGE_PREFIX = "multica:mention-recency:";
+const STORAGE_PREFIX = "wallts:mention-recency:";
 const MAX_ENTRIES = 200;
 
 function storageKey(workspaceId: string): string {

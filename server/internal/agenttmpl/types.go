@@ -38,7 +38,7 @@ type Template struct {
 	// one of "info" / "success" / "warning" / "primary" / "secondary".
 	// Empty falls back to "muted" on the frontend. Hardcoded color values
 	// (text-red-500, bg-blue-100, …) are explicitly NOT allowed — accent
-	// must be a Multica design-system token name (see CLAUDE.md).
+	// must be a Wallts design-system token name (see CLAUDE.md).
 	Accent string `json:"accent,omitempty"`
 
 	// Instructions is the verbatim text written into the created agent's

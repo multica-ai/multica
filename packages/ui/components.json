@@ -12,10 +12,10 @@
   },
   "iconLibrary": "lucide",
   "aliases": {
-    "components": "@multica/ui/components",
-    "ui": "@multica/ui/components/ui",
-    "hooks": "@multica/ui/hooks",
-    "lib": "@multica/ui/lib",
-    "utils": "@multica/ui/lib/utils"
+    "components": "@wallts/ui/components",
+    "ui": "@wallts/ui/components/ui",
+    "hooks": "@wallts/ui/hooks",
+    "lib": "@wallts/ui/lib",
+    "utils": "@wallts/ui/lib/utils"
   }
 }

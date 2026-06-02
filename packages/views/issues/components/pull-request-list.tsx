@@ -20,13 +20,13 @@ import {
   shouldShowPullRequestStats,
   type PullRequestStatusKind,
   type PullRequestProgressSegment,
-} from "@multica/core/github";
+} from "@wallts/core/github";
 import type {
   GitHubPullRequest,
   GitHubPullRequestChecksConclusion,
   GitHubPullRequestState,
-} from "@multica/core/types";
-import { cn } from "@multica/ui/lib/utils";
+} from "@wallts/core/types";
+import { cn } from "@wallts/ui/lib/utils";
 import { useT } from "../../i18n";
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];

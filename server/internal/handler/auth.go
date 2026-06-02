@@ -18,9 +18,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/logger"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/wallts-ai/wallts/server/internal/auth"
+	"github.com/wallts-ai/wallts/server/internal/logger"
+	db "github.com/wallts-ai/wallts/server/pkg/db/generated"
 )
 
 // SignupError represents signup restriction errors
@@ -35,7 +35,7 @@ func (e SignupError) Error() string {
 var ErrSignupProhibited = SignupError{Message: "user registration is disabled on this self-hosted instance"}
 var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allowed on this instance"}
 
-const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
+const devVerificationCodeEnv = "WALLTS_DEV_VERIFICATION_CODE"
 
 // supportedLanguages mirrors SUPPORTED_LOCALES in packages/core/i18n/types.ts.
 // Keep both lists in sync when adding a locale — the user-controlled language
@@ -192,7 +192,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 const signupSourceMaxLen = 512
 
 func signupSourceFromRequest(r *http.Request) string {
-	c, err := r.Cookie("multica_signup_source")
+	c, err := r.Cookie("wallts_signup_source")
 	if err != nil || c == nil {
 		return ""
 	}
@@ -415,13 +415,13 @@ type UpdateMeRequest struct {
 
 // NameLoginRequest is the request body for name-based login.
 // Users authenticate by providing a name only — no OAuth, no email.
-// A synthetic email (name@multica.local) is used internally to satisfy
+// A synthetic email (name@wallts.local) is used internally to satisfy
 // the DB NOT NULL email constraint and provide a unique user key.
 type NameLoginRequest struct {
 	Name string `json:"name"`
 }
 
-const nameLoginDomain = "multica.local"
+const nameLoginDomain = "wallts.local"
 
 func (h *Handler) NameLogin(w http.ResponseWriter, r *http.Request) {
 	var req NameLoginRequest
@@ -443,7 +443,7 @@ func (h *Handler) NameLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Reject names containing @ to prevent synthetic email collisions
 	// with real email addresses (e.g. "alice@example.com" would map to
-	// alice@example.com@multica.local which is unexpected).
+	// alice@example.com@wallts.local which is unexpected).
 	if strings.Contains(name, "@") {
 		writeError(w, http.StatusBadRequest, "name must not contain @")
 		return
@@ -456,7 +456,7 @@ func (h *Handler) NameLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate synthetic email: name@multica.local
+	// Generate synthetic email: name@wallts.local
 	syntheticEmail := strings.ToLower(name) + "@" + nameLoginDomain
 
 	user, isNew, err := h.findOrCreateUser(r.Context(), syntheticEmail)

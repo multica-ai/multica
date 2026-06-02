@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Cloud, Lock, Monitor } from "lucide-react";
-import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
+import type { AgentRuntime, MemberWithUser } from "@wallts/core/types";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
   PickerItem,

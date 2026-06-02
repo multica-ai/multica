@@ -1,4 +1,4 @@
-import type { TimelineEntry } from "@multica/core/types";
+import type { TimelineEntry } from "@wallts/core/types";
 
 /**
  * Walks the parent_id graph rooted at `rootId` and returns every descendant in

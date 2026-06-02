@@ -35,10 +35,10 @@ We adopt RNR with the following commitments. The first two are **principles** th
 
 ### 3.1 Defaults first
 
-When using any RNR component, accept its default variant, default size, default spacing, default palette. Don't add wrapper layers, "improved" defaults, or `variant="multicaCustom"` styles unless a concrete product need demands it. The hand-written legacy exists precisely because someone reached for a "slightly improved" version of a standard primitive — recreating that pattern with RNR underneath defeats the migration.
+When using any RNR component, accept its default variant, default size, default spacing, default palette. Don't add wrapper layers, "improved" defaults, or `variant="walltsCustom"` styles unless a concrete product need demands it. The hand-written legacy exists precisely because someone reached for a "slightly improved" version of a standard primitive — recreating that pattern with RNR underneath defeats the migration.
 
 Concrete consequences:
-- Phase 1 uses shadcn's default neutral palette as-is (light + dark). Multica's existing custom tokens (`brand`, `success`, `warning`, `info`, `priority`, `code-surface`) are appended but **dark-mode values are not authored ahead of demonstrated need** — they copy their light values until a screen using them actually breaks in dark mode.
+- Phase 1 uses shadcn's default neutral palette as-is (light + dark). Wallts's existing custom tokens (`brand`, `success`, `warning`, `info`, `priority`, `code-surface`) are appended but **dark-mode values are not authored ahead of demonstrated need** — they copy their light values until a screen using them actually breaks in dark mode.
 - Phase 2/3: when `npx @rnr/cli add <component>` writes a file, do not immediately tweak its styles. Use it as-is; adjust callers if API differs.
 - Tier C "foundation upgrade" means swap raw `<Text>` for RNR's `Text` and swap inline conditionals for `cva` — it does NOT mean redesign or add variants the component didn't have before.
 
@@ -193,11 +193,11 @@ Dark mode colors are not in the current config and need to be authored. Two opti
 
 Phase 1 starts with **option 1** (shadcn default dark palette) for velocity. A later pass can tune to match desktop's `packages/ui/styles/tokens.css` dark theme once the infrastructure is proven.
 
-Multica-specific tokens not in shadcn's default (`brand`, `brand-foreground`, `success`, `warning`, `info`, `priority`, `code-surface`) get their own CSS variables in both `:root` and `.dark:root`, mapped through `tailwind.config.js` the same way.
+Wallts-specific tokens not in shadcn's default (`brand`, `brand-foreground`, `success`, `warning`, `info`, `priority`, `code-surface`) get their own CSS variables in both `:root` and `.dark:root`, mapped through `tailwind.config.js` the same way.
 
 ### 5.3 Why class-mode, not media-query-mode
 
-Media-query mode (`@media (prefers-color-scheme: dark)`) is the simpler default but cannot be overridden by the app. Multica's Settings → Appearance picker needs to override the OS preference, which requires class mode. The cost of class mode is a single `setColorScheme()` call at app startup to apply the saved preference, paid once before first paint.
+Media-query mode (`@media (prefers-color-scheme: dark)`) is the simpler default but cannot be overridden by the app. Wallts's Settings → Appearance picker needs to override the OS preference, which requires class mode. The cost of class mode is a single `setColorScheme()` call at app startup to apply the saved preference, paid once before first paint.
 
 ### 5.4 `system` option
 
@@ -223,7 +223,7 @@ Checklist:
    - `npx expo install tailwindcss-animate class-variance-authority clsx tailwind-merge @rn-primitives/portal`
    - Confirm `class-variance-authority`, `clsx`, `tailwind-merge`, `@rn-primitives/slot` are already present (they are) — only `tailwindcss-animate` and `@rn-primitives/portal` are new.
 2. **Update `metro.config.js`** to set `inlineRem: 16` on `withNativeWind(...)`.
-3. **Rewrite `global.css`** with `:root` and `.dark:root` CSS variable blocks (light + dark palettes including Multica's custom tokens).
+3. **Rewrite `global.css`** with `:root` and `.dark:root` CSS variable blocks (light + dark palettes including Wallts's custom tokens).
 4. **Rewrite `tailwind.config.js`** to use `hsl(var(--...))` mappings, set `darkMode: 'class'`, register `tailwindcss-animate` plugin, add `hairlineWidth()` border width. Keep mobile-specific overrides (`borderRadius`, custom tokens).
 5. **Create `lib/theme.ts`** — TS mirror of CSS variables + `NAV_THEME` for React Navigation.
 6. **Create `lib/use-color-scheme.ts`** — wraps NativeWind's `useColorScheme()`, loads/persists preference from `expo-secure-store` on mount, exposes `{ colorScheme, isDarkColorScheme, setColorScheme }`.

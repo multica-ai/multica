@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { FileCardExtension } from "./file-card";
 import { ImageExtension } from "./index";
-import { preprocessFileCards } from "@multica/ui/markdown";
+import { preprocessFileCards } from "@wallts/ui/markdown";
 
 const fileCardRenderMarkdown = FileCardExtension.config.renderMarkdown as (
   node: { attrs: Record<string, string> },

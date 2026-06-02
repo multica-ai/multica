@@ -1,40 +1,40 @@
 ---
 title: 문제 해결
-description: Multica를 자체 호스팅할 때 흔히 겪는 문제 — 증상, 원인, 진단 방법, 해결 방법.
+description: Wallts를 자체 호스팅할 때 흔히 겪는 문제 — 증상, 원인, 진단 방법, 해결 방법.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-증상으로 문제를 찾아보세요. 각 항목은 **증상 / 가능한 원인 / 진단 방법 / 해결 방법**을 제공합니다. 여러분의 상황이 목록에 없다면 [GitHub](https://github.com/multica-ai/multica/issues)에 이슈를 등록하세요.
+증상으로 문제를 찾아보세요. 각 항목은 **증상 / 가능한 원인 / 진단 방법 / 해결 방법**을 제공합니다. 여러분의 상황이 목록에 없다면 [GitHub](https://github.com/wallts-ai/wallts/issues)에 이슈를 등록하세요.
 
 ## 데몬이 서버에 연결되지 않음
 
-**증상**: [`multica daemon`](/cli)의 `status` 명령이 `offline` 또는 `connection refused`를 표시합니다. 서버 로그에 `/api/daemon/register`나 `/api/daemon/heartbeat` 요청이 보이지 않습니다. 데몬 메커니즘이 어떻게 동작하는지는 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
+**증상**: [`wallts daemon`](/cli)의 `status` 명령이 `offline` 또는 `connection refused`를 표시합니다. 서버 로그에 `/api/daemon/register`나 `/api/daemon/heartbeat` 요청이 보이지 않습니다. 데몬 메커니즘이 어떻게 동작하는지는 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
 
 **가능한 원인**:
 
-1. **`MULTICA_SERVER_URL`이 잘못된 주소를 가리킴** — 기본값은 `ws://localhost:8080/ws`이며, 자체 호스팅 시 여러분의 서버 주소로 변경해야 합니다
+1. **`WALLTS_SERVER_URL`이 잘못된 주소를 가리킴** — 기본값은 `ws://localhost:8080/ws`이며, 자체 호스팅 시 여러분의 서버 주소로 변경해야 합니다
 2. **네트워크 / 방화벽 차단** — 데몬과 서버가 같은 네트워크에 있지 않거나, 아웃바운드 트래픽이 차단됨
-3. **토큰이 만료되었거나 유효하지 않음** — `multica login`을 한 번도 실행하지 않았거나, PAT이 취소됨
+3. **토큰이 만료되었거나 유효하지 않음** — `wallts login`을 한 번도 실행하지 않았거나, PAT이 취소됨
 4. **서버가 등록을 거부함** — 로그인한 계정이 대상 워크스페이스에 속해 있지 않음(register가 403을 반환)
 5. **DNS 해석 실패** — 데몬 기기에서 호스트명이 해석되지 않음
 
 **진단 방법**:
 
 ```bash
-multica daemon logs --lines 100    # look for daemon-side errors
-echo $MULTICA_SERVER_URL          # confirm the address is set
+wallts daemon logs --lines 100    # look for daemon-side errors
+echo $WALLTS_SERVER_URL          # confirm the address is set
 curl -i http://<server-host>:8080/health   # hit the server directly
 curl -i http://<server-host>:8080/readyz  # include DB + migration readiness
-cat ~/.multica/config.json        # verify api_token exists
-multica workspace list            # confirm you're a member of the target workspace
+cat ~/.wallts/config.json        # verify api_token exists
+wallts workspace list            # confirm you're a member of the target workspace
 ```
 
-**해결 방법**: 위의 각 원인을 하나씩 처리하세요. 가장 흔한 두 가지 해결책은 **`MULTICA_SERVER_URL`을 변경하고 데몬을 재시작**하는 것(`multica daemon restart`)과 **다시 로그인**하는 것(`multica logout && multica login`)입니다.
+**해결 방법**: 위의 각 원인을 하나씩 처리하세요. 가장 흔한 두 가지 해결책은 **`WALLTS_SERVER_URL`을 변경하고 데몬을 재시작**하는 것(`wallts daemon restart`)과 **다시 로그인**하는 것(`wallts logout && wallts login`)입니다.
 
 ## 작업이 `queued`에서 멈춤
 
-**증상**: 에이전트에게 이슈를 할당한 뒤 이슈 상태가 곧바로 `in_progress`로 바뀌지만, 오랜 시간이 지나도 페이지에 에이전트 실행의 흔적이 보이지 않습니다. `multica daemon status`는 데몬을 `online`으로 표시합니다.
+**증상**: 에이전트에게 이슈를 할당한 뒤 이슈 상태가 곧바로 `in_progress`로 바뀌지만, 오랜 시간이 지나도 페이지에 에이전트 실행의 흔적이 보이지 않습니다. `wallts daemon status`는 데몬을 `online`으로 표시합니다.
 
 **가능한 원인**(빈도순):
 
@@ -47,19 +47,19 @@ multica workspace list            # confirm you're a member of the target worksp
 **진단 방법**:
 
 ```bash
-multica daemon status --output json       # runtime list + last_seen_at
-multica agent list                         # check agent archived state
-multica issue show <issue-id>             # inspect task history
+wallts daemon status --output json       # runtime list + last_seen_at
+wallts agent list                         # check agent archived state
+wallts issue show <issue-id>             # inspect task history
 ```
 
 서버 측(자체 호스팅)에서는 `"no_tasks"` / `"no_capacity"`를 grep하여 클레임 결과를 확인할 수 있습니다.
 
 **해결 방법**:
 
-- 동시 실행 가득 참 → 실행 중인 작업이 끝나기를 기다리거나, `multica agent update <id> --max-concurrent-tasks 10`으로 상한을 올리세요
+- 동시 실행 가득 참 → 실행 중인 작업이 끝나기를 기다리거나, `wallts agent update <id> --max-concurrent-tasks 10`으로 상한을 올리세요
 - 같은 이슈 순차 실행 → 이전 작업이 끝나기를 기다리거나, 다른 에이전트에게 다시 할당하세요
-- 에이전트 보관됨 → `multica agent restore <id>`
-- 런타임 미등록 → `multica daemon restart`하면 데몬이 다시 등록합니다
+- 에이전트 보관됨 → `wallts agent restore <id>`
+- 런타임 미등록 → `wallts daemon restart`하면 데몬이 다시 등록합니다
 
 ## WebSocket이 연결되지 않음
 
@@ -80,7 +80,7 @@ multica issue show <issue-id>             # inspect task history
 
 **해결 방법**:
 
-- Origin 오류 → 서버의 `.env`에 `FRONTEND_ORIGIN=https://multica.yourdomain.com`을 설정(또는 쉼표로 구분한 `CORS_ALLOWED_ORIGINS`)하고 서버를 재시작하세요
+- Origin 오류 → 서버의 `.env`에 `FRONTEND_ORIGIN=https://wallts.yourdomain.com`을 설정(또는 쉼표로 구분한 `CORS_ALLOWED_ORIGINS`)하고 서버를 재시작하세요
 - 프로토콜 불일치 → `FRONTEND_ORIGIN`의 프로토콜이 프런트엔드와 일치하는지 확인하세요
 - 리버스 프록시 → Nginx에 `proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";`를 추가하세요
 - 쿠키 만료 → 페이지를 새로고침하고 다시 로그인하세요
@@ -128,11 +128,11 @@ SMTP 경로는 모든 실패를 실패한 단계와 함께 감싸므로, 서버 
 
 | 기록된 오류 | 의미 | 해결 방법 |
 |---|---|---|
-| `smtp dial <host>:<port>: dial tcp …: connect: connection refused` / `i/o timeout` | 백엔드 컨테이너가 relay에 도달할 수 없음 — 잘못된 host, 잘못된 port, 방화벽, 또는 relay가 수신 대기 중이 아님 | 컨테이너 내부에서 `SMTP_HOST` / `SMTP_PORT`가 해석되는지 확인하세요(`docker compose -f docker-compose.selfhost.yml exec backend nslookup <host>` 및 `nc -vz <host> <port>`). Multica를 실행하는 호스트에서 relay로 향하는 방화벽을 여세요 |
+| `smtp dial <host>:<port>: dial tcp …: connect: connection refused` / `i/o timeout` | 백엔드 컨테이너가 relay에 도달할 수 없음 — 잘못된 host, 잘못된 port, 방화벽, 또는 relay가 수신 대기 중이 아님 | 컨테이너 내부에서 `SMTP_HOST` / `SMTP_PORT`가 해석되는지 확인하세요(`docker compose -f docker-compose.selfhost.yml exec backend nslookup <host>` 및 `nc -vz <host> <port>`). Wallts를 실행하는 호스트에서 relay로 향하는 방화벽을 여세요 |
 | `smtp starttls: x509: certificate signed by unknown authority`(또는 `certificate is not valid for any names`) | relay가 사설 CA / 자체 서명 인증서를 사용하며, 컨테이너의 신뢰 저장소가 이를 거부함 | CA를 컨테이너에 설치하거나, relay가 신뢰할 수 있는 네트워크 구간에서 도달 가능함을 확인한 후에만 `SMTP_TLS_INSECURE=true`를 설정하세요 |
 | `smtp auth: 535 5.7.8 Authentication credentials invalid`(또는 `534`/`530`) | `SMTP_USERNAME` / `SMTP_PASSWORD`가 잘못되었거나, relay가 `PLAIN`이 아닌 다른 인증 방식을 요구함 | 메일 관리자에게 서비스 계정 자격 증명을 다시 확인하세요. Exchange 익명 내부 relay의 경우 둘 다 비워 두세요(`SMTP_USERNAME=`, `SMTP_PASSWORD=`) |
 | `smtp MAIL FROM: 550 5.7.1 Client does not have permissions to send as this sender` | relay가 `RESEND_FROM_EMAIL`을 봉투 발신자로 수락하지 않음 — 전형적인 Exchange "anonymous users not allowed" 또는 DMARC 정렬 문제 | `RESEND_FROM_EMAIL`을 relay가 수락하는 도메인으로 설정하세요. Exchange에서는 receive connector에서 원본 IP에 `ms-Exch-SMTP-Accept-Any-Sender`를 부여하세요 |
-| `smtp RCPT TO <addr>: 550 5.7.1 Unable to relay` | relay의 receive connector가 여러분의 서브넷이 외부 수신자에게 중계하는 것을 허용하지 않음(외부 도메인과 통신하는 익명 내부 relay에서 가장 흔함) | 초대를 내부 수신자로 제한하거나, Multica 호스트의 서브넷을 Exchange "Anonymous Users → Relay" 권한 목록에 추가하세요 |
+| `smtp RCPT TO <addr>: 550 5.7.1 Unable to relay` | relay의 receive connector가 여러분의 서브넷이 외부 수신자에게 중계하는 것을 허용하지 않음(외부 도메인과 통신하는 익명 내부 relay에서 가장 흔함) | 초대를 내부 수신자로 제한하거나, Wallts 호스트의 서브넷을 Exchange "Anonymous Users → Relay" 권한 목록에 추가하세요 |
 | `smtp DATA` / `smtp write body` / `smtp end data` | 세션은 수락되었으나 relay가 본문을 폐기함 — 보통 메시지 크기 제한, 콘텐츠 필터링, 또는 전송 중 연결 재설정 때문 | relay 로그에서 동일한 `Message-ID`(로그에는 `<unixnano>@<host>` 형식)를 확인하세요. 필요하면 메시지 크기 제한을 높이세요 |
 
 `MAIL FROM`, `RCPT TO`, `DATA` 오류는 항상 relay의 응답 코드와 함께 기록되므로 반대편의 Exchange / Postfix 로그와 대조할 수 있습니다. 인증 코드와 초대 토큰은 감싸진 오류에 **절대** 포함되지 않습니다.
@@ -148,7 +148,7 @@ SMTP 경로는 모든 실패를 실패한 단계와 함께 감싸므로, 서버 
 - 잘못된 host / port → `SMTP_HOST` / `SMTP_PORT`를 조정하고 백엔드를 재시작하세요. 지원되는 relay 모드는 [인증 설정 → Option B: SMTP relay](/auth-setup)를 참고하세요
 - 인증서 불일치 → relay의 CA를 컨테이너에 설치하거나, 신뢰할 수 있는 네트워크 구간에서 임시로 `SMTP_TLS_INSECURE=true`를 설정하세요
 - 인증 실패 → 자격 증명을 다시 확인하세요. 익명 내부 relay의 경우 `SMTP_USERNAME`과 `SMTP_PASSWORD`를 비워 두세요
-- `Unable to relay` → 내부 수신자로 제한하거나, Exchange receive connector에서 Multica 호스트의 IP에 중계 권한을 부여하세요
+- `Unable to relay` → 내부 수신자로 제한하거나, Exchange receive connector에서 Wallts 호스트의 IP에 중계 권한을 부여하세요
 
 ## 고정 로컬 테스트 코드가 동작하지 않음
 
@@ -156,23 +156,23 @@ SMTP 경로는 모든 실패를 실패한 단계와 함께 감싸므로, 서버 
 
 **가능한 원인**(상호 배타적):
 
-1. **`MULTICA_DEV_VERIFICATION_CODE`가 비어 있음** — 고정 코드는 기본적으로 비활성화되어 있습니다
+1. **`WALLTS_DEV_VERIFICATION_CODE`가 비어 있음** — 고정 코드는 기본적으로 비활성화되어 있습니다
 2. **`APP_ENV=production`** — 이것은 **올바른** 프로덕션 구성입니다. 고정 로컬 테스트 코드는 프로덕션에서 무시됩니다
 3. **구성된 코드가 6자리가 아님** — 이 단축 코드는 6자리 값만 허용합니다
 
 **진단 방법**:
 
 ```bash
-cat .env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
-docker exec <container> env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
+cat .env | grep -E 'APP_ENV|WALLTS_DEV_VERIFICATION_CODE'
+docker exec <container> env | grep -E 'APP_ENV|WALLTS_DEV_VERIFICATION_CODE'
 ```
 
 인박스(스팸 포함)에서 실제 인증 코드를 확인하세요.
 
 **해결 방법**:
 
-- 프로덕션에서는 `MULTICA_DEV_VERIFICATION_CODE`를 비워 두고, Resend를 구성하여 실제 코드를 사용하세요
-- 로컬 개발이나 내부 테스트의 경우 서버 로그에서 생성된 코드를 복사하거나, `APP_ENV=development`와 `MULTICA_DEV_VERIFICATION_CODE=888888`을 설정하세요 — 공개 인스턴스에서는 고정 코드를 절대 활성화하지 마세요(자세한 내용은 [로그인 및 회원가입 구성 → 고정 로컬 테스트 코드](/auth-setup#fixed-local-testing-codes) 참고)
+- 프로덕션에서는 `WALLTS_DEV_VERIFICATION_CODE`를 비워 두고, Resend를 구성하여 실제 코드를 사용하세요
+- 로컬 개발이나 내부 테스트의 경우 서버 로그에서 생성된 코드를 복사하거나, `APP_ENV=development`와 `WALLTS_DEV_VERIFICATION_CODE=888888`을 설정하세요 — 공개 인스턴스에서는 고정 코드를 절대 활성화하지 마세요(자세한 내용은 [로그인 및 회원가입 구성 → 고정 로컬 테스트 코드](/auth-setup#fixed-local-testing-codes) 참고)
 
 ## 사용량 대시보드가 0으로 유지됨
 
@@ -181,7 +181,7 @@ docker exec <container> env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
 **가능한 원인**:
 
 1. **`rollup_task_usage_hourly()`가 전혀 스케줄링되지 않음** — 사용량 / 런타임 대시보드는 파생 테이블 `task_usage_hourly`에서 읽으며, 이 테이블은 해당 함수로 채워집니다. 번들된 `pgvector/pgvector:pg17` 이미지에는 `pg_cron`이 포함되어 있지 않으며, 백엔드도 프로세스 내에서 rollup을 실행하지 않습니다. 외부 스케줄러 없이 새로 설치한 자체 호스팅에서는 이것이 기본 상태입니다.
-2. **`pg_cron`이 설치되었지만 잘못된 데이터베이스를 가리킴** — `pg_cron.database_name`의 기본값은 `postgres`입니다. Multica 데이터베이스 이름이 다르면 스케줄된 작업이 `rollup_task_usage_hourly()`를 전혀 보지 못합니다.
+2. **`pg_cron`이 설치되었지만 잘못된 데이터베이스를 가리킴** — `pg_cron.database_name`의 기본값은 `postgres`입니다. Wallts 데이터베이스 이름이 다르면 스케줄된 작업이 `rollup_task_usage_hourly()`를 전혀 보지 못합니다.
 3. **스케줄러는 실행되지만 rollup이 조용히 오류를 냄** — 예를 들어 cron 항목 내부의 DB 역할 / search_path가 잘못됨.
 
 **진단 방법**:
@@ -234,7 +234,7 @@ ERROR: refusing to drop legacy daily rollups:
      ./backfill_task_usage_hourly --sleep-between-slices=2s
 
    # Kubernetes
-   kubectl -n multica exec deploy/multica-backend -- \
+   kubectl -n wallts exec deploy/wallts-backend -- \
      ./backfill_task_usage_hourly --sleep-between-slices=2s
    ```
 
@@ -245,7 +245,7 @@ ERROR: refusing to drop legacy daily rollups:
 
 ## 포트 충돌
 
-**증상**: `multica server`나 `multica daemon start`가 `address already in use`로 실패합니다.
+**증상**: `wallts server`나 `wallts daemon start`가 `address already in use`로 실패합니다.
 
 **가능한 원인**:
 
@@ -270,10 +270,10 @@ netstat -ano | findstr :8080    # Windows
 
 | 구성 요소 | 위치 | 명령 |
 |---|---|---|
-| **데몬** | `~/.multica/daemon.log`(백그라운드 모드) 또는 포그라운드 stdout | `multica daemon logs -f --lines 100` |
+| **데몬** | `~/.wallts/daemon.log`(백그라운드 모드) 또는 포그라운드 stdout | `wallts daemon logs -f --lines 100` |
 | **서버(Docker)** | 컨테이너 stdout | `docker logs -f <container>` |
-| **서버(systemd)** | journal | `journalctl -u multica-server -f` |
+| **서버(systemd)** | journal | `journalctl -u wallts-server -f` |
 | **프런트엔드(dev)** | `pnpm dev`를 실행 중인 터미널 | 직접 확인 |
 | **프런트엔드(브라우저)** | DevTools → Console | `F12`를 누르세요 |
 
-더 자세한 데몬 로그가 필요하면, 데몬을 백그라운드에서 포그라운드로 옮기세요: `multica daemon stop && multica daemon start --foreground`.
+더 자세한 데몬 로그가 필요하면, 데몬을 백그라운드에서 포그라운드로 옮기세요: `wallts daemon stop && wallts daemon start --foreground`.

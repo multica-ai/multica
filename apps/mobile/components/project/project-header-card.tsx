@@ -12,7 +12,7 @@
  * bar gives no information and creates a divide-by-zero hazard.
  */
 import { Pressable, View } from "react-native";
-import type { Project } from "@multica/core/types";
+import type { Project } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { ProjectIcon } from "@/components/ui/project-icon";
 

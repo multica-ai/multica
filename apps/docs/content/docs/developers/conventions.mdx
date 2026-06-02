@@ -5,7 +5,7 @@ description: Single source of truth for code naming, i18n translation glossary, 
 
 This page is the single source of truth for code naming, the i18n translation glossary, and the Chinese voice guide. Anything that used to live in `packages/views/locales/glossary.md` or in scattered comments now lives here.
 
-If you write Multica code, change a translation, or write Chinese product copy, this is the page to reference.
+If you write Wallts code, change a translation, or write Chinese product copy, this is the page to reference.
 
 ---
 
@@ -31,7 +31,7 @@ The monorepo enforces strict package boundaries:
 | Package | May depend on | Must NOT depend on |
 | --- | --- | --- |
 | `packages/core` | nothing app-specific | `react-dom`, `localStorage`, `process.env`, `next/*`, UI libraries |
-| `packages/ui` | nothing | `@multica/core`, business logic |
+| `packages/ui` | nothing | `@wallts/core`, business logic |
 | `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
 | `apps/web/platform/` | `next/*` | other apps |
 | `apps/desktop/.../platform/` | `react-router-dom`, electron | other apps |
@@ -88,16 +88,16 @@ This is the **mandatory** glossary for every translation PR. It used to live at 
 
 ### The core distinction: entity vs concept
 
-Multica's product nouns split into two categories:
+Wallts's product nouns split into two categories:
 
-- **Entity** — has a URL, a database row, an API type. In Chinese text, render as **lowercase English** so it visually reads like a type name and signals "this is a Multica system entity".
+- **Entity** — has a URL, a database row, an API type. In Chinese text, render as **lowercase English** so it visually reads like a type name and signals "this is a Wallts system entity".
 - **Concept** — generic noun, not a database entity. **Translate fully** so Chinese users don't see jagged English embedded in flowing text.
 
 This rule is aligned with `apps/docs/content/docs/*.zh.mdx` — the docs are the de facto Chinese voice standard and have been battle-tested across 20+ pages.
 
 ### Entities — mixed rule (`issue` / `skill` / `task`)
 
-`issue` / `skill` / `task` are Multica's core entities. They have schema columns, API fields, and product UI labels that are all English. In Chinese text, they follow a **mixed rule** — what to use depends on where the word appears:
+`issue` / `skill` / `task` are Wallts's core entities. They have schema columns, API fields, and product UI labels that are all English. In Chinese text, they follow a **mixed rule** — what to use depends on where the word appears:
 
 | Context | Render | Example |
 | --- | --- | --- |
@@ -115,7 +115,7 @@ Chinese term reference:
 **Why `issue` / `skill` / `task` aren't forced into Chinese the way `project` / `autopilot` are**:
 
 - **`issue` / `task`**: dev teams talk in English. The Chinese candidates ("任务" — too vague, almost synonymous with "工作"; "工单" — IT ticket connotation; "议题" — GitHub-style but doesn't match the product feel) all read worse than `issue`. **But** in long-form doc prose, repeating lowercase `task` 50× breaks the rhythm — so prose is allowed to use `执行任务`, while UI strings and state names stay lowercase English.
-- **`skill`**: Multica-specific concept with no established Chinese term.
+- **`skill`**: Wallts-specific concept with no established Chinese term.
 - **`project` → "项目"**: settled mainstream Chinese word. Feishu / Tower / Teambition / PingCode / GitHub Projects — every Chinese product translates it. No product keeps `project` in Chinese context.
 - **`autopilot` → "自动化"**: in Chinese, "autopilot" associates with Tesla's "自动驾驶" and doesn't match what the feature does (run tasks on a schedule). Notion and Feishu both use "自动化"; that's the industry consensus.
 
@@ -123,7 +123,7 @@ Chinese term reference:
 
 | Category | Terms |
 | --- | --- |
-| Brands | **Multica**, GitHub, Slack, Google, Anthropic, OpenAI, Claude, Codex, Cursor, Linear, Jira |
+| Brands | **Wallts**, GitHub, Slack, Google, Anthropic, OpenAI, Claude, Codex, Cursor, Linear, Jira |
 | Acronyms | API, CLI, URL, SDK, OAuth, JWT, SSO, WebSocket, HTTP, JSON, YAML, SQL |
 
 ### Translate fully — concepts

@@ -8,7 +8,7 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@multica/ui/components/ui/empty";
+} from "@wallts/ui/components/ui/empty";
 import { useT } from "../../i18n";
 
 // GitHub now lives in its own Settings tab (see github-tab.tsx). Until other

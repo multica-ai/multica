@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { I18nProvider } from "@multica/core/i18n/react";
+import { I18nProvider } from "@wallts/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enWorkspace from "../locales/en/workspace.json";
 import { CreateWorkspaceForm } from "./create-workspace-form";
@@ -12,7 +12,7 @@ const TEST_RESOURCES = {
 };
 
 const mockMutate = vi.fn();
-vi.mock("@multica/core/workspace/mutations", () => ({
+vi.mock("@wallts/core/workspace/mutations", () => ({
   useCreateWorkspace: () => ({ mutate: mockMutate, isPending: false }),
 }));
 

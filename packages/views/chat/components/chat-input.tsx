@@ -2,19 +2,19 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useRef, useState } from "react";
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 import {
   ContentEditor,
   type ContentEditorRef,
   useFileDropZone,
   FileDropOverlay,
 } from "../../editor";
-import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { SubmitButton } from "@multica/ui/components/common/submit-button";
-import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
-import { createLogger } from "@multica/core/logger";
-import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
-import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { FileUploadButton } from "@wallts/ui/components/common/file-upload-button";
+import { SubmitButton } from "@wallts/ui/components/common/submit-button";
+import { useChatStore, DRAFT_NEW_SESSION } from "@wallts/core/chat";
+import { createLogger } from "@wallts/core/logger";
+import { enterKey, formatShortcut, modKey } from "@wallts/core/platform";
+import type { UploadResult } from "@wallts/core/hooks/use-file-upload";
 import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
@@ -141,7 +141,7 @@ export function ChatInput({
     // Block the send while any file is still uploading. If we let it
     // through the attachment id is not yet in uploadMapRef (the upload
     // resolves later) and the attachment would only end up bound to the
-    // session, not the message — the agent then can't `multica attachment
+    // session, not the message — the agent then can't `wallts attachment
     // download <id>` the file. The SubmitButton is also disabled in this
     // state via `uploading`, but Mod+Enter bypasses the button so we
     // still gate here.

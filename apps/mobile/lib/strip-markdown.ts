@@ -2,7 +2,7 @@
  * Best-effort cleanup of a markdown string for compact preview UI — e.g.
  * the "Replying to X" chip above the inline comment composer. NOT a full
  * markdown parser; handles the few patterns that actually appear in
- * multica comments and would otherwise show as visible syntax garbage in a
+ * wallts comments and would otherwise show as visible syntax garbage in a
  * one- or two-line preview:
  *
  *   - mention links   `[@Alice](mention://member/uuid)` → `@Alice`

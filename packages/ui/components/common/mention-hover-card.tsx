@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Users } from "lucide-react";
-import { HoverCard, HoverCardTrigger, HoverCardContent } from "@multica/ui/components/ui/hover-card";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@wallts/ui/components/ui/hover-card";
 import { ActorAvatar } from "./actor-avatar";
 
 interface MentionHoverCardProps {

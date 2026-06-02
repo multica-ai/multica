@@ -31,7 +31,7 @@ export function useActorName() {
     if (type === "member") return getMemberName(id);
     if (type === "agent") return getAgentName(id);
     if (type === "squad") return getSquadName(id);
-    if (type === "system") return "Multica";
+    if (type === "system") return "Wallts";
     return "System";
   }, [getAgentName, getMemberName, getSquadName]);
 

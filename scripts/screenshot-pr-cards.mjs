@@ -11,7 +11,7 @@ import { mkdirSync } from "node:fs";
 
 const FRONTEND = process.env.FRONTEND_ORIGIN || "http://localhost:13101";
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:18181";
-const DB = process.env.DATABASE_URL || "postgres://multica:multica@localhost:5432/multica_multica_101?sslmode=disable";
+const DB = process.env.DATABASE_URL || "postgres://wallts:wallts@localhost:5432/wallts_wallts_101?sslmode=disable";
 const EMAIL = "dev@localhost";
 const SLUG = "dev";
 const ISSUES = [2, 3, 4, 5, 6, 7];
@@ -54,7 +54,7 @@ async function main() {
 
   // Set token before navigation so the renderer hits an authenticated state.
   await page.goto(`${FRONTEND}/login`);
-  await page.evaluate((t) => localStorage.setItem("multica_token", t), token);
+  await page.evaluate((t) => localStorage.setItem("wallts_token", t), token);
 
   for (const n of ISSUES) {
     const url = `${FRONTEND}/${SLUG}/issues/DEV-${n}`;

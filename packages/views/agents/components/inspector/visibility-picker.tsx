@@ -6,8 +6,8 @@ import {
   VISIBILITY_DESCRIPTION,
   VISIBILITY_LABEL,
   VISIBILITY_TOOLTIP,
-} from "@multica/core/agents";
-import type { AgentVisibility } from "@multica/core/types";
+} from "@wallts/core/agents";
+import type { AgentVisibility } from "@wallts/core/types";
 import {
   PickerItem,
   PropertyPicker,

@@ -10,7 +10,7 @@ import type {
   Comment,
   TimelineEntry,
   Reaction,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 import type {
   CommentCreatedPayload,
   CommentUpdatedPayload,
@@ -20,11 +20,11 @@ import type {
   ActivityCreatedPayload,
   ReactionAddedPayload,
   ReactionRemovedPayload,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 import {
   issueTimelineOptions,
   issueKeys,
-} from "@multica/core/issues/queries";
+} from "@wallts/core/issues/queries";
 import {
   useCreateComment,
   useUpdateComment,
@@ -32,9 +32,9 @@ import {
   useResolveComment,
   useToggleCommentReaction,
   type ToggleCommentReactionVars,
-} from "@multica/core/issues/mutations";
-import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
-import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
+} from "@wallts/core/issues/mutations";
+import { sortTimelineEntriesAsc } from "@wallts/core/issues/timeline-sort";
+import { useWSEvent, useWSReconnect } from "@wallts/core/realtime";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 

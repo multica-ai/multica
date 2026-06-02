@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent as rtlFireEvent, render, screen, waitFor } from "@testing-library/react";
-import { I18nProvider } from "@multica/core/i18n/react";
-import type { AgentTask } from "@multica/core/types/agent";
+import { I18nProvider } from "@wallts/core/i18n/react";
+import type { AgentTask } from "@wallts/core/types/agent";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
@@ -22,7 +22,7 @@ type EventHandler = (payload: unknown) => void;
 const wsHandlers = vi.hoisted(() => new Map<string, Set<EventHandler>>());
 const wsReconnectCallbacks = vi.hoisted(() => new Set<() => void>());
 
-vi.mock("@multica/core/realtime", () => ({
+vi.mock("@wallts/core/realtime", () => ({
   useWSEvent: (event: string, handler: EventHandler) => {
     useEffect(() => {
       const set = wsHandlers.get(event) ?? new Set<EventHandler>();
@@ -43,7 +43,7 @@ vi.mock("@multica/core/realtime", () => ({
   },
 }));
 
-vi.mock("@multica/core/workspace/hooks", () => ({
+vi.mock("@wallts/core/workspace/hooks", () => ({
   useActorName: () => ({
     getActorName: (_: string, id: string) => (id ? `Agent ${id}` : "Agent"),
     getActorInitials: (_: string, id: string) =>
@@ -76,7 +76,7 @@ const mockApi = vi.hoisted(() => ({
   cancelTask: vi.fn(),
 }));
 
-vi.mock("@multica/core/api", () => ({
+vi.mock("@wallts/core/api", () => ({
   api: mockApi,
 }));
 

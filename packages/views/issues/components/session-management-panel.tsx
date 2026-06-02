@@ -15,16 +15,16 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@multica/core/api";
-import { issueKeys } from "@multica/core/issues/queries";
-import { useResetSession } from "@multica/core/issues/mutations";
+import { api } from "@wallts/core/api";
+import { issueKeys } from "@wallts/core/issues/queries";
+import { useResetSession } from "@wallts/core/issues/mutations";
 import type {
   AgentSession,
   AgentSessionRun,
   AgentSessionStatus,
-} from "@multica/core/types";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { Button } from "@multica/ui/components/ui/button";
+} from "@wallts/core/types";
+import { Skeleton } from "@wallts/ui/components/ui/skeleton";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -32,17 +32,17 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@multica/ui/components/ui/dialog";
+} from "@wallts/ui/components/ui/dialog";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
-} from "@multica/ui/components/ui/tooltip";
+} from "@wallts/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useActorName } from "@multica/core/workspace/hooks";
+import { useActorName } from "@wallts/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
 import { useT } from "../../i18n";
-import { cn } from "@multica/ui/lib/utils";
+import { cn } from "@wallts/ui/lib/utils";
 
 interface SessionManagementPanelProps {
   issueId: string;

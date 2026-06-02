@@ -39,7 +39,7 @@ export const THEME = {
     chart4: "hsl(43 74% 66%)",
     chart5: "hsl(27 87% 67%)",
 
-    // Multica custom
+    // Wallts custom
     brand: "hsl(225 71% 58%)",
     brandForeground: "hsl(0 0% 98%)",
     success: "hsl(142 71% 45%)",
@@ -78,7 +78,7 @@ export const THEME = {
     chart4: "hsl(280 65% 60%)",
     chart5: "hsl(340 75% 55%)",
 
-    // Multica custom — dark mirrors light until demand
+    // Wallts custom — dark mirrors light until demand
     brand: "hsl(225 71% 58%)",
     brandForeground: "hsl(0 0% 98%)",
     success: "hsl(142 71% 45%)",

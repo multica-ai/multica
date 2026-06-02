@@ -27,7 +27,7 @@ images:
 #     --from-literal=RESEND_API_KEY="" \
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
-#     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+#     --from-literal=WALLTS_DEV_VERIFICATION_CODE=""
 #
 # The chart references this Secret by name; it does not template it, so real
 # values never need to land in git.
@@ -46,8 +46,8 @@ existingSecret: wallts-secrets
 # -----------------------------------------------------------------------------
 postgresql:
   enabled: true
-  database: multica
-  user: multica
+  database: wallts
+  user: wallts
   persistence:
     size: 10Gi
     # Leave empty to use the cluster's default StorageClass.
@@ -77,11 +77,11 @@ backend:
   # All non-secret backend env. Secret values come from `existingSecret`.
   config:
     appEnv: production
-    appUrl: http://multica.dev.lan
-    frontendOrigin: http://multica.dev.lan
+    appUrl: http://wallts.dev.lan
+    frontendOrigin: http://wallts.dev.lan
     corsAllowedOrigins: ""
     cookieDomain: ""
-    resendFromEmail: noreply@multica.ai
+    resendFromEmail: noreply@wallts.ai
     allowSignup: true
     allowedEmails: ""
     allowedEmailDomains: ""
@@ -90,12 +90,12 @@ backend:
     # true so users can only join via invitation.
     disableWorkspaceCreation: false
     googleClientId: ""
-    googleRedirectUri: http://multica.dev.lan/auth/callback
+    googleRedirectUri: http://wallts.dev.lan/auth/callback
     s3Bucket: ""
     s3Region: us-west-2
     cloudfrontDomain: ""
     cloudfrontKeyPairId: ""
-    localUploadBaseUrl: http://api.multica.dev.lan
+    localUploadBaseUrl: http://api.wallts.dev.lan
   resources:
     requests:
       cpu: 100m
@@ -139,9 +139,9 @@ ingress:
   className: traefik
   annotations: {}
   frontend:
-    host: multica.dev.lan
+    host: wallts.dev.lan
   backend:
-    host: api.multica.dev.lan
+    host: api.wallts.dev.lan
   # tls:
-  #   - hosts: [multica.dev.lan, api.multica.dev.lan]
-  #     secretName: multica-tls
+  #   - hosts: [wallts.dev.lan, api.wallts.dev.lan]
+  #     secretName: wallts-tls

@@ -5,7 +5,7 @@ test.describe("Authentication", () => {
   test("login page renders correctly", async ({ page }) => {
     await page.goto("/login");
 
-    await expect(page.locator("h1")).toContainText("Multica");
+    await expect(page.locator("h1")).toContainText("Wallts");
     await expect(page.locator('input[placeholder="Email"]')).toBeVisible();
     await expect(page.locator('input[placeholder="Name"]')).toBeVisible();
     await expect(page.locator('button[type="submit"]')).toContainText(
@@ -23,7 +23,7 @@ test.describe("Authentication", () => {
   test("unauthenticated user is redirected to /login", async ({ page }) => {
     await page.goto("/login");
     await page.evaluate(() => {
-      localStorage.removeItem("multica_token");
+      localStorage.removeItem("wallts_token");
     });
 
     // Visit a workspace-scoped route; DashboardGuard should redirect to /login.

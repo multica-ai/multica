@@ -47,7 +47,7 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 				"**Choosing `--status` when creating sub-issues.**",
 				"`--status todo` = **start now**",
 				"`--status backlog` = **wait**",
-				"`multica issue status <child-id> todo`",
+				"`wallts issue status <child-id> todo`",
 				"all `--status todo`",
 				"`--status backlog` from the start",
 			} {
@@ -90,7 +90,7 @@ func TestBriefHasNoParentNotificationGuidance(t *testing.T) {
 			// Old "do it yourself" framing (PR #2918).
 			"## Parent / Sub-issue Protocol",
 			"**Tell the parent when you finish a child.**",
-			"multica issue comment add <parent-id>",
+			"wallts issue comment add <parent-id>",
 			"with NO `--parent`",
 			"link the child as `[MUL-",
 			"`@mention` the parent's assignee",
@@ -121,7 +121,7 @@ func TestBriefHasNoParentNotificationGuidance(t *testing.T) {
 			// The protocol must no longer emit a placeholder
 			// `<this-issue-id>` status flip — the workflow above owns
 			// that command with the real issue id substituted.
-			"`multica issue status <this-issue-id> in_review`",
+			"`wallts issue status <this-issue-id> in_review`",
 			// Non-existent CLI form Elon's earlier review flagged.
 			"issue list --parent",
 		} {
@@ -134,7 +134,7 @@ func TestBriefHasNoParentNotificationGuidance(t *testing.T) {
 
 // Comment-triggered briefs must NOT carry any unconditional status-flip
 // command targeting the current issue. Previous revisions had a
-// dedicated protocol step that wrote `multica issue status <this-issue-id> in_review`;
+// dedicated protocol step that wrote `wallts issue status <this-issue-id> in_review`;
 // the comment-triggered workflow rule "Do NOT change the issue status
 // unless the comment explicitly asks for it" must remain the source of
 // truth (Elon's blocking review on PR #2918).
@@ -146,7 +146,7 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 	}
 	out := buildMetaSkillContent("claude", ctx)
 
-	if strings.Contains(out, "`multica issue status <this-issue-id> in_review`") {
+	if strings.Contains(out, "`wallts issue status <this-issue-id> in_review`") {
 		t.Errorf("comment-triggered brief must not contain a placeholder `<this-issue-id> in_review` flip — that conflicts with the comment-triggered \"do not change status unless asked\" rule")
 	}
 
@@ -188,11 +188,11 @@ func TestCommentTriggeredBriefCarriesNewCommentsHint(t *testing.T) {
 		t.Errorf("comment brief must offer the full-thread (--tail 30) option, got:\n%s", out)
 	}
 	// Issue-wide catch-up demoted to an only-if-needed fallback.
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --output json") {
+	if !strings.Contains(out, "wallts issue comment list "+issueID+" --since "+since+" --output json") {
 		t.Errorf("comment brief must keep the issue-wide --since catch-up fallback, got:\n%s", out)
 	}
 	// The removed resolve step must not reappear.
-	if strings.Contains(out, "multica comment resolve") {
+	if strings.Contains(out, "wallts comment resolve") {
 		t.Errorf("comment brief must not carry the dropped resolve step, got:\n%s", out)
 	}
 }
@@ -213,7 +213,7 @@ func TestCommentTriggeredBriefColdStartThreadRead(t *testing.T) {
 	if strings.Contains(out, "new comment(s) since your last run") {
 		t.Errorf("no since-delta hint should render on cold start, got:\n%s", out)
 	}
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread trigger-1 --tail 30 --output json") {
+	if !strings.Contains(out, "wallts issue comment list "+issueID+" --thread trigger-1 --tail 30 --output json") {
 		t.Errorf("cold start must point at the triggering thread read, got:\n%s", out)
 	}
 }
@@ -240,7 +240,7 @@ func TestCommentTriggeredBriefResumedNoDeltaSkipsDefaultThreadRead(t *testing.T)
 		"triggering comment ID / thread anchor",
 		"If your reply depends on thread context",
 		"do not rely only on resumed session memory",
-		"multica issue comment list " + issueID + " --thread trigger-1 --tail 30 --output json",
+		"wallts issue comment list " + issueID + " --thread trigger-1 --tail 30 --output json",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("resumed/no-delta brief missing %q\n--- output ---\n%s", want, out)
@@ -264,7 +264,7 @@ func TestAssignmentTriggeredProtocolStillFlipsInReview(t *testing.T) {
 	ctx := TaskContextForEnv{IssueID: issueID}
 	out := buildMetaSkillContent("claude", ctx)
 
-	want := "`multica issue status " + issueID + " in_review`"
+	want := "`wallts issue status " + issueID + " in_review`"
 	if !strings.Contains(out, want) {
 		t.Errorf("assignment-triggered brief must still flip to in_review on completion (expected %q in the workflow above)", want)
 	}
@@ -446,7 +446,7 @@ func TestWriteRuntimeConfigFileCreatesMissingFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "CLAUDE.md")
-	const brief = "# Multica Agent Runtime\n\nbrief body line"
+	const brief = "# Wallts Agent Runtime\n\nbrief body line"
 
 	if err := writeRuntimeConfigFile(path, brief); err != nil {
 		t.Fatalf("writeRuntimeConfigFile returned error: %v", err)
@@ -476,7 +476,7 @@ func TestWriteRuntimeConfigFilePreservesUserContent(t *testing.T) {
 		t.Fatalf("seed user file: %v", err)
 	}
 
-	const brief = "## Multica brief\n\ninjected body"
+	const brief = "## Wallts brief\n\ninjected body"
 	if err := writeRuntimeConfigFile(path, brief); err != nil {
 		t.Fatalf("writeRuntimeConfigFile returned error: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestWriteRuntimeConfigFileReplacesExistingBlock(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	const newBrief = "## New Multica brief\n\nfresh body"
+	const newBrief = "## New Wallts brief\n\nfresh body"
 	if err := writeRuntimeConfigFile(path, newBrief); err != nil {
 		t.Fatalf("writeRuntimeConfigFile returned error: %v", err)
 	}
@@ -555,7 +555,7 @@ func TestWriteRuntimeConfigFileIsIdempotent(t *testing.T) {
 		t.Fatalf("seed user file: %v", err)
 	}
 
-	const brief = "## Multica brief\n\nbody"
+	const brief = "## Wallts brief\n\nbody"
 	for i := 0; i < 5; i++ {
 		if err := writeRuntimeConfigFile(path, brief); err != nil {
 			t.Fatalf("iteration %d: %v", i, err)
@@ -600,7 +600,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"kimi", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
-		{"multica", "multica.md"},
+		{"wallts", "wallts.md"},
 		{"gemini", "GEMINI.md"},
 	}
 	for _, tc := range cases {
@@ -678,8 +678,8 @@ func TestWriteRuntimeConfigFileIgnoresStrayEndMarkerBeforeBegin(t *testing.T) {
 
 	// Seed a file whose user-authored portion documents the marker format
 	// (so the *end* marker appears before any *begin* marker), then has a
-	// real block authored by an earlier Multica run below.
-	const userDoc = "# Repo CLAUDE.md\n\nExample of what Multica writes:\n" +
+	// real block authored by an earlier Wallts run below.
+	const userDoc = "# Repo CLAUDE.md\n\nExample of what Wallts writes:\n" +
 		runtimeMarkerEnd + "\n\n# Real config below\n"
 	original := userDoc +
 		runtimeMarkerBegin + "\nFIRST BRIEF\n" + runtimeMarkerEnd + "\n"
@@ -772,7 +772,7 @@ func TestWriteRuntimeConfigFileReplacesMalformedHalfBlock(t *testing.T) {
 
 // Cleanup excises the marker block, preserving every byte of surrounding
 // user content. This is the local_directory invariant: a `claude` /
-// `codex` run started by the user after a Multica task must see the same
+// `codex` run started by the user after a Wallts task must see the same
 // file the user wrote.
 func TestCleanupRuntimeConfigPreservesUserContent(t *testing.T) {
 	t.Parallel()
@@ -950,7 +950,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"kimi", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
-		{"multica", "multica.md"},
+		{"wallts", "wallts.md"},
 		{"gemini", "GEMINI.md"},
 	}
 	for _, tc := range cases {

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, act, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { I18nProvider } from "@multica/core/i18n/react";
+import { I18nProvider } from "@wallts/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enAuth from "../../locales/en/auth.json";
 import enSettings from "../../locales/en/settings.json";
@@ -17,14 +17,14 @@ const userRef = vi.hoisted(() => ({
   current: null as { id: string; timezone?: string | null } | null,
 }));
 
-vi.mock("@multica/ui/components/common/theme-provider", () => ({
+vi.mock("@wallts/ui/components/common/theme-provider", () => ({
   useTheme: () => ({ theme: "light", setTheme: vi.fn() }),
 }));
 
-vi.mock("@multica/core/i18n/react", async () => {
+vi.mock("@wallts/core/i18n/react", async () => {
   const actual =
-    await vi.importActual<typeof import("@multica/core/i18n/react")>(
-      "@multica/core/i18n/react",
+    await vi.importActual<typeof import("@wallts/core/i18n/react")>(
+      "@wallts/core/i18n/react",
     );
   return {
     ...actual,
@@ -36,7 +36,7 @@ vi.mock("@multica/core/i18n/react", async () => {
   };
 });
 
-vi.mock("@multica/core/api", () => ({
+vi.mock("@wallts/core/api", () => ({
   api: { updateMe: mockUpdateMe },
 }));
 
@@ -44,10 +44,10 @@ vi.mock("sonner", () => ({
   toast: { warning: mockToastWarning, error: mockToastError },
 }));
 
-vi.mock("@multica/core/auth", async () => {
+vi.mock("@wallts/core/auth", async () => {
   const actual =
-    await vi.importActual<typeof import("@multica/core/auth")>(
-      "@multica/core/auth",
+    await vi.importActual<typeof import("@wallts/core/auth")>(
+      "@wallts/core/auth",
     );
   type AuthState = {
     user: typeof userRef.current;

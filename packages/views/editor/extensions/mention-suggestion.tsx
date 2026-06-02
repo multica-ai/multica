@@ -12,25 +12,25 @@ import {
 import { ReactRenderer } from "@tiptap/react";
 import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import type { QueryClient } from "@tanstack/react-query";
-import { getCurrentWsId } from "@multica/core/platform";
-import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
-import { workspaceKeys } from "@multica/core/workspace/queries";
-import { useAuthStore } from "@multica/core/auth";
-import { canAssignAgentToIssue } from "@multica/core/permissions";
-import { api } from "@multica/core/api";
-import { isImeComposing } from "@multica/core/utils";
+import { getCurrentWsId } from "@wallts/core/platform";
+import { flattenIssueBuckets, issueKeys } from "@wallts/core/issues/queries";
+import { workspaceKeys } from "@wallts/core/workspace/queries";
+import { useAuthStore } from "@wallts/core/auth";
+import { canAssignAgentToIssue } from "@wallts/core/permissions";
+import { api } from "@wallts/core/api";
+import { isImeComposing } from "@wallts/core/utils";
 import type {
   Issue,
   ListIssuesCache,
   MemberWithUser,
   Agent,
   Squad,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { useT } from "../../i18n";
-import { Badge } from "@multica/ui/components/ui/badge";
-import type { IssueStatus } from "@multica/core/types";
+import { Badge } from "@wallts/ui/components/ui/badge";
+import type { IssueStatus } from "@wallts/core/types";
 import type { SuggestionOptions, SuggestionProps } from "@tiptap/suggestion";
 import {
   getRecencyMap,

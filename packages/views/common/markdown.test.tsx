@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Markdown } from "./markdown";
 
-vi.mock("@multica/core/config", () => ({
+vi.mock("@wallts/core/config", () => ({
   useConfigStore: (selector: (state: { cdnDomain: string }) => unknown) =>
     selector({ cdnDomain: "" }),
 }));

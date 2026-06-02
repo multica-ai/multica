@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { X, Plus, Filter, ExternalLink } from "lucide-react";
-import { cn } from "@multica/ui/lib/utils";
-import type { WebhookEventFilter } from "@multica/core/types";
+import { cn } from "@wallts/ui/lib/utils";
+import type { WebhookEventFilter } from "@wallts/core/types";
 import { useT } from "../../i18n";
 
 interface WebhookEventFilterSectionProps {

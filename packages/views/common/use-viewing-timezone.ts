@@ -1,4 +1,4 @@
-import { useAuthStore } from "@multica/core/auth";
+import { useAuthStore } from "@wallts/core/auth";
 import { browserTimezone } from "./timezone-select";
 
 // Viewer's IANA tz: stored user preference, else browser-detected, else UTC.

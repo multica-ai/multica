@@ -29,7 +29,7 @@ import type {
   Issue,
   MemberWithUser,
   Squad,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";

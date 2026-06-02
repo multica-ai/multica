@@ -1,4 +1,4 @@
-// Metro bundler configuration for the mobile app inside the multica monorepo.
+// Metro bundler configuration for the mobile app inside the wallts monorepo.
 // Watches the entire monorepo so type-only imports from packages/core/types/*
 // resolve, looks up node_modules from both project and monorepo root, and
 // enables symlinks so Metro can follow pnpm's symlinked layout to transitive

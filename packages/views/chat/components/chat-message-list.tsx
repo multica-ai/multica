@@ -3,29 +3,29 @@
 import { useState, useRef } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
-import { cn } from "@multica/ui/lib/utils";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { Button } from "@multica/ui/components/ui/button";
+import { cn } from "@wallts/ui/lib/utils";
+import { Skeleton } from "@wallts/ui/components/ui/skeleton";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@multica/ui/components/ui/collapsible";
+} from "@wallts/ui/components/ui/collapsible";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
-} from "@multica/ui/components/ui/tooltip";
+} from "@wallts/ui/components/ui/tooltip";
 import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Copy } from "lucide-react";
-import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
-import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
-import { Markdown } from "@multica/views/common/markdown";
+import { useScrollFade } from "@wallts/ui/hooks/use-scroll-fade";
+import { useAutoScroll } from "@wallts/ui/hooks/use-auto-scroll";
+import { isTaskMessageTaskId, taskMessagesOptions } from "@wallts/core/chat/queries";
+import { Markdown } from "@wallts/views/common/markdown";
 import { copyMarkdown } from "../../editor";
 import { AttachmentList } from "../../issues/components/comment-card";
-import type { AgentAvailability } from "@multica/core/agents";
-import type { ChatMessage, ChatPendingTask, TaskFailureReason } from "@multica/core/types";
-import type { ChatTimelineItem } from "@multica/core/chat";
+import type { AgentAvailability } from "@wallts/core/agents";
+import type { ChatMessage, ChatPendingTask, TaskFailureReason } from "@wallts/core/types";
+import type { ChatTimelineItem } from "@wallts/core/chat";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { buildTimeline } from "../../common/task-transcript";
 import { TaskStatusPill } from "./task-status-pill";
@@ -393,7 +393,7 @@ function TimelineView({
 }: {
   items: ChatTimelineItem[];
   isStreaming?: boolean;
-  attachments?: import("@multica/core/types").Attachment[];
+  attachments?: import("@wallts/core/types").Attachment[];
 }) {
   const { preface, middle, final } = splitTimeline(items);
 
@@ -431,7 +431,7 @@ function OuterProcessFold({
 }: {
   items: ChatTimelineItem[];
   defaultOpen?: boolean;
-  attachments?: import("@multica/core/types").Attachment[];
+  attachments?: import("@wallts/core/types").Attachment[];
 }) {
   const { t } = useT("chat");
   // useState seeds once at mount — subsequent renders never overwrite the
@@ -472,7 +472,7 @@ function MiddleTextRow({
   attachments,
 }: {
   item: ChatTimelineItem;
-  attachments?: import("@multica/core/types").Attachment[];
+  attachments?: import("@wallts/core/types").Attachment[];
 }) {
   return (
     <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">

@@ -11,7 +11,7 @@
  */
 import { Pressable, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import type { Project } from "@multica/core/types";
+import type { Project } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { ProjectStatusIcon } from "@/components/ui/project-status-icon";

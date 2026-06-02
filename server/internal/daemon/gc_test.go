@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/dwickyfp/wallts/server/internal/daemon/execenv"
 )
 
 // newGCTestDaemon creates a minimal Daemon for GC testing with a mock HTTP server.

@@ -8,12 +8,12 @@ import {
   getExistingSubscription,
   subscriptionToJSON,
   getNotificationPermission,
-} from "@multica/core/push-notifications/subscription";
+} from "@wallts/core/push-notifications/subscription";
 import {
   pushNotificationKeys,
   pushSubscriptionOptions,
-} from "@multica/core/push-notifications/queries";
-import { api } from "@multica/core";
+} from "@wallts/core/push-notifications/queries";
+import { api } from "@wallts/core";
 
 /**
  * Client component mounted once in the root layout via `<WebProviders>`.

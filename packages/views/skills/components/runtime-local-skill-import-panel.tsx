@@ -14,35 +14,35 @@ import type {
   AgentRuntime,
   RuntimeLocalSkillSummary,
   Skill,
-} from "@multica/core/types";
-import { useAuthStore } from "@multica/core/auth";
-import { useWorkspaceId } from "@multica/core/hooks";
+} from "@wallts/core/types";
+import { useAuthStore } from "@wallts/core/auth";
+import { useWorkspaceId } from "@wallts/core/hooks";
 import {
   runtimeListOptions,
   runtimeLocalSkillsKeys,
   runtimeLocalSkillsOptions,
   resolveRuntimeLocalSkillImport,
-} from "@multica/core/runtimes";
+} from "@wallts/core/runtimes";
 import {
   skillDetailOptions,
   workspaceKeys,
-} from "@multica/core/workspace/queries";
-import { Button } from "@multica/ui/components/ui/button";
-import { Badge } from "@multica/ui/components/ui/badge";
-import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
-import { Progress } from "@multica/ui/components/ui/progress";
-import { Textarea } from "@multica/ui/components/ui/textarea";
+} from "@wallts/core/workspace/queries";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Badge } from "@wallts/ui/components/ui/badge";
+import { Checkbox } from "@wallts/ui/components/ui/checkbox";
+import { Input } from "@wallts/ui/components/ui/input";
+import { Label } from "@wallts/ui/components/ui/label";
+import { Progress } from "@wallts/ui/components/ui/progress";
+import { Textarea } from "@wallts/ui/components/ui/textarea";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@multica/ui/components/ui/select";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+} from "@wallts/ui/components/ui/select";
+import { Skeleton } from "@wallts/ui/components/ui/skeleton";
+import { useScrollFade } from "@wallts/ui/hooks/use-scroll-fade";
 import { useT } from "../../i18n";
 import { isNameConflictError } from "../lib/utils";
 

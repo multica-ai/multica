@@ -22,7 +22,7 @@ import { useQuery } from "@tanstack/react-query";
 import type {
   Issue,
   IssuePriority,
-} from "@multica/core/types";
+} from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { PriorityIcon } from "@/components/ui/priority-icon";

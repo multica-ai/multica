@@ -93,12 +93,12 @@ describe("parseLogLine", () => {
   });
 
   it("falls back to raw rendering for non-matching lines (panic stack frame)", () => {
-    const r = parseLogLine("\tat github.com/multica/foo (line 42)", 1);
+    const r = parseLogLine("\tat github.com/wallts/foo (line 42)", 1);
     expect(r.timestamp).toBeNull();
     expect(r.level).toBeNull();
-    expect(r.message).toBe("\tat github.com/multica/foo (line 42)");
+    expect(r.message).toBe("\tat github.com/wallts/foo (line 42)");
     expect(r.fields).toEqual({});
-    expect(r.raw).toBe("\tat github.com/multica/foo (line 42)");
+    expect(r.raw).toBe("\tat github.com/wallts/foo (line 42)");
   });
 
   it("falls back to raw rendering for unrecognised level tokens", () => {

@@ -3,14 +3,14 @@
 import { use, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { WorkspaceSlugProvider, paths } from "@multica/core/paths";
-import { workspaceBySlugOptions } from "@multica/core/workspace";
-import { setCurrentWorkspace } from "@multica/core/platform";
-import { useAuthStore } from "@multica/core/auth";
-import { NoAccessPage } from "@multica/views/workspace/no-access-page";
-import { WelcomeAfterOnboarding } from "@multica/views/workspace/welcome-after-onboarding";
-import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
-import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
+import { WorkspaceSlugProvider, paths } from "@wallts/core/paths";
+import { workspaceBySlugOptions } from "@wallts/core/workspace";
+import { setCurrentWorkspace } from "@wallts/core/platform";
+import { useAuthStore } from "@wallts/core/auth";
+import { NoAccessPage } from "@wallts/views/workspace/no-access-page";
+import { WelcomeAfterOnboarding } from "@wallts/views/workspace/welcome-after-onboarding";
+import { WalltsIcon } from "@wallts/ui/components/common/wallts-icon";
+import { useWorkspaceSeen } from "@wallts/views/workspace/use-workspace-seen";
 
 export default function WorkspaceLayout({
   children,
@@ -76,7 +76,7 @@ export default function WorkspaceLayout({
 
   const loadingIndicator = (
     <div className="flex h-svh items-center justify-center">
-      <MulticaIcon className="size-6 animate-pulse" />
+      <WalltsIcon className="size-6 animate-pulse" />
     </div>
   );
 

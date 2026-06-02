@@ -3,15 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Cpu, Loader2, Plus, Check, Info } from "lucide-react";
-import { runtimeModelsOptions } from "@multica/core/runtimes";
-import type { RuntimeModel } from "@multica/core/types";
+import { runtimeModelsOptions } from "@wallts/core/runtimes";
+import type { RuntimeModel } from "@wallts/core/types";
 import {
   Popover,
   PopoverTrigger,
   PopoverContent,
-} from "@multica/ui/components/ui/popover";
-import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
+} from "@wallts/ui/components/ui/popover";
+import { Input } from "@wallts/ui/components/ui/input";
+import { Label } from "@wallts/ui/components/ui/label";
 import { useT } from "../../i18n";
 
 // ModelDropdown renders a searchable, creatable model picker for an agent.

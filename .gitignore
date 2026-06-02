@@ -29,7 +29,7 @@ dist-electron
 !apps/mobile/.env.staging
 # Mobile production config is public (production API URL) — track it so
 # external users can run `pnpm ios:mobile:device:prod:release` against
-# multica.ai's production backend without copying templates first.
+# wallts.ai's production backend without copying templates first.
 !apps/mobile/.env.production
 
 # test coverage
@@ -40,7 +40,7 @@ server/bin/
 server/tmp/
 server/migrate
 server/daemon
-server/multica
+server/wallts
 
 # Test artifacts
 test-results/
@@ -49,7 +49,7 @@ apps/web/test-results/
 # context (agent workspace)
 .context
 .agent_context/
-.multica/
+.wallts/
 
 # local settings
 .claude/

@@ -4,9 +4,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import { Minus, Maximize2, Minimize2, ChevronDown, ChevronRight, Plus, Check, Trash2, Pencil, Loader2, Square } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
-import { cn } from "@multica/ui/lib/utils";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { Button } from "@wallts/ui/components/ui/button";
+import { cn } from "@wallts/ui/lib/utils";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@wallts/ui/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,19 +15,19 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
+} from "@wallts/ui/components/ui/dropdown-menu";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@multica/ui/components/ui/popover";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { useAuthStore } from "@multica/core/auth";
-import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
-import { canAssignAgent } from "@multica/views/issues/components";
-import { api } from "@multica/core/api";
-import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+} from "@wallts/ui/components/ui/popover";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { useAuthStore } from "@wallts/core/auth";
+import { agentListOptions, memberListOptions } from "@wallts/core/workspace/queries";
+import { canAssignAgent } from "@wallts/views/issues/components";
+import { api } from "@wallts/core/api";
+import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@wallts/core/agents";
+import { useFileUpload } from "@wallts/core/hooks/use-file-upload";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
@@ -37,14 +37,14 @@ import {
   pendingChatTaskOptions,
   pendingChatTasksOptions,
   chatKeys,
-} from "@multica/core/chat/queries";
+} from "@wallts/core/chat/queries";
 import {
   useCreateChatSession,
   useDeleteChatSession,
   useMarkChatSessionRead,
   useUpdateChatSession,
-} from "@multica/core/chat/mutations";
-import { useChatStore } from "@multica/core/chat";
+} from "@wallts/core/chat/mutations";
+import { useChatStore } from "@wallts/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
 import {
@@ -55,8 +55,8 @@ import {
 } from "./context-anchor";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatResize } from "./use-chat-resize";
-import { createLogger } from "@multica/core/logger";
-import type { Agent, ChatMessage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import { createLogger } from "@wallts/core/logger";
+import type { Agent, ChatMessage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@wallts/core/types";
 import { useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");

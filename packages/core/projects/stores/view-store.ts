@@ -19,7 +19,7 @@ export const useProjectViewStore = create<ProjectViewState>()(
       setViewMode: (mode) => set({ viewMode: mode }),
     }),
     {
-      name: "multica_projects_view",
+      name: "wallts_projects_view",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
       partialize: (state) => ({ viewMode: state.viewMode }),
       merge: (persisted, current) => {

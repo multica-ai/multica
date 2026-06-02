@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement, ReactNode } from "react";
-import { I18nProvider } from "@multica/core/i18n/react";
+import { I18nProvider } from "@wallts/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enAuth from "../locales/en/auth.json";
 import enSettings from "../locales/en/settings.json";
@@ -44,7 +44,7 @@ vi.mock("@tanstack/react-query", async () => {
   return { ...actual, useQueryClient: () => ({ setQueryData: mockSetQueryData }) };
 });
 
-vi.mock("@multica/core/auth", () => ({
+vi.mock("@wallts/core/auth", () => ({
   useAuthStore: Object.assign(
     (selector?: (s: unknown) => unknown) => {
       const state = {
@@ -64,7 +64,7 @@ vi.mock("@multica/core/auth", () => ({
   ),
 }));
 
-vi.mock("@multica/core/api", () => ({
+vi.mock("@wallts/core/api", () => ({
   api: {
     listWorkspaces: mockApiListWorkspaces,
     verifyCode: mockApiVerifyCode,
@@ -74,7 +74,7 @@ vi.mock("@multica/core/api", () => ({
   },
 }));
 
-vi.mock("@multica/core/types", () => ({}));
+vi.mock("@wallts/core/types", () => ({}));
 
 // ---------------------------------------------------------------------------
 // Import after mocks
@@ -111,7 +111,7 @@ describe("LoginPage", () => {
     mockApiGetMe.mockRejectedValue(new Error("unauthorized"));
     mockLoginWithName.mockResolvedValue({
       token: "name-token",
-      user: { id: "u1", name: "Test", email: "test@multica.local" },
+      user: { id: "u1", name: "Test", email: "test@wallts.local" },
     });
     mockApiListWorkspaces.mockResolvedValue([]);
     localStorage.clear();
@@ -129,9 +129,9 @@ describe("LoginPage", () => {
   // Name step rendering
   // -------------------------------------------------------------------------
 
-  it("renders name form with 'Sign in to Multica' title", () => {
+  it("renders name form with 'Sign in to Wallts' title", () => {
     renderWithI18n(<LoginPage onSuccess={onSuccess} />);
-    expect(screen.getByText(/sign in to multica/i)).toBeInTheDocument();
+    expect(screen.getByText(/sign in to wallts/i)).toBeInTheDocument();
     expect(screen.getByText(/enter your name to get started/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/your name/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /continue/i })).toBeInTheDocument();
@@ -147,7 +147,7 @@ describe("LoginPage", () => {
   it("calls loginWithName on submit with name", async () => {
     mockLoginWithName.mockResolvedValueOnce({
       token: "t",
-      user: { id: "u1", name: "Alice", email: "alice@multica.local" },
+      user: { id: "u1", name: "Alice", email: "alice@wallts.local" },
     });
     renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
@@ -161,7 +161,7 @@ describe("LoginPage", () => {
   it("calls onSuccess after successful name login", async () => {
     mockLoginWithName.mockResolvedValueOnce({
       token: "t",
-      user: { id: "u1", name: "Alice", email: "alice@multica.local" },
+      user: { id: "u1", name: "Alice", email: "alice@wallts.local" },
     });
     renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
@@ -378,7 +378,7 @@ describe("LoginPage", () => {
   // -------------------------------------------------------------------------
 
   it("shows cli_confirm step when existing session + cliCallback", async () => {
-    localStorage.setItem("multica_token", "existing-jwt");
+    localStorage.setItem("wallts_token", "existing-jwt");
     mockApiGetMe
       .mockRejectedValueOnce(new Error("no cookie"))
       .mockResolvedValueOnce({
@@ -405,7 +405,7 @@ describe("LoginPage", () => {
   });
 
   it("CLI authorize button redirects to callback URL", async () => {
-    localStorage.setItem("multica_token", "existing-jwt");
+    localStorage.setItem("wallts_token", "existing-jwt");
     mockApiGetMe
       .mockRejectedValueOnce(new Error("no cookie"))
       .mockResolvedValueOnce({
@@ -437,7 +437,7 @@ describe("LoginPage", () => {
   });
 
   it("'Use a different account' returns to name step", async () => {
-    localStorage.setItem("multica_token", "existing-jwt");
+    localStorage.setItem("wallts_token", "existing-jwt");
     mockApiGetMe
       .mockRejectedValueOnce(new Error("no cookie"))
       .mockResolvedValueOnce({
@@ -462,7 +462,7 @@ describe("LoginPage", () => {
       screen.getByRole("button", { name: /use a different account/i }),
     );
 
-    expect(screen.getByText(/sign in to multica/i)).toBeInTheDocument();
+    expect(screen.getByText(/sign in to wallts/i)).toBeInTheDocument();
   });
 
   // -------------------------------------------------------------------------
@@ -591,7 +591,7 @@ describe("LoginPage", () => {
   it("calls onTokenObtained after successful name login", async () => {
     mockLoginWithName.mockResolvedValueOnce({
       token: "t",
-      user: { id: "u1", name: "Alice", email: "alice@multica.local" },
+      user: { id: "u1", name: "Alice", email: "alice@wallts.local" },
     });
     const onTokenObtained = vi.fn();
 

@@ -2,18 +2,18 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Globe, Minus, Plus, Terminal } from "lucide-react";
-import type { McpServerEntry, McpServers } from "@multica/core/agents/mcp-validate";
-import { Button } from "@multica/ui/components/ui/button";
-import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
+import type { McpServerEntry, McpServers } from "@wallts/core/agents/mcp-validate";
+import { Button } from "@wallts/ui/components/ui/button";
+import { Input } from "@wallts/ui/components/ui/input";
+import { Label } from "@wallts/ui/components/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@multica/ui/components/ui/select";
-import { Separator } from "@multica/ui/components/ui/separator";
+} from "@wallts/ui/components/ui/select";
+import { Separator } from "@wallts/ui/components/ui/separator";
 import { useT } from "../../i18n";
 
 // ── Types ────────────────────────────────────────────────────────────────────

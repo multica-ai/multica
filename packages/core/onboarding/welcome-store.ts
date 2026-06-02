@@ -15,7 +15,7 @@ import { create } from "zustand";
  *
  * `choice` is "runtime" or "skip":
  *   - "runtime": user picked a runtime in Step 3. `runtimeId` is set. The
- *     workspace welcome hook creates a Multica Helper agent on that runtime
+ *     workspace welcome hook creates a Wallts Helper agent on that runtime
  *     and presents starter cards.
  *   - "skip": user explicitly skipped. `runtimeId` is undefined. The hook
  *     seeds two issues (install-runtime guide + create-agent guide) and

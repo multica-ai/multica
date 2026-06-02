@@ -6,7 +6,7 @@ description: Configure email + verification code sign-in, Google OAuth, signup a
 import { Callout } from "fumadocs-ui/components/callout";
 import { Mermaid } from "@/components/mermaid";
 
-Multica supports two sign-in methods: **email + verification code** (default) and **Google OAuth** (optional). On successful sign-in, the server issues a JWT cookie with a 30-day lifetime. This page covers how to configure each method, how to restrict who can sign up, and the single biggest trap for self-hosted deployments.
+Wallts supports two sign-in methods: **email + verification code** (default) and **Google OAuth** (optional). On successful sign-in, the server issues a JWT cookie with a 30-day lifetime. This page covers how to configure each method, how to restrict who can sign up, and the single biggest trap for self-hosted deployments.
 
 For the list of environment variables referenced below, see [Environment variables](/environment-variables); for token usage and lifecycle details, see [Authentication and tokens](/auth-tokens).
 
@@ -55,7 +55,7 @@ RESEND_FROM_EMAIL=noreply@yourdomain.com  # reused as the From: header
 ```bash
 SMTP_HOST=smtp.internal.example.com
 SMTP_PORT=587
-SMTP_USERNAME=multica
+SMTP_USERNAME=wallts
 SMTP_PASSWORD=...
 SMTP_TLS_INSECURE=false        # set true only for self-signed / private CA
 RESEND_FROM_EMAIL=noreply@yourdomain.com
@@ -66,7 +66,7 @@ RESEND_FROM_EMAIL=noreply@yourdomain.com
 ```bash
 SMTP_HOST=smtp.qiye.aliyun.com
 SMTP_PORT=465                  # implicit TLS auto-enabled on 465
-SMTP_USERNAME=multica@yourdomain.com
+SMTP_USERNAME=wallts@yourdomain.com
 SMTP_PASSWORD=...
 SMTP_TLS=implicit              # optional on 465; required on a non-standard SMTPS port
 RESEND_FROM_EMAIL=noreply@yourdomain.com
@@ -83,27 +83,27 @@ At startup the server prints which provider it picked, including the negotiated 
 
 The old behavior where non-production instances accepted `888888` by default has been removed. Unless you explicitly configure it, typing `888888` is treated like any other wrong code.
 
-Local development without any email backend configured (no Resend, no SMTP) should use the generated code printed in server logs. If you need deterministic local/private automation, set `MULTICA_DEV_VERIFICATION_CODE` to a 6-digit value such as `888888`, and keep `APP_ENV` non-production:
+Local development without any email backend configured (no Resend, no SMTP) should use the generated code printed in server logs. If you need deterministic local/private automation, set `WALLTS_DEV_VERIFICATION_CODE` to a 6-digit value such as `888888`, and keep `APP_ENV` non-production:
 
 ```bash
 APP_ENV=development
-MULTICA_DEV_VERIFICATION_CODE=888888
+WALLTS_DEV_VERIFICATION_CODE=888888
 ```
 
 This shortcut is ignored when `APP_ENV=production`.
 </Callout>
 
-Production deployments should leave `MULTICA_DEV_VERIFICATION_CODE` empty and set `APP_ENV=production`. If you deploy via `make selfhost` / `docker-compose.selfhost.yml`, `APP_ENV` defaults to `production`.
+Production deployments should leave `WALLTS_DEV_VERIFICATION_CODE` empty and set `APP_ENV=production`. If you deploy via `make selfhost` / `docker-compose.selfhost.yml`, `APP_ENV` defaults to `production`.
 
 ## Google OAuth configuration
 
 Optional. Without it, only email + verification code is available; with it, the sign-in page gets a "Sign in with Google" button.
 
 1. Create an OAuth 2.0 client in the [Google Cloud Console](https://console.cloud.google.com/)
-2. Set the **Authorized redirect URIs** to your Multica frontend address plus `/auth/callback`, for example:
+2. Set the **Authorized redirect URIs** to your Wallts frontend address plus `/auth/callback`, for example:
 
     ```text
-    https://multica.yourdomain.com/auth/callback
+    https://wallts.yourdomain.com/auth/callback
     ```
 
 3. Once you have the client ID and client secret, set three environment variables:
@@ -111,7 +111,7 @@ Optional. Without it, only email + verification code is available; with it, the 
     ```bash
     GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
     GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
-    GOOGLE_REDIRECT_URI=https://multica.yourdomain.com/auth/callback
+    GOOGLE_REDIRECT_URI=https://wallts.yourdomain.com/auth/callback
     ```
 
 4. Restart the server.
@@ -162,7 +162,7 @@ To actually "allow everyone," leave all three variables empty (or keep `ALLOW_SI
 
 ## Can you still invite people when signup is disabled?
 
-**Only people who already have a Multica account.** Accepting an invite doesn't check the signup allowlist — if the invitee has signed up already (for example in another workspace), clicking the invite link and signing in lets them accept.
+**Only people who already have a Wallts account.** Accepting an invite doesn't check the signup allowlist — if the invitee has signed up already (for example in another workspace), clicking the invite link and signing in lets them accept.
 
 **But people who have never signed up cannot be rescued by an invite.** Before accepting, they must sign in, and the first step of sign-in (requesting the verification code) passes through the signup allowlist check. If `ALLOW_SIGNUP=false`, or their email isn't in `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`, they **cannot complete signup**, and therefore cannot accept the invite.
 

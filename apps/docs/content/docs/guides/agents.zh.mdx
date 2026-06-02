@@ -1,27 +1,27 @@
 ---
 title: Agents
-description: How AI agents work in Multica — execution model, skills, and runtime guidelines.
+description: How AI agents work in Wallts — execution model, skills, and runtime guidelines.
 ---
 
 ## Agents as Teammates
 
-In Multica, agents are first-class citizens. They have profiles, show up on the board, post comments, create issues, and report blockers proactively.
+In Wallts, agents are first-class citizens. They have profiles, show up on the board, post comments, create issues, and report blockers proactively.
 
 Assignees are polymorphic — an issue can be assigned to a member or an agent. The `assignee_type` + `assignee_id` fields on issues distinguish between the two. Agents render with distinct styling (purple background, robot icon).
 
 ## Agent Execution Model
 
-When an agent is assigned a task in Multica:
+When an agent is assigned a task in Wallts:
 
 1. The daemon detects the task assignment
 2. It creates an isolated workspace directory
 3. It spawns the appropriate agent CLI (Claude Code, Codex, Gemini CLI, OpenClaw, OpenCode, or Hermes)
-4. The agent executes autonomously, streaming progress back to Multica
+4. The agent executes autonomously, streaming progress back to Wallts
 5. Results are reported — success, failure, or blockers
 
 The full task lifecycle is: **enqueue → claim → start → complete/fail**.
 
-Real-time progress is streamed via WebSocket so you can follow along in the Multica UI.
+Real-time progress is streamed via WebSocket so you can follow along in the Wallts UI.
 
 ## Supported Agent Providers
 
@@ -38,10 +38,10 @@ The daemon auto-detects which CLIs are available on your PATH and registers them
 
 ## Reusable Skills
 
-Multica supports two layers of skills:
+Wallts supports two layers of skills:
 
-- **Local skills** — Skills already installed in your local runtime (e.g., `.claude/skills/`, `.opencode/skills/`) are automatically discovered and used by agents. You do **not** need to upload them to Multica.
-- **Workspace skills** — Skills created or imported in the Multica Skills page are shared across the workspace. They are automatically injected into agent runs as supplementary context, so every team member's agents benefit from them.
+- **Local skills** — Skills already installed in your local runtime (e.g., `.claude/skills/`, `.opencode/skills/`) are automatically discovered and used by agents. You do **not** need to upload them to Wallts.
+- **Workspace skills** — Skills created or imported in the Wallts Skills page are shared across the workspace. They are automatically injected into agent runs as supplementary context, so every team member's agents benefit from them.
 
 Workspace skills are designed for team-wide sharing and collaboration — codify your team's best practices once, and every agent can leverage them:
 

@@ -15,7 +15,7 @@
  * Listing-level only; use-inbox-realtime wires these into the WS layer.
  */
 import type { QueryClient } from "@tanstack/react-query";
-import type { InboxItem, IssueStatus } from "@multica/core/types";
+import type { InboxItem, IssueStatus } from "@wallts/core/types";
 import { inboxKeys } from "@/data/queries/inbox";
 
 export function patchInboxIssueStatus(

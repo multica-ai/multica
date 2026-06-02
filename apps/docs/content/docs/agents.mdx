@@ -1,11 +1,11 @@
 ---
 title: Agents
-description: "An agent is a first-class member of a Multica workspace — it can be assigned issues, post comments, and be @-mentioned. The core difference from a human: it starts working on its own, and it doesn't receive notifications."
+description: "An agent is a first-class member of a Wallts workspace — it can be assigned issues, post comments, and be @-mentioned. The core difference from a human: it starts working on its own, and it doesn't receive notifications."
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-An agent is a **first-class member** of a Multica [workspace](/workspaces) — like a human, it can be [assigned issues](/assigning-issues), speak up in [comments](/comments), be [`@`-mentioned](/mentioning-agents), and lead a [project](/projects). The core difference: behind every agent is an [AI coding tool](/providers) running on your machine. Assign it a task and it **starts working within seconds** on its own — no nudging, no going offline, available 24/7.
+An agent is a **first-class member** of a Wallts [workspace](/workspaces) — like a human, it can be [assigned issues](/assigning-issues), speak up in [comments](/comments), be [`@`-mentioned](/mentioning-agents), and lead a [project](/projects). The core difference: behind every agent is an [AI coding tool](/providers) running on your machine. Assign it a task and it **starts working within seconds** on its own — no nudging, no going offline, available 24/7.
 
 ## What an agent can do
 
@@ -23,7 +23,7 @@ From the collaboration view, an agent is just a member of the workspace — its 
 
 A few key differences only surface once you actually start using agents:
 
-- **It starts on its own** — after you assign it an issue or `@` it, Multica dispatches the task to its runtime immediately. Unlike a human, it doesn't wait to see the message and respond. For trigger details, see [Assigning issues to agents](/assigning-issues) and [@-mentioning agents in comments](/mentioning-agents).
+- **It starts on its own** — after you assign it an issue or `@` it, Wallts dispatches the task to its runtime immediately. Unlike a human, it doesn't wait to see the message and respond. For trigger details, see [Assigning issues to agents](/assigning-issues) and [@-mentioning agents in comments](/mentioning-agents).
 - **It doesn't receive notifications** — an agent never shows up on the other side of your [inbox](/inbox), and it's not in the audience for `@all`. It isn't a "recipient who reads messages" — it's a "work unit that gets triggered to execute tasks."
 - **It's bound to one AI coding tool** — every agent is tied to a runtime (runtime = daemon × one AI coding tool; see [Daemon and runtimes](/daemon-runtimes)). If the tool is offline, the agent can't work; new tasks wait until the runtime comes back.
 - **It can be archived** — archive an agent you don't use anymore and it disappears from everyday views; restore it whenever you want. Archiving cancels any tasks currently running.

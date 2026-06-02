@@ -9,7 +9,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## Mention an agent in a comment
 
-Same as mentioning a member — type `@` to open the picker and select an agent. Once the comment is posted, Multica immediately enqueues a `task` for each mentioned agent with **that comment** as its trigger context. When the agent receives the task it can read:
+Same as mentioning a member — type `@` to open the picker and select an agent. Once the comment is posted, Wallts immediately enqueues a `task` for each mentioned agent with **that comment** as its trigger context. When the agent receives the task it can read:
 
 - The full issue (description + every historical comment)
 - The trigger comment itself — as the starting point for this run
@@ -51,7 +51,7 @@ When you call everyone with `@all`, **only workspace members land in the inbox �
 
 ## Agents @-mentioning themselves does not loop
 
-Agents can post comments while executing, and those comments may contain `@mention`s. Multica has a hardcoded guard: **if the comment author is the same as the agent targeted by an `@` mention, that mention is skipped** — there is no "agent A @ agent A → new task → @ agent A again" infinite loop.
+Agents can post comments while executing, and those comments may contain `@mention`s. Wallts has a hardcoded guard: **if the comment author is the same as the agent targeted by an `@` mention, that mention is skipped** — there is no "agent A @ agent A → new task → @ agent A again" infinite loop.
 
 This guard **only blocks direct self-references.** Agent A @-mentioning agent B works normally; if B then @-mentions A in its reply, A is triggered again — in other words, **indirect recursion is not blocked**. When writing agent instructions, be careful not to let a group of agents @-mention each other in a cycle.
 

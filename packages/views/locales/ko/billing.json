@@ -1,6 +1,6 @@
 {
   "title": "결제(테스트 페이지)",
-  "subtitle": "multica-cloud의 /api/v1/billing/*로 직접 전달합니다. 완성된 UI가 아니라 proxy와 Stripe 흐름을 검증하기 위해 모든 endpoint를 한 페이지에 모아둔 것입니다.",
+  "subtitle": "wallts-cloud의 /api/v1/billing/*로 직접 전달합니다. 완성된 UI가 아니라 proxy와 Stripe 흐름을 검증하기 위해 모든 endpoint를 한 페이지에 모아둔 것입니다.",
   "endpoints": {
     "balance": "GET /api/cloud-billing/balance",
     "transactions": "GET /api/cloud-billing/transactions",

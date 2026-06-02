@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { toast } from "sonner";
-import { api } from "@multica/core/api";
+import { api } from "@wallts/core/api";
 import { useT } from "../i18n";
 
 interface DesktopBridge {

@@ -1,6 +1,6 @@
 import type { LocaleAdapter, SupportedLocale } from "./types";
 
-export const LOCALE_COOKIE = "multica-locale";
+export const LOCALE_COOKIE = "wallts-locale";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 // Web-only adapter: persists via document.cookie so the Next.js proxy can

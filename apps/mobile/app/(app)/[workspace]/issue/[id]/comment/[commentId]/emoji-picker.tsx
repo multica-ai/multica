@@ -20,7 +20,7 @@ import { View } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { EmojiKeyboard, type EmojiType } from "rn-emoji-keyboard";
-import type { Reaction } from "@multica/core/types";
+import type { Reaction } from "@wallts/core/types";
 import { Text } from "@/components/ui/text";
 import { issueTimelineOptions } from "@/data/queries/issues";
 import { useToggleCommentReaction } from "@/data/mutations/issues";

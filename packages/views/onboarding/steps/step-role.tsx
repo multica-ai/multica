@@ -12,7 +12,7 @@ import {
   Search,
   Settings2,
 } from "lucide-react";
-import type { QuestionnaireAnswers, Role } from "@multica/core/onboarding";
+import type { QuestionnaireAnswers, Role } from "@wallts/core/onboarding";
 import { StepQuestion, type QuestionOption } from "./step-question";
 import { useT } from "../../i18n";
 

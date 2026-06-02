@@ -3,14 +3,14 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
-import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { FileUploadButton } from "@wallts/ui/components/common/file-upload-button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@wallts/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { api } from "@multica/core/api";
-import type { Attachment } from "@multica/core/types";
-import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
-import { cn } from "@multica/ui/lib/utils";
+import { useFileUpload } from "@wallts/core/hooks/use-file-upload";
+import { api } from "@wallts/core/api";
+import type { Attachment } from "@wallts/core/types";
+import { useCommentDraftStore, type CommentDraftKey } from "@wallts/core/issues/stores";
+import { cn } from "@wallts/ui/lib/utils";
 import { useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------

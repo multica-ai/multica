@@ -2,20 +2,20 @@
 
 import { memo, useMemo, type ReactNode } from "react";
 import { EyeOff, MoreHorizontal, Plus, UserMinus } from "lucide-react";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@wallts/ui/components/ui/tooltip";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import type { Issue, IssueAssigneeType, IssueStatus } from "@multica/core/types";
-import { Button } from "@multica/ui/components/ui/button";
+import type { Issue, IssueAssigneeType, IssueStatus } from "@wallts/core/types";
+import { Button } from "@wallts/ui/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-} from "@multica/ui/components/ui/dropdown-menu";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
-import { useModalStore } from "@multica/core/modals";
-import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
+} from "@wallts/ui/components/ui/dropdown-menu";
+import { STATUS_CONFIG } from "@wallts/core/issues/config";
+import { useModalStore } from "@wallts/core/modals";
+import { useViewStoreApi } from "@wallts/core/issues/stores/view-store-context";
 import { StatusHeading } from "./status-heading";
 import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";

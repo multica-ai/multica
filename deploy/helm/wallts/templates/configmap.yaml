@@ -8,7 +8,7 @@ data:
   # --- Backend ---
   PORT: "8080"
   APP_ENV: {{ .Values.backend.config.appEnv | quote }}
-  MULTICA_APP_URL: {{ .Values.backend.config.appUrl | quote }}
+  WALLTS_APP_URL: {{ .Values.backend.config.appUrl | quote }}
   FRONTEND_ORIGIN: {{ .Values.backend.config.frontendOrigin | quote }}
   CORS_ALLOWED_ORIGINS: {{ .Values.backend.config.corsAllowedOrigins | quote }}
   COOKIE_DOMAIN: {{ .Values.backend.config.cookieDomain | quote }}

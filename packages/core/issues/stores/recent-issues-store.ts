@@ -90,12 +90,12 @@ export const useRecentIssuesStore = create<RecentIssuesState>()(
         }),
     }),
     {
-      name: "multica_recent_issues",
+      name: "wallts_recent_issues",
       storage: createJSONStorage(() => defaultStorage),
       partialize: (state) => ({ byWorkspace: state.byWorkspace }),
       // v0 stored a flat `items` array under the bare key (or, when the
       // workspace slug happened to be set at write time, under
-      // `multica_recent_issues:<slug>`). Both shapes are unsafe to surface
+      // `wallts_recent_issues:<slug>`). Both shapes are unsafe to surface
       // because v0 entries don't know which workspace they belonged to —
       // drop them and let the cache repopulate as the user visits issues.
       version: 1,

@@ -1,4 +1,4 @@
-# Multica i18n 术语表 (Glossary)
+# Wallts i18n 术语表 (Glossary)
 
 > **本文件已迁移**。所有翻译规范、命名规范、中文风格指南现在统一在 docs 站维护：
 >

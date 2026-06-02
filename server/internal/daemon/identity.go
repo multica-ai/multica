@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/dwickyfp/wallts/server/internal/cli"
 )
 
 // daemonIDFileName is the file that stores this machine's stable daemon
@@ -19,7 +19,7 @@ const daemonIDFileName = "daemon.id"
 
 // EnsureDaemonID returns a stable UUID for this daemon instance, persisting
 // it to disk on first call. Identity is machine-scoped: every profile on the
-// same machine shares one UUID stored at `~/.multica/daemon.id`. Profile
+// same machine shares one UUID stored at `~/.wallts/daemon.id`. Profile
 // boundaries are about which backend/account a daemon is talking to, not
 // about the physical machine's identity, so a single host running both the
 // CLI-spawned daemon and the desktop-spawned daemon (or toggling profiles)
@@ -182,7 +182,7 @@ func LegacyDaemonIDs(hostname, profile string) []string {
 	return out
 }
 
-// LegacyDaemonUUIDs scans `~/.multica/profiles/*/daemon.id` and returns every
+// LegacyDaemonUUIDs scans `~/.wallts/profiles/*/daemon.id` and returns every
 // UUID that survives parsing. These are identities that were minted per
 // profile before daemon identity became machine-scoped; runtime rows
 // registered under them — potentially on multiple backends (prod/dev/self-
@@ -226,7 +226,7 @@ func LegacyDaemonUUIDs() ([]string, error) {
 }
 
 // filterLegacyIDs removes any entry equal to current (e.g. when the user
-// explicitly pins MULTICA_DAEMON_ID to the hostname itself, there's nothing
+// explicitly pins WALLTS_DAEMON_ID to the hostname itself, there's nothing
 // to migrate — the row is already keyed on the current id).
 func filterLegacyIDs(ids []string, current string) []string {
 	if current == "" {

@@ -1,8 +1,8 @@
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { MemberDetailPage as SharedMemberDetailPage } from "@multica/views/members";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions } from "@multica/core/workspace/queries";
+import { MemberDetailPage as SharedMemberDetailPage } from "@wallts/views/members";
+import { useWorkspaceId } from "@wallts/core/hooks";
+import { memberListOptions } from "@wallts/core/workspace/queries";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 
 export function MemberDetailPage() {
