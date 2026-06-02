@@ -23,6 +23,11 @@ export interface RuntimeDevice {
 
 export type AgentRuntime = RuntimeDevice;
 
+export interface CreateRuntimeRequest {
+  name?: string;
+  provider: string;
+}
+
 export interface AgentTool {
   id: string;
   name: string;
