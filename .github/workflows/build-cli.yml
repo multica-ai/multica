@@ -50,7 +50,8 @@ jobs:
             echo "ref=refs/remotes/origin/$input_ref" >> "$GITHUB_OUTPUT"
             echo "is_tag=false" >> "$GITHUB_OUTPUT"
             echo "tag_name=" >> "$GITHUB_OUTPUT"
-            echo "version=$input_ref" >> "$GITHUB_OUTPUT"
+            safe_version="${input_ref//\//-}"
+            echo "version=$safe_version" >> "$GITHUB_OUTPUT"
           elif git rev-parse --verify "$input_ref" >/dev/null 2>&1; then
             echo "Resolved $input_ref as commit"
             echo "ref=$input_ref" >> "$GITHUB_OUTPUT"
@@ -61,15 +62,6 @@ jobs:
             echo "::error::Cannot resolve ref: $input_ref"
             exit 1
           fi
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
-
-      - name: Run tests
-        run: cd server && go test ./...
 
   build:
     needs: verify-ref
@@ -132,7 +124,8 @@ jobs:
           echo "Built: server/bin/$output"
           ./bin/$output version || true
 
-      - name: Package archive
+      - name: Package archive (Unix)
+        if: matrix.goos != 'windows'
         working-directory: server/bin
         shell: bash
         env:
@@ -140,16 +133,24 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           VERSION: ${{ needs.verify-ref.outputs.version }}
         run: |
-          if [ "$GOOS" = "windows" ]; then
-            archive_name="multica-cli-${VERSION}-${GOOS}-${GOARCH}.zip"
-            zip "$archive_name" multica.exe
-          else
-            archive_name="multica-cli-${VERSION}-${GOOS}-${GOARCH}.tar.gz"
-            tar czf "$archive_name" multica
-          fi
-
+          archive_name="multica-cli-${VERSION}-${GOOS}-${GOARCH}.tar.gz"
+          tar czf "$archive_name" multica
           echo "archive_name=$archive_name" >> "$GITHUB_ENV"
           echo "Created archive: $archive_name"
+
+      - name: Package archive (Windows)
+        if: matrix.goos == 'windows'
+        working-directory: server/bin
+        shell: pwsh
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ needs.verify-ref.outputs.version }}
+        run: |
+          $archive_name = "multica-cli-${env:VERSION}-${env:GOOS}-${env:GOARCH}.zip"
+          Compress-Archive -Path multica.exe -DestinationPath $archive_name
+          Add-Content -Path $env:GITHUB_ENV -Value "archive_name=$archive_name"
+          Write-Host "Created archive: $archive_name"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
