@@ -425,6 +425,7 @@ type CerebroCostOptimizationMeasurement struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	HeldOut         bool               `json:"held_out"`
 	ActualCostCents int64              `json:"actual_cost_cents"`
+	DetailJson      []byte             `json:"detail_json"`
 }
 
 type CerebroCredential struct {

@@ -21,7 +21,8 @@ export type CostSavingKey =
   | "snapshot_prompt"
   | "bundled_read"
   | "model_routing"
-  | "prune_tool_results";
+  | "prune_tool_results"
+  | "context_duplication";
 
 /** The three states every saving can be in. */
 export type CostSavingMode = "off" | "shadow" | "on";
@@ -34,7 +35,8 @@ export type CostSavingMetric =
   | "platform_calls"
   | "input_tokens"
   | "model_cost"
-  | "context_tokens";
+  | "context_tokens"
+  | "tokens";
 
 /**
  * Which agent runtime a saving actually affects. Savings live in two runtimes:
@@ -97,6 +99,7 @@ export const COST_SAVING_DEFAULTS: Record<CostSavingKey, CostSavingMode> = {
   bundled_read: "off",
   model_routing: "off",
   prune_tool_results: "off",
+  context_duplication: "off",
 };
 
 /**
@@ -212,5 +215,14 @@ export const COST_SAVINGS: CostSavingDefinition[] = [
     metric: "context_tokens",
     runtimeScope: "gateway",
     estimateNote: "Trims superseded tool output from later turns.",
+  },
+  {
+    key: "context_duplication",
+    label: "Context duplication",
+    description:
+      "Measure how much of the composed agent brief repeats the same sentences across sections (workspace context, skills list, agent instructions, and similar).",
+    metric: "tokens",
+    runtimeScope: "both",
+    estimateNote: "Typical workspaces show 20–40% duplicate sentences before cleanup.",
   },
 ];

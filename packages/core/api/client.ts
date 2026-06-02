@@ -769,6 +769,56 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cost-optimization-analytics-client): FIR-2765 drill-down analytics.
+  async getCostOptimizationAnalyticsSummary(wsId: string): Promise<unknown> {
+    return this.fetch(`/api/workspaces/${wsId}/cost-optimization/analytics`);
+  }
+
+  async getCostOptimizationAnalyticsIssues(
+    wsId: string,
+    key: string,
+    opts?: { days?: number; limit?: number },
+  ): Promise<unknown> {
+    const params = new URLSearchParams();
+    if (opts?.days !== undefined) params.set("days", String(opts.days));
+    if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    const suffix = qs ? `?${qs}` : "";
+    return this.fetch(
+      `/api/workspaces/${wsId}/cost-optimization/analytics/${encodeURIComponent(key)}/issues${suffix}`,
+    );
+  }
+
+  async getCostOptimizationAnalyticsIssueRuns(
+    wsId: string,
+    key: string,
+    issueId: string,
+    opts?: { days?: number; limit?: number },
+  ): Promise<unknown> {
+    const params = new URLSearchParams();
+    if (opts?.days !== undefined) params.set("days", String(opts.days));
+    if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    const suffix = qs ? `?${qs}` : "";
+    return this.fetch(
+      `/api/workspaces/${wsId}/cost-optimization/analytics/${encodeURIComponent(key)}/issues/${encodeURIComponent(issueId)}/runs${suffix}`,
+    );
+  }
+
+  // CEREBRO-PATCH(cost-optimization-prompt-inspector-client): FIR-2765 composed prompt view.
+  async getCostOptimizationPromptInspector(
+    wsId: string,
+    repoUrl?: string,
+  ): Promise<unknown> {
+    const params = new URLSearchParams();
+    if (repoUrl) params.set("repo_url", repoUrl);
+    const qs = params.toString();
+    const suffix = qs ? `?${qs}` : "";
+    return this.fetch(
+      `/api/workspaces/${wsId}/cost-optimization/prompt-inspector${suffix}`,
+    );
+  }
+
   // CEREBRO-PATCH(cerebro-account-client): JEH-921 workspace accounts CRUD.
   async listCerebroAccounts(wsId: string): Promise<CerebroAccount[]> {
     return this.fetch(`/api/workspaces/${wsId}/accounts`);

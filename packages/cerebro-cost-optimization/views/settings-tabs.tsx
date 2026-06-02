@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { Gauge } from "lucide-react";
-import { CostOptimizationSettingsTab } from "./settings-tab";
+import { CostOptimizationTabs } from "./cost-optimization-tabs";
 
 // Mirrors @multica/views ExtraSettingsTab. Defined locally so this entrypoint
 // stays free of a views dependency (and the topo-sort coupling it brings),
@@ -22,6 +22,6 @@ export const cerebroCostOptimizationTabs: ExtraSettingsTab[] = [
     value: "cost-optimization",
     label: "Cost optimization",
     icon: Gauge,
-    content: createElement(CostOptimizationSettingsTab),
+    content: createElement(CostOptimizationTabs),
   },
 ];
