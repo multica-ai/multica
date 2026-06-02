@@ -11,6 +11,7 @@
       "english": "English",
       "chinese": "中文",
       "korean": "한국어",
+      "japanese": "日本語",
       "turkish": "Türkçe",
       "sync_failed": "Dil bu cihaza kaydedildi, ancak hesabınızla eşitlenemedi. Diğer cihazlarda önceki dil görünebilir."
     },
@@ -123,6 +124,10 @@
   },
   "workspace": {
     "section_general": "Genel",
+    "change_logo_aria": "Çalışma alanı logosunu değiştir",
+    "click_logo_hint": "Yeni bir görsel yüklemek için logoya tıklayın",
+    "toast_logo_updated": "Çalışma alanı logosu güncellendi",
+    "toast_logo_failed": "Çalışma alanı logosu yüklenemedi",
     "name_label": "Ad",
     "description_label": "Açıklama",
     "description_placeholder": "Bu çalışma alanı neye odaklanıyor?",

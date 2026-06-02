@@ -96,3 +96,42 @@ func TestRunSkillImportJsonTreatsDuplicateAsStructuredResult(t *testing.T) {
 		t.Fatalf("existing_skill = %#v", existing)
 	}
 }
+
+func TestRunSkillSearchRequestsSearchEndpoint(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		if r.URL.Path != "/api/skills/search" {
+			t.Fatalf("expected /api/skills/search, got %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("q") != "react hooks" {
+			t.Fatalf("expected q=react hooks, got %q", r.URL.Query().Get("q"))
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"name":          "React",
+				"url":           "https://clawhub.ai/ivangdavila/react",
+				"source":        "clawhub.ai",
+				"repo":          nil,
+				"install_count": 62,
+				"github_stars":  nil,
+				"description":   "React engineering skill",
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := &cobra.Command{Use: "search"}
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+	if err := runSkillSearch(cmd, []string{"react hooks"}); err != nil {
+		t.Fatalf("runSkillSearch: %v", err)
+	}
+	if gotPath == "" {
+		t.Fatal("expected search endpoint to be requested")
+	}
+}

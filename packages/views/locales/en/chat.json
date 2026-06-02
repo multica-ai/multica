@@ -43,8 +43,7 @@
     "row_subtitle": {
       "working": "Working",
       "completed": "Completed",
-      "new_reply": "New reply",
-      "archived_label": "Archived"
+      "new_reply": "New reply"
     },
     "stop_dialog": {
       "title": "Stop this run?",
@@ -77,9 +76,7 @@
     "my_agents": "My agents",
     "others": "Others",
     "no_agents": "No agents",
-    "active_group": "Active",
-    "archived_group_one": "{{count}} archived chat",
-    "archived_group_other": "{{count}} archived chats"
+    "history_group": "Chat history"
   },
   "empty_state": {
     "first_time_title": "Chat with your agents",

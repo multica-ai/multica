@@ -40,8 +40,7 @@
     "row_subtitle": {
       "working": "运行中",
       "completed": "已完成",
-      "new_reply": "新回复",
-      "archived_label": "已归档"
+      "new_reply": "新回复"
     },
     "stop_dialog": {
       "title": "停止这次运行？",
@@ -74,8 +73,7 @@
     "my_agents": "我的智能体",
     "others": "其他",
     "no_agents": "暂无智能体",
-    "active_group": "进行中",
-    "archived_group_other": "{{count}} 条已归档"
+    "history_group": "历史对话"
   },
   "empty_state": {
     "first_time_title": "和你的智能体对话",

@@ -25,7 +25,8 @@
     "all": "Tümü",
     "online": "Online",
     "unstable": "Kararsız",
-    "offline": "Offline"
+    "offline": "Offline",
+    "archived": "Arşivlendi"
   },
   "workload": {
     "working": "Çalışıyor",

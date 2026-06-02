@@ -122,6 +122,7 @@ export function PreferencesTab() {
     { value: "en", label: t(($) => $.preferences.language.english) },
     { value: "zh-Hans", label: t(($) => $.preferences.language.chinese) },
     { value: "ko", label: t(($) => $.preferences.language.korean) },
+    { value: "ja", label: t(($) => $.preferences.language.japanese) },
     { value: "tr", label: t(($) => $.preferences.language.turkish) },
   ];
 

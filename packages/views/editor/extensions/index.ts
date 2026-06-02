@@ -35,6 +35,7 @@ import { Markdown } from "@tiptap/markdown";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 import { BaseMentionExtension } from "./mention-extension";
 import { createMentionSuggestion } from "./mention-suggestion";
 import { CodeBlockView } from "./code-block-view";
@@ -57,7 +58,7 @@ const LinkExtension = Link.extend({ inclusive: false }).configure({
   defaultProtocol: "https",
 });
 
-const ImageExtension = Image.extend({
+export const ImageExtension = Image.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -71,6 +72,15 @@ const ImageExtension = Image.extend({
   },
   addNodeView() {
     return ReactNodeViewRenderer(ImageView);
+  },
+  renderMarkdown: (node: any) => {
+    const src = node.attrs?.src || "";
+    const alt = escapeMarkdownLabel(node.attrs?.alt || "");
+    const title = node.attrs?.title;
+    if (title) {
+      return `![${alt}](${src} "${title}")\n\n`;
+    }
+    return `![${alt}](${src})\n\n`;
   },
 }).configure({
   inline: false,

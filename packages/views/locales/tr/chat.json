@@ -43,8 +43,7 @@
     "row_subtitle": {
       "working": "Çalışıyor",
       "completed": "Tamamlandı",
-      "new_reply": "Yeni yanıt",
-      "archived_label": "Arşivlendi"
+      "new_reply": "Yeni yanıt"
     },
     "stop_dialog": {
       "title": "Bu çalıştırma durdurulsun mu?",
@@ -77,9 +76,7 @@
     "my_agents": "Ajanlarım",
     "others": "Diğerleri",
     "no_agents": "Ajan yok",
-    "active_group": "Aktif",
-    "archived_group_one": "{{count}} arşivlenmiş sohbet",
-    "archived_group_other": "{{count}} arşivlenmiş sohbet"
+    "history_group": "Sohbet geçmişi"
   },
   "empty_state": {
     "first_time_title": "Ajanlarınızla sohbet edin",

@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { useConfigStore } from "@multica/core/config";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
 import { createEnDict } from "./en";
+import { createJaDict } from "./ja";
 import { createKoDict } from "./ko";
 import { createTrDict } from "./tr";
 import { createZhDict } from "./zh";
@@ -27,6 +28,7 @@ const dictionaryFactories: Record<
   (allowSignup: boolean) => LandingDict
 > = {
   en: createEnDict,
+  ja: createJaDict,
   ko: createKoDict,
   zh: createZhDict,
   tr: createTrDict,

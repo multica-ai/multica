@@ -559,7 +559,7 @@ export interface RuntimeModel {
   default?: boolean;
   /**
    * Per-model reasoning/effort catalog discovered by the daemon. Currently
-   * populated for claude and codex runtimes only; omitted (or undefined)
+   * populated for claude, codex, and opencode runtimes; omitted (or undefined)
    * for every other provider, which the UI treats as "no thinking-level
    * picker for this model". See MUL-2339.
    */

@@ -28,6 +28,18 @@ export const uiTranslations: Partial<Record<Lang, Partial<Translations>>> = {
     chooseTheme: "테마 변경",
     editOnGithub: "GitHub에서 편집",
   },
+  ja: {
+    search: "検索",
+    searchNoResult: "結果が見つかりません",
+    toc: "このページの内容",
+    tocNoHeadings: "見出しなし",
+    lastUpdate: "最終更新",
+    chooseLanguage: "言語を選択",
+    nextPage: "次のページ",
+    previousPage: "前のページ",
+    chooseTheme: "テーマを変更",
+    editOnGithub: "GitHub で編集",
+  },
   tr: {
     search: "Ara",
     searchNoResult: "Sonuç bulunamadı",
@@ -47,6 +59,7 @@ export const localeLabels: Record<Lang, string> = {
   en: "English",
   zh: "简体中文",
   ko: "한국어",
+  ja: "日本語",
   tr: "Türkçe",
 };
 
@@ -70,6 +83,12 @@ export const homeCopy = {
     titleLead: "사람과 에이전트,",
     titleAccent: "한곳에서.",
     byline: ["시작하기", "2026년 4월 업데이트", "약 6분 읽기"],
+  },
+  ja: {
+    eyebrow: "Multica ドキュメント",
+    titleLead: "人とエージェントが、",
+    titleAccent: "一つの場所に。",
+    byline: ["はじめに", "2026年4月更新", "約6分で読めます"],
   },
   tr: {
     eyebrow: "Multica Dokümanları",
