@@ -707,11 +707,17 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         }
         actions={
           <>
-            <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)} className="px-2 sm:px-3">
+            <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)} className="px-2 sm:px-2.5" aria-label={t(($) => $.detail.edit)}>
               <Pencil className="h-3.5 w-3.5 sm:mr-1" />
               <span className="hidden sm:inline">{t(($) => $.detail.edit)}</span>
             </Button>
-            <Button size="sm" onClick={handleRunNow} disabled={autopilot.status !== "active" || triggerAutopilot.isPending} className="px-2 sm:px-3">
+            <Button
+              size="sm"
+              onClick={handleRunNow}
+              disabled={autopilot.status !== "active" || triggerAutopilot.isPending}
+              className="px-2 sm:px-2.5"
+              aria-label={triggerAutopilot.isPending ? t(($) => $.detail.running) : t(($) => $.detail.run_now)}
+            >
               {triggerAutopilot.isPending ? (
                 <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
               ) : (
