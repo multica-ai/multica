@@ -39,6 +39,9 @@ var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allow
 const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
 
 // supportedLanguages mirrors SUPPORTED_LOCALES in packages/core/i18n/types.ts.
+// Keep both lists in sync when adding a locale — the user-controlled language
+// field round-trips through GetMe back into i18n.changeLanguage(), so without
+// validation an arbitrary string would persist and echo to every device.
 var supportedLanguages = map[string]struct{}{
 	"en":      {},
 	"zh-Hans": {},
@@ -175,6 +178,18 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 	return created, true, nil
 }
 
+// signupSourceFromRequest reads the attribution cookie the web frontend
+// sets on the first pageview (UTM + referrer bundle). The frontend writes
+// a JSON string URL-encoded into the cookie value — Go does not
+// auto-decode Cookie.Value, so we have to unescape here before the string
+// lands in PostHog. Missing cookie / decode failures collapse to the
+// empty string; that simply omits signup_source from the event rather
+// than sending percent-encoded garbage. Never fall back to r.Referer() —
+// the frontend has already sanitised attribution and a raw referer can
+// leak sensitive URL parameters.
+//
+// The cap is the server-side defence against a client that manages to set
+// an oversize cookie; it matches SIGNUP_SOURCE_MAX_LEN on the frontend.
 const signupSourceMaxLen = 512
 
 func signupSourceFromRequest(r *http.Request) string {
@@ -428,6 +443,13 @@ func (h *Handler) NameLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reject names containing @ to prevent synthetic email collisions
+	// with real email addresses (e.g. "alice@example.com" would map to
+	// alice@example.com@multica.local which is unexpected).
+	if strings.Contains(name, "@") {
+		writeError(w, http.StatusBadRequest, "name must not contain @")
+		return
+	}
 	// Generate synthetic email: name@multica.local
 	syntheticEmail := strings.ToLower(name) + "@" + nameLoginDomain
 

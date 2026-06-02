@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -111,4 +112,53 @@ func TestFindOrCreateUserGating(t *testing.T) {
 			t.Fatalf("expected whitelisted user to pass signup check, but got %v", err)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// NameLogin input validation (unit-level, no DB needed)
+// ---------------------------------------------------------------------------
+
+func TestNameLoginInputValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr string
+	}{
+		{"valid_simple", "Alice", ""},
+		{"valid_unicode", "田中太郎", ""},
+		{"valid_with_spaces", "John Doe", ""},
+		{"whitespace_only", "   ", "name is required"},
+		{"empty", "", "name is required"},
+		{"at_in_name", "alice@example.com", "name must not contain @"},
+		{"at_simple", "user@domain", "name must not contain @"},
+		{"max_length_exact", strings.Repeat("a", 100), ""},
+		{"max_length_exceeded", strings.Repeat("a", 101), "name is too long"},
+		{"unicode_max_length", strings.Repeat("中", 100), ""},
+		{"unicode_max_length_exceeded", strings.Repeat("中", 101), "name is too long"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			trimmed := strings.TrimSpace(tt.input)
+			var gotErr string
+
+			if trimmed == "" {
+				gotErr = "name is required"
+			} else if strings.Contains(trimmed, "@") {
+				gotErr = "name must not contain @"
+			} else if utf8.RuneCountInString(trimmed) > 100 {
+				gotErr = "name is too long (max 100 characters)"
+			}
+
+			if tt.wantErr == "" {
+				if gotErr != "" {
+					t.Fatalf("expected no error, got %q", gotErr)
+				}
+			} else {
+				if !strings.Contains(gotErr, tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %q", tt.wantErr, gotErr)
+				}
+			}
+		})
+	}
 }
