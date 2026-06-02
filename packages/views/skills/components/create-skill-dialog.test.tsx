@@ -327,6 +327,79 @@ describe("CreateSkillDialog", () => {
     expect(batchImportSkills).not.toHaveBeenCalled();
   });
 
+  it("keeps URL multi-skill import results when one selected skill fails", async () => {
+    const user = userEvent.setup();
+    const importedSkill = {
+      id: "skill-1",
+      workspace_id: "ws-1",
+      name: "foo",
+      description: "Foo helper",
+      content: "foo",
+      config: {},
+      files: [],
+      created_by: "user-1",
+      created_at: "2026-05-29T00:00:00Z",
+      updated_at: "2026-05-29T00:00:00Z",
+    };
+    const discoverImportSkills = vi.fn().mockResolvedValue({
+      skills: [
+        {
+          name: "foo",
+          description: "Foo helper",
+          content: "---\nname: foo\n---\nfoo",
+          config: { origin: { type: "gitee", path: "skills/foo" } },
+          files: [],
+          source_path: "skills/foo/SKILL.md",
+          source_url: "https://gitee.com/acme/skills/tree/master/skills/foo",
+        },
+        {
+          name: "bar",
+          description: "Bar helper",
+          content: "---\nname: bar\n---\nbar",
+          config: { origin: { type: "gitee", path: "skills/bar" } },
+          files: [],
+          source_path: "skills/bar/SKILL.md",
+          source_url: "https://gitee.com/acme/skills/tree/master/skills/bar",
+        },
+      ],
+    });
+    const importSkill = vi
+      .fn()
+      .mockResolvedValueOnce(importedSkill)
+      .mockRejectedValueOnce(new Error("network down"));
+
+    setApiInstance({
+      discoverImportSkills,
+      importSkill,
+      batchImportSkills: vi.fn(),
+    } as unknown as ApiClient);
+
+    renderDialog();
+
+    await user.click(screen.getByRole("button", { name: /Import from URL/i }));
+    await user.type(screen.getByLabelText("Skill URL"), "https://gitee.com/acme/skills");
+    await user.click(screen.getByRole("button", { name: /^Import$/i }));
+
+    expect(await screen.findByText("foo")).toBeInTheDocument();
+    expect(screen.getByText("bar")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Import 2 Skills/i }));
+
+    await waitFor(() => {
+      expect(importSkill).toHaveBeenCalledTimes(2);
+    });
+    expect(importSkill).toHaveBeenNthCalledWith(1, {
+      url: "https://gitee.com/acme/skills/tree/master/skills/foo",
+      overwrite: undefined,
+    });
+    expect(importSkill).toHaveBeenNthCalledWith(2, {
+      url: "https://gitee.com/acme/skills/tree/master/skills/bar",
+      overwrite: undefined,
+    });
+    expect(await screen.findByText("1 imported, 0 skipped, 1 failed.")).toBeInTheDocument();
+    expect(screen.getByText("Failed imports: bar: network down")).toBeInTheDocument();
+  });
+
   it("prompts for URL discovery conflicts and sends overwrite only for checked skills", async () => {
     const user = userEvent.setup();
     const importedSkill = {

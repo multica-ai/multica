@@ -17,7 +17,6 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@multica/core/api";
 import type {
-  BatchImportSkillsResponse,
   CreateSkillRequest,
   DiscoveredImportSkill,
   Skill,
@@ -76,6 +75,12 @@ type SkillConflictItem = {
   key: string;
   name: string;
   description?: string;
+};
+
+type SkillImportBatchResult = {
+  created: Skill[];
+  skipped: string[];
+  failed: string[];
 };
 
 type ExistingSkillConflict = {
@@ -392,7 +397,7 @@ function LocalDirectoryForm({
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
   const [parsedSkills, setParsedSkills] = useState<CreateSkillRequest[]>([]);
-  const [batchResult, setBatchResult] = useState<BatchImportSkillsResponse | null>(null);
+  const [batchResult, setBatchResult] = useState<SkillImportBatchResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [conflicts, setConflicts] = useState<SkillConflictItem[]>([]);
@@ -434,6 +439,7 @@ function LocalDirectoryForm({
       setBatchResult({
         created: [],
         skipped: skippedNames,
+        failed: [],
       });
       await qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
       toast.success(
@@ -447,6 +453,7 @@ function LocalDirectoryForm({
     setBatchResult({
       created: result.created,
       skipped: [...skippedNames, ...result.skipped],
+      failed: [],
     });
     await Promise.all([
       qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) }),
@@ -488,7 +495,11 @@ function LocalDirectoryForm({
   };
 
   const handleDone = () => {
-    if (batchResult?.created.length === 1) {
+    if (
+      batchResult?.created.length === 1 &&
+      batchResult.skipped.length === 0 &&
+      batchResult.failed.length === 0
+    ) {
       onCreated(batchResult.created[0]!);
       return;
     }
@@ -638,12 +649,20 @@ function LocalDirectoryForm({
               {t(($) => $.create.local.import_summary, {
                 created: batchResult.created.length,
                 skipped: batchResult.skipped.length,
+                failed: batchResult.failed.length,
               })}
             </p>
             {batchResult.skipped.length > 0 && (
               <p className="text-xs text-muted-foreground">
                 {t(($) => $.create.local.skipped_names, {
                   names: batchResult.skipped.join(", "),
+                })}
+              </p>
+            )}
+            {batchResult.failed.length > 0 && (
+              <p className="text-xs text-destructive">
+                {t(($) => $.create.local.failed_names, {
+                  names: batchResult.failed.join(", "),
                 })}
               </p>
             )}
@@ -872,7 +891,7 @@ function UrlForm({
   const [overwriteKeys, setOverwriteKeys] = useState<Set<string>>(new Set());
   const [discoveredSkills, setDiscoveredSkills] = useState<DiscoveredImportSkill[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
-  const [batchResult, setBatchResult] = useState<BatchImportSkillsResponse | null>(null);
+  const [batchResult, setBatchResult] = useState<SkillImportBatchResult | null>(null);
   const source = detectUrlSource(url);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
@@ -924,18 +943,29 @@ function UrlForm({
   ) => {
     const created: Skill[] = [];
     const skipped = skippedConflicts.map((skill) => skill.name);
+    const failed: string[] = [];
     for (const { key, skill } of skillsToImport) {
-      const imported = await api.importSkill({
-        url: skill.source_url,
-        ...(source === "gitee" && giteeToken.trim()
-          ? { gitee_token: giteeToken.trim() }
-          : {}),
-        overwrite: overwriteKeysToApply.has(key) || undefined,
-      });
-      created.push(imported);
-      seedAfterCreate(qc, wsId, imported);
+      try {
+        const imported = await api.importSkill({
+          url: skill.source_url,
+          ...(source === "gitee" && giteeToken.trim()
+            ? { gitee_token: giteeToken.trim() }
+            : {}),
+          overwrite: overwriteKeysToApply.has(key) || undefined,
+        });
+        created.push(imported);
+        seedAfterCreate(qc, wsId, imported);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          const importConflict = getImportConflict(err.body);
+          skipped.push(importConflict?.name || skill.name);
+          continue;
+        }
+        const message = err instanceof Error ? err.message : t(($) => $.create.url.fallback_error);
+        failed.push(`${skill.name}: ${message}`);
+      }
     }
-    setBatchResult({ created, skipped });
+    setBatchResult({ created, skipped, failed });
     await Promise.all([
       qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) }),
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) }),
@@ -1057,7 +1087,11 @@ function UrlForm({
   };
 
   const handleDone = () => {
-    if (batchResult?.created.length === 1) {
+    if (
+      batchResult?.created.length === 1 &&
+      batchResult.skipped.length === 0 &&
+      batchResult.failed.length === 0
+    ) {
       onCreated(batchResult.created[0]!);
       return;
     }
@@ -1235,12 +1269,20 @@ function UrlForm({
               {t(($) => $.create.local.import_summary, {
                 created: batchResult.created.length,
                 skipped: batchResult.skipped.length,
+                failed: batchResult.failed.length,
               })}
             </p>
             {batchResult.skipped.length > 0 && (
               <p className="text-xs text-muted-foreground">
                 {t(($) => $.create.local.skipped_names, {
                   names: batchResult.skipped.join(", "),
+                })}
+              </p>
+            )}
+            {batchResult.failed.length > 0 && (
+              <p className="text-xs text-destructive">
+                {t(($) => $.create.local.failed_names, {
+                  names: batchResult.failed.join(", "),
                 })}
               </p>
             )}
