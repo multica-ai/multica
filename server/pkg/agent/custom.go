@@ -123,9 +123,9 @@ func (b *customBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			}
 		}
 
+		stdoutResult := <-stdoutDone
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)
-		stdoutResult := <-stdoutDone
 		output := string(stdoutResult.data)
 		sessionID := extractCustomSessionID(output, sessionIDPattern)
 		if sessionID == "" {
