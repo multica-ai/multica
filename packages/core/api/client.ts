@@ -153,6 +153,11 @@ import type {
   ListChannelThreadsResponse,
   ChannelThreadSummary,
   ListThreadMessagesResponse,
+  ListChannelMessagesResponse,
+  MessageThreadResponse,
+  ChannelContextResponse,
+  ConvertMessageToIssueRequest,
+  ConvertMessageToIssueResponse,
   ChannelMessage,
   CreateChannelRequest,
   UpdateChannelRequest,
@@ -2064,6 +2069,13 @@ export class ApiClient {
     return this.fetch(`/api/channels/${id}/members`);
   }
 
+  async addChannelMember(channelId: string, data: { user_id: string; role?: string }): Promise<{ channel_id: string; user_id: string; role: string }> {
+    return this.fetch(`/api/channels/${channelId}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   async listChannelThreads(channelId: string): Promise<ListChannelThreadsResponse> {
     return this.fetch(`/api/channels/${channelId}/threads`);
   }
@@ -2103,6 +2115,46 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // Channel V2 — flat messages
+  async listChannelMessages(channelId: string): Promise<ListChannelMessagesResponse> {
+    return this.fetch(`/api/channels/${channelId}/messages`);
+  }
+
+  async sendChannelMessage(channelId: string, data: CreateChannelMessageRequest): Promise<ChannelMessage> {
+    return this.fetch(`/api/channels/${channelId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async replyToMessage(channelId: string, messageId: string, data: CreateChannelMessageRequest): Promise<{ message: ChannelMessage; thread: ChannelThreadSummary }> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/reply`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getMessageThread(channelId: string, messageId: string): Promise<MessageThreadResponse> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/thread`);
+  }
+
+  async convertMessageToIssue(channelId: string, messageId: string, data?: ConvertMessageToIssueRequest): Promise<ConvertMessageToIssueResponse> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/convert-issue`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    });
+  }
+
+  async removeChannelMember(channelId: string, userId: string): Promise<{ removed: boolean }> {
+    return this.fetch(`/api/channels/${channelId}/members/${userId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getChannelContext(channelId: string, recent = 20): Promise<ChannelContextResponse> {
+    return this.fetch(`/api/channels/${channelId}/context?recent=${recent}`);
   }
 
   // Members

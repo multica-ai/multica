@@ -12,6 +12,12 @@ export const channelKeys = {
     [...channelKeys.all(wsId), "threads", channelId] as const,
   messages: (wsId: string, channelId: string, threadId: string) =>
     [...channelKeys.all(wsId), "messages", channelId, threadId] as const,
+  channelMessages: (wsId: string, channelId: string) =>
+    [...channelKeys.all(wsId), "channelMessages", channelId] as const,
+  messageThread: (wsId: string, channelId: string, messageId: string) =>
+    [...channelKeys.all(wsId), "messageThread", channelId, messageId] as const,
+  context: (wsId: string, channelId: string) =>
+    [...channelKeys.all(wsId), "context", channelId] as const,
 };
 
 export function channelListOptions(wsId: string) {
@@ -22,6 +28,32 @@ export function channelListOptions(wsId: string) {
   });
 }
 
+export function channelMessagesOptions(wsId: string, channelId: string | null) {
+  return queryOptions({
+    queryKey: channelKeys.channelMessages(wsId, channelId ?? ""),
+    queryFn: () => api.listChannelMessages(channelId ?? ""),
+    enabled: !!channelId,
+    select: (data) => data.messages,
+  });
+}
+
+export function messageThreadOptions(wsId: string, channelId: string | null, messageId: string | null) {
+  return queryOptions({
+    queryKey: channelKeys.messageThread(wsId, channelId ?? "", messageId ?? ""),
+    queryFn: () => api.getMessageThread(channelId ?? "", messageId ?? ""),
+    enabled: !!channelId && !!messageId,
+  });
+}
+
+export function channelContextOptions(wsId: string, channelId: string | null) {
+  return queryOptions({
+    queryKey: channelKeys.context(wsId, channelId ?? ""),
+    queryFn: () => api.getChannelContext(channelId ?? ""),
+    enabled: !!channelId,
+  });
+}
+
+// Legacy V1 queries (backward compat)
 export function channelThreadsOptions(wsId: string, channelId: string | null) {
   return queryOptions({
     queryKey: channelKeys.threads(wsId, channelId ?? ""),

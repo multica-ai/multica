@@ -59,7 +59,7 @@ export interface ListChannelThreadsResponse {
 
 export interface ChannelMessage {
   id: string;
-  thread_id: string;
+  thread_id?: string;
   channel_id: string;
   workspace_id: string;
   author_type: "member" | "agent" | "system";
@@ -67,8 +67,36 @@ export interface ChannelMessage {
   author_name?: string;
   author_avatar_url?: string;
   content: string;
+  reply_to_id?: string;
+  reply_count?: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ListChannelMessagesResponse {
+  messages: ChannelMessage[];
+  total: number;
+}
+
+export interface MessageThreadResponse {
+  root_message: ChannelMessage;
+  replies: ChannelMessage[];
+  thread: ChannelThreadSummary | null;
+}
+
+export interface ChannelContextMessage {
+  id: string;
+  author_type: string;
+  author_id: string | null;
+  author_name?: string;
+  content: string;
+  created_at: string;
+}
+
+export interface ChannelContextResponse {
+  channel: ChannelSummary;
+  members: ChannelMember[];
+  messages: ChannelContextMessage[];
 }
 
 export interface ThreadLinkedIssue {
@@ -106,4 +134,16 @@ export interface CreateChannelThreadRequest {
 
 export interface CreateChannelMessageRequest {
   content: string;
+}
+
+export interface ConvertMessageToIssueRequest {
+  title?: string;
+  description?: string;
+  project_id?: string;
+}
+
+export interface ConvertMessageToIssueResponse {
+  issue_id: string;
+  issue_number: number;
+  title: string;
 }

@@ -204,12 +204,18 @@ export type {
   ChannelThreadSummary,
   ListChannelThreadsResponse,
   ChannelMessage,
+  ListChannelMessagesResponse,
+  MessageThreadResponse,
+  ChannelContextMessage,
+  ChannelContextResponse,
   ThreadLinkedIssue,
   ListThreadMessagesResponse,
   CreateChannelRequest,
   UpdateChannelRequest,
   CreateChannelThreadRequest,
   CreateChannelMessageRequest,
+  ConvertMessageToIssueRequest,
+  ConvertMessageToIssueResponse,
 } from "./channel";
 export type {
   Squad,

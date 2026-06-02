@@ -3,20 +3,24 @@
 -- name: ListChannels :many
 -- Lists channels visible to a user: open channels + channels the user is a member of.
 -- Includes the user's membership row (if any) and an unread flag computed from
--- the latest thread activity vs the member's last_read_at.
+-- the latest message activity vs the member's last_read_at.
 SELECT
     c.*,
     cm.role          AS member_role,
     cm.last_read_at  AS member_last_read_at,
     (cm.user_id IS NOT NULL)::boolean AS is_member,
-    COALESCE((
-        SELECT max(t.last_message_at) FROM channel_thread t WHERE t.channel_id = c.id
-    ), c.created_at)::timestamptz AS last_activity_at,
+    COALESCE(
+        GREATEST(
+            (SELECT max(m.created_at) FROM channel_message m WHERE m.channel_id = c.id),
+            (SELECT max(t.last_message_at) FROM channel_thread t WHERE t.channel_id = c.id)
+        ),
+        c.created_at
+    )::timestamptz AS last_activity_at,
     (
         cm.user_id IS NOT NULL
         AND EXISTS (
-            SELECT 1 FROM channel_thread t
-            WHERE t.channel_id = c.id AND t.last_message_at > cm.last_read_at
+            SELECT 1 FROM channel_message m
+            WHERE m.channel_id = c.id AND m.created_at > cm.last_read_at
         )
     )::boolean AS has_unread
 FROM channel c
@@ -92,8 +96,8 @@ ORDER BY t.last_message_at DESC, t.created_at DESC;
 SELECT * FROM channel_thread WHERE id = $1;
 
 -- name: CreateChannelThread :one
-INSERT INTO channel_thread (channel_id, workspace_id, title, created_by)
-VALUES ($1, $2, COALESCE(sqlc.narg('title'), ''), sqlc.narg('created_by'))
+INSERT INTO channel_thread (channel_id, workspace_id, title, created_by, root_message_id)
+VALUES ($1, $2, COALESCE(sqlc.narg('title'), ''), sqlc.narg('created_by'), sqlc.narg('root_message_id'))
 RETURNING *;
 
 -- name: UpdateChannelThreadTitle :one
@@ -111,7 +115,7 @@ WHERE id = $1;
 -- name: DeleteChannelThread :exec
 DELETE FROM channel_thread WHERE id = $1;
 
--- ============ Messages ============
+-- ============ Messages (V1 — thread-scoped, kept for backward compat) ============
 
 -- name: ListThreadMessages :many
 SELECT * FROM channel_message
@@ -125,6 +129,76 @@ RETURNING *;
 
 -- name: DeleteChannelMessage :exec
 DELETE FROM channel_message WHERE id = $1;
+
+-- name: GetChannelMessage :one
+SELECT * FROM channel_message WHERE id = $1;
+
+-- ============ Messages (V2 — top-level flat messages) ============
+
+-- name: ListChannelMessages :many
+-- Lists top-level channel messages (thread_id IS NULL), with reply_count.
+SELECT m.*,
+    COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
+FROM channel_message m
+WHERE m.channel_id = $1 AND m.thread_id IS NULL
+ORDER BY m.created_at ASC;
+
+-- name: ListChannelMessagesPaginated :many
+-- Lists top-level channel messages with cursor-based pagination (before a timestamp).
+SELECT m.*,
+    COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
+FROM channel_message m
+WHERE m.channel_id = $1 AND m.thread_id IS NULL AND m.created_at < $2
+ORDER BY m.created_at DESC
+LIMIT $3;
+
+-- name: CreateChannelMessageTopLevel :one
+-- Creates a top-level message in a channel (no thread).
+INSERT INTO channel_message (channel_id, workspace_id, author_type, author_id, content)
+VALUES ($1, $2, $3, sqlc.narg('author_id'), $4)
+RETURNING *;
+
+-- name: CreateChannelMessageReply :one
+-- Creates a reply message linked to a parent message, within its thread.
+INSERT INTO channel_message (thread_id, channel_id, workspace_id, author_type, author_id, content, reply_to_id)
+VALUES ($1, $2, $3, $4, sqlc.narg('author_id'), $5, $6)
+RETURNING *;
+
+-- name: ListMessageReplies :many
+-- Lists all replies (thread messages) for a given root message.
+SELECT m.* FROM channel_message m
+JOIN channel_thread t ON t.id = m.thread_id
+WHERE t.root_message_id = $1
+ORDER BY m.created_at ASC;
+
+-- name: GetThreadByRootMessage :one
+-- Finds the thread created from a specific root message.
+SELECT * FROM channel_thread WHERE root_message_id = $1;
+
+-- name: CreateChannelThreadFromMessage :one
+-- Creates a thread anchored to a root message.
+INSERT INTO channel_thread (channel_id, workspace_id, title, created_by, root_message_id)
+VALUES ($1, $2, $3, sqlc.narg('created_by'), $4)
+RETURNING *;
+
+-- name: CountMessageReplies :one
+-- Counts replies to a specific message.
+SELECT count(*)::int AS reply_count
+FROM channel_message
+WHERE reply_to_id = $1;
+
+-- ============ Channel context (for agents) ============
+
+-- name: GetChannelContext :many
+-- Returns the N most recent top-level messages in a channel for agent context injection.
+SELECT m.*,
+    u.name AS author_name,
+    u.avatar_url AS author_avatar_url
+FROM channel_message m
+LEFT JOIN "user" u ON u.id = m.author_id
+WHERE m.channel_id = $1 AND m.thread_id IS NULL
+ORDER BY m.created_at DESC
+LIMIT $2;
 
 -- ============ Issue <-> thread linkage ============
 
