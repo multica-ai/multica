@@ -176,3 +176,28 @@ func TestGetConfigExposesWorkspaceCreationDisabled(t *testing.T) {
 		t.Fatalf("workspace_creation_disabled: want true with env on, got false (body=%s)", w.Body.String())
 	}
 }
+
+func TestGetConfigOmitsGoogleClientID(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	defer func() { testHandler.Storage = origStorage }()
+
+	t.Setenv("GOOGLE_CLIENT_ID", "should-not-appear")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// google_client_id must not appear in the JSON response
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if _, ok := raw["google_client_id"]; ok {
+		t.Fatalf("google_client_id should not be in config response, but it is: %s", w.Body.String())
+	}
+}

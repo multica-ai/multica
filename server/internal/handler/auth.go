@@ -450,6 +450,14 @@ func (h *Handler) NameLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name must not contain @")
 		return
 	}
+
+	// Reject names with non-printable control characters (null bytes,
+	// newlines, etc.) that would corrupt the synthetic email or display.
+	if strings.ContainsFunc(name, func(r rune) bool { return r < 32 || r == 127 }) {
+		writeError(w, http.StatusBadRequest, "name contains invalid characters")
+		return
+	}
+
 	// Generate synthetic email: name@multica.local
 	syntheticEmail := strings.ToLower(name) + "@" + nameLoginDomain
 
