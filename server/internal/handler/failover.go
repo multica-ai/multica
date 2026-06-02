@@ -97,6 +97,10 @@ func (h *Handler) CreateFailoverGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "strategy must be 'priority', 'round-robin', or 'least-loaded'")
 		return
 	}
+	if strategy != "priority" {
+		slog.Warn("create failover group: only 'priority' strategy is currently implemented, other strategies are accepted but fall back to priority ordering",
+			"strategy", strategy)
+	}
 	group, err := h.Queries.CreateFailoverGroup(r.Context(), db.CreateFailoverGroupParams{
 		WorkspaceID: parseUUID(workspaceID),
 		Name:        req.Name,

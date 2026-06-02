@@ -58,7 +58,7 @@ func init() {
 	failoverGroupCmd.AddCommand(failoverGroupRemoveRuntimeCmd)
 
 	failoverGroupListCmd.Flags().String("output", "table", "Output format: table or json")
-	failoverGroupCreateCmd.Flags().String("strategy", "priority", "Failover strategy: priority, round-robin, or least-loaded")
+	failoverGroupCreateCmd.Flags().String("strategy", "priority", "Failover strategy (only 'priority' is currently implemented)")
 	failoverGroupCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	failoverGroupDeleteCmd.Flags().String("output", "json", "Output format: table or json")
 	failoverGroupAddRuntimeCmd.Flags().Int("priority", 0, "Priority for the runtime in this group (higher = preferred)")

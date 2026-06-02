@@ -352,6 +352,17 @@ func reRouteTasksForOfflineRuntime(ctx context.Context, queries *db.Queries, off
 		return nil, nil
 	}
 
+	// Fetch the failover group to check its strategy.
+	group, gerr := queries.GetFailoverGroup(ctx, rt.FailoverGroupID)
+	if gerr != nil {
+		return nil, gerr
+	}
+	if group.Strategy != "priority" {
+		slog.Warn("runtime sweeper: failover strategy not yet implemented, falling back to priority ordering",
+			"runtime_id", util.UUIDToString(offlineRuntimeID),
+			"strategy", group.Strategy)
+	}
+
 	candidates, err := queries.SelectFailoverCandidates(ctx, db.SelectFailoverCandidatesParams{
 		FailoverGroupID:  rt.FailoverGroupID,
 		OfflineRuntimeID: offlineRuntimeID,
@@ -363,6 +374,8 @@ func reRouteTasksForOfflineRuntime(ctx context.Context, queries *db.Queries, off
 		return nil, nil
 	}
 
+	// Pick the best candidate. Currently always priority-ordered (highest first).
+	// TODO: implement round-robin and least-loaded strategies.
 	bestCandidate := candidates[0]
 
 	rerouted, err := queries.ReRouteQueuedTasksToRuntime(ctx, db.ReRouteQueuedTasksToRuntimeParams{
