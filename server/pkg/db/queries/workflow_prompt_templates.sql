@@ -69,8 +69,8 @@ INSERT INTO workflow_prompt_overrides (
     @override_content
 )
 ON CONFLICT (template_id,
-    COALESCE(agent_id, '00000000-0000-0000-0000-000000000000'::uuid),
-    COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid))
+        (COALESCE(agent_id, '00000000-0000-0000-0000-000000000000'::uuid)),
+        (COALESCE(project_id, '00000000-0000-0000-0000-000000000000'::uuid)))
 DO UPDATE SET override_content = EXCLUDED.override_content
 RETURNING *;
 
