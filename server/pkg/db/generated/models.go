@@ -64,6 +64,28 @@ type AgentRuntime struct {
 	Visibility     string             `json:"visibility"`
 }
 
+// Tracks agent run sessions for issue-level session persistence and resume
+type AgentSession struct {
+	ID      pgtype.UUID `json:"id"`
+	IssueID pgtype.UUID `json:"issue_id"`
+	AgentID pgtype.UUID `json:"agent_id"`
+	// Monotonically increasing per (issue_id, agent_id) pair
+	RunNumber int32 `json:"run_number"`
+	// JSONB blob storing session state: messages, tool results, context
+	State []byte `json:"state"`
+	// Compressed summary of prior conversation for context injection
+	ConversationSummary pgtype.Text        `json:"conversation_summary"`
+	WorkingDirectory    pgtype.Text        `json:"working_directory"`
+	Branch              pgtype.Text        `json:"branch"`
+	FilesModified       []string           `json:"files_modified"`
+	IsActive            bool               `json:"is_active"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	LastActiveAt        pgtype.Timestamptz `json:"last_active_at"`
+	ExpiresAt           pgtype.Timestamptz `json:"expires_at"`
+	// Optimistic locking version for concurrent state updates
+	Version int32 `json:"version"`
+}
+
 type AgentSkill struct {
 	AgentID   pgtype.UUID        `json:"agent_id"`
 	SkillID   pgtype.UUID        `json:"skill_id"`
@@ -276,6 +298,19 @@ type GithubInstallation struct {
 	ConnectedByID    pgtype.UUID        `json:"connected_by_id"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type GithubPrReview struct {
+	ID                pgtype.UUID        `json:"id"`
+	PrID              pgtype.UUID        `json:"pr_id"`
+	ReviewID          int64              `json:"review_id"`
+	ReviewerLogin     string             `json:"reviewer_login"`
+	ReviewerAvatarUrl pgtype.Text        `json:"reviewer_avatar_url"`
+	State             string             `json:"state"`
+	Body              pgtype.Text        `json:"body"`
+	SubmittedAt       pgtype.Timestamptz `json:"submitted_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type GithubPullRequest struct {

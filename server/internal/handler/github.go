@@ -536,6 +536,8 @@ func (h *Handler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		h.handlePullRequestEvent(ctx, body)
 	case "check_suite":
 		h.handleCheckSuiteEvent(ctx, body)
+	case "pull_request_review":
+		h.handlePullRequestReviewEvent(ctx, body)
 	default:
 		// Acknowledge every event so GitHub doesn't mark the endpoint failing,
 		// but ignore types we don't model.
@@ -941,6 +943,170 @@ func (h *Handler) handleCheckSuiteEvent(ctx context.Context, body []byte) {
 		h.publish(protocol.EventPullRequestUpdated, ws, "system", "", map[string]any{
 			"linked_issue_ids": linked,
 		})
+	}
+}
+
+// ── pull_request_review webhook ────────────────────────────────────────────
+
+type ghPullRequestReviewPayload struct {
+	Action       string `json:"action"`
+	Review       struct {
+		ID      int64  `json:"id"`
+		Body    string `json:"body"`
+		State   string `json:"state"`
+		HTMLURL string `json:"html_url"`
+		User    struct {
+			Login     string `json:"login"`
+			AvatarURL string `json:"avatar_url"`
+		} `json:"user"`
+		SubmittedAt string `json:"submitted_at"`
+	} `json:"review"`
+	PullRequest struct {
+		Number int32 `json:"number"`
+	} `json:"pull_request"`
+	Repository struct {
+		Name  string `json:"name"`
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+	} `json:"repository"`
+	Installation struct {
+		ID int64 `json:"id"`
+	} `json:"installation"`
+}
+
+// handlePullRequestReviewEvent persists PR review submissions and adds a
+// system comment to every linked issue. Only substantive states (approved,
+// changes_requested) trigger comments; "commented" reviews that carry no
+// approval signal are stored but don't post to the issue timeline.
+func (h *Handler) handlePullRequestReviewEvent(ctx context.Context, body []byte) {
+	var p ghPullRequestReviewPayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		slog.Warn("github: bad pull_request_review payload", "err", err)
+		return
+	}
+	if p.Action != "submitted" && p.Action != "dismissed" {
+		return // only care about new reviews and dismissals
+	}
+	if p.Installation.ID == 0 {
+		return
+	}
+	inst, err := h.Queries.GetGitHubInstallationByInstallationID(ctx, p.Installation.ID)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("github: lookup installation failed", "err", err)
+		}
+		return
+	}
+
+	pr, err := h.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+		WorkspaceID: inst.WorkspaceID,
+		RepoOwner:   p.Repository.Owner.Login,
+		RepoName:    p.Repository.Name,
+		PrNumber:    p.PullRequest.Number,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("github: lookup pr for review failed", "err", err)
+		}
+		return
+	}
+
+	state := mapReviewState(p.Action, p.Review.State)
+	review, err := h.Queries.UpsertGitHubPRReview(ctx, db.UpsertGitHubPRReviewParams{
+		PrID:              pr.ID,
+		ReviewID:          p.Review.ID,
+		ReviewerLogin:     p.Review.User.Login,
+		ReviewerAvatarUrl: ptrToText(strPtrOrNil(p.Review.User.AvatarURL)),
+		State:             state,
+		Body:              ptrToText(strPtrOrNil(p.Review.Body)),
+		SubmittedAt:       parseGHTimeRequired(p.Review.SubmittedAt),
+	})
+	if err != nil {
+		slog.Warn("github: upsert pr review failed", "err", err)
+		return
+	}
+
+	workspaceID := uuidToString(inst.WorkspaceID)
+
+	// Post a system comment to every linked issue for approved/changes_requested.
+	if state == "approved" || state == "changes_requested" {
+		issueIDs, err := h.Queries.ListIssueIDsForPullRequest(ctx, pr.ID)
+		if err != nil {
+			slog.Warn("github: list issues for pr review comment failed", "err", err)
+			return
+		}
+		for _, issueID := range issueIDs {
+			issue, err := h.Queries.GetIssue(ctx, issueID)
+			if err != nil {
+				continue
+			}
+			icon := "✅"
+			label := "approved"
+			if state == "changes_requested" {
+				icon = "❌"
+				label = "requested changes on"
+			}
+			content := fmt.Sprintf(
+				"%s **%s** %s PR [%s/%s#%d](%s)",
+				icon, p.Review.User.Login, label,
+				p.Repository.Owner.Login, p.Repository.Name, p.PullRequest.Number,
+				p.Review.HTMLURL,
+			)
+			if p.Review.Body != "" {
+				content += "\n\n> " + p.Review.Body
+			}
+			comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+				IssueID:     issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+				AuthorType:  "system",
+				AuthorID:    pgtype.UUID{Valid: true},
+				Content:     content,
+				Type:        "system",
+				ParentID:    pgtype.UUID{Valid: false},
+			})
+			if err != nil {
+				slog.Warn("github: create review comment failed", "err", err)
+				continue
+			}
+			h.publish(protocol.EventCommentCreated, workspaceID, "system", "", map[string]any{
+				"comment": commentToResponse(comment, nil, nil),
+			})
+		}
+	}
+
+	// Broadcast review update so the PR list re-queries.
+	linkedIssueIDs, _ := h.Queries.ListIssueIDsForPullRequest(ctx, pr.ID)
+	issueIDStrs := make([]string, len(linkedIssueIDs))
+	for i, id := range linkedIssueIDs {
+		issueIDStrs[i] = uuidToString(id)
+	}
+	h.publish(protocol.EventPRReviewSubmitted, workspaceID, "system", "", map[string]any{
+		"review":          review.ID.String(),
+		"pr_id":           uuidToString(pr.ID),
+		"state":           state,
+		"reviewer":        p.Review.User.Login,
+		"linked_issue_ids": issueIDStrs,
+	})
+}
+
+// mapReviewState normalizes the GitHub review event action+state pair into
+// our canonical review states. GitHub sends action="dismissed" with no
+// review.state for dismissed reviews, and action="submitted" with
+// review.state in {approved, changes_requested, commented, dismissed}.
+func mapReviewState(action, state string) string {
+	if action == "dismissed" {
+		return "dismissed"	
+	}
+	switch state {
+	case "approved":
+		return "approved"
+	case "changes_requested":
+		return "changes_requested"
+	case "commented":
+		return "commented"
+	default:
+		return "pending"
 	}
 }
 

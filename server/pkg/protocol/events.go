@@ -124,4 +124,5 @@ const (
 	EventPullRequestLinked         = "pull_request:linked"
 	EventPullRequestUpdated        = "pull_request:updated"
 	EventPullRequestUnlinked       = "pull_request:unlinked"
+	EventPRReviewSubmitted         = "pull_request_review:submitted"
 )
