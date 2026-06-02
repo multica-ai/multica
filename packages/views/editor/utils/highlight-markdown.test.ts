@@ -51,4 +51,28 @@ describe("highlightToHtml", () => {
   it("does not treat a == b (comparison) as a highlight", () => {
     expect(highlightToHtml("if a == b then")).toBe("if a == b then");
   });
+
+  // Boundary regressions (Emacs review, PR #3661).
+
+  it("does not let a == inside inline code close the highlight", () => {
+    // The inner `==` lives in inline code; the highlight must wrap the whole
+    // span, not stop at the code's `==`.
+    expect(highlightToHtml("==a `b==c` d==")).toBe(
+      "<mark>a `b==c` d</mark>",
+    );
+  });
+
+  it("does not let a == inside inline math close the highlight", () => {
+    expect(highlightToHtml("==a $b==c$ d==")).toBe(
+      "<mark>a $b==c$ d</mark>",
+    );
+  });
+
+  it("does not highlight across a blank line / block boundary", () => {
+    expect(highlightToHtml("==a\n\nb==")).toBe("==a\n\nb==");
+  });
+
+  it("still highlights across a soft line break within a block", () => {
+    expect(highlightToHtml("==a\nb==")).toBe("<mark>a\nb</mark>");
+  });
 });

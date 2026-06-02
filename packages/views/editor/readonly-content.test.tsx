@@ -147,6 +147,22 @@ describe("ReadonlyContent highlight Markdown", () => {
     expect(container.querySelector("mark")).toBeNull();
     expect(container.querySelector("code")?.textContent).toBe("a ==b== c");
   });
+
+  // Boundary regressions (Emacs review, PR #3661).
+
+  it("wraps the whole span when an inner == lives in inline code", () => {
+    const { container } = render(<ReadonlyContent content={"==a `b==c` d=="} />);
+    const mark = container.querySelector("mark");
+    expect(mark).not.toBeNull();
+    // inner `==` stays inside the code, not consumed as the closing fence
+    expect(mark?.querySelector("code")?.textContent).toBe("b==c");
+    expect(mark?.textContent).toBe("a b==c d");
+  });
+
+  it("does not highlight across a blank line", () => {
+    const { container } = render(<ReadonlyContent content={"==a\n\nb=="} />);
+    expect(container.querySelector("mark")).toBeNull();
+  });
 });
 
 describe("ReadonlyContent issue mention Markdown", () => {

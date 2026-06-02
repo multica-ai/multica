@@ -1,4 +1,5 @@
 import Highlight from "@tiptap/extension-highlight";
+import { matchHighlightAt } from "../utils/highlight-match";
 
 /**
  * HighlightExtension — text highlight mark (`==text==` ⇄ <mark>).
@@ -20,13 +21,15 @@ import Highlight from "@tiptap/extension-highlight";
  * variant would need a syntax that can carry a colour (`==text==` cannot), so it
  * is intentionally out of scope here (see MUL-2934).
  *
- * BOUNDARY RULES — must stay in sync with the read-only renderer's regex in
- * utils/highlight-markdown.ts so the editor and the read-only view agree on what
- * counts as a highlight:
- *   - no whitespace directly inside the fences (`==x==` highlights, `== x ==` does not)
+ * BOUNDARY RULES live in utils/highlight-match.ts and are shared with the
+ * read-only renderer (utils/highlight-markdown.ts) so the editor and the
+ * read-only view can never disagree on what counts as a highlight:
+ *   - no whitespace directly inside the fences (`==x==` highlights, `== x ==` not)
  *   - non-empty content (`====` stays literal text)
+ *   - neither fence may sit inside code/math (a `==` inside `` `code` `` / `$math$`
+ *     is literal), so ``==a `b==c` d==`` highlights the whole span, not `a `b`
+ *   - a highlight may not cross a blank line / block boundary
  */
-const HIGHLIGHT_TOKEN_RE = /^==(?!\s)([\s\S]*?[^\s])==/;
 
 export const HighlightExtension = Highlight.extend({
   markdownTokenizer: {
@@ -36,12 +39,12 @@ export const HighlightExtension = Highlight.extend({
       return src.indexOf("==");
     },
     tokenize(src: string, _tokens: unknown, helpers: any) {
-      const match = HIGHLIGHT_TOKEN_RE.exec(src);
+      const match = matchHighlightAt(src, 0);
       if (!match) return undefined;
       return {
         type: "highlight",
-        raw: match[0],
-        tokens: helpers.inlineTokens(match[1]),
+        raw: src.slice(0, match.end),
+        tokens: helpers.inlineTokens(match.inner),
       };
     },
   },

@@ -61,4 +61,24 @@ describe("HighlightExtension — markdown serialization (cross-process protocol)
   it("does not treat == inside inline code as a highlight", () => {
     expect(roundTrip("`a ==b== c`")).toBe("`a ==b== c`");
   });
+
+  // Boundary regressions (Emacs review, PR #3661).
+
+  it("does not let a == inside inline code close the highlight", () => {
+    const e = makeEditor("==a `b==c` d==");
+    const html = e.getHTML();
+    // whole span highlighted; inner `==` stays inside an inline <code>
+    expect(html).toContain("<mark");
+    expect(html).toContain("<code");
+    expect(html).toContain("b==c");
+    // must NOT have stopped at the code's `==`
+    expect(html).not.toMatch(/<mark[^>]*>a\s*$/);
+    expect(e.getMarkdown().trim()).toBe("==a `b==c` d==");
+  });
+
+  it("does not highlight across a blank line (two literal paragraphs)", () => {
+    const e = makeEditor("==a\n\nb==");
+    expect(e.getHTML()).not.toContain("<mark");
+    expect(e.getMarkdown().trim()).toBe("==a\n\nb==");
+  });
 });
