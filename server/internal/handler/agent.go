@@ -196,6 +196,11 @@ type AgentTaskResponse struct {
 	Repos            []RepoData            `json:"repos,omitempty"`
 	ProjectID        string                `json:"project_id,omitempty"`        // issue's project, when present
 	ProjectTitle     string                `json:"project_title,omitempty"`     // for surfacing in agent context
+	// CEREBRO-PATCH(agent-task-issue-title): FIR-2763 M1 — daemon-resolved issue
+	// titles so the trace-upload sidecar can stamp human-readable names on each
+	// ai_proxy_logs row. Empty when unresolved; registry stores null.
+	IssueTitle       string                `json:"issue_title,omitempty"`
+	ParentIssueTitle string                `json:"parent_issue_title,omitempty"`
 	ProjectResources []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
 	CreatedAt        string                `json:"created_at"`
 	PriorSessionID   string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue

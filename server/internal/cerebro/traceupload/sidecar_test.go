@@ -9,20 +9,23 @@ import (
 // serialized into the trace_meta line exactly as the registry reader expects.
 func TestSidecarMetaLineAllFields(t *testing.T) {
 	s := Sidecar{
-		Runtime:         "claude",
-		TaskID:          "task-1",
-		SessionID:       "sess-1",
-		IssueID:         "issue-1",
-		AgentID:         "agent-1",
-		AgentName:       "Mia",
-		WorkspaceID:     "ws-1",
-		ProjectID:       "proj-1",
-		AutopilotID:     "auto-1",
-		ParentTaskID:    "parent-1",
-		CreatedByType:   "member",
-		Surface:         "issue",
-		TriggerUserID:   "user-1",
-		TriggerUserName: "Jesper",
+		Runtime:          "claude",
+		TaskID:           "task-1",
+		SessionID:        "sess-1",
+		IssueID:          "issue-1",
+		AgentID:          "agent-1",
+		AgentName:        "Mia",
+		WorkspaceID:      "ws-1",
+		ProjectID:        "proj-1",
+		AutopilotID:      "auto-1",
+		ParentTaskID:     "parent-1",
+		CreatedByType:    "member",
+		Surface:          "issue",
+		TriggerUserID:    "user-1",
+		TriggerUserName:  "Jesper",
+		IssueTitle:       "FIR-2763: Token-spend observability",
+		ParentIssueTitle: "FIR-2759: Vurder vores trace-system",
+		ProjectName:      "Agent platform",
 	}
 	line, err := s.MetaLine()
 	if err != nil {
@@ -33,21 +36,24 @@ func TestSidecarMetaLineAllFields(t *testing.T) {
 		t.Fatalf("unmarshal meta line: %v", err)
 	}
 	want := map[string]string{
-		"type":              "trace_meta",
-		"runtime":           "claude",
-		"task_id":           "task-1",
-		"session_id":        "sess-1",
-		"issue_id":          "issue-1",
-		"agent_id":          "agent-1",
-		"agent_name":        "Mia",
-		"workspace_id":      "ws-1",
-		"project_id":        "proj-1",
-		"autopilot_id":      "auto-1",
-		"parent_task_id":    "parent-1",
-		"created_by_type":   "member",
-		"surface":           "issue",
-		"trigger_user_id":   "user-1",
-		"trigger_user_name": "Jesper",
+		"type":               "trace_meta",
+		"runtime":            "claude",
+		"task_id":            "task-1",
+		"session_id":         "sess-1",
+		"issue_id":           "issue-1",
+		"agent_id":           "agent-1",
+		"agent_name":         "Mia",
+		"workspace_id":       "ws-1",
+		"project_id":         "proj-1",
+		"autopilot_id":       "auto-1",
+		"parent_task_id":     "parent-1",
+		"created_by_type":    "member",
+		"surface":            "issue",
+		"trigger_user_id":    "user-1",
+		"trigger_user_name":  "Jesper",
+		"issue_title":        "FIR-2763: Token-spend observability",
+		"parent_issue_title": "FIR-2759: Vurder vores trace-system",
+		"project_name":       "Agent platform",
 	}
 	for k, v := range want {
 		if got[k] != v {
@@ -65,7 +71,7 @@ func TestSidecarMetaLineOmitsEmpty(t *testing.T) {
 	}
 	var got map[string]any
 	_ = json.Unmarshal(line, &got)
-	for _, k := range []string{"issue_id", "agent_id", "project_id", "autopilot_id", "parent_task_id", "created_by_type", "surface", "trigger_user_id", "trigger_user_name"} {
+	for _, k := range []string{"issue_id", "agent_id", "project_id", "autopilot_id", "parent_task_id", "created_by_type", "surface", "trigger_user_id", "trigger_user_name", "issue_title", "parent_issue_title", "project_name"} {
 		if _, present := got[k]; present {
 			t.Errorf("expected %q omitted, but present", k)
 		}
