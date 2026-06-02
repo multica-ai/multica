@@ -69,7 +69,13 @@ export function McpConfigTab({
   const [mode, setMode] = useState<"visual" | "json">("visual");
 
   // The parsed mcpServers for the visual editor.
-  const servers = useMemo(() => extractServers(JSON.parse(text || "null")), [text]);
+  const servers = useMemo(() => {
+    try {
+      return extractServers(JSON.parse(text || "null"));
+    } catch {
+      return null;
+    }
+  }, [text]);
 
   // Sync local draft when the agent prop changes (e.g. after a successful
   // save invalidates the cache and a fresh agent arrives). We only sync
