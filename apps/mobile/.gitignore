@@ -15,6 +15,14 @@ web-build/
 ios/
 android/
 
+# Override the `ios/` rule above for local Expo native modules under
+# modules/<name>/ios/. Those Swift / podspec files are source, not
+# prebuild output, and MUST be tracked. Without this rescue, the
+# feishu-sso module's Swift implementation gets silently swallowed —
+# see lesson 2 in apps/mobile/CLAUDE.md.
+!modules/**/ios/
+!modules/**/ios/**
+
 # Override the root .gitignore "data/" rule (intended for backend runtime
 # dirs). apps/mobile/data/ is source — TanStack Query queries, mutations,
 # stores, ApiClient — and MUST be tracked.

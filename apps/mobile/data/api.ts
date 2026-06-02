@@ -376,6 +376,21 @@ class ApiClient {
     });
   }
 
+  /** Exchange a Feishu OAuth `code` (from LarkSSOSDK) for a Multica session.
+   *  `redirectUri` is the value the SDK used internally — Feishu's
+   *  /access_token endpoint validates it matches the original authorize
+   *  step. Mirror what lib/feishu-sso.ts → startFeishuLogin returned;
+   *  do not invent a value here. */
+  async feishuLogin(
+    code: string,
+    redirectUri: string,
+  ): Promise<LoginResponse> {
+    return this.fetch<LoginResponse>("/auth/feishu", {
+      method: "POST",
+      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+    });
+  }
+
   async getMe(opts?: { signal?: AbortSignal }): Promise<User> {
     return this.fetchValidated(
       "/api/me",
