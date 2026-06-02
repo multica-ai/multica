@@ -45,6 +45,7 @@ import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
 import { GanttView } from "../../issues/components/gantt-view";
 import { SwimLaneView } from "../../issues/components/swimlane-view";
+import { TreeView } from "../../issues/components/tree-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@wallts/ui/components/ui/skeleton";
 import { Button } from "@wallts/ui/components/ui/button";
@@ -213,7 +214,7 @@ function ProjectIssuesContent({
   // but non-empty project would surface a misleading "no issues" CTA.
   // For Board/List the bucketed cache really is the ground truth,
   // so an empty result means an empty project.
-  if (viewMode !== "gantt" && viewMode !== "swimlane" && projectIssues.length === 0) {
+  if (viewMode !== "gantt" && viewMode !== "swimlane" && viewMode !== "tree" && projectIssues.length === 0) {
     return (
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
         <ListTodo className="h-10 w-10 text-muted-foreground/40" />
@@ -277,6 +278,12 @@ function ProjectIssuesContent({
           myIssuesFilter={filter}
           sort={sort}
           projectId={projectId}
+        />
+      )}
+      {viewMode === "tree" && (
+        <TreeView
+          issues={issues}
+          childProgressMap={childProgressMap}
         />
       )}
     </div>

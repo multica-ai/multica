@@ -81,11 +81,13 @@
     "tooltip_list": "列表视图",
     "tooltip_gantt": "甘特图",
     "tooltip_swimlane": "泳道视图",
+    "tooltip_tree": "树形视图",
     "section": "视图",
     "board": "看板",
     "list": "列表",
     "gantt": "甘特图",
-    "swimlane": "泳道"
+    "swimlane": "泳道",
+    "tree": "树形视图"
   },
   "gantt": {
     "header_issue": "Issue",

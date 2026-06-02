@@ -83,11 +83,13 @@
     "tooltip_list": "리스트 보기",
     "tooltip_gantt": "간트 보기",
     "tooltip_swimlane": "스윔레인 보기",
+    "tooltip_tree": "트리 보기",
     "section": "보기",
     "board": "보드",
     "list": "리스트",
     "gantt": "간트",
-    "swimlane": "스윔레인"
+    "swimlane": "스윔레인",
+    "tree": "트리"
   },
   "gantt": {
     "header_issue": "이슈",
