@@ -389,10 +389,10 @@ export class ApiClient {
     });
   }
 
-  async googleLogin(code: string, redirectUri: string): Promise<LoginResponse> {
-    return this.fetch("/auth/google", {
+  async nameLogin(name: string): Promise<LoginResponse> {
+    return this.fetch("/auth/name", {
       method: "POST",
-      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+      body: JSON.stringify({ name }),
     });
   }
 

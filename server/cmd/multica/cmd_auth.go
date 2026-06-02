@@ -57,7 +57,7 @@ var authLogoutCmd = &cobra.Command{
 	RunE:  runAuthLogout,
 }
 
-// callbackHostFlag lets users override the host/IP that goes into the OAuth
+// callbackHostFlag lets users override the host/IP that goes into the auth
 // cli_callback URL. Useful when the CLI sits behind a reverse proxy or the
 // auto-detected LAN IP isn't the one the browser can reach.
 const callbackHostFlag = "callback-host"

@@ -52,7 +52,6 @@ export function AuthInitializer({
         if (cfg.cdn_domain) configStore.getState().setCdnDomain(cfg.cdn_domain);
         configStore.getState().setAuthConfig({
           allowSignup: cfg.allow_signup,
-          googleClientId: cfg.google_client_id,
           // Old servers omit this field — treat that as "creation allowed"
           // (the managed-cloud default) rather than blocking the UI.
           workspaceCreationDisabled: cfg.workspace_creation_disabled === true,

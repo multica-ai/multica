@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -39,8 +38,8 @@ var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allow
 
 const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
 
-// supportedLanguages mirrors `SUPPORTED_LOCALES` in packages/core/i18n/types.ts.
-// Keep both lists in sync when adding a locale — the user-controlled `language`
+// supportedLanguages mirrors SUPPORTED_LOCALES in packages/core/i18n/types.ts.
+// Keep both lists in sync when adding a locale — the user-controlled language
 // field round-trips through GetMe back into i18n.changeLanguage(), so without
 // validation an arbitrary string would persist and echo to every device.
 var supportedLanguages = map[string]struct{}{
@@ -55,7 +54,6 @@ type UserResponse struct {
 	Email                   string          `json:"email"`
 	AvatarURL               *string         `json:"avatar_url"`
 	Language                *string         `json:"language"`
-	// Pinned IANA tz; nil = no preference (use browser-detected tz).
 	Timezone                *string         `json:"timezone"`
 	OnboardedAt             *string         `json:"onboarded_at"`
 	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
@@ -65,16 +63,9 @@ type UserResponse struct {
 	UpdatedAt               string          `json:"updated_at"`
 }
 
-// MaxProfileDescriptionLen caps the user-supplied profile_description body.
-// Picked at 2000 chars per MUL-2406: enough room for role / stack / a few
-// preferences, short enough that injecting it into every agent brief
-// doesn't move the needle on prompt cost.
 const MaxProfileDescriptionLen = 2000
 
 func userToResponse(u db.User) UserResponse {
-	// JSONB column is []byte with DEFAULT '{}', so it's never nil at the DB
-	// level. Defensive coalesce just in case a future ALTER makes the column
-	// nullable and some row comes back with no default applied.
 	q := u.OnboardingQuestionnaire
 	if len(q) == 0 {
 		q = []byte("{}")
@@ -122,12 +113,10 @@ func isDevVerificationCode(code string) bool {
 	if isProductionEnv() {
 		return false
 	}
-
 	devCode := strings.TrimSpace(os.Getenv(devVerificationCodeEnv))
 	if !isSixDigitCode(devCode) {
 		return false
 	}
-
 	return subtle.ConstantTimeCompare([]byte(code), []byte(devCode)) == 1
 }
 
@@ -159,9 +148,7 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 }
 
 // findOrCreateUser returns the existing user for an email, or creates one if
-// none exists. isNew reports whether this call created the user — the signup
-// event fires on that edge, covering both the verification-code and Google
-// OAuth entry points.
+// none exists. isNew reports whether this call created the user.
 func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.User, isNew bool, err error) {
 	user, err = h.Queries.GetUserByEmail(ctx, email)
 	isNew = isNotFound(err)
@@ -199,7 +186,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 // empty string; that simply omits signup_source from the event rather
 // than sending percent-encoded garbage. Never fall back to r.Referer() —
 // the frontend has already sanitised attribution and a raw referer can
-// leak OAuth code/state from the callback URL.
+// leak sensitive URL parameters.
 //
 // The cap is the server-side defence against a client that manages to set
 // an oversize cookie; it matches SIGNUP_SOURCE_MAX_LEN on the frontend.
@@ -222,7 +209,7 @@ func signupSourceFromRequest(r *http.Request) string {
 
 func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
 	if !isNewUser {
-		return nil // existing users always allowed to log in
+		return nil
 	}
 
 	email = strings.ToLower(email)
@@ -231,22 +218,18 @@ func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
 		domain = email[at+1:]
 	}
 
-	// 1. explicit email whitelist always wins
 	if len(h.cfg.AllowedEmails) > 0 && contains(h.cfg.AllowedEmails, email) {
 		return nil
 	}
 
-	// 2. domain whitelist always wins
 	if len(h.cfg.AllowedEmailDomains) > 0 && contains(h.cfg.AllowedEmailDomains, domain) {
 		return nil
 	}
 
-	// 3. general signup flag
 	if !h.cfg.AllowSignup {
 		return ErrSignupProhibited
 	}
 
-	// 4. if allowlists are set but didn't match, block
 	if len(h.cfg.AllowedEmailDomains) > 0 || len(h.cfg.AllowedEmails) > 0 {
 		return ErrSignupProhibited
 	}
@@ -276,15 +259,12 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check signup restrictions before sending magic link
 	_, err := h.Queries.GetUserByEmail(r.Context(), email)
 	if err != nil {
 		if !isNotFound(err) {
-			// Real database/query error → return 500
 			writeError(w, http.StatusInternalServerError, "failed to lookup user")
 			return
 		}
-		// User does not exist → treat as new user
 		isNewUser := true
 		if err := h.checkSignupAllowed(email, isNewUser); err != nil {
 			var signupErr SignupError
@@ -296,10 +276,8 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		// User already exists → always allowed to login
 		isNewUser := false
 		if err := h.checkSignupAllowed(email, isNewUser); err != nil {
-			// This should rarely happen, but handle it anyway
 			var signupErr SignupError
 			if errors.As(err, &signupErr) {
 				writeError(w, http.StatusForbidden, signupErr.Error())
@@ -310,7 +288,6 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Rate limit: max 1 code per 60 seconds per email
 	latest, err := h.Queries.GetLatestCodeByEmail(r.Context(), email)
 	if err == nil && time.Since(latest.CreatedAt.Time) < 60*time.Second {
 		writeError(w, http.StatusTooManyRequests, "please wait before requesting another code")
@@ -339,7 +316,6 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Best-effort cleanup of expired codes
 	_ = h.Queries.DeleteExpiredVerificationCodes(r.Context())
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Verification code sent"})
@@ -399,12 +375,10 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set HttpOnly auth cookie (browser clients) + CSRF cookie.
 	if err := auth.SetAuthCookies(w, tokenString); err != nil {
 		slog.Warn("failed to set auth cookies", "error", err)
 	}
 
-	// Set CloudFront signed cookies for CDN access.
 	if h.CFSigner != nil {
 		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(auth.AuthTokenTTL())) {
 			http.SetCookie(w, cookie)
@@ -438,115 +412,56 @@ type UpdateMeRequest struct {
 	AvatarURL          *string `json:"avatar_url"`
 	Language           *string `json:"language"`
 	ProfileDescription *string `json:"profile_description"`
-	// IANA tz to pin; "" clears back to NULL; nil leaves untouched.
-	Timezone *string `json:"timezone"`
+	Timezone           *string `json:"timezone"`
 }
 
-type GoogleLoginRequest struct {
-	Code        string `json:"code"`
-	RedirectURI string `json:"redirect_uri"`
+// NameLoginRequest is the request body for name-based login.
+// Users authenticate by providing a name only — no OAuth, no email.
+// A synthetic email (name@multica.local) is used internally to satisfy
+// the DB NOT NULL email constraint and provide a unique user key.
+type NameLoginRequest struct {
+	Name string `json:"name"`
 }
 
-type googleTokenResponse struct {
-	AccessToken string `json:"access_token"`
-	IDToken     string `json:"id_token"`
-	TokenType   string `json:"token_type"`
-}
+const nameLoginDomain = "multica.local"
 
-type googleUserInfo struct {
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	Picture string `json:"picture"`
-}
-
-func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
-	var req GoogleLoginRequest
+func (h *Handler) NameLogin(w http.ResponseWriter, r *http.Request) {
+	var req NameLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	if req.Code == "" {
-		writeError(w, http.StatusBadRequest, "code is required")
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 
-	clientID := os.Getenv("GOOGLE_CLIENT_ID")
-	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
-	if clientID == "" || clientSecret == "" {
-		writeError(w, http.StatusServiceUnavailable, "Google login is not configured")
+	if utf8.RuneCountInString(name) > 100 {
+		writeError(w, http.StatusBadRequest, "name is too long (max 100 characters)")
 		return
 	}
 
-	redirectURI := req.RedirectURI
-	if redirectURI == "" {
-		redirectURI = os.Getenv("GOOGLE_REDIRECT_URI")
-	}
-
-	// Exchange authorization code for tokens.
-	tokenResp, err := http.PostForm("https://oauth2.googleapis.com/token", url.Values{
-		"code":          {req.Code},
-		"client_id":     {clientID},
-		"client_secret": {clientSecret},
-		"redirect_uri":  {redirectURI},
-		"grant_type":    {"authorization_code"},
-	})
-	if err != nil {
-		slog.Error("google oauth token exchange failed", "error", err)
-		writeError(w, http.StatusBadGateway, "failed to exchange code with Google")
-		return
-	}
-	defer tokenResp.Body.Close()
-
-	tokenBody, err := io.ReadAll(tokenResp.Body)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "failed to read Google token response")
+	// Reject names containing @ to prevent synthetic email collisions
+	// with real email addresses (e.g. "alice@example.com" would map to
+	// alice@example.com@multica.local which is unexpected).
+	if strings.Contains(name, "@") {
+		writeError(w, http.StatusBadRequest, "name must not contain @")
 		return
 	}
 
-	if tokenResp.StatusCode != http.StatusOK {
-		slog.Error("google oauth token exchange returned error", "status", tokenResp.StatusCode, "body", string(tokenBody))
-		writeError(w, http.StatusBadRequest, "failed to exchange code with Google")
+	// Reject names with non-printable control characters (null bytes,
+	// newlines, etc.) that would corrupt the synthetic email or display.
+	if strings.ContainsFunc(name, func(r rune) bool { return r < 32 || r == 127 }) {
+		writeError(w, http.StatusBadRequest, "name contains invalid characters")
 		return
 	}
 
-	var gToken googleTokenResponse
-	if err := json.Unmarshal(tokenBody, &gToken); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Google token response")
-		return
-	}
+	// Generate synthetic email: name@multica.local
+	syntheticEmail := strings.ToLower(name) + "@" + nameLoginDomain
 
-	// Fetch user info from Google.
-	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
-	if err != nil {
-		slog.Error("failed to create userinfo request", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
-
-	userInfoResp, err := http.DefaultClient.Do(userInfoReq)
-	if err != nil {
-		slog.Error("google userinfo fetch failed", "error", err)
-		writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
-		return
-	}
-	defer userInfoResp.Body.Close()
-
-	var gUser googleUserInfo
-	if err := json.NewDecoder(userInfoResp.Body).Decode(&gUser); err != nil {
-		writeError(w, http.StatusBadGateway, "failed to parse Google user info")
-		return
-	}
-
-	if gUser.Email == "" {
-		writeError(w, http.StatusBadRequest, "Google account has no email")
-		return
-	}
-
-	email := strings.ToLower(strings.TrimSpace(gUser.Email))
-
-	user, isNew, err := h.findOrCreateUser(r.Context(), email)
+	user, isNew, err := h.findOrCreateUser(r.Context(), syntheticEmail)
 	if err != nil {
 		var signupErr SignupError
 		if errors.As(err, &signupErr) {
@@ -556,41 +471,24 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create user")
 		return
 	}
+
+	// Preserve original casing of the name for new users
 	if isNew {
-		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
-		evt.Properties["auth_method"] = "google"
-		h.Analytics.Capture(evt)
-	}
-
-	// Update name and avatar from Google profile if the user was just created
-	// (default name is email prefix) or has no avatar yet.
-	needsUpdate := false
-	newName := user.Name
-	newAvatar := user.AvatarUrl
-
-	if gUser.Name != "" && user.Name == strings.Split(email, "@")[0] {
-		newName = gUser.Name
-		needsUpdate = true
-	}
-	if gUser.Picture != "" && !user.AvatarUrl.Valid {
-		newAvatar = pgtype.Text{String: gUser.Picture, Valid: true}
-		needsUpdate = true
-	}
-
-	if needsUpdate {
-		updated, err := h.Queries.UpdateUser(r.Context(), db.UpdateUserParams{
-			ID:        user.ID,
-			Name:      newName,
-			AvatarUrl: newAvatar,
+		updated, updateErr := h.Queries.UpdateUser(r.Context(), db.UpdateUserParams{
+			ID:   user.ID,
+			Name: name,
 		})
-		if err == nil {
+		if updateErr == nil {
 			user = updated
 		}
+		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
+		evt.Properties["auth_method"] = "name"
+		h.Analytics.Capture(evt)
 	}
 
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
-		slog.Warn("google login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
+		slog.Warn("name login failed", append(logger.RequestAttrs(r), "error", err, "name", name)...)
 		writeError(w, http.StatusInternalServerError, "failed to generate token")
 		return
 	}
@@ -605,7 +503,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	slog.Info("user logged in via google", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	slog.Info("user logged in via name", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "name", name)...)
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Token: tokenString,
 		User:  userToResponse(user),
@@ -613,8 +511,6 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // IssueCliToken returns a fresh JWT for the authenticated user.
-// This allows cookie-authenticated browser sessions to obtain a bearer token
-// that can be handed off to the CLI via the cli_callback redirect.
 func (h *Handler) IssueCliToken(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -685,9 +581,6 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		params.Language = pgtype.Text{String: lang, Valid: true}
 	}
 	if req.ProfileDescription != nil {
-		// Count runes, not bytes: 2000 chars of Chinese must not be rejected
-		// as ~6000 bytes. utf8.RuneCountInString handles invalid UTF-8 by
-		// counting each bad byte as one rune, which still bounds the column.
 		desc := strings.TrimSpace(*req.ProfileDescription)
 		if utf8.RuneCountInString(desc) > MaxProfileDescriptionLen {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("profile_description exceeds %d characters", MaxProfileDescriptionLen))
@@ -697,9 +590,6 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Timezone != nil {
-		// Valid=false → column untouched; Valid=true + "" → clear to
-		// NULL; Valid=true + IANA → set. Three-way semantics enforced
-		// in the UpdateUser SQL CASE.
 		tz := strings.TrimSpace(*req.Timezone)
 		if tz != "" {
 			if loc, err := time.LoadLocation(tz); err != nil || loc == nil {
