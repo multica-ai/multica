@@ -278,6 +278,19 @@ type GithubInstallation struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type GithubPrReview struct {
+	ID                pgtype.UUID        `json:"id"`
+	PrID              pgtype.UUID        `json:"pr_id"`
+	ReviewID          int64              `json:"review_id"`
+	ReviewerLogin     string             `json:"reviewer_login"`
+	ReviewerAvatarUrl pgtype.Text        `json:"reviewer_avatar_url"`
+	State             string             `json:"state"`
+	Body              pgtype.Text        `json:"body"`
+	SubmittedAt       pgtype.Timestamptz `json:"submitted_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type GithubPullRequest struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
