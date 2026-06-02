@@ -24,6 +24,20 @@ func (q *Queries) BumpChannelThread(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const countMessageReplies = `-- name: CountMessageReplies :one
+SELECT count(*)::int AS reply_count
+FROM channel_message
+WHERE reply_to_id = $1
+`
+
+// Counts replies to a specific message.
+func (q *Queries) CountMessageReplies(ctx context.Context, replyToID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countMessageReplies, replyToID)
+	var reply_count int32
+	err := row.Scan(&reply_count)
+	return reply_count, err
+}
+
 const createChannel = `-- name: CreateChannel :one
 INSERT INTO channel (workspace_id, name, slug, description, access_mode, created_by)
 VALUES ($1, $2, $3, COALESCE($4, ''), COALESCE($5, 'open'), $6)
@@ -68,7 +82,7 @@ func (q *Queries) CreateChannel(ctx context.Context, arg CreateChannelParams) (C
 const createChannelMessage = `-- name: CreateChannelMessage :one
 INSERT INTO channel_message (thread_id, channel_id, workspace_id, author_type, author_id, content)
 VALUES ($1, $2, $3, $4, $6, $5)
-RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at
+RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id
 `
 
 type CreateChannelMessageParams struct {
@@ -100,21 +114,105 @@ func (q *Queries) CreateChannelMessage(ctx context.Context, arg CreateChannelMes
 		&i.Content,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ReplyToID,
+	)
+	return i, err
+}
+
+const createChannelMessageReply = `-- name: CreateChannelMessageReply :one
+INSERT INTO channel_message (thread_id, channel_id, workspace_id, author_type, author_id, content, reply_to_id)
+VALUES ($1, $2, $3, $4, $7, $5, $6)
+RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id
+`
+
+type CreateChannelMessageReplyParams struct {
+	ThreadID    pgtype.UUID `json:"thread_id"`
+	ChannelID   pgtype.UUID `json:"channel_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AuthorType  string      `json:"author_type"`
+	Content     string      `json:"content"`
+	ReplyToID   pgtype.UUID `json:"reply_to_id"`
+	AuthorID    pgtype.UUID `json:"author_id"`
+}
+
+// Creates a reply message linked to a parent message, within its thread.
+func (q *Queries) CreateChannelMessageReply(ctx context.Context, arg CreateChannelMessageReplyParams) (ChannelMessage, error) {
+	row := q.db.QueryRow(ctx, createChannelMessageReply,
+		arg.ThreadID,
+		arg.ChannelID,
+		arg.WorkspaceID,
+		arg.AuthorType,
+		arg.Content,
+		arg.ReplyToID,
+		arg.AuthorID,
+	)
+	var i ChannelMessage
+	err := row.Scan(
+		&i.ID,
+		&i.ThreadID,
+		&i.ChannelID,
+		&i.WorkspaceID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ReplyToID,
+	)
+	return i, err
+}
+
+const createChannelMessageTopLevel = `-- name: CreateChannelMessageTopLevel :one
+INSERT INTO channel_message (channel_id, workspace_id, author_type, author_id, content)
+VALUES ($1, $2, $3, $5, $4)
+RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id
+`
+
+type CreateChannelMessageTopLevelParams struct {
+	ChannelID   pgtype.UUID `json:"channel_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AuthorType  string      `json:"author_type"`
+	Content     string      `json:"content"`
+	AuthorID    pgtype.UUID `json:"author_id"`
+}
+
+// Creates a top-level message in a channel (no thread).
+func (q *Queries) CreateChannelMessageTopLevel(ctx context.Context, arg CreateChannelMessageTopLevelParams) (ChannelMessage, error) {
+	row := q.db.QueryRow(ctx, createChannelMessageTopLevel,
+		arg.ChannelID,
+		arg.WorkspaceID,
+		arg.AuthorType,
+		arg.Content,
+		arg.AuthorID,
+	)
+	var i ChannelMessage
+	err := row.Scan(
+		&i.ID,
+		&i.ThreadID,
+		&i.ChannelID,
+		&i.WorkspaceID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ReplyToID,
 	)
 	return i, err
 }
 
 const createChannelThread = `-- name: CreateChannelThread :one
-INSERT INTO channel_thread (channel_id, workspace_id, title, created_by)
-VALUES ($1, $2, COALESCE($3, ''), $4)
-RETURNING id, channel_id, workspace_id, title, created_by, message_count, last_message_at, created_at, updated_at
+INSERT INTO channel_thread (channel_id, workspace_id, title, created_by, root_message_id)
+VALUES ($1, $2, COALESCE($3, ''), $4, $5)
+RETURNING id, channel_id, workspace_id, title, created_by, message_count, last_message_at, created_at, updated_at, root_message_id
 `
 
 type CreateChannelThreadParams struct {
-	ChannelID   pgtype.UUID `json:"channel_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Title       interface{} `json:"title"`
-	CreatedBy   pgtype.UUID `json:"created_by"`
+	ChannelID     pgtype.UUID `json:"channel_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Title         interface{} `json:"title"`
+	CreatedBy     pgtype.UUID `json:"created_by"`
+	RootMessageID pgtype.UUID `json:"root_message_id"`
 }
 
 func (q *Queries) CreateChannelThread(ctx context.Context, arg CreateChannelThreadParams) (ChannelThread, error) {
@@ -122,6 +220,46 @@ func (q *Queries) CreateChannelThread(ctx context.Context, arg CreateChannelThre
 		arg.ChannelID,
 		arg.WorkspaceID,
 		arg.Title,
+		arg.CreatedBy,
+		arg.RootMessageID,
+	)
+	var i ChannelThread
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.CreatedBy,
+		&i.MessageCount,
+		&i.LastMessageAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RootMessageID,
+	)
+	return i, err
+}
+
+const createChannelThreadFromMessage = `-- name: CreateChannelThreadFromMessage :one
+INSERT INTO channel_thread (channel_id, workspace_id, title, created_by, root_message_id)
+VALUES ($1, $2, $3, $5, $4)
+RETURNING id, channel_id, workspace_id, title, created_by, message_count, last_message_at, created_at, updated_at, root_message_id
+`
+
+type CreateChannelThreadFromMessageParams struct {
+	ChannelID     pgtype.UUID `json:"channel_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Title         string      `json:"title"`
+	RootMessageID pgtype.UUID `json:"root_message_id"`
+	CreatedBy     pgtype.UUID `json:"created_by"`
+}
+
+// Creates a thread anchored to a root message.
+func (q *Queries) CreateChannelThreadFromMessage(ctx context.Context, arg CreateChannelThreadFromMessageParams) (ChannelThread, error) {
+	row := q.db.QueryRow(ctx, createChannelThreadFromMessage,
+		arg.ChannelID,
+		arg.WorkspaceID,
+		arg.Title,
+		arg.RootMessageID,
 		arg.CreatedBy,
 	)
 	var i ChannelThread
@@ -135,6 +273,7 @@ func (q *Queries) CreateChannelThread(ctx context.Context, arg CreateChannelThre
 		&i.LastMessageAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RootMessageID,
 	)
 	return i, err
 }
@@ -199,6 +338,73 @@ func (q *Queries) GetChannel(ctx context.Context, arg GetChannelParams) (Channel
 	return i, err
 }
 
+const getChannelContext = `-- name: GetChannelContext :many
+
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+    u.name AS author_name,
+    u.avatar_url AS author_avatar_url
+FROM channel_message m
+LEFT JOIN "user" u ON u.id = m.author_id
+WHERE m.channel_id = $1 AND m.thread_id IS NULL
+ORDER BY m.created_at DESC
+LIMIT $2
+`
+
+type GetChannelContextParams struct {
+	ChannelID pgtype.UUID `json:"channel_id"`
+	Limit     int32       `json:"limit"`
+}
+
+type GetChannelContextRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	ThreadID        pgtype.UUID        `json:"thread_id"`
+	ChannelID       pgtype.UUID        `json:"channel_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	AuthorType      string             `json:"author_type"`
+	AuthorID        pgtype.UUID        `json:"author_id"`
+	Content         string             `json:"content"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ReplyToID       pgtype.UUID        `json:"reply_to_id"`
+	AuthorName      pgtype.Text        `json:"author_name"`
+	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
+}
+
+// ============ Channel context (for agents) ============
+// Returns the N most recent top-level messages in a channel for agent context injection.
+func (q *Queries) GetChannelContext(ctx context.Context, arg GetChannelContextParams) ([]GetChannelContextRow, error) {
+	rows, err := q.db.Query(ctx, getChannelContext, arg.ChannelID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetChannelContextRow{}
+	for rows.Next() {
+		var i GetChannelContextRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ThreadID,
+			&i.ChannelID,
+			&i.WorkspaceID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ReplyToID,
+			&i.AuthorName,
+			&i.AuthorAvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getChannelMember = `-- name: GetChannelMember :one
 SELECT channel_id, user_id, role, last_read_at, joined_at FROM channel_member WHERE channel_id = $1 AND user_id = $2
 `
@@ -221,8 +427,30 @@ func (q *Queries) GetChannelMember(ctx context.Context, arg GetChannelMemberPara
 	return i, err
 }
 
+const getChannelMessage = `-- name: GetChannelMessage :one
+SELECT id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id FROM channel_message WHERE id = $1
+`
+
+func (q *Queries) GetChannelMessage(ctx context.Context, id pgtype.UUID) (ChannelMessage, error) {
+	row := q.db.QueryRow(ctx, getChannelMessage, id)
+	var i ChannelMessage
+	err := row.Scan(
+		&i.ID,
+		&i.ThreadID,
+		&i.ChannelID,
+		&i.WorkspaceID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ReplyToID,
+	)
+	return i, err
+}
+
 const getChannelThread = `-- name: GetChannelThread :one
-SELECT id, channel_id, workspace_id, title, created_by, message_count, last_message_at, created_at, updated_at FROM channel_thread WHERE id = $1
+SELECT id, channel_id, workspace_id, title, created_by, message_count, last_message_at, created_at, updated_at, root_message_id FROM channel_thread WHERE id = $1
 `
 
 func (q *Queries) GetChannelThread(ctx context.Context, id pgtype.UUID) (ChannelThread, error) {
@@ -238,6 +466,30 @@ func (q *Queries) GetChannelThread(ctx context.Context, id pgtype.UUID) (Channel
 		&i.LastMessageAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RootMessageID,
+	)
+	return i, err
+}
+
+const getThreadByRootMessage = `-- name: GetThreadByRootMessage :one
+SELECT id, channel_id, workspace_id, title, created_by, message_count, last_message_at, created_at, updated_at, root_message_id FROM channel_thread WHERE root_message_id = $1
+`
+
+// Finds the thread created from a specific root message.
+func (q *Queries) GetThreadByRootMessage(ctx context.Context, rootMessageID pgtype.UUID) (ChannelThread, error) {
+	row := q.db.QueryRow(ctx, getThreadByRootMessage, rootMessageID)
+	var i ChannelThread
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.CreatedBy,
+		&i.MessageCount,
+		&i.LastMessageAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RootMessageID,
 	)
 	return i, err
 }
@@ -310,9 +562,128 @@ func (q *Queries) ListChannelMembers(ctx context.Context, channelID pgtype.UUID)
 	return items, nil
 }
 
+const listChannelMessages = `-- name: ListChannelMessages :many
+
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+    COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
+FROM channel_message m
+WHERE m.channel_id = $1 AND m.thread_id IS NULL
+ORDER BY m.created_at ASC
+`
+
+type ListChannelMessagesRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	ThreadID    pgtype.UUID        `json:"thread_id"`
+	ChannelID   pgtype.UUID        `json:"channel_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	Content     string             `json:"content"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ReplyToID   pgtype.UUID        `json:"reply_to_id"`
+	ReplyCount  int32              `json:"reply_count"`
+}
+
+// ============ Messages (V2 — top-level flat messages) ============
+// Lists top-level channel messages (thread_id IS NULL), with reply_count.
+func (q *Queries) ListChannelMessages(ctx context.Context, channelID pgtype.UUID) ([]ListChannelMessagesRow, error) {
+	rows, err := q.db.Query(ctx, listChannelMessages, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelMessagesRow{}
+	for rows.Next() {
+		var i ListChannelMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ThreadID,
+			&i.ChannelID,
+			&i.WorkspaceID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ReplyToID,
+			&i.ReplyCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChannelMessagesPaginated = `-- name: ListChannelMessagesPaginated :many
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+    COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
+FROM channel_message m
+WHERE m.channel_id = $1 AND m.thread_id IS NULL AND m.created_at < $2
+ORDER BY m.created_at DESC
+LIMIT $3
+`
+
+type ListChannelMessagesPaginatedParams struct {
+	ChannelID pgtype.UUID        `json:"channel_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Limit     int32              `json:"limit"`
+}
+
+type ListChannelMessagesPaginatedRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	ThreadID    pgtype.UUID        `json:"thread_id"`
+	ChannelID   pgtype.UUID        `json:"channel_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	Content     string             `json:"content"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ReplyToID   pgtype.UUID        `json:"reply_to_id"`
+	ReplyCount  int32              `json:"reply_count"`
+}
+
+// Lists top-level channel messages with cursor-based pagination (before a timestamp).
+func (q *Queries) ListChannelMessagesPaginated(ctx context.Context, arg ListChannelMessagesPaginatedParams) ([]ListChannelMessagesPaginatedRow, error) {
+	rows, err := q.db.Query(ctx, listChannelMessagesPaginated, arg.ChannelID, arg.CreatedAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelMessagesPaginatedRow{}
+	for rows.Next() {
+		var i ListChannelMessagesPaginatedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ThreadID,
+			&i.ChannelID,
+			&i.WorkspaceID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ReplyToID,
+			&i.ReplyCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelThreads = `-- name: ListChannelThreads :many
 
-SELECT t.id, t.channel_id, t.workspace_id, t.title, t.created_by, t.message_count, t.last_message_at, t.created_at, t.updated_at, u.name AS creator_name, u.avatar_url AS creator_avatar_url,
+SELECT t.id, t.channel_id, t.workspace_id, t.title, t.created_by, t.message_count, t.last_message_at, t.created_at, t.updated_at, t.root_message_id, u.name AS creator_name, u.avatar_url AS creator_avatar_url,
     COALESCE((
         SELECT count(*) FROM issue i WHERE i.source_thread_id = t.id
     )::bigint, 0)::bigint AS issue_count
@@ -332,6 +703,7 @@ type ListChannelThreadsRow struct {
 	LastMessageAt    pgtype.Timestamptz `json:"last_message_at"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	RootMessageID    pgtype.UUID        `json:"root_message_id"`
 	CreatorName      pgtype.Text        `json:"creator_name"`
 	CreatorAvatarUrl pgtype.Text        `json:"creator_avatar_url"`
 	IssueCount       int64              `json:"issue_count"`
@@ -357,6 +729,7 @@ func (q *Queries) ListChannelThreads(ctx context.Context, channelID pgtype.UUID)
 			&i.LastMessageAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RootMessageID,
 			&i.CreatorName,
 			&i.CreatorAvatarUrl,
 			&i.IssueCount,
@@ -378,14 +751,18 @@ SELECT
     cm.role          AS member_role,
     cm.last_read_at  AS member_last_read_at,
     (cm.user_id IS NOT NULL)::boolean AS is_member,
-    COALESCE((
-        SELECT max(t.last_message_at) FROM channel_thread t WHERE t.channel_id = c.id
-    ), c.created_at)::timestamptz AS last_activity_at,
+    COALESCE(
+        GREATEST(
+            (SELECT max(m.created_at) FROM channel_message m WHERE m.channel_id = c.id),
+            (SELECT max(t.last_message_at) FROM channel_thread t WHERE t.channel_id = c.id)
+        ),
+        c.created_at
+    )::timestamptz AS last_activity_at,
     (
         cm.user_id IS NOT NULL
         AND EXISTS (
-            SELECT 1 FROM channel_thread t
-            WHERE t.channel_id = c.id AND t.last_message_at > cm.last_read_at
+            SELECT 1 FROM channel_message m
+            WHERE m.channel_id = c.id AND m.created_at > cm.last_read_at
         )
     )::boolean AS has_unread
 FROM channel c
@@ -423,7 +800,7 @@ type ListChannelsRow struct {
 // ============ Channels ============
 // Lists channels visible to a user: open channels + channels the user is a member of.
 // Includes the user's membership row (if any) and an unread flag computed from
-// the latest thread activity vs the member's last_read_at.
+// the latest message activity vs the member's last_read_at.
 func (q *Queries) ListChannels(ctx context.Context, arg ListChannelsParams) ([]ListChannelsRow, error) {
 	rows, err := q.db.Query(ctx, listChannels, arg.WorkspaceID, arg.UserID)
 	if err != nil {
@@ -450,6 +827,45 @@ func (q *Queries) ListChannels(ctx context.Context, arg ListChannelsParams) ([]L
 			&i.IsMember,
 			&i.LastActivityAt,
 			&i.HasUnread,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMessageReplies = `-- name: ListMessageReplies :many
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id FROM channel_message m
+JOIN channel_thread t ON t.id = m.thread_id
+WHERE t.root_message_id = $1
+ORDER BY m.created_at ASC
+`
+
+// Lists all replies (thread messages) for a given root message.
+func (q *Queries) ListMessageReplies(ctx context.Context, rootMessageID pgtype.UUID) ([]ChannelMessage, error) {
+	rows, err := q.db.Query(ctx, listMessageReplies, rootMessageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChannelMessage{}
+	for rows.Next() {
+		var i ChannelMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.ThreadID,
+			&i.ChannelID,
+			&i.WorkspaceID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ReplyToID,
 		); err != nil {
 			return nil, err
 		}
@@ -506,12 +922,12 @@ func (q *Queries) ListThreadIssues(ctx context.Context, sourceThreadID pgtype.UU
 
 const listThreadMessages = `-- name: ListThreadMessages :many
 
-SELECT id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at FROM channel_message
+SELECT id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id FROM channel_message
 WHERE thread_id = $1
 ORDER BY created_at ASC
 `
 
-// ============ Messages ============
+// ============ Messages (V1 — thread-scoped, kept for backward compat) ============
 func (q *Queries) ListThreadMessages(ctx context.Context, threadID pgtype.UUID) ([]ChannelMessage, error) {
 	rows, err := q.db.Query(ctx, listThreadMessages, threadID)
 	if err != nil {
@@ -531,6 +947,7 @@ func (q *Queries) ListThreadMessages(ctx context.Context, threadID pgtype.UUID) 
 			&i.Content,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ReplyToID,
 		); err != nil {
 			return nil, err
 		}
@@ -631,7 +1048,7 @@ func (q *Queries) UpdateChannel(ctx context.Context, arg UpdateChannelParams) (C
 const updateChannelThreadTitle = `-- name: UpdateChannelThreadTitle :one
 UPDATE channel_thread SET title = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, channel_id, workspace_id, title, created_by, message_count, last_message_at, created_at, updated_at
+RETURNING id, channel_id, workspace_id, title, created_by, message_count, last_message_at, created_at, updated_at, root_message_id
 `
 
 type UpdateChannelThreadTitleParams struct {
@@ -652,6 +1069,7 @@ func (q *Queries) UpdateChannelThreadTitle(ctx context.Context, arg UpdateChanne
 		&i.LastMessageAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RootMessageID,
 	)
 	return i, err
 }

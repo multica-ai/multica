@@ -244,6 +244,7 @@ type ChannelMessage struct {
 	Content     string             `json:"content"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ReplyToID   pgtype.UUID        `json:"reply_to_id"`
 }
 
 type ChannelThread struct {
@@ -256,6 +257,7 @@ type ChannelThread struct {
 	LastMessageAt pgtype.Timestamptz `json:"last_message_at"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	RootMessageID pgtype.UUID        `json:"root_message_id"`
 }
 
 type ChatMessage struct {

@@ -14,14 +14,12 @@ import (
 
 // ---------------------------------------------------------------------------
 // Channel commands — lightweight human+agent collaboration (OPE-1943).
-// Channels contain threads; threads contain messages. Issues are produced from
-// threads and reflow their status back. Agents post into threads via the same
-// message endpoint (author resolved from the task token).
+// V2: channels contain flat messages; threads are created implicitly on reply.
 // ---------------------------------------------------------------------------
 
 var channelCmd = &cobra.Command{
 	Use:   "channel",
-	Short: "Work with channels (threaded human+agent discussion)",
+	Short: "Work with channels (human+agent discussion)",
 }
 
 var channelListCmd = &cobra.Command{
@@ -36,9 +34,67 @@ var channelCreateCmd = &cobra.Command{
 	RunE:  runChannelCreate,
 }
 
+// ---- message subcommands ----
+
+var channelMessageCmd = &cobra.Command{
+	Use:   "message",
+	Short: "Work with channel messages",
+}
+
+var channelMessageListCmd = &cobra.Command{
+	Use:   "list <channel-id>",
+	Short: "List top-level messages in a channel",
+	Args:  exactArgs(1),
+	RunE:  runChannelMessageList,
+}
+
+var channelMessageSendCmd = &cobra.Command{
+	Use:   "send <channel-id>",
+	Short: "Post a message into a channel",
+	Args:  exactArgs(1),
+	RunE:  runChannelMessageSend,
+}
+
+var channelMessageReplyCmd = &cobra.Command{
+	Use:   "reply <channel-id> <message-id>",
+	Short: "Reply to a message (creates thread if needed)",
+	Args:  exactArgs(2),
+	RunE:  runChannelMessageReply,
+}
+
+// ---- member subcommands ----
+
+var channelMemberCmd = &cobra.Command{
+	Use:   "member",
+	Short: "Manage channel members",
+}
+
+var channelMemberListCmd = &cobra.Command{
+	Use:   "list <channel-id>",
+	Short: "List members of a channel",
+	Args:  exactArgs(1),
+	RunE:  runChannelMemberList,
+}
+
+var channelMemberAddCmd = &cobra.Command{
+	Use:   "add <channel-id>",
+	Short: "Add a member to a channel",
+	Args:  exactArgs(1),
+	RunE:  runChannelMemberAdd,
+}
+
+var channelMemberRemoveCmd = &cobra.Command{
+	Use:   "remove <channel-id>",
+	Short: "Remove a member from a channel",
+	Args:  exactArgs(1),
+	RunE:  runChannelMemberRemove,
+}
+
+// ---- thread subcommands (V1 backward compat) ----
+
 var channelThreadCmd = &cobra.Command{
 	Use:   "thread",
-	Short: "Work with channel threads",
+	Short: "Work with channel threads (legacy)",
 }
 
 var channelThreadListCmd = &cobra.Command{
@@ -55,34 +111,33 @@ var channelThreadCreateCmd = &cobra.Command{
 	RunE:  runChannelThreadCreate,
 }
 
-var channelMessageCmd = &cobra.Command{
-	Use:   "message",
-	Short: "Work with thread messages",
-}
+// ---- context subcommand ----
 
-var channelMessageListCmd = &cobra.Command{
-	Use:   "list <channel-id> <thread-id>",
-	Short: "List messages in a thread",
-	Args:  exactArgs(2),
-	RunE:  runChannelMessageList,
-}
-
-var channelMessageSendCmd = &cobra.Command{
-	Use:   "send <channel-id> <thread-id>",
-	Short: "Post a message into a thread",
-	Args:  exactArgs(2),
-	RunE:  runChannelMessageSend,
+var channelContextCmd = &cobra.Command{
+	Use:   "context <channel-id>",
+	Short: "Get channel context (info, members, recent messages) for agents",
+	Args:  exactArgs(1),
+	RunE:  runChannelContext,
 }
 
 func init() {
 	channelCmd.AddCommand(channelListCmd)
 	channelCmd.AddCommand(channelCreateCmd)
-	channelCmd.AddCommand(channelThreadCmd)
 	channelCmd.AddCommand(channelMessageCmd)
-	channelThreadCmd.AddCommand(channelThreadListCmd)
-	channelThreadCmd.AddCommand(channelThreadCreateCmd)
+	channelCmd.AddCommand(channelMemberCmd)
+	channelCmd.AddCommand(channelThreadCmd)
+	channelCmd.AddCommand(channelContextCmd)
+
 	channelMessageCmd.AddCommand(channelMessageListCmd)
 	channelMessageCmd.AddCommand(channelMessageSendCmd)
+	channelMessageCmd.AddCommand(channelMessageReplyCmd)
+
+	channelMemberCmd.AddCommand(channelMemberListCmd)
+	channelMemberCmd.AddCommand(channelMemberAddCmd)
+	channelMemberCmd.AddCommand(channelMemberRemoveCmd)
+
+	channelThreadCmd.AddCommand(channelThreadListCmd)
+	channelThreadCmd.AddCommand(channelThreadCreateCmd)
 
 	channelListCmd.Flags().String("output", "table", "Output format: table or json")
 	channelListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
@@ -92,6 +147,25 @@ func init() {
 	channelCreateCmd.Flags().String("access-mode", "open", "Access mode: open or invite")
 	channelCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
+	channelMessageListCmd.Flags().String("output", "table", "Output format: table or json")
+	channelMessageListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
+
+	channelMessageSendCmd.Flags().String("content", "", "Message content (required)")
+	channelMessageSendCmd.Flags().String("output", "json", "Output format: table or json")
+
+	channelMessageReplyCmd.Flags().String("content", "", "Reply content (required)")
+	channelMessageReplyCmd.Flags().String("output", "json", "Output format: table or json")
+
+	channelMemberListCmd.Flags().String("output", "table", "Output format: table or json")
+	channelMemberListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
+
+	channelMemberAddCmd.Flags().String("user-id", "", "User ID to add (required)")
+	channelMemberAddCmd.Flags().String("role", "member", "Role: owner or member")
+	channelMemberAddCmd.Flags().String("output", "json", "Output format")
+
+	channelMemberRemoveCmd.Flags().String("user-id", "", "User ID to remove (required)")
+	channelMemberRemoveCmd.Flags().String("output", "json", "Output format")
+
 	channelThreadListCmd.Flags().String("output", "table", "Output format: table or json")
 	channelThreadListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 
@@ -99,11 +173,8 @@ func init() {
 	channelThreadCreateCmd.Flags().String("content", "", "Opening message content")
 	channelThreadCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
-	channelMessageListCmd.Flags().String("output", "table", "Output format: table or json")
-	channelMessageListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
-
-	channelMessageSendCmd.Flags().String("content", "", "Message content (required)")
-	channelMessageSendCmd.Flags().String("output", "json", "Output format: table or json")
+	channelContextCmd.Flags().Int("recent", 20, "Number of recent messages to include")
+	channelContextCmd.Flags().String("output", "json", "Output format")
 }
 
 func runChannelList(cmd *cobra.Command, _ []string) error {
@@ -178,6 +249,187 @@ func runChannelCreate(cmd *cobra.Command, _ []string) error {
 	return cli.PrintJSON(os.Stdout, result)
 }
 
+// ---- message commands (V2) ----
+
+func runChannelMessageList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	path := "/api/channels/" + args[0] + "/messages"
+	var result map[string]any
+	if err := client.GetJSON(ctx, path, &result); err != nil {
+		return fmt.Errorf("list messages: %w", err)
+	}
+	messagesRaw, _ := result["messages"].([]any)
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fullID, _ := cmd.Flags().GetBool("full-id")
+	headers := []string{"ID", "AUTHOR", "CONTENT", "REPLIES", "CREATED"}
+	rows := make([][]string, 0, len(messagesRaw))
+	for _, raw := range messagesRaw {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		created := strVal(m, "created_at")
+		if len(created) >= 19 {
+			created = created[:19]
+		}
+		content := strVal(m, "content")
+		if len(content) > 60 {
+			content = content[:57] + "..."
+		}
+		rows = append(rows, []string{
+			displayID(strVal(m, "id"), fullID),
+			strVal(m, "author_type"),
+			content,
+			intStr(m, "reply_count"),
+			created,
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runChannelMessageSend(cmd *cobra.Command, args []string) error {
+	content, _ := cmd.Flags().GetString("content")
+	if content == "" {
+		return fmt.Errorf("--content is required")
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	path := "/api/channels/" + args[0] + "/messages"
+	body := map[string]any{"content": content}
+	var result map[string]any
+	if err := client.PostJSON(ctx, path, body, &result); err != nil {
+		return fmt.Errorf("send message: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func runChannelMessageReply(cmd *cobra.Command, args []string) error {
+	content, _ := cmd.Flags().GetString("content")
+	if content == "" {
+		return fmt.Errorf("--content is required")
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	path := "/api/channels/" + args[0] + "/messages/" + args[1] + "/reply"
+	body := map[string]any{"content": content}
+	var result map[string]any
+	if err := client.PostJSON(ctx, path, body, &result); err != nil {
+		return fmt.Errorf("reply: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+// ---- member commands ----
+
+func runChannelMemberList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	path := "/api/channels/" + args[0] + "/members"
+	var result map[string]any
+	if err := client.GetJSON(ctx, path, &result); err != nil {
+		return fmt.Errorf("list members: %w", err)
+	}
+	membersRaw, _ := result["members"].([]any)
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fullID, _ := cmd.Flags().GetBool("full-id")
+	headers := []string{"USER_ID", "NAME", "ROLE", "JOINED"}
+	rows := make([][]string, 0, len(membersRaw))
+	for _, raw := range membersRaw {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		joined := strVal(m, "joined_at")
+		if len(joined) >= 10 {
+			joined = joined[:10]
+		}
+		rows = append(rows, []string{
+			displayID(strVal(m, "user_id"), fullID),
+			strVal(m, "user_name"),
+			strVal(m, "role"),
+			joined,
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runChannelMemberAdd(cmd *cobra.Command, args []string) error {
+	userID, _ := cmd.Flags().GetString("user-id")
+	if userID == "" {
+		return fmt.Errorf("--user-id is required")
+	}
+	role, _ := cmd.Flags().GetString("role")
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	path := "/api/channels/" + args[0] + "/members"
+	body := map[string]any{"user_id": userID, "role": role}
+	var result map[string]any
+	if err := client.PostJSON(ctx, path, body, &result); err != nil {
+		return fmt.Errorf("add member: %w", err)
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func runChannelMemberRemove(cmd *cobra.Command, args []string) error {
+	userID, _ := cmd.Flags().GetString("user-id")
+	if userID == "" {
+		return fmt.Errorf("--user-id is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	path := "/api/channels/" + args[0] + "/members/" + userID
+	if err := client.DeleteJSON(ctx, path); err != nil {
+		return fmt.Errorf("remove member: %w", err)
+	}
+	fmt.Fprintf(os.Stdout, "Removed user %s from channel %s\n", userID, args[0])
+	return nil
+}
+
+// ---- thread commands (V1 backward compat) ----
+
 func runChannelThreadList(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -247,7 +499,9 @@ func runChannelThreadCreate(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(os.Stdout, result)
 }
 
-func runChannelMessageList(cmd *cobra.Command, args []string) error {
+// ---- context command ----
+
+func runChannelContext(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -255,61 +509,11 @@ func runChannelMessageList(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	path := "/api/channels/" + args[0] + "/threads/" + args[1] + "/messages"
+	recent, _ := cmd.Flags().GetInt("recent")
+	path := fmt.Sprintf("/api/channels/%s/context?recent=%d", args[0], recent)
 	var result map[string]any
 	if err := client.GetJSON(ctx, path, &result); err != nil {
-		return fmt.Errorf("list messages: %w", err)
-	}
-	messagesRaw, _ := result["messages"].([]any)
-
-	output, _ := cmd.Flags().GetString("output")
-	if output == "json" {
-		return cli.PrintJSON(os.Stdout, result)
-	}
-	fullID, _ := cmd.Flags().GetBool("full-id")
-	headers := []string{"ID", "AUTHOR", "CONTENT", "CREATED"}
-	rows := make([][]string, 0, len(messagesRaw))
-	for _, raw := range messagesRaw {
-		m, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		created := strVal(m, "created_at")
-		if len(created) >= 19 {
-			created = created[:19]
-		}
-		content := strVal(m, "content")
-		if len(content) > 60 {
-			content = content[:57] + "..."
-		}
-		rows = append(rows, []string{
-			displayID(strVal(m, "id"), fullID),
-			strVal(m, "author_type"),
-			content,
-			created,
-		})
-	}
-	cli.PrintTable(os.Stdout, headers, rows)
-	return nil
-}
-
-func runChannelMessageSend(cmd *cobra.Command, args []string) error {
-	content, _ := cmd.Flags().GetString("content")
-	if content == "" {
-		return fmt.Errorf("--content is required")
-	}
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	path := "/api/channels/" + args[0] + "/threads/" + args[1] + "/messages"
-	body := map[string]any{"content": content}
-	var result map[string]any
-	if err := client.PostJSON(ctx, path, body, &result); err != nil {
-		return fmt.Errorf("send message: %w", err)
+		return fmt.Errorf("get context: %w", err)
 	}
 	return cli.PrintJSON(os.Stdout, result)
 }

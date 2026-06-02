@@ -553,8 +553,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/read", h.MarkChannelRead)
 					r.Get("/members", h.ListChannelMembers)
 					r.Post("/members", h.AddChannelMember)
+					r.Delete("/members/{userId}", h.RemoveChannelMember)
 					r.Post("/join", h.JoinChannel)
 					r.Post("/leave", h.LeaveChannel)
+					r.Get("/context", h.GetChannelContext)
+					// V2 flat messages
+					r.Get("/messages", h.ListChannelMessages)
+					r.Post("/messages", h.SendChannelMessage)
+					r.Route("/messages/{msgId}", func(r chi.Router) {
+						r.Post("/reply", h.ReplyToMessage)
+						r.Get("/thread", h.GetMessageThread)
+						r.Post("/convert-issue", h.ConvertMessageToIssue)
+					})
+					// V1 threads (backward compat)
 					r.Get("/threads", h.ListChannelThreads)
 					r.Post("/threads", h.CreateChannelThread)
 					r.Route("/threads/{threadId}", func(r chi.Router) {
