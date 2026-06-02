@@ -72,5 +72,9 @@
   "mermaid": {
     "render_error": "Mermaid ダイアグラムを描画できません。",
     "rendering": "ダイアグラムを描画中…"
+  },
+  "slash_command": {
+    "no_skills_configured": "設定済みスキルなし",
+    "no_results": "一致するスキルなし"
   }
 }
