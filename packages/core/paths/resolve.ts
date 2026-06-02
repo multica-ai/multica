@@ -17,6 +17,9 @@ export function resolvePostAuthDestination(
   workspaces: Workspace[],
   hasOnboarded: boolean,
 ): string {
+  // Onboarding guide is skipped — all users go to their first workspace
+  // or workspace creation regardless of onboarded status.
+  void hasOnboarded;
   const first = workspaces[0];
   if (first) {
     return paths.workspace(first.slug).issues();
