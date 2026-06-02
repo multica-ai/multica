@@ -1,12 +1,12 @@
 version: 2
 
-project_name: multica
+project_name: wallts
 
 builds:
-  - id: multica
-    main: ./cmd/multica
+  - id: wallts
+    main: ./cmd/wallts
     dir: server
-    binary: multica
+    binary: wallts
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
@@ -57,19 +57,19 @@ changelog:
       - "^chore:"
 
 brews:
-  - name: multica
+  - name: wallts
     ids:
       - versioned
     repository:
-      owner: multica-ai
+      owner: dwickyfp
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
-    homepage: "https://github.com/multica-ai/multica"
-    description: "Multica CLI — local agent runtime and management tool for the Multica platform"
+    homepage: "https://github.com/dwickyfp/wallts"
+    description: "Wallts CLI — local agent runtime and management tool for the Wallts platform"
     license: "Apache-2.0"
     install: |
-      bin.install "multica"
+      bin.install "wallts"
     test: |
-      system "#{bin}/multica", "version"
+      system "#{bin}/wallts", "version"

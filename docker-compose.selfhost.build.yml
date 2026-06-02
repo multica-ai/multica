@@ -3,13 +3,13 @@
 
 services:
   backend:
-    image: multica-backend:dev
+    image: wallts-backend:dev
     build:
       context: .
       dockerfile: Dockerfile
 
   frontend:
-    image: multica-web:dev
+    image: wallts-web:dev
     build:
       context: .
       dockerfile: Dockerfile.web

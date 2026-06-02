@@ -1,4 +1,4 @@
-name: multica
+name: wallts
 
 services:
   postgres:
