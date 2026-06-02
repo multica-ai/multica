@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -41,7 +42,7 @@ func TestRuntimeToResponsePrefersBuiltinLaunchHeader(t *testing.T) {
 
 	resp := runtimeToResponse(rt)
 
-	if resp.LaunchHeader != "claude -p" {
+	if resp.LaunchHeader != agent.LaunchHeader("claude") {
 		t.Fatalf("LaunchHeader = %q, want built-in launch header", resp.LaunchHeader)
 	}
 }
