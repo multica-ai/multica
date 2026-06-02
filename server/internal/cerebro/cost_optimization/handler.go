@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // EventCostOptimizationChanged is the WS event type emitted when a per-workspace
@@ -33,14 +34,15 @@ var validModes = map[string]struct{}{
 // dependencies so the package can be wired into the router without touching the
 // main Handler struct (which is owned by upstream).
 type Handler struct {
-	Queries *cerebrodb.Queries
-	Bus     *events.Bus
+	Queries     *cerebrodb.Queries
+	MainQueries *db.Queries
+	Bus         *events.Bus
 }
 
 // New constructs a cost_optimization.Handler. The caller wires it via dependency
 // injection from the main router.
-func New(queries *cerebrodb.Queries, bus *events.Bus) *Handler {
-	return &Handler{Queries: queries, Bus: bus}
+func New(queries *cerebrodb.Queries, mainQueries *db.Queries, bus *events.Bus) *Handler {
+	return &Handler{Queries: queries, MainQueries: mainQueries, Bus: bus}
 }
 
 // listResponse is the GET response shape: a flat map of overrides. Defaults

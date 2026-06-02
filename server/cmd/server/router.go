@@ -276,7 +276,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.PullRequestLinkHealer = cerebrogithubprheal.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-github-pr-heal): JEH-1919
 	featureFlagsHandler := feature_flags.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 per-workspace saving-mode handler.
-	costOptimizationHandler := cerebrocostoptimization.New(cerebroQueries, bus)
+	costOptimizationHandler := cerebrocostoptimization.New(cerebroQueries, queries, bus)
 	// CEREBRO-PATCH(router-channel-listen): wire the cerebro channel-listen
 	// service into the upstream handler so the comment trigger path can
 	// dispatch always-listening agents in channels.
@@ -703,6 +703,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/cost-optimization", costOptimizationHandler.List)
 					// CEREBRO-PATCH(cerebro-cost-optimization-dashboard): FIR-2325 phase-5 savings dashboard (any member).
 					r.Get("/cost-optimization/dashboard", costOptimizationHandler.Dashboard)
+					// CEREBRO-PATCH(cerebro-cost-optimization-analytics): FIR-2765 analytics drill-down (any member).
+					r.Get("/cost-optimization/analytics", costOptimizationHandler.AnalyticsSummary)
+					r.Get("/cost-optimization/analytics/{key}/issues", costOptimizationHandler.AnalyticsIssues)
+					r.Get("/cost-optimization/analytics/{key}/issues/{issueId}/runs", costOptimizationHandler.AnalyticsIssueRuns)
+					// CEREBRO-PATCH(cerebro-cost-optimization-prompt-inspector): FIR-2765 composed prompt inspector (any member).
+					r.Get("/cost-optimization/prompt-inspector", costOptimizationHandler.PromptInspector)
 					// CEREBRO-PATCH(cerebro-cost-optimization-holdout): FIR-2640 per-saving holdout share read (any member).
 					r.Get("/cost-optimization/holdout", costOptimizationHandler.ListHoldout)
 					// CEREBRO-PATCH(cerebro-groups-routes): workspace group list (member-level).

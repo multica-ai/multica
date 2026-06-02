@@ -1648,6 +1648,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			h.applySnapshotSaving(r.Context(), &resp, issue, task.TriggerCommentID, task.ID)
 			// CEREBRO-PATCH(daemon-bundled-saving): point prompt at `issue context` (on) or record would-save (shadow) for bundled_read; defers to snapshot (FIR-2384)
 			h.applyBundledReadSaving(r.Context(), &resp, issue, task.ID)
+			// CEREBRO-PATCH(daemon-context-duplication): score meta-skill duplication (FIR-2765)
+			h.applyContextDuplicationSaving(r.Context(), &resp, issue, task.ID)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it

@@ -10,8 +10,10 @@ import {
   type CostSavingKey,
   type CostSavingMode,
 } from "../registry";
+import { parseAnalyticsIssuesResponse, parseAnalyticsRunsResponse, parseAnalyticsSummaryResponse } from "../analytics";
 import { parseDashboardResponse } from "../dashboard";
 import { parseHoldoutResponse, type HoldoutOverrides } from "../holdout";
+import { parsePromptInspectorResponse } from "../prompt-inspector";
 import { useCostOptimizationStore } from "../store";
 
 const costOptimizationKeys = {
@@ -20,6 +22,14 @@ const costOptimizationKeys = {
     ["cerebro-cost-optimization", wsId, "dashboard"] as const,
   holdout: (wsId: string) =>
     ["cerebro-cost-optimization", wsId, "holdout"] as const,
+  analyticsSummary: (wsId: string) =>
+    ["cerebro-cost-optimization", wsId, "analytics", "summary"] as const,
+  analyticsIssues: (wsId: string, key: CostSavingKey, days: number) =>
+    ["cerebro-cost-optimization", wsId, "analytics", key, "issues", days] as const,
+  analyticsRuns: (wsId: string, key: CostSavingKey, issueId: string) =>
+    ["cerebro-cost-optimization", wsId, "analytics", key, issueId, "runs"] as const,
+  promptInspector: (wsId: string, repoUrl: string | undefined) =>
+    ["cerebro-cost-optimization", wsId, "prompt-inspector", repoUrl ?? ""] as const,
 };
 
 /**
@@ -156,5 +166,63 @@ export function useSetHoldoutMutation() {
         queryKey: costOptimizationKeys.holdout(wsId),
       });
     },
+  });
+}
+
+export function useCostOptimizationAnalyticsSummaryQuery() {
+  const wsId = useWorkspaceId();
+  return useQuery({
+    queryKey: costOptimizationKeys.analyticsSummary(wsId),
+    queryFn: async () =>
+      parseAnalyticsSummaryResponse(
+        await api.getCostOptimizationAnalyticsSummary(wsId),
+      ),
+  });
+}
+
+export function useCostOptimizationAnalyticsIssuesQuery(
+  savingKey: CostSavingKey,
+  days = 30,
+) {
+  const wsId = useWorkspaceId();
+  return useQuery({
+    queryKey: costOptimizationKeys.analyticsIssues(wsId, savingKey, days),
+    queryFn: async () =>
+      parseAnalyticsIssuesResponse(
+        await api.getCostOptimizationAnalyticsIssues(wsId, savingKey, { days }),
+      ),
+    enabled: Boolean(savingKey),
+  });
+}
+
+export function useCostOptimizationAnalyticsRunsQuery(
+  savingKey: CostSavingKey,
+  issueId: string,
+  days = 90,
+) {
+  const wsId = useWorkspaceId();
+  return useQuery({
+    queryKey: costOptimizationKeys.analyticsRuns(wsId, savingKey, issueId),
+    queryFn: async () =>
+      parseAnalyticsRunsResponse(
+        await api.getCostOptimizationAnalyticsIssueRuns(
+          wsId,
+          savingKey,
+          issueId,
+          { days },
+        ),
+      ),
+    enabled: Boolean(savingKey && issueId),
+  });
+}
+
+export function useCostOptimizationPromptInspectorQuery(repoUrl?: string) {
+  const wsId = useWorkspaceId();
+  return useQuery({
+    queryKey: costOptimizationKeys.promptInspector(wsId, repoUrl),
+    queryFn: async () =>
+      parsePromptInspectorResponse(
+        await api.getCostOptimizationPromptInspector(wsId, repoUrl),
+      ),
   });
 }

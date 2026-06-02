@@ -3,8 +3,8 @@
 -- inserting a duplicate (UNIQUE on task_id + saving_key).
 INSERT INTO cerebro_cost_optimization_measurement (
     workspace_id, task_id, saving_key, mode, applied, held_out, metric,
-    baseline_value, effective_value, saved_cents, actual_cost_cents
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    baseline_value, effective_value, saved_cents, actual_cost_cents, detail_json
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (task_id, saving_key) DO UPDATE
 SET mode = EXCLUDED.mode,
     applied = EXCLUDED.applied,
@@ -14,6 +14,7 @@ SET mode = EXCLUDED.mode,
     effective_value = EXCLUDED.effective_value,
     saved_cents = EXCLUDED.saved_cents,
     actual_cost_cents = EXCLUDED.actual_cost_cents,
+    detail_json = EXCLUDED.detail_json,
     created_at = now();
 
 -- name: DashboardCerebroCostOptimization :many

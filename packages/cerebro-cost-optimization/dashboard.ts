@@ -66,6 +66,7 @@ const KNOWN_KEYS: ReadonlySet<string> = new Set<CostSavingKey>([
   "bundled_read",
   "model_routing",
   "prune_tool_results",
+  "context_duplication",
 ]);
 
 /** Coerce an unknown to a finite number, falling back to 0. */
@@ -142,6 +143,7 @@ export function metricUnitLabel(metric: CostSavingMetric, count: number): string
       return count === 1 ? "platform call" : "platform calls";
     case "input_tokens":
     case "context_tokens":
+    case "tokens":
       return count === 1 ? "token" : "tokens";
     case "model_cost":
       return "model cost";
@@ -171,7 +173,11 @@ function savingValue(
   if (metric === "model_cost") {
     return formatUsd(cents);
   }
-  if (metric === "context_tokens" || metric === "input_tokens") {
+  if (
+    metric === "context_tokens" ||
+    metric === "input_tokens" ||
+    metric === "tokens"
+  ) {
     const tokens = `${units.toLocaleString("en-US")} ${metricUnitLabel(metric, units)}`;
     return cents > 0 ? `${tokens} (${formatUsd(cents)})` : tokens;
   }
