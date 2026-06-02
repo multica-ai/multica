@@ -369,7 +369,7 @@ func TestCheckOrigin(t *testing.T) {
 		{"empty origin allowed", "api.wallts.ai", "", true},
 		{"same-origin allowed (native client default)", "localhost:8080", "http://localhost:8080", true},
 		{"same-origin allowed (https)", "api.wallts.ai", "https://api.wallts.ai", true},
-		{"same-origin allowed (case-insensitive host, RFC 7230)", "API.Multica.AI", "https://api.wallts.ai", true},
+		{"same-origin allowed (case-insensitive host, RFC 7230)", "API.Wallts.AI", "https://api.wallts.ai", true},
 		{"whitelisted origin allowed (web cross-origin)", "localhost:8080", "http://localhost:3000", true},
 		{"whitelisted origin allowed (prod web)", "api.wallts.ai", "https://wallts.ai", true},
 		{"unknown origin rejected (CSWSH defense)", "api.wallts.ai", "https://evil.com", false},

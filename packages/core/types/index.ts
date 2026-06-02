@@ -51,10 +51,24 @@ export type {
   RuntimeLocalSkillsResult,
   RuntimeLocalSkillImportResult,
   IssueUsageSummary,
+  AgentSessionStatus,
+  AgentSessionState,
+  AgentSessionRun,
+  AgentSession,
+  AgentSessionDetail,
 } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
+export type {
+  PushSubscriptionKeys,
+  PushSubscriptionJSON,
+  CreatePushSubscriptionRequest,
+  PushSubscriptionRecord,
+  ListPushSubscriptionsResponse,
+  VapidPublicKeyResponse,
+  PushRateLimitStatus,
+} from "./push-notification";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
 export type {

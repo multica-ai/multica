@@ -43,6 +43,8 @@ import type {
   CreatePersonalAccessTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
+  AgentSession,
+  AgentSessionDetail,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
@@ -96,6 +98,9 @@ import type {
   WebhookDelivery,
   NotificationPreferenceResponse,
   NotificationPreferences,
+  CreatePushSubscriptionRequest,
+  ListPushSubscriptionsResponse,
+  VapidPublicKeyResponse,
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
@@ -174,6 +179,10 @@ import {
   EMPTY_CREATE_BILLING_CHECKOUT_SESSION_RESPONSE,
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
+  AgentSessionListSchema,
+  AgentSessionDetailSchema,
+  EMPTY_AGENT_SESSION_LIST,
+  EMPTY_AGENT_SESSION_DETAIL,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1265,6 +1274,25 @@ export class ApiClient {
     });
   }
 
+  // Agent sessions
+  async listSessionsByIssue(issueId: string): Promise<AgentSession[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/sessions`);
+    return parseWithFallback<AgentSession[]>(raw, AgentSessionListSchema, EMPTY_AGENT_SESSION_LIST, {
+      endpoint: "GET /api/issues/:id/sessions",
+    });
+  }
+
+  async getSessionDetail(sessionId: string): Promise<AgentSessionDetail> {
+    const raw = await this.fetch<unknown>(`/api/sessions/${sessionId}`);
+    return parseWithFallback<AgentSessionDetail>(raw, AgentSessionDetailSchema, EMPTY_AGENT_SESSION_DETAIL, {
+      endpoint: "GET /api/sessions/:id",
+    });
+  }
+
+  async resetSession(sessionId: string): Promise<void> {
+    await this.fetch(`/api/sessions/${sessionId}/reset`, { method: "POST" });
+  }
+
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
     return this.fetch("/api/inbox");
@@ -1307,6 +1335,29 @@ export class ApiClient {
     return this.fetch("/api/notification-preferences", {
       method: "PUT",
       body: JSON.stringify({ preferences }),
+    });
+  }
+
+  // Push Notifications
+  async getVapidPublicKey(): Promise<VapidPublicKeyResponse> {
+    return this.fetch("/api/push/vapid-key");
+  }
+
+  async getPushSubscriptions(): Promise<ListPushSubscriptionsResponse> {
+    return this.fetch("/api/push/subscriptions");
+  }
+
+  async subscribePush(request: CreatePushSubscriptionRequest): Promise<{ id: string }> {
+    return this.fetch("/api/push/subscriptions", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+  }
+
+  async unsubscribePush(endpoint: string): Promise<void> {
+    return this.fetch("/api/push/subscriptions", {
+      method: "DELETE",
+      body: JSON.stringify({ endpoint }),
     });
   }
 

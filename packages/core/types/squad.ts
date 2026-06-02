@@ -85,12 +85,17 @@ export interface CreateSquadActivityLogRequest {
   details?: unknown;
 }
 
-// SquadMemberStatus mirrors the four-way bucket the back-end derives in
+// SquadMemberStatus mirrors the five-way bucket the back-end derives in
 // handler/squad.go::deriveSquadMemberStatus. Kept as a string union here
 // (rather than re-derived from snapshot data) so the squad page can render
 // the freshest server-side judgement without re-fetching the agent
-// snapshot / runtime list.
-export type SquadMemberStatusValue = "working" | "idle" | "offline" | "unstable";
+// snapshot / runtime list. `archived` wins over every runtime/task signal.
+export type SquadMemberStatusValue =
+  | "working"
+  | "idle"
+  | "offline"
+  | "unstable"
+  | "archived";
 
 export interface SquadActiveIssueBrief {
   issue_id: string;

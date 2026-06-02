@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -23,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/session"
 )
 
 // randomID returns a random 16-byte hex string used as a request ID for
@@ -96,7 +98,10 @@ type Handler struct {
 	MembershipCache       *auth.MembershipCache
 	WebhookRateLimiter    WebhookRateLimiter
 	WebhookIPRateLimiter  WebhookRateLimiter
-	cfg                   Config
+	// SessionService is the agent session lifecycle service. Wired in
+	// New() when the caller wants session management endpoints enabled.
+	SessionService session.SessionService
+	cfg            Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
@@ -111,7 +116,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	}
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
-	return &Handler{
+	h := &Handler{
 		Queries:               queries,
 		DB:                    executor,
 		TxStarter:             txStarter,
@@ -134,6 +139,13 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 
 		cfg: cfg,
 	}
+
+	// Wire up session service if the txStarter is a *pgxpool.Pool.
+	if pool, ok := txStarter.(*pgxpool.Pool); ok {
+		h.SessionService = session.NewService(pool, session.DefaultConfig(), slog.Default())
+	}
+
+	return h
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

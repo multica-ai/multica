@@ -644,6 +644,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 
+			// Agent sessions (lifecycle management for S3-F3)
+			r.Route("/api/agent-sessions", func(r chi.Router) {
+				r.Get("/", h.ListSessions)
+				r.Post("/reset", h.ResetSession)
+				r.Route("/{sessionId}", func(r chi.Router) {
+					r.Get("/", h.GetSession)
+				})
+			})
+
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
