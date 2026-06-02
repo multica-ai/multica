@@ -3,6 +3,7 @@ set -euo pipefail
 
 OPENCODE_PID=""
 WORKSPACES="${HOME}/workspaces"
+mkdir -p "${WORKSPACES}"
 
 cleanup() {
   if [ -n "${OPENCODE_PID}" ] && kill -0 "${OPENCODE_PID}" 2>/dev/null; then
