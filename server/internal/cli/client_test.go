@@ -377,3 +377,35 @@ func TestNormalizeGOOS(t *testing.T) {
 		}
 	}
 }
+
+func TestSetHeadersOnBehalfOf(t *testing.T) {
+	t.Run("sends X-On-Behalf-Of when set", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if obo := r.Header.Get("X-On-Behalf-Of"); obo != "member-789" {
+				t.Errorf("expected X-On-Behalf-Of member-789, got %q", obo)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"1"}`))
+		}))
+		defer srv.Close()
+		client := NewAPIClient(srv.URL, "ws", "tok")
+		client.OnBehalfOf = "member-789"
+		if err := client.PostJSON(context.Background(), "/t", map[string]string{}, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	t.Run("omits header when unset", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, ok := r.Header["X-On-Behalf-Of"]; ok {
+				t.Errorf("did not expect X-On-Behalf-Of header")
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"1"}`))
+		}))
+		defer srv.Close()
+		client := NewAPIClient(srv.URL, "ws", "tok")
+		if err := client.PostJSON(context.Background(), "/t", map[string]string{}, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}

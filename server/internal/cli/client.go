@@ -50,6 +50,7 @@ type APIClient struct {
 	Token       string
 	AgentID     string // When set, requests are attributed to this agent instead of the user.
 	TaskID      string // When set, sent as X-Task-ID for agent-task validation.
+	OnBehalfOf  string // When set, a privileged token attributes the action to this member (X-On-Behalf-Of).
 	HTTPClient  *http.Client
 
 	// Identity overrides. Empty values fall back to the package-level
@@ -92,6 +93,9 @@ func (c *APIClient) setHeaders(req *http.Request) {
 	}
 	if c.TaskID != "" {
 		req.Header.Set("X-Task-ID", c.TaskID)
+	}
+	if c.OnBehalfOf != "" {
+		req.Header.Set("X-On-Behalf-Of", c.OnBehalfOf)
 	}
 
 	platform := c.Platform
