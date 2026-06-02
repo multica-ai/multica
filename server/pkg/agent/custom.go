@@ -6,20 +6,25 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
 
 const CustomPromptPlaceholder = "{{prompt}}"
+const CustomSessionIDPlaceholder = "{{session_id}}"
 
 // CustomInvocation describes a generic local CLI invocation supplied by the
-// daemon rather than compiled into Multica. V1 is intentionally small: it is
-// an environment-variable bridge for commands like `king -p "{{prompt}}"`,
-// not a full provider plugin system. Keeping this runtime-neutral shape here
-// gives a future server/Web-backed custom-runtime editor a stable contract to
-// persist and hand back to the daemon without reworking the execution layer.
+// daemon rather than compiled into Multica. Args drive the first turn. When
+// Multica has a prior provider session id, ResumeArgs can use
+// {{session_id}} plus {{prompt}} to continue that provider-native session.
+// SessionIDRegex lets the daemon extract the provider's real session id from
+// stdout, keeping the contract runtime-neutral instead of baking in one
+// custom CLI's stream format.
 type CustomInvocation struct {
-	Args []string
+	Args           []string
+	ResumeArgs     []string
+	SessionIDRegex string
 }
 
 type customBackend struct {
@@ -37,6 +42,10 @@ func (b *customBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if _, err := exec.LookPath(execPath); err != nil {
 		return nil, fmt.Errorf("custom executable not found at %q: %w", execPath, err)
 	}
+	sessionIDPattern, err := compileCustomSessionIDRegex(b.cfg.Custom.SessionIDRegex)
+	if err != nil {
+		return nil, err
+	}
 
 	timeout := opts.Timeout
 	if timeout == 0 {
@@ -44,7 +53,11 @@ func (b *customBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	args, promptInArgs := buildCustomArgs(b.cfg.Custom.Args, prompt)
+	templateArgs := b.cfg.Custom.Args
+	if opts.ResumeSessionID != "" && len(b.cfg.Custom.ResumeArgs) > 0 {
+		templateArgs = b.cfg.Custom.ResumeArgs
+	}
+	args, promptInArgs := buildCustomArgs(templateArgs, prompt, opts.ResumeSessionID)
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
 	if opts.Cwd != "" {
@@ -114,8 +127,12 @@ func (b *customBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		duration := time.Since(startTime)
 		stdoutResult := <-stdoutDone
 		output := string(stdoutResult.data)
+		sessionID := extractCustomSessionID(output, sessionIDPattern)
+		if sessionID == "" {
+			sessionID = opts.ResumeSessionID
+		}
 		if output != "" {
-			trySend(msgCh, Message{Type: MessageText, Content: output})
+			trySend(msgCh, Message{Type: MessageText, Content: output, SessionID: sessionID})
 		}
 
 		status := "completed"
@@ -147,6 +164,7 @@ func (b *customBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			Output:     output,
 			Error:      errMsg,
 			DurationMs: duration.Milliseconds(),
+			SessionID:  sessionID,
 		}
 	}()
 
@@ -158,7 +176,7 @@ type readAllResult struct {
 	err  error
 }
 
-func buildCustomArgs(args []string, prompt string) ([]string, bool) {
+func buildCustomArgs(args []string, prompt, sessionID string) ([]string, bool) {
 	out := make([]string, 0, len(args))
 	promptInArgs := false
 	for _, arg := range args {
@@ -166,7 +184,36 @@ func buildCustomArgs(args []string, prompt string) ([]string, bool) {
 			promptInArgs = true
 			arg = strings.ReplaceAll(arg, CustomPromptPlaceholder, prompt)
 		}
+		if strings.Contains(arg, CustomSessionIDPlaceholder) {
+			arg = strings.ReplaceAll(arg, CustomSessionIDPlaceholder, sessionID)
+		}
 		out = append(out, arg)
 	}
 	return out, promptInArgs
+}
+
+func compileCustomSessionIDRegex(pattern string) (*regexp.Regexp, error) {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return nil, nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("invalid custom session id regex: %w", err)
+	}
+	return re, nil
+}
+
+func extractCustomSessionID(output string, re *regexp.Regexp) string {
+	if re == nil || output == "" {
+		return ""
+	}
+	match := re.FindStringSubmatch(output)
+	if len(match) > 1 {
+		return strings.TrimSpace(match[1])
+	}
+	if len(match) == 1 {
+		return strings.TrimSpace(match[0])
+	}
+	return ""
 }

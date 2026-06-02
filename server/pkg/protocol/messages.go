@@ -23,6 +23,33 @@ type TaskAvailablePayload struct {
 	TaskID    string `json:"task_id,omitempty"`
 }
 
+// CustomRuntimeAddPayload is sent from server to daemon when a workspace
+// owner/admin asks the daemon to persist a new local custom CLI runtime.
+type CustomRuntimeAddPayload struct {
+	RequestID      string   `json:"request_id"`
+	Provider       string   `json:"provider"`
+	Name           string   `json:"name,omitempty"`
+	Path           string   `json:"path"`
+	Args           []string `json:"args,omitempty"`
+	ResumeArgs     []string `json:"resume_args,omitempty"`
+	SessionIDRegex string   `json:"session_id_regex,omitempty"`
+}
+
+// CustomRuntimeDeletePayload removes a Web-managed custom runtime from the
+// daemon profile-local config. The provider is the runtime identity.
+type CustomRuntimeDeletePayload struct {
+	RequestID string `json:"request_id"`
+	Provider  string `json:"provider"`
+}
+
+// CustomRuntimeAddResultPayload is the daemon's best-effort acknowledgement
+// after it has tried to save the runtime on the local machine.
+type CustomRuntimeAddResultPayload struct {
+	RequestID string `json:"request_id"`
+	OK        bool   `json:"ok"`
+	Error     string `json:"error,omitempty"`
+}
+
 // TaskProgressPayload is sent from daemon to server during task execution.
 type TaskProgressPayload struct {
 	TaskID  string `json:"task_id"`

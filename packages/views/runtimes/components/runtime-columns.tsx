@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import {
   ArrowUpCircle,
   Globe,
+  Loader2,
   MoreHorizontal,
+  Pencil,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -16,7 +18,12 @@ import {
   deriveRuntimeHealth,
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
+import { useDeleteCustomRuntime } from "@multica/core/runtimes/mutations";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogContent,
+} from "@multica/ui/components/ui/alert-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,6 +41,10 @@ import { workloadConfig } from "../../agents/presence";
 import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
+import {
+  CustomRuntimeDialog,
+  managedCustomRuntimeConfig,
+} from "./custom-runtime-dialog";
 import {
   computeCostInWindow,
   formatLastSeen,
@@ -475,13 +486,17 @@ function RowMenu({
 }) {
   const { t } = useT("runtimes");
   const [deleteOpen, setDeleteOpen] = useState(false);
-  // Delete is currently the only row action; if the row can't run it, drop
-  // the kebab entirely so the column doesn't render an empty popover. The
-  // self-healing case (local + online) is the runtime-detail parity fix —
-  // see isSelfHealingRuntime for the rationale.
+  const [editOpen, setEditOpen] = useState(false);
+  const [customDeleteOpen, setCustomDeleteOpen] = useState(false);
+  const customConfig = managedCustomRuntimeConfig(runtime);
+  const canManageCustom = canDelete && Boolean(customConfig);
+  // Raw runtime deletion is hidden for self-healing local rows because the
+  // daemon will recreate them. Web-managed custom runtimes are different:
+  // their row action talks to the daemon first and removes the local profile
+  // config, so the runtime will not self-register again.
   const selfHealing = isSelfHealingRuntime(runtime);
 
-  if (!canDelete || selfHealing) {
+  if (!canManageCustom && (!canDelete || selfHealing)) {
     return <span aria-hidden />;
   }
 
@@ -506,26 +521,145 @@ function RowMenu({
           className="w-40"
           onClick={(e) => e.stopPropagation()}
         >
+          {canManageCustom && (
+            <DropdownMenuItem
+              onClick={() => setEditOpen(true)}
+              title={t(($) => $.list.custom_edit_action)}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              {t(($) => $.list.custom_edit_action)}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             variant="destructive"
-            onClick={() => setDeleteOpen(true)}
+            onClick={() =>
+              canManageCustom
+                ? setCustomDeleteOpen(true)
+                : setDeleteOpen(true)
+            }
             title={t(($) => $.list.delete_permission_hint)}
           >
             <Trash2 className="h-3.5 w-3.5" />
-            {t(($) => $.list.delete_action)}
+            {canManageCustom
+              ? t(($) => $.list.custom_delete_action)
+              : t(($) => $.list.delete_action)}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <DeleteRuntimeDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        runtime={runtime}
-        wsId={wsId}
-        onDeleted={() => {
-          setDeleteOpen(false);
-          toast.success(t(($) => $.detail.toast_deleted));
-        }}
-      />
+      {canManageCustom && editOpen && (
+        <CustomRuntimeDialog
+          wsId={wsId}
+          targetRuntime={runtime}
+          editRuntime={runtime}
+          onClose={() => setEditOpen(false)}
+        />
+      )}
+      {canManageCustom ? (
+        <CustomRuntimeDeleteDialog
+          open={customDeleteOpen}
+          onOpenChange={setCustomDeleteOpen}
+          runtime={runtime}
+          wsId={wsId}
+          onDeleted={() => {
+            setCustomDeleteOpen(false);
+            toast.success(t(($) => $.list.custom_delete_success_toast));
+          }}
+        />
+      ) : (
+        <DeleteRuntimeDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          runtime={runtime}
+          wsId={wsId}
+          onDeleted={() => {
+            setDeleteOpen(false);
+            toast.success(t(($) => $.detail.toast_deleted));
+          }}
+        />
+      )}
     </>
+  );
+}
+
+function CustomRuntimeDeleteDialog({
+  open,
+  onOpenChange,
+  runtime,
+  wsId,
+  onDeleted,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  runtime: AgentRuntime;
+  wsId: string;
+  onDeleted: () => void;
+}) {
+  const { t } = useT("runtimes");
+  const deleteCustomRuntime = useDeleteCustomRuntime(wsId);
+  const submitting = deleteCustomRuntime.isPending;
+
+  const handleOpenChange = (next: boolean) => {
+    if (submitting) return;
+    onOpenChange(next);
+  };
+
+  const handleConfirm = async () => {
+    try {
+      await deleteCustomRuntime.mutateAsync(runtime.id);
+      onDeleted();
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.list.custom_delete_failed_toast);
+      toast.error(message);
+    }
+  };
+
+  return (
+    <AlertDialog open={open} onOpenChange={handleOpenChange}>
+      <AlertDialogContent
+        className="w-[calc(100vw-2rem)] !max-w-[440px] gap-0 overflow-hidden rounded-lg p-0"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 pb-4 pt-5">
+          <h2 className="text-base font-semibold">
+            {t(($) => $.list.custom_delete_dialog.title)}
+          </h2>
+          <p className="mt-1 text-sm leading-5 text-muted-foreground">
+            {t(($) => $.list.custom_delete_dialog.description, {
+              name: runtime.name,
+            })}
+          </p>
+        </div>
+        <div className="border-t bg-muted/25 px-5 py-3">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={() => handleOpenChange(false)}
+              disabled={submitting}
+            >
+              {t(($) => $.list.custom_delete_dialog.cancel)}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full sm:w-auto"
+              onClick={handleConfirm}
+              disabled={submitting}
+            >
+              {submitting && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              )}
+              {submitting
+                ? t(($) => $.list.custom_delete_dialog.submitting)
+                : t(($) => $.list.custom_delete_dialog.confirm)}
+            </Button>
+          </div>
+        </div>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

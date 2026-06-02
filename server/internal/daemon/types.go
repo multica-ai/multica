@@ -8,13 +8,14 @@ import (
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
-	Path         string // path to CLI binary
-	Model        string // model override (optional)
-	DisplayName  string // optional runtime display name override
-	LaunchHeader string // optional launch skeleton for UI display
-	Custom       *agent.CustomInvocation
-	VersionArgs  []string // nil = use --version; empty with SkipVersion = no probe
-	SkipVersion  bool
+	Path          string // path to CLI binary
+	Model         string // model override (optional)
+	DisplayName   string // optional runtime display name override
+	LaunchHeader  string // optional launch skeleton for UI display
+	Custom        *agent.CustomInvocation
+	ManagedCustom bool     // true when sourced from profile-local custom-runtimes.json
+	VersionArgs   []string // nil = use --version; empty with SkipVersion = no probe
+	SkipVersion   bool
 }
 
 // Runtime represents a registered daemon runtime.

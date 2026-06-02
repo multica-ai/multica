@@ -8,11 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/mattn/go-shellwords"
+	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -222,27 +224,25 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", ""); ok {
 		agents["antigravity"] = e
 	}
-	customAgents, err := loadCustomAgentsFromEnv(func(cmd string) (string, bool) {
-		if _, err := exec.LookPath(cmd); err == nil {
-			return cmd, true
-		}
-		if strings.ContainsAny(cmd, "/\\") {
-			return "", false
-		}
-		if !isSafeAgentName(cmd) {
-			return "", false
-		}
-		if path, ok := resolveAgentsViaLoginShell([]string{cmd})[cmd]; ok {
-			return path, true
-		}
-		return "", false
-	})
+	profile := overrides.Profile
+
+	customAgents, err := loadCustomAgentsFromEnv(defaultCustomAgentPathResolver)
 	if err != nil {
 		return Config{}, err
 	}
 	for provider, entry := range customAgents {
 		if _, exists := agents[provider]; exists {
 			return Config{}, fmt.Errorf("custom agent provider %q is reserved by a built-in runtime", provider)
+		}
+		agents[provider] = entry
+	}
+	managedCustomAgents, err := loadManagedCustomAgents(profile, defaultCustomAgentPathResolver)
+	if err != nil {
+		return Config{}, err
+	}
+	for provider, entry := range managedCustomAgents {
+		if _, exists := agents[provider]; exists {
+			return Config{}, fmt.Errorf("custom agent provider %q is already configured", provider)
 		}
 		agents[provider] = entry
 	}
@@ -313,9 +313,6 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if overrides.MaxConcurrentTasks > 0 {
 		maxConcurrentTasks = overrides.MaxConcurrentTasks
 	}
-
-	// Profile
-	profile := overrides.Profile
 
 	// daemon_id resolution: override > env > persistent UUID on disk.
 	// The persistent UUID is written once to `<profile-dir>/daemon.id` and
@@ -575,36 +572,216 @@ func shellArgsFromEnv(name string) ([]string, error) {
 	return args, nil
 }
 
-type customAgentEnvEntry struct {
-	Provider    string    `json:"provider"`
-	Name        string    `json:"name"`
-	Path        string    `json:"path"`
-	Args        []string  `json:"args"`
-	VersionArgs *[]string `json:"version_args"`
+// ManagedCustomAgent is the machine-local custom runtime contract used by
+// both MULTICA_CUSTOM_AGENTS and the Web-managed custom-runtimes.json file.
+// The server stores none of this in workspace DB because executable paths,
+// PATH lookup, and argv semantics are properties of the daemon host.
+type ManagedCustomAgent struct {
+	Provider       string    `json:"provider"`
+	Name           string    `json:"name"`
+	Path           string    `json:"path"`
+	Args           []string  `json:"args"`
+	ResumeArgs     []string  `json:"resume_args,omitempty"`
+	SessionIDRegex string    `json:"session_id_regex,omitempty"`
+	VersionArgs    *[]string `json:"version_args"`
 }
 
 type agentPathResolver func(cmd string) (string, bool)
 
-// loadCustomAgentsFromEnv parses MULTICA_CUSTOM_AGENTS. This is deliberately
-// an env-var bridge, not the final product shape: it unblocks local
-// experimentation and contributions while keeping the runtime contract
-// explicit. A future Web/server-backed custom-runtime editor should persist
-// the same fields, then deliver them to the daemon through a managed config
-// source instead of asking users to export JSON by hand.
+// loadCustomAgentsFromEnv parses MULTICA_CUSTOM_AGENTS. Custom runtimes do not
+// have a universal health or version probe, so they register without running
+// --version unless the entry explicitly supplies version_args.
 func loadCustomAgentsFromEnv(resolve agentPathResolver) (map[string]AgentEntry, error) {
 	raw := strings.TrimSpace(os.Getenv("MULTICA_CUSTOM_AGENTS"))
 	if raw == "" {
 		return nil, nil
 	}
-	var entries []customAgentEnvEntry
+	var entries []ManagedCustomAgent
 	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
 		return nil, fmt.Errorf("invalid MULTICA_CUSTOM_AGENTS: %w", err)
 	}
+	return customAgentsToAgentEntries("MULTICA_CUSTOM_AGENTS", entries, resolve, true)
+}
+
+const managedCustomAgentsFile = "custom-runtimes.json"
+
+func loadManagedCustomAgents(profile string, resolve agentPathResolver) (map[string]AgentEntry, error) {
+	entries, err := readManagedCustomAgents(profile)
+	if err != nil {
+		return nil, err
+	}
+	agents, err := customAgentsToAgentEntries("managed custom runtimes", entries, resolve, true)
+	if err != nil {
+		return nil, err
+	}
+	for provider, entry := range agents {
+		entry.ManagedCustom = true
+		agents[provider] = entry
+	}
+	return agents, nil
+}
+
+func readManagedCustomAgents(profile string) ([]ManagedCustomAgent, error) {
+	path, err := managedCustomAgentsPath(profile)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read managed custom runtimes: %w", err)
+	}
+	var entries []ManagedCustomAgent
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("parse managed custom runtimes: %w", err)
+	}
+	return entries, nil
+}
+
+// UpsertManagedCustomAgent stores one custom runtime in the daemon profile.
+// It intentionally validates only fields that are profile-independent. The
+// caller that is currently running on the daemon host validates executable
+// reachability before calling this, and LoadConfig validates again on restart.
+func UpsertManagedCustomAgent(profile string, entry ManagedCustomAgent) error {
+	normalized, err := normalizeManagedCustomAgent(entry)
+	if err != nil {
+		return err
+	}
+	entries, err := readManagedCustomAgents(profile)
+	if err != nil {
+		return err
+	}
+	replaced := false
+	for i, existing := range entries {
+		if strings.EqualFold(strings.TrimSpace(existing.Provider), normalized.Provider) {
+			entries[i] = normalized
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		entries = append(entries, normalized)
+	}
+	return writeManagedCustomAgents(profile, entries)
+}
+
+func DeleteManagedCustomAgent(profile, provider string) error {
+	normalizedProvider := strings.ToLower(strings.TrimSpace(provider))
+	if !isSafeAgentName(normalizedProvider) {
+		return fmt.Errorf("invalid custom runtime provider: must match [A-Za-z0-9._-]+")
+	}
+	if isBuiltinProvider(normalizedProvider) {
+		return fmt.Errorf("custom agent provider %q is reserved by a built-in runtime", normalizedProvider)
+	}
+	entries, err := readManagedCustomAgents(profile)
+	if err != nil {
+		return err
+	}
+	filtered := entries[:0:0]
+	removed := false
+	for _, existing := range entries {
+		if strings.EqualFold(strings.TrimSpace(existing.Provider), normalizedProvider) {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, existing)
+	}
+	if !removed {
+		return fmt.Errorf("custom runtime provider %q is not managed by this daemon", normalizedProvider)
+	}
+	return writeManagedCustomAgents(profile, filtered)
+}
+
+func normalizeManagedCustomAgent(entry ManagedCustomAgent) (ManagedCustomAgent, error) {
+	provider := strings.ToLower(strings.TrimSpace(entry.Provider))
+	if !isSafeAgentName(provider) {
+		return ManagedCustomAgent{}, fmt.Errorf("invalid custom runtime provider: must match [A-Za-z0-9._-]+")
+	}
+	if isBuiltinProvider(provider) {
+		return ManagedCustomAgent{}, fmt.Errorf("custom agent provider %q is reserved by a built-in runtime", provider)
+	}
+	path := strings.TrimSpace(entry.Path)
+	if path == "" {
+		return ManagedCustomAgent{}, fmt.Errorf("custom runtime path must be non-empty")
+	}
+	args := append([]string(nil), entry.Args...)
+	resumeArgs := append([]string(nil), entry.ResumeArgs...)
+	sessionIDRegex := strings.TrimSpace(entry.SessionIDRegex)
+	if sessionIDRegex != "" {
+		if _, err := regexp.Compile(sessionIDRegex); err != nil {
+			return ManagedCustomAgent{}, fmt.Errorf("invalid custom runtime session_id_regex: %w", err)
+		}
+	}
+	var versionArgs *[]string
+	if entry.VersionArgs != nil {
+		copied := append([]string(nil), (*entry.VersionArgs)...)
+		versionArgs = &copied
+	}
+	return ManagedCustomAgent{
+		Provider:       provider,
+		Name:           strings.TrimSpace(entry.Name),
+		Path:           path,
+		Args:           args,
+		ResumeArgs:     resumeArgs,
+		SessionIDRegex: sessionIDRegex,
+		VersionArgs:    versionArgs,
+	}, nil
+}
+
+func writeManagedCustomAgents(profile string, entries []ManagedCustomAgent) error {
+	path, err := managedCustomAgentsPath(profile)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create managed custom runtime dir: %w", err)
+	}
+	data, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode managed custom runtimes: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".custom-runtimes-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("create managed custom runtime temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write managed custom runtime temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close managed custom runtime temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("chmod managed custom runtime temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename managed custom runtime file: %w", err)
+	}
+	return nil
+}
+
+func managedCustomAgentsPath(profile string) (string, error) {
+	dir, err := cli.ProfileDir(profile)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, managedCustomAgentsFile), nil
+}
+
+func customAgentsToAgentEntries(source string, entries []ManagedCustomAgent, resolve agentPathResolver, defaultSkipVersion bool) (map[string]AgentEntry, error) {
 	out := make(map[string]AgentEntry, len(entries))
 	for i, entry := range entries {
 		provider := strings.ToLower(strings.TrimSpace(entry.Provider))
 		if !isSafeAgentName(provider) {
-			return nil, fmt.Errorf("invalid MULTICA_CUSTOM_AGENTS[%d].provider: must match [A-Za-z0-9._-]+", i)
+			return nil, fmt.Errorf("invalid %s[%d].provider: must match [A-Za-z0-9._-]+", source, i)
 		}
 		if isBuiltinProvider(provider) {
 			return nil, fmt.Errorf("custom agent provider %q is reserved by a built-in runtime", provider)
@@ -614,15 +791,22 @@ func loadCustomAgentsFromEnv(resolve agentPathResolver) (map[string]AgentEntry, 
 		}
 		path := strings.TrimSpace(entry.Path)
 		if path == "" {
-			return nil, fmt.Errorf("invalid MULTICA_CUSTOM_AGENTS[%d].path: must be non-empty", i)
+			return nil, fmt.Errorf("invalid %s[%d].path: must be non-empty", source, i)
 		}
 		resolvedPath, ok := resolve(path)
 		if !ok {
 			return nil, fmt.Errorf("custom agent provider %q executable not found at %q", provider, path)
 		}
 		args := append([]string(nil), entry.Args...)
+		resumeArgs := append([]string(nil), entry.ResumeArgs...)
+		sessionIDRegex := strings.TrimSpace(entry.SessionIDRegex)
+		if sessionIDRegex != "" {
+			if _, err := regexp.Compile(sessionIDRegex); err != nil {
+				return nil, fmt.Errorf("invalid %s[%d].session_id_regex: %w", source, i, err)
+			}
+		}
 		versionArgs := []string(nil)
-		skipVersion := false
+		skipVersion := defaultSkipVersion
 		if entry.VersionArgs != nil {
 			versionArgs = append([]string(nil), (*entry.VersionArgs)...)
 			skipVersion = len(versionArgs) == 0
@@ -635,12 +819,32 @@ func loadCustomAgentsFromEnv(resolve agentPathResolver) (map[string]AgentEntry, 
 			Path:         resolvedPath,
 			DisplayName:  displayName,
 			LaunchHeader: customLaunchHeader(path, args),
-			Custom:       &agent.CustomInvocation{Args: args},
-			VersionArgs:  versionArgs,
-			SkipVersion:  skipVersion,
+			Custom: &agent.CustomInvocation{
+				Args:           args,
+				ResumeArgs:     resumeArgs,
+				SessionIDRegex: sessionIDRegex,
+			},
+			VersionArgs: versionArgs,
+			SkipVersion: skipVersion,
 		}
 	}
 	return out, nil
+}
+
+func defaultCustomAgentPathResolver(cmd string) (string, bool) {
+	if _, err := exec.LookPath(cmd); err == nil {
+		return cmd, true
+	}
+	if strings.ContainsAny(cmd, "/\\") {
+		return "", false
+	}
+	if !isSafeAgentName(cmd) {
+		return "", false
+	}
+	if path, ok := resolveAgentsViaLoginShell([]string{cmd})[cmd]; ok {
+		return path, true
+	}
+	return "", false
 }
 
 func customLaunchHeader(path string, args []string) string {

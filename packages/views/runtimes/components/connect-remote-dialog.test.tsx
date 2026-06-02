@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { configStore } from "@multica/core/config";
@@ -116,39 +116,12 @@ describe("ConnectRemoteDialog", () => {
     expect(tokenCode).toHaveClass(...ligatureClasses);
   });
 
-  it("generates MULTICA_CUSTOM_AGENTS for a custom CLI runtime", () => {
+  it("keeps custom runtime setup out of the add-computer dialog", () => {
     const { baseElement } = renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: "Custom CLI" }));
-
-    expect(screen.getByLabelText("Provider ID")).toHaveValue("king");
-    expect(baseElement).toHaveTextContent("MULTICA_CUSTOM_AGENTS");
-    expect(baseElement).toHaveTextContent('"provider":"king"');
-    expect(baseElement).toHaveTextContent('"name":"Code King"');
-    expect(baseElement).toHaveTextContent('"path":"king"');
-    expect(baseElement).toHaveTextContent('"args":["-p","{{prompt}}"]');
-  });
-
-  it("updates the custom runtime env command from form fields", () => {
-    const { baseElement } = renderDialog();
-
-    fireEvent.click(screen.getByRole("button", { name: "Custom CLI" }));
-    fireEvent.change(screen.getByLabelText("Provider ID"), {
-      target: { value: "queen" },
-    });
-    fireEvent.change(screen.getByLabelText("Display name"), {
-      target: { value: "Code Queen" },
-    });
-    fireEvent.change(screen.getByLabelText("Executable"), {
-      target: { value: "/opt/queen/bin/queen" },
-    });
-    fireEvent.change(screen.getByLabelText("Arguments"), {
-      target: { value: "run\n--prompt={{prompt}}" },
-    });
-
-    expect(baseElement).toHaveTextContent('"provider":"queen"');
-    expect(baseElement).toHaveTextContent('"name":"Code Queen"');
-    expect(baseElement).toHaveTextContent('"path":"/opt/queen/bin/queen"');
-    expect(baseElement).toHaveTextContent('"args":["run","--prompt={{prompt}}"]');
+    expect(
+      screen.queryByRole("button", { name: "Custom runtime" }),
+    ).not.toBeInTheDocument();
+    expect(baseElement).not.toHaveTextContent("MULTICA_CUSTOM_AGENTS");
   });
 });

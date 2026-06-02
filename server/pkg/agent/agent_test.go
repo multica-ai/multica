@@ -197,6 +197,71 @@ printf 'stdin: %s\n' "$input"
 	}
 }
 
+func TestCustomBackendUsesResumeArgsAndCapturesCodeWhaleSessionID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	dir := t.TempDir()
+	recordPath := filepath.Join(dir, "codewhale-args.txt")
+	fakePath := filepath.Join(dir, "codewhale")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+printf '%s\n' "$*" >> "$CODEWHALE_RECORD"
+if [ "$1" = "exec" ] && [ "$2" = "--resume" ]; then
+  printf 'resumed %s: %s\n' "$3" "$4"
+else
+  printf '{"type":"session_start","sessionId":"cw-session-1"}\n'
+  printf 'fresh: %s\n' "$4"
+fi
+`))
+	t.Setenv("CODEWHALE_RECORD", recordPath)
+
+	backend, err := New("codewhale", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Custom: &CustomInvocation{
+			Args:           []string{"exec", "--auto", "--output-format", "stream-json", "{{prompt}}"},
+			ResumeArgs:     []string{"exec", "--resume", "{{session_id}}", "{{prompt}}"},
+			SessionIDRegex: `"sessionId":"([^"]+)"`,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New(custom): %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "fresh task", ExecOptions{Cwd: dir})
+	if err != nil {
+		t.Fatalf("first Execute: %v", err)
+	}
+	first := <-session.Result
+	if first.Status != "completed" {
+		t.Fatalf("first status = %q, error = %q", first.Status, first.Error)
+	}
+	if first.SessionID != "cw-session-1" {
+		t.Fatalf("first SessionID = %q", first.SessionID)
+	}
+
+	session, err = backend.Execute(context.Background(), "follow up", ExecOptions{
+		Cwd:             dir,
+		ResumeSessionID: first.SessionID,
+	})
+	if err != nil {
+		t.Fatalf("resume Execute: %v", err)
+	}
+	resumed := <-session.Result
+	if resumed.Status != "completed" {
+		t.Fatalf("resume status = %q, error = %q", resumed.Status, resumed.Error)
+	}
+	if strings.TrimSpace(resumed.Output) != "resumed cw-session-1: follow up" {
+		t.Fatalf("resume output = %q", resumed.Output)
+	}
+	if resumed.SessionID != "cw-session-1" {
+		t.Fatalf("resume SessionID = %q", resumed.SessionID)
+	}
+	if got := strings.TrimSpace(readTestFile(t, recordPath)); got != "exec --auto --output-format stream-json fresh task\nexec --resume cw-session-1 follow up" {
+		t.Fatalf("argv record = %q", got)
+	}
+}
+
 func readTestFile(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)

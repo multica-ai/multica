@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -407,6 +408,285 @@ type UpdateAgentRuntimeRequest struct {
 	// or workspace admins can bind agents) and "public" (any workspace
 	// member can). Owner / workspace admin only, gated by canEditRuntime.
 	Visibility *string `json:"visibility,omitempty"`
+}
+
+type AddCustomRuntimeRequest struct {
+	TargetRuntimeID string   `json:"target_runtime_id"`
+	Provider        string   `json:"provider"`
+	Name            string   `json:"name"`
+	Path            string   `json:"path"`
+	Args            []string `json:"args"`
+	ResumeArgs      []string `json:"resume_args"`
+	SessionIDRegex  string   `json:"session_id_regex"`
+}
+
+const customRuntimeAddAckTimeout = 30 * time.Second
+
+// AddCustomRuntime asks the selected daemon host to persist a local custom CLI
+// runtime. The existing runtime ID is only a routing handle to the connected
+// daemon; the custom provider itself is saved on that daemon's profile-local
+// config and appears after daemon re-registration.
+func (h *Handler) AddCustomRuntime(w http.ResponseWriter, r *http.Request) {
+	if h.DaemonHub == nil {
+		writeError(w, http.StatusServiceUnavailable, "daemon websocket is unavailable")
+		return
+	}
+
+	var req AddCustomRuntimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	targetRuntimeID := strings.TrimSpace(req.TargetRuntimeID)
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, targetRuntimeID, "target_runtime_id")
+	if !ok {
+		return
+	}
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+	member, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found")
+	if !ok {
+		return
+	}
+	if !canEditRuntime(member, rt) {
+		writeError(w, http.StatusForbidden, "you can only edit your own runtimes")
+		return
+	}
+	if !rt.DaemonID.Valid || strings.TrimSpace(rt.DaemonID.String) == "" {
+		writeError(w, http.StatusBadRequest, "custom runtimes require a daemon-backed local runtime")
+		return
+	}
+
+	provider := strings.ToLower(strings.TrimSpace(req.Provider))
+	if !isSafeCustomRuntimeProvider(provider) {
+		writeError(w, http.StatusBadRequest, "provider must match [A-Za-z0-9._-]+")
+		return
+	}
+	if isBuiltinCustomRuntimeProvider(provider) {
+		writeError(w, http.StatusBadRequest, "provider is reserved by a built-in runtime")
+		return
+	}
+	path := strings.TrimSpace(req.Path)
+	if path == "" {
+		writeError(w, http.StatusBadRequest, "path must be non-empty")
+		return
+	}
+
+	requestID := uuid.NewString()
+	ackCtx, cancel := context.WithTimeout(r.Context(), customRuntimeAddAckTimeout)
+	defer cancel()
+	result, delivered, ackErr := h.DaemonHub.RequestCustomRuntimeAdd(ackCtx, targetRuntimeID, protocol.CustomRuntimeAddPayload{
+		RequestID:      requestID,
+		Provider:       provider,
+		Name:           strings.TrimSpace(req.Name),
+		Path:           path,
+		Args:           append([]string(nil), req.Args...),
+		ResumeArgs:     append([]string(nil), req.ResumeArgs...),
+		SessionIDRegex: strings.TrimSpace(req.SessionIDRegex),
+	})
+	if !delivered {
+		writeError(w, http.StatusConflict, "daemon is not connected")
+		return
+	}
+	if ackErr != nil {
+		writeError(w, http.StatusGatewayTimeout, "daemon did not confirm custom runtime add")
+		return
+	}
+	if !result.OK {
+		msg := strings.TrimSpace(result.Error)
+		if msg == "" {
+			msg = "daemon failed to add custom runtime"
+		}
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "added"})
+}
+
+func (h *Handler) UpdateCustomRuntime(w http.ResponseWriter, r *http.Request) {
+	if h.DaemonHub == nil {
+		writeError(w, http.StatusServiceUnavailable, "daemon websocket is unavailable")
+		return
+	}
+	rt, runtimeUUID, ok := h.requireEditableManagedCustomRuntime(w, r)
+	if !ok {
+		return
+	}
+	var req AddCustomRuntimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	path := strings.TrimSpace(req.Path)
+	if path == "" {
+		writeError(w, http.StatusBadRequest, "path must be non-empty")
+		return
+	}
+
+	requestID := uuid.NewString()
+	ackCtx, cancel := context.WithTimeout(r.Context(), customRuntimeAddAckTimeout)
+	defer cancel()
+	result, delivered, ackErr := h.DaemonHub.RequestCustomRuntimeAdd(ackCtx, uuidToString(runtimeUUID), protocol.CustomRuntimeAddPayload{
+		RequestID:      requestID,
+		Provider:       rt.Provider,
+		Name:           strings.TrimSpace(req.Name),
+		Path:           path,
+		Args:           append([]string(nil), req.Args...),
+		ResumeArgs:     append([]string(nil), req.ResumeArgs...),
+		SessionIDRegex: strings.TrimSpace(req.SessionIDRegex),
+	})
+	if !delivered {
+		writeError(w, http.StatusConflict, "daemon is not connected")
+		return
+	}
+	if ackErr != nil {
+		writeError(w, http.StatusGatewayTimeout, "daemon did not confirm custom runtime update")
+		return
+	}
+	if !result.OK {
+		msg := strings.TrimSpace(result.Error)
+		if msg == "" {
+			msg = "daemon failed to update custom runtime"
+		}
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (h *Handler) DeleteCustomRuntime(w http.ResponseWriter, r *http.Request) {
+	if h.DaemonHub == nil {
+		writeError(w, http.StatusServiceUnavailable, "daemon websocket is unavailable")
+		return
+	}
+	rt, runtimeUUID, ok := h.requireEditableManagedCustomRuntime(w, r)
+	if !ok {
+		return
+	}
+	active, err := h.Queries.CountActiveAgentsByRuntime(r.Context(), runtimeUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to inspect runtime bindings")
+		return
+	}
+	if active > 0 {
+		writeError(w, http.StatusConflict, "custom runtime has active agents")
+		return
+	}
+
+	requestID := uuid.NewString()
+	ackCtx, cancel := context.WithTimeout(r.Context(), customRuntimeAddAckTimeout)
+	defer cancel()
+	result, delivered, ackErr := h.DaemonHub.RequestCustomRuntimeDelete(ackCtx, uuidToString(runtimeUUID), protocol.CustomRuntimeDeletePayload{
+		RequestID: requestID,
+		Provider:  rt.Provider,
+	})
+	if !delivered {
+		writeError(w, http.StatusConflict, "daemon is not connected")
+		return
+	}
+	if ackErr != nil {
+		writeError(w, http.StatusGatewayTimeout, "daemon did not confirm custom runtime delete")
+		return
+	}
+	if !result.OK {
+		msg := strings.TrimSpace(result.Error)
+		if msg == "" {
+			msg = "daemon failed to delete custom runtime"
+		}
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	if err := h.Queries.DeleteArchivedAgentsByRuntime(r.Context(), runtimeUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove archived runtime bindings")
+		return
+	}
+	if err := h.Queries.DeleteAgentRuntime(r.Context(), runtimeUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (h *Handler) requireEditableManagedCustomRuntime(w http.ResponseWriter, r *http.Request) (db.AgentRuntime, pgtype.UUID, bool) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return db.AgentRuntime{}, pgtype.UUID{}, false
+	}
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return db.AgentRuntime{}, pgtype.UUID{}, false
+	}
+	member, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found")
+	if !ok {
+		return db.AgentRuntime{}, pgtype.UUID{}, false
+	}
+	if !canEditRuntime(member, rt) {
+		writeError(w, http.StatusForbidden, "you can only edit your own runtimes")
+		return db.AgentRuntime{}, pgtype.UUID{}, false
+	}
+	if !rt.DaemonID.Valid || strings.TrimSpace(rt.DaemonID.String) == "" {
+		writeError(w, http.StatusBadRequest, "custom runtimes require a daemon-backed local runtime")
+		return db.AgentRuntime{}, pgtype.UUID{}, false
+	}
+	if !isManagedCustomRuntime(rt) {
+		writeError(w, http.StatusBadRequest, "runtime is not a managed custom runtime")
+		return db.AgentRuntime{}, pgtype.UUID{}, false
+	}
+	return rt, runtimeUUID, true
+}
+
+func isManagedCustomRuntime(rt db.AgentRuntime) bool {
+	if isBuiltinCustomRuntimeProvider(strings.ToLower(strings.TrimSpace(rt.Provider))) {
+		return false
+	}
+	var metadata map[string]any
+	if len(rt.Metadata) > 0 {
+		_ = json.Unmarshal(rt.Metadata, &metadata)
+	}
+	source, _ := metadata["custom_runtime_source"].(string)
+	if source == "managed" {
+		return true
+	}
+	// Older dev builds registered custom runtimes before writing the managed
+	// source marker. Non-built-in daemon-backed providers are still custom
+	// runtimes, and daemon-side delete/update will reject env-only entries.
+	return rt.DaemonID.Valid && strings.TrimSpace(rt.DaemonID.String) != ""
+}
+
+func isSafeCustomRuntimeProvider(provider string) bool {
+	if provider == "" {
+		return false
+	}
+	for _, r := range provider {
+		if r >= 'a' && r <= 'z' {
+			continue
+		}
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if r == '.' || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isBuiltinCustomRuntimeProvider(provider string) bool {
+	switch provider {
+	case "claude", "codex", "opencode", "openclaw", "hermes",
+		"gemini", "pi", "cursor", "copilot", "kimi", "kiro", "antigravity":
+		return true
+	default:
+		return false
+	}
 }
 
 // UpdateAgentRuntime handles PATCH /api/runtimes/:id. Currently visibility

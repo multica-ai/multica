@@ -175,11 +175,14 @@ type DaemonRegisterRequest struct {
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
 	Runtimes        []struct {
-		Name         string `json:"name"`
-		Type         string `json:"type"`
-		Version      string `json:"version"` // agent CLI version (claude/codex)
-		Status       string `json:"status"`
-		LaunchHeader string `json:"launch_header,omitempty"`
+		Name                string         `json:"name"`
+		Type                string         `json:"type"`
+		Version             string         `json:"version"` // agent CLI version (claude/codex)
+		Status              string         `json:"status"`
+		LaunchHeader        string         `json:"launch_header,omitempty"`
+		CustomRuntime       bool           `json:"custom_runtime,omitempty"`
+		CustomRuntimeSource string         `json:"custom_runtime_source,omitempty"`
+		CustomRuntimeConfig map[string]any `json:"custom_runtime_config,omitempty"`
 	} `json:"runtimes"`
 }
 
@@ -333,6 +336,15 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		if launchHeader := strings.TrimSpace(runtime.LaunchHeader); launchHeader != "" {
 			metadataPayload["launch_header"] = launchHeader
+		}
+		if runtime.CustomRuntime {
+			metadataPayload["custom_runtime"] = true
+			if source := strings.TrimSpace(runtime.CustomRuntimeSource); source != "" {
+				metadataPayload["custom_runtime_source"] = source
+			}
+			if runtime.CustomRuntimeConfig != nil {
+				metadataPayload["custom_runtime_config"] = runtime.CustomRuntimeConfig
+			}
 		}
 		metadata, _ := json.Marshal(metadataPayload)
 

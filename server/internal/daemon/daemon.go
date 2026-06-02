@@ -715,7 +715,7 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
-	var runtimes []map[string]string
+	var runtimes []map[string]any
 	for name, entry := range d.cfg.Agents {
 		version, err := detectAgentEntryVersion(ctx, name, entry)
 		if err != nil {
@@ -735,13 +735,30 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
-		runtimes = append(runtimes, map[string]string{
+		runtime := map[string]any{
 			"name":          displayName,
 			"type":          name,
 			"version":       version,
 			"status":        "online",
 			"launch_header": runtimeLaunchHeader(name, entry),
-		})
+		}
+		if entry.Custom != nil {
+			runtime["custom_runtime"] = true
+			if entry.ManagedCustom {
+				runtime["custom_runtime_source"] = "managed"
+			} else {
+				runtime["custom_runtime_source"] = "env"
+			}
+			runtime["custom_runtime_config"] = ManagedCustomAgent{
+				Provider:       name,
+				Name:           entry.DisplayName,
+				Path:           entry.Path,
+				Args:           append([]string(nil), entry.Custom.Args...),
+				ResumeArgs:     append([]string(nil), entry.Custom.ResumeArgs...),
+				SessionIDRegex: strings.TrimSpace(entry.Custom.SessionIDRegex),
+			}
+		}
+		runtimes = append(runtimes, runtime)
 	}
 	if len(runtimes) == 0 {
 		return nil, fmt.Errorf("no agent runtimes could be registered")
