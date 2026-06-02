@@ -197,6 +197,10 @@ func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (stri
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
 		skillsDir = filepath.Join(workDir, ".kiro", "skills")
+	case "multica":
+		// Multica agents discover skills from .agent_context/skills/ in the
+		// workdir. The runtime config (multica.md) references this path.
+		skillsDir = filepath.Join(workDir, ".agent_context", "skills")
 	case "antigravity":
 		// Antigravity (`agy`) auto-discovers workspace-level skills from
 		// .agents/skills/ in the workdir. The CLI inherits Gemini CLI's
