@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,7 +18,6 @@ import (
 type CreateWorkflowRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
-	Template    string `json:"template"`    // legacy "ai-coding" compat
 	TemplateID  string `json:"template_id"` // UUID of template to clone from
 }
 
@@ -310,10 +308,6 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 
 	resp := workflowToResponse(wf, 0)
 
-	// If a template is requested, create pre-configured nodes + edges.
-	if req.Template == "ai-coding" {
-		h.createAICodingTemplate(r.Context(), wf.ID)
-	}
 	h.publish(protocol.EventWorkflowCreated, workspaceID, "member", userID, map[string]any{"workflow": resp})
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -909,100 +903,3 @@ func ptrStrToUUID(s *string) pgtype.UUID {
 	return u
 }
 
-// ── Template: AI Coding workflow ─────────────────────────────────────────────
-
-func (h *Handler) createAICodingTemplate(ctx context.Context, workflowID pgtype.UUID) {
-	type nodeDef struct {
-		title              string
-		description        string
-		inSchema           string
-		outSchema          string
-		workerInstructions string
-		criticInstructions string
-		criticType         string
-		x, y               float64
-	}
-
-	nodes := []nodeDef{
-		{
-			title:       "需求分析",
-			description: "分析需求并产出需求文档",
-			inSchema:    `{"type":"object","properties":{"idea":{"type":"string","description":"产品构思或需求描述"}},"required":["idea"]}`,
-			outSchema:   `{"type":"object","properties":{"requirement_doc":{"type":"string","description":"需求文档"}},"required":["requirement_doc"]}`,
-			workerInstructions: "你是一位资深产品需求分析师。请根据输入的产品构思，撰写一份完整的需求分析文档，包括：功能需求、非功能需求、用户故事、验收标准。",
-			criticInstructions: "作为评审者，请评估需求文档的完整性、清晰度和可行性。检查是否遗漏了关键场景。如果不通过，请明确指出需要改进的部分。",
-			criticType:         "human",
-			x:                  100, y: 50,
-		},
-		{
-			title:       "架构设计",
-			description: "基于需求文档设计技术架构",
-			inSchema:    `{"type":"object","properties":{"requirement_doc":{"type":"string"}},"required":["requirement_doc"]}`,
-			outSchema:   `{"type":"object","properties":{"architecture_doc":{"type":"string","description":"架构设计文档"}},"required":["architecture_doc"]}`,
-			workerInstructions: "你是一位资深技术架构师。请根据需求文档，撰写技术架构设计方案，包括：技术选型、系统架构图描述、模块划分、数据流设计、接口设计原则。",
-			criticInstructions: "作为技术负责人，请评审架构方案的合理性、可扩展性和技术风险。如果不通过，请指出具体问题和改进方向。",
-			criticType:         "human",
-			x:                  350, y: 50,
-		},
-		{
-			title:       "任务拆分",
-			description: "将架构设计拆分为具体开发任务",
-			inSchema:    `{"type":"object","properties":{"architecture_doc":{"type":"string"}},"required":["architecture_doc"]}`,
-			outSchema:   `{"type":"object","properties":{"tasks":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"estimated_hours":{"type":"number"}}}}}},"required":["tasks"]}`,
-			workerInstructions: "你是一位资深项目经理。请根据架构设计文档，将工作拆分为可执行的开发任务，每个任务应包含标题、描述、预估工时和优先级。",
-			criticInstructions: "请评审任务拆分的合理性：粒度是否合适？是否有遗漏？依赖关系是否清晰？",
-			criticType:         "human",
-			x:                  600, y: 50,
-		},
-		{
-			title:       "编码",
-			description: "根据任务拆分进行编码实现",
-			inSchema:    `{"type":"object","properties":{"tasks":{"type":"array"}},"required":["tasks"]}`,
-			outSchema:   `{"type":"object","properties":{"code_changes":{"type":"array","description":"代码变更列表"}},"required":["code_changes"]}`,
-			workerInstructions: "你是一位资深软件工程师。请根据分配的任务进行编码实现，确保代码质量、测试覆盖和文档完整。",
-			criticInstructions: "作为代码审查Agent，请检查代码的正确性、安全性、性能、代码风格和测试覆盖。如不通过请指出具体问题。",
-			criticType:         "agent",
-			x:                  850, y: 50,
-		},
-		{
-			title:       "测试",
-			description: "对编码结果进行全面测试",
-			inSchema:    `{"type":"object","properties":{"code_changes":{"type":"array"}},"required":["code_changes"]}`,
-			outSchema:   `{"type":"object","properties":{"test_report":{"type":"string","description":"测试报告"}},"required":["test_report"]}`,
-			workerInstructions: "你是一位资深测试工程师。请对代码变更进行全面的测试验证，包括单元测试、集成测试、端到端测试，并产出测试报告。",
-			criticInstructions: "请评审测试报告：测试覆盖率是否充分？是否有遗漏的测试场景？测试结果是否可靠？",
-			criticType:         "human",
-			x:                  1100, y: 50,
-		},
-	}
-
-	var nodeIDs []pgtype.UUID
-	for i, nd := range nodes {
-		node, err := h.Queries.CreateWorkflowNode(ctx, db.CreateWorkflowNodeParams{
-			WorkflowID:         workflowID,
-			Title:              nd.title,
-			Description:        nonNullText(nd.description),
-			PositionX:          nd.x,
-			PositionY:          nd.y,
-			FormatSchema:       []byte(nd.inSchema),
-			WorkerType:         "agent",
-			WorkerInstructions: nonNullText(nd.workerInstructions),
-			CriticType:         nd.criticType,
-			CriticInstructions: nonNullText(nd.criticInstructions),
-			SortOrder:          int32(i),
-		})
-		if err != nil {
-			continue
-		}
-		nodeIDs = append(nodeIDs, node.ID)
-
-		// Create edge from previous node
-		if i > 0 {
-			h.Queries.CreateWorkflowEdge(ctx, db.CreateWorkflowEdgeParams{
-				WorkflowID:   workflowID,
-				SourceNodeID: nodeIDs[i-1],
-				TargetNodeID: node.ID,
-			})
-		}
-	}
-}

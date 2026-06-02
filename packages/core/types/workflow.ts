@@ -94,7 +94,6 @@ export interface WorkflowNodeRun {
 export interface CreateWorkflowRequest {
   title: string;
   description?: string;
-  template?: string;
   template_id?: string;
 }
 
