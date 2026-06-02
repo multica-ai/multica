@@ -75,12 +75,13 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgres://wallts:wallts@localhost:5432/wallts?sslmode=disable
+      DATABASE_URL: postgres://wallts:***@localhost:5432/wallts?sslmode=disable
       # Wires up the RedisLocalSkill*_test.go suite. Distinct from REDIS_URL
       # (which would flip the server binary itself onto the Redis-backed
       # realtime relay + request stores); the tests talk to this Redis
       # directly so they run alongside the Postgres-backed suite.
-      REDIS_TEST_URL: redis://localhost:6379/1
+      REDIS_TEST_URL: redis://localhost:***@v6
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
