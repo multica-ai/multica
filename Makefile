@@ -172,7 +172,7 @@ start: ## Start backend and frontend for the current checkout and run migrations
 	@echo "Using env file: $(ENV_FILE)"
 	@echo "Backend: http://localhost:$(PORT)"
 	@echo "Frontend: http://localhost:$(FRONTEND_PORT)"
-	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
+# 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	@echo "Running migrations..."
 	cd server && go run ./cmd/migrate up
 	@echo "Starting backend and frontend..."
