@@ -18,6 +18,7 @@ import {
   UserMinus,
 } from "lucide-react";
 import type { AgentTask, Issue } from "@multica/core/types";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { api } from "@multica/core/api";
 import {
   ALL_STATUSES,
@@ -95,6 +96,7 @@ export function IssueActionsMenuItems({
   onDeletedNavigateTo,
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
+  const wsId = useWorkspaceId();
   const {
     isPinned,
     updateField,
@@ -122,7 +124,7 @@ export function IssueActionsMenuItems({
   // The query shares its key with ExecutionLogSection, so navigating from
   // the issue detail page is a free cache hit.
   const { data: tasks } = useQuery({
-    queryKey: issueKeys.tasks(issue.id),
+    queryKey: issueKeys.tasks(wsId, issue.id),
     queryFn: () => api.listTasksByIssue(issue.id),
     staleTime: 30_000,
   });

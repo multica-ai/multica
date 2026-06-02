@@ -225,7 +225,7 @@ describe("onIssueDeleted", () => {
 
   it("removes every cache entry scoped directly to the deleted issue", () => {
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), baseIssue);
-    qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(ISSUE_ID), [
+    qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(WS_ID, ISSUE_ID), [
       {
         type: "activity",
         id: "activity-1",
@@ -235,7 +235,7 @@ describe("onIssueDeleted", () => {
         created_at: "2025-01-01T00:00:00Z",
       },
     ]);
-    qc.setQueryData<IssueReaction[]>(issueKeys.reactions(ISSUE_ID), [
+    qc.setQueryData<IssueReaction[]>(issueKeys.reactions(WS_ID, ISSUE_ID), [
       {
         id: "reaction-1",
         issue_id: ISSUE_ID,
@@ -245,7 +245,7 @@ describe("onIssueDeleted", () => {
         created_at: "2025-01-01T00:00:00Z",
       },
     ]);
-    qc.setQueryData<IssueSubscriber[]>(issueKeys.subscribers(ISSUE_ID), [
+    qc.setQueryData<IssueSubscriber[]>(issueKeys.subscribers(WS_ID, ISSUE_ID), [
       {
         issue_id: ISSUE_ID,
         user_type: "member",
@@ -254,14 +254,14 @@ describe("onIssueDeleted", () => {
         created_at: "2025-01-01T00:00:00Z",
       },
     ]);
-    qc.setQueryData<IssueUsageSummary>(issueKeys.usage(ISSUE_ID), {
+    qc.setQueryData<IssueUsageSummary>(issueKeys.usage(WS_ID, ISSUE_ID), {
       total_input_tokens: 10,
       total_output_tokens: 20,
       total_cache_read_tokens: 0,
       total_cache_write_tokens: 0,
       task_count: 1,
     });
-    qc.setQueryData<Attachment[]>(issueKeys.attachments(ISSUE_ID), [
+    qc.setQueryData<Attachment[]>(issueKeys.attachments(WS_ID, ISSUE_ID), [
       {
         id: "attachment-1",
         workspace_id: WS_ID,
@@ -279,14 +279,14 @@ describe("onIssueDeleted", () => {
         created_at: "2025-01-01T00:00:00Z",
       },
     ]);
-    qc.setQueryData<AgentTask[]>(issueKeys.tasks(ISSUE_ID), [makeTask()]);
+    qc.setQueryData<AgentTask[]>(issueKeys.tasks(WS_ID, ISSUE_ID), [makeTask()]);
     qc.setQueryData<Issue[]>(issueKeys.children(WS_ID, ISSUE_ID), [otherIssue]);
     qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(WS_ID, ISSUE_ID), {
       labels: [labelA],
     });
 
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, OTHER_ISSUE_ID), otherIssue);
-    qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(OTHER_ISSUE_ID), []);
+    qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(WS_ID, OTHER_ISSUE_ID), []);
     qc.setQueryData<IssueLabelsResponse>(
       labelKeys.byIssue(WS_ID, OTHER_ISSUE_ID),
       { labels: [labelB] },
@@ -295,19 +295,19 @@ describe("onIssueDeleted", () => {
     onIssueDeleted(qc, WS_ID, ISSUE_ID);
 
     expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
-    expect(qc.getQueryData(issueKeys.timeline(ISSUE_ID))).toBeUndefined();
-    expect(qc.getQueryData(issueKeys.reactions(ISSUE_ID))).toBeUndefined();
-    expect(qc.getQueryData(issueKeys.subscribers(ISSUE_ID))).toBeUndefined();
-    expect(qc.getQueryData(issueKeys.usage(ISSUE_ID))).toBeUndefined();
-    expect(qc.getQueryData(issueKeys.attachments(ISSUE_ID))).toBeUndefined();
-    expect(qc.getQueryData(issueKeys.tasks(ISSUE_ID))).toBeUndefined();
+    expect(qc.getQueryData(issueKeys.timeline(WS_ID, ISSUE_ID))).toBeUndefined();
+    expect(qc.getQueryData(issueKeys.reactions(WS_ID, ISSUE_ID))).toBeUndefined();
+    expect(qc.getQueryData(issueKeys.subscribers(WS_ID, ISSUE_ID))).toBeUndefined();
+    expect(qc.getQueryData(issueKeys.usage(WS_ID, ISSUE_ID))).toBeUndefined();
+    expect(qc.getQueryData(issueKeys.attachments(WS_ID, ISSUE_ID))).toBeUndefined();
+    expect(qc.getQueryData(issueKeys.tasks(WS_ID, ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.children(WS_ID, ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(labelKeys.byIssue(WS_ID, ISSUE_ID))).toBeUndefined();
 
     expect(qc.getQueryData(issueKeys.detail(WS_ID, OTHER_ISSUE_ID))).toEqual(
       otherIssue,
     );
-    expect(qc.getQueryData(issueKeys.timeline(OTHER_ISSUE_ID))).toEqual([]);
+    expect(qc.getQueryData(issueKeys.timeline(WS_ID, OTHER_ISSUE_ID))).toEqual([]);
     expect(qc.getQueryData(labelKeys.byIssue(WS_ID, OTHER_ISSUE_ID))).toEqual({
       labels: [labelB],
     });
@@ -444,7 +444,7 @@ describe("onIssueDeleted", () => {
     qc.setQueryData<AgentTask[]>(agentTasksKeys.detail(WS_ID, AGENT_ID), [
       makeTask(),
     ]);
-    qc.setQueryData<AgentTask[]>(issueKeys.tasks(ISSUE_ID), [makeTask()]);
+    qc.setQueryData<AgentTask[]>(issueKeys.tasks(WS_ID, ISSUE_ID), [makeTask()]);
 
     onIssueDeleted(qc, WS_ID, ISSUE_ID);
 
@@ -452,7 +452,7 @@ describe("onIssueDeleted", () => {
     expectInvalidated(qc, agentActivityKeys.last30d(WS_ID));
     expectInvalidated(qc, agentRunCountsKeys.last30d(WS_ID));
     expectInvalidated(qc, agentTasksKeys.detail(WS_ID, AGENT_ID));
-    expect(qc.getQueryData(issueKeys.tasks(ISSUE_ID))).toBeUndefined();
+    expect(qc.getQueryData(issueKeys.tasks(WS_ID, ISSUE_ID))).toBeUndefined();
   });
 });
 

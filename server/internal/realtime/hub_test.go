@@ -352,6 +352,92 @@ func TestWriteWSAuthFrameLogsWriteErrors(t *testing.T) {
 	}
 }
 
+// TestHub_ScopeSubscriptionDeniedWhenNoAuthorizer verifies that when the hub
+// has no ScopeAuthorizer configured, scope subscriptions (task/chat) are denied
+// with a "forbidden" error rather than being granted unconditionally.
+func TestHub_ScopeSubscriptionDeniedWhenNoAuthorizer(t *testing.T) {
+	_, server := newTestHub(t) // newTestHub does NOT set an authorizer
+	defer server.Close()
+
+	conn := connectWS(t, server)
+	defer conn.Close()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Attempt to subscribe to a task scope — should be denied because no
+	// authorizer is wired.
+	subMsg, _ := json.Marshal(map[string]any{
+		"type":    "subscribe",
+		"payload": map[string]string{"scope": ScopeTask, "id": "task-123"},
+	})
+	if err := conn.WriteMessage(websocket.TextMessage, subMsg); err != nil {
+		t.Fatalf("write subscribe: %v", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+
+	var resp struct {
+		Type    string            `json:"type"`
+		Payload map[string]string `json:"payload"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.Type != "subscribe_error" {
+		t.Fatalf("expected subscribe_error, got %s", resp.Type)
+	}
+	if resp.Payload["error"] != "forbidden" {
+		t.Fatalf("expected error=forbidden, got %q", resp.Payload["error"])
+	}
+	if resp.Payload["scope"] != ScopeTask {
+		t.Fatalf("expected scope=%s, got %q", ScopeTask, resp.Payload["scope"])
+	}
+}
+
+// TestHub_ChatScopeSubscriptionDeniedWhenNoAuthorizer is the same check for
+// ScopeChat to ensure both gated scopes are covered.
+func TestHub_ChatScopeSubscriptionDeniedWhenNoAuthorizer(t *testing.T) {
+	_, server := newTestHub(t)
+	defer server.Close()
+
+	conn := connectWS(t, server)
+	defer conn.Close()
+
+	time.Sleep(50 * time.Millisecond)
+
+	subMsg, _ := json.Marshal(map[string]any{
+		"type":    "subscribe",
+		"payload": map[string]string{"scope": ScopeChat, "id": "chat-456"},
+	})
+	if err := conn.WriteMessage(websocket.TextMessage, subMsg); err != nil {
+		t.Fatalf("write subscribe: %v", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+
+	var resp struct {
+		Type    string            `json:"type"`
+		Payload map[string]string `json:"payload"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.Type != "subscribe_error" {
+		t.Fatalf("expected subscribe_error, got %s", resp.Type)
+	}
+	if resp.Payload["error"] != "forbidden" {
+		t.Fatalf("expected error=forbidden, got %q", resp.Payload["error"])
+	}
+}
+
 func TestCheckOrigin(t *testing.T) {
 	prev := allowedWSOrigins.Load().([]string)
 	SetAllowedOrigins([]string{

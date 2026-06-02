@@ -843,7 +843,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     timeline, loading: timelineLoading,
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
-  } = useIssueTimeline(id, user?.id);
+  } = useIssueTimeline(wsId, id, user?.id);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
@@ -992,20 +992,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
-  } = useIssueReactions(id, user?.id);
+  } = useIssueReactions(wsId, id, user?.id);
 
   const {
     subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
-  } = useIssueSubscribers(id, user?.id);
+  } = useIssueSubscribers(wsId, id, user?.id);
 
   // Token usage
-  const { data: usage } = useQuery(issueUsageOptions(id));
+  const { data: usage } = useQuery(issueUsageOptions(wsId, id));
 
   // Attachments uploaded against this issue. Drives the description
   // editor's click-time fresh-sign download: NodeViews match
   // `src`/`href` against this list to resolve an attachment id before
   // calling `/api/attachments/{id}`.
-  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(id));
+  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(wsId, id));
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;

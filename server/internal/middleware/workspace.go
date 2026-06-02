@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -152,7 +153,7 @@ func resolveWorkspaceUUID(queries *db.Queries) workspaceResolver {
 func writeError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write([]byte(`{"error":"` + msg + `"}`))
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 // RequireWorkspaceMember resolves the workspace from slug (preferred) or UUID

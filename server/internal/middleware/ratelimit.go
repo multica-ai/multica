@@ -7,10 +7,71 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
+
+// memRateEntry tracks a fixed-window counter for in-memory rate limiting.
+type memRateEntry struct {
+	count    int64
+	windowEnd time.Time
+}
+
+// memRateLimiter is a simple per-IP fixed-window rate limiter using sync.Map.
+// It is NOT cluster-safe — intended only as a fallback when Redis is unavailable.
+type memRateLimiter struct {
+	mu      sync.Mutex
+	entries map[string]*memRateEntry
+	limit   int
+	window  time.Duration
+}
+
+func newMemRateLimiter(limit int, window time.Duration) *memRateLimiter {
+	rl := &memRateLimiter{
+		entries: make(map[string]*memRateEntry),
+		limit:   limit,
+		window:  window,
+	}
+	// Periodic cleanup to prevent unbounded memory growth.
+	go func() {
+		ticker := time.NewTicker(window * 2)
+		defer ticker.Stop()
+		for range ticker.C {
+			rl.cleanup()
+		}
+	}()
+	return rl
+}
+
+func (rl *memRateLimiter) allow(key string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	e, ok := rl.entries[key]
+	if !ok || now.After(e.windowEnd) {
+		rl.entries[key] = &memRateEntry{count: 1, windowEnd: now.Add(rl.window)}
+		return true
+	}
+	if e.count >= int64(rl.limit) {
+		return false
+	}
+	e.count++
+	return true
+}
+
+func (rl *memRateLimiter) cleanup() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	now := time.Now()
+	for k, e := range rl.entries {
+		if now.After(e.windowEnd) {
+			delete(rl.entries, k)
+		}
+	}
+}
 
 // rateLimitScript atomically increments the counter and sets the TTL on
 // first access. Using a Lua script ensures INCR and EXPIRE cannot be
@@ -49,7 +110,8 @@ func ParseTrustedProxies(raw string) []*net.IPNet {
 }
 
 // RateLimit returns a per-IP fixed-window rate limiter backed by Redis.
-// If rdb is nil the middleware is a no-op (fail-open).
+// If rdb is nil, an in-memory fallback limiter is used (not cluster-safe,
+// but protects single-node deployments from brute-force attacks).
 //
 // trustedProxies controls X-Forwarded-For handling: when the direct
 // connection (RemoteAddr) originates from a CIDR in the list, the
@@ -58,15 +120,28 @@ func ParseTrustedProxies(raw string) []*net.IPNet {
 // RemoteAddr is used. This matches the project's conservative trust
 // model (see health_realtime.go).
 func RateLimit(rdb *redis.Client, limit int, window time.Duration, trustedProxies []*net.IPNet) func(http.Handler) http.Handler {
+	var memFallback *memRateLimiter
+	if rdb == nil {
+		memFallback = newMemRateLimiter(limit, window)
+	}
 	return func(next http.Handler) http.Handler {
-		if rdb == nil {
-			return next
-		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := extractIP(r, trustedProxies)
 			key := rateLimitKey(r.URL.Path, ip)
-			ctx := r.Context()
 
+			if memFallback != nil {
+				if !memFallback.allow(key) {
+					w.Header().Set("Retry-After", fmt.Sprintf("%d", int(window.Seconds())))
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusTooManyRequests)
+					json.NewEncoder(w).Encode(map[string]string{"error": "too many requests"})
+					return
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			ctx := r.Context()
 			count, err := rateLimitScript.Run(ctx, rdb, []string{key}, int(window.Seconds())).Int64()
 			if err != nil {
 				slog.Warn("ratelimit: redis error; allowing request", "error", err, "ip", ip)
