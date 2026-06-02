@@ -606,9 +606,17 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "4. Run `multica issue status %s in_progress`\n", ctx.IssueID)
 		b.WriteString("5. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)\n")
 		if ctx.IsSquadLeader {
-			fmt.Fprintf(&b, "6. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `multica squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently): `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
+			fmt.Fprintf(&b, "6. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `multica squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently). Use `--content-stdin` with a HEREDOC to avoid shell backtick issues:\n\n"+
+			"       cat <<'COMMENT' | multica issue comment add %s --content-stdin\n"+
+			"       Your results here.\n"+
+			"       COMMENT\n\n"+
+			"    Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
 		} else {
-			fmt.Fprintf(&b, "6. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
+			fmt.Fprintf(&b, "6. **Post your final results as a comment — this step is mandatory**. Use `--content-stdin` with a HEREDOC to avoid shell backtick issues:\n\n"+
+			"       cat <<'COMMENT' | multica issue comment add %s --content-stdin\n"+
+			"       Your results here.\n"+
+			"       COMMENT\n\n"+
+			"    Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
 		}
 		b.WriteString("7. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
 		fmt.Fprintf(&b, "8. When done, run `multica issue status %s in_review`\n", ctx.IssueID)

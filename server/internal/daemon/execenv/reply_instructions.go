@@ -161,19 +161,20 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 			issueID, triggerCommentID,
 		)
 	}
-	// Non-Codex providers on Linux/macOS: lightweight inline template, no
-	// platform branch. Pre-#1795 default, restored after we found that
-	// #1795 / #1851 had expanded a Codex-specific fix into a global mandate
-	// that broke Windows non-ASCII for every provider. The CLI decodes
-	// `\n` etc. server-side, so escaped multi-line is fine; for richer
-	// formatting the agent can still reach for `--content-stdin` (works
-	// on Linux/macOS) or `--content-file <path>` (works on every platform),
-	// both listed in Available Commands above.
+	// Non-Codex providers on Linux/macOS: default to HEREDOC via
+	// --content-stdin. Inline `--content "..."` is vulnerable to shell
+	// command substitution — backticks in agent-authored content get
+	// silently eaten by bash/zsh before the bytes reach the CLI
+	// (see ONE-102). HEREDOC sidesteps this entirely. The agent can
+	// still use `--content-file <path>` as a platform-agnostic
+	// alternative (works on Windows too).
 	return fmt.Sprintf(
 		"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
 			"do NOT reuse --parent values from previous turns in this session.\n\n"+
 			"Use this form, preserving the same issue ID and --parent value:\n\n"+
-			"    multica issue comment add %s --parent %s --content \"...\"\n\n"+
+			"    cat <<'COMMENT' | multica issue comment add %s --parent %s --content-stdin\n"+
+			"    Your reply here. Use `backticks` freely.\n"+
+			"    COMMENT\n\n"+
 			"For multi-line bodies, code blocks, or content with quotes/backticks, prefer `--content-stdin` "+
 			"(pipe a HEREDOC) or `--content-file <path>` (read a UTF-8 file). See Available Commands above for the full menu.\n",
 		issueID, triggerCommentID,

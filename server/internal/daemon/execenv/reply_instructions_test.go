@@ -43,12 +43,10 @@ func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
 }
 
 // TestBuildCommentReplyInstructionsNonCodexLinux pins that every non-Codex
-// provider on Linux/macOS gets the lightweight pre-#1795 inline template.
-// The "MUST stdin" mandate was originally a Codex-specific fix that
-// #1795 / #1851 accidentally spread to every provider, breaking Windows
-// non-ASCII for all of them (#2198 / #2236 / #2376). Non-Codex providers
-// handle inline escaping correctly and the CLI server-decodes `\n` etc.,
-// so the inline template works on every non-Windows platform.
+// provider on Linux/macOS gets the HEREDOC template (via --content-stdin).
+// Inline `--content "..."` is vulnerable to shell command substitution —
+// backticks get silently eaten by bash/zsh (see ONE-102). HEREDOC
+// sidesteps this entirely.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
@@ -66,7 +64,8 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 				got := BuildCommentReplyInstructions(provider, issueID, triggerID)
 
 				for _, want := range []string{
-					"multica issue comment add " + issueID + " --parent " + triggerID + " --content \"...\"",
+					"multica issue comment add " + issueID + " --parent " + triggerID + " --content-stdin",
+					"<<'COMMENT'",
 					"do NOT reuse --parent values from previous turns",
 					"If you decide to reply",
 				} {
@@ -75,13 +74,12 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 					}
 				}
 
-				// Non-Codex / non-Windows providers must NOT receive the
-				// Codex-specific "MUST stdin" mandate or its HEREDOC
-				// template — that was the over-spread of #1795 / #1851.
+				// The primary template must NOT show inline --content
+				// as the example command — that's the vulnerable form.
+				// It may still appear in supplementary notes about
+				// alternatives, which is fine.
 				for _, banned := range []string{
 					"Always use `--content-stdin`",
-					"<<'COMMENT'",
-					"--parent " + triggerID + " --content-stdin",
 					"--parent " + triggerID + " --content-file",
 				} {
 					if strings.Contains(got, banned) {
