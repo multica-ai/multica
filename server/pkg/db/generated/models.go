@@ -675,6 +675,26 @@ type WebhookDelivery struct {
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
+type WorkflowPromptOverride struct {
+	ID              pgtype.UUID `json:"id"`
+	TemplateID      pgtype.UUID `json:"template_id"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+	ProjectID       pgtype.UUID `json:"project_id"`
+	OverrideContent string      `json:"override_content"`
+}
+
+type WorkflowPromptTemplate struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Stage       string             `json:"stage"`
+	Name        string             `json:"name"`
+	Content     string             `json:"content"`
+	IsDefault   pgtype.Bool        `json:"is_default"`
+	Version     pgtype.Int4        `json:"version"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Workspace struct {
 	ID           pgtype.UUID        `json:"id"`
 	Name         string             `json:"name"`
