@@ -39,18 +39,8 @@ import NetInfo from "@react-native-community/netinfo";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { getToken } from "@/data/secure-storage";
+import { getEffectiveApiUrl } from "@/data/server-config";
 import { WSClient } from "./ws-client";
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
-
-if (!API_URL) {
-  // ApiClient already throws on this; keeping a defensive check here
-  // avoids a confusing "URL constructor failed" deep in WSClient.
-  throw new Error("EXPO_PUBLIC_API_URL is not set");
-}
-
-// http(s)://host → ws(s)://host/ws
-const WS_URL = `${API_URL.replace(/^http/, "ws")}/ws`;
 
 const RealtimeContext = createContext<WSClient | null>(null);
 
@@ -86,8 +76,11 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       const token = await getToken();
       if (cancelled || !token) return;
 
+      // http(s)://host → ws(s)://host/ws. Read at connection time so a
+      // saved self-host URL applies after app restart and before WS connect.
+      const wsUrl = `${getEffectiveApiUrl().replace(/^http/, "ws")}/ws`;
       ws = new WSClient({
-        url: WS_URL,
+        url: wsUrl,
         token,
         workspaceSlug: wsSlug,
         clientVersion: "0.1.0",

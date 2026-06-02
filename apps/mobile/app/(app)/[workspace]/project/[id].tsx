@@ -43,6 +43,7 @@ import { pinListOptions } from "@/data/queries/pins";
 import { useCreatePin, useDeletePin } from "@/data/mutations/pins";
 import { useAuthStore } from "@/data/auth-store";
 import { useProjectRealtime } from "@/data/realtime/use-project-realtime";
+import { getEffectiveWebUrl } from "@/data/server-config";
 import { useWorkspaceStore } from "@/data/workspace-store";
 
 export default function ProjectDetail() {
@@ -86,7 +87,7 @@ export default function ProjectDetail() {
 
   const onPressMore = () => {
     if (!project) return;
-    const wsUrl = process.env.EXPO_PUBLIC_WEB_URL;
+    const wsUrl = getEffectiveWebUrl();
     const options = [
       "Cancel",
       isPinned ? "Unpin" : "Pin",

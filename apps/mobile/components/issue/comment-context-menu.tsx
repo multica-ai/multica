@@ -24,6 +24,7 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import type { Reaction, TimelineEntry } from "@multica/core/types";
 import { useAuthStore } from "@/data/auth-store";
+import { getEffectiveWebUrl } from "@/data/server-config";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useCommentSelectStore } from "@/data/comment-select-store";
 import { useReplyTargetStore } from "@/data/stores/reply-target-store";
@@ -55,7 +56,7 @@ export function useCommentLongPress(
     const isRoot = !entry.parent_id;
     const resolved = !!entry.resolved_at;
     const hasContent = !!entry.content;
-    const webUrl = process.env.EXPO_PUBLIC_WEB_URL;
+    const webUrl = getEffectiveWebUrl();
     const canCopyLink = !!(webUrl && wsSlug && issueIdentifier);
     const reactions = (entry.reactions ?? []) as Reaction[];
 

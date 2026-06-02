@@ -121,17 +121,9 @@ import {
 } from "./schemas";
 import type { ZodType } from "zod";
 import { getCurrentSlug } from "./workspace-store";
+import { getEffectiveApiUrl } from "./server-config";
 import { parseWithFallback } from "@/lib/parse-response";
 import { createRequestId } from "@/lib/request-id";
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
-
-if (!API_URL) {
-  throw new Error(
-    "EXPO_PUBLIC_API_URL is not set. Add it to apps/mobile/.env.development.local " +
-      "(see apps/mobile/.env.staging for an example).",
-  );
-}
 
 export interface LoginResponse {
   token: string;
@@ -252,7 +244,7 @@ class ApiClient {
 
     let res: Response;
     try {
-      res = await fetch(`${API_URL}${path}`, {
+      res = await fetch(`${getEffectiveApiUrl()}${path}`, {
         ...init,
         signal: controller.signal,
         headers,
@@ -1102,7 +1094,7 @@ class ApiClient {
     );
 
     console.log(`[api] → POST ${path}`, { rid, filename: asset.name });
-    const res = await fetch(`${API_URL}${path}`, {
+    const res = await fetch(`${getEffectiveApiUrl()}${path}`, {
       method: "POST",
       headers,
       body: formData,
@@ -1306,7 +1298,7 @@ class ApiClient {
 
     console.log(`[api] → POST ${path}`, { rid, filename: asset.name });
 
-    const res = await fetch(`${API_URL}${path}`, {
+    const res = await fetch(`${getEffectiveApiUrl()}${path}`, {
       method: "POST",
       headers,
       body: formData,

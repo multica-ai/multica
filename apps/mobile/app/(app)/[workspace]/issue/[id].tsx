@@ -38,6 +38,7 @@ import { pinListOptions } from "@/data/queries/pins";
 import { useCreatePin, useDeletePin } from "@/data/mutations/pins";
 import { useAuthStore } from "@/data/auth-store";
 import { useIssueRealtime } from "@/data/realtime/use-issue-realtime";
+import { getEffectiveWebUrl } from "@/data/server-config";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useViewedIssuesStore } from "@/data/viewed-issues-store";
 import { useCommentSelectStore } from "@/data/comment-select-store";
@@ -112,7 +113,7 @@ export default function IssueDetail() {
   // the timeline list, not in this menu — one entry per action.
   const onPressMore = useCallback(() => {
     if (!issue || !wsSlug) return;
-    const webUrl = process.env.EXPO_PUBLIC_WEB_URL;
+    const webUrl = getEffectiveWebUrl();
     const issueLink = webUrl
       ? `${webUrl}/${wsSlug}/issue/${issue.identifier}`
       : null;

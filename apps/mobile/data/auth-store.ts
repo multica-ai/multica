@@ -13,6 +13,7 @@ import { create } from "zustand";
 import type { User } from "@multica/core/types";
 import { api, ApiError } from "./api";
 import { clearToken, getToken, setToken } from "./secure-storage";
+import { restoreServerConfig } from "./server-config";
 import { useWorkspaceStore } from "./workspace-store";
 
 interface AuthState {
@@ -32,6 +33,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: true,
 
   initialize: async () => {
+    await restoreServerConfig();
     // Restore the persisted workspace slug alongside the auth token so the
     // entry redirect (app/index.tsx) can route directly to the last-used
     // workspace without flashing /select-workspace.

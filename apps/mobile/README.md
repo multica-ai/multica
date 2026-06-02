@@ -96,12 +96,20 @@ A free Apple ID signs builds for **7 days only**, Debug and Release both. After 
 
 ## Pointing at a different backend
 
-Edit `EXPO_PUBLIC_API_URL` in `.env.staging`, `.env.production`, or `.env.development.local` (whichever variant you're running). Then:
+`EXPO_PUBLIC_API_URL` is now only the default backend bundled into the app. On the login screen, open **Server → Change server**, enter a Multica backend origin, and save it. The app probes `/api/config`, persists the URL in SecureStore, clears the local session, and uses that server for HTTP, file upload, WebSocket, login, workspace, chat, and issue requests after app restart.
 
-- For an installed **Debug build**: restart Metro (`pnpm dev:mobile:staging`) so the next JS bundle picks up the new value.
-- For an installed **Release build**: re-run the `ios:mobile:device:staging:release` command — the value is baked into the embedded bundle at build time.
+Accepted examples:
 
-For local backend testing, use your Mac's LAN IP (`ipconfig getifaddr en0`), not `localhost`.
+- `https://api.example.com`
+- `http://192.168.1.42:8080`
+
+Use a backend origin only: no `/api`, workspace path, query string, or trailing route. For local backend testing from a phone or simulator on another device, use your Mac's LAN IP (`ipconfig getifaddr en0`), not `localhost`. The phone and server must be on the same network unless the backend is reachable through a public hostname or VPN.
+
+Tap **Use default** on the login screen to clear the custom backend and return to the build's bundled `EXPO_PUBLIC_API_URL`. This avoids getting stuck if a self-host URL is mistyped or no longer reachable.
+
+For self-hosted Multica, start the backend first, confirm `http://<host>:8080/health` returns JSON, then configure the mobile app with `http://<host>:8080`. If the backend exposes `daemon_app_url` from `/api/config`, mobile web links use that runtime app URL; otherwise they fall back to the build-time `EXPO_PUBLIC_WEB_URL`.
+
+Changing `.env.*` still changes the default URL for a newly built bundle, but it is no longer required just to connect an installed app to a self-hosted backend.
 
 ## Voice backend behavior
 
