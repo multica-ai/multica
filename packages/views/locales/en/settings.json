@@ -83,6 +83,20 @@
       "description": "Control native OS notification banners shown when Multica is in the background.",
       "label": "Show system notifications",
       "hint": "Show a banner from your operating system for new inbox items when the app isn't focused."
+    },
+    "push": {
+      "title": "Browser Push Notifications",
+      "description": "Receive native browser alerts even when Multica is in the background. Requires your browser to allow push notifications.",
+      "label": "Enable Browser Push",
+      "hint": "Notifications are sent for mentions, assignments, agent runs, and CI failures.",
+      "device_count": "Active on {{count}} device(s).",
+      "browser_blocked_hint": "Push notifications are blocked by your browser. Enable them in browser site settings.",
+      "permission_denied": "Notification permission was denied. Please enable it in your browser settings.",
+      "vapid_not_configured": "Push notifications are not configured on this server yet.",
+      "subscribe_failed": "Failed to enable browser push. Please try again.",
+      "unsubscribe_failed": "Failed to disable browser push. Please try again.",
+      "enabled": "Browser push notifications enabled",
+      "disabled": "Browser push notifications disabled"
     }
   },
   "tokens": {

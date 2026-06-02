@@ -98,6 +98,9 @@ import type {
   WebhookDelivery,
   NotificationPreferenceResponse,
   NotificationPreferences,
+  CreatePushSubscriptionRequest,
+  ListPushSubscriptionsResponse,
+  VapidPublicKeyResponse,
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
@@ -1332,6 +1335,29 @@ export class ApiClient {
     return this.fetch("/api/notification-preferences", {
       method: "PUT",
       body: JSON.stringify({ preferences }),
+    });
+  }
+
+  // Push Notifications
+  async getVapidPublicKey(): Promise<VapidPublicKeyResponse> {
+    return this.fetch("/api/push/vapid-key");
+  }
+
+  async getPushSubscriptions(): Promise<ListPushSubscriptionsResponse> {
+    return this.fetch("/api/push/subscriptions");
+  }
+
+  async subscribePush(request: CreatePushSubscriptionRequest): Promise<{ id: string }> {
+    return this.fetch("/api/push/subscriptions", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+  }
+
+  async unsubscribePush(endpoint: string): Promise<void> {
+    return this.fetch("/api/push/subscriptions", {
+      method: "DELETE",
+      body: JSON.stringify({ endpoint }),
     });
   }
 
