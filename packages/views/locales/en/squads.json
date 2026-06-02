@@ -53,6 +53,7 @@
     "status_idle": "Idle",
     "status_offline": "Offline",
     "status_unstable": "Unstable",
+    "status_archived": "Archived",
     "issue_status_blocked": "blocked",
     "active_issue_more": "and {{count}} more",
     "last_active_label": "last active {{time}}"

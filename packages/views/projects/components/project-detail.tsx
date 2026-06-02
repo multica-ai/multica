@@ -24,6 +24,7 @@ import {
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -33,6 +34,7 @@ import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
+import { filterRunningAssigneeGroups } from "./project-issue-filters";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
@@ -139,24 +141,39 @@ function ProjectIssuesContent({
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const runningIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const task of snapshot) {
+      if (task.status === "running" && task.issue_id) ids.add(task.issue_id);
+    }
+    return ids;
+  }, [snapshot]);
 
   const issues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
+    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
   );
 
   // Status-unfiltered companion for Swimlane.
   const swimlaneIssues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
+    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
   );
 
   // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
   // to wait for every status bucket to paginate in. View-store filters still
   // apply so toggling priority / assignee / label hides the same bars.
   const filteredGanttIssues = useMemo(
-    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
+    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
+  );
+
+  const filteredAssigneeGroups = useMemo(
+    () => filterRunningAssigneeGroups(assigneeGroups, agentRunningFilter, runningIssueIds),
+    [assigneeGroups, agentRunningFilter, runningIssueIds],
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
@@ -221,8 +238,8 @@ function ProjectIssuesContent({
     <div className="flex flex-col flex-1 min-h-0">
       {viewMode === "board" && (
         <BoardView
-          issues={assigneeGroups ? projectIssues : issues}
-          assigneeGroups={assigneeGroups}
+          issues={filteredAssigneeGroups ? filteredAssigneeGroups.flatMap((group) => group.issues) : issues}
+          assigneeGroups={filteredAssigneeGroups}
           assigneeGroupQueryKey={assigneeGroupQueryKey}
           assigneeGroupFilter={assigneeGroupFilter}
           visibleStatuses={visibleStatuses}

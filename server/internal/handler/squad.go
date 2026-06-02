@@ -474,9 +474,11 @@ type SquadMemberStatusListResponse struct {
 // last_seen_at is within the last 5 minutes is reported as "unstable" so
 // the squad UI surfaces transient drops the same way the agent dot does.
 //
-// Archived agents always report `offline` regardless of any leftover
+// Archived agents always report `archived` regardless of any leftover
 // runtime row or task — they should appear in the list but never look
-// like they're still working. Per the RFC decision (see MUL-2319), we
+// like they're still working or merely offline (a leftover online
+// runtime row would otherwise read as "offline" and hide the fact that
+// the agent has been archived). Per the RFC decision (see MUL-2319), we
 // surface archived agents in this endpoint rather than filtering them
 // out in the SQL.
 func deriveSquadMemberStatus(
@@ -487,7 +489,7 @@ func deriveSquadMemberStatus(
 	now time.Time,
 ) string {
 	if archived {
-		return "offline"
+		return "archived"
 	}
 	if hasActiveTask {
 		return "working"
@@ -1028,6 +1030,11 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
+		return
+	}
+
+	// Private-leader gate: deny if the actor cannot access the leader.
+	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, authorType, authorID, uuidToString(issue.WorkspaceID)) {
 		return
 	}
 

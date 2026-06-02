@@ -25,7 +25,8 @@
     "all": "전체",
     "online": "온라인",
     "unstable": "불안정",
-    "offline": "오프라인"
+    "offline": "오프라인",
+    "archived": "보관됨"
   },
   "workload": {
     "working": "작업 중",
