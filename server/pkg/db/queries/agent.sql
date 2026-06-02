@@ -535,6 +535,16 @@ WHERE issue_id = $1 AND status IN ('queued', 'dispatched');
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched');
 
+
+-- name: CountCompletedTasksForIssueAfter :one
+-- Returns the number of completed tasks for the same issue that finished
+-- after the given timestamp. Used by the failure-escalation dedup to
+-- suppress an escalation when a subsequent task already succeeded.
+SELECT count(*)\:\:bigint FROM agent_task_queue
+WHERE issue_id = $1
+  AND status = 'completed'
+  AND completed_at IS NOT NULL
+  AND completed_at > $2;
 -- name: GetLatestTaskIsLeaderForIssueAndAgent :one
 -- Returns the is_leader_task flag of the agent's most recent task on this
 -- issue, or NULL if the agent has never had a task on this issue. Used by

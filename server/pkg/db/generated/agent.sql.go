@@ -1428,6 +1428,26 @@ func (q *Queries) GetLastTaskStartedAtForIssueAndAgent(ctx context.Context, arg 
 	return started_at, err
 }
 
+const countCompletedTasksForIssueAfter = `-- name: CountCompletedTasksForIssueAfter :one
+SELECT count(*)::bigint FROM agent_task_queue
+WHERE issue_id = $1
+  AND status = 'completed'
+  AND completed_at IS NOT NULL
+  AND completed_at > $2
+`
+
+type CountCompletedTasksForIssueAfterParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+}
+
+func (q *Queries) CountCompletedTasksForIssueAfter(ctx context.Context, arg CountCompletedTasksForIssueAfterParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCompletedTasksForIssueAfter, arg.IssueID, arg.CompletedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getLatestTaskIsLeaderForIssueAndAgent = `-- name: GetLatestTaskIsLeaderForIssueAndAgent :one
 SELECT is_leader_task FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2

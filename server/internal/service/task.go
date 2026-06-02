@@ -1266,6 +1266,12 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// and only triggers for issue/chat tasks.
 	retried, _ := s.MaybeRetryFailedTask(ctx, task)
 
+	// Escalate to next handler when no auto-retry is pending. The helper
+	// itself handles dedup (metadata check, later-success guard, etc.).
+	if task.IssueID.Valid && retried == nil {
+		s.escalateTaskFailure(ctx, task)
+	}
+
 	// Skip the per-failure system comment when we'll immediately retry —
 	// the new task will surface its own status to the user, and we don't
 	// want to spam the issue with "task timed out" messages on every
@@ -1544,11 +1550,19 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	for _, t := range tasks {
 		// Auto-retry first so the issue stays in_progress rather than
 		// flapping todo → in_progress within a tick.
-		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {
+		child, _ := s.MaybeRetryFailedTask(ctx, t)
+		if child != nil {
 			retried++
 			if t.IssueID.Valid {
 				retriedIssues[util.UUIDToString(t.IssueID)] = true
 			}
+		}
+
+		// Escalate to next handler when no auto-retry is pending.
+		// This covers batch paths (orphan recovery, sweeper, timeout, etc.)
+		// that FailTask does not reach.
+		if child == nil && t.IssueID.Valid {
+			s.escalateTaskFailure(ctx, t)
 		}
 
 		failureReason := "agent_error"
