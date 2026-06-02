@@ -13,7 +13,6 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	defer func() { testHandler.Storage = origStorage }()
 
 	t.Setenv("ALLOW_SIGNUP", "false")
-	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
 	t.Setenv("MULTICA_PUBLIC_URL", "https://api.example.com/")
 	t.Setenv("MULTICA_APP_URL", "https://app.example.com/")
 
@@ -35,9 +34,6 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 	if cfg.AllowSignup {
 		t.Fatalf("allow_signup: want false, got true")
-	}
-	if cfg.GoogleClientID != "google-client-id" {
-		t.Fatalf("google_client_id: want google-client-id, got %q", cfg.GoogleClientID)
 	}
 	if cfg.WorkspaceCreationDisabled {
 		t.Fatalf("workspace_creation_disabled: want false by default, got true")
@@ -167,5 +163,30 @@ func TestGetConfigExposesWorkspaceCreationDisabled(t *testing.T) {
 	}
 	if !cfg.WorkspaceCreationDisabled {
 		t.Fatalf("workspace_creation_disabled: want true with env on, got false (body=%s)", w.Body.String())
+	}
+}
+
+func TestGetConfigOmitsGoogleClientID(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	defer func() { testHandler.Storage = origStorage }()
+
+	t.Setenv("GOOGLE_CLIENT_ID", "should-not-appear")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// google_client_id must not appear in the JSON response
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if _, ok := raw["google_client_id"]; ok {
+		t.Fatalf("google_client_id should not be in config response, but it is: %s", w.Body.String())
 	}
 }
