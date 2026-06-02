@@ -350,7 +350,7 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		WorkspaceID: util.UUIDToString(plan.workspaceID),
 	}
 	var completion GatewayCompletion
-	if cfg.ToolsEnabledForAgent(task.AgentID) {
+	if e.agentHasCallableTools(runCtx, task.AgentID, plan.workspaceID, task.OriginalUserID) {
 		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID, task.OriginalUserID, pruneOn && !pruneHeldOut)
 	} else {
 		completion, err = e.completeGateway(runCtx, cfg, agent.Model.String, messages, meta)
@@ -599,6 +599,19 @@ func (e *FirtalGatewayExecutor) completeGatewayForcingText(ctx context.Context, 
 	return c, err
 }
 
+// agentHasCallableTools reports whether this task should enter the tool loop.
+// Resolution follows the runtime tools list (cerebro_runtime_tool cascade with
+// legacy agent_tool_grant fallback), not MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS.
+func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agentID, workspaceID, originalUserID pgtype.UUID) bool {
+	if e.registry == nil {
+		return false
+	}
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID}
+	taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
+	taskRegistry.db = e.registry.db
+	return len(taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, originalUserID)) > 0
+}
+
 // runToolLoop runs the model in an Anthropic-native tool-call loop. Up to
 // firtalGatewayMaxToolRounds (or cfg.MaxToolRounds when set) rounds dispatch
 // tools; each round sends the running transcript plus tool definitions, and if
@@ -645,17 +658,33 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		}
 	}
 	if !useRegistry {
-		// POC fallback: MCP server with hardcoded 3 tools.
-		toolSrv = NewFirtalGatewayToolServer(e.queries, tctx)
-		for _, def := range GatewayToolDefs() {
-			anthropicTools = append(anthropicTools, AnthropicTool{
-				Name:        def.Function.Name,
-				Description: def.Function.Description,
-				InputSchema: def.Function.Parameters,
-			})
+		// Legacy POC fallback only when the runtime has no cerebro_runtime_tool
+		// rows yet. Once tools are managed on the runtime, an empty grant list
+		// means chat-only — do not inject the hardcoded three-tool MCP set.
+		runtimeToolsConfigured := false
+		if e.cerebro != nil && agentID.Valid {
+			var checkErr error
+			runtimeToolsConfigured, checkErr = e.cerebro.HasCerebroRuntimeToolsForAgent(ctx, agentID)
+			if checkErr != nil {
+				slog.Warn("firtal gateway: runtime tools configured-check failed",
+					"agent_id", util.UUIDToString(agentID),
+					"error", checkErr,
+				)
+				runtimeToolsConfigured = false
+			}
 		}
-		if len(anthropicTools) > 0 {
-			anthropicTools[len(anthropicTools)-1].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+		if !runtimeToolsConfigured {
+			toolSrv = NewFirtalGatewayToolServer(e.queries, tctx)
+			for _, def := range GatewayToolDefs() {
+				anthropicTools = append(anthropicTools, AnthropicTool{
+					Name:        def.Function.Name,
+					Description: def.Function.Description,
+					InputSchema: def.Function.Parameters,
+				})
+			}
+			if len(anthropicTools) > 0 {
+				anthropicTools[len(anthropicTools)-1].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+			}
 		}
 	}
 
