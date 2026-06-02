@@ -316,7 +316,22 @@
       "saved_toast": "MCP config를 저장했습니다",
       "save_failed_toast": "MCP config를 저장하지 못했습니다",
       "redacted_title": "설정됨 - 현재 보기에서는 숨김",
-      "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다."
+      "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다.",
+      "mode_visual": "시각적",
+      "mode_json": "JSON",
+      "add_stdio_server": "stdio 서버 추가",
+      "add_http_server": "HTTP/SSE 서버 추가",
+      "no_servers": "MCP 서버가 설정되지 않았습니다. 아래에서 추가하세요.",
+      "server_name_placeholder": "서버-이름",
+      "server_name_aria": "MCP 서버 이름",
+      "transport_label": "전송",
+      "command_label": "명령어",
+      "args_label": "인수",
+      "env_label": "환경 변수",
+      "headers_label": "헤더",
+      "http_type_label": "유형",
+      "url_label": "URL",
+      "env_key_placeholder": "KEY"
     },
     "skills": {
       "intro": "이 에이전트에 할당된 워크스페이스 스킬입니다. 로컬 런타임 스킬은 항상 자동으로 사용할 수 있습니다.",
