@@ -302,6 +302,7 @@ export function GitHubTab() {
               checked={flags.autoLinkPRs}
               disabled={!canManage || !flags.enabled || savingKey === "github_auto_link_prs_enabled"}
               onCheckedChange={(v) => persistSetting("github_auto_link_prs_enabled", v)}
+            />
 
             <FeatureRow
               id="github-pr-approval-gate"
@@ -315,7 +316,6 @@ export function GitHubTab() {
               checked={flags.prApprovalGate}
               disabled={!canManage || !flags.enabled || savingKey === "require_pr_approval_before_done"}
               onCheckedChange={(v) => persistSetting("require_pr_approval_before_done", v)}
-            />
             />
           </CardContent>
         </Card>
