@@ -31,6 +31,12 @@ class GetuiIntentService : GTIntentService() {
   }
 
   private fun extractNotificationUrl(msg: GTNotificationMessage?): String? {
-    return msg?.content?.trim()?.takeIf { it.startsWith("wujieai-multicam://") }
+    val candidates = listOf(
+      msg?.payload,
+      msg?.url,
+      msg?.intentUri,
+      msg?.content,
+    )
+    return candidates.firstOrNull { it?.trim()?.startsWith("wujieai-multicam://") == true }
   }
 }

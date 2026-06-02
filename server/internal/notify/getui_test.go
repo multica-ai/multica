@@ -38,7 +38,11 @@ func TestGetuiPushSingleByCID_AuthenticatesAndSends(t *testing.T) {
 			}
 			var body struct {
 				RequestID string `json:"request_id"`
-				Audience  struct {
+				Settings  struct {
+					TTL      int64          `json:"ttl"`
+					Strategy map[string]int `json:"strategy"`
+				} `json:"settings"`
+				Audience struct {
 					CID []string `json:"cid"`
 				} `json:"audience"`
 				PushMessage struct {
@@ -46,10 +50,20 @@ func TestGetuiPushSingleByCID_AuthenticatesAndSends(t *testing.T) {
 						Title     string `json:"title"`
 						Body      string `json:"body"`
 						ClickType string `json:"click_type"`
-						Intent    string `json:"intent"`
 						Payload   string `json:"payload"`
 					} `json:"notification"`
 				} `json:"push_message"`
+				PushChannel struct {
+					Android struct {
+						UPS struct {
+							Notification struct {
+								Title     string `json:"title"`
+								Body      string `json:"body"`
+								ClickType string `json:"click_type"`
+							} `json:"notification"`
+						} `json:"ups"`
+					} `json:"android"`
+				} `json:"push_channel"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode push body: %v", err)
@@ -57,8 +71,14 @@ func TestGetuiPushSingleByCID_AuthenticatesAndSends(t *testing.T) {
 			if len(body.Audience.CID) != 1 || body.Audience.CID[0] != "cid-success" {
 				t.Fatalf("unexpected cid audience: %#v", body.Audience.CID)
 			}
-			if body.PushMessage.Notification.Title != "OPE-1" || body.PushMessage.Notification.Body != "hello" || body.PushMessage.Notification.ClickType != "intent" || body.PushMessage.Notification.Intent != "wujieai-multicam://issues/issue-1?commentId=comment-1" || body.PushMessage.Notification.Payload != "wujieai-multicam://issues/issue-1?commentId=comment-1" {
+			if body.PushMessage.Notification.Title != "OPE-1" || body.PushMessage.Notification.Body != "hello" || body.PushMessage.Notification.ClickType != "payload" || body.PushMessage.Notification.Payload != "wujieai-multicam://issues/issue-1?commentId=comment-1" {
 				t.Fatalf("unexpected notification: %#v", body.PushMessage.Notification)
+			}
+			if body.PushChannel.Android.UPS.Notification.Title != "OPE-1" || body.PushChannel.Android.UPS.Notification.Body != "hello" || body.PushChannel.Android.UPS.Notification.ClickType != "startapp" {
+				t.Fatalf("unexpected offline notification: %#v", body.PushChannel.Android.UPS.Notification)
+			}
+			if body.Settings.Strategy["default"] != 1 || body.Settings.Strategy["hw"] != 1 || body.Settings.Strategy["ho"] != 1 {
+				t.Fatalf("unexpected strategy: %#v", body.Settings.Strategy)
 			}
 			if len(body.RequestID) != 32 {
 				t.Fatalf("request_id length = %d, want 32", len(body.RequestID))
