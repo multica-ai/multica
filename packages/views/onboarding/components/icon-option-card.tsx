@@ -74,6 +74,7 @@ export function IconOtherOptionCard({
   onConfirm,
   placeholder,
   mode = "radio",
+  allowToggleOff = false,
 }: {
   icon: ReactNode;
   label: string;
@@ -84,13 +85,23 @@ export function IconOtherOptionCard({
   onConfirm: () => void;
   placeholder: string;
   mode?: "radio" | "checkbox";
+  /**
+   * When true, clicking the card while it is already selected fires
+   * `onSelect` again so the parent can toggle the pick off (multi-select
+   * pattern, used by the source-backfill modal). Default `false`
+   * preserves the original onboarding StepSource behaviour: a re-click
+   * on the selected Other card is a no-op so users can move focus
+   * into the text input without deselecting. Clicks that originate
+   * inside the input never toggle — the input stops their propagation.
+   */
+  allowToggleOff?: boolean;
 }) {
   return (
     <div
       role={mode}
       aria-checked={selected}
       onClick={() => {
-        if (!selected) onSelect();
+        if (allowToggleOff || !selected) onSelect();
       }}
       className={cn(
         "flex w-full items-center gap-3 rounded-xl border bg-card px-4 py-3 text-left transition-all",
@@ -111,6 +122,7 @@ export function IconOtherOptionCard({
           type="text"
           value={otherValue}
           onChange={(e) => onOtherChange(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
             if (e.key === "Enter" && otherValue.trim()) {
               e.preventDefault();

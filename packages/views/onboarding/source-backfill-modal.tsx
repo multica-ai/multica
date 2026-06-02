@@ -25,6 +25,7 @@ import {
   DialogContent,
 } from "@multica/ui/components/ui/dialog";
 import {
+  GitHubIcon,
   GoogleIcon,
   LinkedInIcon,
   OpenAIIcon,
@@ -97,7 +98,21 @@ export function SourceBackfillModal() {
     if (openedForUserRef.current === user.id) return;
     if (!needsSourceBackfill(user, dismissCount)) return;
     openedForUserRef.current = user.id;
-    setOpen(true);
+    // Soft entrance: let the user see the workspace for a beat before
+    // the modal floats in, so it doesn't feel like a hard block. Common
+    // delight pattern — ~700ms is short enough that nobody starts an
+    // interaction first but long enough that the workspace renders.
+    // Honour `prefers-reduced-motion: reduce`: those users have opted
+    // out of incidental animations, so open immediately.
+    const reducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+    if (reducedMotion) {
+      setOpen(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setOpen(true), 700);
+    return () => window.clearTimeout(timer);
   }, [user, dismissCount]);
 
   return (
@@ -138,7 +153,6 @@ function SourceBackfillDialogBody({
   const { t } = useT("onboarding");
 
   const [answers, setAnswers] = useState(EMPTY_BACKFILL);
-  const [pendingOther, setPendingOther] = useState(false);
   const [busy, setBusy] = useState(false);
   const shownEmittedRef = useRef(false);
 
@@ -159,6 +173,7 @@ function SourceBackfillDialogBody({
       { slug: "social_x", icon: <XIcon className="h-[15px] w-[15px]" />, label: t(($) => $.questions.source.social_x) },
       { slug: "social_linkedin", icon: <LinkedInIcon className="h-[18px] w-[18px]" />, label: t(($) => $.questions.source.social_linkedin) },
       { slug: "social_youtube", icon: <YouTubeIcon className="h-[18px] w-[18px]" />, label: t(($) => $.questions.source.social_youtube) },
+      { slug: "social_github", icon: <GitHubIcon className="h-[18px] w-[18px]" />, label: t(($) => $.questions.source.social_github) },
       { slug: "social_other", icon: <Globe className="h-4 w-4" />, label: t(($) => $.questions.source.social_misc) },
       { slug: "blog_newsletter", icon: <Newspaper className="h-4 w-4" />, label: t(($) => $.questions.source.blog_newsletter) },
       { slug: "ai_assistant", icon: <OpenAIIcon className="h-[16px] w-[16px]" />, label: t(($) => $.questions.source.ai_assistant) },
@@ -181,10 +196,16 @@ function SourceBackfillDialogBody({
   );
 
   const otherOption = options.find((o) => o.isOther) ?? null;
+  // Single source of truth for "is Other ticked": derive from `source`
+  // directly, NOT a parallel useState flag. The previous version kept a
+  // `pendingOther` state set to true on every Other click — which meant
+  // a second click toggled "other" off in `source` but left
+  // `pendingOther` stuck at true, so `otherActive` (its OR with
+  // selected) never flipped back and the card visually stayed selected
+  // (caught in UAT).
   const otherSelected = otherOption
     ? selected.includes(otherOption.slug)
     : false;
-  const otherActive = otherSelected || pendingOther;
   const otherFilled = (answers.source_other ?? "").trim().length > 0;
   const hasNonOtherSelection = selected.some(
     (slug) => slug !== otherOption?.slug,
@@ -192,12 +213,11 @@ function SourceBackfillDialogBody({
   const canSubmit =
     !busy &&
     selected.length > 0 &&
-    (hasNonOtherSelection || !otherActive || otherFilled);
+    (hasNonOtherSelection || !otherSelected || otherFilled);
 
   const handleSelect = useCallback(
     (option: QuestionOption) => {
       if (option.isOther) {
-        setPendingOther(true);
         setAnswers((a) => {
           const has = a.source.includes("other");
           return has
@@ -206,7 +226,6 @@ function SourceBackfillDialogBody({
         });
         return;
       }
-      setPendingOther(false);
       const slug = option.slug as Source;
       setAnswers((a) => {
         const has = a.source.includes(slug);
@@ -298,13 +317,14 @@ function SourceBackfillDialogBody({
               key={option.slug}
               icon={option.icon}
               label={option.label}
-              selected={otherActive}
+              selected={otherSelected}
               onSelect={() => handleSelect(option)}
               otherValue={answers.source_other ?? ""}
               onOtherChange={handleOtherChange}
               onConfirm={submit}
               placeholder={t(($) => $.questions.source.other_placeholder)}
               mode="checkbox"
+              allowToggleOff
             />
           ) : (
             <IconOptionCard

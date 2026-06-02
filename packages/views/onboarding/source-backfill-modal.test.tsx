@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -54,12 +54,37 @@ function wipeDismissCounters() {
   }
 }
 
+/**
+ * Default tests run with reduced-motion *on* so the modal's entrance
+ * delay short-circuits and the dialog opens synchronously — keeps the
+ * behavioural tests focused on selection / submit / skip semantics
+ * rather than fighting timers. The dedicated entrance-delay test below
+ * overrides this to assert the deferred-open path.
+ */
+function mockPrefersReducedMotion(matches: boolean) {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    configurable: true,
+    value: (q: string) => ({
+      matches: q.includes("reduce") ? matches : false,
+      media: q,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
 beforeEach(() => {
   mockSaveQuestionnaire.mockReset();
   mockSaveQuestionnaire.mockResolvedValue(undefined);
   mockCaptureEvent.mockReset();
   setUser(null);
   wipeDismissCounters();
+  mockPrefersReducedMotion(true);
 });
 
 afterEach(() => {
@@ -179,6 +204,96 @@ describe("SourceBackfillModal", () => {
     expect(
       screen.queryByText(/How did you hear about Multica/i),
     ).not.toBeInTheDocument();
+  });
+
+  it("renders the GitHub channel rebased from origin/main", async () => {
+    setUser({
+      id: "u1",
+      onboarded_at: "2026-01-01T00:00:00Z",
+      onboarding_questionnaire: { source: [] },
+    });
+    renderModal();
+    expect(await screen.findByText("GitHub")).toBeInTheDocument();
+  });
+
+  it("Other toggles off on the second click instead of getting stuck", async () => {
+    // Regression: an earlier version held a parallel `pendingOther`
+    // flag that flipped to true on every Other click. A second click
+    // then removed "other" from `source` but the row's onClick guard
+    // (`if (!selected) onSelect()`) ALSO swallowed re-clicks while
+    // selected, so the toggle-off never fired. Fixed by dropping
+    // pendingOther AND opting the modal's Other card into the new
+    // `allowToggleOff` prop on `IconOtherOptionCard`.
+    setUser({
+      id: "u1",
+      onboarded_at: "2026-01-01T00:00:00Z",
+      onboarding_questionnaire: { source: [] },
+    });
+    const user = userEvent.setup();
+    renderModal();
+    // Wait for the modal to render. Pick the Other card by its
+    // checkbox role — `role="checkbox"` + matching `aria-checked`
+    // stays stable whether the label is showing or the input has
+    // replaced it.
+    await screen.findByText("Friends or colleagues");
+    const checkboxes = screen.getAllByRole("checkbox");
+    // 12 options: 11 normal + 1 Other. Other is the last per the
+    // component's option array.
+    const other = checkboxes[checkboxes.length - 1]!;
+    const friends = checkboxes[0]!;
+
+    // Tick Other → Submit disabled (no free-text yet)
+    await user.click(other);
+    expect(other).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled();
+    // Add a real selection so we can test the un-tick path without
+    // the validator hiding the bug behind the empty-other-text branch.
+    await user.click(friends);
+    expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
+    // Un-tick Other → still enabled because friends is still picked.
+    await user.click(other);
+    expect(other).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
+    // Critically: submit and assert "other" is NOT in the payload.
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    await waitFor(() => {
+      expect(mockSaveQuestionnaire).toHaveBeenCalledTimes(1);
+    });
+    const sent = mockSaveQuestionnaire.mock.calls[0]![0];
+    expect(sent.source).toEqual(["friends_colleagues"]);
+    expect(sent.source).not.toContain("other");
+  });
+
+  it("defers the entrance by ~700ms when the user has not opted into reduced motion", async () => {
+    mockPrefersReducedMotion(false);
+    vi.useFakeTimers();
+    try {
+      setUser({
+        id: "u1",
+        onboarded_at: "2026-01-01T00:00:00Z",
+        onboarding_questionnaire: { source: [] },
+      });
+      renderModal();
+      // Immediately after mount: still hidden — the workspace gets a
+      // beat to render before the modal floats in.
+      expect(
+        screen.queryByText(/How did you hear about Multica/i),
+      ).not.toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(699);
+      });
+      expect(
+        screen.queryByText(/How did you hear about Multica/i),
+      ).not.toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(
+        screen.queryByText(/How did you hear about Multica/i),
+      ).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not open once the per-user dismiss cap is reached on this browser", () => {
