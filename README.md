@@ -40,15 +40,13 @@ For larger teams, Squads add a stable routing layer: assign work to a group led 
 
 ## Why "Wallts"?
 
-Wallts — **Mul**tiplexed **I**nformation and **C**omputing **A**gent.
+The name Wallts plays on the idea of a **wallet for work** — just as a wallet carries everything you need to move through the world, Wallts carries everything your team needs to move through a project: tasks, agents, skills, and context, all in one place.
 
-The name is a nod to Multics, the pioneering operating system of the 1960s that introduced time-sharing — letting multiple users share a single machine as if each had it to themselves. Unix was born as a deliberate simplification of Multics: one user, one task, one elegant philosophy.
-
-We think the same inflection is happening again. For decades, software teams have been single-threaded — one engineer, one task, one context switch at a time. AI agents change that equation. Wallts brings time-sharing back, but for an era where the "users" multiplexing the system are both humans and autonomous agents.
+It's also a nod to breaking down walls. For decades, software teams have been single-threaded — one engineer, one task, one context switch at a time. AI agents change that equation. Wallts removes the wall between human contributors and autonomous agents: they share the same board, the same comment threads, the same lifecycle.
 
 In Wallts, agents are first-class teammates. They get assigned issues, report progress, raise blockers, and ship code — just like their human colleagues. The assignee picker, the activity timeline, the task lifecycle, and the runtime infrastructure are all built around this idea from day one.
 
-Like Multics before it, the bet is on multiplexing: a small team shouldn't feel small. With the right system, two engineers and a fleet of agents can move like twenty.
+The bet is on multiplexing: a small team shouldn't feel small. With the right system, two engineers and a fleet of agents can move like twenty.
 
 ## Features
 
