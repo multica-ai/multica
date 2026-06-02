@@ -196,56 +196,45 @@ function SourceBackfillDialogBody({
     [t],
   );
 
-  const selected = useMemo<readonly string[]>(
-    () => [
-      ...answers.source,
-      ...(!answers.source.includes("other") && answers.source_other
-        ? ["other"]
-        : []),
-    ],
-    [answers.source, answers.source_other],
-  );
-
+  // Single-select: at most one slug in `source` at any time. The server
+  // schema keeps the array (back-compat with the v2 multi-select shape
+  // and with existing rows), but the modal UI commits exactly one pick
+  // — primary-source attribution is the documented industry default for
+  // HDYHAU prompts (Fairing, Recast, HockeyStack) and gives the team
+  // clean channel weights without splitting users across N buckets.
+  const pickedSlug: string | null = answers.source[0] ?? null;
   const otherOption = options.find((o) => o.isOther) ?? null;
-  // Single source of truth for "is Other ticked": derive from `source`
-  // directly, NOT a parallel useState flag. The previous version kept a
-  // `pendingOther` state set to true on every Other click — which meant
-  // a second click toggled "other" off in `source` but left
-  // `pendingOther` stuck at true, so `otherActive` (its OR with
-  // selected) never flipped back and the card visually stayed selected
-  // (caught in UAT).
-  const otherSelected = otherOption
-    ? selected.includes(otherOption.slug)
-    : false;
+  const otherSelected = pickedSlug === otherOption?.slug;
   const otherFilled = (answers.source_other ?? "").trim().length > 0;
-  const hasNonOtherSelection = selected.some(
-    (slug) => slug !== otherOption?.slug,
-  );
   const canSubmit =
     !busy &&
-    selected.length > 0 &&
-    (hasNonOtherSelection || !otherSelected || otherFilled);
+    pickedSlug !== null &&
+    // If the user picked Other, gate Submit on having typed something —
+    // an empty Other selection isn't useful attribution data.
+    (!otherSelected || otherFilled);
 
   const handleSelect = useCallback(
     (option: QuestionOption) => {
       if (option.isOther) {
-        setAnswers((a) => {
-          const has = a.source.includes("other");
-          return has
-            ? { ...a, source: a.source.filter((s) => s !== "other"), source_other: null }
-            : { ...a, source: [...a.source, "other"], source_skipped: false };
-        });
+        const slug = option.slug as Source;
+        setAnswers((a) => ({
+          ...a,
+          source: [slug],
+          // Picking Other doesn't carry text from a prior Other pick
+          // forward: the text input auto-focuses fresh so the user can
+          // type immediately. A previous text value would be misleading.
+          source_other: a.source[0] === "other" ? a.source_other : null,
+          source_skipped: false,
+        }));
         return;
       }
       const slug = option.slug as Source;
-      setAnswers((a) => {
-        const has = a.source.includes(slug);
-        return {
-          ...a,
-          source: has ? a.source.filter((s) => s !== slug) : [...a.source, slug],
-          source_skipped: false,
-        };
-      });
+      setAnswers((a) => ({
+        ...a,
+        source: [slug],
+        source_other: null,
+        source_skipped: false,
+      }));
     },
     [],
   );
@@ -318,7 +307,7 @@ function SourceBackfillDialogBody({
       </div>
 
       <fieldset
-        role="group"
+        role="radiogroup"
         aria-label={t(($) => $.questions.source.question)}
         className="m-0 grid grid-cols-1 gap-2 p-0 px-6 pt-4 sm:grid-cols-2"
       >
@@ -334,17 +323,16 @@ function SourceBackfillDialogBody({
               onOtherChange={handleOtherChange}
               onConfirm={submit}
               placeholder={t(($) => $.questions.source.other_placeholder)}
-              mode="checkbox"
-              allowToggleOff
+              mode="radio"
             />
           ) : (
             <IconOptionCard
               key={option.slug}
               icon={option.icon}
               label={option.label}
-              selected={selected.includes(option.slug)}
+              selected={pickedSlug === option.slug}
               onSelect={() => handleSelect(option)}
-              mode="checkbox"
+              mode="radio"
             />
           ),
         )}

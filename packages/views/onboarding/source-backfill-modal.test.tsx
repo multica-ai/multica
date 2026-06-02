@@ -216,14 +216,10 @@ describe("SourceBackfillModal", () => {
     expect(await screen.findByText("GitHub")).toBeInTheDocument();
   });
 
-  it("Other toggles off on the second click instead of getting stuck", async () => {
-    // Regression: an earlier version held a parallel `pendingOther`
-    // flag that flipped to true on every Other click. A second click
-    // then removed "other" from `source` but the row's onClick guard
-    // (`if (!selected) onSelect()`) ALSO swallowed re-clicks while
-    // selected, so the toggle-off never fired. Fixed by dropping
-    // pendingOther AND opting the modal's Other card into the new
-    // `allowToggleOff` prop on `IconOtherOptionCard`.
+  it("picking a second option replaces the first (single-select primary source)", async () => {
+    // The modal is now a single-select radio. Industry default for
+    // HDYHAU is to capture the primary acquisition source, so picking
+    // a second option must replace the first — never accumulate.
     setUser({
       id: "u1",
       onboarded_at: "2026-01-01T00:00:00Z",
@@ -231,37 +227,30 @@ describe("SourceBackfillModal", () => {
     });
     const user = userEvent.setup();
     renderModal();
-    // Wait for the modal to render. Pick the Other card by its
-    // checkbox role — `role="checkbox"` + matching `aria-checked`
-    // stays stable whether the label is showing or the input has
-    // replaced it.
     await screen.findByText("Friends or colleagues");
-    const checkboxes = screen.getAllByRole("checkbox");
-    // 12 options: 11 normal + 1 Other. Other is the last per the
-    // component's option array.
-    const other = checkboxes[checkboxes.length - 1]!;
-    const friends = checkboxes[0]!;
+    const radios = screen.getAllByRole("radio");
+    const friends = radios[0]!;
+    const search = radios[1]!;
 
-    // Tick Other → Submit disabled (no free-text yet)
-    await user.click(other);
-    expect(other).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled();
-    // Add a real selection so we can test the un-tick path without
-    // the validator hiding the bug behind the empty-other-text branch.
     await user.click(friends);
-    expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
-    // Un-tick Other → still enabled because friends is still picked.
-    await user.click(other);
-    expect(other).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
-    // Critically: submit and assert "other" is NOT in the payload.
+    expect(friends).toHaveAttribute("aria-checked", "true");
+    expect(search).toHaveAttribute("aria-checked", "false");
+
+    // Pick a second option — the first must clear and Submit stays
+    // enabled with exactly one pick in the payload.
+    await user.click(search);
+    expect(friends).toHaveAttribute("aria-checked", "false");
+    expect(search).toHaveAttribute("aria-checked", "true");
+
     await user.click(screen.getByRole("button", { name: "Submit" }));
     await waitFor(() => {
       expect(mockSaveQuestionnaire).toHaveBeenCalledTimes(1);
     });
     const sent = mockSaveQuestionnaire.mock.calls[0]![0];
-    expect(sent.source).toEqual(["friends_colleagues"]);
-    expect(sent.source).not.toContain("other");
+    // Server schema is still `source: string[]` for back-compat with
+    // v2 rows; the client always sends a single-element array.
+    expect(sent.source).toEqual(["search"]);
+    expect(sent.source).not.toContain("friends_colleagues");
   });
 
   it("defers the entrance by ~700ms when the user has not opted into reduced motion", async () => {
