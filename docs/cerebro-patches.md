@@ -222,6 +222,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `chat-handler-chat-coalesce-test` | server/internal/handler/chat_coalesce_test.go | 335 | Chat handler additions (cancel/coalesce/attachment) |
 | `chat-handler-chat-complete-test` | server/internal/handler/chat_complete_test.go | 116 | JEH-720 — regression guard for the duplicate assistant chat_message bug in CompleteTask |
 | `chat-collapse-dup-assistant` | server/internal/service/task.go | 6 | JEH-720 — collapse the post-tx assistant chat_message insert into the in-tx one so completing chat tasks no longer races with the WS broadcast |
+| `chat-task-original-user-id` | server/pkg/db/queries/chat.sql<br>server/internal/service/task.go | ~4 | FIR-2761 / JEH-1710 — chat enqueue now sets `original_user_id` from `chat_session.creator_id` so managed-gateway runs resolve tools via the cerebro_runtime_tool cascade (user/group grants) instead of falling back to an empty legacy `agent_tool_grant` table. |
+| `chat-task-original-user-id-test` | server/internal/handler/chat_coalesce_test.go<br>server/internal/cerebro/runtime/tools_registry_cascade_test.go | ~47 | FIR-2761 — regression: queued chat task stamps `original_user_id`; cascade tool list matches issue path for the same user grants. |
 | `chat-handler-chat-test` | server/internal/handler/chat_test.go | 247 | Chat handler additions (cancel/coalesce/attachment) |
 | `chat-index-cerebro` | packages/views/chat/index.ts | 0 | Chat view cerebro additions (MCP onboarding, status, archive) |
 | `chat-input-mcp-onboarding` | packages/views/chat/components/chat-input.tsx | 53 | Chat view cerebro additions (MCP onboarding, status, archive) |

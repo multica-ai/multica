@@ -171,8 +171,9 @@ WHERE id = $1;
 -- (migration 057). The DO UPDATE branch is a no-op write — the assignment
 -- to priority is what makes RETURNING surface the existing row instead of
 -- producing zero rows.
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
-VALUES ($1, $2, NULL, 'queued', $3, $4)
+-- CEREBRO-PATCH(chat-task-original-user-id): seed original_user_id so chat tasks use the cerebro_runtime_tool cascade (same as issue tasks).
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id, original_user_id)
+VALUES ($1, $2, NULL, 'queued', $3, $4, sqlc.narg(original_user_id))
 ON CONFLICT (chat_session_id) WHERE status = 'queued' AND chat_session_id IS NOT NULL
 DO UPDATE SET priority = agent_task_queue.priority
 RETURNING *;

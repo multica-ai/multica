@@ -531,3 +531,31 @@ func insertChatMessage(t *testing.T, sessionID, role, content string) {
 		t.Fatalf("create chat_message: %v", err)
 	}
 }
+
+// CEREBRO-PATCH(chat-task-original-user-id-test): FIR-2761 — queued chat tasks must carry creator_id as original_user_id for tool cascade.
+// TestSendChatMessage_QueuedTaskCarriesCreatorAsOriginalUserID is the regression
+// guard for FIR-2761. Chat tasks must stamp chat_session.creator_id as
+// original_user_id so GetCascadeEnabledToolsForAgent can apply user/group grants
+// instead of falling back to legacy agent_tool_grant rows (usually empty).
+func TestSendChatMessage_QueuedTaskCarriesCreatorAsOriginalUserID(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	sessionID := createChatSessionForCoalesceTest(t)
+
+	if w := sendChatMessage(t, sessionID, "hello"); w.Code != http.StatusCreated {
+		t.Fatalf("send: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var originalUserID string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT original_user_id::text FROM agent_task_queue
+		WHERE chat_session_id = $1 AND status = 'queued'`,
+		sessionID,
+	).Scan(&originalUserID); err != nil {
+		t.Fatalf("query queued task: %v", err)
+	}
+	if originalUserID != testUserID {
+		t.Fatalf("original_user_id = %q, want %q", originalUserID, testUserID)
+	}
+}
