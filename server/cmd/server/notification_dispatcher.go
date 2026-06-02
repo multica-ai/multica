@@ -48,7 +48,9 @@ type notificationEventPayload struct {
 	Summary         string `json:"summary,omitempty"`
 	Body            string `json:"body"`
 	Link            string `json:"link"`
+	IssueID         string `json:"issue_id"`
 	IssueIdentifier string `json:"issue_identifier"`
+	CommentID       string `json:"comment_id"`
 	ActorName       string `json:"actor_name,omitempty"`
 	RenderMode      string `json:"render_mode,omitempty"`
 }
@@ -431,6 +433,7 @@ func processMobilePushDelivery(ctx context.Context, queries *db.Queries, cfg not
 
 	title := buildMobilePushTitle(eventPayload)
 	body := buildMobilePushBody(eventPayload, title)
+	clickURL := buildMobilePushClickURL(eventPayload)
 	requestID := strings.ReplaceAll(util.UUIDToString(claimed.ID), "-", "")
 	if len(requestID) > 32 {
 		requestID = requestID[:32]
@@ -441,6 +444,7 @@ func processMobilePushDelivery(ctx context.Context, queries *db.Queries, cfg not
 		RequestID: requestID,
 		Title:     title,
 		Body:      body,
+		ClickURL:  clickURL,
 		TTL:       int64(getuiPushTTL / time.Millisecond),
 	}); err != nil {
 		finalizeFailedMobilePushDelivery(ctx, queries, claimed, err)
@@ -621,6 +625,18 @@ func buildMobilePushBody(event notificationEventPayload, title string) string {
 		return "From: " + actorName
 	}
 	return "You have a new notification."
+}
+
+func buildMobilePushClickURL(event notificationEventPayload) string {
+	issueID := strings.TrimSpace(event.IssueID)
+	if issueID == "" {
+		return ""
+	}
+	clickURL := "wujieai-multicam://issues/" + issueID
+	if commentID := strings.TrimSpace(event.CommentID); commentID != "" {
+		clickURL += "?commentId=" + url.QueryEscape(commentID)
+	}
+	return clickURL
 }
 
 func loadDingTalkDispatchContext(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery) (dingtalkDeliveryPayload, notificationEventPayload, db.ExternalAccountBinding, error) {

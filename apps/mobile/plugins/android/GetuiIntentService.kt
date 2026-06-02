@@ -27,5 +27,10 @@ class GetuiIntentService : GTIntentService() {
   }
 
   override fun onNotificationMessageClicked(context: Context?, msg: GTNotificationMessage?) {
+    GetuiPushState.setNotificationUrl(context, extractNotificationUrl(msg))
+  }
+
+  private fun extractNotificationUrl(msg: GTNotificationMessage?): String? {
+    return msg?.content?.trim()?.takeIf { it.startsWith("wujieai-multicam://") }
   }
 }

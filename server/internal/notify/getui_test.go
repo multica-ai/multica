@@ -46,6 +46,8 @@ func TestGetuiPushSingleByCID_AuthenticatesAndSends(t *testing.T) {
 						Title     string `json:"title"`
 						Body      string `json:"body"`
 						ClickType string `json:"click_type"`
+						Intent    string `json:"intent"`
+						Payload   string `json:"payload"`
 					} `json:"notification"`
 				} `json:"push_message"`
 			}
@@ -55,7 +57,7 @@ func TestGetuiPushSingleByCID_AuthenticatesAndSends(t *testing.T) {
 			if len(body.Audience.CID) != 1 || body.Audience.CID[0] != "cid-success" {
 				t.Fatalf("unexpected cid audience: %#v", body.Audience.CID)
 			}
-			if body.PushMessage.Notification.Title != "OPE-1" || body.PushMessage.Notification.Body != "hello" || body.PushMessage.Notification.ClickType != "none" {
+			if body.PushMessage.Notification.Title != "OPE-1" || body.PushMessage.Notification.Body != "hello" || body.PushMessage.Notification.ClickType != "intent" || body.PushMessage.Notification.Intent != "wujieai-multicam://issues/issue-1?commentId=comment-1" || body.PushMessage.Notification.Payload != "wujieai-multicam://issues/issue-1?commentId=comment-1" {
 				t.Fatalf("unexpected notification: %#v", body.PushMessage.Notification)
 			}
 			if len(body.RequestID) != 32 {
@@ -82,6 +84,7 @@ func TestGetuiPushSingleByCID_AuthenticatesAndSends(t *testing.T) {
 		RequestID: "123456789012345678901234567890123456",
 		Title:     "OPE-1",
 		Body:      "hello",
+		ClickURL:  "wujieai-multicam://issues/issue-1?commentId=comment-1",
 	})
 	if err != nil {
 		t.Fatalf("PushSingleByCID: %v", err)

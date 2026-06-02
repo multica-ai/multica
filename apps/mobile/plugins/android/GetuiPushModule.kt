@@ -54,6 +54,24 @@ class GetuiPushModule(
   }
 
   @ReactMethod
+  fun getPendingNotificationUrl(promise: Promise) {
+    try {
+      promise.resolve(GetuiPushState.getPendingNotificationUrl(reactContext.applicationContext))
+    } catch (error: Throwable) {
+      promise.reject("getui_pending_notification_url_failed", error)
+    }
+  }
+
+  @ReactMethod
+  fun consumePendingNotificationUrl(promise: Promise) {
+    try {
+      promise.resolve(GetuiPushState.consumePendingNotificationUrl(reactContext.applicationContext))
+    } catch (error: Throwable) {
+      promise.reject("getui_consume_notification_url_failed", error)
+    }
+  }
+
+  @ReactMethod
   fun addListener(eventName: String) {
     // Required by NativeEventEmitter.
   }

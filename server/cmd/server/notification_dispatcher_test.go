@@ -242,6 +242,38 @@ func getuiDispatchFutureMillis() string {
 	return strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10)
 }
 
+func TestBuildMobilePushClickURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		event notificationEventPayload
+		want  string
+	}{
+		{
+			name:  "issue only",
+			event: notificationEventPayload{IssueID: "issue-1"},
+			want:  "wujieai-multicam://issues/issue-1",
+		},
+		{
+			name:  "issue with comment",
+			event: notificationEventPayload{IssueID: "issue-1", CommentID: "comment 1"},
+			want:  "wujieai-multicam://issues/issue-1?commentId=comment+1",
+		},
+		{
+			name:  "missing issue",
+			event: notificationEventPayload{CommentID: "comment-1"},
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildMobilePushClickURL(tt.event); got != tt.want {
+				t.Fatalf("buildMobilePushClickURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildDingTalkDeliveryMarkdown_SanitizesMentionLinks(t *testing.T) {
 	card := buildDingTalkDeliveryMarkdown(notificationEventPayload{
 		Title:           "1. Install a runtime (Desktop app or CLI)",

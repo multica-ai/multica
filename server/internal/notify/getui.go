@@ -43,6 +43,7 @@ type GetuiPushMessage struct {
 	RequestID string
 	Title     string
 	Body      string
+	ClickURL  string
 	TTL       int64
 }
 
@@ -171,6 +172,18 @@ func (c GetuiConfig) pushSingleByCIDWithToken(ctx context.Context, token string,
 		ttl = int64((2 * time.Hour) / time.Millisecond)
 	}
 
+	notification := map[string]any{
+		"title": truncateRunes(firstNonBlank(msg.Title, "Multica"), 50),
+		"body":  truncateRunes(firstNonBlank(msg.Body, "You have a new notification."), 256),
+	}
+	if clickURL := normalizeGetuiClickURL(msg.ClickURL); clickURL != "" {
+		notification["click_type"] = "intent"
+		notification["intent"] = clickURL
+		notification["payload"] = clickURL
+	} else {
+		notification["click_type"] = "none"
+	}
+
 	body, err := json.Marshal(map[string]any{
 		"request_id": truncateRunes(requestID, 32),
 		"settings": map[string]any{
@@ -180,11 +193,7 @@ func (c GetuiConfig) pushSingleByCIDWithToken(ctx context.Context, token string,
 			"cid": []string{cid},
 		},
 		"push_message": map[string]any{
-			"notification": map[string]any{
-				"title":      truncateRunes(firstNonBlank(msg.Title, "Multica"), 50),
-				"body":       truncateRunes(firstNonBlank(msg.Body, "You have a new notification."), 256),
-				"click_type": "none",
-			},
+			"notification": notification,
 		},
 	})
 	if err != nil {
@@ -248,6 +257,17 @@ func (c GetuiConfig) tokenCache() *getuiTokenCache {
 	key := strings.Join([]string{c.BaseURL, c.AppID, c.AppKey}, "|")
 	cache, _ := getuiTokenCaches.LoadOrStore(key, &getuiTokenCache{})
 	return cache.(*getuiTokenCache)
+}
+
+func normalizeGetuiClickURL(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(value, "wujieai-multicam://") {
+		return value
+	}
+	return ""
 }
 
 func parseGetuiExpireTime(raw json.RawMessage) time.Time {
