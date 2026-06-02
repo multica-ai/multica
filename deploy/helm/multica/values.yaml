@@ -56,6 +56,13 @@ postgres:
 # Backend (Go API + WS server)
 # -----------------------------------------------------------------------------
 backend:
+  # Concurrent backend pods are now safe to start: cmd/migrate uses a
+  # Postgres session-level advisory lock to serialize the startup
+  # `migrate up` run, so late-arriving pods queue and then no-op (see
+  # GitHub multica-ai/multica#3647). 1 is still the recommended default
+  # because the chart Deployment uses strategy: Recreate and there is no
+  # leader-elected workload split — increase this only if you actually
+  # need horizontal scale of the API/WS server.
   replicas: 1
   uploads:
     persistence:
