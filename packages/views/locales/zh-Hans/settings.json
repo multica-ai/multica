@@ -221,7 +221,9 @@
     "section_repositories": "代码仓库",
     "repositories_shortcut_label": "仓库 URL 仍在「代码仓库」标签页中管理",
     "repositories_shortcut_link": "前往管理 →",
-    "toast_failed": "更新 GitHub 设置失败"
+    "toast_failed": "更新 GitHub 设置失败",
+    "feature_pr_approval_gate_label": "Require PR approval before Done",
+    "feature_pr_approval_gate_description": "When enabled, issues cannot be marked as Done unless all linked pull requests have at least one approved review."
   },
   "repositories": {
     "section_title": "代码仓库",
