@@ -12,7 +12,7 @@ import (
 )
 
 const createPersonalAccessToken = `-- name: CreatePersonalAccessToken :one
-INSERT INTO personal_access_token (user_id, name, token_hash, token_prefix, expires_at)
+INSERT INTO multica_personal_access_token (user_id, name, token_hash, token_prefix, expires_at)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at
 `
@@ -25,7 +25,7 @@ type CreatePersonalAccessTokenParams struct {
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 }
 
-func (q *Queries) CreatePersonalAccessToken(ctx context.Context, arg CreatePersonalAccessTokenParams) (PersonalAccessToken, error) {
+func (q *Queries) CreatePersonalAccessToken(ctx context.Context, arg CreatePersonalAccessTokenParams) (MulticaPersonalAccessToken, error) {
 	row := q.db.QueryRow(ctx, createPersonalAccessToken,
 		arg.UserID,
 		arg.Name,
@@ -33,7 +33,7 @@ func (q *Queries) CreatePersonalAccessToken(ctx context.Context, arg CreatePerso
 		arg.TokenPrefix,
 		arg.ExpiresAt,
 	)
-	var i PersonalAccessToken
+	var i MulticaPersonalAccessToken
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
@@ -49,15 +49,15 @@ func (q *Queries) CreatePersonalAccessToken(ctx context.Context, arg CreatePerso
 }
 
 const getPersonalAccessTokenByHash = `-- name: GetPersonalAccessTokenByHash :one
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at FROM personal_access_token
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at FROM multica_personal_access_token
 WHERE token_hash = $1
   AND revoked = FALSE
   AND (expires_at IS NULL OR expires_at > now())
 `
 
-func (q *Queries) GetPersonalAccessTokenByHash(ctx context.Context, tokenHash string) (PersonalAccessToken, error) {
+func (q *Queries) GetPersonalAccessTokenByHash(ctx context.Context, tokenHash string) (MulticaPersonalAccessToken, error) {
 	row := q.db.QueryRow(ctx, getPersonalAccessTokenByHash, tokenHash)
-	var i PersonalAccessToken
+	var i MulticaPersonalAccessToken
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
@@ -73,21 +73,21 @@ func (q *Queries) GetPersonalAccessTokenByHash(ctx context.Context, tokenHash st
 }
 
 const listPersonalAccessTokensByUser = `-- name: ListPersonalAccessTokensByUser :many
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at FROM personal_access_token
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at FROM multica_personal_access_token
 WHERE user_id = $1
   AND revoked = FALSE
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListPersonalAccessTokensByUser(ctx context.Context, userID pgtype.UUID) ([]PersonalAccessToken, error) {
+func (q *Queries) ListPersonalAccessTokensByUser(ctx context.Context, userID pgtype.UUID) ([]MulticaPersonalAccessToken, error) {
 	rows, err := q.db.Query(ctx, listPersonalAccessTokensByUser, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []PersonalAccessToken{}
+	items := []MulticaPersonalAccessToken{}
 	for rows.Next() {
-		var i PersonalAccessToken
+		var i MulticaPersonalAccessToken
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
@@ -110,7 +110,7 @@ func (q *Queries) ListPersonalAccessTokensByUser(ctx context.Context, userID pgt
 }
 
 const revokePersonalAccessToken = `-- name: RevokePersonalAccessToken :one
-UPDATE personal_access_token
+UPDATE multica_personal_access_token
 SET revoked = TRUE
 WHERE id = $1 AND user_id = $2
 RETURNING token_hash
@@ -129,7 +129,7 @@ func (q *Queries) RevokePersonalAccessToken(ctx context.Context, arg RevokePerso
 }
 
 const updatePersonalAccessTokenLastUsed = `-- name: UpdatePersonalAccessTokenLastUsed :exec
-UPDATE personal_access_token
+UPDATE multica_personal_access_token
 SET last_used_at = now()
 WHERE id = $1
 `

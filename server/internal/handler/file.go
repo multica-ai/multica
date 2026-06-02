@@ -56,7 +56,7 @@ type AttachmentResponse struct {
 	CreatedAt     string  `json:"created_at"`
 }
 
-func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
+func (h *Handler) attachmentToResponse(a db.MulticaAttachment) AttachmentResponse {
 	resp := AttachmentResponse{
 		ID:           uuidToString(a.ID),
 		WorkspaceID:  uuidToString(a.WorkspaceID),

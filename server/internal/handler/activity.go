@@ -133,7 +133,7 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 // mergeTimeline merges comments and activities and returns them sorted by
 // (created_at, id). When ascending=true, oldest first (the new flat-array
 // contract); otherwise newest first (the wrapped legacy contract).
-func (h *Handler) mergeTimeline(r *http.Request, comments []db.Comment, activities []db.ActivityLog, ascending bool) []TimelineEntry {
+func (h *Handler) mergeTimeline(r *http.Request, comments []db.MulticaComment, activities []db.MulticaActivityLog, ascending bool) []TimelineEntry {
 	out := make([]TimelineEntry, 0, len(comments)+len(activities))
 	out = append(out, h.commentsToEntries(r, comments)...)
 	for _, a := range activities {
@@ -156,7 +156,7 @@ func (h *Handler) mergeTimeline(r *http.Request, comments []db.Comment, activiti
 
 // commentsToEntries fetches reactions + attachments for the given comments in
 // one batch each and returns enriched TimelineEntry slices preserving order.
-func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []TimelineEntry {
+func (h *Handler) commentsToEntries(r *http.Request, comments []db.MulticaComment) []TimelineEntry {
 	if len(comments) == 0 {
 		return nil
 	}
@@ -193,7 +193,7 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 	return out
 }
 
-func activityToEntry(a db.ActivityLog) TimelineEntry {
+func activityToEntry(a db.MulticaActivityLog) TimelineEntry {
 	action := a.Action
 	actorType := ""
 	if a.ActorType.Valid {

@@ -13,13 +13,13 @@ func newTimezoneTestUser(t *testing.T, email string) string {
 
 	var userID string
 	if err := testPool.QueryRow(ctx,
-		`INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
+		`INSERT INTO multica_user (name, email) VALUES ($1, $2) RETURNING id`,
 		"Timezone Test", email,
 	).Scan(&userID); err != nil {
 		t.Fatalf("insert test user: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, userID)
+		testPool.Exec(ctx, `DELETE FROM multica_user WHERE id = $1`, userID)
 	})
 	return userID
 }
@@ -37,7 +37,7 @@ func TestUpdateMeAcceptsTimezone(t *testing.T) {
 
 	var stored *string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT timezone FROM "user" WHERE id = $1`, userID,
+		`SELECT timezone FROM multica_user WHERE id = $1`, userID,
 	).Scan(&stored); err != nil {
 		t.Fatalf("lookup user: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestUpdateMeRejectsInvalidTimezone(t *testing.T) {
 
 	var stored *string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT timezone FROM "user" WHERE id = $1`, userID,
+		`SELECT timezone FROM multica_user WHERE id = $1`, userID,
 	).Scan(&stored); err != nil {
 		t.Fatalf("lookup user: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestUpdateMePreservesTimezoneWhenNotProvided(t *testing.T) {
 	userID := newTimezoneTestUser(t, "tz-preserve@multica.ai")
 
 	if _, err := testPool.Exec(context.Background(),
-		`UPDATE "user" SET timezone = 'America/Los_Angeles' WHERE id = $1`, userID,
+		`UPDATE multica_user SET timezone = 'America/Los_Angeles' WHERE id = $1`, userID,
 	); err != nil {
 		t.Fatalf("preset timezone: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestUpdateMePreservesTimezoneWhenNotProvided(t *testing.T) {
 
 	var stored *string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT timezone FROM "user" WHERE id = $1`, userID,
+		`SELECT timezone FROM multica_user WHERE id = $1`, userID,
 	).Scan(&stored); err != nil {
 		t.Fatalf("lookup user: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestUpdateMeClearsTimezoneOnEmptyString(t *testing.T) {
 	userID := newTimezoneTestUser(t, "tz-clear@multica.ai")
 
 	if _, err := testPool.Exec(context.Background(),
-		`UPDATE "user" SET timezone = 'Asia/Shanghai' WHERE id = $1`, userID,
+		`UPDATE multica_user SET timezone = 'Asia/Shanghai' WHERE id = $1`, userID,
 	); err != nil {
 		t.Fatalf("preset timezone: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestUpdateMeClearsTimezoneOnEmptyString(t *testing.T) {
 
 	var stored *string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT timezone FROM "user" WHERE id = $1`, userID,
+		`SELECT timezone FROM multica_user WHERE id = $1`, userID,
 	).Scan(&stored); err != nil {
 		t.Fatalf("lookup user: %v", err)
 	}

@@ -50,11 +50,11 @@ func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *
 // archived leader produces the same skip behaviour as an offline solo agent.
 func (s *AutopilotService) DispatchAutopilot(
 	ctx context.Context,
-	autopilot db.Autopilot,
+	autopilot db.MulticaAutopilot,
 	triggerID pgtype.UUID,
 	source string,
 	payload []byte,
-) (*db.AutopilotRun, error) {
+) (*db.MulticaAutopilotRun, error) {
 	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
 		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, reason)
 	}
@@ -133,7 +133,7 @@ func (s *AutopilotService) DispatchAutopilot(
 // Creator on the issue is always the agent that will actually do the work
 // (the resolved leader for a squad autopilot, otherwise the assignee agent
 // itself), so activity / mentions render with the right author identity.
-func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
+func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.MulticaAutopilot, run *db.MulticaAutopilotRun) error {
 	leader, _, err := s.resolveAutopilotLeader(ctx, ap)
 	if err != nil {
 		return fmt.Errorf("resolve leader: %w", err)
@@ -261,7 +261,7 @@ func (e *errDispatchSkipped) Error() string { return e.reason }
 // applies also run here as belt-and-braces: if the leader changed between
 // admission and dispatch, or the runtime went offline in the gap, we still
 // fail closed instead of enqueueing a doomed task.
-func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
+func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.MulticaAutopilot, run *db.MulticaAutopilotRun) error {
 	agent, _, err := s.resolveAutopilotLeader(ctx, ap)
 	if err != nil {
 		// Same admission-vs-failure classification as shouldSkipDispatch:
@@ -324,7 +324,7 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 }
 
 // SyncRunFromIssue updates the autopilot run when its linked issue reaches a terminal status.
-func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue) {
+func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.MulticaIssue) {
 	if !issue.OriginType.Valid || issue.OriginType.String != "autopilot" {
 		return
 	}
@@ -367,7 +367,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 }
 
 // SyncRunFromTask updates the autopilot run when a run_only task completes or fails.
-func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTaskQueue) {
+func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.MulticaAgentTaskQueue) {
 	if !task.AutopilotRunID.Valid {
 		return
 	}
@@ -422,7 +422,7 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 // DispatchAutopilot up the stack and the failure-vs-skip distinction is
 // owned by the dispatcher entry point. Keeps dispatchRunOnly free of
 // state-mutation helpers.
-func (s *AutopilotService) handleDispatchSkip(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, err error) *db.AutopilotRun {
+func (s *AutopilotService) handleDispatchSkip(ctx context.Context, ap db.MulticaAutopilot, run *db.MulticaAutopilotRun, err error) *db.MulticaAutopilotRun {
 	var skipErr *errDispatchSkipped
 	if !errors.As(err, &skipErr) {
 		return nil
@@ -478,7 +478,7 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 //     scheduled run. Migration 096 removed the agent FK on autopilot, so an
 //     agent assignee being missing is now a real condition the gate must
 //     handle (previously cascade-deleted).
-func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot) (string, bool) {
+func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.MulticaAutopilot) (string, bool) {
 	if !ap.AssigneeID.Valid {
 		return "autopilot has no assignee", true
 	}
@@ -565,7 +565,7 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 // For squad autopilots the message names the squad so an operator looking at
 // the failure_reason field knows which squad's leader is down without
 // joining back to autopilot_run.squad_id.
-func formatAdmissionReason(ap db.Autopilot, raw string) string {
+func formatAdmissionReason(ap db.MulticaAutopilot, raw string) string {
 	prefix := "assignee "
 	if ap.AssigneeType == "squad" {
 		prefix = "squad leader "
@@ -607,7 +607,7 @@ var errSquadArchived = errors.New("squad is archived")
 // Unknown assignee_type values return an error. assignee_type is gated by a
 // CHECK constraint at the DB layer, so this only fires if a future code path
 // inserts a row that bypasses the check.
-func (s *AutopilotService) resolveAutopilotLeader(ctx context.Context, ap db.Autopilot) (agent db.Agent, squadResolved bool, err error) {
+func (s *AutopilotService) resolveAutopilotLeader(ctx context.Context, ap db.MulticaAutopilot) (agent db.MulticaAgent, squadResolved bool, err error) {
 	switch ap.AssigneeType {
 	case "", "agent":
 		agent, err = s.Queries.GetAgent(ctx, ap.AssigneeID)
@@ -615,18 +615,18 @@ func (s *AutopilotService) resolveAutopilotLeader(ctx context.Context, ap db.Aut
 	case "squad":
 		squad, err := s.Queries.GetSquad(ctx, ap.AssigneeID)
 		if err != nil {
-			return db.Agent{}, true, fmt.Errorf("load squad: %w", err)
+			return db.MulticaAgent{}, true, fmt.Errorf("load squad: %w", err)
 		}
 		if squad.ArchivedAt.Valid {
-			return db.Agent{}, true, errSquadArchived
+			return db.MulticaAgent{}, true, errSquadArchived
 		}
 		agent, err = s.Queries.GetAgent(ctx, squad.LeaderID)
 		if err != nil {
-			return db.Agent{}, true, fmt.Errorf("load squad leader: %w", err)
+			return db.MulticaAgent{}, true, fmt.Errorf("load squad leader: %w", err)
 		}
 		return agent, true, nil
 	default:
-		return db.Agent{}, false, fmt.Errorf("unknown assignee_type %q", ap.AssigneeType)
+		return db.MulticaAgent{}, false, fmt.Errorf("unknown assignee_type %q", ap.AssigneeType)
 	}
 }
 
@@ -634,7 +634,7 @@ func (s *AutopilotService) resolveAutopilotLeader(ctx context.Context, ap db.Aut
 // autopilot_run row. Only populated when assignee_type='squad'. First-version
 // reports do not consume this; it exists so a future squad-cost view does not
 // need to backfill — see RFC §4.e (MUL-2429).
-func autopilotSquadAttribution(ap db.Autopilot) pgtype.UUID {
+func autopilotSquadAttribution(ap db.MulticaAutopilot) pgtype.UUID {
 	if ap.AssigneeType == "squad" && ap.AssigneeID.Valid {
 		return ap.AssigneeID
 	}
@@ -647,12 +647,12 @@ func autopilotSquadAttribution(ap db.Autopilot) pgtype.UUID {
 // trigger handler) treat this as a successful — but no-op — dispatch.
 func (s *AutopilotService) recordSkippedRun(
 	ctx context.Context,
-	autopilot db.Autopilot,
+	autopilot db.MulticaAutopilot,
 	triggerID pgtype.UUID,
 	source string,
 	payload []byte,
 	reason string,
-) (*db.AutopilotRun, error) {
+) (*db.MulticaAutopilotRun, error) {
 	run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
 		AutopilotID:    autopilot.ID,
 		TriggerID:      triggerID,
@@ -691,7 +691,7 @@ func (s *AutopilotService) recordSkippedRun(
 	return &run, nil
 }
 
-func (s *AutopilotService) publishRunDone(workspaceID string, run db.AutopilotRun, status string) {
+func (s *AutopilotService) publishRunDone(workspaceID string, run db.MulticaAutopilotRun, status string) {
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventAutopilotRunDone,
 		WorkspaceID: workspaceID,
@@ -704,7 +704,7 @@ func (s *AutopilotService) publishRunDone(workspaceID string, run db.AutopilotRu
 	})
 }
 
-func (s *AutopilotService) captureIssueCreatedFromAutopilot(ap db.Autopilot, run *db.AutopilotRun, issue db.Issue, leaderID pgtype.UUID) {
+func (s *AutopilotService) captureIssueCreatedFromAutopilot(ap db.MulticaAutopilot, run *db.MulticaAutopilotRun, issue db.MulticaIssue, leaderID pgtype.UUID) {
 	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
@@ -722,7 +722,7 @@ func (s *AutopilotService) captureIssueCreatedFromAutopilot(ap db.Autopilot, run
 	))
 }
 
-func (s *AutopilotService) captureAutopilotRunStarted(ap db.Autopilot, run db.AutopilotRun, triggerSource string) {
+func (s *AutopilotService) captureAutopilotRunStarted(ap db.MulticaAutopilot, run db.MulticaAutopilotRun, triggerSource string) {
 	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
@@ -736,7 +736,7 @@ func (s *AutopilotService) captureAutopilotRunStarted(ap db.Autopilot, run db.Au
 	))
 }
 
-func (s *AutopilotService) captureAutopilotRunCompleted(ap db.Autopilot, run db.AutopilotRun) {
+func (s *AutopilotService) captureAutopilotRunCompleted(ap db.MulticaAutopilot, run db.MulticaAutopilotRun) {
 	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
@@ -751,7 +751,7 @@ func (s *AutopilotService) captureAutopilotRunCompleted(ap db.Autopilot, run db.
 	))
 }
 
-func (s *AutopilotService) captureAutopilotRunFailed(ap db.Autopilot, run db.AutopilotRun, triggerSource, reason string) {
+func (s *AutopilotService) captureAutopilotRunFailed(ap db.MulticaAutopilot, run db.MulticaAutopilotRun, triggerSource, reason string) {
 	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
@@ -777,7 +777,7 @@ func (s *AutopilotService) captureAutopilotRunFailed(ap db.Autopilot, run db.Aut
 // leader (so per-agent funnels stay consistent); a resolve error degrades
 // to the raw assignee_id rather than dropping the event — incomplete data
 // in the dashboard is preferable to silent attribution gaps.
-func (s *AutopilotService) autopilotAssigneeAnalytics(ap db.Autopilot) analytics.AutopilotAssignee {
+func (s *AutopilotService) autopilotAssigneeAnalytics(ap db.MulticaAutopilot) analytics.AutopilotAssignee {
 	assignee := analytics.AutopilotAssignee{
 		AssigneeType: ap.AssigneeType,
 	}
@@ -809,7 +809,7 @@ func autopilotErrorType(reason string) string {
 	}
 }
 
-func autopilotActorID(ap db.Autopilot) string {
+func autopilotActorID(ap db.MulticaAutopilot) string {
 	id := util.UUIDToString(ap.CreatedByID)
 	if ap.CreatedByType == "agent" && id != "" {
 		return "agent:" + id
@@ -820,7 +820,7 @@ func autopilotActorID(ap db.Autopilot) string {
 	return "system"
 }
 
-func autopilotRunDurationMS(run db.AutopilotRun) int64 {
+func autopilotRunDurationMS(run db.MulticaAutopilotRun) int64 {
 	if !run.CompletedAt.Valid {
 		return 0
 	}
@@ -843,7 +843,7 @@ func autopilotRunDurationMS(run db.AutopilotRun) int64 {
 // it understands the actual work. For webhook-sourced runs, also appends
 // a payload section so the agent has the event context inline (otherwise
 // the agent only sees the issue body, never the run's trigger_payload).
-func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.AutopilotRun) pgtype.Text {
+func (s *AutopilotService) buildIssueDescription(ap db.MulticaAutopilot, run db.MulticaAutopilotRun) pgtype.Text {
 	now := time.Now().UTC().Format("2006-01-02 15:04 UTC")
 	var b strings.Builder
 	b.WriteString(ap.Description.String)
@@ -904,7 +904,7 @@ var issueTitleTemplateTokenRE = regexp.MustCompile(`\{\{\s*([^{}]*?)\s*\}\}`)
 // tolerated so the render layer accepts every form that
 // ValidateIssueTitleTemplate accepts — otherwise users would save templates
 // that pass validation but still emit a literal token at trigger time.
-func (s *AutopilotService) interpolateTemplate(ap db.Autopilot) string {
+func (s *AutopilotService) interpolateTemplate(ap db.MulticaAutopilot) string {
 	tmpl := ap.Title
 	if ap.IssueTitleTemplate.Valid && ap.IssueTitleTemplate.String != "" {
 		tmpl = ap.IssueTitleTemplate.String

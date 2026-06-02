@@ -12,7 +12,7 @@ import (
 )
 
 const createMember = `-- name: CreateMember :one
-INSERT INTO member (workspace_id, user_id, role)
+INSERT INTO multica_member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)
 RETURNING id, workspace_id, user_id, role, created_at
 `
@@ -23,9 +23,9 @@ type CreateMemberParams struct {
 	Role        string      `json:"role"`
 }
 
-func (q *Queries) CreateMember(ctx context.Context, arg CreateMemberParams) (Member, error) {
+func (q *Queries) CreateMember(ctx context.Context, arg CreateMemberParams) (MulticaMember, error) {
 	row := q.db.QueryRow(ctx, createMember, arg.WorkspaceID, arg.UserID, arg.Role)
-	var i Member
+	var i MulticaMember
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -37,7 +37,7 @@ func (q *Queries) CreateMember(ctx context.Context, arg CreateMemberParams) (Mem
 }
 
 const deleteMember = `-- name: DeleteMember :exec
-DELETE FROM member WHERE id = $1
+DELETE FROM multica_member WHERE id = $1
 `
 
 func (q *Queries) DeleteMember(ctx context.Context, id pgtype.UUID) error {
@@ -46,13 +46,13 @@ func (q *Queries) DeleteMember(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getMember = `-- name: GetMember :one
-SELECT id, workspace_id, user_id, role, created_at FROM member
+SELECT id, workspace_id, user_id, role, created_at FROM multica_member
 WHERE id = $1
 `
 
-func (q *Queries) GetMember(ctx context.Context, id pgtype.UUID) (Member, error) {
+func (q *Queries) GetMember(ctx context.Context, id pgtype.UUID) (MulticaMember, error) {
 	row := q.db.QueryRow(ctx, getMember, id)
-	var i Member
+	var i MulticaMember
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -64,7 +64,7 @@ func (q *Queries) GetMember(ctx context.Context, id pgtype.UUID) (Member, error)
 }
 
 const getMemberByUserAndWorkspace = `-- name: GetMemberByUserAndWorkspace :one
-SELECT id, workspace_id, user_id, role, created_at FROM member
+SELECT id, workspace_id, user_id, role, created_at FROM multica_member
 WHERE user_id = $1 AND workspace_id = $2
 `
 
@@ -73,9 +73,9 @@ type GetMemberByUserAndWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMemberByUserAndWorkspaceParams) (Member, error) {
+func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMemberByUserAndWorkspaceParams) (MulticaMember, error) {
 	row := q.db.QueryRow(ctx, getMemberByUserAndWorkspace, arg.UserID, arg.WorkspaceID)
-	var i Member
+	var i MulticaMember
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -87,20 +87,20 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 }
 
 const listMembers = `-- name: ListMembers :many
-SELECT id, workspace_id, user_id, role, created_at FROM member
+SELECT id, workspace_id, user_id, role, created_at FROM multica_member
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListMembers(ctx context.Context, workspaceID pgtype.UUID) ([]Member, error) {
+func (q *Queries) ListMembers(ctx context.Context, workspaceID pgtype.UUID) ([]MulticaMember, error) {
 	rows, err := q.db.Query(ctx, listMembers, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Member{}
+	items := []MulticaMember{}
 	for rows.Next() {
-		var i Member
+		var i MulticaMember
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -121,8 +121,8 @@ func (q *Queries) ListMembers(ctx context.Context, workspaceID pgtype.UUID) ([]M
 const listMembersWithUser = `-- name: ListMembersWithUser :many
 SELECT m.id, m.workspace_id, m.user_id, m.role, m.created_at,
        u.name as user_name, u.email as user_email, u.avatar_url as user_avatar_url
-FROM member m
-JOIN "user" u ON u.id = m.user_id
+FROM multica_member m
+JOIN multica_user u ON u.id = m.user_id
 WHERE m.workspace_id = $1
 ORDER BY m.created_at ASC
 `
@@ -168,7 +168,7 @@ func (q *Queries) ListMembersWithUser(ctx context.Context, workspaceID pgtype.UU
 }
 
 const updateMemberRole = `-- name: UpdateMemberRole :one
-UPDATE member SET role = $2
+UPDATE multica_member SET role = $2
 WHERE id = $1
 RETURNING id, workspace_id, user_id, role, created_at
 `
@@ -178,9 +178,9 @@ type UpdateMemberRoleParams struct {
 	Role string      `json:"role"`
 }
 
-func (q *Queries) UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) (Member, error) {
+func (q *Queries) UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) (MulticaMember, error) {
 	row := q.db.QueryRow(ctx, updateMemberRole, arg.ID, arg.Role)
-	var i Member
+	var i MulticaMember
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,

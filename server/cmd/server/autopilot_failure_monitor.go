@@ -194,7 +194,7 @@ func emitAutopilotPausedNotifications(
 	ctx context.Context,
 	queries *db.Queries,
 	bus *events.Bus,
-	autopilot db.Autopilot,
+	autopilot db.MulticaAutopilot,
 	candidate db.SelectAutopilotsExceedingFailureThresholdRow,
 	cfg failureMonitorConfig,
 	failPct float64,
@@ -274,7 +274,7 @@ type pausedRecipient struct {
 func resolveAutopilotPausedRecipients(
 	ctx context.Context,
 	queries *db.Queries,
-	autopilot db.Autopilot,
+	autopilot db.MulticaAutopilot,
 ) []pausedRecipient {
 	if autopilot.CreatedByType == "member" {
 		return []pausedRecipient{{Type: "member", ID: autopilot.CreatedByID}}
@@ -309,7 +309,7 @@ func resolveAutopilotPausedRecipients(
 // frontend listeners (mirrors handler.AutopilotResponse). Kept here instead
 // of importing the handler package to avoid a cycle (handler imports the
 // service which we're sitting alongside in cmd/server).
-func autopilotEventPayload(a db.Autopilot) map[string]any {
+func autopilotEventPayload(a db.MulticaAutopilot) map[string]any {
 	return map[string]any{
 		"id":                   util.UUIDToString(a.ID),
 		"workspace_id":         util.UUIDToString(a.WorkspaceID),

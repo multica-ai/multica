@@ -37,7 +37,7 @@ type ProjectResponse struct {
 	ResourceCount int64 `json:"resource_count"`
 }
 
-func projectToResponse(p db.Project) ProjectResponse {
+func projectToResponse(p db.MulticaProject) ProjectResponse {
 	return ProjectResponse{
 		ID:          uuidToString(p.ID),
 		WorkspaceID: uuidToString(p.WorkspaceID),
@@ -279,7 +279,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	creator, _ := h.parseUserUUIDOrZero(userID)
-	resourceRows := make([]db.ProjectResource, 0, len(req.Resources))
+	resourceRows := make([]db.MulticaProjectResource, 0, len(req.Resources))
 	for i, res := range req.Resources {
 		var label pgtype.Text
 		if res.Label != nil && strings.TrimSpace(*res.Label) != "" {
@@ -649,7 +649,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type projectSearchRow struct {
-		project     db.Project
+		project     db.MulticaProject
 		totalCount  int64
 		matchSource string
 	}

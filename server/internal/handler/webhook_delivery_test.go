@@ -36,7 +36,7 @@ func setSigningSecretViaHandler(t *testing.T, apID, triggerID, secret string) {
 func setTriggerProvider(t *testing.T, triggerID, provider string) {
 	t.Helper()
 	if _, err := testPool.Exec(context.Background(),
-		`UPDATE autopilot_trigger SET provider = $1 WHERE id = $2`, provider, triggerID); err != nil {
+		`UPDATE multica_autopilot_trigger SET provider = $1 WHERE id = $2`, provider, triggerID); err != nil {
 		t.Fatalf("set provider: %v", err)
 	}
 }

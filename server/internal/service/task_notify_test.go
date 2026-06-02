@@ -49,7 +49,7 @@ func TestNotifyTaskAvailable_BumpsBeforeWakeup(t *testing.T) {
 		t.Fatal("precondition: cache should report empty after MarkEmpty under current version")
 	}
 
-	svc.notifyTaskAvailable(db.AgentTaskQueue{
+	svc.notifyTaskAvailable(db.MulticaAgentTaskQueue{
 		ID:        taskID,
 		RuntimeID: runtimeID,
 	})
@@ -89,7 +89,7 @@ func TestNotifyTaskAvailable_InvalidWithoutRuntimeIsNoOp(t *testing.T) {
 	v0 := cache.CurrentVersion(ctx, "rt-stays")
 	cache.MarkEmpty(ctx, "rt-stays", v0)
 
-	svc.notifyTaskAvailable(db.AgentTaskQueue{
+	svc.notifyTaskAvailable(db.MulticaAgentTaskQueue{
 		// RuntimeID intentionally invalid (zero value, Valid=false).
 		ID: testUUID(9),
 	})

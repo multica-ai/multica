@@ -12,7 +12,7 @@ import (
 )
 
 const countIssuesByProject = `-- name: CountIssuesByProject :one
-SELECT count(*) FROM issue
+SELECT count(*) FROM multica_issue
 WHERE project_id = $1
 `
 
@@ -24,7 +24,7 @@ func (q *Queries) CountIssuesByProject(ctx context.Context, projectID pgtype.UUI
 }
 
 const createProject = `-- name: CreateProject :one
-INSERT INTO project (
+INSERT INTO multica_project (
     workspace_id, title, description, icon, status,
     lead_type, lead_id, priority
 ) VALUES (
@@ -43,7 +43,7 @@ type CreateProjectParams struct {
 	Priority    string      `json:"priority"`
 }
 
-func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
+func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (MulticaProject, error) {
 	row := q.db.QueryRow(ctx, createProject,
 		arg.WorkspaceID,
 		arg.Title,
@@ -54,7 +54,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.LeadID,
 		arg.Priority,
 	)
-	var i Project
+	var i MulticaProject
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -72,7 +72,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 }
 
 const deleteProject = `-- name: DeleteProject :exec
-DELETE FROM project WHERE id = $1 AND workspace_id = $2
+DELETE FROM multica_project WHERE id = $1 AND workspace_id = $2
 `
 
 type DeleteProjectParams struct {
@@ -87,13 +87,13 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM multica_project
 WHERE id = $1
 `
 
-func (q *Queries) GetProject(ctx context.Context, id pgtype.UUID) (Project, error) {
+func (q *Queries) GetProject(ctx context.Context, id pgtype.UUID) (MulticaProject, error) {
 	row := q.db.QueryRow(ctx, getProject, id)
-	var i Project
+	var i MulticaProject
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -111,7 +111,7 @@ func (q *Queries) GetProject(ctx context.Context, id pgtype.UUID) (Project, erro
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM multica_project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -120,9 +120,9 @@ type GetProjectInWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWorkspaceParams) (Project, error) {
+func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWorkspaceParams) (MulticaProject, error) {
 	row := q.db.QueryRow(ctx, getProjectInWorkspace, arg.ID, arg.WorkspaceID)
-	var i Project
+	var i MulticaProject
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -143,7 +143,7 @@ const getProjectIssueStats = `-- name: GetProjectIssueStats :many
 SELECT project_id,
        count(*)::bigint AS total_count,
        count(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done_count
-FROM issue
+FROM multica_issue
 WHERE project_id = ANY($1::uuid[])
 GROUP BY project_id
 `
@@ -175,7 +175,7 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, projectIds []pgtype.
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM multica_project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -188,15 +188,15 @@ type ListProjectsParams struct {
 	Priority    pgtype.Text `json:"priority"`
 }
 
-func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error) {
+func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]MulticaProject, error) {
 	rows, err := q.db.Query(ctx, listProjects, arg.WorkspaceID, arg.Status, arg.Priority)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Project{}
+	items := []MulticaProject{}
 	for rows.Next() {
-		var i Project
+		var i MulticaProject
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -221,7 +221,7 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 }
 
 const updateProject = `-- name: UpdateProject :one
-UPDATE project SET
+UPDATE multica_project SET
     title = COALESCE($2, title),
     description = $3,
     icon = $4,
@@ -245,7 +245,7 @@ type UpdateProjectParams struct {
 	LeadID      pgtype.UUID `json:"lead_id"`
 }
 
-func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
+func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (MulticaProject, error) {
 	row := q.db.QueryRow(ctx, updateProject,
 		arg.ID,
 		arg.Title,
@@ -256,7 +256,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.LeadType,
 		arg.LeadID,
 	)
-	var i Project
+	var i MulticaProject
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,

@@ -64,10 +64,10 @@ func TestListWorkspaceAgentTaskSnapshot(t *testing.T) {
 		var id string
 		var query string
 		if f.completedAt == "" {
-			query = `INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+			query = `INSERT INTO multica_agent_task_queue (agent_id, runtime_id, status, priority)
 			         VALUES ($1, $2, $3, 0) RETURNING id`
 		} else {
-			query = `INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, completed_at)
+			query = `INSERT INTO multica_agent_task_queue (agent_id, runtime_id, status, priority, completed_at)
 			         VALUES ($1, $2, $3, 0, ` + f.completedAt + `) RETURNING id`
 		}
 		if err := testPool.QueryRow(ctx, query, f.agentID, testRuntimeID, f.status).Scan(&id); err != nil {
@@ -77,7 +77,7 @@ func TestListWorkspaceAgentTaskSnapshot(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		for _, id := range insertedIDs {
-			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, id)
+			testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, id)
 		}
 	})
 
@@ -148,7 +148,7 @@ func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	// Clean up any agents created by this test.
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
+			`DELETE FROM multica_agent WHERE workspace_id = $1 AND name = $2`,
 			testWorkspaceID, "duplicate-name-test-agent",
 		)
 	})
@@ -211,7 +211,7 @@ func TestWorkspaceAlwaysRedactEnv(t *testing.T) {
 
 func resetWorkspaceSettings(t *testing.T, workspaceID string) {
 	t.Helper()
-	if _, err := testPool.Exec(context.Background(), "UPDATE workspace SET settings = '{}'::jsonb WHERE id = $1", workspaceID); err != nil {
+	if _, err := testPool.Exec(context.Background(), "UPDATE multica_workspace SET settings = '{}'::jsonb WHERE id = $1", workspaceID); err != nil {
 		t.Logf("warning: failed to reset workspace settings: %v", err)
 	}
 }
@@ -223,13 +223,13 @@ func TestGetAgent_AlwaysRedactEnv_OwnerSeesRedacted(t *testing.T) {
 	ctx := context.Background()
 
 	// Enable always_redact_env on workspace.
-	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = '{"always_redact_env": true}' WHERE id = $1`, testWorkspaceID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE multica_workspace SET settings = '{"always_redact_env": true}' WHERE id = $1`, testWorkspaceID); err != nil {
 		t.Fatalf("failed to set workspace settings: %v", err)
 	}
 	t.Cleanup(func() { resetWorkspaceSettings(t, testWorkspaceID) })
 
 	agentID := createHandlerTestAgent(t, "redact-get-test-agent", nil)
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE multica_agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to set custom_env: %v", err)
 	}
 
@@ -263,14 +263,14 @@ func TestListAgents_AlwaysRedactEnv_OwnerSeesRedacted(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = '{"always_redact_env": true}' WHERE id = $1`, testWorkspaceID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE multica_workspace SET settings = '{"always_redact_env": true}' WHERE id = $1`, testWorkspaceID); err != nil {
 		t.Fatalf("failed to set workspace settings: %v", err)
 	}
 	t.Cleanup(func() { resetWorkspaceSettings(t, testWorkspaceID) })
 
 	agentName := "redact-list-test-agent"
 	agentID := createHandlerTestAgent(t, agentName, nil)
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE multica_agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to set custom_env: %v", err)
 	}
 
@@ -315,12 +315,12 @@ func TestGetAgent_DefaultNoRedactForOwner(t *testing.T) {
 	ctx := context.Background()
 
 	// Ensure workspace has no always_redact_env policy (guards against test-order leakage).
-	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = '{}'::jsonb WHERE id = $1`, testWorkspaceID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE multica_workspace SET settings = '{}'::jsonb WHERE id = $1`, testWorkspaceID); err != nil {
 		t.Fatalf("failed to clear workspace settings: %v", err)
 	}
 
 	agentID := createHandlerTestAgent(t, "no-redact-get-test-agent", nil)
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE multica_agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to set custom_env: %v", err)
 	}
 

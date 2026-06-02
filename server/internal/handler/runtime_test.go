@@ -84,13 +84,13 @@ func TestGetRuntimeUsage_BucketsByUsageTime(t *testing.T) {
 	// Pick a runtime bound to the fixture workspace.
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1
+		SELECT id FROM multica_agent_runtime WHERE workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&runtimeID); err != nil {
 		t.Fatalf("fetch runtime: %v", err)
 	}
 	var agentID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1
+		SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("fetch agent: %v", err)
 	}
@@ -98,14 +98,14 @@ func TestGetRuntimeUsage_BucketsByUsageTime(t *testing.T) {
 	// Create an issue for the tasks to reference.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type)
+		INSERT INTO multica_issue (workspace_id, title, creator_id, creator_type)
 		VALUES ($1, 'runtime usage test', $2, 'member')
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	// enqueued yesterday 23:58 UTC, finished today 00:05 UTC — tokens belong to today.
@@ -120,20 +120,20 @@ func TestGetRuntimeUsage_BucketsByUsageTime(t *testing.T) {
 	insertTaskWithUsage := func(enqueueAt, usageAt time.Time, inputTokens int64) string {
 		var taskID string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
+			INSERT INTO multica_agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
 			VALUES ($1, $2, $3, 'completed', $4)
 			RETURNING id
 		`, agentID, issueID, runtimeID, enqueueAt).Scan(&taskID); err != nil {
 			t.Fatalf("insert task: %v", err)
 		}
 		if _, err := testPool.Exec(ctx, `
-			INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+			INSERT INTO multica_task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
 			VALUES ($1, 'claude', 'claude-3-5-sonnet', $2, 0, $3)
 		`, taskID, inputTokens, usageAt); err != nil {
 			t.Fatalf("insert task_usage: %v", err)
 		}
 		t.Cleanup(func() {
-			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+			testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID)
 		})
 		return taskID
 	}
@@ -224,7 +224,7 @@ func TestListRuntimeUsageBucketsByViewerTimezone(t *testing.T) {
 	// off-by-one tz-cutoff bugs.
 	var agentID pgtype.UUID
 	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY id LIMIT 1
+		SELECT id FROM multica_agent WHERE workspace_id = $1 ORDER BY id LIMIT 1
 	`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("pick fixture agent: %v", err)
 	}
@@ -281,12 +281,12 @@ func TestResolveViewingTZ(t *testing.T) {
 
 	var userID string
 	if err := testPool.QueryRow(ctx,
-		`INSERT INTO "user" (name, email, timezone)
+		`INSERT INTO multica_user (name, email, timezone)
 		 VALUES ('TZ Resolve', 'tz-resolve@multica.ai', 'Asia/Tokyo') RETURNING id`,
 	).Scan(&userID); err != nil {
 		t.Fatalf("insert user: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, userID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_user WHERE id = $1`, userID) })
 
 	// Explicit ?tz= wins over the stored preference.
 	req := newRequest("GET", "/api/dashboard/usage/daily?tz=America/New_York", nil)
@@ -312,12 +312,12 @@ func TestResolveViewingTZ(t *testing.T) {
 	// No ?tz= and no stored value → UTC.
 	var bareUserID string
 	if err := testPool.QueryRow(ctx,
-		`INSERT INTO "user" (name, email)
+		`INSERT INTO multica_user (name, email)
 		 VALUES ('TZ Bare', 'tz-bare@multica.ai') RETURNING id`,
 	).Scan(&bareUserID); err != nil {
 		t.Fatalf("insert bare user: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, bareUserID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_user WHERE id = $1`, bareUserID) })
 	req = newRequest("GET", "/api/dashboard/usage/daily", nil)
 	req.Header.Set("X-User-ID", bareUserID)
 	if got := testHandler.resolveViewingTZ(req); got != "UTC" {
@@ -330,12 +330,12 @@ func TestResolveViewingTZ(t *testing.T) {
 	// string would reach SQL `AT TIME ZONE` and 500 every dashboard read.
 	var badTZUserID string
 	if err := testPool.QueryRow(ctx,
-		`INSERT INTO "user" (name, email, timezone)
+		`INSERT INTO multica_user (name, email, timezone)
 		 VALUES ('TZ Bad', 'tz-bad@multica.ai', 'Bad/Zone') RETURNING id`,
 	).Scan(&badTZUserID); err != nil {
 		t.Fatalf("insert bad-tz user: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, badTZUserID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_user WHERE id = $1`, badTZUserID) })
 	req = newRequest("GET", "/api/dashboard/usage/daily", nil)
 	req.Header.Set("X-User-ID", badTZUserID)
 	if got := testHandler.resolveViewingTZ(req); got != "UTC" {

@@ -98,7 +98,7 @@ type AutopilotRunResponse struct {
 
 // ── Converters ──────────────────────────────────────────────────────────────
 
-func autopilotToResponse(a db.Autopilot) AutopilotResponse {
+func autopilotToResponse(a db.MulticaAutopilot) AutopilotResponse {
 	assigneeType := a.AssigneeType
 	if assigneeType == "" {
 		// Older rows pre-MUL-2429 may surface as "" against an out-of-date
@@ -125,7 +125,7 @@ func autopilotToResponse(a db.Autopilot) AutopilotResponse {
 	}
 }
 
-func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerResponse {
+func (h *Handler) triggerToResponse(t db.MulticaAutopilotTrigger) AutopilotTriggerResponse {
 	resp := AutopilotTriggerResponse{
 		ID:             uuidToString(t.ID),
 		AutopilotID:    uuidToString(t.AutopilotID),
@@ -179,7 +179,7 @@ func webhookPathForToken(token string) string {
 	return "/api/webhooks/autopilots/" + token
 }
 
-func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
+func runToResponse(r db.MulticaAutopilotRun) AutopilotRunResponse {
 	var payload any
 	if r.TriggerPayload != nil {
 		json.Unmarshal(r.TriggerPayload, &payload)
@@ -210,7 +210,7 @@ func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
 // 256 KiB × N rows) would dominate response size. Clients fetch the full
 // payload via GET /api/autopilots/{id}/runs/{runId} when the user opens
 // the run detail dialog.
-func runToResponseSlim(r db.AutopilotRun) AutopilotRunResponse {
+func runToResponseSlim(r db.MulticaAutopilotRun) AutopilotRunResponse {
 	resp := runToResponse(r)
 	resp.TriggerPayload = nil
 	return resp
@@ -324,14 +324,14 @@ func (h *Handler) GetAutopilot(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) loadAutopilotInWorkspace(w http.ResponseWriter, r *http.Request, autopilotID, workspaceID string) (db.Autopilot, bool) {
+func (h *Handler) loadAutopilotInWorkspace(w http.ResponseWriter, r *http.Request, autopilotID, workspaceID string) (db.MulticaAutopilot, bool) {
 	autopilotUUID, ok := parseUUIDOrBadRequest(w, autopilotID, "autopilot id")
 	if !ok {
-		return db.Autopilot{}, false
+		return db.MulticaAutopilot{}, false
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
-		return db.Autopilot{}, false
+		return db.MulticaAutopilot{}, false
 	}
 
 	autopilot, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
@@ -340,7 +340,7 @@ func (h *Handler) loadAutopilotInWorkspace(w http.ResponseWriter, r *http.Reques
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "autopilot not found")
-		return db.Autopilot{}, false
+		return db.MulticaAutopilot{}, false
 	}
 	return autopilot, true
 }
@@ -750,11 +750,11 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 	autopilotID pgtype.UUID,
 	label pgtype.Text,
 	provider string,
-) (db.AutopilotTrigger, error) {
+) (db.MulticaAutopilotTrigger, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		token, err := generateWebhookToken()
 		if err != nil {
-			return db.AutopilotTrigger{}, err
+			return db.MulticaAutopilotTrigger{}, err
 		}
 		trigger, err := h.Queries.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
 			AutopilotID:  autopilotID,
@@ -768,10 +768,10 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 			return trigger, nil
 		}
 		if !isUniqueViolation(err) {
-			return db.AutopilotTrigger{}, err
+			return db.MulticaAutopilotTrigger{}, err
 		}
 	}
-	return db.AutopilotTrigger{}, fmt.Errorf("could not mint unique webhook token")
+	return db.MulticaAutopilotTrigger{}, fmt.Errorf("could not mint unique webhook token")
 }
 
 func isAllowedWebhookProvider(p string) bool {
@@ -1029,7 +1029,7 @@ func (h *Handler) RotateAutopilotTriggerWebhookToken(w http.ResponseWriter, r *h
 		return
 	}
 
-	var rotated db.AutopilotTrigger
+	var rotated db.MulticaAutopilotTrigger
 	for attempt := 0; attempt < 3; attempt++ {
 		token, terr := generateWebhookToken()
 		if terr != nil {

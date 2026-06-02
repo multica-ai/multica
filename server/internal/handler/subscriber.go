@@ -18,7 +18,7 @@ type SubscriberResponse struct {
 	CreatedAt string `json:"created_at"`
 }
 
-func subscriberToResponse(s db.IssueSubscriber) SubscriberResponse {
+func subscriberToResponse(s db.MulticaIssueSubscriber) SubscriberResponse {
 	return SubscriberResponse{
 		IssueID:   uuidToString(s.IssueID),
 		UserType:  s.UserType,

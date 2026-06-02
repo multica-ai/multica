@@ -613,7 +613,7 @@ type persistDeliveryInput struct {
 // false, nil) on the happy path. On dedupe-key unique-violation it returns
 // (existing-row, true, nil) after bumping attempt_count on the prior row.
 // Any other error bubbles up so the handler can 500 cleanly.
-func (h *Handler) persistInboundDelivery(r *http.Request, in persistDeliveryInput) (db.WebhookDelivery, bool, error) {
+func (h *Handler) persistInboundDelivery(r *http.Request, in persistDeliveryInput) (db.MulticaWebhookDelivery, bool, error) {
 	params := db.CreateWebhookDeliveryParams{
 		WorkspaceID:     in.WorkspaceID,
 		AutopilotID:     in.AutopilotID,
@@ -638,7 +638,7 @@ func (h *Handler) persistInboundDelivery(r *http.Request, in persistDeliveryInpu
 		return delivery, false, nil
 	}
 	if !isUniqueViolation(err) || in.DedupeKey == "" {
-		return db.WebhookDelivery{}, false, err
+		return db.MulticaWebhookDelivery{}, false, err
 	}
 	// Dedupe collision: fetch the original row, bump attempt count.
 	existing, lookupErr := h.Queries.GetWebhookDeliveryByTriggerAndDedupe(r.Context(), db.GetWebhookDeliveryByTriggerAndDedupeParams{
@@ -646,7 +646,7 @@ func (h *Handler) persistInboundDelivery(r *http.Request, in persistDeliveryInpu
 		DedupeKey: pgtype.Text{String: in.DedupeKey, Valid: true},
 	})
 	if lookupErr != nil {
-		return db.WebhookDelivery{}, false, fmt.Errorf("lookup duplicate delivery: %w", lookupErr)
+		return db.MulticaWebhookDelivery{}, false, fmt.Errorf("lookup duplicate delivery: %w", lookupErr)
 	}
 	bumped, bumpErr := h.Queries.BumpWebhookDeliveryAttempt(r.Context(), existing.ID)
 	if bumpErr != nil {

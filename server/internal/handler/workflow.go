@@ -131,7 +131,7 @@ type WorkflowAdminResponse struct {
 
 // ── Converters ───────────────────────────────────────────────────────────────
 
-func workflowToResponse(wf db.Workflow, nodeCount int64) WorkflowResponse {
+func workflowToResponse(wf db.MulticaWorkflow, nodeCount int64) WorkflowResponse {
 	return WorkflowResponse{
 		ID:               uuidToString(wf.ID),
 		WorkspaceID:      uuidToString(wf.WorkspaceID),
@@ -149,7 +149,7 @@ func workflowToResponse(wf db.Workflow, nodeCount int64) WorkflowResponse {
 	}
 }
 
-func workflowNodeToResponse(node db.WorkflowNode) WorkflowNodeResponse {
+func workflowNodeToResponse(node db.MulticaWorkflowNode) WorkflowNodeResponse {
 	return WorkflowNodeResponse{
 		ID:                 uuidToString(node.ID),
 		WorkflowID:         uuidToString(node.WorkflowID),
@@ -171,7 +171,7 @@ func workflowNodeToResponse(node db.WorkflowNode) WorkflowNodeResponse {
 	}
 }
 
-func workflowEdgeToResponse(edge db.WorkflowEdge) WorkflowEdgeResponse {
+func workflowEdgeToResponse(edge db.MulticaWorkflowEdge) WorkflowEdgeResponse {
 	return WorkflowEdgeResponse{
 		ID:           uuidToString(edge.ID),
 		WorkflowID:   uuidToString(edge.WorkflowID),
@@ -184,10 +184,10 @@ func workflowEdgeToResponse(edge db.WorkflowEdge) WorkflowEdgeResponse {
 
 // ── Loader ───────────────────────────────────────────────────────────────────
 
-func (h *Handler) loadWorkflowInWorkspace(w http.ResponseWriter, r *http.Request, id string) (db.Workflow, bool) {
+func (h *Handler) loadWorkflowInWorkspace(w http.ResponseWriter, r *http.Request, id string) (db.MulticaWorkflow, bool) {
 	wfID, ok := parseUUIDOrBadRequest(w, id, "workflow ID")
 	if !ok {
-		return db.Workflow{}, false
+		return db.MulticaWorkflow{}, false
 	}
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID := parseUUID(workspaceID)
@@ -208,7 +208,7 @@ func (h *Handler) loadWorkflowInWorkspace(w http.ResponseWriter, r *http.Request
 	}
 
 	writeError(w, http.StatusNotFound, "workflow not found")
-	return db.Workflow{}, false
+	return db.MulticaWorkflow{}, false
 }
 
 // ── Workflow CRUD ────────────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ func (h *Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
 
 	templateFilter := r.URL.Query().Get("template")
 
-	var workflows []db.Workflow
+	var workflows []db.MulticaWorkflow
 	var err error
 
 	switch templateFilter {
@@ -756,7 +756,7 @@ func (h *Handler) ToggleWorkflowTemplate(w http.ResponseWriter, r *http.Request)
 
 // ── Workflow Admins ────────────────────────────────────────────────────────────
 
-func userToAdminResponse(u db.User) WorkflowAdminResponse {
+func userToAdminResponse(u db.MulticaUser) WorkflowAdminResponse {
 	return WorkflowAdminResponse{
 		ID:                 uuidToString(u.ID),
 		Name:               u.Name,

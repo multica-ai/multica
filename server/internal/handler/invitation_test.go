@@ -14,14 +14,14 @@ func clearInvitationsForTestWorkspace(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := testPool.Exec(ctx,
-		`DELETE FROM workspace_invitation WHERE workspace_id = $1`,
+		`DELETE FROM multica_workspace_invitation WHERE workspace_id = $1`,
 		parseUUID(testWorkspaceID),
 	); err != nil {
 		t.Fatalf("clear invitations: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM workspace_invitation WHERE workspace_id = $1`,
+			`DELETE FROM multica_workspace_invitation WHERE workspace_id = $1`,
 			parseUUID(testWorkspaceID),
 		)
 	})
@@ -63,7 +63,7 @@ func TestCreateInvitation_AllowsAfterExpiry(t *testing.T) {
 
 	var staleID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace_invitation (
+		INSERT INTO multica_workspace_invitation (
 			workspace_id, inviter_id, invitee_email, role, status, created_at, updated_at, expires_at
 		)
 		VALUES ($1, $2, $3, 'member', 'pending', now() - interval '10 days', now() - interval '10 days', now() - interval '3 days')
@@ -93,7 +93,7 @@ func TestCreateInvitation_AllowsAfterExpiry(t *testing.T) {
 
 	var staleStatus string
 	if err := testPool.QueryRow(ctx,
-		`SELECT status FROM workspace_invitation WHERE id = $1`, staleID,
+		`SELECT status FROM multica_workspace_invitation WHERE id = $1`, staleID,
 	).Scan(&staleStatus); err != nil {
 		t.Fatalf("read stale row: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestCreateInvitation_AllowsAfterExpiry(t *testing.T) {
 
 	var pendingCount int
 	if err := testPool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM workspace_invitation
+		SELECT COUNT(*) FROM multica_workspace_invitation
 		WHERE workspace_id = $1 AND invitee_email = $2 AND status = 'pending'
 	`, parseUUID(testWorkspaceID), invitationTestEmail).Scan(&pendingCount); err != nil {
 		t.Fatalf("count pending: %v", err)

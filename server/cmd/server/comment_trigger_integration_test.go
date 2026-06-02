@@ -49,20 +49,20 @@ func ensureAgentTask(t *testing.T, agentID string) string {
 	ctx := context.Background()
 	var taskID string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id::text FROM agent_task_queue WHERE agent_id = $1 LIMIT 1`,
+		`SELECT id::text FROM multica_agent_task_queue WHERE agent_id = $1 LIMIT 1`,
 		agentID,
 	).Scan(&taskID); err == nil && taskID != "" {
 		return taskID
 	}
 	var runtimeID string
 	if err := testPool.QueryRow(ctx,
-		`SELECT runtime_id::text FROM agent WHERE id = $1`,
+		`SELECT runtime_id::text FROM multica_agent WHERE id = $1`,
 		agentID,
 	).Scan(&runtimeID); err != nil {
 		t.Fatalf("ensureAgentTask: load runtime_id for agent %s: %v", agentID, err)
 	}
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, status, priority)
 		VALUES ($1, $2, 'queued', 0)
 		RETURNING id::text
 	`, agentID, runtimeID).Scan(&taskID); err != nil {
@@ -76,7 +76,7 @@ func countPendingTasks(t *testing.T, issueID string) int {
 	t.Helper()
 	var count int
 	err := testPool.QueryRow(context.Background(),
-		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND status IN ('queued', 'dispatched')`,
+		`SELECT count(*) FROM multica_agent_task_queue WHERE issue_id = $1 AND status IN ('queued', 'dispatched')`,
 		issueID).Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to count pending tasks: %v", err)
@@ -88,7 +88,7 @@ func countPendingTasks(t *testing.T, issueID string) int {
 func clearTasks(t *testing.T, issueID string) {
 	t.Helper()
 	_, err := testPool.Exec(context.Background(),
-		`DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		`DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
 	if err != nil {
 		t.Fatalf("failed to clear tasks: %v", err)
 	}
@@ -101,7 +101,7 @@ func latestTriggerCommentID(t *testing.T, issueID string) string {
 	var triggerID *string
 	err := testPool.QueryRow(context.Background(),
 		`SELECT trigger_comment_id::text
-		   FROM agent_task_queue
+		   FROM multica_agent_task_queue
 		  WHERE issue_id = $1 AND status IN ('queued', 'dispatched')
 		  ORDER BY created_at DESC
 		  LIMIT 1`,

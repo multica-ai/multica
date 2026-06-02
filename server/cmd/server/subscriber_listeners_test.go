@@ -23,9 +23,9 @@ func createTestIssue(t *testing.T, workspaceID, creatorID string) string {
 	ctx := context.Background()
 	var issueID string
 	err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_type, creator_id, position, number)
 		VALUES ($1, 'subscriber test issue', 'todo', 'medium', 'member', $2, 0,
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1))
 		RETURNING id
 	`, workspaceID, creatorID).Scan(&issueID)
 	if err != nil {
@@ -40,7 +40,7 @@ func createTestUser(t *testing.T, email string) string {
 	ctx := context.Background()
 	var userID string
 	err := testPool.QueryRow(ctx, `
-		INSERT INTO "user" (name, email)
+		INSERT INTO multica_user (name, email)
 		VALUES ($1, $2)
 		RETURNING id
 	`, "Subscriber Test User", email).Scan(&userID)
@@ -52,12 +52,12 @@ func createTestUser(t *testing.T, email string) string {
 
 func cleanupTestIssue(t *testing.T, issueID string) {
 	t.Helper()
-	testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueID)
 }
 
 func cleanupTestUser(t *testing.T, email string) {
 	t.Helper()
-	testPool.Exec(context.Background(), `DELETE FROM "user" WHERE email = $1`, email)
+	testPool.Exec(context.Background(), `DELETE FROM multica_user WHERE email = $1`, email)
 }
 
 func isSubscribed(t *testing.T, queries *db.Queries, issueID, userType, userID string) bool {

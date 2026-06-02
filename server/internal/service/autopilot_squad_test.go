@@ -16,13 +16,13 @@ func TestAutopilotSquadAttribution(t *testing.T) {
 
 	tests := []struct {
 		name string
-		ap   db.Autopilot
+		ap   db.MulticaAutopilot
 		want pgtype.UUID
 	}{
-		{"agent assignee returns zero", db.Autopilot{AssigneeType: "agent", AssigneeID: id}, pgtype.UUID{}},
-		{"squad assignee returns squad id", db.Autopilot{AssigneeType: "squad", AssigneeID: id}, id},
-		{"squad with invalid id returns zero", db.Autopilot{AssigneeType: "squad", AssigneeID: pgtype.UUID{}}, pgtype.UUID{}},
-		{"unset type defaults to non-squad", db.Autopilot{AssigneeID: id}, pgtype.UUID{}},
+		{"agent assignee returns zero", db.MulticaAutopilot{AssigneeType: "agent", AssigneeID: id}, pgtype.UUID{}},
+		{"squad assignee returns squad id", db.MulticaAutopilot{AssigneeType: "squad", AssigneeID: id}, id},
+		{"squad with invalid id returns zero", db.MulticaAutopilot{AssigneeType: "squad", AssigneeID: pgtype.UUID{}}, pgtype.UUID{}},
+		{"unset type defaults to non-squad", db.MulticaAutopilot{AssigneeID: id}, pgtype.UUID{}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -40,15 +40,15 @@ func TestAutopilotSquadAttribution(t *testing.T) {
 func TestFormatAdmissionReason(t *testing.T) {
 	tests := []struct {
 		name string
-		ap   db.Autopilot
+		ap   db.MulticaAutopilot
 		raw  string
 		want string
 	}{
-		{"agent archived", db.Autopilot{AssigneeType: "agent"}, "agent is archived", "assignee agent is archived"},
-		{"squad archived", db.Autopilot{AssigneeType: "squad"}, "agent is archived", "squad leader agent is archived"},
-		{"agent no runtime", db.Autopilot{AssigneeType: "agent"}, "agent has no runtime bound", "assignee agent has no runtime bound"},
-		{"squad no runtime", db.Autopilot{AssigneeType: "squad"}, "agent has no runtime bound", "squad leader agent has no runtime bound"},
-		{"runtime offline retains MUL-1899 suffix", db.Autopilot{AssigneeType: "agent"}, "agent runtime is offline", "agent runtime is offline at dispatch time"},
+		{"agent archived", db.MulticaAutopilot{AssigneeType: "agent"}, "agent is archived", "assignee agent is archived"},
+		{"squad archived", db.MulticaAutopilot{AssigneeType: "squad"}, "agent is archived", "squad leader agent is archived"},
+		{"agent no runtime", db.MulticaAutopilot{AssigneeType: "agent"}, "agent has no runtime bound", "assignee agent has no runtime bound"},
+		{"squad no runtime", db.MulticaAutopilot{AssigneeType: "squad"}, "agent has no runtime bound", "squad leader agent has no runtime bound"},
+		{"runtime offline retains MUL-1899 suffix", db.MulticaAutopilot{AssigneeType: "agent"}, "agent runtime is offline", "agent runtime is offline at dispatch time"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

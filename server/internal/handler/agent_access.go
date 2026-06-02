@@ -21,7 +21,7 @@ import (
 // {agent.owner_id} ∪ workspace owner/admin members. Manual configuration of
 // allowed_principals is not exposed in v1; future work can extend this set
 // without changing call sites.
-func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, actorType, actorID, workspaceID string) bool {
+func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.MulticaAgent, actorType, actorID, workspaceID string) bool {
 	if agent.Visibility != "private" {
 		return true
 	}
@@ -41,7 +41,7 @@ func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, act
 // memberAllowedForPrivateAgent is the pure predicate used by both
 // canAccessPrivateAgent and the ListAgents filter loop. Caller must have
 // already confirmed agent.Visibility == "private".
-func memberAllowedForPrivateAgent(agent db.Agent, userID, role string) bool {
+func memberAllowedForPrivateAgent(agent db.MulticaAgent, userID, role string) bool {
 	if roleAllowed(role, "owner", "admin") {
 		return true
 	}

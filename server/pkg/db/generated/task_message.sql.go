@@ -12,7 +12,7 @@ import (
 )
 
 const createTaskMessage = `-- name: CreateTaskMessage :one
-INSERT INTO task_message (task_id, seq, type, tool, content, input, output)
+INSERT INTO multica_task_message (task_id, seq, type, tool, content, input, output)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id, task_id, seq, type, tool, content, input, output, created_at
 `
@@ -27,7 +27,7 @@ type CreateTaskMessageParams struct {
 	Output  pgtype.Text `json:"output"`
 }
 
-func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessageParams) (TaskMessage, error) {
+func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessageParams) (MulticaTaskMessage, error) {
 	row := q.db.QueryRow(ctx, createTaskMessage,
 		arg.TaskID,
 		arg.Seq,
@@ -37,7 +37,7 @@ func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessagePa
 		arg.Input,
 		arg.Output,
 	)
-	var i TaskMessage
+	var i MulticaTaskMessage
 	err := row.Scan(
 		&i.ID,
 		&i.TaskID,
@@ -53,7 +53,7 @@ func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessagePa
 }
 
 const deleteTaskMessages = `-- name: DeleteTaskMessages :exec
-DELETE FROM task_message
+DELETE FROM multica_task_message
 WHERE task_id = $1
 `
 
@@ -63,20 +63,20 @@ func (q *Queries) DeleteTaskMessages(ctx context.Context, taskID pgtype.UUID) er
 }
 
 const listTaskMessages = `-- name: ListTaskMessages :many
-SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
+SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM multica_task_message
 WHERE task_id = $1
 ORDER BY seq ASC
 `
 
-func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]TaskMessage, error) {
+func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]MulticaTaskMessage, error) {
 	rows, err := q.db.Query(ctx, listTaskMessages, taskID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []TaskMessage{}
+	items := []MulticaTaskMessage{}
 	for rows.Next() {
-		var i TaskMessage
+		var i MulticaTaskMessage
 		if err := rows.Scan(
 			&i.ID,
 			&i.TaskID,
@@ -99,7 +99,7 @@ func (q *Queries) ListTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]T
 }
 
 const listTaskMessagesSince = `-- name: ListTaskMessagesSince :many
-SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM task_message
+SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM multica_task_message
 WHERE task_id = $1 AND seq > $2
 ORDER BY seq ASC
 `
@@ -109,15 +109,15 @@ type ListTaskMessagesSinceParams struct {
 	Seq    int32       `json:"seq"`
 }
 
-func (q *Queries) ListTaskMessagesSince(ctx context.Context, arg ListTaskMessagesSinceParams) ([]TaskMessage, error) {
+func (q *Queries) ListTaskMessagesSince(ctx context.Context, arg ListTaskMessagesSinceParams) ([]MulticaTaskMessage, error) {
 	rows, err := q.db.Query(ctx, listTaskMessagesSince, arg.TaskID, arg.Seq)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []TaskMessage{}
+	items := []MulticaTaskMessage{}
 	for rows.Next() {
-		var i TaskMessage
+		var i MulticaTaskMessage
 		if err := rows.Scan(
 			&i.ID,
 			&i.TaskID,

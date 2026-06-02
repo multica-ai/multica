@@ -26,12 +26,12 @@ func TestDashboardEndpoints(t *testing.T) {
 
 	var runtimeID, agentID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1
+		SELECT id FROM multica_agent_runtime WHERE workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&runtimeID); err != nil {
 		t.Fatalf("fetch runtime: %v", err)
 	}
 	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1
+		SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("fetch agent: %v", err)
 	}
@@ -39,13 +39,13 @@ func TestDashboardEndpoints(t *testing.T) {
 	// Two issues: one bound to a project, one not.
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
+		INSERT INTO multica_project (workspace_id, title)
 		VALUES ($1, 'dashboard test project')
 		RETURNING id
 	`, testWorkspaceID).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_project WHERE id = $1`, projectID) })
 
 	// issue.number is `UNIQUE (workspace_id, number)` (migration 020) and
 	// defaults to 0. Two inserts into the same workspace would collide on the
@@ -59,16 +59,16 @@ func TestDashboardEndpoints(t *testing.T) {
 			pid = projectID
 		}
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
+			INSERT INTO multica_issue (workspace_id, title, creator_id, creator_type, project_id, number)
 			VALUES (
 				$1, 'dashboard test', $2, 'member', $3,
-				(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1)
+				(SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1)
 			)
 			RETURNING id
 		`, testWorkspaceID, testUserID, pid).Scan(&id); err != nil {
 			t.Fatalf("insert issue: %v", err)
 		}
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id) })
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, id) })
 		return id
 	}
 	projectIssueID := mkIssue(true)
@@ -81,19 +81,19 @@ func TestDashboardEndpoints(t *testing.T) {
 	mkTaskWithUsage := func(issueID string, status string, tokens int64) {
 		var taskID string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
+			INSERT INTO multica_agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, now())
 			RETURNING id
 		`, agentID, issueID, runtimeID, status, started, completed).Scan(&taskID); err != nil {
 			t.Fatalf("insert task: %v", err)
 		}
 		if _, err := testPool.Exec(ctx, `
-			INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+			INSERT INTO multica_task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
 			VALUES ($1, 'claude', 'claude-3-5-sonnet', $2, 0, now())
 		`, taskID, tokens); err != nil {
 			t.Fatalf("insert task_usage: %v", err)
 		}
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 	}
 
 	mkTaskWithUsage(projectIssueID, "completed", 1000)
@@ -258,10 +258,10 @@ func TestDashboardUsageDailyBucketsByViewerTimezone(t *testing.T) {
 	ctx := context.Background()
 
 	var runtimeID, agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
 		t.Fatalf("fetch runtime: %v", err)
 	}
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("fetch agent: %v", err)
 	}
 
@@ -341,31 +341,31 @@ func TestDashboardRunTimeDailyBucketsByViewerTimezone(t *testing.T) {
 	ctx := context.Background()
 
 	var runtimeID, agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
 		t.Fatalf("fetch runtime: %v", err)
 	}
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("fetch agent: %v", err)
 	}
 
 	// Issue tagged so we can clean up just this test's rows.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		INSERT INTO multica_issue (workspace_id, title, creator_id, creator_type, number)
 		VALUES ($1, 'runtime-daily tz test', $2, 'member',
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	// completed_at at 04:00 UTC two days ago — still the prior evening in LA.
 	// started_at 10 minutes earlier so the run has a non-zero duration.
 	var completedAt time.Time
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
 		VALUES (
 			$1, $2, $3, 'completed',
 			((CURRENT_DATE - 2)::timestamp + interval '3 hours 50 minutes') AT TIME ZONE 'UTC',
@@ -376,7 +376,7 @@ func TestDashboardRunTimeDailyBucketsByViewerTimezone(t *testing.T) {
 	`, agentID, issueID, runtimeID).Scan(&taskID, &completedAt); err != nil {
 		t.Fatalf("insert completed task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	utcDate := completedAt.UTC().Format("2006-01-02")
 	laLoc, err := time.LoadLocation("America/Los_Angeles")
@@ -435,34 +435,34 @@ func TestRollupTaskUsageHourlyIdempotentAndWatermark(t *testing.T) {
 	ctx := context.Background()
 
 	var runtimeID, agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
 		t.Fatalf("fetch runtime: %v", err)
 	}
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("fetch agent: %v", err)
 	}
 
 	var issueID, taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		INSERT INTO multica_issue (workspace_id, title, creator_id, creator_type, number)
 		VALUES ($1, 'rollup idempotency', $2, 'member',
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
 		VALUES ($1, $2, $3, 'completed', now() - interval '20 minutes') RETURNING id
 	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+		INSERT INTO multica_task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
 		VALUES ($1, 'claude', 'rollup-idem-model', 3333, 0, now() - interval '20 minutes')
 	`, taskID); err != nil {
 		t.Fatalf("insert task_usage: %v", err)
@@ -539,7 +539,7 @@ func TestRollupTaskUsageHourlyReassignBetweenRuntimes(t *testing.T) {
 	oldRuntimeID := handlerTestRuntimeID(t)
 	var newRuntimeID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
+		INSERT INTO multica_agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
 		)
 		VALUES ($1, NULL, 'reassign-target-hourly', 'cloud', 'reassign-target-hourly', 'online', '{}'::jsonb, '{}'::jsonb, now())
@@ -547,34 +547,34 @@ func TestRollupTaskUsageHourlyReassignBetweenRuntimes(t *testing.T) {
 	`, testWorkspaceID).Scan(&newRuntimeID); err != nil {
 		t.Fatalf("create dest runtime: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, newRuntimeID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_runtime WHERE id = $1`, newRuntimeID) })
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("fetch agent: %v", err)
 	}
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		INSERT INTO multica_issue (workspace_id, title, creator_id, creator_type, number)
 		VALUES ($1, 'reassign hourly test', $2, 'member',
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	usageAt := time.Date(2021, 3, 14, 1, 0, 0, 0, time.UTC)
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
 		VALUES ($1, $2, $3, 'completed', $4) RETURNING id
 	`, agentID, issueID, oldRuntimeID, usageAt).Scan(&taskID); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at, updated_at)
+		INSERT INTO multica_task_usage (task_id, provider, model, input_tokens, output_tokens, created_at, updated_at)
 		VALUES ($1, 'claude', 'm-reassign-hourly', 700, 70, $2, $2)
 	`, taskID, usageAt); err != nil {
 		t.Fatalf("insert task_usage: %v", err)
@@ -607,7 +607,7 @@ func TestRollupTaskUsageHourlyReassignBetweenRuntimes(t *testing.T) {
 
 	// Reassignment fires trg_atq_dirty_hourly, which enqueues the OLD and
 	// NEW runtime buckets (same bucket_hour, two runtime_ids).
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET runtime_id = $1 WHERE id = $2`, newRuntimeID, taskID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE multica_agent_task_queue SET runtime_id = $1 WHERE id = $2`, newRuntimeID, taskID); err != nil {
 		t.Fatalf("reassign task: %v", err)
 	}
 	var dirtyCount int
@@ -644,17 +644,17 @@ func TestRollupTaskUsageHourlyWorkspaceMismatch(t *testing.T) {
 
 	var foreignWorkspaceID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug)
+		INSERT INTO multica_workspace (name, slug)
 		VALUES ('ws-mismatch-hourly', 'ws-mismatch-hourly-' || gen_random_uuid()::text)
 		RETURNING id
 	`).Scan(&foreignWorkspaceID); err != nil {
 		t.Fatalf("create foreign workspace: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_workspace WHERE id = $1`, foreignWorkspaceID) })
 
 	var foreignRuntimeID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
+		INSERT INTO multica_agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
 		)
 		VALUES ($1, NULL, 'mismatch-rt-hourly', 'cloud', 'mismatch-rt-hourly', 'online', '{}'::jsonb, '{}'::jsonb, now())
@@ -664,7 +664,7 @@ func TestRollupTaskUsageHourlyWorkspaceMismatch(t *testing.T) {
 	}
 	var foreignAgentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (
+		INSERT INTO multica_agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks, owner_id,
 			instructions, custom_env, custom_args, mcp_config
@@ -679,25 +679,25 @@ func TestRollupTaskUsageHourlyWorkspaceMismatch(t *testing.T) {
 	// foreign one — so agent.workspace_id != issue.workspace_id.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		INSERT INTO multica_issue (workspace_id, title, creator_id, creator_type, number)
 		VALUES ($1, 'mismatch hourly test', $2, 'member',
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	usageAt := time.Date(2021, 9, 9, 1, 0, 0, 0, time.UTC)
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
 		VALUES ($1, $2, $3, 'completed', $4) RETURNING id
 	`, foreignAgentID, issueID, foreignRuntimeID, usageAt).Scan(&taskID); err != nil {
 		t.Fatalf("insert atq: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at, updated_at)
+		INSERT INTO multica_task_usage (task_id, provider, model, input_tokens, output_tokens, created_at, updated_at)
 		VALUES ($1, 'claude', 'm-mismatch-hourly', 333, 33, $2, $2)
 	`, taskID, usageAt); err != nil {
 		t.Fatalf("insert task_usage: %v", err)
@@ -722,7 +722,7 @@ func TestRollupTaskUsageHourlyWorkspaceMismatch(t *testing.T) {
 		return total
 	}
 	if got := wsTotal(foreignWorkspaceID); got != 333 {
-		t.Fatalf("expected foreign workspace bucket = 333 (resolved from agent), got %d", got)
+		t.Fatalf("expected foreign workspace bucket = 333 (resolved from multica_agent), got %d", got)
 	}
 	if got := wsTotal(testWorkspaceID); got != 0 {
 		t.Errorf("expected primary workspace bucket = 0 (issue.workspace_id must not leak), got %d", got)
@@ -730,7 +730,7 @@ func TestRollupTaskUsageHourlyWorkspaceMismatch(t *testing.T) {
 }
 
 // TestDashboardRollupReattributesOnProjectChange verifies the trigger that
-// fires on `UPDATE issue SET project_id` enqueues both old + new project
+// fires on `UPDATE multica_issue SET project_id` enqueues both old + new project
 // buckets so the next rollup tick re-attributes the affected tokens.
 // Uses the rollup window function directly to drain the dirty queue,
 // then asserts the rollup table reflects the new project_id.
@@ -741,21 +741,21 @@ func TestDashboardRollupReattributesOnProjectChange(t *testing.T) {
 	ctx := context.Background()
 
 	var runtimeID, agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
 		t.Fatalf("fetch runtime: %v", err)
 	}
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("fetch agent: %v", err)
 	}
 
 	mkProject := func(name string) string {
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+			INSERT INTO multica_project (workspace_id, title) VALUES ($1, $2) RETURNING id
 		`, testWorkspaceID, name).Scan(&id); err != nil {
 			t.Fatalf("create project: %v", err)
 		}
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, id) })
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_project WHERE id = $1`, id) })
 		return id
 	}
 	projectA := mkProject("dashboard reattr A")
@@ -763,26 +763,26 @@ func TestDashboardRollupReattributesOnProjectChange(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
+		INSERT INTO multica_issue (workspace_id, title, creator_id, creator_type, project_id, number)
 		VALUES ($1, 'reattr issue', $2, 'member', $3,
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, projectA).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
 		VALUES ($1, $2, $3, 'completed', now()) RETURNING id
 	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+		INSERT INTO multica_task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
 		VALUES ($1, 'claude', 'claude-3-5-sonnet', 7777, 0, now())
 	`, taskID); err != nil {
 		t.Fatalf("insert task_usage: %v", err)
@@ -806,7 +806,7 @@ func TestDashboardRollupReattributesOnProjectChange(t *testing.T) {
 	}
 
 	// Move the issue to project B. Trigger enqueues both A and B buckets.
-	if _, err := testPool.Exec(ctx, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectB, issueID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE multica_issue SET project_id = $1 WHERE id = $2`, projectB, issueID); err != nil {
 		t.Fatalf("reassign project: %v", err)
 	}
 	// Second rollup pass: A bucket drops to zero (deleted_empty), B
@@ -851,26 +851,26 @@ func TestDashboardRollupClearsOnIssueDelete(t *testing.T) {
 	ctx := context.Background()
 
 	var runtimeID, agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
 		t.Fatalf("fetch runtime: %v", err)
 	}
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("fetch agent: %v", err)
 	}
 
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, 'dashboard cascade test') RETURNING id
+		INSERT INTO multica_project (workspace_id, title) VALUES ($1, 'dashboard cascade test') RETURNING id
 	`, testWorkspaceID).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_project WHERE id = $1`, projectID) })
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
+		INSERT INTO multica_issue (workspace_id, title, creator_id, creator_type, project_id, number)
 		VALUES ($1, 'cascade issue', $2, 'member', $3,
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, projectID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -879,7 +879,7 @@ func TestDashboardRollupClearsOnIssueDelete(t *testing.T) {
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
 		VALUES ($1, $2, $3, 'completed', now()) RETURNING id
 	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("insert task: %v", err)
@@ -887,7 +887,7 @@ func TestDashboardRollupClearsOnIssueDelete(t *testing.T) {
 	// Don't bother cleaning up taskID either; cascade will take it.
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+		INSERT INTO multica_task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
 		VALUES ($1, 'claude', 'claude-3-5-sonnet', 4242, 0, now())
 	`, taskID); err != nil {
 		t.Fatalf("insert task_usage: %v", err)
@@ -913,7 +913,7 @@ func TestDashboardRollupClearsOnIssueDelete(t *testing.T) {
 	// Delete the issue. Cascade removes atq + task_usage. The issue
 	// BEFORE DELETE trigger should have enqueued the project bucket
 	// before the cascade started.
-	if _, err := testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID); err != nil {
+	if _, err := testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID); err != nil {
 		t.Fatalf("delete issue: %v", err)
 	}
 
@@ -946,25 +946,25 @@ func TestDashboardRollupReattributesOnLinkTaskToIssue(t *testing.T) {
 	ctx := context.Background()
 
 	var runtimeID, agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
 		t.Fatalf("fetch runtime: %v", err)
 	}
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("fetch agent: %v", err)
 	}
 
 	// Quick-create task: issue_id is NULL at creation time.
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, context, created_at)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, runtime_id, status, context, created_at)
 		VALUES ($1, NULL, $2, 'completed', '{}'::jsonb, now()) RETURNING id
 	`, agentID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("insert quick-create task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+		INSERT INTO multica_task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
 		VALUES ($1, 'claude', 'claude-3-5-sonnet', 1234, 0, now())
 	`, taskID); err != nil {
 		t.Fatalf("insert task_usage: %v", err)
@@ -993,26 +993,26 @@ func TestDashboardRollupReattributesOnLinkTaskToIssue(t *testing.T) {
 	// and populates the project bucket.
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, 'dashboard link test') RETURNING id
+		INSERT INTO multica_project (workspace_id, title) VALUES ($1, 'dashboard link test') RETURNING id
 	`, testWorkspaceID).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_project WHERE id = $1`, projectID) })
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
+		INSERT INTO multica_issue (workspace_id, title, creator_id, creator_type, project_id, number)
 		VALUES ($1, 'link test issue', $2, 'member', $3,
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, projectID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	// Mirror LinkTaskToIssue's UPDATE shape.
 	if _, err := testPool.Exec(ctx, `
-		UPDATE agent_task_queue SET issue_id = $1 WHERE id = $2 AND issue_id IS NULL
+		UPDATE multica_agent_task_queue SET issue_id = $1 WHERE id = $2 AND issue_id IS NULL
 	`, issueID, taskID); err != nil {
 		t.Fatalf("link task to issue: %v", err)
 	}
@@ -1207,32 +1207,32 @@ func TestDashboardUsageDailyCrossMidnightFullPipeline(t *testing.T) {
 	ctx := context.Background()
 
 	var runtimeID, agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
 		t.Fatalf("fetch runtime: %v", err)
 	}
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("fetch agent: %v", err)
 	}
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		INSERT INTO multica_issue (workspace_id, title, creator_id, creator_type, number)
 		VALUES ($1, 'cross-midnight pipeline test', $2, 'member',
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
 		VALUES ($1, $2, $3, 'completed', now()) RETURNING id
 	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	// Raw task_usage at 00:30 UTC two days ago — genuinely near UTC
 	// midnight. 00:30 UTC is still the PRIOR evening (~16:30/17:30) in
@@ -1241,7 +1241,7 @@ func TestDashboardUsageDailyCrossMidnightFullPipeline(t *testing.T) {
 	// keeps the row inside the days=10 window without a fixed-date drift.
 	var usageAt time.Time
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+		INSERT INTO multica_task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
 		VALUES (
 			$1, 'claude', 'cross-midnight-model', 8888, 0,
 			((CURRENT_DATE - 2)::timestamp + interval '30 minutes') AT TIME ZONE 'UTC'
@@ -1318,36 +1318,36 @@ func TestRollupTaskUsageHourlyConvergesOnTaskUsageDelete(t *testing.T) {
 	ctx := context.Background()
 
 	var runtimeID, agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
 		t.Fatalf("fetch runtime: %v", err)
 	}
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("fetch agent: %v", err)
 	}
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		INSERT INTO multica_issue (workspace_id, title, creator_id, creator_type, number)
 		VALUES ($1, 'tu-delete trigger test', $2, 'member',
-		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM multica_issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
 		VALUES ($1, $2, $3, 'completed', now() - interval '30 minutes') RETURNING id
 	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	var usageID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+		INSERT INTO multica_task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
 		VALUES ($1, 'claude', 'tu-delete-model', 5050, 0, now() - interval '30 minutes')
 		RETURNING id
 	`, taskID).Scan(&usageID); err != nil {
@@ -1381,13 +1381,13 @@ func TestRollupTaskUsageHourlyConvergesOnTaskUsageDelete(t *testing.T) {
 
 	// Delete the task_usage row directly — fires trg_tu_dirty_hourly,
 	// which enqueues the bucket on task_usage_hourly_dirty.
-	if _, err := testPool.Exec(ctx, `DELETE FROM task_usage WHERE id = $1`, usageID); err != nil {
+	if _, err := testPool.Exec(ctx, `DELETE FROM multica_task_usage WHERE id = $1`, usageID); err != nil {
 		t.Fatalf("delete task_usage: %v", err)
 	}
 	var dirtyCount int
 	testPool.QueryRow(ctx, `SELECT COUNT(*) FROM task_usage_hourly_dirty WHERE model = 'tu-delete-model'`).Scan(&dirtyCount)
 	if dirtyCount != 1 {
-		t.Fatalf("expected 1 dirty entry from task_usage DELETE trigger, got %d", dirtyCount)
+		t.Fatalf("expected 1 dirty entry from multica_task_usage DELETE trigger, got %d", dirtyCount)
 	}
 
 	runWindow("rollup after delete")

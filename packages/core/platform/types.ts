@@ -27,6 +27,9 @@ export interface CoreProviderProps {
   storage?: StorageAdapter;
   /** Use HttpOnly cookies for auth instead of localStorage tokens. Default: false. */
   cookieAuth?: boolean;
+  /** Casdoor SSO mode: session is managed via zgsmAdminToken cookie set by
+   *  the Casdoor OAuth callback. Implies cookie-based auth. Default: false. */
+  casdoorMode?: boolean;
   /** Called after successful login (e.g. set cookie for Next.js middleware). */
   onLogin?: () => void;
   /** Called after logout (e.g. clear cookie). */

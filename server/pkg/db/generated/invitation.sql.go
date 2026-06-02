@@ -12,15 +12,15 @@ import (
 )
 
 const acceptInvitation = `-- name: AcceptInvitation :one
-UPDATE workspace_invitation
+UPDATE multica_workspace_invitation
 SET status = 'accepted', updated_at = now()
 WHERE id = $1 AND status = 'pending'
 RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at
 `
 
-func (q *Queries) AcceptInvitation(ctx context.Context, id pgtype.UUID) (WorkspaceInvitation, error) {
+func (q *Queries) AcceptInvitation(ctx context.Context, id pgtype.UUID) (MulticaWorkspaceInvitation, error) {
 	row := q.db.QueryRow(ctx, acceptInvitation, id)
-	var i WorkspaceInvitation
+	var i MulticaWorkspaceInvitation
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -37,7 +37,7 @@ func (q *Queries) AcceptInvitation(ctx context.Context, id pgtype.UUID) (Workspa
 }
 
 const createInvitation = `-- name: CreateInvitation :one
-INSERT INTO workspace_invitation (workspace_id, inviter_id, invitee_email, invitee_user_id, role)
+INSERT INTO multica_workspace_invitation (workspace_id, inviter_id, invitee_email, invitee_user_id, role)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at
 `
@@ -50,7 +50,7 @@ type CreateInvitationParams struct {
 	Role          string      `json:"role"`
 }
 
-func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationParams) (WorkspaceInvitation, error) {
+func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationParams) (MulticaWorkspaceInvitation, error) {
 	row := q.db.QueryRow(ctx, createInvitation,
 		arg.WorkspaceID,
 		arg.InviterID,
@@ -58,7 +58,7 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 		arg.InviteeUserID,
 		arg.Role,
 	)
-	var i WorkspaceInvitation
+	var i MulticaWorkspaceInvitation
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -75,15 +75,15 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 }
 
 const declineInvitation = `-- name: DeclineInvitation :one
-UPDATE workspace_invitation
+UPDATE multica_workspace_invitation
 SET status = 'declined', updated_at = now()
 WHERE id = $1 AND status = 'pending'
 RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at
 `
 
-func (q *Queries) DeclineInvitation(ctx context.Context, id pgtype.UUID) (WorkspaceInvitation, error) {
+func (q *Queries) DeclineInvitation(ctx context.Context, id pgtype.UUID) (MulticaWorkspaceInvitation, error) {
 	row := q.db.QueryRow(ctx, declineInvitation, id)
-	var i WorkspaceInvitation
+	var i MulticaWorkspaceInvitation
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -100,7 +100,7 @@ func (q *Queries) DeclineInvitation(ctx context.Context, id pgtype.UUID) (Worksp
 }
 
 const expireStalePendingInvitations = `-- name: ExpireStalePendingInvitations :exec
-UPDATE workspace_invitation
+UPDATE multica_workspace_invitation
 SET status = 'expired', updated_at = now()
 WHERE workspace_id = $1
   AND invitee_email = $2
@@ -123,13 +123,13 @@ func (q *Queries) ExpireStalePendingInvitations(ctx context.Context, arg ExpireS
 }
 
 const getInvitation = `-- name: GetInvitation :one
-SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at FROM workspace_invitation
+SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at FROM multica_workspace_invitation
 WHERE id = $1
 `
 
-func (q *Queries) GetInvitation(ctx context.Context, id pgtype.UUID) (WorkspaceInvitation, error) {
+func (q *Queries) GetInvitation(ctx context.Context, id pgtype.UUID) (MulticaWorkspaceInvitation, error) {
 	row := q.db.QueryRow(ctx, getInvitation, id)
-	var i WorkspaceInvitation
+	var i MulticaWorkspaceInvitation
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -146,7 +146,7 @@ func (q *Queries) GetInvitation(ctx context.Context, id pgtype.UUID) (WorkspaceI
 }
 
 const getPendingInvitationByEmail = `-- name: GetPendingInvitationByEmail :one
-SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at FROM workspace_invitation
+SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at FROM multica_workspace_invitation
 WHERE workspace_id = $1 AND invitee_email = $2 AND status = 'pending' AND expires_at > now()
 `
 
@@ -155,9 +155,9 @@ type GetPendingInvitationByEmailParams struct {
 	InviteeEmail string      `json:"invitee_email"`
 }
 
-func (q *Queries) GetPendingInvitationByEmail(ctx context.Context, arg GetPendingInvitationByEmailParams) (WorkspaceInvitation, error) {
+func (q *Queries) GetPendingInvitationByEmail(ctx context.Context, arg GetPendingInvitationByEmailParams) (MulticaWorkspaceInvitation, error) {
 	row := q.db.QueryRow(ctx, getPendingInvitationByEmail, arg.WorkspaceID, arg.InviteeEmail)
-	var i WorkspaceInvitation
+	var i MulticaWorkspaceInvitation
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -177,8 +177,8 @@ const listPendingInvitationsByWorkspace = `-- name: ListPendingInvitationsByWork
 SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at,
        u.name  AS inviter_name,
        u.email AS inviter_email
-FROM workspace_invitation wi
-JOIN "user" u ON u.id = wi.inviter_id
+FROM multica_workspace_invitation wi
+JOIN multica_user u ON u.id = wi.inviter_id
 WHERE wi.workspace_id = $1 AND wi.status = 'pending' AND wi.expires_at > now()
 ORDER BY wi.created_at DESC
 `
@@ -236,9 +236,9 @@ SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_
        w.name AS workspace_name,
        u.name AS inviter_name,
        u.email AS inviter_email
-FROM workspace_invitation wi
-JOIN workspace w ON w.id = wi.workspace_id
-JOIN "user" u ON u.id = wi.inviter_id
+FROM multica_workspace_invitation wi
+JOIN multica_workspace w ON w.id = wi.workspace_id
+JOIN multica_user u ON u.id = wi.inviter_id
 WHERE wi.status = 'pending'
   AND (wi.invitee_user_id = $1 OR wi.invitee_email = $2)
   AND wi.expires_at > now()
@@ -301,7 +301,7 @@ func (q *Queries) ListPendingInvitationsForUser(ctx context.Context, arg ListPen
 }
 
 const revokeInvitation = `-- name: RevokeInvitation :exec
-DELETE FROM workspace_invitation
+DELETE FROM multica_workspace_invitation
 WHERE id = $1 AND status = 'pending'
 `
 

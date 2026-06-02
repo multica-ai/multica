@@ -12,7 +12,7 @@ import (
 )
 
 const createPinnedItem = `-- name: CreatePinnedItem :one
-INSERT INTO pinned_item (workspace_id, user_id, item_type, item_id, position)
+INSERT INTO multica_pinned_item (workspace_id, user_id, item_type, item_id, position)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING id, workspace_id, user_id, item_type, item_id, position, created_at
 `
@@ -25,7 +25,7 @@ type CreatePinnedItemParams struct {
 	Position    float64     `json:"position"`
 }
 
-func (q *Queries) CreatePinnedItem(ctx context.Context, arg CreatePinnedItemParams) (PinnedItem, error) {
+func (q *Queries) CreatePinnedItem(ctx context.Context, arg CreatePinnedItemParams) (MulticaPinnedItem, error) {
 	row := q.db.QueryRow(ctx, createPinnedItem,
 		arg.WorkspaceID,
 		arg.UserID,
@@ -33,7 +33,7 @@ func (q *Queries) CreatePinnedItem(ctx context.Context, arg CreatePinnedItemPara
 		arg.ItemID,
 		arg.Position,
 	)
-	var i PinnedItem
+	var i MulticaPinnedItem
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -47,7 +47,7 @@ func (q *Queries) CreatePinnedItem(ctx context.Context, arg CreatePinnedItemPara
 }
 
 const deletePinnedItem = `-- name: DeletePinnedItem :exec
-DELETE FROM pinned_item
+DELETE FROM multica_pinned_item
 WHERE workspace_id = $1 AND user_id = $2 AND item_type = $3 AND item_id = $4
 `
 
@@ -69,7 +69,7 @@ func (q *Queries) DeletePinnedItem(ctx context.Context, arg DeletePinnedItemPara
 }
 
 const deletePinnedItemsByItem = `-- name: DeletePinnedItemsByItem :exec
-DELETE FROM pinned_item
+DELETE FROM multica_pinned_item
 WHERE item_type = $1 AND item_id = $2
 `
 
@@ -85,7 +85,7 @@ func (q *Queries) DeletePinnedItemsByItem(ctx context.Context, arg DeletePinnedI
 
 const getMaxPinnedItemPosition = `-- name: GetMaxPinnedItemPosition :one
 SELECT COALESCE(MAX(position), 0)::float8 AS max_position
-FROM pinned_item
+FROM multica_pinned_item
 WHERE workspace_id = $1 AND user_id = $2
 `
 
@@ -102,7 +102,7 @@ func (q *Queries) GetMaxPinnedItemPosition(ctx context.Context, arg GetMaxPinned
 }
 
 const listPinnedItems = `-- name: ListPinnedItems :many
-SELECT id, workspace_id, user_id, item_type, item_id, position, created_at FROM pinned_item
+SELECT id, workspace_id, user_id, item_type, item_id, position, created_at FROM multica_pinned_item
 WHERE workspace_id = $1 AND user_id = $2
 ORDER BY position ASC, created_at ASC
 `
@@ -112,15 +112,15 @@ type ListPinnedItemsParams struct {
 	UserID      pgtype.UUID `json:"user_id"`
 }
 
-func (q *Queries) ListPinnedItems(ctx context.Context, arg ListPinnedItemsParams) ([]PinnedItem, error) {
+func (q *Queries) ListPinnedItems(ctx context.Context, arg ListPinnedItemsParams) ([]MulticaPinnedItem, error) {
 	rows, err := q.db.Query(ctx, listPinnedItems, arg.WorkspaceID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []PinnedItem{}
+	items := []MulticaPinnedItem{}
 	for rows.Next() {
-		var i PinnedItem
+		var i MulticaPinnedItem
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -141,7 +141,7 @@ func (q *Queries) ListPinnedItems(ctx context.Context, arg ListPinnedItemsParams
 }
 
 const updatePinnedItemPosition = `-- name: UpdatePinnedItemPosition :exec
-UPDATE pinned_item SET position = $1
+UPDATE multica_pinned_item SET position = $1
 WHERE id = $2 AND workspace_id = $3 AND user_id = $4
 `
 

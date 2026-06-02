@@ -19,8 +19,8 @@ const (
 )
 
 // MemberFromContext returns the workspace member injected by the workspace middleware.
-func MemberFromContext(ctx context.Context) (db.Member, bool) {
-	m, ok := ctx.Value(ctxKeyMember).(db.Member)
+func MemberFromContext(ctx context.Context) (db.MulticaMember, bool) {
+	m, ok := ctx.Value(ctxKeyMember).(db.MulticaMember)
 	return m, ok
 }
 
@@ -33,7 +33,7 @@ func WorkspaceIDFromContext(ctx context.Context) string {
 // SetMemberContext injects workspace ID and member into the context.
 // This is useful for handlers that resolve the workspace from an entity lookup
 // and want to share the member with downstream code.
-func SetMemberContext(ctx context.Context, workspaceID string, member db.Member) context.Context {
+func SetMemberContext(ctx context.Context, workspaceID string, member db.MulticaMember) context.Context {
 	ctx = context.WithValue(ctx, ctxKeyWorkspaceID, workspaceID)
 	ctx = context.WithValue(ctx, ctxKeyMember, member)
 	return ctx

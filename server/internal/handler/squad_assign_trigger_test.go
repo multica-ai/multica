@@ -17,7 +17,7 @@ func TestCreateIssueAssignedToSquadEnqueuesLeader(t *testing.T) {
 	// Look up the seeded test agent — it has a runtime, so it can lead a squad.
 	var leaderID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+		SELECT id FROM multica_agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
 	`, testWorkspaceID).Scan(&leaderID); err != nil {
 		t.Fatalf("load test agent: %v", err)
 	}
@@ -25,13 +25,13 @@ func TestCreateIssueAssignedToSquadEnqueuesLeader(t *testing.T) {
 	// Create a squad with that agent as leader.
 	var squadID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		INSERT INTO multica_squad (workspace_id, name, description, leader_id, creator_id)
 		VALUES ($1, $2, '', $3, $4)
 		RETURNING id
 	`, testWorkspaceID, "Trigger Test Squad", leaderID, testUserID).Scan(&squadID); err != nil {
 		t.Fatalf("create squad: %v", err)
 	}
-	defer testPool.Exec(ctx, `DELETE FROM squad WHERE id = $1`, squadID)
+	defer testPool.Exec(ctx, `DELETE FROM multica_squad WHERE id = $1`, squadID)
 
 	// Create an issue assigned to the squad.
 	w := httptest.NewRecorder()
@@ -58,7 +58,7 @@ func TestCreateIssueAssignedToSquadEnqueuesLeader(t *testing.T) {
 	// A task for the squad leader should now exist for this issue.
 	var taskCount int
 	if err := testPool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_task_queue
+		SELECT count(*) FROM multica_agent_task_queue
 		WHERE issue_id = $1 AND agent_id = $2
 	`, created.ID, leaderID).Scan(&taskCount); err != nil {
 		t.Fatalf("count tasks: %v", err)

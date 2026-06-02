@@ -66,7 +66,7 @@ type IssueResponse struct {
 	OriginID   *string `json:"origin_id,omitempty"`
 }
 
-func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
+func issueToResponse(i db.MulticaIssue, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
 		ID:            uuidToString(i.ID),
@@ -355,7 +355,7 @@ func parseQueryNumber(q string) (int, bool) {
 
 // searchResult holds a raw row from the dynamic search query.
 type searchResult struct {
-	issue                 db.Issue
+	issue                 db.MulticaIssue
 	totalCount            int64
 	matchSource           string
 	matchedCommentContent string
@@ -1870,7 +1870,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		originID = oid
 	}
 
-	var issue db.Issue
+	var issue db.MulticaIssue
 	var workflowID pgtype.UUID
 	if assigneeType.Valid && assigneeType.String == "workflow" {
 		workflowID = assigneeID
@@ -2475,7 +2475,7 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 // acts as a parking lot where issues can be pre-assigned without immediately
 // triggering execution. Moving out of backlog is handled separately in
 // UpdateIssue.
-func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
+func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.MulticaIssue) bool {
 	if issue.Status == "backlog" {
 		return false
 	}
@@ -2486,7 +2486,7 @@ func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bo
 // trigger the assigned agent. Fires for any status — comments are
 // conversational and can happen at any stage, including after completion
 // (e.g. follow-up questions on a done issue).
-func (h *Handler) shouldEnqueueOnComment(ctx context.Context, issue db.Issue) bool {
+func (h *Handler) shouldEnqueueOnComment(ctx context.Context, issue db.MulticaIssue) bool {
 	if !h.isAgentAssigneeReady(ctx, issue) {
 		return false
 	}
@@ -2505,7 +2505,7 @@ func (h *Handler) shouldEnqueueOnComment(ctx context.Context, issue db.Issue) bo
 
 // isAgentAssigneeReady checks if an issue is assigned to an active agent
 // with a valid runtime.
-func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool {
+func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.MulticaIssue) bool {
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
 		return false
 	}
@@ -2896,14 +2896,14 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createWorkflowSubIssue(
 	ctx context.Context,
 	qtx *db.Queries,
-	parentIssue db.Issue,
-	nodeRun db.WorkflowNodeRun,
+	parentIssue db.MulticaIssue,
+	nodeRun db.MulticaWorkflowNodeRun,
 	wsUUID pgtype.UUID,
 	issueNumber int32,
-) (db.Issue, error) {
+) (db.MulticaIssue, error) {
 	node, err := qtx.GetWorkflowNode(ctx, nodeRun.WorkflowNodeID)
 	if err != nil {
-		return db.Issue{}, fmt.Errorf("get workflow node: %w", err)
+		return db.MulticaIssue{}, fmt.Errorf("get workflow node: %w", err)
 	}
 
 	subTitle := fmt.Sprintf("%s — %s", parentIssue.Title, node.Title)
@@ -2943,7 +2943,7 @@ func (h *Handler) createWorkflowSubIssue(
 
 // syncSubIssueForNodeRun maps a node run status to the corresponding sub-issue
 // status and updates it in the database.
-func (h *Handler) syncSubIssueForNodeRun(ctx context.Context, nodeRun db.WorkflowNodeRun) {
+func (h *Handler) syncSubIssueForNodeRun(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun) {
 	run, err := h.Queries.GetWorkflowRun(ctx, nodeRun.WorkflowRunID)
 	if err != nil {
 		slog.Warn("syncSubIssueForNodeRun: failed to get workflow run", "node_run_id", uuidToString(nodeRun.ID), "error", err)
@@ -3056,7 +3056,7 @@ func (h *Handler) injectDownstreamContext(ctx context.Context, run db.WorkflowRu
 
 // handleWorkflowRunTerminal auto-completes or leaves the parent issue when a
 // workflow run reaches a terminal state.
-func (h *Handler) handleWorkflowRunTerminal(ctx context.Context, run db.WorkflowRun, status string) {
+func (h *Handler) handleWorkflowRunTerminal(ctx context.Context, run db.MulticaWorkflowRun, status string) {
 	// Find the parent issue by scanning for a sub-issue whose parent has this
 	// workflow run. We look up the sub-issue via origin, then follow parent_issue_id.
 	nodeRuns, err := h.Queries.ListWorkflowNodeRunsByRun(ctx, run.ID)

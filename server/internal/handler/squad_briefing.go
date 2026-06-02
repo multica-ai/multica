@@ -101,7 +101,7 @@ Hard rules:
 // Archived agent members are skipped — there's no point asking the leader
 // to delegate to a retired agent. Members whose underlying record can't be
 // loaded (deleted user/agent races, FK weirdness) are also skipped silently.
-func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad) string {
+func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.MulticaSquad) string {
 	var sb strings.Builder
 	sb.WriteString(squadOperatingProtocol)
 	sb.WriteString("\n\n")
@@ -118,7 +118,7 @@ func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad
 
 // buildSquadRoster renders the "## Squad Roster" section: a leader self-row
 // plus one row per non-archived member, with literal mention markdown.
-func buildSquadRoster(ctx context.Context, q *db.Queries, squad db.Squad) string {
+func buildSquadRoster(ctx context.Context, q *db.Queries, squad db.MulticaSquad) string {
 	var sb strings.Builder
 	sb.WriteString("## Squad Roster\n\n")
 
@@ -166,7 +166,7 @@ func buildSquadRoster(ctx context.Context, q *db.Queries, squad db.Squad) string
 
 // renderMemberRow renders a single roster row, returning "" if the member
 // can't be resolved or should be skipped (e.g. archived agent).
-func renderMemberRow(ctx context.Context, q *db.Queries, m db.SquadMember) string {
+func renderMemberRow(ctx context.Context, q *db.Queries, m db.MulticaSquadMember) string {
 	id := util.UUIDToString(m.MemberID)
 	role := strings.TrimSpace(m.Role)
 	switch m.MemberType {

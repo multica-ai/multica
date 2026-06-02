@@ -12,7 +12,7 @@ import (
 )
 
 const createDaemonToken = `-- name: CreateDaemonToken :one
-INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, expires_at)
+INSERT INTO multica_daemon_token (token_hash, workspace_id, daemon_id, expires_at)
 VALUES ($1, $2, $3, $4)
 RETURNING id, token_hash, workspace_id, daemon_id, expires_at, created_at
 `
@@ -24,14 +24,14 @@ type CreateDaemonTokenParams struct {
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 }
 
-func (q *Queries) CreateDaemonToken(ctx context.Context, arg CreateDaemonTokenParams) (DaemonToken, error) {
+func (q *Queries) CreateDaemonToken(ctx context.Context, arg CreateDaemonTokenParams) (MulticaDaemonToken, error) {
 	row := q.db.QueryRow(ctx, createDaemonToken,
 		arg.TokenHash,
 		arg.WorkspaceID,
 		arg.DaemonID,
 		arg.ExpiresAt,
 	)
-	var i DaemonToken
+	var i MulticaDaemonToken
 	err := row.Scan(
 		&i.ID,
 		&i.TokenHash,
@@ -44,7 +44,7 @@ func (q *Queries) CreateDaemonToken(ctx context.Context, arg CreateDaemonTokenPa
 }
 
 const deleteDaemonTokensByWorkspaceAndDaemons = `-- name: DeleteDaemonTokensByWorkspaceAndDaemons :many
-DELETE FROM daemon_token
+DELETE FROM multica_daemon_token
 WHERE workspace_id = $1
   AND daemon_id = ANY($2::text[])
 RETURNING token_hash
@@ -55,9 +55,9 @@ type DeleteDaemonTokensByWorkspaceAndDaemonsParams struct {
 	DaemonIds   []string    `json:"daemon_ids"`
 }
 
-// Deletes every daemon_token row matching the (workspace_id, daemon_id)
-// pairs implied by `daemon_ids`. Used by the member-revocation flow to
-// nuke tokens for all runtimes a leaving member owned in one shot.
+// Deletes every multica_daemon_token row matching the (workspace_id, daemon_id)
+// pairs implied by `daemon_ids`. Used by the multica_member-revocation flow to
+// nuke tokens for all runtimes a leaving multica_member owned in one shot.
 // Returns token_hash so the caller can invalidate auth.DaemonTokenCache
 // before the 10-minute TTL expires — without that invalidate, a daemon
 // can keep using its stale token until cache eviction even though the
@@ -83,7 +83,7 @@ func (q *Queries) DeleteDaemonTokensByWorkspaceAndDaemons(ctx context.Context, a
 }
 
 const deleteExpiredDaemonTokens = `-- name: DeleteExpiredDaemonTokens :exec
-DELETE FROM daemon_token
+DELETE FROM multica_daemon_token
 WHERE expires_at <= now()
 `
 
@@ -93,13 +93,13 @@ func (q *Queries) DeleteExpiredDaemonTokens(ctx context.Context) error {
 }
 
 const getDaemonTokenByHash = `-- name: GetDaemonTokenByHash :one
-SELECT id, token_hash, workspace_id, daemon_id, expires_at, created_at FROM daemon_token
+SELECT id, token_hash, workspace_id, daemon_id, expires_at, created_at FROM multica_daemon_token
 WHERE token_hash = $1 AND expires_at > now()
 `
 
-func (q *Queries) GetDaemonTokenByHash(ctx context.Context, tokenHash string) (DaemonToken, error) {
+func (q *Queries) GetDaemonTokenByHash(ctx context.Context, tokenHash string) (MulticaDaemonToken, error) {
 	row := q.db.QueryRow(ctx, getDaemonTokenByHash, tokenHash)
-	var i DaemonToken
+	var i MulticaDaemonToken
 	err := row.Scan(
 		&i.ID,
 		&i.TokenHash,

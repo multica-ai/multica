@@ -19,9 +19,9 @@ func setupSweeperTestFixture(t *testing.T, taskStatus string) (string, string, s
 	// Find the integration test agent
 	var agentID, runtimeID string
 	err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a
-		JOIN member m ON m.workspace_id = a.workspace_id
-		JOIN "user" u ON u.id = m.user_id
+		SELECT a.id, a.runtime_id FROM multica_agent a
+		JOIN multica_member m ON m.workspace_id = a.workspace_id
+		JOIN multica_user u ON u.id = m.user_id
 		WHERE u.email = $1
 		LIMIT 1
 	`, integrationTestEmail).Scan(&agentID, &runtimeID)
@@ -32,9 +32,9 @@ func setupSweeperTestFixture(t *testing.T, taskStatus string) (string, string, s
 	// Create an issue assigned to the agent
 	var issueID string
 	err = testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id)
 		SELECT $1, 'Sweeper test issue', 'todo', 'none', 'member', m.user_id, 'agent', $2
-		FROM member m WHERE m.workspace_id = $1 LIMIT 1
+		FROM multica_member m WHERE m.workspace_id = $1 LIMIT 1
 		RETURNING id
 	`, testWorkspaceID, agentID).Scan(&issueID)
 	if err != nil {
@@ -46,13 +46,13 @@ func setupSweeperTestFixture(t *testing.T, taskStatus string) (string, string, s
 	switch taskStatus {
 	case "running":
 		err = testPool.QueryRow(ctx, `
-			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at)
+			INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at)
 			VALUES ($1, $2, $3, 'running', 0, now() - interval '3 hours', now() - interval '3 hours')
 			RETURNING id
 		`, agentID, runtimeID, issueID).Scan(&taskID)
 	case "dispatched":
 		err = testPool.QueryRow(ctx, `
-			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, dispatched_at)
+			INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, dispatched_at)
 			VALUES ($1, $2, $3, 'dispatched', 0, now() - interval '10 minutes')
 			RETURNING id
 		`, agentID, runtimeID, issueID).Scan(&taskID)
@@ -62,7 +62,7 @@ func setupSweeperTestFixture(t *testing.T, taskStatus string) (string, string, s
 	}
 
 	// Set agent status to "working"
-	_, err = testPool.Exec(ctx, `UPDATE agent SET status = 'working' WHERE id = $1`, agentID)
+	_, err = testPool.Exec(ctx, `UPDATE multica_agent SET status = 'working' WHERE id = $1`, agentID)
 	if err != nil {
 		t.Fatalf("failed to set agent status: %v", err)
 	}
@@ -73,9 +73,9 @@ func setupSweeperTestFixture(t *testing.T, taskStatus string) (string, string, s
 func cleanupSweeperFixture(t *testing.T, issueID, agentID string) {
 	t.Helper()
 	ctx := context.Background()
-	testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-	testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
-	testPool.Exec(ctx, `UPDATE agent SET status = 'idle' WHERE id = $1`, agentID)
+	testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
+	testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID)
+	testPool.Exec(ctx, `UPDATE multica_agent SET status = 'idle' WHERE id = $1`, agentID)
 }
 
 func TestRefreshAgentStatusFromTasks(t *testing.T) {
@@ -89,7 +89,7 @@ func TestRefreshAgentStatusFromTasks(t *testing.T) {
 
 	queries := db.New(testPool)
 
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET status = 'idle' WHERE id = $1`, agentID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE multica_agent SET status = 'idle' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to seed idle agent status: %v", err)
 	}
 
@@ -102,13 +102,13 @@ func TestRefreshAgentStatusFromTasks(t *testing.T) {
 	}
 
 	if _, err := testPool.Exec(ctx, `
-		UPDATE agent_task_queue
+		UPDATE multica_agent_task_queue
 		SET status = 'cancelled', completed_at = now()
 		WHERE id = $1
 	`, taskID); err != nil {
 		t.Fatalf("failed to cancel seeded task: %v", err)
 	}
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET status = 'working' WHERE id = $1`, agentID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE multica_agent SET status = 'working' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to reseed working agent status: %v", err)
 	}
 
@@ -195,7 +195,7 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 
 	// Verify DB: task should be failed
 	var status string
-	err = testPool.QueryRow(context.Background(), `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
+	err = testPool.QueryRow(context.Background(), `SELECT status FROM multica_agent_task_queue WHERE id = $1`, taskID).Scan(&status)
 	if err != nil {
 		t.Fatalf("failed to query task status: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestSweepStaleTasksReconcileAgentStatus(t *testing.T) {
 
 	// Verify agent status is now "idle" in DB
 	var agentStatus string
-	err = testPool.QueryRow(context.Background(), `SELECT status FROM agent WHERE id = $1`, agentID).Scan(&agentStatus)
+	err = testPool.QueryRow(context.Background(), `SELECT status FROM multica_agent WHERE id = $1`, agentID).Scan(&agentStatus)
 	if err != nil {
 		t.Fatalf("failed to query agent status: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestSweepDispatchedStaleTask(t *testing.T) {
 
 	// Verify DB: task should be failed
 	var status string
-	err = testPool.QueryRow(context.Background(), `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
+	err = testPool.QueryRow(context.Background(), `SELECT status FROM multica_agent_task_queue WHERE id = $1`, taskID).Scan(&status)
 	if err != nil {
 		t.Fatalf("failed to query task: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestSweepDispatchedStaleTask(t *testing.T) {
 
 	// Verify agent status reconciled to idle
 	var agentStatus string
-	err = testPool.QueryRow(context.Background(), `SELECT status FROM agent WHERE id = $1`, agentID).Scan(&agentStatus)
+	err = testPool.QueryRow(context.Background(), `SELECT status FROM multica_agent WHERE id = $1`, agentID).Scan(&agentStatus)
 	if err != nil {
 		t.Fatalf("failed to query agent: %v", err)
 	}
@@ -359,9 +359,9 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	// Use the same agent/runtime as the other sweeper tests.
 	var agentID, runtimeID string
 	err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a
-		JOIN member m ON m.workspace_id = a.workspace_id
-		JOIN "user" u ON u.id = m.user_id
+		SELECT a.id, a.runtime_id FROM multica_agent a
+		JOIN multica_member m ON m.workspace_id = a.workspace_id
+		JOIN multica_user u ON u.id = m.user_id
 		WHERE u.email = $1
 		LIMIT 1
 	`, integrationTestEmail).Scan(&agentID, &runtimeID)
@@ -372,23 +372,23 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	// Create an issue already in in_progress (simulates a daemon crash mid-run).
 	var issueID string
 	err = testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id)
 		SELECT $1, 'Stuck in_progress issue', 'in_progress', 'none', 'member', m.user_id, 'agent', $2
-		FROM member m WHERE m.workspace_id = $1 LIMIT 1
+		FROM multica_member m WHERE m.workspace_id = $1 LIMIT 1
 		RETURNING id
 	`, testWorkspaceID, agentID).Scan(&issueID)
 	if err != nil {
 		t.Fatalf("failed to create test issue: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	// Create a stale running task for the issue (3 hours old — beyond any timeout).
 	var taskID string
 	err = testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at)
 		VALUES ($1, $2, $3, 'running', 0, now() - interval '3 hours', now() - interval '3 hours')
 		RETURNING id
 	`, agentID, runtimeID, issueID).Scan(&taskID)
@@ -424,7 +424,7 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	broadcastFailedTasks(ctx, queries, nil, bus, failedTasks)
 
 	var issueStatus string
-	err = testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&issueStatus)
+	err = testPool.QueryRow(ctx, `SELECT status FROM multica_issue WHERE id = $1`, issueID).Scan(&issueStatus)
 	if err != nil {
 		t.Fatalf("failed to query issue status: %v", err)
 	}
@@ -445,9 +445,9 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 
 	var agentID, runtimeID string
 	err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a
-		JOIN member m ON m.workspace_id = a.workspace_id
-		JOIN "user" u ON u.id = m.user_id
+		SELECT a.id, a.runtime_id FROM multica_agent a
+		JOIN multica_member m ON m.workspace_id = a.workspace_id
+		JOIN multica_user u ON u.id = m.user_id
 		WHERE u.email = $1
 		LIMIT 1
 	`, integrationTestEmail).Scan(&agentID, &runtimeID)
@@ -458,22 +458,22 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 	// Issue already advanced to in_review by the agent before the task timed out.
 	var issueID string
 	err = testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id)
 		SELECT $1, 'Already in_review issue', 'in_review', 'none', 'member', m.user_id, 'agent', $2
-		FROM member m WHERE m.workspace_id = $1 LIMIT 1
+		FROM multica_member m WHERE m.workspace_id = $1 LIMIT 1
 		RETURNING id
 	`, testWorkspaceID, agentID).Scan(&issueID)
 	if err != nil {
 		t.Fatalf("failed to create test issue: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	var taskID string
 	err = testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at)
 		VALUES ($1, $2, $3, 'running', 0, now() - interval '3 hours', now() - interval '3 hours')
 		RETURNING id
 	`, agentID, runtimeID, issueID).Scan(&taskID)
@@ -496,7 +496,7 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 
 	// Issue should remain in_review — the sweeper must not clobber agent progress.
 	var issueStatus string
-	err = testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&issueStatus)
+	err = testPool.QueryRow(ctx, `SELECT status FROM multica_issue WHERE id = $1`, issueID).Scan(&issueStatus)
 	if err != nil {
 		t.Fatalf("failed to query issue status: %v", err)
 	}
@@ -519,9 +519,9 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	// Find the integration test agent
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a
-		JOIN member m ON m.workspace_id = a.workspace_id
-		JOIN "user" u ON u.id = m.user_id
+		SELECT a.id, a.runtime_id FROM multica_agent a
+		JOIN multica_member m ON m.workspace_id = a.workspace_id
+		JOIN multica_user u ON u.id = m.user_id
 		WHERE u.email = $1
 		LIMIT 1
 	`, integrationTestEmail).Scan(&agentID, &runtimeID); err != nil {
@@ -534,12 +534,12 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 		var issueID string
 		if err := testPool.QueryRow(ctx, `
 			WITH bumped AS (
-				UPDATE workspace SET issue_counter = issue_counter + 1
+				UPDATE multica_workspace SET issue_counter = issue_counter + 1
 				WHERE id = $1 RETURNING issue_counter
 			)
-			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
+			INSERT INTO multica_issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
 			SELECT $1, $3, 'todo', 'none', 'member', m.user_id, 'agent', $2, (SELECT issue_counter FROM bumped)
-			FROM member m WHERE m.workspace_id = $1 LIMIT 1
+			FROM multica_member m WHERE m.workspace_id = $1 LIMIT 1
 			RETURNING id
 		`, testWorkspaceID, agentID, label).Scan(&issueID); err != nil {
 			t.Fatalf("failed to create %s issue: %v", label, err)
@@ -549,20 +549,20 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	oldIssueID := mkIssue("Queued TTL test (old)")
 	freshIssueID := mkIssue("Queued TTL test (fresh)")
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`, oldIssueID, freshIssueID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id IN ($1, $2)`, oldIssueID, freshIssueID)
+		testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE issue_id IN ($1, $2)`, oldIssueID, freshIssueID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id IN ($1, $2)`, oldIssueID, freshIssueID)
 	})
 
 	var oldTaskID, freshTaskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
 		VALUES ($1, $2, $3, 'queued', 0, now() - interval '5 hours')
 		RETURNING id
 	`, agentID, runtimeID, oldIssueID).Scan(&oldTaskID); err != nil {
 		t.Fatalf("failed to insert old queued task: %v", err)
 	}
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
 		VALUES ($1, $2, $3, 'queued', 0, now())
 		RETURNING id
 	`, agentID, runtimeID, freshIssueID).Scan(&freshTaskID); err != nil {
@@ -588,7 +588,7 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	var oldStatus, oldReason, oldErr string
 	if err := testPool.QueryRow(ctx, `
 		SELECT status, COALESCE(failure_reason, ''), COALESCE(error, '')
-		FROM agent_task_queue WHERE id = $1
+		FROM multica_agent_task_queue WHERE id = $1
 	`, oldTaskID).Scan(&oldStatus, &oldReason, &oldErr); err != nil {
 		t.Fatalf("failed to read old task: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 
 	var freshStatus string
 	if err := testPool.QueryRow(ctx, `
-		SELECT status FROM agent_task_queue WHERE id = $1
+		SELECT status FROM multica_agent_task_queue WHERE id = $1
 	`, freshTaskID).Scan(&freshStatus); err != nil {
 		t.Fatalf("failed to read fresh task: %v", err)
 	}
@@ -624,9 +624,9 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a
-		JOIN member m ON m.workspace_id = a.workspace_id
-		JOIN "user" u ON u.id = m.user_id
+		SELECT a.id, a.runtime_id FROM multica_agent a
+		JOIN multica_member m ON m.workspace_id = a.workspace_id
+		JOIN multica_user u ON u.id = m.user_id
 		WHERE u.email = $1
 		LIMIT 1
 	`, integrationTestEmail).Scan(&agentID, &runtimeID); err != nil {
@@ -638,27 +638,27 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 	var issueIDs []string
 	t.Cleanup(func() {
 		for _, id := range issueIDs {
-			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, id)
-			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+			testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE issue_id = $1`, id)
+			testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, id)
 		}
 	})
 	for i := 0; i < 5; i++ {
 		var issueID string
 		if err := testPool.QueryRow(ctx, `
 			WITH bumped AS (
-				UPDATE workspace SET issue_counter = issue_counter + 1
+				UPDATE multica_workspace SET issue_counter = issue_counter + 1
 				WHERE id = $1 RETURNING issue_counter
 			)
-			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
+			INSERT INTO multica_issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
 			SELECT $1, 'Queued TTL batch test', 'todo', 'none', 'member', m.user_id, 'agent', $2, (SELECT issue_counter FROM bumped)
-			FROM member m WHERE m.workspace_id = $1 LIMIT 1
+			FROM multica_member m WHERE m.workspace_id = $1 LIMIT 1
 			RETURNING id
 		`, testWorkspaceID, agentID).Scan(&issueID); err != nil {
 			t.Fatalf("failed to create issue %d: %v", i, err)
 		}
 		issueIDs = append(issueIDs, issueID)
 		if _, err := testPool.Exec(ctx, `
-			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+			INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
 			VALUES ($1, $2, $3, 'queued', 0, now() - interval '5 hours')
 		`, agentID, runtimeID, issueID); err != nil {
 			t.Fatalf("failed to insert backlog task %d: %v", i, err)
@@ -679,7 +679,7 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 
 	var remaining int
 	if err := testPool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM agent_task_queue
+		SELECT COUNT(*) FROM multica_agent_task_queue
 		WHERE issue_id = ANY($1::uuid[]) AND status = 'queued'
 	`, issueIDs).Scan(&remaining); err != nil {
 		t.Fatalf("failed to count remaining queued: %v", err)

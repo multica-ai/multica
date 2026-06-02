@@ -12,7 +12,7 @@ import (
 )
 
 const getNotificationPreference = `-- name: GetNotificationPreference :one
-SELECT id, workspace_id, user_id, preferences, updated_at FROM notification_preference
+SELECT id, workspace_id, user_id, preferences, updated_at FROM multica_notification_preference
 WHERE workspace_id = $1 AND user_id = $2
 `
 
@@ -21,9 +21,9 @@ type GetNotificationPreferenceParams struct {
 	UserID      pgtype.UUID `json:"user_id"`
 }
 
-func (q *Queries) GetNotificationPreference(ctx context.Context, arg GetNotificationPreferenceParams) (NotificationPreference, error) {
+func (q *Queries) GetNotificationPreference(ctx context.Context, arg GetNotificationPreferenceParams) (MulticaNotificationPreference, error) {
 	row := q.db.QueryRow(ctx, getNotificationPreference, arg.WorkspaceID, arg.UserID)
-	var i NotificationPreference
+	var i MulticaNotificationPreference
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -35,7 +35,7 @@ func (q *Queries) GetNotificationPreference(ctx context.Context, arg GetNotifica
 }
 
 const listNotificationPreferencesByUsers = `-- name: ListNotificationPreferencesByUsers :many
-SELECT id, workspace_id, user_id, preferences, updated_at FROM notification_preference
+SELECT id, workspace_id, user_id, preferences, updated_at FROM multica_notification_preference
 WHERE workspace_id = $1 AND user_id = ANY($2::uuid[])
 `
 
@@ -44,15 +44,15 @@ type ListNotificationPreferencesByUsersParams struct {
 	UserIds     []pgtype.UUID `json:"user_ids"`
 }
 
-func (q *Queries) ListNotificationPreferencesByUsers(ctx context.Context, arg ListNotificationPreferencesByUsersParams) ([]NotificationPreference, error) {
+func (q *Queries) ListNotificationPreferencesByUsers(ctx context.Context, arg ListNotificationPreferencesByUsersParams) ([]MulticaNotificationPreference, error) {
 	rows, err := q.db.Query(ctx, listNotificationPreferencesByUsers, arg.WorkspaceID, arg.UserIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []NotificationPreference{}
+	items := []MulticaNotificationPreference{}
 	for rows.Next() {
-		var i NotificationPreference
+		var i MulticaNotificationPreference
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -71,7 +71,7 @@ func (q *Queries) ListNotificationPreferencesByUsers(ctx context.Context, arg Li
 }
 
 const upsertNotificationPreference = `-- name: UpsertNotificationPreference :one
-INSERT INTO notification_preference (workspace_id, user_id, preferences)
+INSERT INTO multica_notification_preference (workspace_id, user_id, preferences)
 VALUES ($1, $2, $3)
 ON CONFLICT (workspace_id, user_id)
 DO UPDATE SET preferences = $3, updated_at = now()
@@ -84,9 +84,9 @@ type UpsertNotificationPreferenceParams struct {
 	Preferences []byte      `json:"preferences"`
 }
 
-func (q *Queries) UpsertNotificationPreference(ctx context.Context, arg UpsertNotificationPreferenceParams) (NotificationPreference, error) {
+func (q *Queries) UpsertNotificationPreference(ctx context.Context, arg UpsertNotificationPreferenceParams) (MulticaNotificationPreference, error) {
 	row := q.db.QueryRow(ctx, upsertNotificationPreference, arg.WorkspaceID, arg.UserID, arg.Preferences)
-	var i NotificationPreference
+	var i MulticaNotificationPreference
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,

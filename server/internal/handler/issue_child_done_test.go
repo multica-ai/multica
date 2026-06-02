@@ -53,8 +53,8 @@ func newChildDoneFixture(t *testing.T, parentStatus string) childDoneFixture {
 	t.Cleanup(func() {
 		ctx := context.Background()
 		// Cascades through comment.
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, child.ID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, parent.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, child.ID)
+		testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, parent.ID)
 	})
 
 	return childDoneFixture{parent: parent, child: child}
@@ -81,7 +81,7 @@ func countSystemCommentsOn(t *testing.T, issueID string) int {
 	t.Helper()
 	var n int
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT count(*) FROM comment WHERE issue_id = $1 AND author_type = 'system'`,
+		`SELECT count(*) FROM multica_comment WHERE issue_id = $1 AND author_type = 'system'`,
 		issueID,
 	).Scan(&n); err != nil {
 		t.Fatalf("count system comments: %v", err)
@@ -93,7 +93,7 @@ func systemCommentOn(t *testing.T, issueID string) (content, authorIDStr string,
 	t.Helper()
 	row := testPool.QueryRow(context.Background(),
 		`SELECT content, author_id::text, parent_id IS NULL, type
-		   FROM comment
+		   FROM multica_comment
 		   WHERE issue_id = $1 AND author_type = 'system'
 		   ORDER BY created_at DESC
 		   LIMIT 1`,
@@ -226,7 +226,7 @@ func TestChildDoneSkippedWhenNoParent(t *testing.T) {
 	var orphan IssueResponse
 	json.NewDecoder(w.Body).Decode(&orphan)
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, orphan.ID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, orphan.ID)
 	})
 
 	// Sanity baseline — there should be zero system comments anywhere in

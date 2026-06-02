@@ -32,7 +32,7 @@ type InboxItemResponse struct {
 	Details       json.RawMessage `json:"details"`
 }
 
-func inboxToResponse(i db.InboxItem) InboxItemResponse {
+func inboxToResponse(i db.MulticaInboxItem) InboxItemResponse {
 	return InboxItemResponse{
 		ID:            uuidToString(i.ID),
 		WorkspaceID:   uuidToString(i.WorkspaceID),

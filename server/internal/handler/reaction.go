@@ -21,7 +21,7 @@ type ReactionResponse struct {
 	CreatedAt string `json:"created_at"`
 }
 
-func reactionToResponse(r db.CommentReaction) ReactionResponse {
+func reactionToResponse(r db.MulticaCommentReaction) ReactionResponse {
 	return ReactionResponse{
 		ID:        uuidToString(r.ID),
 		CommentID: uuidToString(r.CommentID),

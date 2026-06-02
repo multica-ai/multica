@@ -35,7 +35,7 @@ type CommentResponse struct {
 	Attachments    []AttachmentResponse `json:"attachments"`
 }
 
-func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse) CommentResponse {
+func commentToResponse(c db.MulticaComment, reactions []ReactionResponse, attachments []AttachmentResponse) CommentResponse {
 	if reactions == nil {
 		reactions = []ReactionResponse{}
 	}
@@ -293,7 +293,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 // "user did not pass --tail" and "user passed --tail 0" into the same state,
 // which would silently downgrade the latter to the full-thread path.
 type fetchCommentsArgs struct {
-	Issue         db.Issue
+	Issue         db.MulticaIssue
 	Since         pgtype.Timestamptz
 	ThreadAnchor  string
 	ThreadTail    int
@@ -309,7 +309,7 @@ type fetchCommentsArgs struct {
 // fields are empty strings when there is no next page or the path does not
 // support cursors.
 type fetchCommentsResult struct {
-	Comments     []db.Comment
+	Comments     []db.MulticaComment
 	NextBefore   string
 	NextBeforeID string
 }
@@ -367,10 +367,10 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 			// Root is identified by parent_id IS NULL and is always
 			// present in the SQL output; we keep it out of the cursor /
 			// tail-trim logic so the user always sees thread context.
-			var rootComment *db.Comment
-			replies := make([]db.Comment, 0, len(rows))
+			var rootComment *db.MulticaComment
+			replies := make([]db.MulticaComment, 0, len(rows))
 			for _, r := range rows {
-				c := db.Comment{
+				c := db.MulticaComment{
 					ID:             r.ID,
 					IssueID:        r.IssueID,
 					AuthorType:     r.AuthorType,
@@ -400,7 +400,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 			if hasMore {
 				replies = replies[1:]
 			}
-			out := make([]db.Comment, 0, len(replies)+1)
+			out := make([]db.MulticaComment, 0, len(replies)+1)
 			if rootComment != nil {
 				out = append(out, *rootComment)
 			}
@@ -454,12 +454,12 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		if len(rows) == 0 {
 			return fetchCommentsResult{}, errCommentThreadNotFound
 		}
-		out := make([]db.Comment, 0, len(rows))
+		out := make([]db.MulticaComment, 0, len(rows))
 		for _, r := range rows {
 			if args.Since.Valid && !r.CreatedAt.Time.After(args.Since.Time) {
 				continue
 			}
-			out = append(out, db.Comment{
+			out = append(out, db.MulticaComment{
 				ID:             r.ID,
 				IssueID:        r.IssueID,
 				AuthorType:     r.AuthorType,
@@ -495,14 +495,14 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		// The SQL already orders rows by (last_activity_at ASC, root_id ASC,
 		// created_at ASC, id ASC), so the OLDEST-active thread sits at the
 		// head and the FRESHEST thread at the tail. Walk the rows once to:
-		//   1. Strip the thread-metadata columns down to db.Comment for the
+		//   1. Strip the thread-metadata columns down to db.MulticaComment for the
 		//      caller (uniform shape across paths).
 		//   2. Count distinct threads in the page so we know whether a "next
 		//      older page" is likely to exist.
 		//   3. Capture the head thread's (last_activity_at, root_id) — that
 		//      is the cursor for the next page (next page = threads strictly
 		//      less recent than this one).
-		comments := make([]db.Comment, 0, len(rows))
+		comments := make([]db.MulticaComment, 0, len(rows))
 		var headRoot pgtype.UUID
 		var headLast pgtype.Timestamptz
 		seenRoot := map[string]struct{}{}
@@ -520,7 +520,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 			if args.Since.Valid && !r.CreatedAt.Time.After(args.Since.Time) {
 				continue
 			}
-			comments = append(comments, db.Comment{
+			comments = append(comments, db.MulticaComment{
 				ID:             r.ID,
 				IssueID:        r.IssueID,
 				AuthorType:     r.AuthorType,
@@ -615,7 +615,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var parentID pgtype.UUID
-	var parentComment *db.Comment
+	var parentComment *db.MulticaComment
 	if req.ParentID != nil {
 		var parsed pgtype.UUID
 		parsed, ok = parseUUIDOrBadRequest(w, *req.ParentID, "parent_id")
@@ -765,7 +765,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 // someone else (e.g. sharing results with a colleague, asking another agent).
 // @all is treated as a broadcast — it suppresses the trigger because the user
 // is announcing to everyone, not specifically requesting work from the agent.
-func (h *Handler) commentMentionsOthersButNotAssignee(content string, issue db.Issue) bool {
+func (h *Handler) commentMentionsOthersButNotAssignee(content string, issue db.MulticaIssue) bool {
 	mentions := util.ParseMentions(content)
 	// Filter out issue mentions — they are cross-references, not @people.
 	filtered := mentions[:0]
@@ -804,7 +804,7 @@ func (h *Handler) commentMentionsOthersButNotAssignee(content string, issue db.I
 // considered a conversation with the agent, so replies are allowed to trigger.
 // If the assigned agent has already replied in the thread, the member is
 // conversing with the agent, so replies are allowed to trigger.
-func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment, content string, issue db.Issue) bool {
+func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.MulticaComment, content string, issue db.MulticaIssue) bool {
 	if parent == nil {
 		return false // Not a reply — normal top-level comment
 	}
@@ -865,7 +865,7 @@ func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment,
 //     reviewer agent). Subsequent member follow-ups in the same thread are
 //     directed at the assignee, not at the delegated agent — inheriting
 //     would re-trigger the delegated agent on every plain reply.
-func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util.Mention, replyAuthorType string) bool {
+func shouldInheritParentMentions(parentComment *db.MulticaComment, replyMentions []util.Mention, replyAuthorType string) bool {
 	if parentComment == nil {
 		return false
 	}
@@ -894,7 +894,7 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // dedupe and the natural queued/dispatched coalescing of the task queue.
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
-func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
+func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.MulticaIssue, comment db.MulticaComment, parentComment *db.MulticaComment, authorType, authorID string) {
 	wsID := uuidToString(issue.WorkspaceID)
 	mentions := util.ParseMentions(comment.Content)
 	if shouldInheritParentMentions(parentComment, mentions, authorType) {
@@ -1145,23 +1145,23 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 // the caller's workspace. Returns the comment, the workspace UUID, the actor
 // identity, and ok. Resolve / unresolve handlers share this scaffolding so the
 // "must be a root comment" rule lives in one place.
-func (h *Handler) loadRootCommentForActor(w http.ResponseWriter, r *http.Request) (db.Comment, string, string, string, bool) {
+func (h *Handler) loadRootCommentForActor(w http.ResponseWriter, r *http.Request) (db.MulticaComment, string, string, string, bool) {
 	commentId := chi.URLParam(r, "commentId")
 	userID, ok := requireUserID(w, r)
 	if !ok {
-		return db.Comment{}, "", "", "", false
+		return db.MulticaComment{}, "", "", "", false
 	}
 	commentUUID, ok := parseUUIDOrBadRequest(w, commentId, "comment id")
 	if !ok {
-		return db.Comment{}, "", "", "", false
+		return db.MulticaComment{}, "", "", "", false
 	}
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
-		return db.Comment{}, "", "", "", false
+		return db.MulticaComment{}, "", "", "", false
 	}
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
-		return db.Comment{}, "", "", "", false
+		return db.MulticaComment{}, "", "", "", false
 	}
 	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
 		ID:          commentUUID,
@@ -1169,11 +1169,11 @@ func (h *Handler) loadRootCommentForActor(w http.ResponseWriter, r *http.Request
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "comment not found")
-		return db.Comment{}, "", "", "", false
+		return db.MulticaComment{}, "", "", "", false
 	}
 	if comment.ParentID.Valid {
 		writeError(w, http.StatusBadRequest, "only root comments can be resolved")
-		return db.Comment{}, "", "", "", false
+		return db.MulticaComment{}, "", "", "", false
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	return comment, workspaceID, actorType, actorID, true

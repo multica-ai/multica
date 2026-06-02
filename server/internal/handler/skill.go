@@ -88,7 +88,7 @@ type SkillWithFilesResponse struct {
 	Files []SkillFileResponse `json:"files"`
 }
 
-func skillToResponse(s db.Skill) SkillResponse {
+func skillToResponse(s db.MulticaSkill) SkillResponse {
 	return SkillResponse{
 		ID:          uuidToString(s.ID),
 		WorkspaceID: uuidToString(s.WorkspaceID),
@@ -134,7 +134,7 @@ func skillSummaryToResponse(
 	}
 }
 
-func skillFileToResponse(f db.SkillFile) SkillFileResponse {
+func skillFileToResponse(f db.MulticaSkillFile) SkillFileResponse {
 	return SkillFileResponse{
 		ID:        uuidToString(f.ID),
 		SkillID:   uuidToString(f.SkillID),
@@ -189,16 +189,16 @@ func validateFilePath(p string) bool {
 	return true
 }
 
-func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id string) (db.Skill, bool) {
+func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id string) (db.MulticaSkill, bool) {
 	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
-		return db.Skill{}, false
+		return db.MulticaSkill{}, false
 	}
 
 	skillUUID, ok := parseUUIDOrBadRequest(w, id, "skill id")
 	if !ok {
-		return db.Skill{}, false
+		return db.MulticaSkill{}, false
 	}
 
 	skill, err := h.Queries.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
@@ -313,7 +313,7 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 
 // canManageSkill checks whether the current user can update or delete a skill.
 // The skill creator or workspace owner/admin can manage any skill.
-func (h *Handler) canManageSkill(w http.ResponseWriter, r *http.Request, skill db.Skill) bool {
+func (h *Handler) canManageSkill(w http.ResponseWriter, r *http.Request, skill db.MulticaSkill) bool {
 	wsID := uuidToString(skill.WorkspaceID)
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "skill not found", "owner", "admin", "member")
 	if !ok {

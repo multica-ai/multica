@@ -4,36 +4,19 @@ import { paths } from "./paths";
 
 /**
  * Priority (onboarded-first):
- *   !hasOnboarded               → /onboarding
+ *   !hasOnboarded               → /workspaces/new (skip onboarding guide)
  *   hasOnboarded + workspace[0] → /<first.slug>/issues
  *   hasOnboarded + no workspace → /workspaces/new
  *
- * V3 invariant: `onboarded_at != null` is the single source of truth for
- * "may access /<slug>/*". The web workspace layout and the desktop App.tsx
- * overlay decision both gate on this — sending an un-onboarded user
- * straight to /issues would just be redirected back to /onboarding by
- * the layout gate, costing a navigation round-trip. Check onboarded
- * first.
- *
- * In v3 "has workspace but !onboarded" is physically rare (a user can
- * only land in that state by closing the app between Step 2 and Step 3
- * — both questionnaire and runtime picker steps run after workspace
- * creation but before CompleteOnboarding). OnboardingFlow's Step 2
- * already recognizes existing workspaces and offers "Continue with
- * {name}", so the recovery is seamless.
- *
- * Callers that need invitation-aware routing (callback / login) handle
- * the "un-onboarded with pending invites" branch themselves before calling
- * this resolver — this resolver only deals with the post-invite-check
- * destination.
+ * Onboarding questionnaire and runtime-picker steps are skipped for new
+ * users — they land directly on workspace creation. The onboarding flag
+ * is still tracked (`onboarded_at`) for analytics and future gating, but
+ * the guided UI flow is no longer shown.
  */
 export function resolvePostAuthDestination(
   workspaces: Workspace[],
   hasOnboarded: boolean,
 ): string {
-  if (!hasOnboarded) {
-    return paths.onboarding();
-  }
   const first = workspaces[0];
   if (first) {
     return paths.workspace(first.slug).issues();

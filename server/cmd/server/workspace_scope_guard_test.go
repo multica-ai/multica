@@ -35,7 +35,7 @@ func TestWorkspaceScopeGuard(t *testing.T) {
 
 	t.Run("DeleteIssue", func(t *testing.T) {
 		id := seedIssue(t, ctx)
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, util.UUIDToString(id)) })
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, util.UUIDToString(id)) })
 
 		if err := queries.DeleteIssue(ctx, db.DeleteIssueParams{ID: id, WorkspaceID: wsB}); err != nil {
 			t.Fatalf("cross-workspace DeleteIssue: expected nil error (no-op), got %v", err)
@@ -45,9 +45,9 @@ func TestWorkspaceScopeGuard(t *testing.T) {
 
 	t.Run("DeleteComment", func(t *testing.T) {
 		issueID := seedIssue(t, ctx)
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, util.UUIDToString(issueID)) })
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, util.UUIDToString(issueID)) })
 		id := seedComment(t, ctx, issueID)
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, util.UUIDToString(id)) })
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_comment WHERE id = $1`, util.UUIDToString(id)) })
 
 		if err := queries.DeleteComment(ctx, db.DeleteCommentParams{ID: id, WorkspaceID: wsB}); err != nil {
 			t.Fatalf("cross-workspace DeleteComment: expected nil error (no-op), got %v", err)
@@ -57,7 +57,7 @@ func TestWorkspaceScopeGuard(t *testing.T) {
 
 	t.Run("DeleteProject", func(t *testing.T) {
 		id := seedProject(t, ctx)
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, util.UUIDToString(id)) })
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_project WHERE id = $1`, util.UUIDToString(id)) })
 
 		if err := queries.DeleteProject(ctx, db.DeleteProjectParams{ID: id, WorkspaceID: wsB}); err != nil {
 			t.Fatalf("cross-workspace DeleteProject: expected nil error (no-op), got %v", err)
@@ -67,7 +67,7 @@ func TestWorkspaceScopeGuard(t *testing.T) {
 
 	t.Run("DeleteSkill", func(t *testing.T) {
 		id := seedSkill(t, ctx)
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM skill WHERE id = $1`, util.UUIDToString(id)) })
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_skill WHERE id = $1`, util.UUIDToString(id)) })
 
 		if err := queries.DeleteSkill(ctx, db.DeleteSkillParams{ID: id, WorkspaceID: wsB}); err != nil {
 			t.Fatalf("cross-workspace DeleteSkill: expected nil error (no-op), got %v", err)
@@ -77,7 +77,7 @@ func TestWorkspaceScopeGuard(t *testing.T) {
 
 	t.Run("DeleteChatSession", func(t *testing.T) {
 		id := seedChatSession(t, ctx)
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.UUIDToString(id)) })
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_chat_session WHERE id = $1`, util.UUIDToString(id)) })
 
 		if err := queries.DeleteChatSession(ctx, db.DeleteChatSessionParams{ID: id, WorkspaceID: wsB}); err != nil {
 			t.Fatalf("cross-workspace DeleteChatSession: expected nil error (no-op), got %v", err)
@@ -87,7 +87,7 @@ func TestWorkspaceScopeGuard(t *testing.T) {
 
 	t.Run("UpdateIssueStatus", func(t *testing.T) {
 		id := seedIssue(t, ctx)
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, util.UUIDToString(id)) })
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, util.UUIDToString(id)) })
 
 		_, err := queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 			ID:          id,
@@ -100,7 +100,7 @@ func TestWorkspaceScopeGuard(t *testing.T) {
 
 		// Status must still be the original 'todo'.
 		var status string
-		if err := testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, util.UUIDToString(id)).Scan(&status); err != nil {
+		if err := testPool.QueryRow(ctx, `SELECT status FROM multica_issue WHERE id = $1`, util.UUIDToString(id)).Scan(&status); err != nil {
 			t.Fatalf("re-read issue: %v", err)
 		}
 		if status != "todo" {
@@ -113,13 +113,13 @@ func TestWorkspaceScopeGuard(t *testing.T) {
 	// proves the in-workspace path still mutates.
 	t.Run("InWorkspaceCallsStillWork", func(t *testing.T) {
 		id := seedIssue(t, ctx)
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, util.UUIDToString(id)) })
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, util.UUIDToString(id)) })
 
 		if err := queries.DeleteIssue(ctx, db.DeleteIssueParams{ID: id, WorkspaceID: wsA}); err != nil {
 			t.Fatalf("in-workspace DeleteIssue: %v", err)
 		}
 		var count int
-		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE id = $1`, util.UUIDToString(id)).Scan(&count); err != nil {
+		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM multica_issue WHERE id = $1`, util.UUIDToString(id)).Scan(&count); err != nil {
 			t.Fatalf("count issue: %v", err)
 		}
 		if count != 0 {
@@ -137,7 +137,7 @@ func seedIssue(t *testing.T, ctx context.Context) pgtype.UUID {
 	// avoid colliding with concurrent integration tests in the same DB.
 	n := 1_000_000 + rand.IntN(1_000_000)
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_type, creator_id, position, number)
 		VALUES ($1, 'scope-guard test issue', 'todo', 'none', 'member', $2, 0, $3)
 		RETURNING id
 	`, testWorkspaceID, testUserID, n).Scan(&s); err != nil {
@@ -150,7 +150,7 @@ func seedComment(t *testing.T, ctx context.Context, issueID pgtype.UUID) pgtype.
 	t.Helper()
 	var s string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type)
 		VALUES ($1, $2, 'member', $3, 'scope-guard test comment', 'comment')
 		RETURNING id
 	`, util.UUIDToString(issueID), testWorkspaceID, testUserID).Scan(&s); err != nil {
@@ -163,7 +163,7 @@ func seedProject(t *testing.T, ctx context.Context) pgtype.UUID {
 	t.Helper()
 	var s string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title, status, priority)
+		INSERT INTO multica_project (workspace_id, title, status, priority)
 		VALUES ($1, 'scope-guard test project', 'planned', 'none')
 		RETURNING id
 	`, testWorkspaceID).Scan(&s); err != nil {
@@ -179,7 +179,7 @@ func seedSkill(t *testing.T, ctx context.Context) pgtype.UUID {
 	// with previous runs on the same DB.
 	name := uniqueName("scope-guard skill")
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+		INSERT INTO multica_skill (workspace_id, name, description, content, config, created_by)
 		VALUES ($1, $2, '', '', '{}'::jsonb, $3)
 		RETURNING id
 	`, testWorkspaceID, name, testUserID).Scan(&s); err != nil {
@@ -192,14 +192,14 @@ func seedChatSession(t *testing.T, ctx context.Context) pgtype.UUID {
 	t.Helper()
 	var agentID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1
+		SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("find test agent: %v", err)
 	}
 	var s string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id)
-		VALUES ($1, $2, $3, 'scope-guard chat', (SELECT runtime_id FROM agent WHERE id = $2))
+		INSERT INTO multica_chat_session (workspace_id, agent_id, creator_id, title, runtime_id)
+		VALUES ($1, $2, $3, 'scope-guard chat', (SELECT runtime_id FROM multica_agent WHERE id = $2))
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID).Scan(&s); err != nil {
 		t.Fatalf("seed chat_session: %v", err)

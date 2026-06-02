@@ -12,9 +12,9 @@ import (
 )
 
 const addIssueReaction = `-- name: AddIssueReaction :one
-INSERT INTO issue_reaction (issue_id, workspace_id, actor_type, actor_id, emoji)
+INSERT INTO multica_issue_reaction (issue_id, workspace_id, actor_type, actor_id, emoji)
 VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (issue_id, actor_type, actor_id, emoji) DO UPDATE SET created_at = issue_reaction.created_at
+ON CONFLICT (issue_id, actor_type, actor_id, emoji) DO UPDATE SET created_at = multica_issue_reaction.created_at
 RETURNING id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at
 `
 
@@ -26,7 +26,7 @@ type AddIssueReactionParams struct {
 	Emoji       string      `json:"emoji"`
 }
 
-func (q *Queries) AddIssueReaction(ctx context.Context, arg AddIssueReactionParams) (IssueReaction, error) {
+func (q *Queries) AddIssueReaction(ctx context.Context, arg AddIssueReactionParams) (MulticaIssueReaction, error) {
 	row := q.db.QueryRow(ctx, addIssueReaction,
 		arg.IssueID,
 		arg.WorkspaceID,
@@ -34,7 +34,7 @@ func (q *Queries) AddIssueReaction(ctx context.Context, arg AddIssueReactionPara
 		arg.ActorID,
 		arg.Emoji,
 	)
-	var i IssueReaction
+	var i MulticaIssueReaction
 	err := row.Scan(
 		&i.ID,
 		&i.IssueID,
@@ -48,20 +48,20 @@ func (q *Queries) AddIssueReaction(ctx context.Context, arg AddIssueReactionPara
 }
 
 const listIssueReactions = `-- name: ListIssueReactions :many
-SELECT id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at FROM issue_reaction
+SELECT id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at FROM multica_issue_reaction
 WHERE issue_id = $1
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListIssueReactions(ctx context.Context, issueID pgtype.UUID) ([]IssueReaction, error) {
+func (q *Queries) ListIssueReactions(ctx context.Context, issueID pgtype.UUID) ([]MulticaIssueReaction, error) {
 	rows, err := q.db.Query(ctx, listIssueReactions, issueID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []IssueReaction{}
+	items := []MulticaIssueReaction{}
 	for rows.Next() {
-		var i IssueReaction
+		var i MulticaIssueReaction
 		if err := rows.Scan(
 			&i.ID,
 			&i.IssueID,
@@ -82,7 +82,7 @@ func (q *Queries) ListIssueReactions(ctx context.Context, issueID pgtype.UUID) (
 }
 
 const removeIssueReaction = `-- name: RemoveIssueReaction :exec
-DELETE FROM issue_reaction
+DELETE FROM multica_issue_reaction
 WHERE issue_id = $1 AND actor_type = $2 AND actor_id = $3 AND emoji = $4
 `
 

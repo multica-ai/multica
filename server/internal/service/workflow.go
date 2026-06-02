@@ -24,11 +24,11 @@ type WorkflowService struct {
 	TaskSvc   *TaskService
 
 	// OnNodeStatusChanged fires after TransitionNodeRun succeeds.
-	OnNodeStatusChanged func(ctx context.Context, nodeRun db.WorkflowNodeRun)
+	OnNodeStatusChanged func(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun)
 
 	// OnRunTerminal fires when a workflow run reaches a terminal status
 	// (completed, failed, or cancelled).
-	OnRunTerminal func(ctx context.Context, run db.WorkflowRun, status string)
+	OnRunTerminal func(ctx context.Context, run db.MulticaWorkflowRun, status string)
 }
 
 func NewWorkflowService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *WorkflowService {
@@ -177,7 +177,7 @@ func (s *WorkflowService) ValidateDAG(ctx context.Context, workflowID pgtype.UUI
 
 // StartRun creates a workflow_run and node_runs for every node, then
 // kicks off root nodes (nodes with no incoming edges).
-func (s *WorkflowService) StartRun(ctx context.Context, workflow db.Workflow, triggeredByType, triggeredByID string, input json.RawMessage) (*db.WorkflowRun, error) {
+func (s *WorkflowService) StartRun(ctx context.Context, workflow db.MulticaWorkflow, triggeredByType, triggeredByID string, input json.RawMessage) (*db.MulticaWorkflowRun, error) {
 	if workflow.Status != "active" {
 		return nil, fmt.Errorf("workflow is not active (status=%s)", workflow.Status)
 	}
@@ -187,7 +187,7 @@ func (s *WorkflowService) StartRun(ctx context.Context, workflow db.Workflow, tr
 		triggeredByUUID = pgtype.UUID{}
 	}
 
-	var run db.WorkflowRun
+	var run db.MulticaWorkflowRun
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		r, err := qtx.CreateWorkflowRun(ctx, db.CreateWorkflowRunParams{
 			WorkflowID:      workflow.ID,
@@ -276,11 +276,11 @@ func (s *WorkflowService) DispatchRootNodeRuns(ctx context.Context, runID pgtype
 // all created node runs so the caller can create corresponding sub-issues.
 func (s *WorkflowService) StartRunForIssue(
 	ctx context.Context,
-	workflow db.Workflow,
-	issue db.Issue,
+	workflow db.MulticaWorkflow,
+	issue db.MulticaIssue,
 	triggeredByType string,
 	triggeredByID string,
-) (*db.WorkflowRun, []db.WorkflowNodeRun, error) {
+) (*db.MulticaWorkflowRun, []db.MulticaWorkflowNodeRun, error) {
 	input, err := json.Marshal(map[string]any{
 		"title":       issue.Title,
 		"description": textToString(issue.Description),
@@ -341,7 +341,7 @@ func (s *WorkflowService) CancelRun(ctx context.Context, runID pgtype.UUID) erro
 // ── State machine ────────────────────────────────────────────────────────────
 
 // TransitionNodeRun validates the transition and updates the node run status.
-func (s *WorkflowService) TransitionNodeRun(ctx context.Context, nodeRun db.WorkflowNodeRun, newStatus string) (*db.WorkflowNodeRun, error) {
+func (s *WorkflowService) TransitionNodeRun(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun, newStatus string) (*db.MulticaWorkflowNodeRun, error) {
 	if !isValidTransition(nodeRun.Status, newStatus) {
 		return nil, fmt.Errorf("invalid transition: %s → %s", nodeRun.Status, newStatus)
 	}
@@ -505,7 +505,7 @@ func (s *WorkflowService) checkRunCompletion(ctx context.Context, runID pgtype.U
 
 // SubmitWorkerOutput handles human/agent submitting the worker phase output.
 func (s *WorkflowService) SubmitWorkerOutput(ctx context.Context, nodeRunID pgtype.UUID, output json.RawMessage) error {
-	var nodeRun db.WorkflowNodeRun
+	var nodeRun db.MulticaWorkflowNodeRun
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		nr, err := qtx.GetWorkflowNodeRun(ctx, nodeRunID)
 		if err != nil {
@@ -535,7 +535,7 @@ func (s *WorkflowService) SubmitWorkerOutput(ctx context.Context, nodeRunID pgty
 
 // ReviewNodeRun handles the Critic's approval or rework decision.
 func (s *WorkflowService) ReviewNodeRun(ctx context.Context, nodeRunID pgtype.UUID, approved bool, comment string, criticOutput json.RawMessage) error {
-	var nodeRun db.WorkflowNodeRun
+	var nodeRun db.MulticaWorkflowNodeRun
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		nr, err := qtx.GetWorkflowNodeRun(ctx, nodeRunID)
 		if err != nil {
@@ -642,7 +642,7 @@ func (s *WorkflowService) ReviewNodeRun(ctx context.Context, nodeRunID pgtype.UU
 }
 
 // dispatchWorker advances a node run from format_ok to the worker phase.
-func (s *WorkflowService) dispatchWorker(ctx context.Context, nodeRun db.WorkflowNodeRun) error {
+func (s *WorkflowService) dispatchWorker(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun) error {
 	node, err := s.Queries.GetWorkflowNode(ctx, nodeRun.WorkflowNodeID)
 	if err != nil {
 		return fmt.Errorf("get node: %w", err)
@@ -685,7 +685,7 @@ func (s *WorkflowService) dispatchWorker(ctx context.Context, nodeRun db.Workflo
 }
 
 // dispatchCritic advances a node run from awaiting_critic to the critic phase.
-func (s *WorkflowService) dispatchCritic(ctx context.Context, nodeRun db.WorkflowNodeRun) error {
+func (s *WorkflowService) dispatchCritic(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun) error {
 	node, err := s.Queries.GetWorkflowNode(ctx, nodeRun.WorkflowNodeID)
 	if err != nil {
 		return fmt.Errorf("get node: %w", err)
@@ -732,7 +732,7 @@ func (s *WorkflowService) dispatchCritic(ctx context.Context, nodeRun db.Workflo
 
 // DispatchAgentTask creates an agent_task_queue row for a workflow node run
 // and links it via the workflow_node_run_id column.
-func (s *WorkflowService) DispatchAgentTask(ctx context.Context, nodeRun db.WorkflowNodeRun, phase string) (*db.AgentTaskQueue, error) {
+func (s *WorkflowService) DispatchAgentTask(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun, phase string) (*db.MulticaAgentTaskQueue, error) {
 	node, err := s.Queries.GetWorkflowNode(ctx, nodeRun.WorkflowNodeID)
 	if err != nil {
 		return nil, fmt.Errorf("get node: %w", err)
@@ -834,7 +834,7 @@ func (s *WorkflowService) DispatchAgentTask(ctx context.Context, nodeRun db.Work
 
 // executeFormatChecker validates the node run's input against the node's JSON
 // Schema (if configured), then transitions accordingly.
-func (s *WorkflowService) executeFormatChecker(ctx context.Context, qtx *db.Queries, nodeRun db.WorkflowNodeRun) error {
+func (s *WorkflowService) executeFormatChecker(ctx context.Context, qtx *db.Queries, nodeRun db.MulticaWorkflowNodeRun) error {
 	node, err := qtx.GetWorkflowNode(ctx, nodeRun.WorkflowNodeID)
 	if err != nil {
 		return err
@@ -986,7 +986,7 @@ func qtxForRun(q *db.Queries) *db.Queries {
 // HandleWorkflowTaskCompletion is called when an agent task linked to a
 // workflow node run reaches completion. It transitions the node run based
 // on the completed task's phase (worker → awaiting_critic, critic → review).
-func (s *WorkflowService) HandleWorkflowTaskCompletion(ctx context.Context, task db.AgentTaskQueue) error {
+func (s *WorkflowService) HandleWorkflowTaskCompletion(ctx context.Context, task db.MulticaAgentTaskQueue) error {
 	if !task.WorkflowNodeRunID.Valid {
 		return nil
 	}

@@ -20,13 +20,13 @@ func newWaitlistTestUser(t *testing.T, email string) string {
 
 	var userID string
 	if err := testPool.QueryRow(ctx,
-		`INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
+		`INSERT INTO multica_user (name, email) VALUES ($1, $2) RETURNING id`,
 		"Waitlist Test", email,
 	).Scan(&userID); err != nil {
 		t.Fatalf("insert test user: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, userID)
+		testPool.Exec(ctx, `DELETE FROM multica_user WHERE id = $1`, userID)
 	})
 	return userID
 }
@@ -64,7 +64,7 @@ func TestJoinCloudWaitlistRecordsEmailAndReason(t *testing.T) {
 	)
 	if err := testPool.QueryRow(context.Background(), `
 		SELECT cloud_waitlist_email, cloud_waitlist_reason, onboarded_at
-		  FROM "user" WHERE id = $1
+		  FROM multica_user WHERE id = $1
 	`, userID).Scan(&waitlistEmail, &waitlistReason, &onboardedAt); err != nil {
 		t.Fatalf("lookup user: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestJoinCloudWaitlistAllowsEmptyReason(t *testing.T) {
 
 	var waitlistReason *string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT cloud_waitlist_reason FROM "user" WHERE id = $1`, userID,
+		`SELECT cloud_waitlist_reason FROM multica_user WHERE id = $1`, userID,
 	).Scan(&waitlistReason); err != nil {
 		t.Fatalf("lookup user: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestJoinCloudWaitlistSecondCallOverwrites(t *testing.T) {
 	)
 	if err := testPool.QueryRow(context.Background(), `
 		SELECT cloud_waitlist_email, cloud_waitlist_reason, onboarded_at
-		  FROM "user" WHERE id = $1
+		  FROM multica_user WHERE id = $1
 	`, userID).Scan(&waitlistEmail, &waitlistReason, &onboardedAt); err != nil {
 		t.Fatalf("lookup user: %v", err)
 	}
@@ -205,35 +205,35 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	ctx := context.Background()
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `
-			DELETE FROM agent_task_queue
+			DELETE FROM multica_agent_task_queue
 			 WHERE agent_id IN (
-			       SELECT id FROM agent
+			       SELECT id FROM multica_agent
 			        WHERE workspace_id = $1 AND name = $2
 			 )
 		`, testWorkspaceID, onboardingAssistantName)
 		testPool.Exec(ctx,
-			`DELETE FROM issue WHERE workspace_id = $1 AND title = $2`,
+			`DELETE FROM multica_issue WHERE workspace_id = $1 AND title = $2`,
 			testWorkspaceID, onboardingIssueTitle,
 		)
 		testPool.Exec(ctx,
-			`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
+			`DELETE FROM multica_agent WHERE workspace_id = $1 AND name = $2`,
 			testWorkspaceID, onboardingAssistantName,
 		)
 		testPool.Exec(ctx,
-			`UPDATE "user" SET onboarded_at = NULL, starter_content_state = NULL WHERE id = $1`,
+			`UPDATE multica_user SET onboarded_at = NULL, starter_content_state = NULL WHERE id = $1`,
 			testUserID,
 		)
 	})
 	testPool.Exec(ctx,
-		`DELETE FROM issue WHERE workspace_id = $1 AND title = $2`,
+		`DELETE FROM multica_issue WHERE workspace_id = $1 AND title = $2`,
 		testWorkspaceID, onboardingIssueTitle,
 	)
 	testPool.Exec(ctx,
-		`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
+		`DELETE FROM multica_agent WHERE workspace_id = $1 AND name = $2`,
 		testWorkspaceID, onboardingAssistantName,
 	)
 	testPool.Exec(ctx,
-		`UPDATE "user" SET onboarded_at = NULL, starter_content_state = NULL WHERE id = $1`,
+		`UPDATE multica_user SET onboarded_at = NULL, starter_content_state = NULL WHERE id = $1`,
 		testUserID,
 	)
 
@@ -263,7 +263,7 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	)
 	if err := testPool.QueryRow(ctx, `
 		SELECT name, runtime_id, instructions, avatar_url
-		  FROM agent
+		  FROM multica_agent
 		 WHERE id = $1
 	`, resp.AgentID).Scan(&agentName, &agentRuntime, &instructions, &avatarURL); err != nil {
 		t.Fatalf("lookup assistant: %v", err)
@@ -290,7 +290,7 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	)
 	if err := testPool.QueryRow(ctx, `
 		SELECT title, assignee_type, assignee_id, status, priority
-		  FROM issue
+		  FROM multica_issue
 		 WHERE id = $1
 	`, resp.IssueID).Scan(&issueTitle, &assigneeType, &assigneeID, &issueStatus, &issuePriority); err != nil {
 		t.Fatalf("lookup onboarding issue: %v", err)
@@ -311,7 +311,7 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	)
 	if err := testPool.QueryRow(ctx, `
 		SELECT onboarded_at, starter_content_state
-		  FROM "user"
+		  FROM multica_user
 		 WHERE id = $1
 	`, testUserID).Scan(&onboardedAt, &starterContentState); err != nil {
 		t.Fatalf("lookup user onboarding state: %v", err)
@@ -326,7 +326,7 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	var taskCount int
 	if err := testPool.QueryRow(ctx, `
 		SELECT count(*)
-		  FROM agent_task_queue
+		  FROM multica_agent_task_queue
 		 WHERE issue_id = $1 AND agent_id = $2
 	`, resp.IssueID, resp.AgentID).Scan(&taskCount); err != nil {
 		t.Fatalf("count queued tasks: %v", err)
@@ -357,35 +357,35 @@ func TestBootstrapOnboardingRuntime_WithStarterPrompt(t *testing.T) {
 	ctx := context.Background()
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `
-			DELETE FROM agent_task_queue
+			DELETE FROM multica_agent_task_queue
 			 WHERE agent_id IN (
-			       SELECT id FROM agent
+			       SELECT id FROM multica_agent
 			        WHERE workspace_id = $1 AND name = $2
 			 )
 		`, testWorkspaceID, onboardingAssistantName)
 		testPool.Exec(ctx,
-			`DELETE FROM issue WHERE workspace_id = $1 AND title = $2`,
+			`DELETE FROM multica_issue WHERE workspace_id = $1 AND title = $2`,
 			testWorkspaceID, onboardingIssueTitle,
 		)
 		testPool.Exec(ctx,
-			`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
+			`DELETE FROM multica_agent WHERE workspace_id = $1 AND name = $2`,
 			testWorkspaceID, onboardingAssistantName,
 		)
 		testPool.Exec(ctx,
-			`UPDATE "user" SET onboarded_at = NULL, starter_content_state = NULL WHERE id = $1`,
+			`UPDATE multica_user SET onboarded_at = NULL, starter_content_state = NULL WHERE id = $1`,
 			testUserID,
 		)
 	})
 	testPool.Exec(ctx,
-		`DELETE FROM issue WHERE workspace_id = $1 AND title = $2`,
+		`DELETE FROM multica_issue WHERE workspace_id = $1 AND title = $2`,
 		testWorkspaceID, onboardingIssueTitle,
 	)
 	testPool.Exec(ctx,
-		`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
+		`DELETE FROM multica_agent WHERE workspace_id = $1 AND name = $2`,
 		testWorkspaceID, onboardingAssistantName,
 	)
 	testPool.Exec(ctx,
-		`UPDATE "user" SET onboarded_at = NULL, starter_content_state = NULL WHERE id = $1`,
+		`UPDATE multica_user SET onboarded_at = NULL, starter_content_state = NULL WHERE id = $1`,
 		testUserID,
 	)
 
@@ -407,7 +407,7 @@ func TestBootstrapOnboardingRuntime_WithStarterPrompt(t *testing.T) {
 
 	var description *string
 	if err := testPool.QueryRow(ctx, `
-		SELECT description FROM issue WHERE id = $1
+		SELECT description FROM multica_issue WHERE id = $1
 	`, resp.IssueID).Scan(&description); err != nil {
 		t.Fatalf("lookup issue description: %v", err)
 	}
@@ -424,35 +424,35 @@ func TestBootstrapOnboardingRuntime_NoStarterPrompt(t *testing.T) {
 	ctx := context.Background()
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `
-			DELETE FROM agent_task_queue
+			DELETE FROM multica_agent_task_queue
 			 WHERE agent_id IN (
-			       SELECT id FROM agent
+			       SELECT id FROM multica_agent
 			        WHERE workspace_id = $1 AND name = $2
 			 )
 		`, testWorkspaceID, onboardingAssistantName)
 		testPool.Exec(ctx,
-			`DELETE FROM issue WHERE workspace_id = $1 AND title = $2`,
+			`DELETE FROM multica_issue WHERE workspace_id = $1 AND title = $2`,
 			testWorkspaceID, onboardingIssueTitle,
 		)
 		testPool.Exec(ctx,
-			`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
+			`DELETE FROM multica_agent WHERE workspace_id = $1 AND name = $2`,
 			testWorkspaceID, onboardingAssistantName,
 		)
 		testPool.Exec(ctx,
-			`UPDATE "user" SET onboarded_at = NULL, starter_content_state = NULL WHERE id = $1`,
+			`UPDATE multica_user SET onboarded_at = NULL, starter_content_state = NULL WHERE id = $1`,
 			testUserID,
 		)
 	})
 	testPool.Exec(ctx,
-		`DELETE FROM issue WHERE workspace_id = $1 AND title = $2`,
+		`DELETE FROM multica_issue WHERE workspace_id = $1 AND title = $2`,
 		testWorkspaceID, onboardingIssueTitle,
 	)
 	testPool.Exec(ctx,
-		`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
+		`DELETE FROM multica_agent WHERE workspace_id = $1 AND name = $2`,
 		testWorkspaceID, onboardingAssistantName,
 	)
 	testPool.Exec(ctx,
-		`UPDATE "user" SET onboarded_at = NULL, starter_content_state = NULL WHERE id = $1`,
+		`UPDATE multica_user SET onboarded_at = NULL, starter_content_state = NULL WHERE id = $1`,
 		testUserID,
 	)
 
@@ -472,7 +472,7 @@ func TestBootstrapOnboardingRuntime_NoStarterPrompt(t *testing.T) {
 
 	var description *string
 	if err := testPool.QueryRow(ctx, `
-		SELECT description FROM issue WHERE id = $1
+		SELECT description FROM multica_issue WHERE id = $1
 	`, resp.IssueID).Scan(&description); err != nil {
 		t.Fatalf("lookup issue description: %v", err)
 	}
@@ -489,20 +489,20 @@ func TestBootstrapOnboardingNoRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	ctx := context.Background()
 	t.Cleanup(func() {
 		testPool.Exec(ctx,
-			`DELETE FROM issue WHERE workspace_id = $1 AND title = $2`,
+			`DELETE FROM multica_issue WHERE workspace_id = $1 AND title = $2`,
 			testWorkspaceID, noRuntimeIssueTitle,
 		)
 		testPool.Exec(ctx,
-			`UPDATE "user" SET onboarded_at = NULL, starter_content_state = NULL, language = NULL WHERE id = $1`,
+			`UPDATE multica_user SET onboarded_at = NULL, starter_content_state = NULL, language = NULL WHERE id = $1`,
 			testUserID,
 		)
 	})
 	testPool.Exec(ctx,
-		`DELETE FROM issue WHERE workspace_id = $1 AND title = $2`,
+		`DELETE FROM multica_issue WHERE workspace_id = $1 AND title = $2`,
 		testWorkspaceID, noRuntimeIssueTitle,
 	)
 	testPool.Exec(ctx,
-		`UPDATE "user" SET onboarded_at = NULL, starter_content_state = NULL, language = 'en' WHERE id = $1`,
+		`UPDATE multica_user SET onboarded_at = NULL, starter_content_state = NULL, language = 'en' WHERE id = $1`,
 		testUserID,
 	)
 
@@ -533,7 +533,7 @@ func TestBootstrapOnboardingNoRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	)
 	if err := testPool.QueryRow(ctx, `
 		SELECT title, assignee_type, assignee_id, status, priority, description
-		  FROM issue
+		  FROM multica_issue
 		 WHERE id = $1
 	`, resp.IssueID).Scan(&issueTitle, &assigneeType, &assigneeID, &issueStatus, &issuePriority, &description); err != nil {
 		t.Fatalf("lookup no-runtime onboarding issue: %v", err)
@@ -566,7 +566,7 @@ func TestBootstrapOnboardingNoRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	)
 	if err := testPool.QueryRow(ctx, `
 		SELECT onboarded_at, starter_content_state
-		  FROM "user"
+		  FROM multica_user
 		 WHERE id = $1
 	`, testUserID).Scan(&onboardedAt, &starterContentState); err != nil {
 		t.Fatalf("lookup user onboarding state: %v", err)
@@ -581,7 +581,7 @@ func TestBootstrapOnboardingNoRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	var taskCount int
 	if err := testPool.QueryRow(ctx, `
 		SELECT count(*)
-		  FROM agent_task_queue
+		  FROM multica_agent_task_queue
 		 WHERE issue_id = $1
 	`, resp.IssueID).Scan(&taskCount); err != nil {
 		t.Fatalf("count queued tasks: %v", err)
@@ -612,20 +612,20 @@ func TestBootstrapOnboardingNoRuntimeUsesChineseGuideForChineseUsers(t *testing.
 	ctx := context.Background()
 	t.Cleanup(func() {
 		testPool.Exec(ctx,
-			`DELETE FROM issue WHERE workspace_id = $1 AND title = $2`,
+			`DELETE FROM multica_issue WHERE workspace_id = $1 AND title = $2`,
 			testWorkspaceID, noRuntimeIssueTitle,
 		)
 		testPool.Exec(ctx,
-			`UPDATE "user" SET onboarded_at = NULL, starter_content_state = NULL, language = NULL WHERE id = $1`,
+			`UPDATE multica_user SET onboarded_at = NULL, starter_content_state = NULL, language = NULL WHERE id = $1`,
 			testUserID,
 		)
 	})
 	testPool.Exec(ctx,
-		`DELETE FROM issue WHERE workspace_id = $1 AND title = $2`,
+		`DELETE FROM multica_issue WHERE workspace_id = $1 AND title = $2`,
 		testWorkspaceID, noRuntimeIssueTitle,
 	)
 	testPool.Exec(ctx,
-		`UPDATE "user" SET onboarded_at = NULL, starter_content_state = NULL, language = 'zh-Hans' WHERE id = $1`,
+		`UPDATE multica_user SET onboarded_at = NULL, starter_content_state = NULL, language = 'zh-Hans' WHERE id = $1`,
 		testUserID,
 	)
 
@@ -646,7 +646,7 @@ func TestBootstrapOnboardingNoRuntimeUsesChineseGuideForChineseUsers(t *testing.
 	var description string
 	if err := testPool.QueryRow(ctx, `
 		SELECT description
-		  FROM issue
+		  FROM multica_issue
 		 WHERE id = $1
 	`, resp.IssueID).Scan(&description); err != nil {
 		t.Fatalf("lookup no-runtime onboarding issue: %v", err)

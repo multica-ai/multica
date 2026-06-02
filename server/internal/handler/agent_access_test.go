@@ -22,7 +22,7 @@ func TestMemberAllowedForPrivateAgent_Pure(t *testing.T) {
 	ownerUserID := "11111111-1111-1111-1111-111111111111"
 	otherUserID := "22222222-2222-2222-2222-222222222222"
 
-	agent := db.Agent{
+	agent := db.MulticaAgent{
 		OwnerID: util.MustParseUUID(ownerUserID),
 	}
 
@@ -60,7 +60,7 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 
 	ctx := context.Background()
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO "user" (name, email)
+		INSERT INTO multica_user (name, email)
 		VALUES ('Private Agent Owner', 'private-agent-owner@multica.test')
 		RETURNING id
 	`).Scan(&ownerID); err != nil {
@@ -68,18 +68,18 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM "user" WHERE email = 'private-agent-owner@multica.test'`)
+			`DELETE FROM multica_user WHERE email = 'private-agent-owner@multica.test'`)
 	})
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO member (workspace_id, user_id, role)
+		INSERT INTO multica_member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'member')
 	`, testWorkspaceID, ownerID); err != nil {
 		t.Fatalf("add owner as member: %v", err)
 	}
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO "user" (name, email)
+		INSERT INTO multica_user (name, email)
 		VALUES ('Plain Member', 'plain-member@multica.test')
 		RETURNING id
 	`).Scan(&memberID); err != nil {
@@ -87,18 +87,18 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM "user" WHERE email = 'plain-member@multica.test'`)
+			`DELETE FROM multica_user WHERE email = 'plain-member@multica.test'`)
 	})
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO member (workspace_id, user_id, role)
+		INSERT INTO multica_member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'member')
 	`, testWorkspaceID, memberID); err != nil {
 		t.Fatalf("add plain member: %v", err)
 	}
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (
+		INSERT INTO multica_agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks, owner_id,
 			instructions, custom_env, custom_args
@@ -111,7 +111,7 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM agent WHERE id = $1`, agentID)
+			`DELETE FROM multica_agent WHERE id = $1`, agentID)
 	})
 
 	return agentID, ownerID, memberID
@@ -350,14 +350,14 @@ func TestListChatMessages_PrivateAgentForbidsAfterAccessRevoked(t *testing.T) {
 	// landed).
 	var sessionID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
+		INSERT INTO multica_chat_session (workspace_id, agent_id, creator_id, title, status)
 		VALUES ($1, $2, $3, 'pre-revocation session', 'active')
 		RETURNING id
 	`, testWorkspaceID, agentID, memberID).Scan(&sessionID); err != nil {
 		t.Fatalf("seed chat session: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, sessionID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_chat_session WHERE id = $1`, sessionID)
 	})
 
 	memberRow, err := testHandler.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
@@ -394,7 +394,7 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 	// Create a separate workspace + agent runtime + private agent.
 	var foreignWorkspaceID, foreignUserID, foreignRuntimeID, foreignAgentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO "user" (name, email)
+		INSERT INTO multica_user (name, email)
 		VALUES ('Foreign Owner', 'cross-ws-foreign@multica.test')
 		RETURNING id
 	`).Scan(&foreignUserID); err != nil {
@@ -402,11 +402,11 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM "user" WHERE email = 'cross-ws-foreign@multica.test'`)
+			`DELETE FROM multica_user WHERE email = 'cross-ws-foreign@multica.test'`)
 	})
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
+		INSERT INTO multica_workspace (name, slug, description, issue_prefix)
 		VALUES ('Cross-WS Foreign', 'cross-ws-foreign', '', 'XWF')
 		RETURNING id
 	`).Scan(&foreignWorkspaceID); err != nil {
@@ -414,23 +414,23 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM workspace WHERE slug = 'cross-ws-foreign'`)
+			`DELETE FROM multica_workspace WHERE slug = 'cross-ws-foreign'`)
 	})
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO member (workspace_id, user_id, role)
+		INSERT INTO multica_member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'owner')
 	`, foreignWorkspaceID, foreignUserID); err != nil {
 		t.Fatalf("add foreign member: %v", err)
 	}
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
+		INSERT INTO multica_agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
 		VALUES ($1, NULL, 'Foreign Runtime', 'cloud', 'foreign_test', 'online', 'Foreign', '{}'::jsonb, now())
 		RETURNING id
 	`, foreignWorkspaceID).Scan(&foreignRuntimeID); err != nil {
 		t.Fatalf("create foreign runtime: %v", err)
 	}
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id, instructions, custom_env, custom_args)
+		INSERT INTO multica_agent (workspace_id, name, description, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id, instructions, custom_env, custom_args)
 		VALUES ($1, 'foreign-private-agent', '', 'cloud', '{}'::jsonb, $2, 'private', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
 		RETURNING id
 	`, foreignWorkspaceID, foreignRuntimeID, foreignUserID).Scan(&foreignAgentID); err != nil {
@@ -443,28 +443,28 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 	// agent and enqueued a task.
 	var issueID, commentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_type, creator_id, number)
 		VALUES ($1, 'cross-ws mention test', 'todo', 'medium', 'member', $2,
-		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1)
+		        COALESCE((SELECT MAX(number) FROM multica_issue WHERE workspace_id = $1), 0) + 1)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create test issue: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueID)
 	})
 
 	// Multica's mention format is markdown-linked: [@Name](mention://agent/<uuid>).
 	mention := "[@Foreign](mention://agent/" + foreignAgentID + ")"
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
+		INSERT INTO multica_comment (workspace_id, issue_id, author_type, author_id, content)
 		VALUES ($1, $2, 'member', $3, $4)
 		RETURNING id
 	`, testWorkspaceID, issueID, testUserID, mention).Scan(&commentID); err != nil {
 		t.Fatalf("create test comment: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, commentID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_comment WHERE id = $1`, commentID)
 	})
 
 	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
@@ -481,7 +481,7 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 	// workspace-scoping check.
 	var beforeCount int
 	if err := testPool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM agent_task_queue WHERE agent_id = $1`,
+		`SELECT COUNT(*) FROM multica_agent_task_queue WHERE agent_id = $1`,
 		foreignAgentID,
 	).Scan(&beforeCount); err != nil {
 		t.Fatalf("count tasks before: %v", err)
@@ -491,7 +491,7 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 
 	var afterCount int
 	if err := testPool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM agent_task_queue WHERE agent_id = $1`,
+		`SELECT COUNT(*) FROM multica_agent_task_queue WHERE agent_id = $1`,
 		foreignAgentID,
 	).Scan(&afterCount); err != nil {
 		t.Fatalf("count tasks after: %v", err)

@@ -53,13 +53,13 @@ func TestCreateWorkspace_DoesNotMarkOnboarded(t *testing.T) {
 
 	ctx := context.Background()
 	const slug = "handler-tests-onboarded-null"
-	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	_, _ = testPool.Exec(ctx, `DELETE FROM multica_workspace WHERE slug = $1`, slug)
 	// Ensure the test user starts un-onboarded so the assertion is meaningful.
-	_, _ = testPool.Exec(ctx, `UPDATE "user" SET onboarded_at = NULL WHERE id = $1`, testUserID)
+	_, _ = testPool.Exec(ctx, `UPDATE multica_user SET onboarded_at = NULL WHERE id = $1`, testUserID)
 
 	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
-		_, _ = testPool.Exec(context.Background(), `UPDATE "user" SET onboarded_at = NULL WHERE id = $1`, testUserID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_workspace WHERE slug = $1`, slug)
+		_, _ = testPool.Exec(context.Background(), `UPDATE multica_user SET onboarded_at = NULL WHERE id = $1`, testUserID)
 	})
 
 	w := httptest.NewRecorder()
@@ -73,7 +73,7 @@ func TestCreateWorkspace_DoesNotMarkOnboarded(t *testing.T) {
 	}
 
 	var onboardedAt *string
-	if err := testPool.QueryRow(ctx, `SELECT onboarded_at FROM "user" WHERE id = $1`, testUserID).Scan(&onboardedAt); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT onboarded_at FROM multica_user WHERE id = $1`, testUserID).Scan(&onboardedAt); err != nil {
 		t.Fatalf("lookup user: %v", err)
 	}
 	if onboardedAt != nil {
@@ -91,22 +91,22 @@ func TestDeleteWorkspace_RequiresOwner(t *testing.T) {
 	ctx := context.Background()
 
 	const slug = "handler-tests-delete-403"
-	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	_, _ = testPool.Exec(ctx, `DELETE FROM multica_workspace WHERE slug = $1`, slug)
 
 	var wsID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO workspace (name, slug, description)
+INSERT INTO multica_workspace (name, slug, description)
 VALUES ($1, $2, $3)
 RETURNING id
 `, "Handler Test Delete 403", slug, "DeleteWorkspace handler permission test").Scan(&wsID); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_workspace WHERE id = $1`, wsID)
 	})
 
 	if _, err := testPool.Exec(ctx, `
-INSERT INTO member (workspace_id, user_id, role)
+INSERT INTO multica_member (workspace_id, user_id, role)
 VALUES ($1, $2, 'admin')
 `, wsID, testUserID); err != nil {
 		t.Fatalf("create admin member: %v", err)
@@ -122,7 +122,7 @@ VALUES ($1, $2, 'admin')
 	}
 
 	var exists bool
-	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM workspace WHERE id = $1)`, wsID).Scan(&exists); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM multica_workspace WHERE id = $1)`, wsID).Scan(&exists); err != nil {
 		t.Fatalf("verify workspace: %v", err)
 	}
 	if !exists {
@@ -137,22 +137,22 @@ func TestDeleteWorkspace_OwnerSucceeds(t *testing.T) {
 	ctx := context.Background()
 
 	const slug = "handler-tests-delete-ok"
-	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	_, _ = testPool.Exec(ctx, `DELETE FROM multica_workspace WHERE slug = $1`, slug)
 
 	var wsID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO workspace (name, slug, description)
+INSERT INTO multica_workspace (name, slug, description)
 VALUES ($1, $2, $3)
 RETURNING id
 `, "Handler Test Delete OK", slug, "DeleteWorkspace handler owner test").Scan(&wsID); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_workspace WHERE id = $1`, wsID)
 	})
 
 	if _, err := testPool.Exec(ctx, `
-INSERT INTO member (workspace_id, user_id, role)
+INSERT INTO multica_member (workspace_id, user_id, role)
 VALUES ($1, $2, 'owner')
 `, wsID, testUserID); err != nil {
 		t.Fatalf("create owner member: %v", err)
@@ -168,7 +168,7 @@ VALUES ($1, $2, 'owner')
 	}
 
 	var exists bool
-	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM workspace WHERE id = $1)`, wsID).Scan(&exists); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM multica_workspace WHERE id = $1)`, wsID).Scan(&exists); err != nil {
 		t.Fatalf("verify workspace: %v", err)
 	}
 	if exists {
@@ -195,11 +195,11 @@ func setupRevocationFixture(t *testing.T, slug, daemonID string) revocationFixtu
 	t.Helper()
 	ctx := context.Background()
 
-	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	_, _ = testPool.Exec(ctx, `DELETE FROM multica_workspace WHERE slug = $1`, slug)
 
 	var wsID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO workspace (name, slug, description, issue_prefix)
+INSERT INTO multica_workspace (name, slug, description, issue_prefix)
 VALUES ($1, $2, $3, $4)
 RETURNING id
 `, "Revocation "+slug, slug, "revocation test", "REV").Scan(&wsID); err != nil {
@@ -210,7 +210,7 @@ RETURNING id
 	// passes. Two owners total so LeaveWorkspace doesn't trip the "must keep
 	// at least one owner" guard.
 	if _, err := testPool.Exec(ctx, `
-INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
+INSERT INTO multica_member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
 `, wsID, testUserID); err != nil {
 		t.Fatalf("create requester member: %v", err)
 	}
@@ -218,7 +218,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
 	targetEmail := fmt.Sprintf("revocation-%s@multica.ai", slug)
 	var targetUserID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+INSERT INTO multica_user (name, email) VALUES ($1, $2) RETURNING id
 `, "Revocation Target "+slug, targetEmail).Scan(&targetUserID); err != nil {
 		t.Fatalf("create target user: %v", err)
 	}
@@ -227,20 +227,20 @@ INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
 	// agent, member, daemon_token), then user (whose deletion would
 	// otherwise be blocked by agent.owner_id / agent_runtime.owner_id FKs).
 	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, targetUserID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_workspace WHERE id = $1`, wsID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_user WHERE id = $1`, targetUserID)
 	})
 
 	var memberID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner') RETURNING id
+INSERT INTO multica_member (workspace_id, user_id, role) VALUES ($1, $2, 'owner') RETURNING id
 `, wsID, targetUserID).Scan(&memberID); err != nil {
 		t.Fatalf("create target member: %v", err)
 	}
 
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent_runtime (
+INSERT INTO multica_agent_runtime (
     workspace_id, daemon_id, name, runtime_mode, provider, status,
     device_info, metadata, owner_id, last_seen_at
 )
@@ -252,7 +252,7 @@ RETURNING id
 
 	var agentID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent (
+INSERT INTO multica_agent (
     workspace_id, name, description, runtime_mode, runtime_config,
     runtime_id, visibility, max_concurrent_tasks, owner_id
 )
@@ -264,7 +264,7 @@ RETURNING id
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+INSERT INTO multica_agent_task_queue (agent_id, runtime_id, status, priority)
 VALUES ($1, $2, 'queued', 0)
 RETURNING id
 `, agentID, runtimeID).Scan(&taskID); err != nil {
@@ -277,7 +277,7 @@ RETURNING id
 	sum := sha256.Sum256([]byte(rawToken))
 	tokenHash := hex.EncodeToString(sum[:])
 	if _, err := testPool.Exec(ctx, `
-INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, expires_at)
+INSERT INTO multica_daemon_token (token_hash, workspace_id, daemon_id, expires_at)
 VALUES ($1, $2, $3, now() + interval '1 day')
 `, tokenHash, wsID, daemonID); err != nil {
 		t.Fatalf("insert daemon_token: %v", err)
@@ -300,7 +300,7 @@ func assertRevoked(t *testing.T, fx revocationFixture) {
 	ctx := context.Background()
 
 	var memberExists bool
-	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM member WHERE id = $1)`, fx.MemberID).Scan(&memberExists); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM multica_member WHERE id = $1)`, fx.MemberID).Scan(&memberExists); err != nil {
 		t.Fatalf("query member: %v", err)
 	}
 	if memberExists {
@@ -308,7 +308,7 @@ func assertRevoked(t *testing.T, fx revocationFixture) {
 	}
 
 	var runtimeStatus string
-	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_runtime WHERE id = $1`, fx.RuntimeID).Scan(&runtimeStatus); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT status FROM multica_agent_runtime WHERE id = $1`, fx.RuntimeID).Scan(&runtimeStatus); err != nil {
 		t.Fatalf("query runtime: %v", err)
 	}
 	if runtimeStatus != "offline" {
@@ -316,7 +316,7 @@ func assertRevoked(t *testing.T, fx revocationFixture) {
 	}
 
 	var archivedAt *string
-	if err := testPool.QueryRow(ctx, `SELECT archived_at::text FROM agent WHERE id = $1`, fx.AgentID).Scan(&archivedAt); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT archived_at::text FROM multica_agent WHERE id = $1`, fx.AgentID).Scan(&archivedAt); err != nil {
 		t.Fatalf("query agent: %v", err)
 	}
 	if archivedAt == nil {
@@ -324,7 +324,7 @@ func assertRevoked(t *testing.T, fx revocationFixture) {
 	}
 
 	var taskStatus string
-	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, fx.TaskID).Scan(&taskStatus); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT status FROM multica_agent_task_queue WHERE id = $1`, fx.TaskID).Scan(&taskStatus); err != nil {
 		t.Fatalf("query task: %v", err)
 	}
 	if taskStatus != "cancelled" {
@@ -332,7 +332,7 @@ func assertRevoked(t *testing.T, fx revocationFixture) {
 	}
 
 	var tokenExists bool
-	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM daemon_token WHERE token_hash = $1)`, fx.TokenHash).Scan(&tokenExists); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM multica_daemon_token WHERE token_hash = $1)`, fx.TokenHash).Scan(&tokenExists); err != nil {
 		t.Fatalf("query daemon_token: %v", err)
 	}
 	if tokenExists {
@@ -400,7 +400,7 @@ func TestDeleteMember_CancelsTasksFromAgentReassignment(t *testing.T) {
 	// (not the leaving member). The agent originally lived here.
 	var otherRuntimeID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent_runtime (
+INSERT INTO multica_agent_runtime (
     workspace_id, daemon_id, name, runtime_mode, provider, status,
     device_info, metadata, owner_id, last_seen_at
 )
@@ -415,7 +415,7 @@ RETURNING id
 	// to the leaving member's runtime).
 	var orphanTaskID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+INSERT INTO multica_agent_task_queue (agent_id, runtime_id, status, priority)
 VALUES ($1, $2, 'queued', 0)
 RETURNING id
 `, fx.AgentID, otherRuntimeID).Scan(&orphanTaskID); err != nil {
@@ -438,7 +438,7 @@ RETURNING id
 	// cancelled. Without the by-agent leg in CancelAgentTasksByRuntimeOrAgent
 	// this stays 'queued' and would be picked up by the other runtime.
 	var orphanStatus string
-	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, orphanTaskID).Scan(&orphanStatus); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT status FROM multica_agent_task_queue WHERE id = $1`, orphanTaskID).Scan(&orphanStatus); err != nil {
 		t.Fatalf("query orphan task: %v", err)
 	}
 	if orphanStatus != "cancelled" {
@@ -448,7 +448,7 @@ RETURNING id
 	// And the OTHER runtime — owned by an active member — must still be
 	// online: revocation is scoped to the leaving member's owned runtimes.
 	var otherStatus string
-	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_runtime WHERE id = $1`, otherRuntimeID).Scan(&otherStatus); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT status FROM multica_agent_runtime WHERE id = $1`, otherRuntimeID).Scan(&otherStatus); err != nil {
 		t.Fatalf("query other runtime: %v", err)
 	}
 	if otherStatus != "online" {
@@ -463,11 +463,11 @@ RETURNING id
 func TestDeleteMember_NoRuntimes_DeletesMember(t *testing.T) {
 	ctx := context.Background()
 	const slug = "handler-tests-revoke-no-runtimes"
-	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	_, _ = testPool.Exec(ctx, `DELETE FROM multica_workspace WHERE slug = $1`, slug)
 
 	var wsID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO workspace (name, slug, description, issue_prefix)
+INSERT INTO multica_workspace (name, slug, description, issue_prefix)
 VALUES ($1, $2, $3, $4)
 RETURNING id
 `, "Revocation no runtimes", slug, "revocation no-runtimes test", "REV").Scan(&wsID); err != nil {
@@ -475,25 +475,25 @@ RETURNING id
 	}
 
 	if _, err := testPool.Exec(ctx, `
-INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
+INSERT INTO multica_member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
 `, wsID, testUserID); err != nil {
 		t.Fatalf("create requester member: %v", err)
 	}
 
 	var targetUserID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+INSERT INTO multica_user (name, email) VALUES ($1, $2) RETURNING id
 `, "Revocation No Runtimes Target", "revocation-no-runtimes@multica.ai").Scan(&targetUserID); err != nil {
 		t.Fatalf("create target user: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, targetUserID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_workspace WHERE id = $1`, wsID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM multica_user WHERE id = $1`, targetUserID)
 	})
 
 	var memberID string
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin') RETURNING id
+INSERT INTO multica_member (workspace_id, user_id, role) VALUES ($1, $2, 'admin') RETURNING id
 `, wsID, targetUserID).Scan(&memberID); err != nil {
 		t.Fatalf("create target member: %v", err)
 	}
@@ -509,7 +509,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin') RETURN
 	}
 
 	var memberExists bool
-	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM member WHERE id = $1)`, memberID).Scan(&memberExists); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM multica_member WHERE id = $1)`, memberID).Scan(&memberExists); err != nil {
 		t.Fatalf("query member: %v", err)
 	}
 	if memberExists {

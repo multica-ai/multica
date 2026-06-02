@@ -71,11 +71,11 @@ func setHandlerTestWorkspaceRepos(t *testing.T, repos []map[string]string) {
 	if err != nil {
 		t.Fatalf("marshal repos: %v", err)
 	}
-	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, data, testWorkspaceID); err != nil {
-		t.Fatalf("update workspace repos: %v", err)
+	if _, err := testPool.Exec(context.Background(), `UPDATE multica_workspace SET repos = $1 WHERE id = $2`, data, testWorkspaceID); err != nil {
+		t.Fatalf("update multica_workspace repos: %v", err)
 	}
 	t.Cleanup(func() {
-		if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte("[]"), testWorkspaceID); err != nil {
+		if _, err := testPool.Exec(context.Background(), `UPDATE multica_workspace SET repos = $1 WHERE id = $2`, []byte("[]"), testWorkspaceID); err != nil {
 			t.Fatalf("reset workspace repos: %v", err)
 		}
 	})
@@ -100,7 +100,7 @@ func createClaimReclaimRuntime(t *testing.T, ctx context.Context, name string) s
 
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
+		INSERT INTO multica_agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider,
 			status, device_info, metadata, last_seen_at, visibility
 		)
@@ -109,7 +109,7 @@ func createClaimReclaimRuntime(t *testing.T, ctx context.Context, name string) s
 	`, testWorkspaceID, name).Scan(&runtimeID); err != nil {
 		t.Fatalf("setup: create runtime: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_runtime WHERE id = $1`, runtimeID) })
 
 	return runtimeID
 }
@@ -119,7 +119,7 @@ func createClaimReclaimAgentAndIssue(t *testing.T, ctx context.Context, runtimeI
 
 	var agentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (
+		INSERT INTO multica_agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks, owner_id
 		)
@@ -128,21 +128,21 @@ func createClaimReclaimAgentAndIssue(t *testing.T, ctx context.Context, runtimeI
 	`, testWorkspaceID, name, runtimeID, testUserID).Scan(&agentID); err != nil {
 		t.Fatalf("setup: create agent: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent WHERE id = $1`, agentID) })
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES (
 			$1, $2, 'in_progress', 'none', $3, 'member',
-			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1),
+			(SELECT COALESCE(MAX(number), 82649) + 1 FROM multica_issue WHERE workspace_id = $1),
 			0
 		)
 		RETURNING id
 	`, testWorkspaceID, name+" issue", testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	return agentID, issueID
 }
@@ -152,7 +152,7 @@ func createDispatchedClaimFixtureTask(t *testing.T, ctx context.Context, agentID
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at
 		)
 		VALUES ($1, $2, $3, 'dispatched', 0, now() - ($4::interval), CASE WHEN $5::boolean THEN now() ELSE NULL END)
@@ -160,7 +160,7 @@ func createDispatchedClaimFixtureTask(t *testing.T, ctx context.Context, agentID
 	`, agentID, runtimeID, issueID, dispatchedAge, started).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create dispatched task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	return taskID
 }
@@ -212,7 +212,7 @@ func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {
 	var refreshed bool
 	if err := testPool.QueryRow(ctx, `
 		SELECT dispatched_at > now() - interval '15 seconds'
-		FROM agent_task_queue
+		FROM multica_agent_task_queue
 		WHERE id = $1
 	`, taskID).Scan(&refreshed); err != nil {
 		t.Fatalf("load refreshed dispatched_at: %v", err)
@@ -240,7 +240,7 @@ func TestClaimTaskByRuntime_DoesNotReclaimFreshDispatchedTask(t *testing.T) {
 	var stillFresh bool
 	if err := testPool.QueryRow(ctx, `
 		SELECT dispatched_at < now() - interval '70 seconds'
-		FROM agent_task_queue
+		FROM multica_agent_task_queue
 		WHERE id = $1
 	`, taskID).Scan(&stillFresh); err != nil {
 		t.Fatalf("load fresh dispatched task: %v", err)
@@ -268,7 +268,7 @@ func TestClaimTaskByRuntime_DoesNotReclaimAlreadyStartedTask(t *testing.T) {
 	var startedAtValid bool
 	if err := testPool.QueryRow(ctx, `
 		SELECT started_at IS NOT NULL
-		FROM agent_task_queue
+		FROM multica_agent_task_queue
 		WHERE id = $1
 	`, taskID).Scan(&startedAtValid); err != nil {
 		t.Fatalf("load started dispatched task: %v", err)
@@ -297,7 +297,7 @@ func TestClaimTaskByRuntime_DoesNotReclaimDifferentRuntimeTask(t *testing.T) {
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `
 		SELECT runtime_id::text
-		FROM agent_task_queue
+		FROM multica_agent_task_queue
 		WHERE id = $1
 	`, taskID).Scan(&runtimeID); err != nil {
 		t.Fatalf("load other-runtime dispatched task: %v", err)
@@ -340,7 +340,7 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	// Clean up: deregister the runtime.
 	rt := runtimes[0].(map[string]any)
 	runtimeID := rt["id"].(string)
-	testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, runtimeID)
 }
 
 func TestDaemonRegister_WithDaemonToken_WorkspaceMismatch(t *testing.T) {
@@ -388,7 +388,7 @@ func TestDaemonHeartbeat_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&regResp)
 	runtimes := regResp["runtimes"].([]any)
 	runtimeID := runtimes[0].(map[string]any)["id"].(string)
-	defer testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	defer testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, runtimeID)
 
 	// Try heartbeat with a daemon token from a DIFFERENT workspace — should fail.
 	w = httptest.NewRecorder()
@@ -545,33 +545,33 @@ func TestGetTaskStatus_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	// Create a task in the test workspace.
 	var issueID, taskID string
 	err := testPool.QueryRow(context.Background(), `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type)
 		VALUES ($1, 'daemon-auth-test-issue', 'todo', 'medium', $2, 'member')
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID)
 	if err != nil {
 		t.Fatalf("setup: create issue: %v", err)
 	}
-	defer testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	defer testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueID)
 
 	// Get an agent and runtime from the test workspace.
 	var agentID, runtimeID string
 	err = testPool.QueryRow(context.Background(), `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+		SELECT a.id, a.runtime_id FROM multica_agent a WHERE a.workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 	if err != nil {
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
 	err = testPool.QueryRow(context.Background(), `
-		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, status, runtime_id)
 		VALUES ($1, $2, 'queued', $3)
 		RETURNING id
 	`, agentID, issueID, runtimeID).Scan(&taskID)
 	if err != nil {
 		t.Fatalf("setup: create task: %v", err)
 	}
-	defer testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	defer testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID)
 
 	// Try GetTaskStatus with a daemon token from a DIFFERENT workspace — should fail.
 	w := httptest.NewRecorder()
@@ -653,14 +653,14 @@ func TestGetIssueGCCheck_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	// only status + updated_at, so a "done" issue exercises the typical path.
 	var issueID string
 	err := testPool.QueryRow(context.Background(), `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type)
 		VALUES ($1, 'gc-check-auth-test-issue', 'done', 'medium', $2, 'member')
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID)
 	if err != nil {
 		t.Fatalf("setup: create issue: %v", err)
 	}
-	defer testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	defer testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueID)
 
 	// Cross-workspace daemon token must be rejected with 404 — same status
 	// code as "issue not found" so there is no UUID enumeration oracle.
@@ -740,19 +740,19 @@ func setupForeignWorkspaceFixture(t *testing.T) (string, string) {
 
 	var foreignWorkspaceID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
+		INSERT INTO multica_workspace (name, slug, description, issue_prefix)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id
 	`, "Foreign Workspace", "foreign-idor-tests", "Cross-tenant IDOR test workspace", "FOR").Scan(&foreignWorkspaceID); err != nil {
 		t.Fatalf("setup: create foreign workspace: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_workspace WHERE id = $1`, foreignWorkspaceID)
 	})
 
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
+		INSERT INTO multica_agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
 		)
 		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now())
@@ -763,7 +763,7 @@ func setupForeignWorkspaceFixture(t *testing.T) (string, string) {
 
 	var agentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (
+		INSERT INTO multica_agent (
 			workspace_id, name, description, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks
 		)
@@ -775,7 +775,7 @@ func setupForeignWorkspaceFixture(t *testing.T) (string, string) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type)
 		VALUES ($1, 'foreign-workspace-issue', 'todo', 'medium', $2, 'agent')
 		RETURNING id
 	`, foreignWorkspaceID, agentID).Scan(&issueID); err != nil {
@@ -784,7 +784,7 @@ func setupForeignWorkspaceFixture(t *testing.T) (string, string) {
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, status, runtime_id)
 		VALUES ($1, $2, 'queued', $3)
 		RETURNING id
 	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
@@ -836,7 +836,7 @@ func TestCancelTask_CrossWorkspace_Returns404(t *testing.T) {
 	// The foreign task must not have been cancelled.
 	var status string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT status FROM agent_task_queue WHERE id = $1`, foreignTaskID,
+		`SELECT status FROM multica_agent_task_queue WHERE id = $1`, foreignTaskID,
 	).Scan(&status); err != nil {
 		t.Fatalf("read foreign task status: %v", err)
 	}
@@ -858,7 +858,7 @@ func TestCancelTask_TaskBelongsToDifferentIssue_Returns404(t *testing.T) {
 
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		`SELECT id, runtime_id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
 	).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
@@ -867,33 +867,33 @@ func TestCancelTask_TaskBelongsToDifferentIssue_Returns404(t *testing.T) {
 	// Issue X — the task's real parent.
 	var issueXID, taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'cancel-crossissue-x', 'todo', 'medium', $2, 'member', 91001, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueXID); err != nil {
 		t.Fatalf("setup: create issue X: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueXID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueXID) })
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, status, runtime_id)
 		VALUES ($1, $2, 'queued', $3)
 		RETURNING id
 	`, agentID, issueXID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	// Issue Y — a sibling in the same workspace, used only as the URL cover.
 	var issueYID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'cancel-crossissue-y', 'todo', 'medium', $2, 'member', 91002, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueYID); err != nil {
 		t.Fatalf("setup: create issue Y: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueYID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueYID) })
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues/"+issueYID+"/tasks/"+taskID+"/cancel", nil)
@@ -906,7 +906,7 @@ func TestCancelTask_TaskBelongsToDifferentIssue_Returns404(t *testing.T) {
 
 	var status string
 	if err := testPool.QueryRow(ctx,
-		`SELECT status FROM agent_task_queue WHERE id = $1`, taskID,
+		`SELECT status FROM multica_agent_task_queue WHERE id = $1`, taskID,
 	).Scan(&status); err != nil {
 		t.Fatalf("read task status: %v", err)
 	}
@@ -926,7 +926,7 @@ func TestCancelTask_SameIssue_Succeeds(t *testing.T) {
 
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		`SELECT id, runtime_id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
 	).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
@@ -934,22 +934,22 @@ func TestCancelTask_SameIssue_Succeeds(t *testing.T) {
 
 	var issueID, taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'cancel-happy-path', 'todo', 'medium', $2, 'member', 91003, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, status, runtime_id)
 		VALUES ($1, $2, 'queued', $3)
 		RETURNING id
 	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues/"+issueID+"/tasks/"+taskID+"/cancel", nil)
@@ -1086,16 +1086,16 @@ func TestGetDaemonWorkspaceRepos_VersionIgnoresOrderAndDescription(t *testing.T)
 
 	version1 := getReposVersion()
 
-	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/web.git","description":"frontend"},{"url":"git@example.com:team/api.git","description":"backend"}]`), testWorkspaceID); err != nil {
-		t.Fatalf("update workspace repos: %v", err)
+	if _, err := testPool.Exec(context.Background(), `UPDATE multica_workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/web.git","description":"frontend"},{"url":"git@example.com:team/api.git","description":"backend"}]`), testWorkspaceID); err != nil {
+		t.Fatalf("update multica_workspace repos: %v", err)
 	}
 	version2 := getReposVersion()
 	if version1 != version2 {
 		t.Fatalf("expected repos_version to ignore order/description changes, got %s vs %s", version1, version2)
 	}
 
-	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/api.git","description":"backend"},{"url":"git@example.com:team/mobile.git","description":"mobile"}]`), testWorkspaceID); err != nil {
-		t.Fatalf("update workspace repos: %v", err)
+	if _, err := testPool.Exec(context.Background(), `UPDATE multica_workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/api.git","description":"backend"},{"url":"git@example.com:team/mobile.git","description":"mobile"}]`), testWorkspaceID); err != nil {
+		t.Fatalf("update multica_workspace repos: %v", err)
 	}
 	version3 := getReposVersion()
 	if strings.EqualFold(version2, version3) {
@@ -1128,27 +1128,27 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 	// Seed a legacy runtime row keyed on the hostname-derived id.
 	var legacyRuntimeID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		INSERT INTO multica_agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
 		VALUES ($1, $2, 'legacy-runtime', 'local', 'claude', 'offline', 'TestMachine.local', '{}'::jsonb, $3, now() - interval '1 hour')
 		RETURNING id
 	`, testWorkspaceID, legacyDaemonID, testUserID).Scan(&legacyRuntimeID); err != nil {
 		t.Fatalf("seed legacy runtime: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyRuntimeID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, legacyRuntimeID)
 	})
 
 	// An agent bound to the legacy runtime.
 	var legacyAgentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
+		INSERT INTO multica_agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
 		VALUES ($1, 'legacy-agent', 'local', '{}'::jsonb, $2, 'workspace', 1)
 		RETURNING id
 	`, testWorkspaceID, legacyRuntimeID).Scan(&legacyAgentID); err != nil {
 		t.Fatalf("seed legacy agent: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, legacyAgentID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent WHERE id = $1`, legacyAgentID)
 	})
 
 	// An issue + task also bound to the legacy runtime (tasks have ON DELETE
@@ -1156,23 +1156,23 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 	// drop historical tasks).
 	var legacyIssueID, legacyTaskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'legacy-task-owner', 'todo', 'medium', $2, 'member', 97501, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&legacyIssueID); err != nil {
 		t.Fatalf("seed legacy issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, legacyIssueID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, legacyIssueID) })
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		INSERT INTO multica_agent_task_queue (agent_id, issue_id, status, runtime_id)
 		VALUES ($1, $2, 'completed', $3)
 		RETURNING id
 	`, legacyAgentID, legacyIssueID, legacyRuntimeID).Scan(&legacyTaskID); err != nil {
 		t.Fatalf("seed legacy task: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, legacyTaskID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, legacyTaskID)
 	})
 
 	// Register under the new stable UUID, declaring the prior hostname-derived
@@ -1199,7 +1199,7 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 	runtimes := resp["runtimes"].([]any)
 	newRuntimeID := runtimes[0].(map[string]any)["id"].(string)
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, newRuntimeID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, newRuntimeID)
 	})
 
 	if newRuntimeID == legacyRuntimeID {
@@ -1208,7 +1208,7 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 
 	// Agent should now point at the new runtime.
 	var agentRuntimeID string
-	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, legacyAgentID).Scan(&agentRuntimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM multica_agent WHERE id = $1`, legacyAgentID).Scan(&agentRuntimeID); err != nil {
 		t.Fatalf("read agent runtime_id: %v", err)
 	}
 	if agentRuntimeID != newRuntimeID {
@@ -1217,7 +1217,7 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 
 	// Task should be reassigned (not dropped).
 	var taskRuntimeID string
-	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent_task_queue WHERE id = $1`, legacyTaskID).Scan(&taskRuntimeID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM multica_agent_task_queue WHERE id = $1`, legacyTaskID).Scan(&taskRuntimeID); err != nil {
 		t.Fatalf("read task runtime_id: %v", err)
 	}
 	if taskRuntimeID != newRuntimeID {
@@ -1227,7 +1227,7 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 	// Legacy runtime row must be gone — no more "online + offline" duplicates
 	// for the same machine.
 	var legacyCount int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM multica_agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount); err != nil {
 		t.Fatalf("count legacy runtime: %v", err)
 	}
 	if legacyCount != 0 {
@@ -1236,7 +1236,7 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 
 	// New row should record which legacy id it subsumed, for debug/audit.
 	var legacyTrace *string
-	if err := testPool.QueryRow(ctx, `SELECT legacy_daemon_id FROM agent_runtime WHERE id = $1`, newRuntimeID).Scan(&legacyTrace); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT legacy_daemon_id FROM multica_agent_runtime WHERE id = $1`, newRuntimeID).Scan(&legacyTrace); err != nil {
 		t.Fatalf("read legacy_daemon_id: %v", err)
 	}
 	if legacyTrace == nil || *legacyTrace != legacyDaemonID {
@@ -1261,14 +1261,14 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_ReverseDotLocal(t *testing.T
 
 	var legacyRuntimeID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		INSERT INTO multica_agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
 		VALUES ($1, $2, 'legacy-runtime-reverse', 'local', 'claude', 'offline', '', '{}'::jsonb, $3, now())
 		RETURNING id
 	`, testWorkspaceID, legacyDaemonID, testUserID).Scan(&legacyRuntimeID); err != nil {
 		t.Fatalf("seed legacy runtime: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyRuntimeID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, legacyRuntimeID)
 	})
 
 	w := httptest.NewRecorder()
@@ -1290,11 +1290,11 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_ReverseDotLocal(t *testing.T
 	json.NewDecoder(w.Body).Decode(&resp)
 	newRuntimeID := resp["runtimes"].([]any)[0].(map[string]any)["id"].(string)
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, newRuntimeID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, newRuntimeID)
 	})
 
 	var legacyCount int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM multica_agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount); err != nil {
 		t.Fatalf("count legacy runtime: %v", err)
 	}
 	if legacyCount != 0 {
@@ -1319,14 +1319,14 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_CaseDrift(t *testing.T) {
 
 	var legacyRuntimeID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		INSERT INTO multica_agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
 		VALUES ($1, $2, 'legacy-runtime-case', 'local', 'claude', 'offline', '', '{}'::jsonb, $3, now())
 		RETURNING id
 	`, testWorkspaceID, storedDaemonID, testUserID).Scan(&legacyRuntimeID); err != nil {
 		t.Fatalf("seed legacy runtime: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyRuntimeID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, legacyRuntimeID)
 	})
 
 	w := httptest.NewRecorder()
@@ -1348,11 +1348,11 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_CaseDrift(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&resp)
 	newRuntimeID := resp["runtimes"].([]any)[0].(map[string]any)["id"].(string)
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, newRuntimeID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, newRuntimeID)
 	})
 
 	var legacyCount int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM multica_agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount); err != nil {
 		t.Fatalf("count legacy runtime: %v", err)
 	}
 	if legacyCount != 0 {
@@ -1360,7 +1360,7 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_CaseDrift(t *testing.T) {
 	}
 
 	var legacyTrace *string
-	if err := testPool.QueryRow(ctx, `SELECT legacy_daemon_id FROM agent_runtime WHERE id = $1`, newRuntimeID).Scan(&legacyTrace); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT legacy_daemon_id FROM multica_agent_runtime WHERE id = $1`, newRuntimeID).Scan(&legacyTrace); err != nil {
 		t.Fatalf("read legacy_daemon_id: %v", err)
 	}
 	if legacyTrace == nil || *legacyTrace != emittedLegacyID {
@@ -1389,41 +1389,41 @@ func TestDaemonRegister_MergesAllCaseDuplicateLegacyRuntimes(t *testing.T) {
 
 	var legacyUpperID, legacyLowerID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		INSERT INTO multica_agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
 		VALUES ($1, $2, 'legacy-upper', 'local', 'claude', 'offline', '', '{}'::jsonb, $3, now() - interval '2 hours')
 		RETURNING id
 	`, testWorkspaceID, storedUpperID, testUserID).Scan(&legacyUpperID); err != nil {
 		t.Fatalf("seed upper-case legacy runtime: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyUpperID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, legacyUpperID) })
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+		INSERT INTO multica_agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
 		VALUES ($1, $2, 'legacy-lower', 'local', 'claude', 'offline', '', '{}'::jsonb, $3, now() - interval '1 hour')
 		RETURNING id
 	`, testWorkspaceID, storedLowerID, testUserID).Scan(&legacyLowerID); err != nil {
 		t.Fatalf("seed lower-case legacy runtime: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyLowerID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, legacyLowerID) })
 
 	// Bind one agent to each legacy row to verify both sides get reassigned.
 	var upperAgentID, lowerAgentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
+		INSERT INTO multica_agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
 		VALUES ($1, 'dup-agent-upper', 'local', '{}'::jsonb, $2, 'workspace', 1)
 		RETURNING id
 	`, testWorkspaceID, legacyUpperID).Scan(&upperAgentID); err != nil {
 		t.Fatalf("seed upper agent: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, upperAgentID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent WHERE id = $1`, upperAgentID) })
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
+		INSERT INTO multica_agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
 		VALUES ($1, 'dup-agent-lower', 'local', '{}'::jsonb, $2, 'workspace', 1)
 		RETURNING id
 	`, testWorkspaceID, legacyLowerID).Scan(&lowerAgentID); err != nil {
 		t.Fatalf("seed lower agent: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, lowerAgentID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent WHERE id = $1`, lowerAgentID) })
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/daemon/register", map[string]any{
@@ -1444,13 +1444,13 @@ func TestDaemonRegister_MergesAllCaseDuplicateLegacyRuntimes(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&resp)
 	newRuntimeID := resp["runtimes"].([]any)[0].(map[string]any)["id"].(string)
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, newRuntimeID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, newRuntimeID)
 	})
 
 	// Both case-duplicate legacy rows must be gone — not just one.
 	var stillPresent int
 	if err := testPool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_runtime WHERE id = ANY($1)
+		SELECT count(*) FROM multica_agent_runtime WHERE id = ANY($1)
 	`, []string{legacyUpperID, legacyLowerID}).Scan(&stillPresent); err != nil {
 		t.Fatalf("count legacy runtimes: %v", err)
 	}
@@ -1461,7 +1461,7 @@ func TestDaemonRegister_MergesAllCaseDuplicateLegacyRuntimes(t *testing.T) {
 	// Both agents must point at the new runtime.
 	for _, agentID := range []string{upperAgentID, lowerAgentID} {
 		var runtimeID string
-		if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM multica_agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
 			t.Fatalf("read agent runtime_id: %v", err)
 		}
 		if runtimeID != newRuntimeID {
@@ -1501,11 +1501,11 @@ func TestDaemonRegister_LegacyIDNoMatchIsNoop(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&resp)
 	runtimeID := resp["runtimes"].([]any)[0].(map[string]any)["id"].(string)
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, runtimeID)
 	})
 
 	var legacy *string
-	if err := testPool.QueryRow(ctx, `SELECT legacy_daemon_id FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&legacy); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT legacy_daemon_id FROM multica_agent_runtime WHERE id = $1`, runtimeID).Scan(&legacy); err != nil {
 		t.Fatalf("read legacy_daemon_id: %v", err)
 	}
 	if legacy != nil {
@@ -1525,14 +1525,14 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+		SELECT a.id, a.runtime_id FROM multica_agent a WHERE a.workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
 	var autopilotID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot (
+		INSERT INTO multica_autopilot (
 			workspace_id, title, assignee_id, execution_mode,
 			created_by_type, created_by_id
 		)
@@ -1541,11 +1541,11 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
 		t.Fatalf("setup: create autopilot: %v", err)
 	}
-	defer testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+	defer testPool.Exec(ctx, `DELETE FROM multica_autopilot WHERE id = $1`, autopilotID)
 
 	var runID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot_run (autopilot_id, source, status)
+		INSERT INTO multica_autopilot_run (autopilot_id, source, status)
 		VALUES ($1, 'manual', 'running')
 		RETURNING id
 	`, autopilotID).Scan(&runID); err != nil {
@@ -1555,7 +1555,7 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 	// issue_id is explicitly NULL — the condition that used to trigger 404.
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority, autopilot_run_id
 		)
 		VALUES ($1, $2, NULL, 'dispatched', 0, $3)
@@ -1563,7 +1563,7 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 	`, agentID, runtimeID, runID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create autopilot task: %v", err)
 	}
-	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	defer testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID)
 
 	// Cross-workspace daemon token must still 404.
 	w := httptest.NewRecorder()
@@ -1590,7 +1590,7 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 	}
 
 	var status string
-	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT status FROM multica_agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
 		t.Fatalf("post-check: read task status: %v", err)
 	}
 	if status != "running" {
@@ -1619,15 +1619,15 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	// workspace's repos list.
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+		INSERT INTO multica_project (workspace_id, title) VALUES ($1, $2) RETURNING id
 	`, testWorkspaceID, "Claim project repo override").Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_project WHERE id = $1`, projectID) })
 
 	const projectRepoURL = "https://github.com/example/project-only-repo"
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO project_resource (
+		INSERT INTO multica_project_resource (
 			project_id, workspace_id, resource_type, resource_ref, position
 		) VALUES ($1, $2, 'github_repo', $3::jsonb, 0)
 	`, projectID, testWorkspaceID, `{"url":"`+projectRepoURL+`"}`); err != nil {
@@ -1637,7 +1637,7 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	// Agent + runtime + queued task in this project.
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		`SELECT id, runtime_id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
 	).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("get agent: %v", err)
@@ -1645,25 +1645,25 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (
+		INSERT INTO multica_issue (
 			workspace_id, project_id, title, status, priority, creator_id, creator_type, number, position
 		) VALUES ($1, $2, 'project repo override', 'todo', 'medium', $3, 'member', 88001, 0)
 		RETURNING id
 	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority
 		) VALUES ($1, $2, $3, 'queued', 0)
 		RETURNING id
 	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-project-repos")
@@ -1717,15 +1717,15 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+		INSERT INTO multica_project (workspace_id, title) VALUES ($1, $2) RETURNING id
 	`, testWorkspaceID, "Claim project without repos").Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_project WHERE id = $1`, projectID) })
 
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		`SELECT id, runtime_id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
 	).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("get agent: %v", err)
@@ -1733,25 +1733,25 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (
+		INSERT INTO multica_issue (
 			workspace_id, project_id, title, status, priority, creator_id, creator_type, number, position
 		) VALUES ($1, $2, 'no project repos', 'todo', 'medium', $3, 'member', 88002, 0)
 		RETURNING id
 	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority
 		) VALUES ($1, $2, $3, 'queued', 0)
 		RETURNING id
 	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-fallback")
@@ -1791,14 +1791,14 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+		SELECT a.id, a.runtime_id FROM multica_agent a WHERE a.workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
 	var autopilotID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot (
+		INSERT INTO multica_autopilot (
 			workspace_id, title, assignee_id, execution_mode,
 			created_by_type, created_by_id
 		)
@@ -1807,11 +1807,11 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
 		t.Fatalf("setup: create autopilot: %v", err)
 	}
-	defer testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+	defer testPool.Exec(ctx, `DELETE FROM multica_autopilot WHERE id = $1`, autopilotID)
 
 	var runID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot_run (autopilot_id, source, status)
+		INSERT INTO multica_autopilot_run (autopilot_id, source, status)
 		VALUES ($1, 'manual', 'running')
 		RETURNING id
 	`, autopilotID).Scan(&runID); err != nil {
@@ -1821,7 +1821,7 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 	// Create a queued task with only AutopilotRunID (no IssueID, no ChatSessionID).
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority, autopilot_run_id
 		)
 		VALUES ($1, $2, NULL, 'queued', 0, $3)
@@ -1829,7 +1829,7 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 	`, agentID, runtimeID, runID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create autopilot task: %v", err)
 	}
-	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	defer testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID)
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
@@ -1879,7 +1879,7 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	// Local agent/runtime (belongs to testWorkspace).
 	var localAgentID, localRuntimeID string
 	if err := testPool.QueryRow(ctx,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		`SELECT id, runtime_id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
 	).Scan(&localAgentID, &localRuntimeID); err != nil {
 		t.Fatalf("setup: get local agent: %v", err)
@@ -1889,17 +1889,17 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	// resolve to.
 	var foreignWorkspaceID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
+		INSERT INTO multica_workspace (name, slug, description, issue_prefix)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id
 	`, "Mismatch Foreign", "mismatch-foreign-claim", "", "MFC").Scan(&foreignWorkspaceID); err != nil {
 		t.Fatalf("setup: create foreign workspace: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_workspace WHERE id = $1`, foreignWorkspaceID) })
 
 	var foreignIssueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'mismatch-foreign-issue', 'todo', 'medium', $2, 'member', 77001, 0)
 		RETURNING id
 	`, foreignWorkspaceID, testUserID).Scan(&foreignIssueID); err != nil {
@@ -1911,13 +1911,13 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	// bug would produce.
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
 		VALUES ($1, $2, $3, 'queued', 2)
 		RETURNING id
 	`, localAgentID, localRuntimeID, foreignIssueID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create mismatched task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+localRuntimeID+"/claim", nil,
@@ -1935,7 +1935,7 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	// is released immediately rather than stuck until the sweeper fires.
 	var status string
 	if err := testPool.QueryRow(ctx,
-		`SELECT status FROM agent_task_queue WHERE id = $1`, taskID,
+		`SELECT status FROM multica_agent_task_queue WHERE id = $1`, taskID,
 	).Scan(&status); err != nil {
 		t.Fatalf("read task status: %v", err)
 	}
@@ -1960,24 +1960,24 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+		SELECT a.id, a.runtime_id FROM multica_agent a WHERE a.workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'mul-1198 fixture', 'in_progress', 'none', $2, 'member', 81198, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	var triggerCommentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type)
 		VALUES ($1, $2, 'member', $3, 'please take a look', 'comment')
 		RETURNING id
 	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
@@ -1987,7 +1987,7 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 	// Comment-triggered, already running (as CompleteAgentTask requires).
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id, trigger_comment_id,
 			status, priority, started_at
 		)
@@ -1996,7 +1996,7 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create comment-triggered task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	const agentFinalOutput = "sure, will look into it shortly"
 
@@ -2016,7 +2016,7 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 	// Exactly one agent comment on the issue, threaded under the trigger,
 	// carrying the agent's final output.
 	rows, err := testPool.Query(ctx, `
-		SELECT content, parent_id FROM comment
+		SELECT content, parent_id FROM multica_comment
 		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
 		ORDER BY created_at ASC
 	`, issueID, agentID)
@@ -2063,24 +2063,24 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+		SELECT a.id, a.runtime_id FROM multica_agent a WHERE a.workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'mul-1198 dedup fixture', 'in_progress', 'none', $2, 'member', 81199, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	var triggerCommentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type)
 		VALUES ($1, $2, 'member', $3, 'please take a look', 'comment')
 		RETURNING id
 	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
@@ -2089,7 +2089,7 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id, trigger_comment_id,
 			status, priority, started_at
 		)
@@ -2098,11 +2098,11 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create comment-triggered task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	// Agent posts its own reply during the run — exactly the compliant path.
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+		INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
 		VALUES ($1, $2, 'agent', $3, 'done, see PR', 'comment', $4)
 	`, issueID, testWorkspaceID, agentID, triggerCommentID); err != nil {
 		t.Fatalf("setup: create agent reply: %v", err)
@@ -2123,7 +2123,7 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 
 	var count int
 	if err := testPool.QueryRow(ctx, `
-		SELECT count(*) FROM comment
+		SELECT count(*) FROM multica_comment
 		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
 	`, issueID, agentID).Scan(&count); err != nil {
 		t.Fatalf("count agent comments: %v", err)
@@ -2142,24 +2142,24 @@ func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T)
 
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+		SELECT a.id, a.runtime_id FROM multica_agent a WHERE a.workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'trivial-done-suppression fixture', 'in_progress', 'none', $2, 'member', 81200, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	var triggerCommentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type)
 		VALUES ($1, $2, 'member', $3, 'please follow up', 'comment')
 		RETURNING id
 	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
@@ -2168,7 +2168,7 @@ func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T)
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id, trigger_comment_id,
 			status, priority, started_at
 		)
@@ -2177,7 +2177,7 @@ func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T)
 	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create comment-triggered task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
@@ -2194,7 +2194,7 @@ func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T)
 
 	var count int
 	if err := testPool.QueryRow(ctx, `
-		SELECT count(*) FROM comment
+		SELECT count(*) FROM multica_comment
 		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
 	`, issueID, agentID).Scan(&count); err != nil {
 		t.Fatalf("count agent comments: %v", err)
@@ -2213,24 +2213,24 @@ func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *te
 
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+		SELECT a.id, a.runtime_id FROM multica_agent a WHERE a.workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'assignment-trivial-done fixture', 'in_progress', 'none', $2, 'member', 81201, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID) })
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at
 		)
@@ -2239,7 +2239,7 @@ func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *te
 	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create assignment-triggered task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
@@ -2256,7 +2256,7 @@ func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *te
 
 	var content string
 	if err := testPool.QueryRow(ctx, `
-		SELECT content FROM comment
+		SELECT content FROM multica_comment
 		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
 		ORDER BY created_at DESC LIMIT 1
 	`, issueID, agentID).Scan(&content); err != nil {
@@ -2326,10 +2326,10 @@ func createRuntimeGuardAgent(t *testing.T, ctx context.Context) (agentID, runtim
 		t.Fatalf("setup: expected registered runtime, got %v", resp)
 	}
 	runtimeID = runtimes[0].(map[string]any)["id"].(string)
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_runtime WHERE id = $1`, runtimeID) })
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (
+		INSERT INTO multica_agent (
 			workspace_id, name, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks
 		)
@@ -2338,7 +2338,7 @@ func createRuntimeGuardAgent(t *testing.T, ctx context.Context) (agentID, runtim
 	`, testWorkspaceID, "Runtime Guard Agent "+t.Name(), runtimeID).Scan(&agentID); err != nil {
 		t.Fatalf("setup: create runtime guard agent: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent WHERE id = $1`, agentID) })
 
 	return agentID, runtimeID, daemonID
 }
@@ -2348,7 +2348,7 @@ func createRuntimeGuardRuntime(t *testing.T, ctx context.Context, provider strin
 
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
+		INSERT INTO multica_agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider, status,
 			device_info, metadata, owner_id, last_seen_at
 		)
@@ -2358,7 +2358,7 @@ func createRuntimeGuardRuntime(t *testing.T, ctx context.Context, provider strin
 	`, testWorkspaceID, provider, testUserID).Scan(&runtimeID); err != nil {
 		t.Fatalf("setup: create runtime: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent_runtime WHERE id = $1`, runtimeID) })
 	return runtimeID
 }
 
@@ -2406,7 +2406,7 @@ func TestChatSessionRuntimeBackfillRequiresMatchingSessionID(t *testing.T) {
 	)
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO chat_session (id, session_id, runtime_id)
+		INSERT INTO multica_chat_session (id, session_id, runtime_id)
 		VALUES
 			($1, 'old-runtime-session', NULL),
 			($2, 'matched-runtime-session', NULL);
@@ -2414,7 +2414,7 @@ func TestChatSessionRuntimeBackfillRequiresMatchingSessionID(t *testing.T) {
 		t.Fatalf("seed temp chat sessions: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			chat_session_id, runtime_id, session_id, status,
 			completed_at, started_at, dispatched_at, created_at
 		)
@@ -2430,14 +2430,14 @@ func TestChatSessionRuntimeBackfillRequiresMatchingSessionID(t *testing.T) {
 	}
 
 	if _, err := tx.Exec(ctx, `
-		UPDATE chat_session cs
+		UPDATE multica_chat_session cs
 		SET runtime_id = latest.runtime_id
 		FROM (
 			SELECT DISTINCT ON (chat_session_id)
 				chat_session_id,
 				runtime_id,
 				session_id
-			FROM agent_task_queue
+			FROM multica_agent_task_queue
 			WHERE chat_session_id IS NOT NULL
 			  AND session_id IS NOT NULL
 			  AND status IN ('completed', 'failed')
@@ -2451,7 +2451,7 @@ func TestChatSessionRuntimeBackfillRequiresMatchingSessionID(t *testing.T) {
 
 	var poisonedRuntimeID *string
 	if err := tx.QueryRow(ctx, `
-		SELECT runtime_id::text FROM chat_session WHERE id = $1
+		SELECT runtime_id::text FROM multica_chat_session WHERE id = $1
 	`, poisonedChatID).Scan(&poisonedRuntimeID); err != nil {
 		t.Fatalf("query poisoned chat runtime: %v", err)
 	}
@@ -2461,7 +2461,7 @@ func TestChatSessionRuntimeBackfillRequiresMatchingSessionID(t *testing.T) {
 
 	var matchedRuntimeID string
 	if err := tx.QueryRow(ctx, `
-		SELECT runtime_id::text FROM chat_session WHERE id = $1
+		SELECT runtime_id::text FROM multica_chat_session WHERE id = $1
 	`, matchedChatID).Scan(&matchedRuntimeID); err != nil {
 		t.Fatalf("query matched chat runtime: %v", err)
 	}
@@ -2482,16 +2482,16 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 
 	var skipIssueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'runtime-session-skip fixture', 'in_progress', 'none', $2, 'member', 81203, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&skipIssueID); err != nil {
 		t.Fatalf("setup: create skip issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, skipIssueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, skipIssueID) })
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
@@ -2501,7 +2501,7 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		t.Fatalf("setup: create old-runtime prior task: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority
 		)
@@ -2518,7 +2518,7 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		t.Fatalf("runtime mismatch: expected PriorWorkDir='/tmp/old-runtime-workdir', got %q", task.PriorWorkDir)
 	}
 	if _, err := testPool.Exec(ctx, `
-		UPDATE agent_task_queue
+		UPDATE multica_agent_task_queue
 		SET status = 'completed', completed_at = now()
 		WHERE issue_id = $1 AND status IN ('dispatched', 'running')
 	`, skipIssueID); err != nil {
@@ -2527,16 +2527,16 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 
 	var resumeIssueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'runtime-session-resume fixture', 'in_progress', 'none', $2, 'member', 81204, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&resumeIssueID); err != nil {
 		t.Fatalf("setup: create resume issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, resumeIssueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, resumeIssueID) })
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
@@ -2546,7 +2546,7 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		t.Fatalf("setup: create same-runtime prior task: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority
 		)
@@ -2565,24 +2565,24 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 
 	var commentIssueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'comment-triggered-session-skip fixture', 'in_progress', 'none', $2, 'member', 81205, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&commentIssueID); err != nil {
 		t.Fatalf("setup: create comment-triggered issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, commentIssueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, commentIssueID) })
 
 	var triggerCommentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type)
 		VALUES ($1, $2, 'member', $3, 'please follow up', 'comment')
 		RETURNING id
 	`, commentIssueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
 		t.Fatalf("setup: create trigger comment: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
@@ -2592,7 +2592,7 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		t.Fatalf("setup: create comment-trigger prior task: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id, trigger_comment_id,
 			status, priority
 		)
@@ -2609,7 +2609,7 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		t.Fatalf("comment trigger: expected PriorWorkDir='/tmp/comment-prior-workdir', got %q", task.PriorWorkDir)
 	}
 	if _, err := testPool.Exec(ctx, `
-		UPDATE agent_task_queue
+		UPDATE multica_agent_task_queue
 		SET status = 'completed', completed_at = now()
 		WHERE issue_id = $1 AND status IN ('dispatched', 'running')
 	`, commentIssueID); err != nil {
@@ -2618,15 +2618,15 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 
 	var freshIssueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO multica_issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'force-fresh-session fixture', 'in_progress', 'none', $2, 'member', 81206, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&freshIssueID); err != nil {
 		t.Fatalf("setup: create force-fresh issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, freshIssueID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, freshIssueID) })
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
@@ -2636,7 +2636,7 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		t.Fatalf("setup: create force-fresh prior task: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, force_fresh_session
 		)
@@ -2666,7 +2666,7 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 
 	var skipSessionID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
+		INSERT INTO multica_chat_session (
 			workspace_id, agent_id, creator_id, title,
 			session_id, work_dir, runtime_id
 		)
@@ -2675,10 +2675,10 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	`, testWorkspaceID, agentID, testUserID, oldRuntimeID).Scan(&skipSessionID); err != nil {
 		t.Fatalf("setup: create skip chat session: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, skipSessionID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_chat_session WHERE id = $1`, skipSessionID) })
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
@@ -2688,7 +2688,7 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 		t.Fatalf("setup: create old-runtime chat task: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority
 		)
@@ -2705,7 +2705,7 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 		t.Fatalf("chat runtime mismatch: expected PriorWorkDir='/tmp/old-chat-workdir', got %q", task.PriorWorkDir)
 	}
 	if _, err := testPool.Exec(ctx, `
-		UPDATE agent_task_queue
+		UPDATE multica_agent_task_queue
 		SET status = 'completed', completed_at = now()
 		WHERE chat_session_id = $1 AND status IN ('dispatched', 'running')
 	`, skipSessionID); err != nil {
@@ -2714,7 +2714,7 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 
 	var resumeSessionID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
+		INSERT INTO multica_chat_session (
 			workspace_id, agent_id, creator_id, title,
 			session_id, work_dir, runtime_id
 		)
@@ -2723,10 +2723,10 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&resumeSessionID); err != nil {
 		t.Fatalf("setup: create resume chat session: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, resumeSessionID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_chat_session WHERE id = $1`, resumeSessionID) })
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority
 		)
@@ -2755,7 +2755,7 @@ func TestClaimTask_ChatForceFreshSessionSkipsPriorSession(t *testing.T) {
 
 	var chatSessionID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
+		INSERT INTO multica_chat_session (
 			workspace_id, agent_id, creator_id, title,
 			session_id, work_dir, runtime_id
 		)
@@ -2764,10 +2764,10 @@ func TestClaimTask_ChatForceFreshSessionSkipsPriorSession(t *testing.T) {
 	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
 		t.Fatalf("setup: create chat session: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_chat_session WHERE id = $1`, chatSessionID) })
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
@@ -2777,7 +2777,7 @@ func TestClaimTask_ChatForceFreshSessionSkipsPriorSession(t *testing.T) {
 		t.Fatalf("setup: create prior chat task: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority, force_fresh_session
 		)
@@ -2810,7 +2810,7 @@ func TestClaimTask_ChatLegacyNullRuntimeFallsBackToTaskRow(t *testing.T) {
 
 	var legacySessionID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
+		INSERT INTO multica_chat_session (
 			workspace_id, agent_id, creator_id, title,
 			session_id, work_dir, runtime_id
 		)
@@ -2819,10 +2819,10 @@ func TestClaimTask_ChatLegacyNullRuntimeFallsBackToTaskRow(t *testing.T) {
 	`, testWorkspaceID, agentID, testUserID).Scan(&legacySessionID); err != nil {
 		t.Fatalf("setup: create legacy chat session: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, legacySessionID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_chat_session WHERE id = $1`, legacySessionID) })
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
@@ -2832,7 +2832,7 @@ func TestClaimTask_ChatLegacyNullRuntimeFallsBackToTaskRow(t *testing.T) {
 		t.Fatalf("setup: create matching-runtime prior task: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority
 		)
@@ -2861,19 +2861,19 @@ func TestGetChatSessionGCCheck(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
 	var sessionID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
+		INSERT INTO multica_chat_session (workspace_id, agent_id, creator_id, title, status)
 		VALUES ($1, $2, $3, 'gc-check fixture', 'active')
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID).Scan(&sessionID); err != nil {
 		t.Fatalf("setup: create chat session: %v", err)
 	}
-	defer testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID)
+	defer testPool.Exec(ctx, `DELETE FROM multica_chat_session WHERE id = $1`, sessionID)
 
 	// Cross-workspace daemon token must 404 with no oracle.
 	w := httptest.NewRecorder()
@@ -2910,7 +2910,7 @@ func TestGetChatSessionGCCheck(t *testing.T) {
 
 	// Hard-deleted session: 404 — exactly what the daemon needs to reclaim
 	// the workdir on the next GC pass after a user runs DeleteChatSession.
-	if _, err := testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID); err != nil {
+	if _, err := testPool.Exec(ctx, `DELETE FROM multica_chat_session WHERE id = $1`, sessionID); err != nil {
 		t.Fatalf("delete chat session: %v", err)
 	}
 	w = httptest.NewRecorder()
@@ -2933,13 +2933,13 @@ func TestGetAutopilotRunGCCheck(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT id FROM multica_agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
 	var autopilotID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot (
+		INSERT INTO multica_autopilot (
 			workspace_id, title, assignee_id, execution_mode,
 			created_by_type, created_by_id
 		)
@@ -2948,11 +2948,11 @@ func TestGetAutopilotRunGCCheck(t *testing.T) {
 	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
 		t.Fatalf("setup: create autopilot: %v", err)
 	}
-	defer testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+	defer testPool.Exec(ctx, `DELETE FROM multica_autopilot WHERE id = $1`, autopilotID)
 
 	var runID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot_run (autopilot_id, source, status, completed_at)
+		INSERT INTO multica_autopilot_run (autopilot_id, source, status, completed_at)
 		VALUES ($1, 'manual', 'completed', NOW() - INTERVAL '6 days')
 		RETURNING id
 	`, autopilotID).Scan(&runID); err != nil {
@@ -3004,7 +3004,7 @@ func TestGetTaskGCCheck(t *testing.T) {
 
 	var agentID, runtimeID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+		SELECT a.id, a.runtime_id FROM multica_agent a WHERE a.workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("setup: get agent: %v", err)
 	}
@@ -3020,7 +3020,7 @@ func TestGetTaskGCCheck(t *testing.T) {
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
+		INSERT INTO multica_agent_task_queue (
 			agent_id, runtime_id, status, priority, context, completed_at
 		)
 		VALUES ($1, $2, 'completed', 0, $3, NOW())
@@ -3028,7 +3028,7 @@ func TestGetTaskGCCheck(t *testing.T) {
 	`, agentID, runtimeID, quickContext).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create quick-create task: %v", err)
 	}
-	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	defer testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID)
 
 	// Cross-workspace probe.
 	w := httptest.NewRecorder()
@@ -3096,12 +3096,12 @@ func createEphemeralUser(t *testing.T, label string) string {
 	email := fmt.Sprintf("membership-cache-%s-%s@multica.ai", label, uuid.NewString())
 	var userID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+		INSERT INTO multica_user (name, email) VALUES ($1, $2) RETURNING id
 	`, "Membership Cache Test "+label, email).Scan(&userID); err != nil {
 		t.Fatalf("create ephemeral user: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_user WHERE id = $1`, userID)
 	})
 	return userID
 }
@@ -3114,12 +3114,12 @@ func createEphemeralMember(t *testing.T, workspaceID, label, role string) (strin
 	userID := createEphemeralUser(t, label)
 	var memberID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3) RETURNING id
+		INSERT INTO multica_member (workspace_id, user_id, role) VALUES ($1, $2, $3) RETURNING id
 	`, workspaceID, userID, role).Scan(&memberID); err != nil {
 		t.Fatalf("create ephemeral member: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM member WHERE id = $1`, memberID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_member WHERE id = $1`, memberID)
 	})
 	return userID, memberID
 }
@@ -3282,22 +3282,22 @@ func TestMembershipCache_InvalidatedOnDeleteWorkspace(t *testing.T) {
 	ctx := context.Background()
 
 	const slug = "membership-cache-delete-ws"
-	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	_, _ = testPool.Exec(ctx, `DELETE FROM multica_workspace WHERE slug = $1`, slug)
 	var wsID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
+		INSERT INTO multica_workspace (name, slug, description, issue_prefix)
 		VALUES ($1, $2, $3, $4) RETURNING id
 	`, "Membership Cache Delete WS", slug, "DeleteWorkspace cache invalidation test", "MCD").Scan(&wsID); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+		testPool.Exec(context.Background(), `DELETE FROM multica_workspace WHERE id = $1`, wsID)
 	})
 
 	// testUser must be an owner of the isolated workspace to call
 	// DeleteWorkspace.
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
+		INSERT INTO multica_member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
 	`, wsID, testUserID); err != nil {
 		t.Fatalf("add owner: %v", err)
 	}

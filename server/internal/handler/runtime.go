@@ -38,7 +38,7 @@ type AgentRuntimeResponse struct {
 	UpdatedAt  string  `json:"updated_at"`
 }
 
-func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
+func runtimeToResponse(rt db.MulticaAgentRuntime) AgentRuntimeResponse {
 	var metadata any
 	if rt.Metadata != nil {
 		json.Unmarshal(rt.Metadata, &metadata)
@@ -471,7 +471,7 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, runtimeToResponse(rt))
 }
 
-func canEditRuntime(member db.Member, rt db.AgentRuntime) bool {
+func canEditRuntime(member db.MulticaMember, rt db.MulticaAgentRuntime) bool {
 	if roleAllowed(member.Role, "owner", "admin") {
 		return true
 	}
@@ -485,7 +485,7 @@ func canEditRuntime(member db.Member, rt db.AgentRuntime) bool {
 // runtime stays bound to its owner. Workspace owners/admins keep an
 // administrative override for both. See migration 083 for the visibility
 // column.
-func canUseRuntimeForAgent(member db.Member, rt db.AgentRuntime) bool {
+func canUseRuntimeForAgent(member db.MulticaMember, rt db.MulticaAgentRuntime) bool {
 	if roleAllowed(member.Role, "owner", "admin") {
 		return true
 	}
@@ -498,7 +498,7 @@ func canUseRuntimeForAgent(member db.Member, rt db.AgentRuntime) bool {
 func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
-	var runtimes []db.AgentRuntime
+	var runtimes []db.MulticaAgentRuntime
 	var err error
 
 	if ownerFilter := r.URL.Query().Get("owner"); ownerFilter == "me" {

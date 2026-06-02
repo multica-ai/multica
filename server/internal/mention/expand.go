@@ -16,12 +16,12 @@ import (
 // IssueResolver looks up an issue by workspace and number.
 // Implemented by db.Queries.
 type IssueResolver interface {
-	GetIssueByNumber(ctx context.Context, arg db.GetIssueByNumberParams) (db.Issue, error)
+	GetIssueByNumber(ctx context.Context, arg db.GetIssueByNumberParams) (db.MulticaIssue, error)
 }
 
 // PrefixResolver looks up a workspace to get its issue prefix.
 type PrefixResolver interface {
-	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.MulticaWorkspace, error)
 }
 
 // Resolver combines both interfaces needed for mention expansion.

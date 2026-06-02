@@ -12,7 +12,7 @@ import (
 )
 
 const advanceTriggerNextRun = `-- name: AdvanceTriggerNextRun :exec
-UPDATE autopilot_trigger
+UPDATE multica_autopilot_trigger
 SET next_run_at = $2,
     last_fired_at = now(),
     updated_at = now()
@@ -31,9 +31,9 @@ func (q *Queries) AdvanceTriggerNextRun(ctx context.Context, arg AdvanceTriggerN
 
 const claimDueScheduleTriggers = `-- name: ClaimDueScheduleTriggers :many
 
-UPDATE autopilot_trigger t
+UPDATE multica_autopilot_trigger t
 SET next_run_at = NULL
-FROM autopilot a
+FROM multica_autopilot a
 WHERE t.autopilot_id = a.id
   AND t.kind = 'schedule'
   AND t.enabled = true
@@ -65,7 +65,7 @@ type ClaimDueScheduleTriggersRow struct {
 // Scheduler Queries
 // =====================
 // Atomically claim all due schedule triggers to prevent concurrent execution.
-// Joins the autopilot table to ensure only active autopilots are fired.
+// Joins the multica_autopilot table to ensure only active autopilots are fired.
 func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueScheduleTriggersRow, error) {
 	rows, err := q.db.Query(ctx, claimDueScheduleTriggers)
 	if err != nil {
@@ -103,7 +103,7 @@ func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueSched
 }
 
 const createAutopilot = `-- name: CreateAutopilot :one
-INSERT INTO autopilot (
+INSERT INTO multica_autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
     status, execution_mode, issue_title_template, project_id,
     created_by_type, created_by_id
@@ -128,7 +128,7 @@ type CreateAutopilotParams struct {
 	ProjectID          pgtype.UUID `json:"project_id"`
 }
 
-func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams) (Autopilot, error) {
+func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams) (MulticaAutopilot, error) {
 	row := q.db.QueryRow(ctx, createAutopilot,
 		arg.WorkspaceID,
 		arg.Title,
@@ -142,7 +142,7 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 		arg.IssueTitleTemplate,
 		arg.ProjectID,
 	)
-	var i Autopilot
+	var i MulticaAutopilot
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -165,7 +165,7 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 
 const createAutopilotRun = `-- name: CreateAutopilotRun :one
 
-INSERT INTO autopilot_run (
+INSERT INTO multica_autopilot_run (
     autopilot_id, trigger_id, source, status, trigger_payload, squad_id
 ) VALUES (
     $1, $4, $2, $3, $5,
@@ -185,11 +185,11 @@ type CreateAutopilotRunParams struct {
 // =====================
 // Autopilot Run Management
 // =====================
-// squad_id is an attribution hook: set to the assignee squad when the
-// parent autopilot has assignee_type='squad', NULL otherwise. The executing
-// agent_id on agent_task_queue still records who actually ran the work
-// (the squad leader); squad_id lets reports group by squad without a join.
-func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRunParams) (AutopilotRun, error) {
+// squad_id is an attribution hook: set to the assignee multica_squad when the
+// parent multica_autopilot has assignee_type='squad', NULL otherwise. The executing
+// agent_id on multica_agent_task_queue still records who actually ran the work
+// (the multica_squad leader); squad_id lets reports group by multica_squad without a join.
+func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRunParams) (MulticaAutopilotRun, error) {
 	row := q.db.QueryRow(ctx, createAutopilotRun,
 		arg.AutopilotID,
 		arg.Source,
@@ -198,7 +198,7 @@ func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRun
 		arg.TriggerPayload,
 		arg.SquadID,
 	)
-	var i AutopilotRun
+	var i MulticaAutopilotRun
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -220,7 +220,7 @@ func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRun
 
 const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
+INSERT INTO multica_agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
 VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, workflow_node_run_id
 `
@@ -236,7 +236,7 @@ type CreateAutopilotTaskParams struct {
 // =====================
 // Task Queue (run_only mode)
 // =====================
-func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTaskParams) (AgentTaskQueue, error) {
+func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTaskParams) (MulticaAgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createAutopilotTask,
 		arg.AgentID,
 		arg.RuntimeID,
@@ -244,7 +244,7 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		arg.AutopilotRunID,
 		arg.TriggerSummary,
 	)
-	var i AgentTaskQueue
+	var i MulticaAgentTaskQueue
 	err := row.Scan(
 		&i.ID,
 		&i.AgentID,
@@ -277,7 +277,7 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 }
 
 const createAutopilotTrigger = `-- name: CreateAutopilotTrigger :one
-INSERT INTO autopilot_trigger (
+INSERT INTO multica_autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
     next_run_at, webhook_token, label, provider
 ) VALUES (
@@ -299,7 +299,7 @@ type CreateAutopilotTriggerParams struct {
 	Provider       pgtype.Text        `json:"provider"`
 }
 
-func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilotTriggerParams) (AutopilotTrigger, error) {
+func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilotTriggerParams) (MulticaAutopilotTrigger, error) {
 	row := q.db.QueryRow(ctx, createAutopilotTrigger,
 		arg.AutopilotID,
 		arg.Kind,
@@ -311,7 +311,7 @@ func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilo
 		arg.Label,
 		arg.Provider,
 	)
-	var i AutopilotTrigger
+	var i MulticaAutopilotTrigger
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -332,7 +332,7 @@ func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilo
 }
 
 const deleteAutopilot = `-- name: DeleteAutopilot :exec
-DELETE FROM autopilot WHERE id = $1
+DELETE FROM multica_autopilot WHERE id = $1
 `
 
 func (q *Queries) DeleteAutopilot(ctx context.Context, id pgtype.UUID) error {
@@ -341,7 +341,7 @@ func (q *Queries) DeleteAutopilot(ctx context.Context, id pgtype.UUID) error {
 }
 
 const deleteAutopilotTrigger = `-- name: DeleteAutopilotTrigger :exec
-DELETE FROM autopilot_trigger WHERE id = $1
+DELETE FROM multica_autopilot_trigger WHERE id = $1
 `
 
 func (q *Queries) DeleteAutopilotTrigger(ctx context.Context, id pgtype.UUID) error {
@@ -350,27 +350,27 @@ func (q *Queries) DeleteAutopilotTrigger(ctx context.Context, id pgtype.UUID) er
 }
 
 const failAutopilotRunsByIssue = `-- name: FailAutopilotRunsByIssue :exec
-UPDATE autopilot_run
-SET status = 'failed', completed_at = now(), failure_reason = 'linked issue was deleted'
+UPDATE multica_autopilot_run
+SET status = 'failed', completed_at = now(), failure_reason = 'linked multica_issue was deleted'
 WHERE issue_id = $1
   AND status IN ('issue_created', 'running')
 `
 
-// Fails active autopilot runs linked to a given issue.
-// Must be called BEFORE issue deletion (ON DELETE SET NULL clears issue_id).
+// Fails active multica_autopilot runs linked to a given multica_issue.
+// Must be called BEFORE multica_issue deletion (ON DELETE SET NULL clears issue_id).
 func (q *Queries) FailAutopilotRunsByIssue(ctx context.Context, issueID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, failAutopilotRunsByIssue, issueID)
 	return err
 }
 
 const getAutopilot = `-- name: GetAutopilot :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM multica_autopilot
 WHERE id = $1
 `
 
-func (q *Queries) GetAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, error) {
+func (q *Queries) GetAutopilot(ctx context.Context, id pgtype.UUID) (MulticaAutopilot, error) {
 	row := q.db.QueryRow(ctx, getAutopilot, id)
-	var i Autopilot
+	var i MulticaAutopilot
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -392,7 +392,7 @@ func (q *Queries) GetAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, 
 }
 
 const getAutopilotInWorkspace = `-- name: GetAutopilotInWorkspace :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM multica_autopilot
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -401,9 +401,9 @@ type GetAutopilotInWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetAutopilotInWorkspace(ctx context.Context, arg GetAutopilotInWorkspaceParams) (Autopilot, error) {
+func (q *Queries) GetAutopilotInWorkspace(ctx context.Context, arg GetAutopilotInWorkspaceParams) (MulticaAutopilot, error) {
 	row := q.db.QueryRow(ctx, getAutopilotInWorkspace, arg.ID, arg.WorkspaceID)
-	var i Autopilot
+	var i MulticaAutopilot
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -425,13 +425,13 @@ func (q *Queries) GetAutopilotInWorkspace(ctx context.Context, arg GetAutopilotI
 }
 
 const getAutopilotRun = `-- name: GetAutopilotRun :one
-SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id FROM autopilot_run
+SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id FROM multica_autopilot_run
 WHERE id = $1
 `
 
-func (q *Queries) GetAutopilotRun(ctx context.Context, id pgtype.UUID) (AutopilotRun, error) {
+func (q *Queries) GetAutopilotRun(ctx context.Context, id pgtype.UUID) (MulticaAutopilotRun, error) {
 	row := q.db.QueryRow(ctx, getAutopilotRun, id)
-	var i AutopilotRun
+	var i MulticaAutopilotRun
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -453,7 +453,7 @@ func (q *Queries) GetAutopilotRun(ctx context.Context, id pgtype.UUID) (Autopilo
 
 const getAutopilotRunByIssue = `-- name: GetAutopilotRunByIssue :one
 
-SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id FROM autopilot_run
+SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id FROM multica_autopilot_run
 WHERE issue_id = $1 AND status IN ('issue_created', 'running')
 LIMIT 1
 `
@@ -461,9 +461,9 @@ LIMIT 1
 // =====================
 // Run lookup by linked entities
 // =====================
-func (q *Queries) GetAutopilotRunByIssue(ctx context.Context, issueID pgtype.UUID) (AutopilotRun, error) {
+func (q *Queries) GetAutopilotRunByIssue(ctx context.Context, issueID pgtype.UUID) (MulticaAutopilotRun, error) {
 	row := q.db.QueryRow(ctx, getAutopilotRunByIssue, issueID)
-	var i AutopilotRun
+	var i MulticaAutopilotRun
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -484,13 +484,13 @@ func (q *Queries) GetAutopilotRunByIssue(ctx context.Context, issueID pgtype.UUI
 }
 
 const getAutopilotTrigger = `-- name: GetAutopilotTrigger :one
-SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret FROM autopilot_trigger
+SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret FROM multica_autopilot_trigger
 WHERE id = $1
 `
 
-func (q *Queries) GetAutopilotTrigger(ctx context.Context, id pgtype.UUID) (AutopilotTrigger, error) {
+func (q *Queries) GetAutopilotTrigger(ctx context.Context, id pgtype.UUID) (MulticaAutopilotTrigger, error) {
 	row := q.db.QueryRow(ctx, getAutopilotTrigger, id)
-	var i AutopilotTrigger
+	var i MulticaAutopilotTrigger
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -512,8 +512,8 @@ func (q *Queries) GetAutopilotTrigger(ctx context.Context, id pgtype.UUID) (Auto
 
 const getWebhookTriggerByToken = `-- name: GetWebhookTriggerByToken :one
 SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, a.workspace_id AS autopilot_workspace_id
-FROM autopilot_trigger t
-JOIN autopilot a ON a.id = t.autopilot_id
+FROM multica_autopilot_trigger t
+JOIN multica_autopilot a ON a.id = t.autopilot_id
 WHERE t.kind = 'webhook'
   AND t.webhook_token = $1
 `
@@ -536,8 +536,8 @@ type GetWebhookTriggerByTokenRow struct {
 	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
 }
 
-// Look up a webhook trigger by its public bearer token. Joined to autopilot
-// so the webhook handler can derive the workspace from the trigger's parent
+// Look up a webhook trigger by its public bearer token. Joined to multica_autopilot
+// so the webhook handler can derive the multica_workspace from the trigger's parent
 // without trusting any request header. The handler still re-loads the
 // Autopilot via GetAutopilot and cross-checks WorkspaceID matches the row's
 // autopilot_workspace_id.
@@ -565,7 +565,7 @@ func (q *Queries) GetWebhookTriggerByToken(ctx context.Context, webhookToken pgt
 }
 
 const listAutopilotRuns = `-- name: ListAutopilotRuns :many
-SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id FROM autopilot_run
+SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id FROM multica_autopilot_run
 WHERE autopilot_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -577,15 +577,15 @@ type ListAutopilotRunsParams struct {
 	Offset      int32       `json:"offset"`
 }
 
-func (q *Queries) ListAutopilotRuns(ctx context.Context, arg ListAutopilotRunsParams) ([]AutopilotRun, error) {
+func (q *Queries) ListAutopilotRuns(ctx context.Context, arg ListAutopilotRunsParams) ([]MulticaAutopilotRun, error) {
 	rows, err := q.db.Query(ctx, listAutopilotRuns, arg.AutopilotID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AutopilotRun{}
+	items := []MulticaAutopilotRun{}
 	for rows.Next() {
-		var i AutopilotRun
+		var i MulticaAutopilotRun
 		if err := rows.Scan(
 			&i.ID,
 			&i.AutopilotID,
@@ -614,7 +614,7 @@ func (q *Queries) ListAutopilotRuns(ctx context.Context, arg ListAutopilotRunsPa
 
 const listAutopilotTriggers = `-- name: ListAutopilotTriggers :many
 
-SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret FROM autopilot_trigger
+SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret FROM multica_autopilot_trigger
 WHERE autopilot_id = $1
 ORDER BY created_at ASC
 `
@@ -622,15 +622,15 @@ ORDER BY created_at ASC
 // =====================
 // Autopilot Trigger CRUD
 // =====================
-func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.UUID) ([]AutopilotTrigger, error) {
+func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.UUID) ([]MulticaAutopilotTrigger, error) {
 	rows, err := q.db.Query(ctx, listAutopilotTriggers, autopilotID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AutopilotTrigger{}
+	items := []MulticaAutopilotTrigger{}
 	for rows.Next() {
-		var i AutopilotTrigger
+		var i MulticaAutopilotTrigger
 		if err := rows.Scan(
 			&i.ID,
 			&i.AutopilotID,
@@ -659,7 +659,7 @@ func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.
 
 const listAutopilots = `-- name: ListAutopilots :many
 
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM multica_autopilot
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
 ORDER BY created_at DESC
@@ -673,15 +673,15 @@ type ListAutopilotsParams struct {
 // =====================
 // Autopilot CRUD
 // =====================
-func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) ([]Autopilot, error) {
+func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) ([]MulticaAutopilot, error) {
 	rows, err := q.db.Query(ctx, listAutopilots, arg.WorkspaceID, arg.Status)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Autopilot{}
+	items := []MulticaAutopilot{}
 	for rows.Next() {
-		var i Autopilot
+		var i MulticaAutopilot
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -712,8 +712,8 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 const recoverLostTriggers = `-- name: RecoverLostTriggers :many
 
 SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, a.workspace_id AS autopilot_workspace_id
-FROM autopilot_trigger t
-JOIN autopilot a ON t.autopilot_id = a.id
+FROM multica_autopilot_trigger t
+JOIN multica_autopilot a ON t.autopilot_id = a.id
 WHERE t.kind = 'schedule'
   AND t.enabled = true
   AND t.next_run_at IS NULL
@@ -782,7 +782,7 @@ func (q *Queries) RecoverLostTriggers(ctx context.Context) ([]RecoverLostTrigger
 }
 
 const rotateAutopilotTriggerWebhookToken = `-- name: RotateAutopilotTriggerWebhookToken :one
-UPDATE autopilot_trigger
+UPDATE multica_autopilot_trigger
 SET webhook_token = $2,
     updated_at = now()
 WHERE id = $1
@@ -798,9 +798,9 @@ type RotateAutopilotTriggerWebhookTokenParams struct {
 // Rotates the bearer token for a webhook trigger. Restricted to kind='webhook'
 // so an accidental call against a schedule/api trigger is a no-op (returns no
 // rows) rather than corrupting unrelated state.
-func (q *Queries) RotateAutopilotTriggerWebhookToken(ctx context.Context, arg RotateAutopilotTriggerWebhookTokenParams) (AutopilotTrigger, error) {
+func (q *Queries) RotateAutopilotTriggerWebhookToken(ctx context.Context, arg RotateAutopilotTriggerWebhookTokenParams) (MulticaAutopilotTrigger, error) {
 	row := q.db.QueryRow(ctx, rotateAutopilotTriggerWebhookToken, arg.ID, arg.WebhookToken)
-	var i AutopilotTrigger
+	var i MulticaAutopilotTrigger
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -826,7 +826,7 @@ WITH stats AS (
     SELECT autopilot_id,
            count(*) FILTER (WHERE status IN ('completed', 'failed')) AS total,
            count(*) FILTER (WHERE status = 'failed') AS failed
-    FROM autopilot_run
+    FROM multica_autopilot_run
     WHERE created_at >= $3::timestamptz
     GROUP BY autopilot_id
 )
@@ -834,7 +834,7 @@ SELECT a.id, a.workspace_id, a.title, a.assignee_id,
        a.created_by_type, a.created_by_id,
        s.total::bigint  AS total_runs,
        s.failed::bigint AS failed_runs
-FROM autopilot a
+FROM multica_autopilot a
 JOIN stats s ON s.autopilot_id = a.id
 WHERE a.status = 'active'
   AND s.total >= $1::bigint
@@ -867,11 +867,11 @@ type SelectAutopilotsExceedingFailureThresholdRow struct {
 // excluded from BOTH numerator and denominator: an admission-skipped run
 // (e.g. assignee runtime offline at dispatch time, MUL-1899) is neither a
 // success nor a failure, so it must not dilute the failure ratio (which
-// would let a 100%-failing autopilot mask itself behind a wall of skips)
+// would let a 100%-failing multica_autopilot mask itself behind a wall of skips)
 // nor inflate it. issue_created/running are still excluded so in-flight
 // work isn't penalised.
 // Used by the failure monitor to auto-pause sustained-failure autopilots
-// (the canonical example from MUL-1336 was an autopilot scheduled every 5 min
+// (the canonical example from MUL-1336 was an multica_autopilot scheduled every 5 min
 // that 100% failed for days, burning ~1.5k useless tasks per week).
 func (q *Queries) SelectAutopilotsExceedingFailureThreshold(ctx context.Context, arg SelectAutopilotsExceedingFailureThresholdParams) ([]SelectAutopilotsExceedingFailureThresholdRow, error) {
 	rows, err := q.db.Query(ctx, selectAutopilotsExceedingFailureThreshold, arg.MinRuns, arg.FailRatioThreshold, arg.Since)
@@ -903,7 +903,7 @@ func (q *Queries) SelectAutopilotsExceedingFailureThreshold(ctx context.Context,
 }
 
 const setAutopilotTriggerSigningSecret = `-- name: SetAutopilotTriggerSigningSecret :one
-UPDATE autopilot_trigger
+UPDATE multica_autopilot_trigger
 SET signing_secret = $2,
     updated_at = now()
 WHERE id = $1
@@ -921,9 +921,9 @@ type SetAutopilotTriggerSigningSecretParams struct {
 // write-only endpoint only ever carries the secret value, with no risk of an
 // accidental log line leaking it alongside other fields. Restricted to
 // webhook triggers to avoid corrupting unrelated state.
-func (q *Queries) SetAutopilotTriggerSigningSecret(ctx context.Context, arg SetAutopilotTriggerSigningSecretParams) (AutopilotTrigger, error) {
+func (q *Queries) SetAutopilotTriggerSigningSecret(ctx context.Context, arg SetAutopilotTriggerSigningSecretParams) (MulticaAutopilotTrigger, error) {
 	row := q.db.QueryRow(ctx, setAutopilotTriggerSigningSecret, arg.ID, arg.SigningSecret)
-	var i AutopilotTrigger
+	var i MulticaAutopilotTrigger
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -944,7 +944,7 @@ func (q *Queries) SetAutopilotTriggerSigningSecret(ctx context.Context, arg SetA
 }
 
 const setAutopilotTriggerWebhookToken = `-- name: SetAutopilotTriggerWebhookToken :one
-UPDATE autopilot_trigger
+UPDATE multica_autopilot_trigger
 SET webhook_token = $2,
     updated_at = now()
 WHERE id = $1
@@ -961,9 +961,9 @@ type SetAutopilotTriggerWebhookTokenParams struct {
 // token. Splitting the create + token-set keeps the existing CreateAutopilotTrigger
 // query usable by the schedule path without forcing every caller to think
 // about webhook_token.
-func (q *Queries) SetAutopilotTriggerWebhookToken(ctx context.Context, arg SetAutopilotTriggerWebhookTokenParams) (AutopilotTrigger, error) {
+func (q *Queries) SetAutopilotTriggerWebhookToken(ctx context.Context, arg SetAutopilotTriggerWebhookTokenParams) (MulticaAutopilotTrigger, error) {
 	row := q.db.QueryRow(ctx, setAutopilotTriggerWebhookToken, arg.ID, arg.WebhookToken)
-	var i AutopilotTrigger
+	var i MulticaAutopilotTrigger
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -984,19 +984,19 @@ func (q *Queries) SetAutopilotTriggerWebhookToken(ctx context.Context, arg SetAu
 }
 
 const systemPauseAutopilot = `-- name: SystemPauseAutopilot :one
-UPDATE autopilot
+UPDATE multica_autopilot
 SET status = 'paused', updated_at = now()
 WHERE id = $1 AND status = 'active'
 RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id
 `
 
-// Atomically pauses an autopilot only if it is currently active. Returns no
-// rows when the autopilot was already paused/archived (or another worker
+// Atomically pauses an multica_autopilot only if it is currently active. Returns no
+// rows when the multica_autopilot was already paused/archived (or another worker
 // raced first), letting the caller treat that as a benign no-op rather than
 // an error.
-func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, error) {
+func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (MulticaAutopilot, error) {
 	row := q.db.QueryRow(ctx, systemPauseAutopilot, id)
-	var i Autopilot
+	var i MulticaAutopilot
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -1018,7 +1018,7 @@ func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (Aut
 }
 
 const touchAutopilotTriggerFiredAt = `-- name: TouchAutopilotTriggerFiredAt :exec
-UPDATE autopilot_trigger
+UPDATE multica_autopilot_trigger
 SET last_fired_at = now(),
     updated_at = now()
 WHERE id = $1
@@ -1034,7 +1034,7 @@ func (q *Queries) TouchAutopilotTriggerFiredAt(ctx context.Context, id pgtype.UU
 }
 
 const updateAutopilot = `-- name: UpdateAutopilot :one
-UPDATE autopilot SET
+UPDATE multica_autopilot SET
     title = COALESCE($2, title),
     description = COALESCE($3, description),
     assignee_type = COALESCE($4, assignee_type),
@@ -1060,7 +1060,7 @@ type UpdateAutopilotParams struct {
 	ProjectID          pgtype.UUID `json:"project_id"`
 }
 
-func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams) (Autopilot, error) {
+func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams) (MulticaAutopilot, error) {
 	row := q.db.QueryRow(ctx, updateAutopilot,
 		arg.ID,
 		arg.Title,
@@ -1072,7 +1072,7 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 		arg.IssueTitleTemplate,
 		arg.ProjectID,
 	)
-	var i Autopilot
+	var i MulticaAutopilot
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -1094,7 +1094,7 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 }
 
 const updateAutopilotLastRunAt = `-- name: UpdateAutopilotLastRunAt :exec
-UPDATE autopilot SET last_run_at = now(), updated_at = now()
+UPDATE multica_autopilot SET last_run_at = now(), updated_at = now()
 WHERE id = $1
 `
 
@@ -1104,7 +1104,7 @@ func (q *Queries) UpdateAutopilotLastRunAt(ctx context.Context, id pgtype.UUID) 
 }
 
 const updateAutopilotRunCompleted = `-- name: UpdateAutopilotRunCompleted :one
-UPDATE autopilot_run
+UPDATE multica_autopilot_run
 SET status = 'completed', completed_at = now(), result = $2
 WHERE id = $1
 RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
@@ -1115,9 +1115,9 @@ type UpdateAutopilotRunCompletedParams struct {
 	Result []byte      `json:"result"`
 }
 
-func (q *Queries) UpdateAutopilotRunCompleted(ctx context.Context, arg UpdateAutopilotRunCompletedParams) (AutopilotRun, error) {
+func (q *Queries) UpdateAutopilotRunCompleted(ctx context.Context, arg UpdateAutopilotRunCompletedParams) (MulticaAutopilotRun, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotRunCompleted, arg.ID, arg.Result)
-	var i AutopilotRun
+	var i MulticaAutopilotRun
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -1138,7 +1138,7 @@ func (q *Queries) UpdateAutopilotRunCompleted(ctx context.Context, arg UpdateAut
 }
 
 const updateAutopilotRunFailed = `-- name: UpdateAutopilotRunFailed :one
-UPDATE autopilot_run
+UPDATE multica_autopilot_run
 SET status = 'failed', completed_at = now(), failure_reason = $2
 WHERE id = $1
 RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
@@ -1149,9 +1149,9 @@ type UpdateAutopilotRunFailedParams struct {
 	FailureReason pgtype.Text `json:"failure_reason"`
 }
 
-func (q *Queries) UpdateAutopilotRunFailed(ctx context.Context, arg UpdateAutopilotRunFailedParams) (AutopilotRun, error) {
+func (q *Queries) UpdateAutopilotRunFailed(ctx context.Context, arg UpdateAutopilotRunFailedParams) (MulticaAutopilotRun, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotRunFailed, arg.ID, arg.FailureReason)
-	var i AutopilotRun
+	var i MulticaAutopilotRun
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -1172,7 +1172,7 @@ func (q *Queries) UpdateAutopilotRunFailed(ctx context.Context, arg UpdateAutopi
 }
 
 const updateAutopilotRunIssueCreated = `-- name: UpdateAutopilotRunIssueCreated :one
-UPDATE autopilot_run
+UPDATE multica_autopilot_run
 SET status = 'issue_created', issue_id = $2
 WHERE id = $1
 RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
@@ -1183,9 +1183,9 @@ type UpdateAutopilotRunIssueCreatedParams struct {
 	IssueID pgtype.UUID `json:"issue_id"`
 }
 
-func (q *Queries) UpdateAutopilotRunIssueCreated(ctx context.Context, arg UpdateAutopilotRunIssueCreatedParams) (AutopilotRun, error) {
+func (q *Queries) UpdateAutopilotRunIssueCreated(ctx context.Context, arg UpdateAutopilotRunIssueCreatedParams) (MulticaAutopilotRun, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotRunIssueCreated, arg.ID, arg.IssueID)
-	var i AutopilotRun
+	var i MulticaAutopilotRun
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -1206,7 +1206,7 @@ func (q *Queries) UpdateAutopilotRunIssueCreated(ctx context.Context, arg Update
 }
 
 const updateAutopilotRunRunning = `-- name: UpdateAutopilotRunRunning :one
-UPDATE autopilot_run
+UPDATE multica_autopilot_run
 SET status = 'running', task_id = $2
 WHERE id = $1
 RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
@@ -1217,9 +1217,9 @@ type UpdateAutopilotRunRunningParams struct {
 	TaskID pgtype.UUID `json:"task_id"`
 }
 
-func (q *Queries) UpdateAutopilotRunRunning(ctx context.Context, arg UpdateAutopilotRunRunningParams) (AutopilotRun, error) {
+func (q *Queries) UpdateAutopilotRunRunning(ctx context.Context, arg UpdateAutopilotRunRunningParams) (MulticaAutopilotRun, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotRunRunning, arg.ID, arg.TaskID)
-	var i AutopilotRun
+	var i MulticaAutopilotRun
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -1240,7 +1240,7 @@ func (q *Queries) UpdateAutopilotRunRunning(ctx context.Context, arg UpdateAutop
 }
 
 const updateAutopilotRunSkipped = `-- name: UpdateAutopilotRunSkipped :one
-UPDATE autopilot_run
+UPDATE multica_autopilot_run
 SET status = 'skipped', completed_at = now(), failure_reason = $2
 WHERE id = $1
 RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
@@ -1251,15 +1251,15 @@ type UpdateAutopilotRunSkippedParams struct {
 	FailureReason pgtype.Text `json:"failure_reason"`
 }
 
-// Marks an autopilot_run as skipped without enqueueing any task. Used by the
-// pre-flight admission check when the assignee agent's runtime is offline:
-// creating an issue / task in that state would just pile a doomed job onto
-// agent_task_queue (the canonical "持续给离线 local agent 入队" symptom from
+// Marks an multica_autopilot_run as skipped without enqueueing any task. Used by the
+// pre-flight admission check when the assignee multica_agent's runtime is offline:
+// creating an multica_issue / task in that state would just pile a doomed job onto
+// multica_agent_task_queue (the canonical "持续给离线 local multica_agent 入队" symptom from
 // MUL-1899). Recording the skip + reason gives the UI / failure monitor / ops
 // a paper trail without polluting the failure ratio.
-func (q *Queries) UpdateAutopilotRunSkipped(ctx context.Context, arg UpdateAutopilotRunSkippedParams) (AutopilotRun, error) {
+func (q *Queries) UpdateAutopilotRunSkipped(ctx context.Context, arg UpdateAutopilotRunSkippedParams) (MulticaAutopilotRun, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotRunSkipped, arg.ID, arg.FailureReason)
-	var i AutopilotRun
+	var i MulticaAutopilotRun
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -1280,7 +1280,7 @@ func (q *Queries) UpdateAutopilotRunSkipped(ctx context.Context, arg UpdateAutop
 }
 
 const updateAutopilotRunSkippedWithResult = `-- name: UpdateAutopilotRunSkippedWithResult :one
-UPDATE autopilot_run
+UPDATE multica_autopilot_run
 SET status = 'skipped',
     completed_at = now(),
     failure_reason = $2,
@@ -1295,9 +1295,9 @@ type UpdateAutopilotRunSkippedWithResultParams struct {
 	Result        []byte      `json:"result"`
 }
 
-func (q *Queries) UpdateAutopilotRunSkippedWithResult(ctx context.Context, arg UpdateAutopilotRunSkippedWithResultParams) (AutopilotRun, error) {
+func (q *Queries) UpdateAutopilotRunSkippedWithResult(ctx context.Context, arg UpdateAutopilotRunSkippedWithResultParams) (MulticaAutopilotRun, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotRunSkippedWithResult, arg.ID, arg.FailureReason, arg.Result)
-	var i AutopilotRun
+	var i MulticaAutopilotRun
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,
@@ -1318,7 +1318,7 @@ func (q *Queries) UpdateAutopilotRunSkippedWithResult(ctx context.Context, arg U
 }
 
 const updateAutopilotTrigger = `-- name: UpdateAutopilotTrigger :one
-UPDATE autopilot_trigger SET
+UPDATE multica_autopilot_trigger SET
     enabled = COALESCE($2::boolean, enabled),
     cron_expression = COALESCE($3, cron_expression),
     timezone = COALESCE($4, timezone),
@@ -1338,7 +1338,7 @@ type UpdateAutopilotTriggerParams struct {
 	Label          pgtype.Text        `json:"label"`
 }
 
-func (q *Queries) UpdateAutopilotTrigger(ctx context.Context, arg UpdateAutopilotTriggerParams) (AutopilotTrigger, error) {
+func (q *Queries) UpdateAutopilotTrigger(ctx context.Context, arg UpdateAutopilotTriggerParams) (MulticaAutopilotTrigger, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotTrigger,
 		arg.ID,
 		arg.Enabled,
@@ -1347,7 +1347,7 @@ func (q *Queries) UpdateAutopilotTrigger(ctx context.Context, arg UpdateAutopilo
 		arg.NextRunAt,
 		arg.Label,
 	)
-	var i AutopilotTrigger
+	var i MulticaAutopilotTrigger
 	err := row.Scan(
 		&i.ID,
 		&i.AutopilotID,

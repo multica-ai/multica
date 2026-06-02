@@ -44,7 +44,7 @@ type SquadMemberResponse struct {
 
 // ── Converters ──────────────────────────────────────────────────────────────
 
-func squadToResponse(s db.Squad) SquadResponse {
+func squadToResponse(s db.MulticaSquad) SquadResponse {
 	return SquadResponse{
 		ID:           uuidToString(s.ID),
 		WorkspaceID:  uuidToString(s.WorkspaceID),
@@ -61,7 +61,7 @@ func squadToResponse(s db.Squad) SquadResponse {
 	}
 }
 
-func squadMemberToResponse(m db.SquadMember) SquadMemberResponse {
+func squadMemberToResponse(m db.MulticaSquadMember) SquadMemberResponse {
 	return SquadMemberResponse{
 		ID:         uuidToString(m.ID),
 		SquadID:    uuidToString(m.SquadID),
@@ -75,16 +75,16 @@ func squadMemberToResponse(m db.SquadMember) SquadMemberResponse {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 // loadSquadInWorkspace loads a squad scoped to the current workspace.
-func (h *Handler) loadSquadInWorkspace(w http.ResponseWriter, r *http.Request) (db.Squad, string, bool) {
+func (h *Handler) loadSquadInWorkspace(w http.ResponseWriter, r *http.Request) (db.MulticaSquad, string, bool) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
 	squadID := chi.URLParam(r, "id")
 	squadUUID, ok := parseUUIDOrBadRequest(w, squadID, "squad id")
 	if !ok {
-		return db.Squad{}, "", false
+		return db.MulticaSquad{}, "", false
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
-		return db.Squad{}, "", false
+		return db.MulticaSquad{}, "", false
 	}
 	squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
 		ID:          squadUUID,
@@ -92,7 +92,7 @@ func (h *Handler) loadSquadInWorkspace(w http.ResponseWriter, r *http.Request) (
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "squad not found")
-		return db.Squad{}, "", false
+		return db.MulticaSquad{}, "", false
 	}
 	return squad, workspaceID, true
 }
@@ -817,7 +817,7 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 // (mention://issue/...) are NOT a routing signal and do not suppress the
 // leader. Agent-authored comments always go through the leader (subject to
 // the leader self-trigger guard) so agent updates still drive coordination.
-func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue db.Issue, commentContent, authorType, authorID string) bool {
+func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue db.MulticaIssue, commentContent, authorType, authorID string) bool {
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
 		return false
 	}
@@ -898,7 +898,7 @@ func commentMentionsAnyone(content string) bool {
 // trigger the squad leader. Mirrors shouldEnqueueAgentTask: backlog issues
 // are skipped (parking lot), and the leader agent must have a runtime and
 // not be archived.
-func (h *Handler) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
+func (h *Handler) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.MulticaIssue) bool {
 	if issue.Status == "backlog" {
 		return false
 	}
@@ -910,7 +910,7 @@ func (h *Handler) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db
 // runtime bound, runtime online) are shared with the autopilot admission
 // gate via service.AgentReadiness — both paths must move together or one
 // will start enqueueing tasks the other refuses (MUL-2429 RFC §4.b B4).
-func (h *Handler) isSquadLeaderReady(ctx context.Context, issue db.Issue) bool {
+func (h *Handler) isSquadLeaderReady(ctx context.Context, issue db.MulticaIssue) bool {
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
 		return false
 	}
@@ -935,7 +935,7 @@ func (h *Handler) isSquadLeaderReady(ctx context.Context, issue db.Issue) bool {
 }
 
 // enqueueSquadLeaderTask triggers the squad leader agent for an issue assigned to a squad.
-func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {
+func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.MulticaIssue, triggerCommentID pgtype.UUID, authorType, authorID string) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,

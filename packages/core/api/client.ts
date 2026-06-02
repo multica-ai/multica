@@ -263,12 +263,18 @@ export class ApiClient {
     this.token = token;
   }
 
-  private readCsrfToken(): string | null {
+  private getCookieValue(name: string): string | null {
     if (typeof document === "undefined") return null;
     const match = document.cookie
       .split("; ")
-      .find((c) => c.startsWith("multica_csrf="));
+      .find((c) => c.startsWith(`${name}=`));
     return match ? match.split("=")[1] ?? null : null;
+  }
+
+  private readCsrfToken(): string | null {
+    // CSRF token may come from either the standard Multica cookie or the
+    // Casdoor-originated cookie. Check both, preferring the Multica one.
+    return this.getCookieValue("multica_csrf") || this.getCookieValue("zgsm_csrf");
   }
 
   private authHeaders(): Record<string, string> {
@@ -1171,6 +1177,8 @@ export class ApiClient {
     cdn_domain: string;
     allow_signup: boolean;
     google_client_id?: string;
+    casdoor_enabled?: boolean;
+    casdoor_login_url?: string;
     posthog_key?: string;
     posthog_host?: string;
     analytics_environment?: string;

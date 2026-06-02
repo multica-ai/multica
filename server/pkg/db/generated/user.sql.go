@@ -12,9 +12,9 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO "user" (name, email, avatar_url)
+INSERT INTO multica_user (name, email, avatar_url)
 VALUES ($1, $2, $3)
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, can_manage_workflows
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id
 `
 
 type CreateUserParams struct {
@@ -23,9 +23,9 @@ type CreateUserParams struct {
 	AvatarUrl pgtype.Text `json:"avatar_url"`
 }
 
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (MulticaUser, error) {
 	row := q.db.QueryRow(ctx, createUser, arg.Name, arg.Email, arg.AvatarUrl)
-	var i User
+	var i MulticaUser
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -41,19 +41,19 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
-		&i.CanManageWorkflows,
+		&i.SubjectID,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, can_manage_workflows FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id FROM multica_user
 WHERE id = $1
 `
 
-func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
+func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (MulticaUser, error) {
 	row := q.db.QueryRow(ctx, getUser, id)
-	var i User
+	var i MulticaUser
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -69,19 +69,19 @@ func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
-		&i.CanManageWorkflows,
+		&i.SubjectID,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, can_manage_workflows FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id FROM multica_user
 WHERE email = $1
 `
 
-func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (MulticaUser, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, email)
-	var i User
+	var i MulticaUser
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -97,18 +97,47 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
-		&i.CanManageWorkflows,
+		&i.SubjectID,
+	)
+	return i, err
+}
+
+const getUserBySubjectID = `-- name: GetUserBySubjectID :one
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id FROM multica_user
+WHERE subject_id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetUserBySubjectID(ctx context.Context, subjectID pgtype.Text) (MulticaUser, error) {
+	row := q.db.QueryRow(ctx, getUserBySubjectID, subjectID)
+	var i MulticaUser
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+		&i.Language,
+		&i.ProfileDescription,
+		&i.Timezone,
+		&i.SubjectID,
 	)
 	return i, err
 }
 
 const joinCloudWaitlist = `-- name: JoinCloudWaitlist :one
-UPDATE "user" SET
+UPDATE multica_user SET
     cloud_waitlist_email = $2,
     cloud_waitlist_reason = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, can_manage_workflows
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id
 `
 
 type JoinCloudWaitlistParams struct {
@@ -120,9 +149,9 @@ type JoinCloudWaitlistParams struct {
 // Records interest in cloud runtimes. Does NOT mark onboarding
 // complete — the user still has to pick a real path (CLI / Skip)
 // in Step 3. Repeating the call overwrites email + reason.
-func (q *Queries) JoinCloudWaitlist(ctx context.Context, arg JoinCloudWaitlistParams) (User, error) {
+func (q *Queries) JoinCloudWaitlist(ctx context.Context, arg JoinCloudWaitlistParams) (MulticaUser, error) {
 	row := q.db.QueryRow(ctx, joinCloudWaitlist, arg.ID, arg.CloudWaitlistEmail, arg.CloudWaitlistReason)
-	var i User
+	var i MulticaUser
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -138,22 +167,22 @@ func (q *Queries) JoinCloudWaitlist(ctx context.Context, arg JoinCloudWaitlistPa
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
-		&i.CanManageWorkflows,
+		&i.SubjectID,
 	)
 	return i, err
 }
 
 const markUserOnboarded = `-- name: MarkUserOnboarded :one
-UPDATE "user" SET
+UPDATE multica_user SET
     onboarded_at = COALESCE(onboarded_at, now()),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, can_manage_workflows
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id
 `
 
-func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, error) {
+func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (MulticaUser, error) {
 	row := q.db.QueryRow(ctx, markUserOnboarded, id)
-	var i User
+	var i MulticaUser
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -169,17 +198,17 @@ func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, 
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
-		&i.CanManageWorkflows,
+		&i.SubjectID,
 	)
 	return i, err
 }
 
 const patchUserOnboarding = `-- name: PatchUserOnboarding :one
-UPDATE "user" SET
+UPDATE multica_user SET
     onboarding_questionnaire = COALESCE($1, onboarding_questionnaire),
     updated_at = now()
 WHERE id = $2
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, can_manage_workflows
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id
 `
 
 type PatchUserOnboardingParams struct {
@@ -191,9 +220,9 @@ type PatchUserOnboardingParams struct {
 // questionnaire JSONB is patchable — the v2 attempt at persisting Step 3
 // runtime choice on the user row was reverted; that state now lives in a
 // frontend Zustand transient store.
-func (q *Queries) PatchUserOnboarding(ctx context.Context, arg PatchUserOnboardingParams) (User, error) {
+func (q *Queries) PatchUserOnboarding(ctx context.Context, arg PatchUserOnboardingParams) (MulticaUser, error) {
 	row := q.db.QueryRow(ctx, patchUserOnboarding, arg.Questionnaire, arg.ID)
-	var i User
+	var i MulticaUser
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -209,17 +238,17 @@ func (q *Queries) PatchUserOnboarding(ctx context.Context, arg PatchUserOnboardi
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
-		&i.CanManageWorkflows,
+		&i.SubjectID,
 	)
 	return i, err
 }
 
 const setStarterContentState = `-- name: SetStarterContentState :one
-UPDATE "user" SET
+UPDATE multica_user SET
     starter_content_state = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, can_manage_workflows
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id
 `
 
 type SetStarterContentStateParams struct {
@@ -232,9 +261,9 @@ type SetStarterContentStateParams struct {
 // "transition NULL -> imported and run the seeding" vs "already
 // decided, short-circuit"). Using COALESCE here would swallow the
 // transition, so this is a straight assignment.
-func (q *Queries) SetStarterContentState(ctx context.Context, arg SetStarterContentStateParams) (User, error) {
+func (q *Queries) SetStarterContentState(ctx context.Context, arg SetStarterContentStateParams) (MulticaUser, error) {
 	row := q.db.QueryRow(ctx, setStarterContentState, arg.ID, arg.StarterContentState)
-	var i User
+	var i MulticaUser
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -250,13 +279,28 @@ func (q *Queries) SetStarterContentState(ctx context.Context, arg SetStarterCont
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
-		&i.CanManageWorkflows,
+		&i.SubjectID,
 	)
 	return i, err
 }
 
+const setUserSubjectID = `-- name: SetUserSubjectID :exec
+UPDATE multica_user SET subject_id = $2, updated_at = now()
+WHERE id = $1
+`
+
+type SetUserSubjectIDParams struct {
+	ID        pgtype.UUID `json:"id"`
+	SubjectID pgtype.Text `json:"subject_id"`
+}
+
+func (q *Queries) SetUserSubjectID(ctx context.Context, arg SetUserSubjectIDParams) error {
+	_, err := q.db.Exec(ctx, setUserSubjectID, arg.ID, arg.SubjectID)
+	return err
+}
+
 const updateUser = `-- name: UpdateUser :one
-UPDATE "user" SET
+UPDATE multica_user SET
     name = COALESCE($2, name),
     avatar_url = COALESCE($3, avatar_url),
     language = COALESCE($4, language),
@@ -268,7 +312,7 @@ UPDATE "user" SET
     END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, can_manage_workflows
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, subject_id
 `
 
 type UpdateUserParams struct {
@@ -292,7 +336,7 @@ type UpdateUserParams struct {
 // to leave the existing column untouched. Folding it into UpdateUser
 // rather than carrying a dedicated UpdateUserTimezone keeps the
 // profile-patch shape uniform between Preferences fields.
-func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (MulticaUser, error) {
 	row := q.db.QueryRow(ctx, updateUser,
 		arg.ID,
 		arg.Name,
@@ -301,7 +345,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		arg.ProfileDescription,
 		arg.Timezone,
 	)
-	var i User
+	var i MulticaUser
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -317,7 +361,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
-		&i.CanManageWorkflows,
+		&i.SubjectID,
 	)
 	return i, err
 }
