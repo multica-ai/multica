@@ -41,10 +41,9 @@ test.describe("Time tracking", () => {
 
   // ── My Time page ───────────────────────────────────────────────────────────
 
-  test("My Time page is reachable from the sidebar", async ({ page }) => {
-    await page.getByRole("link", { name: /my time/i }).click();
-    await page.waitForURL("**/my-time");
-    await expect(page.getByRole("heading", { name: /my time/i })).toBeVisible();
+  test("My Time page is reachable", async ({ page }) => {
+    await page.goto("/my-time");
+    await expect(page.getByRole("button", { name: /add entry/i })).toBeVisible();
   });
 
   test("Team Time page shows this-week totals grouped by member and project", async ({ page }, testInfo) => {
@@ -106,13 +105,10 @@ test.describe("Time tracking", () => {
     await expect(page.getByText("No time logged by any member in this period.")).not.toBeVisible();
   });
 
-  // ── Start and stop timer via sidebar widget ─────────────────────────────────
+  // ── Start and stop timer via My Time quick entry ───────────────────────────
 
-  test("can start and stop a timer using the sidebar widget", async ({ page }) => {
-    await page.goto("/issues");
-
-    // Open the inline description form.
-    await page.getByRole("button", { name: /track time/i }).click();
+  test("can start and stop a timer using the My Time quick entry", async ({ page }) => {
+    await page.goto("/my-time");
 
     // The description input should appear.
     const descInput = page.getByPlaceholder(/what are you working on/i);
@@ -128,8 +124,9 @@ test.describe("Time tracking", () => {
     // Stop it.
     await page.getByRole("button", { name: /stop timer/i }).click();
 
-    // Widget returns to idle state.
-    await expect(page.getByRole("button", { name: /track time/i })).toBeVisible({ timeout: 5000 });
+    // Quick entry returns to idle state.
+    await expect(page.getByPlaceholder(/what are you working on/i)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("button", { name: /^start$/i })).toBeVisible();
   });
 
   // ── Manual entry on My Time page ───────────────────────────────────────────
@@ -342,6 +339,11 @@ test.describe("Time tracking", () => {
     await setDateTimePicker(page, "Pick start time", start);
     await setDateTimePicker(page, "Pick stop time", stop);
     await page.getByRole("button", { name: /save entry/i }).click();
-    await expect(page.getByText("Historical admin work")).toBeVisible();
+    await expect(
+      page
+        .locator('button[aria-label="Edit time entry"]')
+        .filter({ hasText: "Historical admin work" })
+        .first()
+    ).toBeVisible();
   });
 });
