@@ -224,6 +224,8 @@ export function ProviderLogo({
       return <GeminiLogo className={className} />;
     case "antigravity":
       return <AntigravityLogo className={className} />;
+    case "xai":
+      return <span className={className} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontFamily: 'sans-serif' }}>𝕏</span>;
     default:
       return <Monitor className={className} />;
   }
