@@ -23,6 +23,7 @@ import { useFormatRelativeDate } from "./labels";
 import { useProjectViewStore } from "@multica/core/projects";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
+import { HealthPill } from "./health-pill";
 
 const COMPACT_GRID = "grid w-full min-w-[740px] grid-cols-[24px_minmax(200px,1fr)_96px_96px_80px_80px_80px]";
 
@@ -109,6 +110,7 @@ function ProjectCard({ project }: { project: Project }) {
         />
 
         <div className="flex items-center gap-2">
+          {project.health && <HealthPill health={project.health} />}
           <ProjectPriorityBadge project={project} handleUpdate={handleUpdate} align="start" />
           <span className="text-[10px] text-muted-foreground">
             {formatRelativeDate(project.created_at)}
@@ -145,8 +147,9 @@ function ProjectCardCompact({ project }: { project: Project }) {
         <ProjectPriorityBadge project={project} handleUpdate={handleUpdate} align="start" />
       </div>
 
-      <div className="flex items-center justify-start">
+      <div className="flex items-center justify-start gap-1.5">
         <ProjectStatusBadge project={project} handleUpdate={handleUpdate} align="start" />
+        {project.health && <HealthPill health={project.health} />}
       </div>
 
       <span className="flex items-center justify-start gap-1.5 text-xs text-muted-foreground tabular-nums">
