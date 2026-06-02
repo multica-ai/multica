@@ -134,7 +134,28 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, liveness handl
 
 	slog.Info("runtime sweeper: marked stale runtimes offline", "count", len(staleRows), "workspaces", len(workspaces))
 
+	// Attempt failover: re-route queued/dispatched tasks to backup runtimes
+	// before falling back to failing them. Must run BEFORE FailTasksForOfflineRuntimes
+	// so that tasks we successfully re-route are not erroneously failed.
+	for _, row := range staleRows {
+		rerouted, rerr := reRouteTasksForOfflineRuntime(ctx, queries, row.ID)
+		if rerr != nil {
+			slog.Warn("runtime sweeper: failover re-route failed",
+				"runtime_id", util.UUIDToString(row.ID), "error", rerr)
+			continue
+		}
+		if len(rerouted) > 0 {
+			slog.Info("runtime sweeper: re-routed tasks to failover runtime",
+				"runtime_id", util.UUIDToString(row.ID), "rerouted", len(rerouted))
+			for _, t := range rerouted {
+				taskSvc.BroadcastTaskRerouted(ctx, t)
+			}
+		}
+	}
+
 	// Fail orphaned tasks (dispatched/running) whose runtimes just went offline.
+	// Tasks already re-routed above now point at a live runtime, so they are
+	// excluded automatically by the runtime_id IN (offline runtimes) filter.
 	failedTasks, err := queries.FailTasksForOfflineRuntimes(ctx)
 	if err != nil {
 		slog.Warn("runtime sweeper: failed to clean up stale tasks", "error", err)
@@ -319,6 +340,54 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, taskSvc *ser
 
 // reconcileAgentStatus refreshes agent status from the current active task set.
 // Used only by the test-fallback path of broadcastFailedTasks above.
+// reRouteTasksForOfflineRuntime attempts to move queued/dispatched tasks from
+// an offline runtime to a healthy fallback in the same failover group. Returns
+// the list of tasks that were successfully re-routed.
+func reRouteTasksForOfflineRuntime(ctx context.Context, queries *db.Queries, offlineRuntimeID pgtype.UUID) ([]db.AgentTaskQueue, error) {
+	rt, err := queries.GetAgentRuntime(ctx, offlineRuntimeID)
+	if err != nil {
+		return nil, err
+	}
+	if !rt.FailoverGroupID.Valid {
+		return nil, nil
+	}
+
+	// Fetch the failover group to check its strategy.
+	group, gerr := queries.GetFailoverGroup(ctx, rt.FailoverGroupID)
+	if gerr != nil {
+		return nil, gerr
+	}
+	if group.Strategy != "priority" {
+		slog.Warn("runtime sweeper: failover strategy not yet implemented, falling back to priority ordering",
+			"runtime_id", util.UUIDToString(offlineRuntimeID),
+			"strategy", group.Strategy)
+	}
+
+	candidates, err := queries.SelectFailoverCandidates(ctx, db.SelectFailoverCandidatesParams{
+		FailoverGroupID:  rt.FailoverGroupID,
+		OfflineRuntimeID: offlineRuntimeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	// Pick the best candidate. Currently always priority-ordered (highest first).
+	// TODO: implement round-robin and least-loaded strategies.
+	bestCandidate := candidates[0]
+
+	rerouted, err := queries.ReRouteQueuedTasksToRuntime(ctx, db.ReRouteQueuedTasksToRuntimeParams{
+		NewRuntimeID:     bestCandidate.ID,
+		OfflineRuntimeID: offlineRuntimeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return rerouted, nil
+}
+
 func reconcileAgentStatus(ctx context.Context, queries *db.Queries, bus *events.Bus, agentID pgtype.UUID) {
 	agent, err := queries.RefreshAgentStatusFromTasks(ctx, agentID)
 	if err != nil {

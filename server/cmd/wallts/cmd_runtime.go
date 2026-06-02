@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -43,11 +44,26 @@ var runtimeUpdateCmd = &cobra.Command{
 	RunE:  runRuntimeUpdate,
 }
 
+var runtimeSetPriorityCmd = &cobra.Command{
+	Use:   "set-priority <runtime-id> <priority>",
+	Short: "Set the failover priority for a runtime",
+	Args:  exactArgs(2),
+	RunE:  runRuntimeSetPriority,
+}
+
+var runtimeFailoverStatusCmd = &cobra.Command{
+	Use:   "failover-status",
+	Short: "Show failover configuration for runtimes",
+	RunE:  runRuntimeFailoverStatus,
+}
+
 func init() {
 	runtimeCmd.AddCommand(runtimeListCmd)
 	runtimeCmd.AddCommand(runtimeUsageCmd)
 	runtimeCmd.AddCommand(runtimeActivityCmd)
 	runtimeCmd.AddCommand(runtimeUpdateCmd)
+	runtimeCmd.AddCommand(runtimeSetPriorityCmd)
+	runtimeCmd.AddCommand(runtimeFailoverStatusCmd)
 
 	// runtime list
 	runtimeListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -60,6 +76,11 @@ func init() {
 	runtimeActivityCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// runtime update
+	runtimeSetPriorityCmd.Flags().String("output", "table", "Output format: table or json")
+
+	runtimeFailoverStatusCmd.Flags().String("runtime", "", "Show failover status for a specific runtime")
+	runtimeFailoverStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
 	runtimeUpdateCmd.Flags().String("target-version", "", "Target version to update to (required)")
 	runtimeUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 	runtimeUpdateCmd.Flags().Bool("wait", false, "Wait for update to complete (poll until done)")
@@ -206,7 +227,8 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 		if output == "json" {
 			return cli.PrintJSON(os.Stdout, update)
 		}
-		fmt.Printf("Update initiated: %s (status: %s)\n", strVal(update, "id"), strVal(update, "status"))
+		fmt.Printf("Update initiated: %s (status: %s)
+", strVal(update, "id"), strVal(update, "status"))
 		return nil
 	}
 
@@ -230,11 +252,97 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 				return cli.PrintJSON(os.Stdout, update)
 			}
 			if status == "completed" {
-				fmt.Printf("Update completed: %s\n", strVal(update, "output"))
+				fmt.Printf("Update completed: %s
+", strVal(update, "output"))
 			} else {
-				fmt.Printf("Update %s: %s\n", status, strVal(update, "error"))
+				fmt.Printf("Update %s: %s
+", status, strVal(update, "error"))
 			}
 			return nil
 		}
 	}
+}
+func runRuntimeSetPriority(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	priority, err := strconv.Atoi(args[1])
+	if err != nil {
+		return fmt.Errorf("priority must be an integer: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	body := map[string]any{"priority": priority}
+	var result map[string]any
+	if err := client.PatchJSON(ctx, "/api/runtimes/"+args[0]+"/priority", body, &result); err != nil {
+		return fmt.Errorf("set priority: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fmt.Printf("Runtime %s priority set to %d
+", args[0], priority)
+	return nil
+}
+
+func runRuntimeFailoverStatus(cmd *cobra.Command, _ []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	runtimeFilter, _ := cmd.Flags().GetString("runtime")
+
+	var runtimes []map[string]any
+	if err := client.GetJSON(ctx, "/api/runtimes", &runtimes); err != nil {
+		return fmt.Errorf("list runtimes: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+
+	if runtimeFilter != "" {
+		var status map[string]any
+		if err := client.GetJSON(ctx, "/api/runtimes/"+runtimeFilter+"/failover-status", &status); err != nil {
+			return fmt.Errorf("get failover status: %w", err)
+		}
+		if output == "json" {
+			return cli.PrintJSON(os.Stdout, status)
+		}
+		fmt.Printf("Runtime: %s (%s)
+", strVal(status, "runtime_name"), strVal(status, "runtime_id"))
+		fmt.Printf("Priority: %s
+", strVal(status, "priority"))
+		return nil
+	}
+
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, runtimes)
+	}
+
+	headers := []string{"ID", "NAME", "STATUS", "PRIORITY", "FAILOVER_GROUP"}
+	rows := make([][]string, 0, len(runtimes))
+	for _, rt := range runtimes {
+		groupID := "-"
+		if gid := strVal(rt, "failover_group_id"); gid != "" {
+			groupID = gid
+		}
+		rows = append(rows, []string{
+			strVal(rt, "id"),
+			strVal(rt, "name"),
+			strVal(rt, "status"),
+			strVal(rt, "priority"),
+			groupID,
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
 }
