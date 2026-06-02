@@ -49,9 +49,10 @@ Multica supports two delivery backends — [Resend](https://resend.com/) for clo
 | Variable | Default | Description |
 |---|---|---|
 | `SMTP_HOST` | empty | SMTP relay hostname. Setting this activates SMTP mode and overrides Resend |
-| `SMTP_PORT` | `25` | SMTP port. Use `587` for STARTTLS submission; **port 465 (SMTPS / implicit TLS) is not supported** |
+| `SMTP_PORT` | `25` | SMTP port. Use `587` for STARTTLS submission, or `465` for SMTPS (implicit TLS, auto-enabled) |
 | `SMTP_USERNAME` | empty | SMTP username. Leave empty for unauthenticated relay |
 | `SMTP_PASSWORD` | empty | SMTP password |
+| `SMTP_TLS` | `starttls` | TLS mode. `implicit` (aliases `smtps`, `ssl`) forces an immediate TLS handshake on connect (SMTPS); port `465` auto-enables it. Unset / `starttls` upgrades via STARTTLS after connect |
 | `SMTP_TLS_INSECURE` | `false` | Set `true` to skip TLS certificate verification (private CA / self-signed only) |
 
 STARTTLS is upgraded automatically when the server advertises it. The dial timeout is 10s and the whole SMTP session has a 30s deadline, so a black-holed relay can't hang the auth handler.
@@ -128,6 +129,22 @@ Three allowlist layers combine by priority. **If any layer is set to a non-empty
 
 **Invite flows themselves do not check the signup allowlist** — but the invitee must still be able to **sign in** before accepting the invite. If they already have a Multica account (for example from another workspace), they can accept directly, unaffected by the allowlist; **if they have never signed up**, the first step of sign-in (requesting a verification code) still passes through the allowlist check, and an email rejected by `ALLOW_SIGNUP=false` or by `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` **cannot finish signup, and therefore cannot accept the invite**.
 
+## Locking down workspace creation
+
+`ALLOW_SIGNUP=false` blocks new accounts, but it does **not** block an already-signed-in user from creating another workspace via `POST /api/workspaces`. On a self-hosted instance where every issue, repo, and agent must be visible to the platform admin, set `DISABLE_WORKSPACE_CREATION=true` to close that gap.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DISABLE_WORKSPACE_CREATION` | `false` | When `true`, every call to `POST /api/workspaces` returns `403 workspace creation is disabled for this instance`. The web UI hides every "Create workspace" affordance via `/api/config`. There is no role/owner exception — the gate is global per instance |
+
+Recommended bootstrap sequence:
+
+1. Start the instance with `DISABLE_WORKSPACE_CREATION` unset (the default).
+2. Sign in as the admin and create the shared workspace.
+3. Set `DISABLE_WORKSPACE_CREATION=true` and restart the backend. From this point on, users join via invitation only.
+
+If you also want to keep `ALLOW_SIGNUP=true` so invited users can finish signup with their first verification code, combine `DISABLE_WORKSPACE_CREATION=true` with `ALLOWED_EMAIL_DOMAINS` / `ALLOWED_EMAILS` to scope which addresses can sign up. Setting `ALLOW_SIGNUP=false` will additionally block pending invitees from creating their account at all — useful only on instances where every member already has a Multica account.
+
 ## Rate limiting (optional Redis)
 
 Public auth endpoints — `/auth/send-code`, `/auth/verify-code`, `/auth/google` — have per-IP fixed-window rate limiting in front of them. The limiter is backed by Redis. When `REDIS_URL` is unset the middleware is a **no-op** (fail-open) and the backend logs `rate limiting disabled: REDIS_URL not configured` at startup.
@@ -167,6 +184,8 @@ For a full explanation of how each parameter affects daemon behavior, see [Daemo
 | Variable | Default | Description |
 |---|---|---|
 | `FRONTEND_ORIGIN` | empty | Frontend address. Invite email links, the CORS allowlist, and the cookie domain are all derived from this. When unset, invite email links fall back to the hosted domain `https://app.multica.ai` — self-host must set this explicitly |
+| `MULTICA_APP_URL` | empty | Frontend URL for CLI login flow. Also used by the web UI to show self-host daemon setup commands with your app domain; for same-origin deployments this is also used as daemon `server_url` when `MULTICA_PUBLIC_URL` is unset |
+| `MULTICA_PUBLIC_URL` | empty | Public API URL, without trailing slash. Used for autopilot webhook URLs and by the web UI as the daemon `server_url` |
 | `CORS_ALLOWED_ORIGINS` | empty | Additional allowed CORS origins (comma-separated) |
 | `ALLOWED_ORIGINS` | empty | WebSocket-specific origin allowlist (comma-separated); when unset, fallback order is `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` |
 

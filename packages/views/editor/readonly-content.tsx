@@ -38,6 +38,7 @@ import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { isAllowedFileCardHref } from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
+import { highlightToHtml } from "./utils/highlight-markdown";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { HtmlBlockPreview } from "./html-block-preview";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
@@ -64,9 +65,12 @@ const PRE_UNWRAP_RE = /(^|\s)language-(html|mermaid)(\s|$)/;
 
 const sanitizeSchema = {
   ...defaultSchema,
+  // Allow <mark> (text highlight) — emitted by highlightToHtml from `==text==`.
+  // It carries no attributes, so only the tag name needs whitelisting.
+  tagNames: [...(defaultSchema.tagNames ?? []), "mark"],
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "mention"],
+    href: [...(defaultSchema.protocols?.href ?? []), "mention", "slash"],
   },
   attributes: {
     ...defaultSchema.attributes,
@@ -95,6 +99,7 @@ const sanitizeSchema = {
 
 function urlTransform(url: string): string {
   if (url.startsWith("mention://")) return url;
+  if (url.startsWith("slash://skill/")) return url;
   return defaultUrlTransform(url);
 }
 
@@ -137,6 +142,10 @@ function ReadonlyLink({
   children?: React.ReactNode;
 }) {
   const slug = useWorkspaceSlug();
+
+  if (href?.startsWith("slash://skill/")) {
+    return <span className="slash-command">{children}</span>;
+  }
 
   if (isMentionHref(href)) {
     const match = href.match(/^mention:\/\/(member|agent|issue|all)\/(.+)$/);
@@ -317,7 +326,10 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   className,
   attachments,
 }: ReadonlyContentProps) {
-  const processed = useMemo(() => preprocessMarkdown(content), [content]);
+  const processed = useMemo(
+    () => highlightToHtml(preprocessMarkdown(content)),
+    [content],
+  );
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
 

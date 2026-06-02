@@ -30,6 +30,7 @@ type EmailService struct {
 	smtpUsername    string
 	smtpPassword    string
 	smtpTLSInsecure bool
+	smtpTLSImplicit bool
 }
 
 func NewEmailService() *EmailService {
@@ -48,6 +49,19 @@ func NewEmailService() *EmailService {
 	smtpPassword := os.Getenv("SMTP_PASSWORD")
 	smtpTLSInsecure := os.Getenv("SMTP_TLS_INSECURE") == "true"
 
+	// SMTP_TLS=implicit forces an immediate TLS handshake on connect (SMTPS).
+	// Required by providers like Aliyun enterprise mail that only offer port 465
+	// SSL and do not advertise STARTTLS. Default (empty / "starttls") preserves
+	// the prior STARTTLS-upgrade behavior.
+	smtpTLSMode := strings.ToLower(strings.TrimSpace(os.Getenv("SMTP_TLS")))
+	smtpTLSImplicit := smtpTLSMode == "implicit" || smtpTLSMode == "smtps" || smtpTLSMode == "ssl"
+	if smtpTLSMode == "" && smtpPort == "465" {
+		smtpTLSImplicit = true
+	}
+	if smtpTLSMode != "" && !smtpTLSImplicit && smtpTLSMode != "starttls" {
+		fmt.Printf("EmailService: SMTP_TLS=%q not recognized, falling back to starttls\n", smtpTLSMode)
+	}
+
 	var client *resend.Client
 	if apiKey != "" {
 		client = resend.NewClient(apiKey)
@@ -55,7 +69,11 @@ func NewEmailService() *EmailService {
 
 	switch {
 	case smtpHost != "":
-		fmt.Printf("EmailService: SMTP relay %s:%s from=%s\n", smtpHost, smtpPort, from)
+		tlsLabel := "starttls"
+		if smtpTLSImplicit {
+			tlsLabel = "implicit-tls"
+		}
+		fmt.Printf("EmailService: SMTP relay %s:%s (%s) from=%s\n", smtpHost, smtpPort, tlsLabel, from)
 	case client != nil:
 		fmt.Printf("EmailService: Resend API from=%s\n", from)
 	default:
@@ -70,6 +88,7 @@ func NewEmailService() *EmailService {
 		smtpUsername:    smtpUsername,
 		smtpPassword:    smtpPassword,
 		smtpTLSInsecure: smtpTLSInsecure,
+		smtpTLSImplicit: smtpTLSImplicit,
 	}
 }
 
@@ -80,9 +99,21 @@ func NewEmailService() *EmailService {
 func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	addr := net.JoinHostPort(s.smtpHost, s.smtpPort)
 
+	tlsCfg := &tls.Config{
+		ServerName:         s.smtpHost,
+		InsecureSkipVerify: s.smtpTLSInsecure, //nolint:gosec // opt-in via SMTP_TLS_INSECURE=true
+	}
+
 	// Bounded dial + whole-session deadline: prevents a blackholed SMTP server
 	// from hanging the auth handler (or a background goroutine) indefinitely.
-	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	var conn net.Conn
+	var err error
+	if s.smtpTLSImplicit {
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		conn, err = tls.DialWithDialer(dialer, "tcp", addr, tlsCfg)
+	} else {
+		conn, err = net.DialTimeout("tcp", addr, 10*time.Second)
+	}
 	if err != nil {
 		return fmt.Errorf("smtp dial %s: %w", addr, err)
 	}
@@ -98,14 +129,13 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	}
 	defer c.Close()
 
-	// STARTTLS if advertised — refreshes the extension list for 8BITMIME check below.
-	if ok, _ := c.Extension("STARTTLS"); ok {
-		tlsCfg := &tls.Config{
-			ServerName:         s.smtpHost,
-			InsecureSkipVerify: s.smtpTLSInsecure, //nolint:gosec // opt-in via SMTP_TLS_INSECURE=true
-		}
-		if err = c.StartTLS(tlsCfg); err != nil {
-			return fmt.Errorf("smtp starttls: %w", err)
+	// STARTTLS upgrade only makes sense when the underlying connection is still
+	// plaintext. Skip when we already dialed with implicit TLS.
+	if !s.smtpTLSImplicit {
+		if ok, _ := c.Extension("STARTTLS"); ok {
+			if err = c.StartTLS(tlsCfg); err != nil {
+				return fmt.Errorf("smtp starttls: %w", err)
+			}
 		}
 	}
 

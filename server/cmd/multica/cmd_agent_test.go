@@ -500,6 +500,65 @@ func TestResolveCustomEnv(t *testing.T) {
 	})
 }
 
+func TestAgentSkillsAddCallsAdditiveEndpoint(t *testing.T) {
+	var gotMethod string
+	var gotPath string
+	var gotBody map[string][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": "skill-a", "name": "Skill A", "description": ""},
+			{"id": "skill-b", "name": "Skill B", "description": ""},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := &cobra.Command{Use: "add"}
+	cmd.Flags().StringSlice("skill-ids", nil, "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+	if err := cmd.Flags().Set("skill-ids", "skill-a,skill-b"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runAgentSkillsAdd(cmd, []string{"agent-123"}); err != nil {
+		t.Fatalf("runAgentSkillsAdd: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != "/api/agents/agent-123/skills/add" {
+		t.Fatalf("path = %q, want additive endpoint", gotPath)
+	}
+	if !reflect.DeepEqual(gotBody["skill_ids"], []string{"skill-a", "skill-b"}) {
+		t.Fatalf("skill_ids body = %v", gotBody["skill_ids"])
+	}
+}
+
+func TestAgentSkillsAddRequiresSkillIDs(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := &cobra.Command{Use: "add"}
+	cmd.Flags().StringSlice("skill-ids", nil, "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+
+	err := runAgentSkillsAdd(cmd, []string{"agent-123"})
+	if err == nil || !strings.Contains(err.Error(), "--skill-ids is required") {
+		t.Fatalf("expected required --skill-ids error, got %v", err)
+	}
+}
+
 // TestAgentAvatarHappyPath verifies the full flow: agent pre-check, file upload,
 // and avatar update all succeed.
 func TestAgentAvatarHappyPath(t *testing.T) {

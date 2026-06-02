@@ -1,0 +1,183 @@
+---
+title: GitHub 연동
+description: GitHub App을 한 번만 연결하면, 브랜치·제목·본문에 이슈 식별자가 들어간 PR이 해당 이슈에 자동으로 연결됩니다. 그리고 PR을 머지하면 이슈가 완료로 이동합니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+**설정 → GitHub**에서 GitHub 계정 또는 조직을 한 번만 연결하세요. 그 후에는 브랜치 이름, 제목, 본문에 이슈 식별자(예: `MUL-123`)가 들어 있는 모든 pull request가 해당 [이슈](/issues)에 **자동으로 연결**되고, 이슈 사이드바의 **Pull requests** 아래에 표시되며, PR이 머지되면 이슈가 **완료**로 이동합니다.
+
+이슈별 설정은 없습니다. 전체 흐름은 식별자로 동작합니다.
+
+## 연동이 하는 일
+
+| 위치 | 동작 |
+|---|---|
+| **설정 → GitHub** | 워크스페이스 admin에게는 마스터 토글, **Connect GitHub** 버튼, 기능 스위치(PR 사이드바, Co-authored-by, 자동 연결)가 있는 GitHub 탭이 보입니다. 설치 후에는 GitHub 탭으로 다시 돌아옵니다. |
+| **이슈 사이드바 → Pull requests** | 이 이슈에 자동 연결된 모든 PR이 제목, 저장소, 상태(`Open` / `Draft` / `Merged` / `Closed`), 작성자와 함께 표시됩니다. 행을 클릭하면 GitHub의 해당 PR로 이동합니다. |
+| **Webhook(백그라운드)** | 모든 `pull_request` 이벤트에서 Multica는 PR 행을 upsert하고, PR에서 이슈 식별자를 스캔한 뒤, 연결 행을 (다시) 구성합니다. 멱등성이 있어 동일 delivery를 재전송해도 변화가 없습니다. |
+| **머지 시 상태 자동 변경** | PR이 `merged`로 전환되면, 아직 `Done`이나 `Cancelled`가 아닌 모든 연결된 이슈가 `Done`으로 이동합니다. 상태 변경은 source `github_pr_merged`로 타임라인에 기록됩니다. |
+
+미러링되는 것은 PR 자체뿐입니다. 커밋, 열린 PR이 없는 브랜치 ref, CI 체크 상태는 모델링되지 **않습니다**. 이 연동은 의도적으로 좁게 설계되었습니다.
+
+## 식별자 매칭 방식
+
+Webhook은 다음 순서로 세 필드에서 식별자를 추출합니다: **PR head 브랜치**, **PR 제목**, **PR 본문**. 매처는 다음과 같습니다.
+
+- 대소문자를 구분하지 않습니다 — `mul-123`, `MUL-123`, `Mul-123`이 모두 매칭됩니다.
+- 경계가 있습니다 — 왼쪽의 `\b`와 오른쪽의 숫자 앵커 덕분에 `v1.2-3` 같은 버전 번호나 이메일 형식 문자열을 잘못 잡지 않습니다.
+- 워크스페이스 범위로 제한됩니다 — 해당 워크스페이스 고유의 [이슈 prefix](/workspaces)에만 매칭됩니다. prefix가 `MUL`인 워크스페이스에서는 정수가 다른 이슈와 일치하더라도 `FOO-1`이 무시됩니다.
+- 중복이 제거됩니다 — 본문에 `MUL-1, MUL-1`을 나열해도 이슈는 한 번만 연결됩니다.
+
+하나의 PR에서 **여러 이슈**를 참조할 수 있습니다. `Closes MUL-1, MUL-2`는 PR을 두 이슈에 모두 연결하고, 머지하면 두 이슈 모두 `Done`으로 진행됩니다.
+
+## 머지 시 완료 자동 변경 규칙
+
+PR의 `merged` 필드가 `true`로 바뀌면, 연결된 모든 이슈가 평가됩니다.
+
+| 이슈 현재 상태 | 결과 |
+|---|---|
+| `done` | 변화 없음(이미 종료 상태). |
+| `cancelled` | **변화 없음** — 취소됨은 사용자가 작업을 명시적으로 포기했다는 의미이므로, 연동이 이 신호를 덮어쓰지 않습니다. |
+| 그 외 모두(`todo`, `in_progress`, `in_review`, `blocked`, `backlog`) | `done`으로 이동. |
+
+PR을 머지하지 **않고** 닫으면 PR 카드의 상태만 `Closed`로 업데이트됩니다. 연결된 이슈는 그대로 유지됩니다 — 머지 없이 닫는 것이 무엇을 의미하는지는 사용자가 결정합니다.
+
+<Callout type="info">
+이 동작은 타임라인에서 `system` 액터에게 귀속됩니다. 이슈 구독자는 사람이 상태를 옮겼을 때와 동일하게 상태 변경에 대한 인박스 알림을 받습니다.
+</Callout>
+
+## 자동 연결되지 않는 것
+
+- **커밋 메시지의 식별자** — 브랜치 / 제목 / 본문만 스캔됩니다. `MUL-123: fix login`이라는 제목의 커밋은 동일한 문자열이 PR 제목이나 본문에도 나타나지 않는 한 자동 연결되지 않습니다.
+- **PR 댓글의 식별자** — PR 자체의 메타데이터만 스캔되며, 이후의 GitHub 댓글은 무시됩니다.
+- **App이 설치되지 않은 저장소의 PR** — App이 없으면 Multica는 webhook을 전혀 받지 못합니다.
+- **PR을 이슈에 수동으로 연결하기** — 아직 이를 위한 UI는 없습니다. 팀의 규칙상 식별자를 Multica가 읽지 않는 위치에 둔다면, PR 제목이나 본문에 추가하세요.
+
+## 연결 해제
+
+**설정 → GitHub**에는 설치 목록이 없습니다 — 기존 설치는 GitHub에서 직접 관리합니다.
+
+- **GitHub에서** — `https://github.com/settings/installations`(개인) 또는 `https://github.com/organizations/<org>/settings/installations`(조직)에서 Multica GitHub App을 제거합니다. Multica는 `installation.deleted` webhook을 받아 실시간으로 행을 삭제하며, 열려 있는 Settings 탭은 새로고침 없이 업데이트됩니다.
+- **Multica 내부에서의 연결 해제는 admin 전용입니다** — GitHub 탭의 연결 해제 컨트롤은 admin이 아닌 사용자에게는 숨겨집니다. 마스터 GitHub 스위치가 꺼져 있어도 계속 사용할 수 있어, admin이 원클릭으로 기능을 비활성화한 후에도 오래된 설치를 해제할 수 있습니다.
+
+연결 해제 후에도 미러링된 PR 행은 데이터베이스에 남아 과거 이슈 사이드바에서 무엇이 연결되어 있었는지 계속 보여주지만, 해당 설치에서 새로 들어오는 webhook 이벤트는 더 이상 수락되지 않습니다.
+
+## 권한 및 가시성
+
+- **연결 / 연결 해제**에는 워크스페이스 **owner 또는 admin**이 필요합니다. member에게는 카드 설명은 보이지만 Connect 버튼은 보이지 않습니다.
+- 이슈의 **Pull requests** 사이드바는 해당 이슈를 읽을 수 있는 모든 사람에게 보입니다 — 이슈 상세의 나머지 부분과 동일한 권한입니다.
+- GitHub App은 pull request와 메타데이터에 대한 **읽기 전용** 액세스를 요청합니다. Multica는 커밋, 댓글, 상태 체크를 GitHub로 다시 푸시하지 않습니다.
+
+## 자체 호스팅 설정
+
+Multica Cloud에서 Multica를 실행 중이라면 연동이 이미 구성되어 있습니다 — 이 섹션은 건너뛰세요.
+
+자체 호스팅의 경우, GitHub App을 하나 만들고, 서버를 가리키게 한 뒤, 환경 변수 두 개를 설정합니다. 전체 흐름은 아래와 같습니다.
+
+### 1. GitHub App 만들기
+
+다음 중 하나로 이동하세요.
+
+- 개인 계정 → `https://github.com/settings/apps/new`
+- 조직 → `https://github.com/organizations/<org>/settings/apps/new`
+
+다음을 입력하세요.
+
+| 필드 | 값 |
+|---|---|
+| **GitHub App name** | 알아보기 쉬운 이름, 예: `Multica` 또는 `Multica (staging)`. |
+| **Homepage URL** | Multica 프론트엔드, 예: `https://multica.example.com`. |
+| **Callback URL** | 비워 두세요 — Multica는 OAuth 사용자 신원을 사용하지 않습니다. |
+| **Setup URL** | `https://<api-host>/api/github/setup`. **"Redirect on update"를 체크하세요.** |
+| **Webhook → Active** | 활성화. |
+| **Webhook URL** | `https://<api-host>/api/webhooks/github`. |
+| **Webhook secret** | 긴 무작위 문자열을 생성하세요(예: `openssl rand -hex 32`). 2단계에서 동일한 값을 Multica의 env에 붙여넣게 됩니다. |
+| **Permissions → Repository → Pull requests** | **Read-only**. |
+| **Permissions → Repository → Metadata** | Read-only(필수). |
+| **Subscribe to events** | **Pull request**를 체크하세요. |
+| **Where can this GitHub App be installed?** | 선택 사항. 단일 조직 설정에는 `Only on this account`로 충분합니다. |
+
+**Create GitHub App** 후, App 상세 페이지에서 두 가지를 기록해 두세요.
+
+- 상단의 **public link** — 그 꼬리가 slug입니다. `https://github.com/apps/multica-acme` → slug = `multica-acme`.
+- 방금 생성한 **webhook secret**(나중에 GitHub에서 다시 읽을 수 없으니 — 지금 저장하세요).
+
+<Callout type="warning">
+**Webhook secret ≠ Client secret.** App 설정 페이지에는 두 필드가 함께 쌓여 있습니다. **Webhook secret**은 `pull_request` payload에 서명하는 값으로, Multica가 필요로 하는 것입니다. **Client secret**은 OAuth용이며 이 연동에서는 사용되지 않습니다. 이 둘을 혼동하면 모든 webhook delivery에서 혼란스러운 `401 invalid signature`가 발생합니다.
+</Callout>
+
+### 2. 환경 변수 설정
+
+API 서버에서:
+
+```dotenv
+GITHUB_APP_SLUG=multica-acme
+GITHUB_WEBHOOK_SECRET=<the webhook secret you generated>
+```
+
+두 변수 모두 필수입니다. 둘 중 하나라도 누락되면:
+
+- Settings의 `Connect GitHub`이 **비활성화**되고 "not configured" 힌트가 표시됩니다.
+- `/api/webhooks/github` 엔드포인트가 **`503 github webhooks not configured`**를 반환합니다 — Multica는 secret 없이 이벤트를 처리하기를 거부하며, 모든 서명을 조용히 유효한 것으로 취급하지 않습니다.
+
+`FRONTEND_ORIGIN`도 설정되어 있어야 합니다(어떤 프로덕션 자체 호스팅이든 이미 설정되어 있습니다). 설치 후 setup 콜백이 사용자를 `<FRONTEND_ORIGIN>/settings?tab=github`으로 다시 돌려보냅니다.
+
+env 변수를 설정한 후 API를 재시작하세요.
+
+### 3. 마이그레이션 실행
+
+이 연동은 테이블을 마이그레이션 `079_github_integration`으로 제공합니다. 기존 배포를 업그레이드하는 경우:
+
+```bash
+make migrate-up
+```
+
+세 개의 테이블이 생성됩니다: `github_installation`, `github_pull_request`, `issue_pull_request`. 이들은 워크스페이스와 함께 cascade-delete되므로, 워크스페이스를 제거하면 자동으로 정리됩니다.
+
+### 4. UI에서 연결
+
+Multica에서:
+
+1. owner 또는 admin 권한으로 **설정 → GitHub**를 엽니다.
+2. **Connect GitHub**를 클릭합니다. GitHub가 새 탭에서 열립니다.
+3. 액세스를 부여할 저장소를 선택하고 **Install**합니다.
+4. GitHub가 `<api-host>/api/github/setup`으로 리디렉션하여 설치를 기록한 뒤, `<FRONTEND_ORIGIN>/settings?tab=github&github_connected=1`로 돌려보냅니다.
+
+그 후, 브랜치 / 제목 / 본문에 이슈 식별자가 들어 있는 PR을 열어 보세요 — 몇 초 내에 해당 이슈의 상세 페이지에 Pull requests 블록이 나타납니다.
+
+### 5. curl 프로브로 검증
+
+설치 후 GitHub의 **Recent Deliveries** 페이지에서 `401 invalid signature`가 보고된다면, 양쪽의 secret이 다른 것입니다. 어느 쪽이 잘못되었는지 가장 빠르게 찾는 방법은 GitHub를 우회하는 것입니다.
+
+```bash
+SECRET="<the value you put in GITHUB_WEBHOOK_SECRET>"
+BODY='{"zen":"test"}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $NF}')
+curl -i -X POST https://<api-host>/api/webhooks/github \
+  -H "X-Hub-Signature-256: sha256=$SIG" \
+  -H "X-GitHub-Event: ping" \
+  -H "Content-Type: application/json" \
+  -d "$BODY"
+```
+
+| HTTP 상태 | 의미 | 해결 방법 |
+|---|---|---|
+| `200` `{"ok":"pong"}` | 서버가 로드한 secret이 `$SECRET`과 일치합니다. 불일치는 GitHub 쪽에 있습니다. | App → Webhook secret 편집 → **동일한 값을 붙여넣기** → **Save changes**(저장하지 않고 필드 밖을 클릭하면 이전 secret이 유지됩니다). 재전송하세요. |
+| `401 invalid signature` | 서버가 로드한 secret이 생각하는 값이 **아닙니다**. | env 변수가 실행 중인 프로세스에 적용되었는지 확인하세요(예: `kubectl exec` → `echo -n "$GITHUB_WEBHOOK_SECRET" \| wc -c`). 재배포하세요. |
+| `503 github webhooks not configured` | 프로세스에서 `GITHUB_WEBHOOK_SECRET`이 비어 있습니다. | env 변수를 설정하고 API를 재시작하세요. |
+
+## 제한 사항
+
+현재 알아 둬야 할 몇 가지 거친 부분이 있습니다.
+
+- **아직 수동 연결 UI가 없습니다** — PR을 연결하는 유일한 방법은 브랜치, 제목, 본문에 식별자를 두는 것입니다.
+- **CI / 체크 상태가 없습니다** — PR 자체만 미러링됩니다. 빌드 상태, 리뷰 댓글, 리뷰어는 Multica에 표시되지 않습니다.
+- 머지 → 완료 규칙에 대한 **워크스페이스 수준 설정이 없습니다** — 고정된 기본값입니다(`cancelled`가 아닌 한 `merged → done`). 워크스페이스에서 커스터마이즈할 수 있는 매핑은 향후 추가될 예정입니다.
+- **하나의 이슈에 여러 PR이 연결된 경우 머지가 보수적입니다** — 두 PR이 모두 `MUL-123`을 참조하고 첫 번째가 머지되면, 이슈는 즉시 `Done`으로 이동합니다. 진행하기 전에 연결된 모든 PR이 해결되기를 기다리는 후속 변경이 진행 중입니다.
+
+## 다음
+
+- [이슈](/issues) — PR에서 참조하는 이슈 식별자(`MUL-123`)
+- [워크스페이스](/workspaces) — 워크스페이스별 이슈 prefix를 설정하는 곳
+- [환경 변수](/environment-variables) — 위의 GitHub 변수를 포함한 전체 env 참조

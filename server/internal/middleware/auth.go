@@ -137,6 +137,18 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					return
 				}
 				r.Header.Set("X-User-ID", identity.OwnerID)
+				// Tag the auth path so account-level guards (e.g.
+				// handler.RequireHumanActor on /api/cloud-billing/*)
+				// can distinguish a cloud-node machine credential
+				// from a human PAT/JWT. Mirrors the mat_ branch's
+				// stamp of "task_token" — both are server-set,
+				// authoritative, and stripped from any client-
+				// supplied value at the top of this middleware. Same
+				// rationale as MUL-2600: a machine credential
+				// (running agent or running cloud node) must not be
+				// treated as the owner having approved an account-
+				// level action.
+				r.Header.Set("X-Actor-Source", "cloud_pat")
 				next.ServeHTTP(w, r)
 				return
 			}

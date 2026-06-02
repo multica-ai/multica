@@ -1,0 +1,384 @@
+{
+  "step_header": {
+    "step_of": "{{total}}단계 중 {{current}}단계"
+  },
+  "welcome": {
+    "wordmark": "Multica에 오신 것을 환영합니다",
+    "headline_line1": "AI 팀원과",
+    "headline_line2": "하나의",
+    "headline_emphasis": "워크스페이스에서.",
+    "lede": "동료에게 일을 맡기듯 작업을 할당하세요. 에이전트가 이슈를 맡고, 상태를 업데이트하고, 끝나면 댓글을 남깁니다.",
+    "lede_web": "데스크톱에는 런타임이 포함되어 있어 따로 설치할 게 없습니다. 웹에서 계속하려면 내 CLI를 연결하세요.",
+    "lede_desktop": "끝나면 실제 에이전트가 첫 이슈에 답하고 있을 겁니다.",
+    "download_desktop": "데스크톱 다운로드",
+    "continue_on_web": "웹에서 계속",
+    "start_exploring": "둘러보기 시작",
+    "skip_existing": "이미 해봤습니다",
+    "illustration_caption": "모든 이슈, 모든 스레드, 모든 결정이 팀과 에이전트에게 공유됩니다.",
+    "illustration": {
+      "card1_actor_name": "나",
+      "card1_actor_initial": "N",
+      "card1_body_prefix": " 짧은 출시 글 초안 작성해 줄래? ",
+      "card1_body_suffix": "의 인터뷰 결과를 참고해줘.",
+      "card1_mention_content": "@콘텐츠 에이전트",
+      "card1_mention_research": "@리서치 에이전트",
+      "card2_actor_name": "콘텐츠 에이전트",
+      "card2_body": "바로 할게요. 리서치 인용을 가져오고 \"절약한 시간\" 관점으로 초안 작성 중입니다...",
+      "card3_actor_name": "리서치 에이전트",
+      "card3_body": "이번 주 사용자 인터뷰 요약 — 통화 12건, 반복 주제 4개, 인용 후보 3개.",
+      "card3_timestamp": "15분 전",
+      "card4_actor_name": "리뷰 에이전트",
+      "card4_body": "월요일 초안을 검토하고 톤 관련 메모 4개를 남겼습니다. 새 초안을 기다리는 중입니다.",
+      "card5_actor_name": "코딩 에이전트",
+      "card5_body_prefix": "",
+      "card5_body_suffix": "님이 표시한 내보내기 기능을 배포했습니다. PR에 미리보기 링크가 있습니다.",
+      "card5_mention_you": "@나",
+      "card5_timestamp": "방금 전"
+    }
+  },
+  "common": {
+    "back": "뒤로",
+    "continue": "계속",
+    "skip": "건너뛰기",
+    "cancel": "취소",
+    "close": "닫기"
+  },
+  "source_backfill": {
+    "eyebrow": "간단한 질문 하나",
+    "lede": "가입할 때 선택하지 않으셨더라고요. 어떤 사용자에게 Multica가 유용한지 파악하는 데 도움이 됩니다. 답하시면 바로 작업으로 돌아가실 수 있어요.",
+    "submit": "제출",
+    "hint_ready": "좋습니다. 준비되면 제출을 눌러주세요."
+  },
+  "questions": {
+    "eyebrow_about_you": "내 정보",
+    "source": {
+      "question": "Multica를 어디서 알게 되셨나요?",
+      "friends_colleagues": "친구 또는 동료",
+      "search": "Google / 검색",
+      "social_x": "X / Twitter",
+      "social_linkedin": "LinkedIn",
+      "social_youtube": "YouTube",
+      "social_github": "GitHub",
+      "social_misc": "기타 소셜",
+      "blog_newsletter": "블로그 / 뉴스레터",
+      "ai_assistant": "ChatGPT / Claude / Cursor",
+      "from_work": "직장에서",
+      "event_conference": "컨퍼런스 / 밋업",
+      "dont_remember": "기억나지 않음",
+      "other": "기타",
+      "other_placeholder": "예: 자주 듣는 팟캐스트"
+    },
+    "role": {
+      "question": "어떤 역할에 가장 가까우신가요?",
+      "engineer": "엔지니어 / 개발자",
+      "product": "프로덕트 매니저",
+      "designer": "디자이너",
+      "founder": "창업자 / 임원",
+      "marketing": "마케팅 / 그로스",
+      "writer": "작가 / 콘텐츠",
+      "research": "리서처 / 애널리스트",
+      "ops": "운영 / 프로젝트 관리",
+      "student": "학생 / 개인 사용",
+      "other": "기타",
+      "other_placeholder": "예: 교사, 지원팀 리드"
+    },
+    "use_case": {
+      "question": "Multica를 무엇에 쓰고 싶으신가요?",
+      "ship_code": "AI 에이전트와 코드 배포",
+      "manage_team": "팀 작업 관리",
+      "personal_tasks": "개인 작업 정리",
+      "plan_research": "기획, 브레인스토밍, 리서치",
+      "write_publish": "작성, 편집, 게시",
+      "automate_ops": "운영 및 워크플로 자동화",
+      "evaluate": "일단 둘러보기",
+      "other": "기타",
+      "other_placeholder": "예: 스터디 그룹 운영"
+    }
+  },
+  "option_card": {
+    "other_label": "기타",
+    "other_aria": "다른 내용 입력"
+  },
+  "step_question": {
+    "hint_pick": "하나를 선택해 계속하세요. 말하고 싶지 않다면 건너뛸 수 있습니다.",
+    "hint_continue": "좋습니다. 준비되면 계속을 누르세요."
+  },
+  "runtime_aside": {
+    "what_eyebrow": "에이전트 런타임이란?",
+    "what_prefix": "연결하는 \"컴퓨터\"는 내부적으로 ",
+    "what_term": "에이전트 런타임",
+    "what_suffix": "이라고 부릅니다. Claude Code, Codex 같은 AI 코딩 도구 하나와 짝을 이루는 작은 백그라운드 프로세스입니다. 도구 하나에 에이전트 런타임 하나가 대응되며, 에이전트가 맡은 작업을 실제로 실행합니다.",
+    "good_eyebrow": "알아두면 좋은 점",
+    "swap_title": "언제든 교체",
+    "swap_body": "각 에이전트의 런타임은 설정일 뿐입니다. 원할 때 바꿀 수 있습니다.",
+    "add_more_title": "나중에 더 추가",
+    "add_more_body": "팀원을 위한 다른 컴퓨터를 연결하거나 에이전트마다 전용 컴퓨터를 둘 수 있습니다.",
+    "learn_more": "에이전트 런타임 알아보기 →"
+  },
+  "cli_install": {
+    "copy_aria": "복사",
+    "intro": "이 컴퓨터에서 에이전트를 실행하려면 에이전트 런타임(Claude Code, Codex, Cursor 등)이 필요합니다. 서버와 원격 개발 환경에서도 사용할 수 있습니다.",
+    "step1_label": "Multica CLI 설치",
+    "step2_label": "데몬 시작"
+  },
+  "cloud_waitlist": {
+    "intro_main": "클라우드 런타임은 아직 제공되지 않습니다. 이메일을 남겨주시면 준비되는 대로 연락드리겠습니다.",
+    "intro_warning": "주의: 런타임이 없으면 에이전트가 작업을 실행할 수 없습니다. 지금 건너뛰면 다시 돌아와 설치하기 전까지 워크스페이스는 읽기 전용입니다.",
+    "email_label": "이메일",
+    "email_placeholder": "you@work.com",
+    "reason_label": "클라우드를 원하는 이유",
+    "optional": "선택 사항",
+    "reason_placeholder": "예: 에이전트가 24시간 실행되면 좋겠어요. 팀이 여러 기기에서 작업합니다.",
+    "join": "대기자 명단 등록",
+    "on_list": "대기자 명단에 등록됨",
+    "success_toast": "대기자 명단에 등록했습니다. 클라우드 런타임이 준비되면 이메일로 알려드릴게요.",
+    "failed_toast": "대기자 명단에 등록하지 못했습니다"
+  },
+  "first_issue": {
+    "error_title": "문제가 발생했습니다",
+    "retry": "다시 시도",
+    "retry_failed": "다시 시도 실패",
+    "finishing": "마무리 중",
+    "opening": "거의 다 됐습니다. 워크스페이스를 여는 중입니다."
+  },
+  "step_agent": {
+    "eyebrow": "첫 에이전트",
+    "headline": "첫 팀원을 만나보세요.",
+    "lede_prefix": "답변을 보면 ",
+    "lede_suffix": "가 잘 맞아 보입니다. 네 가지 중 원하는 템플릿을 고르세요. 모두 첫 이슈를 바로 맡을 준비가 되어 있으며, 나중에 에이전트 설정에서 지침을 조정할 수 있습니다.",
+    "footer_hint": "시작에는 에이전트 하나면 충분합니다. 나중에 사이드바에서 더 추가하세요.",
+    "create_action": "{{name}} 만들기",
+    "create_failed": "에이전트를 만들지 못했습니다",
+    "recommended_badge": "추천",
+    "templates": {
+      "coding": {
+        "label": "코딩 에이전트",
+        "blurb": "코드를 작성, 리팩터링, 배포합니다. 저장소를 읽습니다.",
+        "instructions": "당신은 제품팀의 코딩 에이전트입니다. 코딩 이슈를 맡아 기능을 구현하고, 버그를 고치고, 테스트를 작성하고, Pull request를 여세요. 시작하기 전에 저장소를 읽고, 기존 코드 규칙을 따르며, diff는 집중된 범위로 유지하세요. 수락 기준이 모호하면 확인 질문을 하세요."
+      },
+      "planning": {
+        "label": "기획 에이전트",
+        "blurb": "작업을 쪼개고, 스펙을 작성하고, 보드를 정리합니다.",
+        "instructions": "당신은 기획 에이전트입니다. 느슨한 아이디어와 열린 이슈를 실행 가능한 작업으로 정리하세요. 하위 작업으로 나누고, 수락 기준을 작성하고, 담당자와 순서를 제안하세요. 속도보다 명확성을 우선하세요. 맥락이 부족해 막히면 추측하지 말고 구체적인 질문 하나를 하세요."
+      },
+      "writing": {
+        "label": "글쓰기 에이전트",
+        "blurb": "초안 작성, 요약, 리서치를 합니다. 긴 글에 강합니다.",
+        "instructions": "당신은 글쓰기 에이전트입니다. 문서를 작성하고, 긴 내용을 요약하고, 필요하면 웹에서 리서치하세요. 결과는 개요가 아니라 독자가 바로 사용할 수 있는 완성된 문장으로 구성하세요. 자료를 참고했다면 출처를 인용하세요. 이슈에서 사용자가 만든 톤을 맞추세요."
+      },
+      "assistant": {
+        "label": "어시스턴트",
+        "blurb": "범용입니다. 작업이 모호할 때 좋은 기본값입니다.",
+        "instructions": "당신은 범용 팀원입니다. 가벼운 코딩, 글쓰기, 리서치, 기획 등 다양한 작업을 처리하고 범위를 실용적으로 관리하세요. 작업이 모호하면 시작하기 전에 확인 질문 하나를 하세요. 기본적으로 장황함보다 짧고 유용한 결과를 우선하세요."
+      }
+    },
+    "about_eyebrow": "에이전트란?",
+    "about_headline": "워크스페이스 안에 있는 AI 팀원입니다.",
+    "about_body": "에이전트는 다른 동료처럼 모든 담당자 선택 목록에 나타납니다. 다만 연결한 런타임만 있으면 24시간 작업할 수 있습니다.",
+    "ways_eyebrow": "에이전트와 일하는 방법",
+    "way_assign_title": "이슈 할당",
+    "way_assign_body": "작업을 맡고 스레드에 진행 상황을 남깁니다.",
+    "way_mention_title": "댓글에서 @멘션",
+    "way_mention_body": "대화에 불러 빠른 의견을 받을 수 있습니다.",
+    "way_chat_title": "1:1 채팅",
+    "way_chat_body": "이슈를 만들지 않고 간단히 질문합니다.",
+    "way_autopilot_title": "오토파일럿으로 예약",
+    "way_autopilot_body": "일일 분류, 주간 요약, 월간 감사 같은 작업을 일정에 맞춰 실행합니다.",
+    "add_more_hint": "에이전트는 언제든 추가할 수 있습니다. 한 명의 만능 에이전트보다 전문 에이전트 몇 명으로 이루어진 작은 팀이 더 좋습니다.",
+    "docs_link": "첫 에이전트 만들기 →"
+  },
+  "welcome_after_onboarding": {
+    "loading_helper": "Helper 준비 중...",
+    "error_title": "설정을 마치지 못했습니다",
+    "error_generic": "문제가 발생했습니다. 다시 시도하세요.",
+    "retry": "다시 시도",
+    "dismiss_error": "닫기",
+    "error_close": "닫기",
+    "user_context_heading": "내 정보",
+    "user_context_role_label": "역할",
+    "user_context_use_case_label": "Multica로 하고 싶은 일",
+    "runtime": {
+      "greeting": "안녕하세요, Multica에 오신 것을 환영합니다",
+      "subtitle": "저는 첫 에이전트 어시스턴트입니다.",
+      "capabilities": "Multica 사용법은 무엇이든 물어보세요. 워크스페이스에서 이슈를 만들고, cron 작업을 설정하고, 새 에이전트를 만드는 일도 맡길 수 있습니다.",
+      "section_label": "시작할 작업을 하나 이상 선택하세요:",
+      "assign_empty": "하나 이상 선택",
+      "assign_count": "작업 {{count}}개를 나에게 할당 →",
+      "assign_count_plural": "작업 {{count}}개를 나에게 할당 →",
+      "cards": {
+        "intro": {
+          "subtitle": "Multica가 무엇이고 무엇을 할 수 있는지 1-2문단으로 설명하겠습니다."
+        },
+        "tour": {
+          "subtitle": "이슈, 에이전트, 스쿼드, 오토파일럿이 어떻게 맞물리는지 안내하겠습니다."
+        },
+        "welcome_page": {
+          "subtitle": "역할에 맞춘 단일 HTML 슬라이드 덱을 만들어 드립니다. 복사해서 브라우저에서 열 수 있습니다."
+        }
+      },
+      "success": {
+        "title": "준비 완료!",
+        "subtitle": "잠시만요 — {{agentName}}이(가) 작업 중입니다 ☕",
+        "tip_inbox": "진행 상황이 생기면 인박스에서 볼 수 있습니다.",
+        "tip_chat": "실시간으로 채팅하고 싶다면 오른쪽 아래 채팅 버튼을 누르세요.",
+        "got_it": "알겠습니다 →"
+      }
+    },
+    "skip": {
+      "loading": "워크스페이스 설정 중...",
+      "title": "Multica에 오신 것을 환영합니다!",
+      "subtitle": "다음 단계를 돕기 위해 작업 두 개를 추가했습니다.",
+      "got_it": "알겠습니다",
+      "status_in_progress": "진행 중",
+      "status_todo": "할 일",
+      "cards": {
+        "install_runtime": {
+          "title": "런타임 연결",
+          "subtitle": "Codex 또는 Kimi를 설치해 에이전트를 작동시키세요."
+        },
+        "create_agent": {
+          "title": "첫 에이전트 만들기",
+          "subtitle": "런타임이 온라인이 되면 첫 Multica 에이전트를 만드세요."
+        }
+      }
+    }
+  },
+  "step_workspace": {
+    "eyebrow_first": "첫 워크스페이스",
+    "eyebrow_resume": "이어 하거나 새로 시작",
+    "headline_first": "워크스페이스 이름을 정하세요.",
+    "headline_resume": "{{name}}에서 계속하거나 새로 시작하세요.",
+    "lede_first": "워크스페이스는 이슈, 에이전트, 프로젝트가 모이는 곳입니다. 나중에 팀원을 초대하거나 워크스페이스를 더 만들 수 있습니다.",
+    "lede_resume": "이미 있는 워크스페이스에서 설정을 이어가거나 별도로 새 워크스페이스를 만드세요. 여러 워크스페이스에 속할 수 있습니다.",
+    "name_label": "워크스페이스 이름",
+    "name_placeholder": "Acme Inc, 내 연구실, 사이드 프로젝트...",
+    "url_label": "URL",
+    "slug_placeholder": "acme",
+    "issue_prefix_label": "이슈 접두사",
+    "issue_prefix_prefix": "이슈는 ",
+    "issue_prefix_suffix": "처럼 표시됩니다. 나중에 설정에서 바꿀 수 있습니다.",
+    "create_new_title": "새 워크스페이스 만들기",
+    "create_new_subtitle": "새로 시작합니다. 다른 업무 영역을 위한 별도 공간입니다.",
+    "hint_opening": "{{name}} 여는 중.",
+    "hint_creating": "{{name}} 만드는 중.",
+    "hint_creating_pending": "{{name}} 만드는 중...",
+    "hint_creating_fallback": "내 워크스페이스",
+    "hint_name_first": "워크스페이스를 만들려면 이름을 입력하세요.",
+    "hint_pick": "워크스페이스를 선택하거나 새로 시작하세요.",
+    "cta_open": "{{name}} 열기",
+    "cta_create_named": "{{name}} 만들기",
+    "cta_create_workspace": "워크스페이스 만들기",
+    "cta_creating": "만드는 중...",
+    "slug_format_error": "소문자, 숫자, 하이픈만 사용할 수 있습니다",
+    "slug_taken_error": "이미 사용 중인 워크스페이스 URL입니다.",
+    "slug_reserved_error": "예약된 워크스페이스 URL이라 사용할 수 없습니다.",
+    "slug_conflict_toast": "다른 워크스페이스 URL을 선택하세요",
+    "create_failed_toast": "워크스페이스를 만들지 못했습니다",
+    "side_create_eyebrow": "워크스페이스에 들어가는 것",
+    "side_existing_eyebrow": "내 워크스페이스",
+    "side_things_eyebrow": "여기서 할 수 있는 일",
+    "side_next_eyebrow": "다음 단계",
+    "side_preview_name": "내 워크스페이스",
+    "side_preview_slug": "workspace",
+    "perk_assign": "동료에게 하듯 이슈를 에이전트에 할당",
+    "perk_chat": "이슈를 만들지 않고 에이전트와 채팅",
+    "perk_invite": "팀원 초대 — 이 워크스페이스만 보입니다",
+    "perk_switch": "왼쪽 위에서 언제든 다른 워크스페이스로 전환",
+    "next_runtime": "에이전트를 실행할 컴퓨터 연결",
+    "next_agent": "연결된 런타임에서 Multica Helper 만들기",
+    "next_starter": "다음 단계를 위한 온보딩 이슈 열기",
+    "preview": {
+      "inbox_label": "인박스",
+      "inbox_meta": "내 알림",
+      "issues_label": "이슈",
+      "issues_meta": "공유 작업 보드",
+      "agents_label": "에이전트",
+      "agents_meta": "AI 팀원",
+      "projects_label": "프로젝트",
+      "projects_meta": "관련 이슈 묶기",
+      "autopilot_label": "오토파일럿",
+      "autopilot_meta": "예약 자동화",
+      "runtimes_label": "런타임",
+      "runtimes_meta": "에이전트가 실행되는 곳",
+      "skills_label": "스킬",
+      "skills_meta": "재사용 가능한 플레이북",
+      "more_label": "기타",
+      "more_meta": "더 많은 기능"
+    },
+    "creation_disabled_eyebrow": "워크스페이스 생성이 비활성화되었습니다",
+    "creation_disabled_headline": "관리자에게 초대를 요청하세요.",
+    "creation_disabled_lede": "이 Multica instance에서는 새 워크스페이스를 만들 수 없습니다. 관리자가 기존 워크스페이스로 초대하면 초대를 수락한 뒤 새로고침해 계속하세요.",
+    "creation_disabled_logout": "로그아웃",
+    "creation_disabled_eyebrow_resume": "내 워크스페이스",
+    "creation_disabled_headline_resume": "{{name}}에서 계속하세요.",
+    "creation_disabled_lede_resume": "이 instance에서는 워크스페이스 생성이 비활성화되어 있으므로 기존 워크스페이스로 계속 이동합니다."
+  },
+  "step_runtime": {
+    "scanning_headline": "이 컴퓨터 연결 중...",
+    "scanning_lede_prefix": "에이전트는 이미 사용하는 AI 코딩 도구를 통해 작업합니다. 예: ",
+    "scanning_lede_suffix": " 등. 이 컴퓨터에 설치된 도구를 확인하는 중입니다.",
+    "found_headline": "이 컴퓨터가 연결되었습니다. 에이전트 런타임을 선택하세요.",
+    "found_lede": "이 컴퓨터에서 찾은 에이전트 런타임입니다. 첫 에이전트에 사용할 런타임을 선택하세요. 나중에 바꾸거나 더 추가할 수 있습니다.",
+    "runtime_count_one": "에이전트 런타임 {{count}}개",
+    "runtime_count_other": "에이전트 런타임 {{count}}개",
+    "status_all_online": "모두 온라인",
+    "status_none_online": "온라인 없음",
+    "status_n_online": "{{count}}개 온라인",
+    "online_label": "온라인",
+    "offline_label": "오프라인",
+    "empty_headline": "아직 이 컴퓨터에서 에이전트 런타임을 찾지 못했습니다.",
+    "empty_lede_prefix": "에이전트 런타임은 우리가 연결하는 AI 코딩 도구입니다. 예: ",
+    "empty_lede_suffix": ". 하나 설치하고 새로고침하거나 아래 경로를 선택하세요.",
+    "empty_skip_title": "지금은 건너뛰기",
+    "empty_skip_subtitle": "읽기 전용 모드로 워크스페이스에 들어갑니다. 이 컴퓨터에 에이전트 런타임을 연결하기 전까지 에이전트는 작업을 실행할 수 없지만, 탐색하고 계획하고 팀원을 초대할 수는 있습니다.",
+    "empty_skip_action": "건너뛰기",
+    "empty_waitlist_title": "클라우드 컴퓨터 사용",
+    "empty_waitlist_subtitle": "클라우드에서 컴퓨터를 실행해 드립니다. 아직 제공되지 않습니다.",
+    "empty_waitlist_action": "준비 중",
+    "skip": "지금은 건너뛰기",
+    "refresh": "새로고침",
+    "refreshing": "새로고침 중...",
+    "hint_selected": "선택됨: {{name}}",
+    "hint_pick": "계속하려면 위에서 에이전트 런타임을 선택하세요.",
+    "hint_waiting": "첫 결과를 기다리는 중...",
+    "hint_skip_or_refresh": "설치 후 새로고침하거나 건너뛰고 워크스페이스로 들어가세요.",
+    "start_exploring": "둘러보기 시작"
+  },
+  "step_platform": {
+    "eyebrow": "컴퓨터 연결",
+    "headline": "에이전트를 실행할 컴퓨터를 연결하세요.",
+    "lede": "에이전트는 Multica에 연결한 실제 컴퓨터에서 실행됩니다. 연결 방법을 선택하세요.",
+    "hint_default": "연결 방법을 선택하세요. 건너뛰고 나중에 연결할 수도 있습니다.",
+    "hint_downloaded": "다운로드 페이지에서 설정을 마친 뒤 이 탭으로 돌아오세요.",
+    "download_title": "이 컴퓨터 사용",
+    "download_title_after": "다운로드 페이지 여는 중...",
+    "download_subtitle": "데스크톱 앱을 설치해 이 컴퓨터를 연결하세요. 별도 설정 없이 다음 페이지에서 플랫폼만 고르면 됩니다.",
+    "download_subtitle_after": "새 탭에서 열었습니다. 그곳에서 설치 파일을 고르고 데스크톱에서 설정을 마치세요.",
+    "download_button": "다운로드",
+    "cli_title": "터미널에서 연결",
+    "cli_subtitle": "서버, 원격 개발 환경, headless 컴퓨터를 연결합니다. 터미널이 필요합니다.",
+    "cli_action": "단계 보기",
+    "cloud_title": "클라우드 컴퓨터 사용",
+    "cloud_subtitle": "클라우드에서 컴퓨터를 실행해 드립니다. 아직 제공되지 않습니다.",
+    "cloud_action": "준비 중",
+    "cli_dialog_title": "터미널에서 연결",
+    "cli_dialog_description": "데스크톱과 같은 연결을 터미널에서 설정합니다. 서버, 원격 개발 환경, headless 컴퓨터에 사용하세요.",
+    "cli_dialog_pick_hint": "위에서 컴퓨터를 선택하세요.",
+    "cli_dialog_connect": "연결하고 계속",
+    "runtimes_connected_one": "컴퓨터 {{count}}대 연결됨",
+    "runtimes_connected_other": "컴퓨터 {{count}}대 연결됨",
+    "live_listening": "실시간 · 컴퓨터를 기다리는 중",
+    "stage_normal_prefix": "위 명령을 실행하세요. ",
+    "stage_normal_suffix": "의 브라우저 로그인이 끝나면 컴퓨터가 자동으로 여기에 표시됩니다(보통 10-30초).",
+    "stage_midway_prefix": "아직 기다리는 중입니다. ",
+    "stage_midway_suffix": "이(가) 연 브라우저 탭에서 로그인을 승인했는지 확인하세요. 그래야 컴퓨터가 연결됩니다.",
+    "stage_slow_prefix": "평소보다 오래 걸리고 있습니다. ",
+    "stage_slow_suffix": "을(를) 실행한 터미널에서 오류가 있는지 확인하세요.",
+    "stage_stalled_prefix": "아직 아무 것도 들어오지 않습니다. 터미널이 익숙하지 않다면 ",
+    "stage_stalled_term": "데스크톱",
+    "stage_stalled_suffix": "이 더 부드러운 경로입니다. 한 번 클릭하면 이 컴퓨터가 연결됩니다. 이 대화상자를 닫고 데스크톱을 선택하거나, 건너뛰기를 눌러 계속하세요."
+  },
+  "errors": {
+    "skip_failed": "온보딩을 마치지 못했습니다"
+  }
+}

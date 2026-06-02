@@ -7,10 +7,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // cursorQuery builds a properly URL-encoded query string for the recent +
@@ -170,6 +174,259 @@ func TestListComments_DefaultPreservesChronologicalOrder(t *testing.T) {
 	_, rows := listComments(t, fx.IssueID, "")
 	want := []string{fx.Root1, fx.R1a, fx.R1b, fx.R1b1, fx.Root2, fx.R2a, fx.R2b}
 	eqIDs(t, ids(rows), want, "default order")
+}
+
+// TestListComments_RootsOnlyReturnsTopLevelComments pins the #3164 contract:
+// issue-level orientation should fetch only root comments, leaving replies for
+// a later thread-scoped read if the caller needs detail.
+func TestListComments_RootsOnlyReturnsTopLevelComments(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	for _, tc := range []struct {
+		name  string
+		query string
+	}{
+		{name: "underscore query", query: "roots_only=true"},
+		{name: "hyphenated alias", query: "roots-only=true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, rows := listComments(t, fx.IssueID, tc.query)
+			eqIDs(t, ids(rows), []string{fx.Root1, fx.Root2}, tc.name)
+			for _, row := range rows {
+				if row.ParentID != nil {
+					t.Fatalf("%s: expected root comment %s to have nil parent_id, got %q", tc.name, row.ID, *row.ParentID)
+				}
+			}
+			nb, nbid := nextThreadCursor(w)
+			if nb != "" || nbid != "" {
+				t.Fatalf("%s: roots-only list should not emit cursor headers, got before=%q before_id=%q", tc.name, nb, nbid)
+			}
+		})
+	}
+}
+
+// TestListComments_RootsOnlyWithSinceReturnsNewTopLevelComments proves the
+// one allowed roots-only combination: `since` narrows the root list without
+// pulling newer replies into the response.
+func TestListComments_RootsOnlyWithSinceReturnsNewTopLevelComments(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	v := url.Values{}
+	v.Set("roots_only", "true")
+	v.Set("since", fx.Base.Add(5*time.Minute).UTC().Format(time.RFC3339Nano))
+	_, rows := listComments(t, fx.IssueID, v.Encode())
+	eqIDs(t, ids(rows), []string{fx.Root2}, "roots_only + since")
+	for _, row := range rows {
+		if row.ParentID != nil {
+			t.Fatalf("roots_only + since: expected root comment %s to have nil parent_id, got %q", row.ID, *row.ParentID)
+		}
+	}
+}
+
+// TestListComments_RootsOnlyReturnsThreadStats pins the orientation metadata:
+// each root returned by roots_only carries reply_count (recursive descendant
+// count) and last_activity_at (MAX created_at over the subtree), so an agent
+// can triage which thread to open without fetching any replies. The fixture's
+// root1 has a nested reply (r1b1 → r1b → root1), proving the count walks deeper
+// than one level. Stats are roots-only — the default list must not carry them.
+func TestListComments_RootsOnlyReturnsThreadStats(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	_, rows := listComments(t, fx.IssueID, "roots_only=true")
+	eqIDs(t, ids(rows), []string{fx.Root1, fx.Root2}, "roots stats order")
+
+	byID := map[string]CommentResponse{}
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+	// root1: r1a, r1b, r1b1 (nested) → 3 replies; newest activity is r1b1 at +3m.
+	assertRootStat(t, byID[fx.Root1], "root1", 3, fx.Base.Add(3*time.Minute))
+	// root2: r2a, r2b → 2 replies; newest activity is r2b at +12m.
+	assertRootStat(t, byID[fx.Root2], "root2", 2, fx.Base.Add(12*time.Minute))
+
+	// The default (non-roots) list must NOT leak the roots-only stats.
+	_, all := listComments(t, fx.IssueID, "")
+	for _, r := range all {
+		if r.ReplyCount != nil || r.LastActivityAt != nil {
+			t.Fatalf("default list leaked roots-only stats on %s (reply_count=%v last_activity=%v)", r.ID, r.ReplyCount, r.LastActivityAt)
+		}
+	}
+}
+
+func assertRootStat(t *testing.T, c CommentResponse, label string, wantReplies int, wantLastActivity time.Time) {
+	t.Helper()
+	if c.ReplyCount == nil {
+		t.Fatalf("%s: reply_count missing", label)
+	}
+	if *c.ReplyCount != wantReplies {
+		t.Fatalf("%s: reply_count got=%d want=%d", label, *c.ReplyCount, wantReplies)
+	}
+	if c.LastActivityAt == nil {
+		t.Fatalf("%s: last_activity_at missing", label)
+	}
+	got, err := time.Parse(time.RFC3339, *c.LastActivityAt)
+	if err != nil {
+		t.Fatalf("%s: last_activity_at parse %q: %v", label, *c.LastActivityAt, err)
+	}
+	if !got.Equal(wantLastActivity) {
+		t.Fatalf("%s: last_activity_at got=%s want=%s", label, got.UTC(), wantLastActivity.UTC())
+	}
+}
+
+// TestListComments_SummaryClipsContent pins the summary projection: with
+// summary=true a long body is clipped to summaryContentRunes (+ellipsis) and
+// flagged content_truncated=true, a short body is returned verbatim with
+// content_truncated=false, and without summary the field is omitted entirely so
+// the default response shape is unchanged.
+func TestListComments_SummaryClipsContent(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		VALUES ($1, 'member', $2, $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, "summary fixture").Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	insert := func(body string, offset time.Duration) string {
+		t.Helper()
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+			VALUES ($1, $2, 'member', $3, $4, 'comment', $5)
+			RETURNING id
+		`, issueID, testWorkspaceID, testUserID, body, base.Add(offset)).Scan(&id); err != nil {
+			t.Fatalf("insert comment: %v", err)
+		}
+		return id
+	}
+	longID := insert(strings.Repeat("x", 500), 0)
+	shortID := insert("short", time.Minute)
+	// Multi-byte body: clipping must land on a rune boundary, never mid-rune.
+	cjkID := insert(strings.Repeat("你", 300), 2*time.Minute)
+
+	// Baseline: no summary → full content, content_truncated omitted.
+	_, full := listComments(t, issueID, "")
+	for _, c := range full {
+		if c.ContentTruncated != nil {
+			t.Fatalf("baseline: content_truncated should be nil, got %v on %s", *c.ContentTruncated, c.ID)
+		}
+		if c.ID == longID && utf8.RuneCountInString(c.Content) != 500 {
+			t.Fatalf("baseline: long content len got=%d want=500", utf8.RuneCountInString(c.Content))
+		}
+	}
+
+	// summary=true → long clipped + truncated true; short verbatim + false.
+	_, sum := listComments(t, issueID, "summary=true")
+	byID := map[string]CommentResponse{}
+	for _, c := range sum {
+		byID[c.ID] = c
+	}
+	long := byID[longID]
+	if long.ContentTruncated == nil || !*long.ContentTruncated {
+		t.Fatalf("summary: long comment should be truncated, got %v", long.ContentTruncated)
+	}
+	if rc := utf8.RuneCountInString(long.Content); rc != summaryContentRunes+1 { // +1 for the ellipsis
+		t.Fatalf("summary: long content rune count got=%d want=%d", rc, summaryContentRunes+1)
+	}
+	if !strings.HasSuffix(long.Content, "…") {
+		t.Fatalf("summary: long content should end with ellipsis, got %q", long.Content)
+	}
+	short := byID[shortID]
+	if short.ContentTruncated == nil || *short.ContentTruncated {
+		t.Fatalf("summary: short comment should be untruncated (false), got %v", short.ContentTruncated)
+	}
+	if short.Content != "short" {
+		t.Fatalf("summary: short content got=%q want=short", short.Content)
+	}
+	cjk := byID[cjkID]
+	if cjk.ContentTruncated == nil || !*cjk.ContentTruncated {
+		t.Fatalf("summary: cjk comment should be truncated, got %v", cjk.ContentTruncated)
+	}
+	if !utf8.ValidString(cjk.Content) {
+		t.Fatalf("summary: cjk content was clipped mid-rune (invalid UTF-8): %q", cjk.Content)
+	}
+	if rc := utf8.RuneCountInString(cjk.Content); rc != summaryContentRunes+1 { // 200 CJK runes + ellipsis
+		t.Fatalf("summary: cjk content rune count got=%d want=%d", rc, summaryContentRunes+1)
+	}
+	if !strings.HasSuffix(cjk.Content, "你…") {
+		t.Fatalf("summary: cjk content should be whole 你-runes then ellipsis, got %q", cjk.Content)
+	}
+}
+
+// TestListComments_RootsOnlySummaryComposes pins the spec's headline
+// "table of contents" read: --roots-only --summary together must (a) clip each
+// root's content and flag content_truncated, AND (b) still carry the roots-only
+// orientation stats (reply_count over the full subtree, last_activity_at). The
+// summary projection composes with roots_only rather than replacing its stats;
+// a future refactor that moved the clip into a per-mode branch would silently
+// break this composition, so both halves are asserted on the same response.
+func TestListComments_RootsOnlySummaryComposes(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		VALUES ($1, 'member', $2, $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, "roots+summary fixture").Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	insert := func(parent *string, body string, offset time.Duration) string {
+		t.Helper()
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at)
+			VALUES ($1, $2, 'member', $3, $4, 'comment', $5, $6)
+			RETURNING id
+		`, issueID, testWorkspaceID, testUserID, body, parent, base.Add(offset)).Scan(&id); err != nil {
+			t.Fatalf("insert comment: %v", err)
+		}
+		return id
+	}
+	rootID := insert(nil, strings.Repeat("x", 500), 0)
+	insert(&rootID, "a reply", 5*time.Minute) // pushes last_activity past the root's own time
+
+	_, rows := listComments(t, issueID, "roots_only=true&summary=true")
+	eqIDs(t, ids(rows), []string{rootID}, "roots_only+summary returns only the root")
+
+	root := rows[0]
+	// Summary half: the long root content is clipped + flagged.
+	if root.ContentTruncated == nil || !*root.ContentTruncated {
+		t.Fatalf("roots+summary: root should be truncated, got %v", root.ContentTruncated)
+	}
+	if rc := utf8.RuneCountInString(root.Content); rc != summaryContentRunes+1 { // +1 for the ellipsis
+		t.Fatalf("roots+summary: clipped content rune count got=%d want=%d", rc, summaryContentRunes+1)
+	}
+	// Stats half: orientation metadata survives the summary projection. The
+	// reply (1 descendant, +5m) drives both reply_count and last_activity_at.
+	assertRootStat(t, root, "root", 1, base.Add(5*time.Minute))
 }
 
 // TestListComments_ThreadResolvesFromAnyAnchor proves Elon's point 2:
@@ -546,6 +803,42 @@ func TestListComments_FlagCombinationRules(t *testing.T) {
 		{
 			name:   "non-numeric recent rejected",
 			query:  "recent=lots",
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "non-boolean roots_only rejected",
+			query:  "roots_only=yes",
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "non-boolean summary rejected",
+			query:  "summary=yes",
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "roots_only + thread rejected",
+			query:  "roots_only=true&thread=" + fx.Root1,
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "roots_only + recent rejected",
+			query:  "roots_only=true&recent=1",
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "roots_only + tail rejected",
+			query:  "roots_only=true&tail=1",
+			status: http.StatusBadRequest,
+		},
+		{
+			name: "roots_only + cursor rejected",
+			query: (func() string {
+				v := url.Values{}
+				v.Set("roots_only", "true")
+				v.Set("before", time.Now().UTC().Format(time.RFC3339))
+				v.Set("before_id", uuid.NewString())
+				return v.Encode()
+			})(),
 			status: http.StatusBadRequest,
 		},
 	}
@@ -1012,4 +1305,135 @@ func TestListComments_ThreadTailNotFoundReturns404(t *testing.T) {
 		t.Fatalf("expected 404 for unknown anchor, got %d: %s", w.Code, w.Body.String())
 	}
 	_ = fx
+}
+
+// resolveCommentRow marks a comment resolved directly in the DB (test helper —
+// the public path goes through ResolveComment, but for list-filter tests we
+// just need the column set).
+func resolveCommentRow(t *testing.T, commentID string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE comment SET resolved_at = now(), resolved_by_type = 'member', resolved_by_id = $2 WHERE id = $1`,
+		commentID, testUserID,
+	); err != nil {
+		t.Fatalf("resolve comment row: %v", err)
+	}
+}
+
+// TestCountNewCommentsSince_IssueWideExcludesAgentOwnAndTrigger pins the
+// claim-side count query: it counts comments created after the given anchor
+// ACROSS THE WHOLE ISSUE (every thread, not just the triggering one), excludes
+// the triggering comment because it is injected into the prompt, and excludes
+// the agent's own comments so a chatty agent does not inflate its own
+// new-comment count.
+func TestCountNewCommentsSince_IssueWideExcludesAgentOwnAndTrigger(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+	agentID := createHandlerTestAgent(t, "count-agent", []byte("[]"))
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at)
+		VALUES ($1, $2, 'agent', $3, 'agent reply', 'comment', $4, $5)
+	`, fx.IssueID, testWorkspaceID, agentID, fx.Root1, fx.Base.Add(4*time.Minute)); err != nil {
+		t.Fatalf("insert agent comment: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Anchor after r1a: root1/r1a are stale. Newer than the anchor are r1b
+	// (trigger thread), r1b1 (the trigger itself — excluded), the agent reply
+	// (excluded), and root2's whole thread root2/r2a/r2b (unrelated thread, now
+	// counted because the count is issue-wide). So r1b + root2 + r2a + r2b = 4.
+	got, err := testHandler.Queries.CountNewCommentsSince(ctx, db.CountNewCommentsSinceParams{
+		AnchorID:    parseUUID(fx.R1b1),
+		IssueID:     parseUUID(fx.IssueID),
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Since:       pgtype.Timestamptz{Time: fx.Base.Add(90 * time.Second), Valid: true},
+		AuthorID:    parseUUID(agentID),
+	})
+	if err != nil {
+		t.Fatalf("count new since anchor: %v", err)
+	}
+	if got != 4 {
+		t.Fatalf("expected issue-wide count of 4 (r1b + root2 + r2a + r2b), got %d", got)
+	}
+
+	// Anchor in the future: nothing is newer.
+	got, err = testHandler.Queries.CountNewCommentsSince(ctx, db.CountNewCommentsSinceParams{
+		AnchorID:    parseUUID(fx.R1b1),
+		IssueID:     parseUUID(fx.IssueID),
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Since:       pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+		AuthorID:    parseUUID(agentID),
+	})
+	if err != nil {
+		t.Fatalf("count new since future: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("expected 0 new comments after a future anchor, got %d", got)
+	}
+}
+
+// TestCreateCommentPreservesDirectParent pins the write-boundary invariant:
+// parent_id stores the exact comment being replied to. Thread readers discover
+// the root separately via recursive queries, so storing a reply-to-reply must
+// not destroy the direct-parent signal that trigger logic needs.
+func TestCreateCommentPreservesDirectParent(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("requires DB")
+	}
+	ctx := context.Background()
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		VALUES ($1, 'member', $2, $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, "direct parent fixture").Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	create := func(parentID, body string) CommentResponse {
+		t.Helper()
+		payload := map[string]any{"content": body}
+		if parentID != "" {
+			payload["parent_id"] = parentID
+		}
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/"+issueID+"/comments", payload)
+		req = withURLParam(req, "id", issueID)
+		testHandler.CreateComment(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment(%q): expected 201, got %d: %s", body, w.Code, w.Body.String())
+		}
+		var resp CommentResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode created comment %q: %v", body, err)
+		}
+		return resp
+	}
+
+	root := create("", "root")
+	if root.ParentID != nil {
+		t.Fatalf("root comment must have nil parent_id, got %v", *root.ParentID)
+	}
+
+	// A direct reply to the root stays parented at the root.
+	reply := create(root.ID, "reply")
+	if reply.ParentID == nil || *reply.ParentID != root.ID {
+		t.Fatalf("direct reply parent_id: want root %s, got %v", root.ID, reply.ParentID)
+	}
+
+	// A reply whose parent is itself a reply must keep that direct parent. The
+	// thread root is recoverable through recursive thread reads; the direct
+	// parent is not recoverable once overwritten.
+	nested := create(reply.ID, "nested")
+	if nested.ParentID == nil || *nested.ParentID != reply.ID {
+		t.Fatalf("reply-to-reply parent_id: want direct parent %s, got %v (root was %s)", reply.ID, nested.ParentID, root.ID)
+	}
 }

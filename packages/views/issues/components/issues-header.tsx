@@ -14,6 +14,7 @@ import {
   FolderMinus,
   List,
   SignalHigh,
+  SlidersHorizontal,
   X,
   Tag,
   User,
@@ -73,7 +74,6 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import type { Issue } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
-import { useIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
 
 // ---------------------------------------------------------------------------
@@ -508,11 +508,12 @@ export function IssuesHeader({
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
   const setScope = useIssuesScopeStore((s) => s.setScope);
-  // Bind the workspace agents-working chip to the global /issues view
-  // store. Subscribing here keeps the chip presentational and lets
-  // /my-issues bind its own store via a sibling header.
-  const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
-  const toggleAgentRunningFilter = useIssueViewStore(
+  // Bind the workspace agents-working chip to the active view store so
+  // shared IssuesHeader consumers (/issues and project detail) toggle the
+  // same filter state as the rest of the display controls. /my-issues keeps
+  // its own sibling header and passes chip state explicitly.
+  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const toggleAgentRunningFilter = useViewStore(
     (s) => s.toggleAgentRunningFilter,
   );
   // Scope the chip to whatever issues this page is currently showing.
@@ -534,45 +535,73 @@ export function IssuesHeader({
     agents: "agents_description",
   };
 
-  return (
-    <div className="flex h-12 shrink-0 items-center justify-between px-4">
-      {/* Left: scope buttons */}
-      <div className="flex items-center gap-1">
-        {SCOPE_VALUES.map((s) => (
-          <Tooltip key={s}>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={
-                    scope === s
-                      ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                      : "text-muted-foreground"
-                  }
-                  onClick={() => setScope(s)}
-                >
-                  {t(($) => $.scope[SCOPE_LABEL_KEY[s]])}
-                </Button>
-              }
-            />
-            <TooltipContent side="bottom">{t(($) => $.scope[SCOPE_DESC_KEY[s]])}</TooltipContent>
-          </Tooltip>
-        ))}
-      </div>
+  const scopeLabel = t(($) => $.scope[SCOPE_LABEL_KEY[scope]]);
 
-      <div className="flex items-center gap-1">
-        {agentRunningFilter && (
-          <span className="mr-1 text-xs text-muted-foreground">
-            {t(($) => $.agent_activity.filter_active_label)}
-          </span>
-        )}
-        <WorkspaceAgentWorkingChip
-          value={agentRunningFilter}
-          onToggle={toggleAgentRunningFilter}
-          scopedIssueIds={scopedIssueIds}
-        />
-        <IssueDisplayControls scopedIssues={scopedIssues} allowGantt={allowGantt} />
+  return (
+    <div className="h-12 shrink-0 overflow-x-auto px-4 [-webkit-overflow-scrolling:touch]">
+      <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
+        {/* Left: scope buttons */}
+        <div className="hidden shrink-0 items-center gap-1 md:flex">
+          {SCOPE_VALUES.map((s) => (
+            <Tooltip key={s}>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={
+                      scope === s
+                        ? "bg-accent text-accent-foreground hover:bg-accent/80"
+                        : "text-muted-foreground"
+                    }
+                    onClick={() => setScope(s)}
+                  >
+                    {t(($) => $.scope[SCOPE_LABEL_KEY[s]])}
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">{t(($) => $.scope[SCOPE_DESC_KEY[s]])}</TooltipContent>
+            </Tooltip>
+          ))}
+        </div>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 gap-1 text-muted-foreground md:hidden"
+              >
+                <span className="truncate">{scopeLabel}</span>
+                <ChevronDown className="size-3 text-muted-foreground" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-auto">
+            <DropdownMenuRadioGroup value={scope} onValueChange={(value) => setScope(value as IssuesScope)}>
+              {SCOPE_VALUES.map((s) => (
+                <DropdownMenuRadioItem key={s} value={s}>
+                  {t(($) => $.scope[SCOPE_LABEL_KEY[s]])}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <div className="flex shrink-0 items-center gap-1">
+          {agentRunningFilter && (
+            <span className="mr-1 hidden text-xs text-muted-foreground md:inline">
+              {t(($) => $.agent_activity.filter_active_label)}
+            </span>
+          )}
+          <WorkspaceAgentWorkingChip
+            value={agentRunningFilter}
+            onToggle={toggleAgentRunningFilter}
+            scopedIssueIds={scopedIssueIds}
+          />
+          <IssueDisplayControls scopedIssues={scopedIssues} allowGantt={allowGantt} />
+        </div>
       </div>
     </div>
   );
@@ -651,9 +680,10 @@ export function IssueDisplayControls({
   const sortLabel = t(($) => $.display[SORT_LABEL_KEY[sortBy]]);
   const groupingLabel = t(($) => $.display[GROUPING_LABEL_KEY[grouping]]);
   const swimlaneGroupingLabel = t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[swimlaneGrouping]]);
+  const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex shrink-0 items-center gap-1">
         {/* Filter */}
         <DropdownMenu>
           <Tooltip>
@@ -666,19 +696,24 @@ export function IssueDisplayControls({
                       size="sm"
                       className={
                         hasActiveFilters
-                          ? "gap-1 bg-brand text-white hover:bg-brand/90"
-                          : "gap-1 text-muted-foreground"
+                          ? "h-8 w-8 gap-1 bg-brand px-0 text-white hover:bg-brand/90 md:h-7 md:w-auto md:px-2.5"
+                          : controlButtonClass
                       }
                     >
                       <Filter className="size-3.5" />
-                      {hasActiveFilters
-                        ? t(($) => $.filters.active_count, { count: activeFilterCount })
-                        : t(($) => $.filters.tooltip)}
+                      <span className="hidden md:inline">
+                        {hasActiveFilters
+                          ? t(($) => $.filters.active_count, { count: activeFilterCount })
+                          : t(($) => $.filters.tooltip)}
+                      </span>
+                      {hasActiveFilters && (
+                        <span className="tabular-nums md:hidden">{activeFilterCount}</span>
+                      )}
                       {hasActiveFilters && (
                         <span
                           role="button"
                           tabIndex={-1}
-                          className="-mr-1 ml-0.5 rounded-sm p-0.5 hover:bg-white/20"
+                          className="-mr-1 ml-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); act.clearFilters(); }}
                           onPointerDown={(e) => e.stopPropagation()}
                         >
@@ -872,13 +907,15 @@ export function IssueDisplayControls({
               render={
                 <TooltipTrigger
                   render={
-                    <Button variant="outline" size="sm" className="gap-1 text-muted-foreground">
-                      {sortBy !== "position" && (
-                        sortDirection === "asc"
-                          ? <ArrowUp className="size-3.5" />
-                          : <ArrowDown className="size-3.5" />
+                    <Button variant="outline" size="sm" className={controlButtonClass}>
+                      {sortBy === "position" ? (
+                        <SlidersHorizontal className="size-3.5" />
+                      ) : sortDirection === "asc" ? (
+                        <ArrowUp className="size-3.5" />
+                      ) : (
+                        <ArrowDown className="size-3.5" />
                       )}
-                      {sortLabel}
+                      <span className="hidden md:inline">{sortLabel}</span>
                     </Button>
                   }
                 />
@@ -1035,7 +1072,7 @@ export function IssueDisplayControls({
                 render={
                   <TooltipTrigger
                     render={
-                      <Button variant="outline" size="sm" className="gap-1 text-muted-foreground">
+                      <Button variant="outline" size="sm" className={controlButtonClass}>
                         {viewMode === "board" ? (
                           <Columns3 className="size-3.5" />
                         ) : viewMode === "swimlane" ? (
@@ -1045,13 +1082,15 @@ export function IssueDisplayControls({
                         ) : (
                           <List className="size-3.5" />
                         )}
-                        {viewMode === "board"
-                          ? t(($) => $.view.board)
-                          : viewMode === "swimlane"
-                          ? t(($) => $.view.swimlane)
-                          : viewMode === "gantt" && allowGantt
-                          ? t(($) => $.view.gantt)
-                          : t(($) => $.view.list)}
+                        <span className="hidden md:inline">
+                          {viewMode === "board"
+                            ? t(($) => $.view.board)
+                            : viewMode === "swimlane"
+                            ? t(($) => $.view.swimlane)
+                            : viewMode === "gantt" && allowGantt
+                            ? t(($) => $.view.gantt)
+                            : t(($) => $.view.list)}
+                        </span>
                       </Button>
                     }
                   />

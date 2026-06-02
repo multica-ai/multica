@@ -394,9 +394,11 @@ func TeamInviteAccepted(inviteeID, workspaceID string, daysSinceInvite int64) Ev
 // The handler drives this transition — we emit from PatchOnboarding so
 // the single emission site stays honest even if the frontend retries.
 //
-// `source` and `useCase` are multi-select (users can pick several);
-// `role` stays single-select. Empty slice = no answer (skip is
-// captured separately via the *Skipped booleans).
+// `useCase` is multi-select (users can pick several); `source` is
+// single-select (primary acquisition channel) but kept as a slice
+// for back-compat with v2 multi-select rows — single-element in
+// current data. `role` stays single-select. Empty slice = no answer
+// (skip is captured separately via the *Skipped booleans).
 //
 // The three answers are also mirrored into person properties via $set
 // so cohorting by source / role / use_case works across every event

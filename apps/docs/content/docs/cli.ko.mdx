@@ -1,0 +1,147 @@
+---
+title: CLI 명령어 레퍼런스
+description: "모든 최상위 Multica CLI 명령어를 한 페이지로 정리한 개요입니다. 전체 사용법은 `multica <command> --help`를 실행하세요."
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica CLI는 Web UI에서 할 수 있는 거의 모든 작업을 그대로 제공합니다([이슈](/issues) 생성, [에이전트](/agents) 할당, [데몬](/daemon-runtimes) 시작 등). 이 페이지는 모든 최상위 명령어를 한 줄 설명과 함께 나열합니다. 전체 플래그와 예제는 `multica <command> --help`를 실행하세요.
+
+## 인증하기
+
+CLI를 처음 사용할 때 이 명령을 실행해 **개인 액세스 토큰(personal access token, PAT)**을 발급받으세요:
+
+```bash
+multica login
+```
+
+브라우저가 자동으로 열립니다. 웹 앱에서 승인하면 CLI가 PAT(`mul_` 접두사)를 `~/.multica/config.json`에 저장합니다. 이후 모든 명령은 이 PAT로 인증됩니다.
+
+<Callout type="tip">
+CI나 headless 환경에서는 브라우저 플로우를 건너뛰세요. 웹 앱의 **설정 → API 토큰**에서 PAT를 만든 뒤 `multica login --token <mul_...>`로 직접 전달하면 됩니다.
+</Callout>
+
+토큰 유형 간의 차이는 [인증과 토큰](/auth-tokens)을 참고하세요.
+
+## 인증과 설정
+
+| 명령어 | 용도 |
+|---|---|
+| `multica login` | 로그인하고 PAT 저장 |
+| `multica auth status` | 현재 로그인 상태, 사용자, 워크스페이스 표시 |
+| `multica auth logout` | 로컬 PAT 삭제 |
+| `multica setup cloud` | Multica Cloud용 원샷 설정(로그인 + 데몬 설치) |
+| `multica setup self-host` | 자체 호스팅 백엔드용 원샷 설정 |
+
+## 워크스페이스와 멤버
+
+| 명령어 | 용도 |
+|---|---|
+| `multica workspace list` | 접근할 수 있는 모든 워크스페이스 나열 |
+| `multica workspace get <slug>` | 워크스페이스 하나의 상세 정보 표시 |
+| `multica workspace member list` | 현재 워크스페이스의 멤버 나열 |
+| `multica workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | 워크스페이스 메타데이터 업데이트(admin/owner). 긴 필드는 `--description-stdin` / `--context-stdin`을 사용할 수 있습니다. |
+
+## 이슈와 프로젝트
+
+<Callout type="info">
+`list` 계열 명령(`multica issue list`, `autopilot list`, `project list` 등)은 기본적으로 짧고 **바로 복사해 붙여 넣을 수 있는** ID를 출력합니다. 이슈는 `MUL-123` 같은 이슈 키이고, 나머지 리소스는 짧은 UUID 접두사입니다. 아래 후속 명령의 `<id>` 인자는 짧은 ID와 전체 UUID를 모두 받으므로, 일반적인 흐름은 `multica issue list` → 키 복사 → `multica issue get MUL-123`입니다. 정식 UUID가 필요할 때는 `list` 명령에 `--full-id`를 전달하세요.
+</Callout>
+
+| 명령어 | 용도 |
+|---|---|
+| `multica issue list` | 이슈 나열(복사해 붙여 넣을 수 있는 이슈 키 출력) |
+| `multica issue get <id>` | 단일 이슈 표시(이슈 키 또는 UUID를 받음) |
+| `multica issue create --title "..."` | 새 이슈 생성 |
+| `multica issue update <id> ...` | 이슈 업데이트(상태, 우선순위, 담당자 등) |
+| `multica issue assign <id> --agent <slug>` | 에이전트에게 할당(즉시 작업을 트리거) |
+| `multica issue status <id> --set <status>` | 상태 변경 단축 명령 |
+| `multica issue search <query>` | 키워드 검색 |
+| `multica issue runs <id>` | 이슈의 에이전트 실행 표시 |
+| `multica issue rerun <id>` | 이슈의 현재 에이전트 담당자에게 새 작업을 다시 큐에 넣기 |
+| `multica issue comment <id> ...` | 중첩: 댓글 보기 / 작성 |
+| `multica issue subscriber <id> ...` | 중첩: 구독 / 구독 취소 |
+| `multica project list/get/create/update/delete/status` | 프로젝트 CRUD |
+
+## 에이전트와 스킬
+
+| 명령어 | 용도 |
+|---|---|
+| `multica agent list` | 워크스페이스의 에이전트 나열 |
+| `multica agent get <slug>` | 에이전트의 구성 표시 |
+| `multica agent create ...` | 에이전트 생성 |
+| `multica agent update <slug> ...` | 에이전트 업데이트 |
+| `multica agent archive <slug>` | 보관 |
+| `multica agent restore <slug>` | 보관된 에이전트 복원 |
+| `multica agent tasks <slug>` | 에이전트의 작업 기록 표시 |
+| `multica agent skills ...` | 중첩: 스킬 연결 / 분리 |
+| `multica skill list/get/create/update/delete` | 스킬 CRUD |
+| `multica skill import ...` | GitHub, ClawHub, 또는 로컬 기기에서 스킬 가져오기 |
+| `multica skill files ...` | 중첩: 스킬의 파일 관리 |
+
+## 스쿼드
+
+| 명령어 | 용도 |
+|---|---|
+| `multica squad list` | 워크스페이스의 스쿼드 나열 |
+| `multica squad get <id>` | 단일 스쿼드 표시 |
+| `multica squad create --name "..." --leader <agent>` | 스쿼드 생성(owner / admin) |
+| `multica squad update <id> ...` | 이름, 설명, 지침, 리더, 또는 아바타 업데이트 |
+| `multica squad delete <id>` | 보관(소프트 삭제) — 할당된 이슈를 리더에게 이관 |
+| `multica squad member list/add/remove/set-role <squad-id>` | 스쿼드 멤버 관리 및 역할 직접 업데이트 |
+| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | 스쿼드 리더 에이전트가 매 턴마다 평가를 기록할 때 사용 |
+
+전체 모델은 [스쿼드](/squads)를 참고하세요.
+
+## 오토파일럿
+
+| 명령어 | 용도 |
+|---|---|
+| `multica autopilot list` | 워크스페이스의 모든 오토파일럿 나열 |
+| `multica autopilot get <id>` | 단일 오토파일럿 표시 |
+| `multica autopilot create ...` | 오토파일럿 생성 |
+| `multica autopilot update <id> ...` | 업데이트 |
+| `multica autopilot delete <id>` | 삭제 |
+| `multica autopilot runs <id>` | 실행 기록 표시 |
+| `multica autopilot trigger <id>` | 수동으로 실행 트리거 |
+
+## 데몬과 런타임
+
+| 명령어 | 용도 |
+|---|---|
+| `multica daemon start` | 데몬 시작(기본은 백그라운드; `--foreground`를 추가하면 포그라운드 실행) |
+| `multica daemon stop` | 데몬 중지 |
+| `multica daemon restart` | 데몬 재시작 |
+| `multica daemon status` | 데몬의 온라인 여부와 동시 실행 수 확인 |
+| `multica daemon logs` | 데몬 로그 보기 |
+| `multica runtime list` | 현재 워크스페이스의 런타임 나열 |
+| `multica runtime usage` | 리소스 사용량 표시 |
+| `multica runtime activity` | 최근 활동 로그 |
+| `multica runtime update <id> ...` | 런타임의 구성 업데이트 |
+
+## 기타
+
+| 명령어 | 용도 |
+|---|---|
+| `multica repo checkout <url>` | 에이전트가 사용할 수 있도록 리포지토리를 로컬에 클론 |
+| `multica config` | 로컬 CLI 구성 보기 또는 편집 |
+| `multica version` | CLI 버전 출력 |
+| `multica update` | CLI를 최신 릴리스로 업그레이드 |
+| `multica attachment download <id>` | 이슈나 댓글에서 첨부 파일 다운로드 |
+
+## 전체 플래그 확인하기
+
+모든 명령은 `--help`를 지원합니다:
+
+```bash
+multica issue create --help
+multica agent update --help
+```
+
+v2에서는 각 명령마다 전용 상세 레퍼런스 페이지를 제공할 예정입니다.
+
+## 다음 단계
+
+- [인증과 토큰](/auth-tokens) — PAT vs. JWT vs. 데몬 토큰
+- [데몬과 런타임](/daemon-runtimes) — `daemon` 명령이 내부적으로 동작하는 방식
+- [에이전트 생성과 구성](/agents-create) — `multica agent create`의 모든 옵션

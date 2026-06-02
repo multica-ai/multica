@@ -127,4 +127,29 @@ describe("WSClient", () => {
       undefined,
     );
   });
+
+  it("passes actor_id and actor_type to event handlers", () => {
+    const ws = new WSClient("ws://example.test/ws");
+    ws.setAuth("tok", "acme");
+    ws.connect();
+
+    const handler = vi.fn();
+    ws.on("issue:created", handler);
+
+    const fakeWs = (ws as any).ws as FakeWebSocket;
+    fakeWs.onmessage?.({
+      data: JSON.stringify({
+        type: "issue:created",
+        payload: { id: "issue-1" },
+        actor_id: "user-123",
+        actor_type: "user",
+      }),
+    });
+
+    expect(handler).toHaveBeenCalledWith(
+      { id: "issue-1" },
+      "user-123",
+      "user",
+    );
+  });
 });

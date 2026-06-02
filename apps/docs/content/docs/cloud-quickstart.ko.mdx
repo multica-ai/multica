@@ -1,0 +1,119 @@
+---
+title: Cloud 빠른 시작
+description: 가입부터 에이전트에게 첫 작업을 할당하기까지 5분 만에.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+이 페이지는 Multica Cloud를 처음부터 끝까지 안내합니다 — **가입 → [CLI](/cli) 설치 → [데몬](/daemon-runtimes) 시작 → [에이전트](/agents) 생성 → 첫 [작업](/tasks) 할당**. 약 5분이 걸립니다.
+
+전제 조건은 하나뿐입니다: 로컬에 [AI 코딩 도구](/providers)([Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi) 중 하나)를 이미 최소 하나는 설치해 두어야 합니다. 데몬은 시작할 때 이들을 자동으로 감지하며, 하나도 없으면 시작을 거부합니다.
+
+## 1. 계정 만들기
+
+[multica.ai](https://multica.ai)에서 가입하세요. 이메일(6자리 인증 코드) 또는 Google로 로그인할 수 있습니다.
+
+가입 후에는 (계정 이름으로 생성된) 기본 워크스페이스에 자동으로 배치됩니다. 나중에 이름을 변경하거나 새 워크스페이스를 만들 수 있습니다.
+
+## 2. Multica CLI 설치하기
+
+**macOS / Linux (Homebrew 권장)**:
+
+```bash
+brew install multica-ai/tap/multica
+```
+
+**macOS / Linux (Homebrew 없이)**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell)**:
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
+
+설치를 확인하세요:
+
+```bash
+multica version
+```
+
+## 3. 로그인 + 데몬 시작하기
+
+명령어 하나로 로그인과 데몬 시작을 처리합니다:
+
+```bash
+multica setup
+```
+
+`multica setup`은 다음을 수행합니다:
+
+1. CLI가 Multica Cloud에 연결하도록 구성합니다
+2. 로그인을 위해 브라우저를 엽니다(웹과 동일한 이메일 인증 코드 / Google OAuth)
+3. 생성된 PAT를 `~/.multica/config.json`에 저장합니다
+4. **데몬을 자동으로 시작합니다** — 3초마다 작업을 폴링하고 15초마다 하트비트를 전송하기 시작합니다
+
+<Callout type="info">
+**데스크톱 앱을 사용 중이신가요?** 데스크톱 앱은 실행 시 **데몬을 자동으로 시작합니다** — `multica setup`을 직접 실행할 필요가 없습니다. [데스크톱 앱](/desktop-app)을 참고하세요.
+</Callout>
+
+데몬이 실행 중인지 확인하세요:
+
+```bash
+multica daemon status
+```
+
+`online`은 서버에 등록되었음을 의미합니다.
+
+## 4. 런타임이 온라인인지 확인하기
+
+웹 UI에서 **설정 → 런타임**으로 이동하세요. 방금 시작한 데몬이 하나 이상의 활성 런타임으로 표시되어야 합니다 — 로컬에 설치된 AI 코딩 도구당 하나씩입니다.
+
+오프라인으로 표시되더라도 당황하지 마세요 — [문제 해결 → 데몬이 서버에 연결할 수 없음](/troubleshooting#daemon-cant-connect-to-the-server)을 참고하세요.
+
+## 5. 에이전트 생성하기
+
+웹 UI에서 **설정 → 에이전트**로 이동하여 **새 에이전트**를 클릭하세요:
+
+- **이름** — 보드와 댓글에서 이 에이전트에 표시되는 이름입니다. 원하는 이름을 고르세요
+- **제공자** — 로컬에 설치한 AI 코딩 도구를 선택하세요(드롭다운에는 런타임에서 감지된 도구만 나열됩니다)
+- **모델**(선택) — 해당 도구 내부의 모델 선택(제공자에 따라 정적 목록 또는 동적 발견)
+- **지침**(선택) — 이 에이전트를 위한 시스템 프롬프트
+
+생성되면 에이전트는 워크스페이스 멤버 목록에 나타나며, 사람 멤버처럼 작업을 할당할 수 있습니다.
+
+## 6. 첫 작업 할당하기
+
+웹 UI에서 이슈를 만들거나, CLI에서 만드세요:
+
+```bash
+multica issue create --title "Add an ASCII architecture diagram to the README"
+```
+
+방금 만든 에이전트에게 이슈를 할당하세요 — 웹 UI에서 아바타를 클릭하거나, CLI를 사용하세요:
+
+```bash
+multica issue assign MUL-1 --to my-agent-name
+```
+
+`--to`는 에이전트 또는 멤버의 **이름**을 받습니다. 부분 문자열 일치도 동작합니다 — 에이전트 이름이 `my-code-reviewer`라면 `reviewer`로 해석됩니다. 워크스페이스에 이름이 겹치는 경우, 대신 `--to-id <uuid>`(`--to`와 상호 배타적)를 전달하세요. UUID는 `multica agent list --output json` 또는 `multica workspace member list --output json`으로 조회하세요.
+
+**다음으로 데몬에서 일어나는 일**:
+
+1. 3초 이내에 작업을 가져갑니다(상태가 `queued`에서 `dispatched`로 바뀝니다)
+2. 일치하는 AI 코딩 도구를 호출하여 작업을 시작합니다(상태가 `running`이 됩니다)
+3. AI가 로컬에서 작업합니다 — 코드 디렉터리를 읽고, 명령을 실행하고, 파일을 편집할 수 있습니다
+4. 완료되면 결과를 Multica로 다시 보고합니다(자동 재시도 동작 여부에 따라 상태가 `completed` 또는 `failed`가 됩니다)
+
+웹 UI는 **실시간으로**(WebSocket을 통해) 업데이트됩니다 — 새로 고침이 필요 없습니다.
+
+## 다음 단계
+
+- [데몬과 런타임](/daemon-runtimes) — 데몬이 어떻게 동작하는지와 런타임의 의미
+- [작업](/tasks) — 작업 생명주기와 재시도 규칙
+- [AI 코딩 도구 비교](/providers) — 12개 도구 간의 기능 차이
+- [데스크톱 앱](/desktop-app) — 데몬을 직접 실행하고 싶지 않은 경우
+- [자체 호스팅 빠른 시작](/self-host-quickstart) — 자체 백엔드 실행하기

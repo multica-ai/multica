@@ -130,10 +130,13 @@ type patchOnboardingRequest struct {
 }
 
 // questionnaireAnswers mirrors the frontend's `QuestionnaireAnswers`
-// shape. Source and use_case are multi-select arrays (Step 1 + Step 3
-// allow picking several); role stays single-select.
+// shape. `use_case` is multi-select (Step 3 allows picking several);
+// `source` is single-select (primary acquisition channel) but kept
+// as `stringOrSlice` for back-compat with v2 multi-select rows — the
+// client now always commits a one-element array. `role` stays
+// single-select.
 //
-// stringOrSlice tolerates pre-multi-select rows that wrote a bare
+// stringOrSlice also tolerates pre-array rows that wrote a bare
 // string into the JSONB column — `json.Unmarshal` would otherwise
 // fail on type mismatch when reading those back.
 type stringOrSlice []string
@@ -150,8 +153,8 @@ func (s *stringOrSlice) UnmarshalJSON(data []byte) error {
 		*s = arr
 		return nil
 	}
-	// Fall back to single string (legacy shape from before this column
-	// went multi-select). Empty string means "unanswered" — keep nil.
+	// Fall back to single string (pre-array shape from before this
+	// column held a slice). Empty string means "unanswered" — keep nil.
 	var single string
 	if err := json.Unmarshal(data, &single); err != nil {
 		return err

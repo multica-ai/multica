@@ -531,30 +531,26 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
   });
 
-  it("renders workspace name as breadcrumb link", async () => {
+  it("renders the issue title leaf as a link to the issue detail page", async () => {
     renderIssueDetail();
 
-    await waitFor(() => {
-      expect(screen.getByText("Test WS")).toBeInTheDocument();
-    });
-
-    const wsLink = screen.getByText("Test WS");
-    // After the URL-driven workspace refactor, issue paths are scoped under
-    // /<workspaceSlug>/issues.
-    expect(wsLink.closest("a")).toHaveAttribute("href", "/test/issues");
+    // The breadcrumb leaf is the whole "identifier + title" string wrapped in a
+    // single link to the issue's own detail route (used to open the full page
+    // from the inline Inbox pane). A bare issue has no ancestor crumbs.
+    const leaf = await screen.findByText("TES-1 Implement authentication");
+    expect(leaf.closest("a")).toHaveAttribute("href", "/test/issues/issue-1");
   });
 
   it("omits the project breadcrumb segment when the issue has no project_id", async () => {
     // Default fixture has project_id: null.
     renderIssueDetail();
 
-    await waitFor(() => {
-      expect(screen.getByText("Test WS")).toBeInTheDocument();
-    });
+    // Leaf renders once loaded; a bare issue has no ancestor crumbs at all.
+    await screen.findByText("TES-1 Implement authentication");
 
-    // Project should not have been fetched.
+    // Project is never fetched and no project crumb appears.
     expect(mockApiObj.getProject).not.toHaveBeenCalled();
-    expect(screen.queryByText("Unknown project")).not.toBeInTheDocument();
+    expect(screen.queryByText("Marketing site refresh")).not.toBeInTheDocument();
   });
 
   it("renders the project breadcrumb segment when the issue belongs to a project", async () => {
@@ -582,20 +578,6 @@ describe("IssueDetail (shared)", () => {
     // The whole project segment is a single AppLink pointing at the project
     // detail route under the active workspace slug.
     expect(projectLink.closest("a")).toHaveAttribute("href", "/test/projects/p-1");
-  });
-
-  it("shows an Unknown project placeholder when the project query fails", async () => {
-    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-missing" });
-    mockApiObj.getProject.mockRejectedValue(new Error("not found"));
-
-    renderIssueDetail();
-
-    await waitFor(() => {
-      expect(screen.getByText("Unknown project")).toBeInTheDocument();
-    });
-    // Placeholder is non-interactive — no link wraps the text.
-    const placeholder = screen.getByText("Unknown project");
-    expect(placeholder.closest("a")).toBeNull();
   });
 
   it("renders properties sidebar with all core rows plus set optional rows", async () => {

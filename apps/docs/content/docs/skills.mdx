@@ -31,7 +31,7 @@ Both individual files and whole skill packs have size caps (single-file cap arou
 
 Once imported, a skill has to be **attached to a specific agent** to take effect. One agent can have multiple skills attached, and one skill can be attached to multiple agents.
 
-After attaching, the agent picks up its skills the next time it starts a task — each AI coding tool has its own skill discovery path (Claude Code uses `.claude/skills/`, Cursor uses `.cursor/skills/`, etc.), and Multica drops files in the right place automatically. **However, three tools (Gemini, Hermes, OpenClaw) currently use the generic fallback path `.agent_context/skills/` — whether these tools actually read skills from that path depends on the tool itself.** Full path mapping and the native-discovery vs. fallback distinction is in [AI coding tools comparison → Where skill files go](/providers#where-skill-files-go).
+After attaching, the agent picks up its skills the next time it starts a task — each AI coding tool has its own skill discovery path (Claude Code uses `.claude/skills/`, Cursor uses `.cursor/skills/`, Antigravity uses `.agents/skills/`, etc.), and Multica drops files in the right place automatically. **However, three tools (Gemini, Hermes, OpenClaw) currently use the generic fallback path `.agent_context/skills/` — whether these tools actually read skills from that path depends on the tool itself.** Full path mapping and the native-discovery vs. fallback distinction is in [AI coding tools comparison → Where skill files go](/providers#where-skill-files-go).
 
 After you edit a skill's contents, **only newly created tasks pick up the new version** — tasks already running continue with the old skill.
 
@@ -54,7 +54,7 @@ Both augment what an agent can do, but in different directions:
 - **Skill** = a structured **knowledge pack** (static content + instructions). The agent reads a skill to learn "when I see problem X, here's how to think and what to do."
 - **MCP** (Model Context Protocol) = a **tool channel**. The agent uses MCP to connect to external services (databases, filesystems, third-party APIs) and **invoke** them.
 
-The two are complementary. In Multica today, MCP support is **only truly consumed by Claude Code** — other tools receive the MCP config but don't actually use it. A dedicated MCP section will come in a later release.
+The two are complementary. In Multica today, MCP support is **provider-specific**: Claude Code, Codex, Hermes, Kimi, Kiro CLI, OpenCode, and OpenClaw consume `mcp_config`; other tools receive the field but don't actually use it. A dedicated MCP section will come in a later release.
 
 ---
 
@@ -64,4 +64,4 @@ By now you know what an agent is, how to create one, and how to attach skills. T
 
 - [Daemon and runtimes](/daemon-runtimes) — where agents actually run, and how to tell online from offline
 - [Executing tasks](/tasks) — the full lifecycle of one "agent work session"
-- [AI coding tools comparison](/providers) — full comparison of all 11 tools (including each one's skill injection path)
+- [AI coding tools comparison](/providers) — full comparison of all 12 tools (including each one's skill injection path)

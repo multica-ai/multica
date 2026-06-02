@@ -90,6 +90,7 @@ export function RuntimesPage({
   cloudRuntimeEnabled = false,
 }: RuntimesPageProps = {}) {
   const isLoading = useAuthStore((s) => s.isLoading);
+  const currentUserId = useAuthStore((s) => s.user?.id);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const [machineFilter, setMachineFilter] =
@@ -138,6 +139,7 @@ export function RuntimesPage({
         now,
         localDaemonId,
         localMachineName,
+        currentUserId,
         workloadByRuntimeId: workloadIndex,
         ensureLocalMachine: hasLocalMachine,
       }),
@@ -146,6 +148,7 @@ export function RuntimesPage({
       now,
       localDaemonId,
       localMachineName,
+      currentUserId,
       workloadIndex,
       hasLocalMachine,
     ],

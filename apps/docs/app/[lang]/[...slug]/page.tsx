@@ -11,6 +11,7 @@ import type { Metadata } from "next";
 import { docsAlternates } from "@/lib/site";
 import { i18n, type Lang } from "@/lib/i18n";
 import { DocsLocaleProvider, LocaleLink } from "@/components/locale-link";
+import { docsSlugStaticParams } from "@/lib/static-params";
 
 function asLang(lang: string): Lang {
   return (i18n.languages as readonly string[]).includes(lang)
@@ -22,11 +23,11 @@ export default async function Page(props: {
   params: Promise<{ lang: string; slug: string[] }>;
 }) {
   const params = await props.params;
-  const page = source.getPage(params.slug, params.lang);
+  const lang = asLang(params.lang);
+  const page = source.getPage(params.slug, lang);
   if (!page) notFound();
 
   const MDX = page.data.body;
-  const lang = asLang(params.lang);
 
   return (
     <DocsPage toc={page.data.toc}>
@@ -42,14 +43,15 @@ export default async function Page(props: {
 }
 
 export function generateStaticParams() {
-  return source.generateParams().filter((p) => p.slug.length > 0);
+  return docsSlugStaticParams(source.generateParams());
 }
 
 export async function generateMetadata(props: {
   params: Promise<{ lang: string; slug: string[] }>;
 }): Promise<Metadata> {
   const params = await props.params;
-  const page = source.getPage(params.slug, params.lang);
+  const lang = asLang(params.lang);
+  const page = source.getPage(params.slug, lang);
   if (!page) notFound();
 
   return {

@@ -120,9 +120,24 @@ export interface AgentTask {
   kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
   /**
    * Local working directory pinned for this task by the daemon. Empty until
-   * the daemon reports a work_dir (typically once execution starts).
+   * the daemon reports a work_dir (typically once execution starts). This is
+   * the canonical absolute path the agent runs in; UI surfaces should prefer
+   * `relative_work_dir` to avoid leaking the user's home directory.
    */
   work_dir?: string;
+  /**
+   * Privacy-safe display form of `work_dir`, derived on the server. For
+   * standard tasks the daemon's workspaces root has been stripped off
+   * (`<wsUUID>/<taskShort>/workdir`); for local_directory tasks where the
+   * path lives outside that layout, the server strips recognised home
+   * prefixes (`/Users/<name>/`, `/home/<name>/`, `<drive>:/Users/<name>/`)
+   * and otherwise falls back to the basename so neither the home directory
+   * nor the username leak into the UI. Older backends omit the field —
+   * render it conditionally and never render `work_dir` raw (not even in
+   * a tooltip / `title` / `aria-label`, since the goal is that screen
+   * shares and screenshots also stay safe).
+   */
+  relative_work_dir?: string;
 }
 
 export interface Agent {
@@ -153,6 +168,29 @@ export interface Agent {
    * alongside `has_custom_env`. Treat `undefined` as zero. MUL-2600.
    */
   custom_env_key_count?: number;
+  /**
+   * MCP server configuration forwarded to runtimes that consume
+   * `agent.mcp_config` (see providerSupportsMcpConfig). Each backend
+   * materialises it in the runtime-native place: Claude flags, Codex
+   * config.toml, ACP session params, OpenCode env config, OpenClaw
+   * wrapper config, etc. `null` (or the field omitted on legacy backends)
+   * means no managed config; the daemon falls back to the CLI's own
+   * default. MUL-2764.
+   *
+   * When the caller can't see secrets (an agent actor, or a non-owner
+   * non-admin), the server replaces the value with `null` and sets
+   * `mcp_config_redacted` to true so the UI can render a "configured
+   * but hidden" state without exposing potentially sensitive fields.
+   */
+  mcp_config?: unknown | null;
+  /**
+   * True when the server stripped `mcp_config` from this response
+   * because the caller lacks permission to see secrets. The UI uses
+   * this to distinguish "no config" (`mcp_config === null &&
+   * !mcp_config_redacted`) from "config exists but you can't see it".
+   * Older backends omit this field; treat `undefined` as false.
+   */
+  mcp_config_redacted?: boolean;
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
@@ -295,6 +333,15 @@ export interface UpdateAgentRequest {
    * MUL-2600.
    */
   custom_args?: string[];
+  /**
+   * MCP server configuration. Tri-state semantics (MUL-2764):
+   *   - field omitted → no change
+   *   - `null` → clear the column; the daemon falls back to the CLI's
+   *     built-in default at launch
+   *   - object → replace the stored JSON verbatim; runtime backends
+   *     validate / translate it according to their own MCP integration
+   */
+  mcp_config?: unknown | null;
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;
@@ -512,7 +559,7 @@ export interface RuntimeModel {
   default?: boolean;
   /**
    * Per-model reasoning/effort catalog discovered by the daemon. Currently
-   * populated for claude and codex runtimes only; omitted (or undefined)
+   * populated for claude, codex, and opencode runtimes; omitted (or undefined)
    * for every other provider, which the UI treats as "no thinking-level
    * picker for this model". See MUL-2339.
    */

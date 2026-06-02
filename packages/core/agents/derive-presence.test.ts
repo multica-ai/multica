@@ -345,6 +345,24 @@ describe("deriveAgentPresenceDetail", () => {
     });
     expect(detail.capacity).toBe(3);
   });
+
+  it("reports archived over any runtime/task signal for an archived agent", () => {
+    // Archived wins over presence: a leftover online runtime and a running
+    // task must never make a retired agent read as live. Availability
+    // collapses to "archived" and workload is forced idle with zero counts
+    // so no consumer (dot, hover card, list row) can surface "Online" or
+    // "Working" for an archived agent.
+    const detail = deriveAgentPresenceDetail({
+      agent: makeAgent({ archived_at: "2026-04-27T10:00:00Z" }),
+      runtime: makeRuntime(),
+      tasks: [makeTask({ status: "running" })],
+      now: NOW,
+    });
+    expect(detail.availability).toBe("archived");
+    expect(detail.workload).toBe("idle");
+    expect(detail.runningCount).toBe(0);
+    expect(detail.queuedCount).toBe(0);
+  });
 });
 
 describe("buildPresenceMap", () => {

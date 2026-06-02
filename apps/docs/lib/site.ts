@@ -1,5 +1,7 @@
 import { source } from "@/lib/source";
 import { i18n } from "@/lib/i18n";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 // Canonical production origin and basePath for the docs app. Used by the
 // sitemap and per-page hreflang metadata — anywhere we need to construct
@@ -20,6 +22,29 @@ export function absoluteDocsUrl(relative: string): string {
   return `${SITE_ORIGIN}${DOCS_BASE_PATH}${path}`;
 }
 
+function docsContentRoots(): string[] {
+  return [
+    join(process.cwd(), "content", "docs"),
+    join(process.cwd(), "apps", "docs", "content", "docs"),
+  ];
+}
+
+function pageSourceStem(slugs: string[]): string {
+  return slugs.length === 0 ? "index" : slugs.join("/");
+}
+
+function hasLocalizedMdx(slugs: string[], lang: string): boolean {
+  const stem = pageSourceStem(slugs);
+  const candidates =
+    lang === i18n.defaultLanguage
+      ? [`${stem}.mdx`, `${stem}/index.mdx`]
+      : [`${stem}.${lang}.mdx`, `${stem}/index.${lang}.mdx`];
+
+  return docsContentRoots().some((root) =>
+    candidates.some((candidate) => existsSync(join(root, candidate))),
+  );
+}
+
 /**
  * Build Next.js `metadata.alternates` for a docs page:
  *  - `canonical` points at the default-language version (Google consolidates
@@ -36,8 +61,11 @@ export function docsAlternates(slugs: string[]): {
 } {
   const languages: Record<string, string> = {};
   for (const lang of i18n.languages) {
+    if (!hasLocalizedMdx(slugs, lang)) continue;
+
     const page = source.getPage(slugs, lang);
-    if (page) languages[lang] = absoluteDocsUrl(page.url);
+    if (!page) continue;
+    languages[lang] = absoluteDocsUrl(page.url);
   }
 
   const canonical =

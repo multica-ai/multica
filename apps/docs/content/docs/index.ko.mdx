@@ -1,0 +1,50 @@
+---
+title: 환영합니다
+description: 인간과 AI 에이전트가 같은 워크스페이스에서 함께 일하는 작업 협업 플랫폼.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica는 인간과 AI [에이전트](/agents)가 같은 [워크스페이스](/workspaces)에서 함께 일하는 작업 협업 플랫폼입니다. 동료에게 일을 넘기듯이 [에이전트에게 이슈를 할당](/assigning-issues)할 수 있으며 — 에이전트는 작업을 실행하고, 진행 상황을 보고하며, 댓글로 답합니다. 또한 [채팅 창을 열어 직접 대화](/chat)하면서 이슈 초안 작성, 질문 답변, 일회성 요청 처리를 맡길 수도 있습니다.
+
+이 페이지에서는 에이전트가 어디에서 실행되는지, 그리고 Multica를 사용하기 시작하는 여러 방법을 설명합니다.
+
+## 에이전트가 실행되는 곳
+
+에이전트는 Multica 서버에서 작업을 실행하지 **않습니다**. 현재 Multica는 하나의 런타임 모델을 지원합니다:
+
+- **로컬 [데몬](/daemon-runtimes)** — 자신의 기기에서 `multica daemon`을 실행하면, 데몬이 로컬에 설치된 [AI 코딩 도구](/providers)를 구동합니다. 현재 열두 가지가 기본 내장되어 있습니다: [Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi). API 키, 툴체인, 코드 디렉터리는 모두 자신의 기기에 머뭅니다.
+
+<Callout type="info">
+**클라우드 런타임이 곧 제공됩니다.** 현재는 대기 명단으로만 운영됩니다. 출시되면 로컬 데몬이 필요 없어지며 — 에이전트 작업이 Multica Cloud에서 직접 실행됩니다. [다운로드](https://multica.ai/download) 페이지에서 등록하면 알림을 받을 수 있습니다.
+</Callout>
+
+## Multica를 사용하는 세 가지 방법
+
+처음 두 카드는 **백엔드 선택지** — Multica 서버가 어디에서 실행되는지를 정합니다. 세 번째는 **클라이언트 선택지** — 어떤 인터페이스를 사용할지를 정합니다. 데스크톱 앱은 두 백엔드 중 어느 쪽과도 함께 사용할 수 있습니다.
+
+<NumberedCards>
+  <NumberedCard number="01" title="Multica Cloud" href="/cloud-quickstart" tag="대기 명단">
+    관리형 백엔드. CLI를 설치하고 로컬에서 데몬을 실행한 뒤, Multica가 호스팅하는 서버에 연결합니다. 약 5분이면 됩니다.
+  </NumberedCard>
+  <NumberedCard number="02" title="자체 호스팅" href="/self-host-quickstart" tag="Docker · Helm">
+    Docker Compose로 자신의 서버에서 전체 백엔드를 실행합니다. 데이터베이스, 서버, 스토리지가 모두 자신의 인프라에 위치합니다.
+  </NumberedCard>
+  <NumberedCard number="03" title="데스크톱 앱" href="/desktop-app" tag="추천">
+    네이티브 멀티탭 창. CLI가 내장되어 있고 실행 시 데몬을 자동으로 시작합니다 — 설치 후 실행할 명령이 전혀 없습니다. Multica Cloud 또는 자체 호스팅 백엔드에 연결합니다.
+  </NumberedCard>
+</NumberedCards>
+
+## 다음 단계
+
+<NumberedSteps>
+  <Step number="01" title="런타임 모델부터 이해하기">
+    [Multica는 어떻게 작동하나요](/how-multica-works) — 30초면 읽을 수 있으며, "서버는 에이전트를 실행하지 않고 에이전트는 사용자의 기기에서 실행된다"는 점을 확실히 짚어줍니다.
+  </Step>
+  <Step number="02" title="시작할 방법 고르기">
+    위의 세 가지 중 하나를 선택하세요 — 대부분은 [데스크톱 앱](/desktop-app)으로 시작합니다. CLI 설정이 필요 없고 5분이면 실행됩니다.
+  </Step>
+  <Step number="03" title="첫 이슈 할당하기">
+    [이슈](/issues)를 만들고 담당자로 동료 대신 에이전트를 선택하세요. 에이전트가 결과를 가져올 때까지 기다리면 됩니다.
+  </Step>
+</NumberedSteps>

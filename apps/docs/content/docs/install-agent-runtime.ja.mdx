@@ -1,0 +1,180 @@
+---
+title: エージェントランタイムをインストールする
+description: Multica はあなたのマシンにインストールされている AI コーディングツールを駆動します。このページでは、デーモンがそれらを検出できるように、サポートされている 12 種のツールをそれぞれインストールする方法を説明します。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica における**ランタイム**とは、あなたのマシンのデーモンと、デーモンが `PATH` で見つけた AI コーディングツール 1 つが組になったものです。オンボーディングの「ランタイムを接続」ステップで **No supported tools detected** と表示される場合、それはデーモンが `PATH` をスキャンしたものの、駆動方法を知っている 12 種のツールのいずれも見つけられなかったことを意味します。以下のツールのいずれか（または複数）をインストールしてから、そのステップに戻って再スキャンしてください — 数秒以内にランタイムが表示されます。
+
+このページは次のドキュメントのインストール側の補完ドキュメントです。
+
+- [デーモンとランタイム](/daemon-runtimes) — 検出の仕組み
+- [AI コーディングツールマトリクス](/providers) — 各ツールができることとできないこと（セッション再開、MCP、モデル選択）
+
+<Callout type="info">
+Multica サーバーがあなたの API キーやツール自体を見ることは決してありません。以下のすべて — インストール、認証、モデルアクセス — はあなたのローカルマシン上に存在します。何かが失敗する場合、それはほぼ常にローカルの問題です。
+</Callout>
+
+## 始める前に
+
+以下の**すべての**ツールに 2 つの前提条件が適用されます。
+
+1. **Multica デーモンが実行中である必要があります。** [Multica CLI](/cli) をインストールした後に `multica daemon start` を実行するか、デーモンを自動的に起動する [Multica デスクトップアプリ](/desktop-app)を使用してください。デーモンが実行されていなければ、ツールを検出する主体がありません。
+2. **ツールのバイナリが `PATH` で到達可能である必要があります。** デーモンは各ツールを名前で呼び出して実行します（各セクションの**デーモンが探す名前**の列を参照）。ターミナルで `which <name>` で見つからなければ、デーモンも見つけられません。インストール後は、新しいターミナルを開く（またはデーモンを再起動する）ことで、新しい `PATH` エントリが反映されるようにしてください。
+
+ツールをインストールした後は、デーモンを再起動してください。
+
+```bash
+multica daemon restart
+```
+
+または、デスクトップアプリではアプリを再起動するだけで構いません。デーモンは起動するたびに `PATH` を再スキャンします。
+
+## サポートされている 12 種のツール
+
+おおよそ利用者の多い順に並べています。すでに認証情報を持っているものを選んで使ってください — 12 種すべてをインストールする必要はありません。
+
+### Claude Code (Anthropic)
+
+最も完全な連携です。セッション再開が動作し、MCP が動作し、**11 種のうちエージェントの `mcp_config` フィールドを実際に読み込む唯一のツール**です（詳しくは[マトリクス](/providers#mcp-configuration-only-claude-code-actually-reads-it)を参照）。
+
+| | |
+|---|---|
+| デーモンが探す名前 | `claude` |
+| インストール | [claude.com/claude-code](https://www.claude.com/claude-code) の公式ガイドに従ってください。標準的な方法は npm パッケージ `@anthropic-ai/claude-code` です（Node.js 18+ が必要）。 |
+| 認証 | `claude` を一度実行して CLI 内のログイン手順に従うか、`ANTHROPIC_API_KEY` を設定してください。 |
+| 備考 | 新しいユーザーに最初に推奨する選択肢です。 |
+
+### Codex (OpenAI)
+
+よりきめ細かい承認ゲートを備えた JSON-RPC 2.0 のトランスポートです。**セッション再開のコードは存在しますが、現在は到達できません** — 再開が必要な場合は Claude Code か ACP 系列のいずれかを選んでください。
+
+| | |
+|---|---|
+| デーモンが探す名前 | `codex` |
+| インストール | [github.com/openai/codex](https://github.com/openai/codex) の公式ガイドに従ってください。標準的な方法は npm パッケージ `@openai/codex` です。 |
+| 認証 | `codex login`（ブラウザベース）または `OPENAI_API_KEY`。 |
+
+### Cursor (Anysphere)
+
+Cursor エディタに対応する CLI です。**セッション再開は動作しません** — Cursor の CLI がセッション id を返さないため、再開時に渡す値は常に無効です。
+
+| | |
+|---|---|
+| デーモンが探す名前 | `cursor-agent` |
+| インストール | [Cursor エディタ](https://cursor.com/)をインストールしてから、[docs.cursor.com](https://docs.cursor.com/) のドキュメントに従って CLI をインストールしてください。バイナリ名は `cursor` ではなく `cursor-agent` です。 |
+| 認証 | Cursor エディタを通じてログインすると、CLI がそのセッションを再利用します。 |
+
+### GitHub Copilot
+
+モデルのルーティングはあなたの GitHub アカウントのエンタイトルメント（entitlement）を通じて行われます — ツールが自分でモデルを選ぶのではなく、どのモデルを受け取るかは GitHub が決めます。
+
+| | |
+|---|---|
+| デーモンが探す名前 | `copilot` |
+| インストール | GitHub の CLI ドキュメント [github.com/github/copilot-cli](https://github.com/github/copilot-cli) を参照してください。 |
+| 認証 | CLI を通じたブラウザベースの GitHub ログイン。 |
+| 備考 | ログインしているアカウントに有効な GitHub Copilot サブスクリプションが必要です。 |
+
+### Gemini (Google)
+
+Gemini 2.5 および 3 シリーズをサポートします。セッション再開と MCP はありません — 単発のタスクに適しています。
+
+| | |
+|---|---|
+| デーモンが探す名前 | `gemini` |
+| インストール | [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli) の公式ガイドに従ってください。標準的な方法は npm パッケージ `@google/gemini-cli` です。 |
+| 認証 | `gemini` を実行すると Google アカウントのログインを求められるか、`GEMINI_API_KEY` を設定してください。 |
+
+### OpenCode (SST)
+
+オープンソースの CLI エージェントです。独自の設定ファイルから利用可能なモデルを動的に発見します — 自分のモデルカタログを持ち込みたいユーザーによく合います。
+
+| | |
+|---|---|
+| デーモンが探す名前 | `opencode` |
+| インストール | [opencode.ai](https://opencode.ai/) の公式ガイド、または GitHub リポジトリ [github.com/sst/opencode](https://github.com/sst/opencode) に従ってください。一般的な方法はインストールスクリプトまたは npm パッケージです。 |
+| 認証 | OpenCode のドキュメントに従ってモデルプロバイダー（Anthropic、OpenAI など）を構成してください。 |
+
+### Kiro CLI (Amazon)
+
+ACP-over-stdio のトランスポートです。セッション再開は ACP `session/load` を通じて動作し、スキルは `.kiro/skills/` にコピーされます。
+
+| | |
+|---|---|
+| デーモンが探す名前 | `kiro-cli` |
+| インストール | [kiro.dev](https://kiro.dev/) の Kiro ドキュメントを参照してください。バイナリ名は `kiro` ではなく `kiro-cli` です。 |
+| 認証 | AWS アカウントベースで、Kiro 独自のオンボーディングに従ってください。 |
+
+### Kimi (Moonshot)
+
+ACP プロトコルのエージェントで、主に中国市場を対象としています。スキルは `.kimi/skills/` 配下に置かれます（ネイティブ発見）。
+
+| | |
+|---|---|
+| デーモンが探す名前 | `kimi` |
+| インストール | [github.com/MoonshotAI/kimi-cli](https://github.com/MoonshotAI/kimi-cli) の公式ガイドに従ってください。 |
+| 認証 | Moonshot API キーで、ベンダーのドキュメントに従って構成します。 |
+
+### Hermes (Nous Research)
+
+ACP プロトコルのエージェントです（Kimi とトランスポートを共有）。セッション再開が動作します。スキル注入のパスは汎用の `.agent_context/skills/` にフォールバックします — 依存する前に、スキルが正しくロードされているか確認してください。
+
+| | |
+|---|---|
+| デーモンが探す名前 | `hermes` |
+| インストール | 最新の CLI ディストリビューションは Nous Research のリポジトリ [github.com/NousResearch](https://github.com/NousResearch) を参照してください。 |
+| 認証 | ベンダーのドキュメントに従います。 |
+
+### OpenClaw
+
+オープンソースの CLI エージェントオーケストレーターです。**モデルはエージェント層にバインドされます**（`openclaw agents add --model`） — タスクごとに上書きすることはできず、Multica から `--model` や `--system-prompt` を渡すこともできません。
+
+| | |
+|---|---|
+| デーモンが探す名前 | `openclaw` |
+| インストール | プロジェクト [github.com/openclaw-org/openclaw](https://github.com/openclaw-org/openclaw) を参照してください（コミュニティによる保守）。 |
+| 認証 | OpenClaw のドキュメントに従って、基盤となるモデルプロバイダーを構成してください。 |
+
+### Pi (Inflection AI)
+
+ミニマルです。**セッション再開の方式が特殊です** — 再開 id が文字列 id ではなく、ディスク上のセッションファイルへのパスです。
+
+| | |
+|---|---|
+| デーモンが探す名前 | `pi` |
+| インストール | Inflection の CLI ドキュメント [pi.ai](https://pi.ai/) を参照してください。 |
+| 認証 | ベンダーのドキュメントに従います。 |
+
+### Antigravity (Google)
+
+Google の Antigravity CLI（`agy`）です。Google の Antigravity サービスと組になり、Gemini ベースのモデルを実行します。セッション再開は `--conversation <id>` を通じて動作し、デーモンが CLI のログファイルからこれをキャプチャします。モデル選択は Antigravity CLI 自体の内部で管理されます — Multica はこのプロバイダーに対してエージェントごとのモデルピッカーを無効にします。スキルは `.agents/skills/` に書き込まれます（CLI が Gemini CLI のワークスペーススキルレイアウトを継承します — [Antigravity ドキュメント](https://antigravity.google/docs/gcli-migration)を参照）。
+
+| | |
+|---|---|
+| デーモンが探す名前 | `agy` |
+| インストール | [antigravity.google/docs/cli-overview](https://antigravity.google/docs/cli-overview) の公式ガイドに従ってください。CLI はあらかじめビルドされて提供されます — `agy install` を一度実行して PATH とシェルエイリアスを設定してください。 |
+| 認証 | `agy` を対話的に一度実行して Google アカウントのログインを完了するか、Antigravity デスクトップアプリを通じてログインしてください — CLI は GUI が書き込んだ keyring エントリを再利用します。 |
+| 備考 | CLI は構造化されたイベントストリームではなく、stdout に通常のアシスタントテキストを出力します。途中の「I will run X」の行と最終的な応答の両方がテキストとして Multica に中継されます。 |
+
+## インストールした後
+
+1. **バイナリが `PATH` にあるか確認してください。** 新しいターミナルを開いて `which <name>`（例: `which claude`、`which cursor-agent`、`which kiro-cli`、`which agy`）を実行してください。パスが出力されれば、デーモンが見つけられます。何も出力されない場合は、まずシェルの `PATH` を修正してください（典型的な原因は、リロードされていないシェルごとの rc ファイルです）。
+2. **デーモンを再起動してください。** `multica daemon restart` を実行するか、デスクトップアプリを再起動してください。デーモンは起動時にのみ `PATH` をスキャンします。
+3. **ランタイムページを確認してください。** Multica UI の**ランタイム**ページに、`(ワークスペース × ツール)` の組み合わせごとに 1 行ずつ表示されるはずです。行に「offline」と表示される場合は、[デーモンとランタイム → ランタイムがオフラインと表示されるとき](/daemon-runtimes#when-a-runtime-is-marked-offline)を参照してください。
+4. **オンボーディングに戻ってください。** 「ランタイムを接続」ステップはポーリングを行い、数秒以内に新しいランタイムを認識します — リロードは不要です。
+
+## トラブルシューティング
+
+- **`which` はバイナリを見つけるのにデーモンは見つけません。** デーモンが古い `PATH` で起動されています。再起動してください。
+- **バイナリは存在するのに起動に失敗します。** ターミナルからツール自体の `--version` や `--help` を一度実行してください — ここで発生する失敗のほとんどは、認証の欠落、期限切れのトークン、または Node.js / ランタイムの不一致です。
+- **ランタイムページに行は表示されるのに、タスクがすぐに失敗します。** タスクをトリガーしながら `multica daemon logs -f` を確認してください。デーモンはツール自体のエラー出力をそのまま表示します。
+
+より広範な症状については、[トラブルシューティングガイド](/troubleshooting)を参照してください。
+
+## 次に
+
+- [デーモンとランタイム](/daemon-runtimes) — 検出、ハートビート、オフライン処理の仕組み
+- [AI コーディングツールマトリクス](/providers) — ツールが接続された後の機能差
+- [エージェントの作成と構成](/agents-create) — エージェントに使うツールを選び、タスクの実行を開始する

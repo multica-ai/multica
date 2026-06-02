@@ -81,17 +81,42 @@ make selfhost
 
 **Option B — SMTP relay（内网/自部署）：**
 
-适合内网无法访问 `api.resend.com`，或已经有内部邮件中继（Exchange、Postfix、自部署 SendGrid 等）的场景。同时设置时 `SMTP_HOST` 优先级高于 Resend。
+适合内网无法访问 `api.resend.com`，或已经有内部邮件中继（Microsoft Exchange、Postfix、自部署 SendGrid 等）的场景。同时设置时 `SMTP_HOST` 优先级高于 Resend，验证码和邀请邮件不会走外部 provider。服务端 advertise STARTTLS 时会自动升级；端口 `465`（SMTPS / 隐式 TLS）会自动启用连接即握手的 TLS 模式，非标准 SMTPS 端口用 `SMTP_TLS=implicit`（别名：`smtps`、`ssl`）强制开启。
+
+**匿名 Exchange 内部 relay（端口 25）** —— 主机按 IP 被信任，不需要凭据：
 
 ```bash
-SMTP_HOST=smtp.internal.example.com
-SMTP_PORT=587                  # 默认 25；STARTTLS 提交端口用 587
-SMTP_USERNAME=multica          # 留空则使用未认证 relay
-SMTP_PASSWORD=...
+SMTP_HOST=exchange.internal.example.com
+SMTP_PORT=25
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_TLS_INSECURE=false
 RESEND_FROM_EMAIL=noreply@yourdomain.com  # 同时作为 SMTP From: 头
 ```
 
-之后重启：`docker compose -f docker-compose.selfhost.yml restart backend`。
+**认证提交（端口 587，STARTTLS）** —— relay 需要 service account；服务端 advertise STARTTLS 时自动升级：
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587
+SMTP_USERNAME=multica
+SMTP_PASSWORD=...
+SMTP_TLS_INSECURE=false        # 仅在私有 CA / 自签证书时改成 true
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+**隐式 TLS / SMTPS（端口 465）** —— 适用于阿里云 / 腾讯企业邮箱等不广告 STARTTLS 的服务商。端口 `465` 自动启用隐式 TLS，因此这里 `SMTP_TLS` 可省略：
+
+```bash
+SMTP_HOST=smtp.qiye.aliyun.com
+SMTP_PORT=465
+SMTP_USERNAME=multica@yourdomain.com
+SMTP_PASSWORD=...
+SMTP_TLS=implicit              # 465 上可省略；非标准 SMTPS 端口上必填
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+之后重启：`docker compose -f docker-compose.selfhost.yml restart backend`。重启时 backend 会打印当前选择的 provider 和协商出的 TLS 模式（`EmailService: SMTP relay <host>:<port> (starttls|implicit-tls) from=…` / `Resend API` / `DEV mode`），密码不会被记录，所以这行截图给同事是安全的。
 
 更多 auth 配置（OAuth、注册白名单）以及完整的 SMTP 变量说明见 [登录与注册配置](/auth-setup) 和 [环境变量](/environment-variables)。
 

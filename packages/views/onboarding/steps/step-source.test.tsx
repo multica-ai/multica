@@ -41,54 +41,41 @@ function renderStep(answers: QuestionnaireAnswers = EMPTY) {
   return { onChange, onAdvance, onSkip, onBack };
 }
 
-describe("StepSource (multi-select)", () => {
+describe("StepSource (single-select primary source)", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("clicking a non-Other option appends the slug to the array", async () => {
+  it("clicking a non-Other option writes a one-element source array", async () => {
     const user = userEvent.setup();
     const { onChange, onAdvance } = renderStep();
 
-    await user.click(screen.getByRole("checkbox", { name: /linkedin/i }));
+    await user.click(screen.getByRole("radio", { name: /linkedin/i }));
 
     expect(onChange).toHaveBeenCalledWith({
       source: ["social_linkedin"],
+      source_other: null,
       source_skipped: false,
     });
     // A click only records — it must NOT auto-advance.
     expect(onAdvance).not.toHaveBeenCalled();
   });
 
-  it("clicking an already-selected option removes it (toggle)", async () => {
+  it("picking a second option replaces the first (no stacking)", async () => {
     const user = userEvent.setup();
     const { onChange } = renderStep({
       ...EMPTY,
       source: ["social_linkedin"],
     });
 
-    await user.click(screen.getByRole("checkbox", { name: /linkedin/i }));
+    await user.click(screen.getByRole("radio", { name: /twitter/i }));
 
     expect(onChange).toHaveBeenCalledWith({
-      source: [],
+      source: ["social_x"],
+      source_other: null,
       source_skipped: false,
     });
   });
 
-  it("multi-select stacks several picks", async () => {
-    const user = userEvent.setup();
-    const { onChange } = renderStep({
-      ...EMPTY,
-      source: ["social_linkedin"],
-    });
-
-    await user.click(screen.getByRole("checkbox", { name: /twitter/i }));
-
-    expect(onChange).toHaveBeenCalledWith({
-      source: ["social_linkedin", "social_x"],
-      source_skipped: false,
-    });
-  });
-
-  it("Skip clears the array + other and marks the step skipped, then calls onSkip", async () => {
+  it("Skip clears source + source_other and marks the step skipped, then calls onSkip", async () => {
     const user = userEvent.setup();
     const { onChange, onSkip } = renderStep();
 
@@ -102,19 +89,37 @@ describe("StepSource (multi-select)", () => {
     expect(onSkip).toHaveBeenCalledTimes(1);
   });
 
-  it("Other: clicking adds 'other' to the array; free-text writes to source_other", async () => {
+  it("Other: clicking writes `source: ['other']` and lets the user type into source_other", async () => {
     const user = userEvent.setup();
     const { onChange } = renderStep();
 
-    await user.click(screen.getByRole("checkbox", { name: /^other$/i }));
+    await user.click(screen.getByRole("radio", { name: /^other$/i }));
 
     expect(onChange).toHaveBeenCalledWith({
       source: ["other"],
+      source_other: null,
       source_skipped: false,
     });
 
     const input = await screen.findByPlaceholderText(/podcast/i);
     await user.type(input, "x");
     expect(onChange).toHaveBeenLastCalledWith({ source_other: "x" });
+  });
+
+  it("switching away from Other clears source_other so a stale value can't leak", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderStep({
+      ...EMPTY,
+      source: ["other"],
+      source_other: "a podcast",
+    });
+
+    await user.click(screen.getByRole("radio", { name: /linkedin/i }));
+
+    expect(onChange).toHaveBeenCalledWith({
+      source: ["social_linkedin"],
+      source_other: null,
+      source_skipped: false,
+    });
   });
 });

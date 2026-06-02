@@ -269,7 +269,7 @@ func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 func TestWriteProjectResourcesSkippedWhenNone(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := writeProjectResources(dir, TaskContextForEnv{}); err != nil {
+	if err := writeProjectResources(dir, TaskContextForEnv{}, nil); err != nil {
 		t.Fatalf("writeProjectResources: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".multica", "project", "resources.json")); !os.IsNotExist(err) {
@@ -352,7 +352,7 @@ func TestWriteContextFiles(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "", ctx); err != nil {
+	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -405,7 +405,7 @@ func TestWriteContextFilesOmitsSkillsWhenEmpty(t *testing.T) {
 		IssueID: "minimal-issue-id",
 	}
 
-	if err := writeContextFiles(dir, "", ctx); err != nil {
+	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -435,7 +435,7 @@ func TestWriteContextFilesAutopilotRunOnly(t *testing.T) {
 		AutopilotSource:      "manual",
 	}
 
-	if err := writeContextFiles(dir, "", ctx); err != nil {
+	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -479,7 +479,7 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "claude", ctx); err != nil {
+	if err := writeContextFiles(dir, "claude", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -613,6 +613,7 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"multica issue status <id> <status>",
 		"multica issue comment add <issue-id>",
 		"multica issue comment add --help",
+		"multica squad member set-role <squad-id>",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing core command/help text %q\n---\n%s", want, s)
@@ -757,7 +758,7 @@ func TestWriteContextFilesCopilotNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "copilot", ctx); err != nil {
+	if err := writeContextFiles(dir, "copilot", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -808,7 +809,7 @@ func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx); err != nil {
+	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -880,7 +881,7 @@ func TestWriteContextFilesPreservesExistingSkillFrontmatter(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx); err != nil {
+	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -915,7 +916,7 @@ func TestWriteContextFilesInjectsNameIntoNamelessFrontmatter(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "opencode", ctx); err != nil {
+	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -953,7 +954,7 @@ func TestWriteContextFilesOpenclawNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "openclaw", ctx); err != nil {
+	if err := writeContextFiles(dir, "openclaw", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -993,7 +994,7 @@ func TestWriteContextFilesKiroNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "kiro", ctx); err != nil {
+	if err := writeContextFiles(dir, "kiro", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1072,6 +1073,74 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 	}
 	if !strings.Contains(s, "discovered automatically") {
 		t.Error("AGENTS.md missing native skill discovery hint")
+	}
+}
+
+// TestInjectRuntimeConfigAntigravity pins that AGENTS.md for Antigravity
+// advertises native skill discovery (rather than the .agent_context fallback)
+// — the CLI inherits Gemini CLI's workspace skill layout at .agents/skills/.
+func TestInjectRuntimeConfigAntigravity(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "antigravity", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "Coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md for Antigravity should advertise native skill discovery")
+	}
+	if strings.Contains(s, ".agent_context/skills/") {
+		t.Error("AGENTS.md for Antigravity must not reference the .agent_context/skills/ fallback")
+	}
+}
+
+// TestWriteContextFilesAntigravityNativeSkills pins that skills for the
+// antigravity provider land in {workDir}/.agents/skills/<slug>/, matching the
+// CLI's native workspace discovery path (Gemini CLI lineage).
+func TestWriteContextFilesAntigravityNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "antigravity-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "antigravity", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".agents", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .agents/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+	// The fallback path must NOT be written — Antigravity's scanner reads
+	// .agents/skills/, not .agent_context/skills/.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error(".agent_context/skills/ MUST NOT be written for antigravity — its scanner does not read that path")
 	}
 }
 
@@ -1190,22 +1259,16 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigAvailableCommandsIsNeutral pins that the core
-// Available Commands section lists comment input modes neutrally for every
-// non-Codex provider on every host OS, with no "MUST pipe via stdin" mandate.
-//
-// Background: #1795 / #1851 introduced "MUST pipe via stdin" /
-// `--description-stdin` directives in the global section to fix Codex's
-// habit of emitting literal `\n` inside `--content "..."` (MUL-1467).
-// That mandate landed in the all-provider section and ended up steering every
-// provider at stdin — which then broke non-ASCII bytes on Windows shells
-// (#2198 / #2236 / #2376). This rollback keeps the strong Codex-specific
-// mandate in the Codex-Specific section (pinned by
-// TestInjectRuntimeConfigCodexLinuxEmphasizesStdin) and leaves the core global
-// command entry neutral.
+// TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic pins that the
+// "never inline --content for agent-authored comments" guardrail reaches EVERY
+// provider on every host OS — post-MUL-2904 the corruption is shell-driven, so
+// the directive is no longer Codex-scoped. The Available Commands entry still
+// lists all three input modes as available, and the legacy over-broad
+// `--description-stdin` / "MUST pipe via stdin" phrasings (#1795 / #1851, which
+// broke Windows non-ASCII) must NOT reappear.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
-func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
+func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 	saved := runtimeGOOS
 	t.Cleanup(func() { runtimeGOOS = saved })
 
@@ -1231,7 +1294,7 @@ func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
 				}
 				s := string(data)
 
-				// Available Commands lists all three input modes as fact.
+				// Available Commands lists all three input modes as available.
 				for _, want := range []string{
 					"--content \"...\"",
 					"--content-stdin",
@@ -1242,16 +1305,28 @@ func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
 					}
 				}
 
-				// "MUST pipe via stdin" must NOT appear in any non-Codex
-				// provider's runtime config: it was the over-spread of
-				// the Codex-specific fix.
+				// The provider-agnostic guardrail must now reach non-Codex
+				// providers too: a dedicated Comment Formatting section that
+				// bans inline `--content` for agent-authored comments.
+				for _, want := range []string{
+					"## Comment Formatting",
+					"Never use inline `--content` for agent-authored comments",
+				} {
+					if !strings.Contains(s, want) {
+						t.Errorf("%s missing provider-agnostic comment guardrail %q\n---\n%s", configFile, want, s)
+					}
+				}
+
+				// The legacy over-broad mandate (#1795 / #1851) must NOT
+				// reappear — it is what broke Windows non-ASCII for every
+				// provider.
 				for _, banned := range []string{
 					"MUST pipe via stdin",
 					"Agent-authored comments should always pipe content via stdin",
 					"use `--description-stdin` and pipe a HEREDOC",
 				} {
 					if strings.Contains(s, banned) {
-						t.Errorf("%s carries over-spread Codex mandate %q for non-Codex provider %s\n---\n%s", configFile, banned, provider, s)
+						t.Errorf("%s reintroduces over-broad legacy mandate %q for provider %s\n---\n%s", configFile, banned, provider, s)
 					}
 				}
 			})
@@ -1259,49 +1334,63 @@ func TestInjectRuntimeConfigAvailableCommandsIsNeutral(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigCodexLinuxEmphasizesStdin pins the
-// Codex-Specific Comment Formatting section's "MUST stdin" mandate on
-// non-Windows hosts. This is the MUL-1467 / #1795 / #1851 fix scoped
-// back to where it belongs.
+// TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesStdin pins that the
+// "## Comment Formatting" section emits the quoted-HEREDOC stdin mandate on
+// non-Windows hosts for EVERY provider, not just Codex. Post-MUL-2904 the
+// guardrail is provider-agnostic because the corruption is shell-driven; the
+// quoted delimiter is what blocks backtick / `$()` substitution in the body.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
-func TestInjectRuntimeConfigCodexLinuxEmphasizesStdin(t *testing.T) {
+func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesStdin(t *testing.T) {
 	saved := runtimeGOOS
 	t.Cleanup(func() { runtimeGOOS = saved })
 	runtimeGOOS = "linux"
 
-	dir := t.TempDir()
-	if _, err := InjectRuntimeConfig(dir, "codex", TaskContextForEnv{
-		IssueID:          "issue-1",
-		TriggerCommentID: "comment-1",
-	}); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("read AGENTS.md: %v", err)
-	}
-	s := string(data)
+	for _, provider := range []string{"codex", "claude", "opencode"} {
+		t.Run(provider, func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := InjectRuntimeConfig(dir, provider, TaskContextForEnv{
+				IssueID:          "issue-1",
+				TriggerCommentID: "comment-1",
+			}); err != nil {
+				t.Fatalf("InjectRuntimeConfig failed: %v", err)
+			}
+			fileName := "CLAUDE.md"
+			if provider != "claude" {
+				fileName = "AGENTS.md"
+			}
+			data, err := os.ReadFile(filepath.Join(dir, fileName))
+			if err != nil {
+				t.Fatalf("read %s: %v", fileName, err)
+			}
+			s := string(data)
 
-	for _, want := range []string{
-		"Codex-Specific Comment Formatting",
-		"always use `--content-stdin` with a HEREDOC",
-		"even for short single-line replies",
-		"Never use inline `--content` for agent-authored comments",
-		"Keep the same `--parent` value",
-		"do not rely on `\\n` escapes",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("AGENTS.md missing Codex multiline guidance %q\n---\n%s", want, s)
-		}
+			for _, want := range []string{
+				"## Comment Formatting",
+				"always use `--content-stdin` with a HEREDOC",
+				"even for short single-line replies",
+				"<<'COMMENT'",
+				"Never use inline `--content` for agent-authored comments",
+				"Keep the same `--parent` value",
+				"do not rely on `\\n` escapes",
+			} {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s missing comment-formatting guidance %q\n---\n%s", fileName, want, s)
+				}
+			}
+			// The heading is no longer Codex-scoped.
+			if strings.Contains(s, "Codex-Specific Comment Formatting") {
+				t.Errorf("%s still carries the old Codex-scoped heading\n---\n%s", fileName, s)
+			}
+		})
 	}
 }
 
 // TestInjectRuntimeConfigCodexWindowsUsesContentFile pins that on Windows
-// the Codex-Specific section directs the agent at `--content-file` instead
-// of `--content-stdin`. PowerShell 5.1 / cmd.exe re-encode piped HEREDOC
-// bytes through the active console codepage and silently drop non-ASCII
-// as `?` before reaching `multica.exe` (#2198 / #2236 / #2376).
+// the Comment Formatting section directs the agent at `--content-file`
+// instead of `--content-stdin`. PowerShell 5.1 / cmd.exe re-encode piped
+// HEREDOC bytes through the active console codepage and silently drop
+// non-ASCII as `?` before reaching `multica.exe` (#2198 / #2236 / #2376).
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
@@ -1482,7 +1571,7 @@ func TestWriteContextFilesHermesFallbackSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "hermes", ctx); err != nil {
+	if err := writeContextFiles(dir, "hermes", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -3277,14 +3366,14 @@ func TestBuildMetaSkillContentOmitsRequestingUserWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigCommentTriggerThreadFirstReads locks in
-// MUL-2387 + MUL-2421: the runtime config's comment-triggered Workflow
-// section must steer the agent at thread-aware reads first, default the
-// trigger thread to `--thread <id> --tail 30` (bounded), and explain the
-// reply-cursor walk for older replies. `--recent N` stays as the
-// cross-thread fallback. The Available Commands core line also has to
-// surface the `--tail` flag so the agent has a single place to discover it.
-func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
+// TestInjectRuntimeConfigCommentTriggerColdStartRead checks the
+// comment-triggered Workflow on cold start (no prior run): it points the agent
+// at the triggering thread (--thread <trigger> --tail 30) instead of the flat
+// dump and with no since-delta hint, while the Available Commands core line
+// still surfaces the thread/recent/cursor flags so they remain discoverable for
+// CLI use even though the verbose cursor walkthrough was dropped from the
+// workflow steps.
+func TestInjectRuntimeConfigCommentTriggerColdStartRead(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -3305,33 +3394,18 @@ func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
 	}
 	s := string(data)
 
-	// Workflow step 2 must read the trigger's thread with --thread anchored
-	// on the exact trigger comment id from this task, bounded to --tail 30.
+	// Cold start (no prior run) → read the triggering thread, not the flat dump,
+	// and no since-delta hint.
 	for _, want := range []string{
-		"--thread " + triggerID,
-		"--tail 30",
+		"Read the triggering conversation first",
 		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
-		// Reply cursor walks older replies inside the same thread.
-		"Next reply cursor:",
-		"--before-id <reply-id>",
-		// --recent fallback at the documented default N=20 for cross-thread context.
-		"multica issue comment list " + issueID + " --recent 20 --output json",
-		// Cursor walks via the stderr line the CLI emits, not invented flags.
-		"Next thread cursor",
-		"--before",
-		"--before-id",
-		// --since is still available and combinable (now scoped to the
-		// post-MUL-2421 mode names).
-		"--since",
-		"may combine with `--thread --tail` or `--recent`",
-		// Explicit pushback on the legacy full-dump recipe so the model has
-		// no reason to fall back to it on long issues.
-		"Avoid the unfiltered",
-		"wastes context",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("comment-triggered Workflow missing %q\n---\n%s", want, s)
+			t.Errorf("comment-triggered Workflow missing cold-start read %q\n---\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "new comment(s) since your last run") {
+		t.Errorf("cold-start workflow must not render the since-delta hint\n---\n%s", s)
 	}
 
 	// Available Commands core line must surface the new flags (this is the
@@ -3356,6 +3430,53 @@ func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
 	// regression target: it dumps the entire thread on long threads.
 	if strings.Contains(s, "multica issue comment list "+issueID+" --thread "+triggerID+" --output json") {
 		t.Errorf("comment-triggered Workflow regressed to unbounded --thread recipe (no --tail) — long threads will overflow context\n---\n%s", s)
+	}
+}
+
+// TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead checks the
+// comment-triggered Workflow when the daemon is resuming a prior session and no
+// since-delta hint is present. In that shape, the agent already has session
+// context and the trigger body is injected in the per-turn prompt, so the
+// runtime brief must not force a duplicate thread read.
+func TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead(t *testing.T) {
+	t.Parallel()
+
+	const (
+		issueID   = "issue-resumed-1"
+		triggerID = "trigger-comment-1"
+	)
+	dir := t.TempDir()
+	ctx := TaskContextForEnv{
+		IssueID:             issueID,
+		TriggerCommentID:    triggerID,
+		PriorSessionResumed: true,
+	}
+	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(data)
+
+	for _, want := range []string{
+		"triggering comment is already included above",
+		"No other new comments on this issue since your last run",
+		"triggering comment ID / thread anchor",
+		"If your reply depends on thread context",
+		"do not rely only on resumed session memory",
+		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("comment-triggered resumed Workflow missing %q\n---\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "scoped to the triggering thread") {
+		t.Errorf("resumed Workflow must not claim the delta is thread-scoped\n---\n%s", s)
+	}
+	if strings.Contains(s, "Read the triggering conversation first") {
+		t.Errorf("resumed workflow must not force the cold-start thread read\n---\n%s", s)
 	}
 }
 
@@ -3522,10 +3643,10 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			want: withSection,
 		},
 		{
-			name:                "assignment_triggered",
-			ctx:                 TaskContextForEnv{IssueID: "issue-md-2"},
-			provider:            "claude",
-			filename:            "CLAUDE.md",
+			name:     "assignment_triggered",
+			ctx:      TaskContextForEnv{IssueID: "issue-md-2"},
+			provider: "claude",
+			filename: "CLAUDE.md",
 			workflowStepPresent: []string{
 				"multica issue metadata list issue-md-2 --output json",
 				"See the `## Issue Metadata` section above",

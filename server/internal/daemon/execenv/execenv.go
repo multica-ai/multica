@@ -39,6 +39,11 @@ type PrepareParams struct {
 	Provider       string // agent provider (determines runtime config and skill injection paths)
 	CodexVersion   string // detected Codex CLI version (only used when Provider == "codex")
 	OpenclawBin    string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
+	// provider-specific config preparer when that provider materialises MCP
+	// via a per-task config file. Only OpenClaw consumes it here today; other
+	// providers wire MCP via ExecOptions.McpConfig in the agent backend.
+	McpConfig json.RawMessage
 	// LocalWorkDir, when non-empty, redirects the agent's working directory
 	// to a user-supplied absolute path instead of the synthesised envRoot/
 	// workdir. The path is NOT copied or mounted — the agent operates on
@@ -54,6 +59,9 @@ type PrepareParams struct {
 type TaskContextForEnv struct {
 	IssueID                 string
 	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
+	NewCommentCount         int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)
+	NewCommentsSince        string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
+	PriorSessionResumed     bool   // true when the daemon will resume an existing provider session for this task
 	AgentID                 string // unique ID of the dispatched agent
 	AgentName               string
 	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
@@ -190,8 +198,18 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	}
 
 	// Write context files into workdir (skills go to provider-native paths).
-	if err := writeContextFiles(workDir, params.Provider, params.Task); err != nil {
+	// Track every file/dir we create in a manifest so CleanupSidecars can
+	// roll a local_directory workdir back to its pre-Prepare state. Cloud
+	// tasks don't need the manifest (the GC loop wipes envRoot wholesale),
+	// but we always write one — it's cheap, keeps Prepare/Reuse symmetric,
+	// and avoids a conditional that would silently disable cleanup if the
+	// local_directory detection logic ever drifts.
+	manifest := &sidecarManifest{}
+	if err := writeContextFiles(workDir, params.Provider, params.Task, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
+	}
+	if err := writeSidecarManifest(envRoot, manifest); err != nil {
+		logger.Warn("execenv: write sidecar manifest failed (non-fatal)", "error", err)
 	}
 
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
@@ -213,7 +231,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// silently degrading to a minimal config would mask it by booting
 	// OpenClaw without the agents / providers / API keys it expects.
 	if params.Provider == "openclaw" {
-		result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: params.OpenclawBin})
+		result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
+			OpenclawBin: params.OpenclawBin,
+			McpConfig:   params.McpConfig,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare openclaw config: %w", err)
 		}
@@ -233,6 +254,11 @@ type ReuseParams struct {
 	Provider     string
 	CodexVersion string // only used when Provider == "codex"
 	OpenclawBin  string // only used when Provider == "openclaw"; empty = PATH lookup
+	// McpConfig is the agent's saved `mcp_config` JSON. Reused on reuse so a
+	// freshly-saved managed set re-materialises into the wrapper before the
+	// task starts — without this a stale wrapper from a prior run would keep
+	// the old MCP set in play.
+	McpConfig json.RawMessage
 	// LocalDirectory is true when the reused WorkDir is a user-supplied
 	// directory (the local_directory flow). The flag is propagated into
 	// the returned Environment so downstream callers (notably the GC
@@ -269,9 +295,24 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		logger:         logger,
 	}
 
-	// Refresh context files (issue_context.md, skills).
-	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task); err != nil {
+	// Refresh context files (issue_context.md, skills). Reuse tracks a
+	// fresh manifest under env.RootDir so a later CleanupSidecars sees
+	// the up-to-date list of writes (an old manifest from a prior run
+	// would otherwise reference files this Reuse no longer creates). For
+	// local_directory tasks the daemon skips Reuse entirely (see
+	// daemon.runTask), but writing the manifest unconditionally keeps
+	// Prepare/Reuse symmetric so a future caller can rely on the
+	// manifest being current after either path. RootDir is empty on the
+	// legacy local_directory Reuse fallback — skip the persist in that
+	// case to avoid creating a stray manifest at the filesystem root.
+	manifest := &sidecarManifest{}
+	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task, manifest); err != nil {
 		logger.Warn("execenv: refresh context files failed", "error", err)
+	}
+	if env.RootDir != "" {
+		if err := writeSidecarManifest(env.RootDir, manifest); err != nil {
+			logger.Warn("execenv: refresh sidecar manifest failed", "error", err)
+		}
 	}
 
 	// Restore CodexHome for Codex provider — the per-task codex-home directory
@@ -296,7 +337,10 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// reuse rather than degrade to a minimal config that boots OpenClaw
 	// without the registered agents.
 	if params.Provider == "openclaw" {
-		result, err := prepareOpenclawConfig(env.RootDir, params.WorkDir, OpenclawConfigPrep{OpenclawBin: params.OpenclawBin})
+		result, err := prepareOpenclawConfig(env.RootDir, params.WorkDir, OpenclawConfigPrep{
+			OpenclawBin: params.OpenclawBin,
+			McpConfig:   params.McpConfig,
+		})
 		if err != nil {
 			logger.Warn("execenv: refresh openclaw config failed", "error", err)
 			return nil
@@ -340,7 +384,11 @@ func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, 
 	if len(workspaceSkills) == 0 {
 		return nil
 	}
-	return writeSkillFiles(skillsDir, workspaceSkills)
+	// Codex skills live under env.RootDir/codex-home, which the GC loop
+	// (cloud) or env teardown (local_directory) wipes wholesale — they
+	// don't sit inside the user's workdir and don't need sidecar manifest
+	// tracking.
+	return writeSkillFiles(skillsDir, workspaceSkills, nil)
 }
 
 // GCMetaKind identifies which kind of parent record a task workdir belongs to.

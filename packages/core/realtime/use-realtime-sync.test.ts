@@ -139,6 +139,7 @@ describe("applyWorkspaceUpdatedToCache", () => {
       settings: {},
       repos: [],
       issue_prefix: "TES",
+      avatar_url: null,
       created_at: "2026-05-18T00:00:00Z",
       updated_at: "2026-05-18T00:00:00Z",
       ...overrides,

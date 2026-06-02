@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
-import { pickLocale } from "@multica/core/i18n";
+import { pickLocale, type SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
 import { useWelcomeStore } from "@multica/core/onboarding";
 import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
@@ -20,6 +20,18 @@ import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { RESOURCES } from "@multica/views/locales";
+
+// BCP-47 region tags for the <html lang> attribute, mirroring
+// apps/web/app/layout.tsx HTML_LANG. index.html ships a static lang="en";
+// we sync it to the resolved locale at boot so screen readers announce the
+// right language AND the Japanese-scoped CJK font override in globals.css
+// (`html[lang|="ja"]`) can take effect.
+const HTML_LANG: Record<SupportedLocale, string> = {
+  en: "en",
+  "zh-Hans": "zh-CN",
+  ko: "ko-KR",
+  ja: "ja-JP",
+};
 
 
 function AppContent() {
@@ -179,6 +191,7 @@ function AppContent() {
     return undefined;
   }, [user, workspaceListFetched, wsCount, workspaces, hasOnboarded, qc]);
 
+
   // Validate persisted tab state against the current user's workspace list,
   // and pick an active workspace if none is set. Runs in useLayoutEffect
   // (synchronously after render, before paint) rather than the render
@@ -302,6 +315,15 @@ export default function App() {
     () => ({ [locale]: RESOURCES[locale] }),
     [locale],
   );
+
+  // Keep <html lang> in sync with the resolved locale (index.html hardcodes
+  // "en"). Drives the lang-scoped Japanese CJK font override and a11y.
+  // useLayoutEffect (not useEffect) so lang is committed before the first
+  // paint — otherwise Japanese users would see one frame of Kanji rendered
+  // with the Chinese-first fallback stack before the override kicks in.
+  useLayoutEffect(() => {
+    document.documentElement.lang = HTML_LANG[locale];
+  }, [locale]);
 
   // React to OS-level language changes detected by main on focus regain.
   // Only act when the user is following the system signal (no explicit

@@ -89,6 +89,20 @@ multica issue show <issue-id>             # 看 task 历史
 
 **症状**：登录或邀请时提交邮箱后，收件箱（和垃圾邮件）里都没有验证码邮件。
 
+**先确认 server 自己认为在用哪个 provider。** 启动时 backend 会打印这三种之一：
+
+- `EmailService: SMTP relay <host>:<port> from=<addr>` —— 走 SMTP（`SMTP_HOST` 非空时优先级高于 Resend）
+- `EmailService: Resend API from=<addr>` —— 走 Resend
+- `EmailService: DEV mode — codes printed to stdout …` —— 没配任何 provider
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs backend | grep "EmailService:"
+```
+
+如果应该出现的那行没出现，说明环境变量没进到进程 —— 检查 `.env` 和 `docker compose -f docker-compose.selfhost.yml exec backend env | grep -E 'RESEND_|SMTP_'`。这行启动日志里**不会**打印任何密码。
+
+### Resend 是当前 provider
+
 **可能原因**：
 
 1. **`RESEND_API_KEY` 没配** —— server 会静默回落，**把验证码打到自己的 stdout 里**，不报错。生产部署很容易踩
@@ -107,6 +121,34 @@ multica issue show <issue-id>             # 看 task 历史
 - 没配 API key → 照 [登录与注册配置 → 怎么配 Email](/auth-setup#email--验证码登录怎么工作) 的步骤配完重启 server
 - 域名没验证 → Resend console 里走 DNS 验证流程（加 SPF / DKIM 记录）
 - 紧急情况下（如内部测试）→ 从 server 日志里抄 `[DEV]` 打印出的验证码
+
+### SMTP 是当前 provider
+
+SMTP 路径把每个失败都按阶段包装好，所以 server 日志已经告诉你 relay 在哪一步拒绝了会话。搜 `"failed to send verification email"` / `"failed to send invitation email"`，看里面包的具体错误：
+
+| 错误日志 | 含义 | 怎么修 |
+|---|---|---|
+| `smtp dial <host>:<port>: dial tcp …: connect: connection refused` / `i/o timeout` | backend 容器连不上 relay —— host / port 错、防火墙挡了、或者 relay 没开 | 在容器里确认能解析和连通：`docker compose -f docker-compose.selfhost.yml exec backend nslookup <host>` 以及 `nc -vz <host> <port>`；放行从 Multica 主机到 relay 的网络 |
+| `smtp starttls: x509: certificate signed by unknown authority`（或 `certificate is not valid for any names`） | relay 用了私有 CA / 自签证书，容器的信任库不接受 | 要么把 CA 装进容器，要么在确认 relay 走的是可信网段后设 `SMTP_TLS_INSECURE=true` |
+| `smtp auth: 535 5.7.8 Authentication credentials invalid`（或 `534`/`530`） | `SMTP_USERNAME` / `SMTP_PASSWORD` 不对，或 relay 不接受 `PLAIN` 认证 | 找邮件管理员复核 service account 凭据；Exchange 匿名内部 relay 应当把两者都留空 |
+| `smtp MAIL FROM: 550 5.7.1 Client does not have permissions to send as this sender` | relay 不接受 `RESEND_FROM_EMAIL` 作为信封发件人 —— Exchange 常见 "anonymous users not allowed" 或 DMARC 对齐问题 | 把 `RESEND_FROM_EMAIL` 改成 relay 接受的域名；Exchange 上给来源 IP 授 `ms-Exch-SMTP-Accept-Any-Sender` |
+| `smtp RCPT TO <addr>: 550 5.7.1 Unable to relay` | relay 的 receive connector 不允许这个子网把邮件中继到外部收件人（匿名内部 relay 发给外部域时常见） | 邀请仅限内部域，或者把 Multica 主机的子网加进 Exchange "Anonymous Users → Relay" 权限列表 |
+| `smtp DATA` / `smtp write body` / `smtp end data` | 会话被接受但 body 被丢 —— 通常是消息大小限制、内容过滤、或中途断连 | 在 relay 端按同一个 `Message-ID`（日志里是 `<unixnano>@<host>`）找上下文；必要时调大消息大小限制 |
+
+`MAIL FROM` / `RCPT TO` / `DATA` 的错误日志里都带着 relay 返回的状态码，可以和 Exchange / Postfix 那边的日志对齐。验证码和邀请 token **不会**出现在这些包装的错误里。
+
+**怎么查**：
+
+- 启动时搜 `"EmailService: SMTP relay"` 一次，运行时搜 `"failed to send"` 看具体阶段
+- 在 backend 容器里测连通：`docker compose -f docker-compose.selfhost.yml exec backend sh -c 'nc -vz $SMTP_HOST $SMTP_PORT'`
+- 确认环境变量真进到了进程：`docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP_`（这条会带出密码，仅在可信终端运行）
+
+**怎么修**：
+
+- host / port 不对 → 改 `SMTP_HOST` / `SMTP_PORT` 后重启 backend；支持的 relay 模式见 [登录与注册配置 → Option B：SMTP relay](/auth-setup)
+- 证书校验失败 → 把 relay 的 CA 装进容器，或在可信网段上临时 `SMTP_TLS_INSECURE=true`
+- 认证失败 → 复核凭据；匿名内部 relay 应把 `SMTP_USERNAME` 和 `SMTP_PASSWORD` 都留空
+- `Unable to relay` → 邀请仅限内部域，或在 Exchange receive connector 上给 Multica 主机授中继权限
 
 ## 固定本地测试验证码登不进去
 

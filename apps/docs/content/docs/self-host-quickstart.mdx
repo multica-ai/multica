@@ -82,17 +82,42 @@ Two delivery backends are supported — pick whichever fits your network:
 
 **Option B — SMTP relay (internal networks / on-premise):**
 
-Use this when the deployment can't reach `api.resend.com`, or you already have an internal mail relay (Exchange, Postfix, on-prem SendGrid, etc.). `SMTP_HOST` takes priority over Resend when both are set.
+Use this when the deployment can't reach `api.resend.com`, or you already have an internal mail relay (Microsoft Exchange, Postfix, on-prem SendGrid, etc.). `SMTP_HOST` takes priority over Resend when both are set, so verification and invite mail stays on the internal relay. STARTTLS is upgraded automatically when advertised; port `465` (SMTPS / implicit TLS) auto-enables an immediate TLS handshake, and `SMTP_TLS=implicit` (aliases: `smtps`, `ssl`) forces it on a non-standard SMTPS port.
+
+For **anonymous Exchange internal relay (port 25)** — the host is trusted by IP and submits without credentials:
 
 ```bash
-SMTP_HOST=smtp.internal.example.com
-SMTP_PORT=587                  # default 25; use 587 for STARTTLS submission
-SMTP_USERNAME=multica          # leave empty for unauthenticated relay
-SMTP_PASSWORD=...
+SMTP_HOST=exchange.internal.example.com
+SMTP_PORT=25
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_TLS_INSECURE=false
 RESEND_FROM_EMAIL=noreply@yourdomain.com  # reused as the From: header
 ```
 
-Then restart: `docker compose -f docker-compose.selfhost.yml restart backend`.
+For **authenticated submission (port 587, STARTTLS)** — the relay requires a service account; STARTTLS is upgraded automatically when advertised:
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587
+SMTP_USERNAME=multica
+SMTP_PASSWORD=...
+SMTP_TLS_INSECURE=false        # set true only for private CA / self-signed
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+For **implicit TLS / SMTPS (port 465)** — providers like Aliyun / Tencent enterprise mail that don't advertise STARTTLS. Port `465` auto-enables implicit TLS, so `SMTP_TLS` is optional here:
+
+```bash
+SMTP_HOST=smtp.qiye.aliyun.com
+SMTP_PORT=465
+SMTP_USERNAME=multica@yourdomain.com
+SMTP_PASSWORD=...
+SMTP_TLS=implicit              # optional on 465; required on a non-standard SMTPS port
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+Then restart: `docker compose -f docker-compose.selfhost.yml restart backend`. On restart, the backend prints which provider it picked and the negotiated TLS mode (`EmailService: SMTP relay <host>:<port> (starttls|implicit-tls) from=…` / `Resend API` / `DEV mode`) — credentials are never logged, so this line is safe to share when asking for help.
 
 For more auth configuration (OAuth, signup allowlist) and the full SMTP variable reference, see [Auth setup](/auth-setup) and [Environment variables → Email](/environment-variables#email-configuration).
 

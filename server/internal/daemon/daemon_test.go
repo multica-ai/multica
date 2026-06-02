@@ -1781,6 +1781,123 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 	}
 }
 
+// Regression test for the MUL-2780 incident: a short 502 burst on the
+// /complete callback used to (a) drop the task at the first failure and
+// (b) wrongly fall back to /fail, surfacing a successful run as red.
+// With the retry helper in place, a transient 502 followed by a 200 must
+// resolve via /complete without ever touching /fail.
+func TestReportTaskResult_RetriesTransientCompleteThenSucceeds(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var completeCalls, failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/complete"):
+			n := completeCalls.Add(1)
+			if n == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(context.Background(), "task-retry", TaskResult{
+		Status:  "completed",
+		Comment: "ok",
+	}, slog.Default())
+
+	if got := completeCalls.Load(); got != 2 {
+		t.Fatalf("expected 2 complete attempts (one 502, one 200), got %d", got)
+	}
+	if got := failCalls.Load(); got != 0 {
+		t.Fatalf("transient 502 must not fall back to /fail (would lose successful result), got %d /fail calls", got)
+	}
+}
+
+// Pins the new "don't downgrade success to failure on transient errors"
+// rule: when /complete is 502 across the entire retry schedule, we must
+// NOT fall through to /fail — that would surface a real success as a
+// failure in the UI. The task is left in running for a future recovery
+// path to pick up.
+func TestReportTaskResult_TransientCompleteExhaustedDoesNotFallback(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	prevSchedule := defaultTerminalRetrySchedule
+	defaultTerminalRetrySchedule = []time.Duration{time.Nanosecond, time.Nanosecond}
+	t.Cleanup(func() { defaultTerminalRetrySchedule = prevSchedule })
+
+	var completeCalls, failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/complete"):
+			completeCalls.Add(1)
+			w.WriteHeader(http.StatusBadGateway)
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(context.Background(), "task-stuck", TaskResult{
+		Status:  "completed",
+		Comment: "ok",
+	}, slog.Default())
+
+	if got := completeCalls.Load(); got != int32(len(defaultTerminalRetrySchedule)+1) {
+		t.Fatalf("expected %d complete attempts, got %d", len(defaultTerminalRetrySchedule)+1, got)
+	}
+	if got := failCalls.Load(); got != 0 {
+		t.Fatalf("exhausted transient retries must NOT fall back to /fail; got %d /fail calls", got)
+	}
+}
+
+// On permanent 4xx from /complete (e.g. 400 bad body, 404 task not found)
+// the helper bails immediately and the daemon falls back to /fail so the
+// UI shows a concrete failure rather than a perpetually-running task.
+func TestReportTaskResult_PermanentCompleteFallsBackToFail(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var completeCalls, failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/complete"):
+			completeCalls.Add(1)
+			w.WriteHeader(http.StatusBadRequest)
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(context.Background(), "task-bad", TaskResult{
+		Status:  "completed",
+		Comment: "ok",
+	}, slog.Default())
+
+	if got := completeCalls.Load(); got != 1 {
+		t.Fatalf("permanent 400 should not retry, got %d complete attempts", got)
+	}
+	if got := failCalls.Load(); got != 1 {
+		t.Fatalf("permanent /complete should fall back to /fail exactly once, got %d", got)
+	}
+}
+
 // TestHandleTask_ReportsUsageBeforeCancel verifies that ReportTaskUsage is called
 // even when the server marks the task as cancelled during the post-run status
 // check. Regression test for the ordering bug where the cancel check ran before

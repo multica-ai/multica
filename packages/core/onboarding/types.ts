@@ -27,6 +27,7 @@ export type Source =
   | "social_x"
   | "social_linkedin"
   | "social_youtube"
+  | "social_github"
   | "social_other"
   | "blog_newsletter"
   | "ai_assistant"
@@ -58,10 +59,13 @@ export type UseCase =
   | "other";
 
 /**
- * Questionnaire shape. `source` and `use_case` allow multiple values
- * (users hear about us through several channels and use Multica for
- * several things); `role` stays single-select since the agent template
- * recommendation wants a primary identity.
+ * Questionnaire shape. `use_case` allows multiple values (users hire
+ * Multica for several jobs at once); `source` and `role` are single-
+ * select — for `source` we capture the primary acquisition channel
+ * for clean self-reported-attribution math (the array shape is
+ * preserved for back-compat with v2 multi-select rows; the client
+ * now always commits a one-element array), and `role` stays single
+ * because the agent template recommendation wants a primary identity.
  *
  * `*_skipped: true` distinguishes an explicit Skip click from a slot
  * the user never reached. Both states are "unknown" for recommendation

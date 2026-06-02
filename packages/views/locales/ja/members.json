@@ -1,0 +1,20 @@
+{
+  "role": {
+    "owner": "オーナー",
+    "admin": "管理者",
+    "member": "メンバー"
+  },
+  "card": {
+    "unavailable": "メンバーを利用できません",
+    "agents_section": "エージェント ({{count}})",
+    "detail_link": "詳細 →",
+    "more_agents_other": "他 {{count}} 件のエージェント"
+  },
+  "detail": {
+    "workspace_fallback": "ワークスペース",
+    "members_breadcrumb": "メンバー",
+    "breadcrumb_fallback": "メンバー",
+    "not_found_title": "メンバーが見つかりません",
+    "not_found_description": "このメンバーはワークスペースから退出した可能性があります。"
+  }
+}

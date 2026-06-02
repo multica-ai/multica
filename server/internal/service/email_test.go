@@ -35,6 +35,41 @@ func TestSanitizeSubjectField(t *testing.T) {
 	}
 }
 
+func TestNewEmailService_TLSMode(t *testing.T) {
+	tests := []struct {
+		name         string
+		smtpTLS      string
+		smtpPort     string
+		wantImplicit bool
+	}{
+		{"unset on 465 auto-enables implicit", "", "465", true},
+		{"unset on 587 stays starttls", "", "587", false},
+		{"unset default port stays starttls", "", "", false},
+		{"explicit implicit on 587 forces SMTPS", "implicit", "587", true},
+		{"smtps alias", "smtps", "587", true},
+		{"ssl alias", "ssl", "587", true},
+		{"explicit starttls on 465 overrides auto-detect", "starttls", "465", false},
+		{"case-insensitive", "IMPLICIT", "587", true},
+		{"trims whitespace", "  implicit  ", "587", true},
+		{"unknown value falls back to starttls", "tls", "465", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Isolate from any ambient mail config so only SMTP_TLS/SMTP_PORT drive the result.
+			t.Setenv("RESEND_API_KEY", "")
+			t.Setenv("SMTP_HOST", "smtp.example.com")
+			t.Setenv("SMTP_PORT", tt.smtpPort)
+			t.Setenv("SMTP_TLS", tt.smtpTLS)
+
+			s := NewEmailService()
+			if s.smtpTLSImplicit != tt.wantImplicit {
+				t.Errorf("SMTP_TLS=%q SMTP_PORT=%q: smtpTLSImplicit = %v, want %v",
+					tt.smtpTLS, tt.smtpPort, s.smtpTLSImplicit, tt.wantImplicit)
+			}
+		})
+	}
+}
+
 func TestBuildInvitationParams_EscapesHTMLInBody(t *testing.T) {
 	tests := []struct {
 		name        string

@@ -37,6 +37,28 @@ import { Callout } from "fumadocs-ui/components/callout";
 **谨慎使用 `@all`**。工作区人数较多时，一条 `@all` 的评论会瞬间生成同等数量的收件箱通知。只在确实需要全员知晓的重大事项上使用——不是日常琐事。
 </Callout>
 
+## 引用 issue
+
+要链接另一个 issue，直接输入它的 issue key，例如 `MUL-123`。Multica 会在评论中解析真实存在的 issue key，并把它存成内部的 `mention://issue/<uuid>` 链接。Issue 链接只是交叉引用：不会通知成员，也不会触发智能体。
+
+通常不需要手写 `[MUL-123](mention://issue/<uuid>)`。这是 Multica 解析 key 之后使用的内部规范格式。
+
+<Callout type="info">
+Markdown 加粗遵循 CommonMark 规则。当加粗文本以标点或闭引号结尾，并且后面紧跟韩语助词时，结尾的 `**` 可能不会被识别。
+
+推荐把引号放到加粗范围外：
+
+```markdown
+"**무엇을 먼저 정해두고 시작할지**"가
+```
+
+而不是：
+
+```markdown
+**"무엇을 먼저 정해두고 시작할지"**가
+```
+</Callout>
+
 ## 编辑和删除评论
 
 只有评论的作者能编辑或删除自己的评论。

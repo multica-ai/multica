@@ -230,11 +230,13 @@ export function ChatInput({
             onSubmit={handleSend}
             onUploadFile={uploadEnabled ? handleUpload : undefined}
             debounceMs={100}
+            enableSlashCommands
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.
             showBubbleMenu={false}
-            // Mod+Enter submits. Bare Enter falls through to Tiptap's
-            // default, which continues lists/quotes and breaks paragraphs.
+            // Chat intentionally leaves submitOnEnter at its default false:
+            // Mod+Enter submits, while bare Enter falls through to Tiptap's
+            // default behavior for lists, quotes, and paragraph breaks.
             // Without this, Enter-as-send would steal the only key that
             // continues a bullet list, leaving users stuck after one item.
           />

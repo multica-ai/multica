@@ -89,6 +89,20 @@ On the server side (self-host), grep for `"no_tasks"` / `"no_capacity"` to see t
 
 **Symptom**: after submitting an email during sign-in or invite acceptance, neither the inbox nor the spam folder has the verification code.
 
+**First, confirm which provider the server thinks is active.** At startup the backend prints one of:
+
+- `EmailService: SMTP relay <host>:<port> from=<addr>` — using SMTP (`SMTP_HOST` non-empty wins over Resend)
+- `EmailService: Resend API from=<addr>` — using Resend
+- `EmailService: DEV mode — codes printed to stdout …` — no provider configured
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs backend | grep "EmailService:"
+```
+
+If the line you expected isn't there, the environment didn't reach the process — check `.env` and `docker compose -f docker-compose.selfhost.yml exec backend env | grep -E 'RESEND_|SMTP_'`. Credentials are never logged on this startup line.
+
+### When Resend is the active provider
+
 **Likely causes**:
 
 1. **`RESEND_API_KEY` not set** — the server silently falls back and **writes the code to its own stdout** without error. Easy to trip over in production
@@ -107,6 +121,34 @@ On the server side (self-host), grep for `"no_tasks"` / `"no_capacity"` to see t
 - Missing API key → follow [Sign-in and signup configuration → How email works](/auth-setup#how-email--verification-code-sign-in-works) to configure and restart the server
 - Domain not verified → run the DNS verification flow in the Resend console (add SPF / DKIM records)
 - In an emergency (internal testing) → copy the code printed under `[DEV]` from the server logs
+
+### When SMTP is the active provider
+
+The SMTP path wraps every failure with the stage it failed at, so the server logs already tell you where the relay rejected the session. Grep for `"failed to send verification email"` / `"failed to send invitation email"` and check the wrapped error:
+
+| Logged error | What it means | How to fix |
+|---|---|---|
+| `smtp dial <host>:<port>: dial tcp …: connect: connection refused` / `i/o timeout` | The backend container can't reach the relay — wrong host, wrong port, firewall, or the relay isn't listening | Verify `SMTP_HOST` / `SMTP_PORT` resolve from inside the container (`docker compose -f docker-compose.selfhost.yml exec backend nslookup <host>` and `nc -vz <host> <port>`); open the firewall from the host running Multica to the relay |
+| `smtp starttls: x509: certificate signed by unknown authority` (or `certificate is not valid for any names`) | The relay uses a private CA / self-signed cert and the container's trust store rejects it | Either install the CA into the container, or set `SMTP_TLS_INSECURE=true` only after confirming the relay is reachable on a trusted segment |
+| `smtp auth: 535 5.7.8 Authentication credentials invalid` (or `534`/`530`) | `SMTP_USERNAME` / `SMTP_PASSWORD` are wrong, or the relay requires a different auth mechanism than `PLAIN` | Re-confirm the service-account credentials with your mail admin; for Exchange anonymous internal relay leave both empty (`SMTP_USERNAME=`, `SMTP_PASSWORD=`) |
+| `smtp MAIL FROM: 550 5.7.1 Client does not have permissions to send as this sender` | The relay won't accept `RESEND_FROM_EMAIL` as the envelope sender — typical Exchange "anonymous users not allowed" or DMARC alignment issue | Set `RESEND_FROM_EMAIL` to a domain the relay accepts; on Exchange, grant the source IP `ms-Exch-SMTP-Accept-Any-Sender` on the receive connector |
+| `smtp RCPT TO <addr>: 550 5.7.1 Unable to relay` | The relay's receive connector doesn't allow your subnet to relay to external recipients (most common for anonymous internal relays talking to outside domains) | Either restrict invites to internal recipients, or add the Multica host's subnet to the Exchange "Anonymous Users → Relay" permission list |
+| `smtp DATA` / `smtp write body` / `smtp end data` | Session was accepted but the relay dropped the body — usually message-size limits, content filtering, or a connection reset mid-stream | Check the relay's logs for the same `Message-ID` (logged as `<unixnano>@<host>`); raise the message size limit if needed |
+
+`MAIL FROM`, `RCPT TO`, and `DATA` errors are always logged with the relay's response code so you can match them against Exchange / Postfix logs on the other side. Verification codes and invite tokens are **never** included in the wrapped error.
+
+**How to diagnose**:
+
+- Grep `"EmailService: SMTP relay"` once at startup, then `"failed to send"` for runtime failures
+- From inside the backend container, sanity-check connectivity: `docker compose -f docker-compose.selfhost.yml exec backend sh -c 'nc -vz $SMTP_HOST $SMTP_PORT'`
+- Confirm the env reached the process: `docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP_` (password will be in the output — only run on a trusted shell)
+
+**How to fix**:
+
+- Wrong host / port → adjust `SMTP_HOST` / `SMTP_PORT` and restart the backend; for the supported relay modes see [Auth setup → Option B: SMTP relay](/auth-setup)
+- Cert mismatch → install the relay's CA into the container, or temporarily `SMTP_TLS_INSECURE=true` on a trusted segment
+- Auth failure → re-check credentials; for anonymous internal relay leave `SMTP_USERNAME` and `SMTP_PASSWORD` empty
+- `Unable to relay` → either restrict to internal recipients or grant the Multica host's IP relay permission on the Exchange receive connector
 
 ## Fixed local test code doesn't work
 

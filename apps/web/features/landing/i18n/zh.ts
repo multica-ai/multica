@@ -101,7 +101,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       label: "\u8fd0\u884c\u65f6",
       title: "\u4e00\u4e2a\u63a7\u5236\u53f0\u7ba1\u7406\u6240\u6709\u7b97\u529b",
       description:
-        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 11 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
+        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 12 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
       cards: [
         {
           title: "\u7edf\u4e00\u8fd0\u884c\u65f6\u9762\u677f",
@@ -116,7 +116,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         {
           title: "\u9996\u6b21\u542f\u52a8\u81ea\u52a8\u6ce8\u518c",
           description:
-            "Multica \u626b\u63cf\u672c\u673a\u7684 11 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
+            "Multica \u626b\u63cf\u672c\u673a\u7684 12 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
         description:
-          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 11 款支持的 AI 编程工具（Claude Code、Codex、Cursor、Copilot、Gemini、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi）。本机已安装的工具会被自动注册成运行时。",
+          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 12 款支持的 AI 编程工具（Antigravity、Claude Code、Codex、Cursor、Copilot、Gemini、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi）。本机已安装的工具会被自动注册成运行时。",
       },
       {
         title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a 智能体",
@@ -192,7 +192,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:
-          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 11 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aClaude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
+          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 12 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
       },
       {
         question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
@@ -292,6 +292,110 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.3.14",
+        date: "2026-06-02",
+        title: "日语支持和 /skill command",
+        changes: [],
+        features: [
+          "Multica 现在支持日语界面、官网和文档",
+          "聊天现在支持 /skill command，用来选择智能体技能",
+          "工作区现在可以显示自定义 Logo",
+          "可以给智能体追加技能，不会覆盖已有技能",
+          "OpenCode 智能体现在支持思考强度 variant",
+        ],
+        improvements: [
+          "早期用户如果没有填写入门来源问题，现在可以在之后补充，不需要重新走完整入门流程",
+          "已停用的智能体现在会在各处显示为已归档，不再看起来像离线或仍在工作",
+          "聊天历史和 Issue 执行记录的悬浮操作更清晰，减少文字截断和按钮重叠",
+          "项目里的 Issue 筛选现在会在列表、看板和时间线视图中一致应用智能体工作中筛选",
+        ],
+        fixes: [
+          "无权限用户不能再通过间接的 Issue 或评论路径触发私有小队负责人",
+          "项目进度统计和重新进入工作的智能体状态刷新更可靠",
+          "桌面端和网页端在空白工作区、无访问权限页面、渲染错误和崩溃后恢复更稳定",
+          "图片和文件卡片的名称包含 Markdown 字符时也能正常显示",
+          "实时连接重连后，聊天、标签和邀请数据会正确刷新",
+          "仅运行自动任务、快速创建任务及其重试任务现在可以从活动视图取消",
+          "多行技能描述现在可以正确导入和展示",
+          "Windows 上的 Copilot 运行会保留多行提示词，并正确处理带引号的自定义参数",
+        ],
+      },
+      {
+        version: "0.3.13",
+        date: "2026-06-01",
+        title: "Skill 搜索与命令行更新",
+        changes: [],
+        features: [
+          "命令行现在可以搜索 Skill，也可以列出某个 Issue 关联的合并请求，发布检查和自动化排查更方便",
+          "团队可以直接在命令行调整小队成员角色，不用进入应用界面",
+          "智能体列表可以按运行机器筛选，更快找到绑定到某台设备或本机运行服务的智能体",
+          "邮件发送服务现在支持安全的 465 端口连接",
+          "OpenCode 运行环境可以使用智能体里保存的 MCP 设置",
+          "OpenCode 智能体现在会把模型 variant 显示为思考强度控制，并把选择结果传给运行时",
+        ],
+        improvements: [
+          "移动端 Issue 顶部操作更清晰，小屏幕上也更容易点击",
+          "聊天历史里的运行状态和操作按钮更稳定，减少误点和状态混乱",
+          "重复导入同一个 Skill 时，会给出清楚结果，不再打断当前流程",
+        ],
+        fixes: [
+          "评论回复会保留在用户实际回复的那条评论下面",
+          "Claude 任务发送提示词时更不容易卡住",
+          "自托管本机运行服务的设置链接会指向正确地址",
+          "MCP 设置说明和运行环境支持判断现在保持一致",
+          "执行日志在任务结束后会正确清理活跃状态",
+        ],
+      },
+      {
+        version: "0.3.12",
+        date: "2026-05-29",
+        title: "Issue 任务续接与韩语支持",
+        changes: [],
+        features: [
+          "智能体在 Issue 评论区继续任务时，会接着之前的会话继续，不再新开会话，任务上下文可以保留下来",
+          "Multica 现在支持韩语界面、官网和文档，包含完整韩语文档与本地化日期显示",
+          "Issue 页面会在标题附近固定显示正在工作的智能体，多智能体同时工作时也能更清楚地查看",
+          "智能体读取 Issue 讨论时可以先看到线程摘要、回复数量和最近活跃时间，更快找到需要跟进的上下文",
+          "OpenClaw 运行环境现在可以使用智能体里保存的 MCP 设置，Claude Opus 4.8 也可用于模型选择和用量估算",
+        ],
+        improvements: [
+          "详情页统一了面包屑导航，Issue、项目、运行环境、技能、智能体和小队的返回路径更清楚",
+          "恢复中的智能体任务会少读重复评论，更快回到触发它的那条讨论",
+          "Issue 提及说明和命令行片段更容易阅读，复制命令时不容易误读参数",
+        ],
+        fixes: [
+          "更新、归档、恢复或从模板创建智能体后，已绑定的技能仍会正确显示",
+          "单个智能体完成自己负责的子 Issue 后，父 Issue 会继续唤起它推进后续工作",
+          "Windows / WSL2 场景下，属于当前用户的本机运行环境会归到本机分组",
+          "命令行登录现在接受 Cloud Node 令牌",
+        ],
+      },
+      {
+        version: "0.3.11",
+        date: "2026-05-28",
+        title: "Antigravity CLI 支持",
+        changes: [],
+        features: [
+          "Antigravity CLI 现在可作为编码运行环境使用",
+          "智能体详情页新增 MCP 配置，可用于 Hermes、Kimi 和 Kiro",
+          "自托管管理员可以关闭自助创建工作区",
+          "桌面端本机运行环境会在访问令牌过期前自动续期",
+        ],
+        improvements: [
+          "Helm Chart 可发布到 GHCR，邮件配置文档更清晰",
+          "任务记录会显示更短、更安全的工作目录",
+          "手动排序时，新 Issue 会留在列顶部，已删除 Issue 不再回到最近列表",
+          "本机运行环境会按设备名合并同一台机器",
+        ],
+        fixes: [
+          "任务完成回传遇到短暂错误时会重试",
+          "本地目录运行不会覆盖已有的 CLAUDE.md、AGENTS.md 或 GEMINI.md",
+          "Windows 上的 Pi 会保留多行提示词",
+          "运行环境 Logo 显示更稳定",
+          "本机运行服务清理时会跳过不完整父级信息",
+        ],
+      },
       {
         version: "0.3.10",
         date: "2026-05-27",
