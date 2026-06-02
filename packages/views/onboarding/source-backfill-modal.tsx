@@ -87,6 +87,13 @@ export function SourceBackfillModal() {
   // a midflight refreshMe (which sets source) doesn't unmount the
   // dialog while the submit animation is still running. `openedRef`
   // is reset when the user identity changes.
+  //
+  // Strict-mode caveat: this effect runs twice in dev. The ref MUST
+  // only be stamped when the dialog actually opens — not when the
+  // effect schedules the timer — or the second strict-mode pass sees
+  // `openedForUserRef.current === user.id` and bails without setting
+  // up a new timer to replace the one strict-mode's cleanup just
+  // cleared, leaving the dialog forever closed.
   const [open, setOpen] = useState(false);
   const openedForUserRef = useRef<string | null>(null);
   useEffect(() => {
@@ -97,7 +104,6 @@ export function SourceBackfillModal() {
     }
     if (openedForUserRef.current === user.id) return;
     if (!needsSourceBackfill(user, dismissCount)) return;
-    openedForUserRef.current = user.id;
     // Soft entrance: let the user see the workspace for a beat before
     // the modal floats in, so it doesn't feel like a hard block. Common
     // delight pattern — ~700ms is short enough that nobody starts an
@@ -108,10 +114,15 @@ export function SourceBackfillModal() {
       typeof window !== "undefined" &&
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
     if (reducedMotion) {
+      openedForUserRef.current = user.id;
       setOpen(true);
       return;
     }
-    const timer = window.setTimeout(() => setOpen(true), 700);
+    const uid = user.id;
+    const timer = window.setTimeout(() => {
+      openedForUserRef.current = uid;
+      setOpen(true);
+    }, 700);
     return () => window.clearTimeout(timer);
   }, [user, dismissCount]);
 

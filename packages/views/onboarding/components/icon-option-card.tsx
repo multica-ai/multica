@@ -100,7 +100,18 @@ export function IconOtherOptionCard({
     <div
       role={mode}
       aria-checked={selected}
-      onClick={() => {
+      onClick={(e) => {
+        // In `allowToggleOff` mode, clicking the row again deselects.
+        // Skip when the click originated on the inner text input so
+        // typing / focusing it doesn't accidentally deselect — clicks
+        // on the icon, padding, or label area still toggle.
+        if (
+          allowToggleOff &&
+          selected &&
+          e.target instanceof HTMLInputElement
+        ) {
+          return;
+        }
         if (allowToggleOff || !selected) onSelect();
       }}
       className={cn(
@@ -122,7 +133,6 @@ export function IconOtherOptionCard({
           type="text"
           value={otherValue}
           onChange={(e) => onOtherChange(e.target.value)}
-          onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
             if (e.key === "Enter" && otherValue.trim()) {
               e.preventDefault();
