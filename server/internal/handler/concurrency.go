@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -44,11 +43,9 @@ func (h *Handler) GetConcurrencyStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
-	if !ok {
+	if _, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found"); !ok {
 		return
 	}
-	_ = member
 
 	// Workspace-wide aggregates.
 	stats, err := h.Queries.GetWorkspaceConcurrencyStats(r.Context(), wsUUID)
@@ -89,7 +86,3 @@ func (h *Handler) GetConcurrencyStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ConcurrencyStatsToJSON serializes the response for CLI consumption.
-func ConcurrencyStatsToJSON(resp ConcurrencyStatsResponse) ([]byte, error) {
-	return json.MarshalIndent(resp, "", "  ")
-}
