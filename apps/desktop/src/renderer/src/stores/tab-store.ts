@@ -563,7 +563,7 @@ export const useTabStore = create<TabStore>()(
         }
 
         if (!nextActive) {
-          const fallbackSlug = validSlugs.values().next().value as string | undefined;
+          const fallbackSlug = validSlugs.values().next().value;
           if (fallbackSlug) {
             const fresh = defaultTabFor(fallbackSlug);
             nextByWorkspace[fallbackSlug] = {
