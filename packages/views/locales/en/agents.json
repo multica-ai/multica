@@ -316,7 +316,22 @@
       "saved_toast": "MCP config saved",
       "save_failed_toast": "Failed to save MCP config",
       "redacted_title": "Configured — hidden from your view",
-      "redacted_hint": "Only the agent owner or a workspace admin can read this config."
+      "redacted_hint": "Only the agent owner or a workspace admin can read this config.",
+      "mode_visual": "Visual",
+      "mode_json": "JSON",
+      "add_stdio_server": "Add stdio server",
+      "add_http_server": "Add HTTP/SSE server",
+      "no_servers": "No MCP servers configured. Add one below.",
+      "server_name_placeholder": "server-name",
+      "server_name_aria": "MCP server name",
+      "transport_label": "Transport",
+      "command_label": "Command",
+      "args_label": "Args",
+      "env_label": "Env",
+      "headers_label": "Headers",
+      "http_type_label": "Type",
+      "url_label": "URL",
+      "env_key_placeholder": "KEY"
     },
     "skills": {
       "intro": "Workspace skills assigned to this agent. Local runtime skills are always available automatically.",
