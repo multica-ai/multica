@@ -447,3 +447,27 @@ func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachment
 	}
 	return items, nil
 }
+
+const replaceCommentAttachments = `-- name: ReplaceCommentAttachments :exec
+UPDATE attachment
+SET comment_id = CASE
+  WHEN id = ANY($3::uuid[]) THEN $1
+  ELSE NULL
+END
+WHERE issue_id = $2
+  AND (
+    comment_id = $1
+    OR (comment_id IS NULL AND id = ANY($3::uuid[]))
+  )
+`
+
+type ReplaceCommentAttachmentsParams struct {
+	CommentID     pgtype.UUID   `json:"comment_id"`
+	IssueID       pgtype.UUID   `json:"issue_id"`
+	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
+}
+
+func (q *Queries) ReplaceCommentAttachments(ctx context.Context, arg ReplaceCommentAttachmentsParams) error {
+	_, err := q.db.Exec(ctx, replaceCommentAttachments, arg.CommentID, arg.IssueID, arg.AttachmentIds)
+	return err
+}

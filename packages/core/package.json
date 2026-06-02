@@ -29,6 +29,7 @@
     "./channels": "./channels/index.ts",
     "./wiki/hooks": "./wiki/hooks.ts",
     "./wiki/queries": "./wiki/queries.ts",
+    "./workspace/avatar-url": "./workspace/avatar-url.ts",
     "./wiki/tree": "./wiki/tree.ts",
     "./issues": "./issues/index.ts",
     "./issues/queries": "./issues/queries.ts",
@@ -88,6 +89,9 @@
     "./pins": "./pins/index.ts",
     "./pins/queries": "./pins/queries.ts",
     "./pins/mutations": "./pins/mutations.ts",
+    "./billing": "./billing/index.ts",
+    "./billing/queries": "./billing/queries.ts",
+    "./billing/mutations": "./billing/mutations.ts",
     "./github": "./github/index.ts",
     "./github/queries": "./github/queries.ts",
     "./feedback": "./feedback/index.ts",
@@ -124,6 +128,7 @@
     "react": "catalog:"
   },
   "devDependencies": {
+    "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",

@@ -17,8 +17,8 @@ export const STARTER_CARD_IDS = ["intro", "tour", "welcome_page"] as const;
 export type StarterCardId = (typeof STARTER_CARD_IDS)[number];
 
 interface StarterPrompt {
-  title: { en: string; zh: string };
-  prompt: { en: string; zh: string };
+  title: { en: string; zh: string; ko: string };
+  prompt: { en: string; zh: string; ko: string };
 }
 
 export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
@@ -26,26 +26,31 @@ export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
     title: {
       en: "Introduce Multica to me",
       zh: "简单介绍一下 Multica",
+      ko: "Multica를 간단히 소개해 주세요",
     },
     prompt: {
       en: "Introduce Multica to me in 1–2 paragraphs. Cover what it is, the core concepts (workspace / issue / agent / runtime), and how it differs from tools like Linear or Jira.",
       zh: "用 1-2 段话简单介绍 Multica 给我。讲清楚它是什么、核心概念有哪些(workspace / issue / agent / runtime)、和 Linear / Jira 之类的工具核心区别在哪。",
+      ko: "Multica를 1-2문단으로 간단히 소개해 주세요. 무엇인지, 핵심 개념(workspace / issue / agent / runtime)이 무엇인지, Linear나 Jira 같은 도구와 핵심적으로 어떻게 다른지 설명해 주세요.",
     },
   },
   tour: {
     title: {
       en: "Walk me through the core features",
       zh: "带我熟悉每个功能",
+      ko: "핵심 기능을 안내해 주세요",
     },
     prompt: {
       en: "Walk me through Multica's core features — issue, agent, squad, autopilot, chat. Pick one realistic scenario I might run into and explain how all these pieces fit together.",
       zh: "陪我熟悉 Multica 的每个核心功能 —— issue、agent、squad、autopilot、chat。挑一个我可能用得上的真实场景,讲讲这几个东西是怎么配合的。",
+      ko: "Multica의 핵심 기능인 issue, agent, squad, autopilot, chat을 안내해 주세요. 제가 실제로 겪을 만한 상황 하나를 골라 이 요소들이 어떻게 함께 작동하는지 설명해 주세요.",
     },
   },
   welcome_page: {
     title: {
       en: "Show me what Multica can do for me — as slides",
       zh: "用 slides 介绍 Multica 能为我做什么",
+      ko: "Multica가 저에게 무엇을 해줄 수 있는지 슬라이드로 보여 주세요",
     },
     prompt: {
       en: `Build me a single-file HTML slide deck that shows what Multica can do for me. Tailor it to my role and use case (see "About me" below). Paste the FULL HTML in a fenced \`\`\`html block in a comment on this issue so I can copy it straight out, save as \`multica-intro.html\`, and double-click to open it in a browser.
@@ -100,6 +105,32 @@ When done, also reply with a one-sentence summary of which scenarios you picked 
 - 左右方向键和空格切换,角落放一个小的页码指示。
 
 做完后再用一句话告诉我你为我挑了哪几个场景以及为什么。`,
+      ko: `Multica가 저에게 무엇을 해줄 수 있는지 보여주는 단일 파일 HTML 슬라이드 덱을 만들어 주세요. 제 역할과 사용 사례에 맞춰 주세요(아래 "내 정보" 참고). 전체 HTML을 이 issue의 댓글에 fenced \`\`\`html 코드 블록으로 붙여 주세요. 그대로 복사해 \`multica-intro.html\`로 저장하고 브라우저에서 더블클릭해 열 수 있어야 합니다.
+
+**출력 형식**
+- 하나의 self-contained .html 파일. CSS / JS는 모두 inline. 의존성, 빌드 도구, 외부 이미지는 쓰지 마세요(시각 요소는 CSS로 생성한 gradient, geometric shape, inline SVG를 사용).
+- 전체 5-8장:
+  1. 제목 — "[내 역할]에게 Multica가 해줄 수 있는 일"
+  2. 네 가지 핵심 개념 — workspace / issue / agent / runtime, 한 장
+  3-6. 제 사용 사례에 맞춘 구체적인 시나리오 3-4개. 각 시나리오는 "X를 하고 싶을 때 → Multica는 이렇게 처리합니다" 형식
+  7. 마무리 — 구체적인 다음 액션 하나
+
+**Viewport 규칙(반드시 지킬 것)**
+- 모든 \`.slide\`: \`height: 100vh; height: 100dvh; overflow: hidden;\`
+- 모든 font-size와 spacing 값은 \`clamp(min, preferred, max)\` 사용. 고정 px / rem 금지.
+- slide당 밀도: 제목 1개 + bullet 4개 이하, 또는 제목 1개 + 짧은 문단 2개. 넘치면 다음 slide로 분리.
+- \`prefers-reduced-motion: reduce\`를 존중해 animation을 끄세요.
+
+**미감(흔한 AI 결과물처럼 보이지 않게)**
+- Fontshare나 Google Fonts에서 개성 있는 typeface를 고르세요. Inter, Roboto, Arial, system font는 쓰지 마세요.
+- CSS variable로 일관된 palette를 정하세요: dominant color 하나 + sharp accent 하나. 흔한 "보라색 gradient + 흰 배경"은 피하세요.
+- 배경은 layered gradient나 geometric pattern으로 분위기를 만들고, flat white는 쓰지 마세요.
+- slide마다 한 번의 잘 짜인 load-in animation만 사용하세요(\`animation-delay\`로 stagger). CSS-only. 흩어진 micro-interaction은 금지.
+
+**Navigation**
+- ArrowLeft / ArrowRight와 Space로 이동. 모서리에 작은 page indicator를 두세요.
+
+완료 후, 어떤 시나리오를 골랐고 왜 골랐는지 한 문장으로 요약해 주세요.`,
     },
   },
 };

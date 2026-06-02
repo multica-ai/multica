@@ -68,6 +68,16 @@ export interface AgentRunCount {
   run_count: number;
 }
 
+export type AgentTaskStatus =
+  | "queued"
+  | "dispatched"
+  | "waiting_local_directory"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | (string & {});
+
 export interface AgentTask {
   id: string;
   agent_id: string;
@@ -76,7 +86,12 @@ export interface AgentTask {
   // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
   // which source produced it.
   issue_id: string;
-  status: "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
+  // `waiting_local_directory` is the daemon-emitted hold state for the
+  // local_directory flow: a task that has been dispatched but is parked
+  // because another task currently owns the same on-disk path lock.
+  // Treated as an active (non-terminal) state alongside queued/dispatched/
+  // running by every consumer that buckets tasks into "active vs done".
+  status: AgentTaskStatus;
   priority: number;
   dispatched_at: string | null;
   started_at: string | null;
@@ -118,10 +133,25 @@ export interface AgentTask {
   exit_code?: number;
   /**
    * Local working directory pinned for this task by the daemon. Empty until
-   * the daemon reports a work_dir (typically once execution starts).
+   * the daemon reports a work_dir (typically once execution starts). This is
+   * the canonical absolute path the agent runs in; UI surfaces should prefer
+   * `relative_work_dir` to avoid leaking the user's home directory.
    */
   work_dir?: string;
   context_dir?: string;
+  /**
+   * Privacy-safe display form of `work_dir`, derived on the server. For
+   * standard tasks the daemon's workspaces root has been stripped off
+   * (`<wsUUID>/<taskShort>/workdir`); for local_directory tasks where the
+   * path lives outside that layout, the server strips recognised home
+   * prefixes (`/Users/<name>/`, `/home/<name>/`, `<drive>:/Users/<name>/`)
+   * and otherwise falls back to the basename so neither the home directory
+   * nor the username leak into the UI. Older backends omit the field —
+   * render it conditionally and never render `work_dir` raw (not even in
+   * a tooltip / `title` / `aria-label`, since the goal is that screen
+   * shares and screenshots also stay safe).
+   */
+  relative_work_dir?: string;
 }
 
 export interface LocalPreview {
@@ -176,6 +206,27 @@ export interface Agent {
    * alongside `has_custom_env`. Treat `undefined` as zero. MUL-2600.
    */
   custom_env_key_count?: number;
+  /**
+   * MCP server configuration forwarded to the runtime CLI (Claude's
+   * `--mcp-config`). The shape is opaque to the platform — whatever
+   * JSON the CLI accepts, the daemon writes to disk verbatim. `null`
+   * (or the field omitted on legacy backends) means no config; the
+   * daemon falls back to the CLI's own default. MUL-2764.
+   *
+   * When the caller can't see secrets (an agent actor, or a non-owner
+   * non-admin), the server replaces the value with `null` and sets
+   * `mcp_config_redacted` to true so the UI can render a "configured
+   * but hidden" state without exposing potentially sensitive fields.
+   */
+  mcp_config?: unknown | null;
+  /**
+   * True when the server stripped `mcp_config` from this response
+   * because the caller lacks permission to see secrets. The UI uses
+   * this to distinguish "no config" (`mcp_config === null &&
+   * !mcp_config_redacted`) from "config exists but you can't see it".
+   * Older backends omit this field; treat `undefined` as false.
+   */
+  mcp_config_redacted?: boolean;
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
@@ -342,6 +393,15 @@ export interface UpdateAgentRequest {
    * MUL-2600.
    */
   custom_args?: string[];
+  /**
+   * MCP server configuration. Tri-state semantics (MUL-2764):
+   *   - field omitted → no change
+   *   - `null` → clear the column; the daemon falls back to the CLI's
+   *     built-in default at launch
+   *   - object → replace the stored JSON verbatim; the platform does
+   *     not validate the shape (MCP CLI accepts whatever it accepts)
+   */
+  mcp_config?: unknown | null;
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;
@@ -420,6 +480,7 @@ export interface CreateSkillRequest {
   content?: string;
   config?: Record<string, unknown>;
   files?: { path: string; content: string }[];
+  overwrite?: boolean;
 }
 
 export interface UpdateSkillRequest {
@@ -437,6 +498,15 @@ export interface SetAgentSkillsRequest {
 export interface BatchImportSkillsResponse {
   created: Skill[];
   skipped: string[];
+}
+
+export interface DiscoveredImportSkill extends CreateSkillRequest {
+  source_path: string;
+  source_url: string;
+}
+
+export interface DiscoverImportSkillsResponse {
+  skills: DiscoveredImportSkill[];
 }
 
 export type RuntimePingStatus = "pending" | "running" | "completed" | "failed" | "timeout";
@@ -858,6 +928,7 @@ export interface CreateRuntimeLocalSkillImportRequest {
   skill_key: string;
   name?: string;
   description?: string;
+  overwrite?: boolean;
 }
 
 export interface RuntimeLocalSkillImportRequest {

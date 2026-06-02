@@ -39,14 +39,6 @@ export async function parseSkillDirectory(files: FileList): Promise<CreateSkillR
 
 async function readAllFiles(files: FileList): Promise<ParsedFile[]> {
   const results: ParsedFile[] = [];
-  // Read only text-based files, skip binaries
-  const textExtensions = new Set([
-    ".md", ".txt", ".yaml", ".yml", ".json", ".toml",
-    ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs",
-    ".sh", ".bash", ".zsh", ".css", ".html", ".xml",
-    ".sql", ".proto", ".graphql",
-  ]);
-
   const promises: Promise<void>[] = [];
 
   // Determine the top-level directory name from the first file's webkitRelativePath.
@@ -54,20 +46,18 @@ async function readAllFiles(files: FileList): Promise<ParsedFile[]> {
   // can identify the skill format by the directory name (e.g. .claude/commands/*.md).
   const topDir = files.length > 0 ? getFirstSegment(files[0]!.webkitRelativePath) : "";
   const preserveTopDir = topDir.startsWith(".");
+  const codexDotDirPrefixes = findCodexDotDirPrefixes(files, preserveTopDir);
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i]!;
-    const ext = getExtension(file.name);
-    if (!textExtensions.has(ext)) continue;
+    const stripped = normalizeUploadPath(file, preserveTopDir);
+    if (shouldSkipSkillImportPath(stripped, codexDotDirPrefixes)) continue;
     if (file.size > 1024 * 1024) continue; // skip files > 1MB
 
     promises.push(
       file.text().then((content) => {
-        // webkitRelativePath is like "dirname/subdir/file.md"
-        const relativePath = file.webkitRelativePath;
         // Strip the top-level directory name, except for dot directories whose
         // name is meaningful to format detection (e.g. .claude/commands/).
-        const stripped = preserveTopDir ? relativePath : stripFirstSegment(relativePath);
         if (stripped) {
           results.push({ relativePath: stripped, content });
         }
@@ -77,6 +67,66 @@ async function readAllFiles(files: FileList): Promise<ParsedFile[]> {
 
   await Promise.all(promises);
   return results;
+}
+
+function normalizeUploadPath(file: File, preserveTopDir: boolean): string {
+  const relativePath = file.webkitRelativePath || file.name;
+  return preserveTopDir ? relativePath : stripFirstSegment(relativePath);
+}
+
+function findCodexDotDirPrefixes(files: FileList, preserveTopDir: boolean): Set<string> {
+  const prefixes = new Set<string>();
+  for (let i = 0; i < files.length; i++) {
+    const path = normalizeUploadPath(files[i]!, preserveTopDir).replaceAll("\\", "/");
+    const match = path.match(/^(\.[^/]+\/)(AGENTS\.md|codex\.md)$/);
+    if (match?.[1]) {
+      prefixes.add(match[1]);
+    }
+  }
+  return prefixes;
+}
+
+const textExtensions = new Set([
+  ".md", ".txt", ".yaml", ".yml", ".json", ".toml",
+  ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs",
+  ".sh", ".bash", ".zsh", ".css", ".html", ".xml",
+  ".sql", ".proto", ".graphql",
+]);
+
+const ignoredDirectories = new Set([
+  ".git", ".hg", ".svn", ".venv", "venv", "env", ".env",
+  "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+  "node_modules", "bower_components",
+  "dist", "build", "out", "target", "coverage",
+  ".next", ".nuxt", ".turbo", ".cache",
+]);
+
+function shouldSkipSkillImportPath(path: string, codexDotDirPrefixes: Set<string>): boolean {
+  const normalized = path.replaceAll("\\", "/");
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length === 0) return true;
+  const filename = parts[parts.length - 1]!;
+  const lowerName = filename.toLowerCase();
+  if (
+    lowerName === "license" ||
+    lowerName === "license.md" ||
+    lowerName === "license.txt" ||
+    lowerName === ".ds_store"
+  ) {
+    return true;
+  }
+  if (filename.startsWith(".")) return true;
+  const firstDir = parts[0] ?? "";
+  const allowTopDotDir = normalized.startsWith(".claude/commands/") ||
+    [...codexDotDirPrefixes].some((prefix) => normalized.startsWith(prefix));
+  for (const [index, part] of parts.slice(0, -1).entries()) {
+    const lower = part.toLowerCase();
+    if (ignoredDirectories.has(lower)) return true;
+    if (lower.startsWith(".") && !(index === 0 && part === firstDir && allowTopDotDir)) {
+      return true;
+    }
+  }
+  return !textExtensions.has(getExtension(filename));
 }
 
 // --- Format parsers ---

@@ -73,7 +73,7 @@ interface CommentCardProps {
    */
   canModerate?: boolean;
   onReply: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
-  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   /** Toggle the resolved state on the thread root. Only invoked for root entries. */
@@ -240,7 +240,7 @@ function ExpandableCommentBody({
   );
 }
 
-export function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
+export function AttachmentList({ attachments, content, className, onRemove }: { attachments?: Attachment[]; content?: string; className?: string; onRemove?: (attachmentId: string) => void }) {
   if (!attachments?.length) return null;
   // Skip attachments whose URL is already referenced in the markdown content,
   // and duplicates of the same file (same name/type/size) that are referenced.
@@ -270,6 +270,8 @@ export function AttachmentList({ attachments, content, className }: { attachment
           <AttachmentRenderer
             key={a.id}
             attachment={{ kind: "record", attachment: a }}
+            editable={!!onRemove}
+            onDelete={onRemove ? () => onRemove(a.id) : undefined}
           />
         ))}
       </div>
@@ -316,6 +318,150 @@ function useRetryAgentComment(issueId: string, commentId: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Attachment edit helpers
+// ---------------------------------------------------------------------------
+
+function collectActiveAttachmentIds(
+  content: string,
+  attachments: Attachment[],
+  retainedStandaloneIds?: Set<string> | null,
+): string[] {
+  const ids = new Set<string>();
+  for (const attachment of attachments) {
+    if (content.includes(attachment.url)) ids.add(attachment.id);
+  }
+  for (const id of retainedStandaloneIds ?? []) ids.add(id);
+  return [...ids];
+}
+
+function sameIdSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((id) => set.has(id));
+}
+
+function initialStandaloneAttachmentIds(entry: TimelineEntry): Set<string> {
+  const content = entry.content ?? "";
+  return new Set(
+    (entry.attachments ?? [])
+      .filter((attachment) => !content.includes(attachment.url))
+      .map((attachment) => attachment.id),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shared edit-attachment state hook
+// ---------------------------------------------------------------------------
+
+function useEditAttachmentState(
+  issueId: string,
+  entry: TimelineEntry,
+  onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>,
+) {
+  const { t } = useT("issues");
+  const { uploadWithToast } = useFileUpload(api);
+  const [editing, setEditing] = useState(false);
+  const editorRef = useRef<ContentEditorRef>(null);
+  const cancelledRef = useRef(false);
+  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  const [retainedStandaloneIds, setRetainedStandaloneIds] = useState<Set<string> | null>(null);
+
+  const editorAttachments = pendingAttachments.length > 0
+    ? [...(entry.attachments ?? []), ...pendingAttachments]
+    : entry.attachments;
+
+  const handleUpload = useCallback(async (file: File) => {
+    const result = await uploadWithToast(file, { issueId });
+    if (result) setPendingAttachments((prev) => [...prev, result]);
+    return result;
+  }, [uploadWithToast, issueId]);
+
+  const { isDragOver, dropZoneProps } = useFileDropZone({
+    onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
+    enabled: editing,
+  });
+
+  const draftKey = `edit:${issueId}:${entry.id}` as const;
+  const getDraft = useCommentDraftStore.getState().getDraft;
+  const setDraft = useCommentDraftStore((s) => s.setDraft);
+  const clearDraft = useCommentDraftStore((s) => s.clearDraft);
+
+  const initialValue = editing
+    ? (getDraft(draftKey) ?? entry.content ?? "")
+    : (entry.content ?? "");
+
+  const standaloneEditAttachments = (entry.attachments ?? []).filter((a) =>
+    retainedStandaloneIds?.has(a.id),
+  );
+
+  const resetState = () => {
+    setEditing(false);
+    setPendingAttachments([]);
+    setRetainedStandaloneIds(null);
+    clearDraft(draftKey);
+  };
+
+  const startEdit = () => {
+    cancelledRef.current = false;
+    setRetainedStandaloneIds(initialStandaloneAttachmentIds(entry));
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    cancelledRef.current = true;
+    resetState();
+  };
+
+  const saveEdit = async () => {
+    if (cancelledRef.current) return;
+    const trimmed = editorRef.current
+      ?.getMarkdown()
+      ?.replace(/(\n\s*)+$/, "")
+      .trim();
+    if (!trimmed) return;
+    const activeIds = collectActiveAttachmentIds(
+      trimmed,
+      [...(entry.attachments ?? []), ...pendingAttachments],
+      retainedStandaloneIds,
+    );
+    const attachmentsChanged = !sameIdSet(activeIds, (entry.attachments ?? []).map((a) => a.id));
+    if (trimmed === (entry.content ?? "").trim() && !attachmentsChanged) {
+      resetState();
+      return;
+    }
+    try {
+      await onEdit(entry.id, trimmed, activeIds);
+      resetState();
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.comment.update_failed),
+      );
+    }
+  };
+
+  return {
+    editing,
+    editorRef,
+    editorAttachments,
+    handleUpload,
+    isDragOver,
+    dropZoneProps,
+    draftKey,
+    setDraft,
+    clearDraft,
+    initialValue,
+    standaloneEditAttachments,
+    retainedStandaloneIds,
+    setRetainedStandaloneIds,
+    startEdit,
+    cancelEdit,
+    saveEdit,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Single comment row (used for both parent and replies within the same Card)
 // ---------------------------------------------------------------------------
 
@@ -339,7 +485,7 @@ function CommentRow({
   issueOpen: boolean;
   currentUserId?: string;
   canModerate?: boolean;
-  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   selectionQuoteActions?: SelectionQuoteActions;
@@ -438,7 +584,7 @@ function CommentRow({
       .filter((a) => trimmed.includes(a.url))
       .map((a) => a.id);
     try {
-      await onEdit(entry.id, trimmed, activeIds.length > 0 ? activeIds : undefined);
+      await onEdit(entry.id, trimmed, activeIds.length > 0 ? activeIds : []);
       setEditing(false);
       setPendingAttachments([]);
       clearEditDraft(editDraftKey);
@@ -616,6 +762,7 @@ function CommentRow({
   );
 }
 
+
 // ---------------------------------------------------------------------------
 // CommentCard — One Card per thread (parent + all replies flat inside)
 // ---------------------------------------------------------------------------
@@ -644,49 +791,21 @@ function CommentCardImpl({
   const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
   const copyCommentLink = useCopyCommentLink(issueId);
-  const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
+  useFileUpload(api, (err) => toast.error(err.message));
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
   const open = !isCollapsed;
   const handleOpenChange = useCallback((_open: boolean) => toggleCollapse(issueId, entry.id), [toggleCollapse, issueId, entry.id]);
-  const [editing, setEditing] = useState(false);
-  const editEditorRef = useRef<ContentEditorRef>(null);
-  const cancelledRef = useRef(false);
-  // Pending uploads from the root-comment edit pass — same rationale as CommentRow.
-  const [parentPendingAttachments, setParentPendingAttachments] = useState<Attachment[]>([]);
-  const parentEditorAttachments = parentPendingAttachments.length > 0
-    ? [...(entry.attachments ?? []), ...parentPendingAttachments]
-    : entry.attachments;
-  const handleParentEditUpload = useCallback(async (file: File) => {
-    const result = await uploadWithToast(file, { issueId });
-    if (result) setParentPendingAttachments((prev) => [...prev, result]);
-    return result;
-  }, [uploadWithToast, issueId]);
-  const { isDragOver: parentDragOver, dropZoneProps: parentDropZoneProps } = useFileDropZone({
-    onDrop: (files) => editEditorRef.current?.uploadFiles(files),
-    enabled: editing,
-  });
 
-  // Edit-mode draft (root comment). Same rationale as CommentRow's draft.
-  const parentEditDraftKey = `edit:${issueId}:${entry.id}` as const;
-  const getParentEditDraft = useCommentDraftStore.getState().getDraft;
-  const setParentEditDraft = useCommentDraftStore((s) => s.setDraft);
-  const clearParentEditDraft = useCommentDraftStore((s) => s.clearDraft);
-  const parentEditInitialValue = editing
-    ? (getParentEditDraft(parentEditDraftKey) ?? entry.content ?? "")
-    : (entry.content ?? "");
+  const edit = useEditAttachmentState(issueId, entry, onEdit);
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
-  // Author-only edit is the same as before; admins additionally get edit
-  // *and* delete on member-authored comments, plus delete on agent-authored
-  // ones. Edit on agent comments is intentionally never offered — agents
-  // own their own outputs.
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
-  const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [retryWithNoteOpen, setRetryWithNoteOpen] = useState(false);
   const isAgent = isAgentComment(entry);
+  const isTemp = entry.id.startsWith("temp-");
   const agentMeta = isAgent ? agents.find((agent) => agent.id === entry.actor_id) : undefined;
   const memberAncestor = isAgent ? findMemberAncestorComment(entry, commentById) : null;
   const isAgentOwner = !!(agentMeta?.owner_id && currentUserId && agentMeta.owner_id === currentUserId);
@@ -703,50 +822,6 @@ function CommentCardImpl({
     (canModerate || isAgentOwner || isTriggerMember);
   const retryAgentComment = useRetryAgentComment(issueId, entry.id);
 
-  const startEdit = () => {
-    cancelledRef.current = false;
-    setEditing(true);
-  };
-
-  const cancelEdit = () => {
-    cancelledRef.current = true;
-    setEditing(false);
-    setParentPendingAttachments([]);
-    clearParentEditDraft(parentEditDraftKey);
-  };
-
-  const saveEdit = async () => {
-    if (cancelledRef.current) return;
-    const trimmed = editEditorRef.current
-      ?.getMarkdown()
-      ?.replace(/(\n\s*)+$/, "")
-      .trim();
-    if (!trimmed || trimmed === (entry.content ?? "").trim()) {
-      setEditing(false);
-      setParentPendingAttachments([]);
-      clearParentEditDraft(parentEditDraftKey);
-      return;
-    }
-    const activeIds = parentPendingAttachments
-      .filter((a) => trimmed.includes(a.url))
-      .map((a) => a.id);
-    try {
-      await onEdit(entry.id, trimmed, activeIds.length > 0 ? activeIds : undefined);
-      setEditing(false);
-      setParentPendingAttachments([]);
-      clearParentEditDraft(parentEditDraftKey);
-    } catch (err) {
-      toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.comment.update_failed),
-      );
-    }
-  };
-
-  // The parent precomputes the flat thread (using collectThreadReplies),
-  // memoizes by thread, and stabilizes the array reference, so we render
-  // straight from `replies` instead of re-walking the graph on every render.
   const allNestedReplies = replies;
 
   const replyCount = allNestedReplies.length;
@@ -839,7 +914,7 @@ function CommentCardImpl({
               </span>
             )}
 
-            {open && !isTemp && (
+            {open && (
               <div className="ml-auto flex items-center gap-0.5">
                 <QuickEmojiPicker
                   onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
@@ -906,7 +981,7 @@ function CommentCardImpl({
                     <>
                       <DropdownMenuSeparator />
                       {canEditEntry && (
-                        <DropdownMenuItem onClick={startEdit}>
+                        <DropdownMenuItem onClick={edit.startEdit}>
                           <Pencil className="h-3.5 w-3.5" />
                           {t(($) => $.comment.edit_action)}
                         </DropdownMenuItem>
@@ -943,26 +1018,26 @@ function CommentCardImpl({
         <CollapsibleContent>
           {/* Parent comment body */}
           <div className="px-4 pb-3" data-comment-id={entry.id} data-thread-root-id={entry.id}>
-            {editing ? (
+            {edit.editing ? (
               <div
-                {...parentDropZoneProps}
+                {...edit.dropZoneProps}
                 className="relative pl-10"
-                onKeyDown={(e) => { if (e.key === "Escape") cancelEdit(); }}
+                onKeyDown={(e) => { if (e.key === "Escape") edit.cancelEdit(); }}
               >
                 <div className="text-sm leading-relaxed">
                   <ContentEditor
-                    ref={editEditorRef}
-                    defaultValue={parentEditInitialValue}
+                    ref={edit.editorRef}
+                    defaultValue={edit.initialValue}
                     placeholder={t(($) => $.comment.edit_placeholder)}
                     onUpdate={(md) => {
-                      if (md.trim().length > 0) setParentEditDraft(parentEditDraftKey, md);
-                      else clearParentEditDraft(parentEditDraftKey);
+                      if (md.trim().length > 0) edit.setDraft(edit.draftKey, md);
+                      else edit.clearDraft(edit.draftKey);
                     }}
-                    onSubmit={saveEdit}
-                    onUploadFile={handleParentEditUpload}
+                    onSubmit={edit.saveEdit}
+                    onUploadFile={edit.handleUpload}
                     debounceMs={100}
                     currentIssueId={issueId}
-                    attachments={parentEditorAttachments}
+                    attachments={edit.editorAttachments}
                     selectionQuoteActions={threadSelectionQuoteActions}
                   />
                 </div>
@@ -970,15 +1045,15 @@ function CommentCardImpl({
                   <FileUploadButton
                     size="sm"
                     multiple
-                    onSelect={(file) => editEditorRef.current?.uploadFile(file)}
-                    onSelectMany={(files) => editEditorRef.current?.uploadFiles(files)}
+                    onSelect={(file) => edit.editorRef.current?.uploadFile(file)}
+                    onSelectMany={(files) => edit.editorRef.current?.uploadFiles(files)}
                   />
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
-                    <Button size="sm" variant="outline" onClick={saveEdit}>{t(($) => $.comment.save_action)}</Button>
+                    <Button size="sm" variant="ghost" onClick={edit.cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
+                    <Button size="sm" variant="outline" onClick={edit.saveEdit}>{t(($) => $.comment.save_action)}</Button>
                   </div>
                 </div>
-                {parentDragOver && <FileDropOverlay />}
+                {edit.isDragOver && <FileDropOverlay />}
               </div>
             ) : (
               <>
@@ -988,16 +1063,14 @@ function CommentCardImpl({
                   className="pl-10"
                 />
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
-                {!isTemp && (
-                  <ReactionBar
-                    reactions={reactions}
-                    currentUserId={currentUserId}
-                    onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
-                    getActorName={getActorName}
-                    hideAddButton={!isLongContent}
-                    className="mt-1.5 pl-10"
-                  />
-                )}
+                <ReactionBar
+                  reactions={reactions}
+                  currentUserId={currentUserId}
+                  onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
+                  getActorName={getActorName}
+                  hideAddButton={!isLongContent}
+                  className="mt-1.5 pl-10"
+                />
               </>
             )}
           </div>

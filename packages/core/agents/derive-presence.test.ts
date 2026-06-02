@@ -171,6 +171,21 @@ describe("deriveWorkloadDetail", () => {
     expect(r.queuedCount).toBe(2);
   });
 
+  it("counts waiting_local_directory as queued (daemon parked on a path lock)", () => {
+    // waiting_local_directory is the daemon-side "blocked on a busy
+    // local_directory" hold state. It is still on the agent's plate —
+    // the chip must not flip to idle just because the run phase hasn't
+    // started yet — and is grouped with queued/dispatched in the
+    // presence verdict so the user sees "Queued · 1" rather than
+    // "Idle".
+    const r = deriveWorkloadDetail([
+      makeTask({ status: "waiting_local_directory" }),
+    ]);
+    expect(r.workload).toBe("queued");
+    expect(r.runningCount).toBe(0);
+    expect(r.queuedCount).toBe(1);
+  });
+
   it("returns working when running coexists with queued (overflow)", () => {
     // Capacity-saturated agent: still running, but with a queue building.
     // The chip says "Working" with the queue expressed as a `+Nq` badge.

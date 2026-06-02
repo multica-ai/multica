@@ -22,7 +22,10 @@ vi.mock("@multica/core/hooks", () => ({
 vi.mock("@multica/core/api", () => ({
   api: {
     updateRuntime: (...args: unknown[]) => mockUpdateRuntime(...args),
+    deleteRuntime: vi.fn(),
+    archiveAgentsAndDeleteRuntime: vi.fn(),
   },
+  ApiError: class ApiError extends Error {},
 }));
 
 vi.mock("sonner", () => ({
@@ -80,7 +83,12 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
     },
     isPending: false,
   }),
-  useDeleteRuntime: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteRuntime: () => ({ mutate: vi.fn(), isPending: false, mutateAsync: vi.fn() }),
+  useArchiveAgentsAndDeleteRuntime: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
 }));
 
 // Stubbing ProviderLogo / UsageSection / UpdateSection avoids dragging in

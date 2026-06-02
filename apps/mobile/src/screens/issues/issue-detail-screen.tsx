@@ -27,7 +27,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MoreHorizontal } from "lucide-react-native";
+import { ChevronRight, MoreHorizontal } from "lucide-react-native";
 import Svg, { Path } from "react-native-svg";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@multica/core/auth";
@@ -40,12 +40,14 @@ import {
 } from "@multica/core/issues/mutations";
 import {
   useIssueAttachments,
+  useChildIssueProgress,
   useIssueDetail,
   useIssueList,
   useIssueSubscribers,
   useIssueTaskRuns,
   useIssueTimelineEntries,
   useLiveIssueTasks,
+  useOptionalIssueDetail,
 } from "@multica/core/issues/hooks";
 import {
   useActorName,
@@ -161,6 +163,11 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const { data: workspaces = [] } = useWorkspaceList();
   const mentionTargets = useWorkspaceMentionTargets(workspace.id);
   const { data: issue, isError, isLoading } = useIssueDetail(workspace.id, issueId);
+  const { data: parentIssue, isLoading: parentIssueLoading } = useOptionalIssueDetail(
+    workspace.id,
+    issue?.parent_issue_id,
+  );
+  const { data: childProgress } = useChildIssueProgress(workspace.id);
   const { data: allIssues = [] } = useIssueList(workspace.id);
   const issueMentionTargets = useMemo(
     () => allIssues.map(issueToMentionTarget),
@@ -707,8 +714,15 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     listRef.current?.scrollToEnd({ animated: true });
   }, []);
 
+  const scrollToTop = useCallback(() => {
+    listRef.current?.scrollToOffset({ animated: true, offset: 0 });
+  }, []);
+
+  const childIssueCount = issue ? childProgress?.get(issue.id)?.total ?? 0 : 0;
+
   const listHeader = useMemo(() => {
     if (!issue) return null;
+    const hasIssueRelations = Boolean(issue.parent_issue_id) || childIssueCount > 0;
     return (
       <View style={styles.listHeader}>
         <View style={styles.section}>
@@ -742,6 +756,37 @@ export function IssueDetailScreen({ navigation, route }: Props) {
             </Pressable>
           )}
           {issueEditError ? <Text style={styles.errorText}>{issueEditError}</Text> : null}
+          {hasIssueRelations ? (
+            <View style={styles.issueRelationsBlock}>
+              {issue.parent_issue_id ? (
+                <IssueRelationRow
+                  disabled={!parentIssue}
+                  label={t("issues.parent_issue")}
+                  meta={parentIssue?.identifier}
+                  onPress={() => {
+                    if (parentIssue) {
+                      navigation.push("IssueDetail", { issueId: parentIssue.id });
+                    }
+                  }}
+                  title={
+                    parentIssue
+                      ? parentIssue.title
+                      : parentIssueLoading
+                        ? t("issues.loading_parent_issue")
+                        : t("issues.unable_to_load_parent_issue")
+                  }
+                />
+              ) : null}
+              {childIssueCount > 0 ? (
+                <IssueRelationRow
+                  label={t("issues.child_issues")}
+                  onPress={() => navigation.navigate("IssueProperties", { issueId })}
+                  separated={Boolean(issue.parent_issue_id)}
+                  title={t("issues.child_issue_count", { count: childIssueCount })}
+                />
+              ) : null}
+            </View>
+          ) : null}
           <Pressable
             accessibilityHint={t("issues.edit_description_hint")}
             accessibilityRole="button"
@@ -863,11 +908,14 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     issueEditError,
     isSubscribed,
     issueId,
+    childIssueCount,
     handleMarkdownLinkPress,
     navigation,
     openAttachmentPreview,
     openDescriptionEditor,
     openIssueDetail,
+    parentIssue,
+    parentIssueLoading,
     pickDocument,
     pickImage,
     saveTitleEdit,
@@ -981,6 +1029,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     <Screen padded={false} safeArea={false}>
       <ScreenTitleBar
         onBack={() => navigation.goBack()}
+        onTitleDoublePress={scrollToTop}
         right={(
           <HeaderIconButton
             label={t("issues.issue_actions")}
@@ -1207,6 +1256,47 @@ function IssueShortcutButton({
     >
       <Text numberOfLines={1} style={styles.issueShortcutLabel}>{label}</Text>
       <Text style={styles.issueShortcutCount}>{count}</Text>
+    </Pressable>
+  );
+}
+
+function IssueRelationRow({
+  disabled = false,
+  label,
+  meta,
+  onPress,
+  separated = false,
+  title,
+}: {
+  disabled?: boolean;
+  label: string;
+  meta?: string;
+  onPress: () => void;
+  separated?: boolean;
+  title: string;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.issueRelationRow,
+        separated && styles.issueRelationRowSeparated,
+        pressed && styles.buttonPressed,
+        disabled && styles.disabledAction,
+      ]}
+    >
+      <View style={styles.issueRelationContent}>
+        <Text numberOfLines={1} style={styles.issueRelationLabel}>{label}</Text>
+        <View style={styles.issueRelationTitleRow}>
+          {meta ? (
+            <Text numberOfLines={1} style={styles.issueRelationMeta}>{meta}</Text>
+          ) : null}
+          <Text numberOfLines={1} style={styles.issueRelationTitle}>{title}</Text>
+        </View>
+      </View>
+      <ChevronRight color={colors.mutedForeground} size={16} />
     </Pressable>
   );
 }
@@ -2820,6 +2910,58 @@ const styles = StyleSheet.create({
   emptyText: {
     color: colors.mutedForeground,
     fontSize: 14,
+  },
+  issueRelationsBlock: {
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginHorizontal: -spacing.sm,
+    overflow: "hidden",
+  },
+  issueRelationRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.md,
+    minHeight: 58,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  issueRelationRowSeparated: {
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  issueRelationContent: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  issueRelationLabel: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontWeight: "500",
+    lineHeight: 16,
+  },
+  issueRelationTitleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  issueRelationMeta: {
+    color: colors.mutedForeground,
+    flexShrink: 0,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
+  issueRelationTitle: {
+    color: colors.foreground,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 19,
+    minWidth: 0,
   },
   issueEngagementRow: {
     alignItems: "center",

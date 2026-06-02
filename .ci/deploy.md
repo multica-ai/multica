@@ -6,10 +6,11 @@
 
 ## 基本原则
 
-1. **发布版本只有一个来源**：每次生产发布开始时先确定唯一的 `PROJECT_VERSION`，后续 backend、frontend、CLI、Gitee Release 都必须使用或校验同一个版本。
+1. **发布版本只有一个来源**：每次生产发布开始时先确定唯一的 `PROJECT_VERSION` 和 `FULL_SHA`，后续 backend、frontend、CLI、Gitee Release 都必须使用或校验同一个版本、同一个 commit。
 2. **Jenkins 负责执行已沉淀的CI/CD流程**：生产构建、推镜像、K3S rollout、CLI artifacts 发布到 OBS 都应由 Jenkins Job 执行；Agent 负责 plan、触发、等待、校验、汇总。
 3. **Release 最后创建**：只有 backend、frontend、CLI 三个组件都发布成功，并且版本校验通过后，才能创建或更新 Gitee Release。
 4. **不要让下游步骤自行猜版本**：尤其是 CLI Jenkins Job 不应只靠“最新 tag”推导发布版本；如果 Jenkins Job 暂未支持显式版本参数，发布流程必须在 Release 前校验 Jenkins 实际产物版本。
+5. **发布目标 commit 必须冻结**：生产发布开始时确定的 `FULL_SHA` 就是本次 release target。后续即使 `origin/main` 在发布过程中继续前进，也只能作为“下一次发布候选”，不得影响本次 tag、Jenkins 参数、manifest 校验和 Gitee Release。
 
 
 ## Source of truth：仓库配置、ENV 与 Jenkins
@@ -116,8 +117,22 @@ PROJECT_VERSION=$(git describe --tags --long \
 规则：
 
 - `PROJECT_VERSION` 必须对应本次发布的 `FULL_SHA`。
-- 如果 `refs/tags/$PROJECT_VERSION` 不存在，创建 annotated tag 并 push 到 `origin`。
-- 如果 tag 已存在，必须确认它指向同一个 `FULL_SHA`，否则停止发布。
+- `FULL_SHA` 一旦确定，本次发布后续所有步骤都必须引用这个固定 commit，不能再用会移动的 `origin/main` / `HEAD` 重新推导发布目标。
+- 如果 `refs/tags/$PROJECT_VERSION` 不存在，必须**立即**基于 `FULL_SHA` 创建 annotated tag 并 push 到 `origin`，不要等 Jenkins 发布后再补 tag：
+
+```bash
+git tag -a "$PROJECT_VERSION" "$FULL_SHA" -m "Multica Release $PROJECT_VERSION"
+git push origin "refs/tags/$PROJECT_VERSION"
+```
+
+- 如果 tag 已存在，必须确认它 peel 后指向同一个 `FULL_SHA`，否则停止发布，禁止进入 Jenkins：
+
+```bash
+TAG_SHA=$(git rev-parse "$PROJECT_VERSION^{}")
+test "$TAG_SHA" = "$FULL_SHA"
+```
+
+- 禁止用 `git tag <tag> origin/main`、`git tag <tag> HEAD` 这类移动引用创建 release tag。必须显式使用已冻结的 `$FULL_SHA`。
 - 不要基于旧的 git-describe-style 发布 tag 再 describe 出嵌套版本，例如 `v0.3.2-...-100-gxxxx-1-gyyyy`。
 
 #### 版本号倒退校验（强制 gate）
@@ -138,6 +153,28 @@ fi
 ```
 
 校验不通过 → 立即停止发布，禁止进入后续 Jenkins 触发阶段。
+
+#### 发布过程中 main 前进处理（强制规则）
+
+生产发布可能持续几十分钟，在此期间 `main` 可能继续合入新 PR。该情况不是本次发布的阻塞项，但必须避免污染本次 release 事实。
+
+任意后续步骤如果执行了 `git fetch origin main --tags` 或刷新了远端引用，必须遵守：
+
+```bash
+CURRENT_ORIGIN_MAIN=$(git rev-parse origin/main)
+if [ "$CURRENT_ORIGIN_MAIN" != "$FULL_SHA" ]; then
+  echo "INFO: origin/main advanced during release; new commits belong to next release."
+  git log --oneline "$FULL_SHA..origin/main" --reverse
+fi
+```
+
+要求：
+
+- 不要因为 `origin/main` 前进而重算 `PROJECT_VERSION` / `FULL_SHA`。
+- 不要把发布过程中合入的新 commit 写入本次 Gitee Release。
+- 不要把本次 release tag 移到新的 `origin/main`。
+- 发布报告可以记录“main 已前进，新增 commit 将进入下一次发布”。
+- 如需发布这些新 commit，必须另起一次 AutoPilot / release run。
 
 ### A. 发布 backend/frontend 到 K3S
 
@@ -199,8 +236,8 @@ Release 内容必须至少包含：
 - CLI Jenkins build URL / build number / result / CLI version / code revision
 - CLI manifest URL 和实际 version
 - previous release tag
-- 官方上游变更摘要（如果本次发布包含官方版本合入）
-- Fork 独有变更摘要（每条尽量包含 Gitee PR 和 Multica Issue）
+- 官方上游变更明细（如果本次发布包含官方版本合入；按领域分组列 GitHub PR 链接和一句话摘要。注意不是二次摘要，是具体变更列表）
+- Fork 独有变更明细（每条尽量包含 Gitee PR 和 Multica Issue；同样不是摘要，是具体变更列表）
 - 基础设施 / 发布流程变更（如果本次发布包含 ENV、K8S、Jenkins、OBS、backfill 等变化）
 - 下载与安装信息（CLI / desktop / mobile 等客户端产物；没有客户端产物时明确写暂无）
 
@@ -243,8 +280,9 @@ Release 内容必须至少包含：
 
 如果本次 release 覆盖官方上游版本合入：
 
-- 明确本次 release 对应/覆盖到的官方基线版本，例如 `v0.3.8`。
-- 总结该官方版本 Changelog 中和本次发布相关的核心变化。
+- 明确本次 release 对应/覆盖到的官方基线版本（以及从哪个版本推进到哪个版本），例如 `v0.3.6 → v0.3.8`。
+- 用具体功能/模块名称总结官方 Changelog 中的核心变化，不能用「稳定性增强」「能力提升」等空洞表述代替。合格示例：「iOS 客户端首次可用」「新增 Helm chart 支持 Kubernetes 部署」「运行时成本识别新增 DeepSeek/Kimi K2.6/Zhipu GLM」。不合格示例：「重点落在 CLI、Runtime 和交互体验的稳定性增强」——这句没有告诉读者任何具体信息。
+- 如果挂了官方 Changelog 锚点，正文必须至少提及该 Changelog 里 2-3 个具体变更点，不能只挂链接不写内容。
 - 带上对应官方基线版本锚点，例如 `[官方 Changelog](https://multica.ai/changelog#release-0-3-8)`。
 - 注意：锚点必须对应本次 release 实际覆盖到的官方基线版本，不是官方网站当前最新版本。比如本次只覆盖到 `v0.3.8`，即使官方已经发布 `v0.3.12`，也只能链接 `#release-0-3-8`。
 
@@ -271,7 +309,7 @@ Release 内容必须至少包含：
 
 ## 官方上游变更
 
-仅当本次发布包含官方上游合入时填写。按领域分组列 GitHub PR 链接和一句话摘要；本节保留 PR/commit 级别追溯，不替代顶部「版本摘要」。来源优先级：
+仅当本次发布包含官方上游合入时填写。按领域分组列 GitHub PR 链接和一句话摘要；本节是具体变更明细（不是二次摘要），与顶部「版本摘要」分工明确——版本摘要做提炼，本节做追溯。来源优先级：
 1. `git log <previous-release-tag>..<PROJECT_VERSION>` 中的 GitHub PR merge commits
 2. 官方 release/changelog
 3. GitHub PR title/body
@@ -326,12 +364,14 @@ curl -fsSL https://multica.wujieai.com/install.sh | sh
 写 Release 前必须做这几步，避免把错误事实固化到发布记录里：
 
 ```bash
-# 1. 确认 tag 与 FULL_SHA 一致
-git rev-parse <PROJECT_VERSION>
+# 1. 确认 tag 与 FULL_SHA 一致（annotated tag 必须 peel）
+git rev-parse <PROJECT_VERSION>^{}
 git rev-parse <FULL_SHA>
 
 # 2. 列出当前 release 覆盖范围内的 commits / PR，严禁写入 tag 之后的 PR
-git log --oneline <PREVIOUS_RELEASE>..<PROJECT_VERSION> --reverse
+git log --oneline <PREVIOUS_RELEASE>..<PROJECT_VERSION>^{} --reverse
+# 或显式使用本次冻结的 FULL_SHA：
+git log --oneline <PREVIOUS_RELEASE>..<FULL_SHA> --reverse
 
 # 3. Fork PR 清单以 Gitee PR API / merge commit 为准
 # 每个 Fork 变更都尽量补 PR + OPE issue；不能只凭记忆写。
@@ -351,8 +391,26 @@ curl -fsSL https://obs-multica.wujieai.com/cli/manifest.json | jq -r .version
 - `PROJECT_VERSION`、Gitee release tag、CLI manifest version 三者一致。
 - 组件交付表包含 backend / frontend / CLI 的 build URL、build number、result、产物版本、code revision。
 - Release 顶部有「版本摘要」，用人话说明核心变化和用户可感知价值；不能只有 PR/Issue 明细。
-- 如果包含官方上游合入，「版本摘要」已总结相关官方 Changelog，并链接到本次 release 覆盖到的官方基线版本锚点。
+- 如果包含官方上游合入，「版本摘要」已总结相关官方 Changelog，并链接到本次 release 覆盖到的官方基线版本锚点；正文至少包含 2-3 个来自官方 Changelog 的具体变更点，不能只有「稳定性增强」等空泛表述。
+- 「版本摘要」下面各节（官方上游变更、Fork 独有变更）不使用「摘要」字样——它们是具体变更明细。
 - 「官方上游变更」和「Fork 独有变更」已分开；无官方合入时说明跳过。
 - Fork 变更不漏当前 tag 内的重要 PR，不混入 tag 之后的 PR。
 - ENV / K8S / Jenkins / OBS / backfill 等基础设施变化有独立 section。
 - 下载 section 只写真实已发布客户端产物；checksum 信息来自 manifest。
+
+### 发布过程中 main 前进导致 tag 错绑的事故处理
+
+如果发现本次 Jenkins/manifest 实际部署的是 `FULL_SHA=A`，但 release tag 被错误打到了发布过程中后续合入的 `origin/main=B`：
+
+1. 先确认 A 是本次 backend / frontend / CLI 已部署 commit，B 是发布过程中后续合入、应进入下一次发布的 commit。
+2. 在确认无误前，不要再次生产发布来“掩盖”问题。
+3. 经发布负责人确认后，将 tag 修正回实际部署 commit A，并更新 Gitee Release 正文说明 B 不属于本次发布：
+
+```bash
+git tag -fa "$PROJECT_VERSION" "$FULL_SHA" -F release-body.md
+git push origin "refs/tags/$PROJECT_VERSION" --force
+```
+
+4. Release 正文必须明确：发布过程中 main 前进的 commit 不属于本次已部署版本，将在下一次 release 中覆盖。
+5. 同步修正 AutoPilot / skill 的发布逻辑，确保后续 tag 创建总是使用冻结的 `FULL_SHA`。
+

@@ -18,21 +18,12 @@ import (
 const daemonIDFileName = "daemon.id"
 
 // EnsureDaemonID returns a stable UUID for this daemon instance, persisting
-// it to disk on first call. Identity is machine-scoped: every profile on the
-// same machine shares one UUID stored at `~/.multica/daemon.id`. Profile
-// boundaries are about which backend/account a daemon is talking to, not
-// about the physical machine's identity, so a single host running both the
-// CLI-spawned daemon and the desktop-spawned daemon (or toggling profiles)
-// registers as one runtime everywhere rather than N.
+// it to disk on first call. Identity is profile-scoped: each profile gets its
+// own daemon.id stored in its profile directory (e.g. `~/.multica/profiles/member/daemon.id`).
+// The default (empty) profile stores it at `~/.multica/daemon.id`.
 //
-// The `profile` argument is retained purely for one-time migration: if the
-// canonical file does not yet exist and the current profile has a leftover
-// per-profile daemon.id from the pre-#1220 layout, promote it in place so a
-// user who previously ran the daemon under a named profile keeps the same
-// UUID instead of a fresh mint + merge round-trip. Any OTHER leftover
-// per-profile daemon.id files are surfaced separately via LegacyDaemonUUIDs
-// so the server can merge their runtime rows into the canonical row at
-// register time.
+// This allows multiple profiles on the same machine to run independent daemons
+// without competing for the same runtime identity on the server.
 //
 // If the file exists but is corrupt (unparseable), it is regenerated so the
 // daemon can continue starting up instead of hard-failing.
@@ -135,7 +126,7 @@ func daemonIDBaseDir(profile, configPath string) (string, error) {
 	if strings.TrimSpace(configPath) != "" {
 		return cli.StateDirForInstance(profile, configPath)
 	}
-	return cli.ProfileDir("")
+	return cli.ProfileDir(profile)
 }
 
 // LegacyDaemonIDs returns the set of daemon_id values this machine may have

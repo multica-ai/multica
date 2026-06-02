@@ -211,6 +211,37 @@ describe("ReadonlyContent line breaks", () => {
   });
 });
 
+describe("ReadonlyContent issue mention Markdown", () => {
+  it("renders an issue mention inside a task list as an issue mention card", () => {
+    const { container, getByTestId } = render(
+      <ReadonlyContent content="- [ ] [MUL-123](mention://issue/issue-123)" />,
+    );
+
+    expect(container.querySelector('input[type="checkbox"]')).not.toBeNull();
+    expect(getByTestId("issue-mention-card").textContent).toBe("MUL-123");
+  });
+
+  it("documents the CommonMark quoted-emphasis edge case before Korean particles", () => {
+    const unsafe = render(
+      <ReadonlyContent content={'**"무엇을 먼저 정해두고 시작할지"**가'} />,
+    );
+
+    expect(unsafe.container.querySelector("strong")).toBeNull();
+    expect(unsafe.container.textContent).toContain(
+      '**"무엇을 먼저 정해두고 시작할지"**가',
+    );
+
+    const safe = render(
+      <ReadonlyContent content={'"**무엇을 먼저 정해두고 시작할지**"가'} />,
+    );
+
+    expect(safe.container.querySelector("strong")?.textContent).toBe(
+      "무엇을 먼저 정해두고 시작할지",
+    );
+    expect(safe.container.textContent).toContain('"무엇을 먼저 정해두고 시작할지"가');
+  });
+});
+
 describe("ReadonlyContent code styling", () => {
   const literalCode = "uv run --extra dev pytest -q";
 
@@ -234,6 +265,15 @@ describe("ReadonlyContent code styling", () => {
 
     expect(inlineCode?.textContent).toBe(literalCode);
     expect(blockCode?.textContent).toBe(literalCode);
+  });
+
+  it("renders code blocks without a language tag (lowlight highlightAuto fallback)", () => {
+    const token = "mul_407ec1e4464b580304362ed749f821901fd7d310";
+    const { container } = render(
+      <ReadonlyContent content={["```", token, "```"].join("\n")} />,
+    );
+    const blockCode = container.querySelector("pre code");
+    expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
   it("keeps editor code literal by disabling font ligatures", () => {

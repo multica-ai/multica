@@ -66,8 +66,8 @@ export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack
     map.set(u.date, entry);
   }
   const round = (n: number) => Math.round(n * 100) / 100;
-  return [...map.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
+  return Array.from(map.entries())
+    .toSorted(([a], [b]) => a.localeCompare(b))
     .map(([date, s]) => {
       const input = round(s.input);
       const output = round(s.output);
@@ -107,8 +107,8 @@ export function aggregateDailyTokens(usage: DashboardUsageDaily[]): DailyTokenDa
     entry.cacheWrite += u.cache_write_tokens;
     map.set(u.date, entry);
   }
-  return [...map.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
+  return Array.from(map.entries())
+    .toSorted(([a], [b]) => a.localeCompare(b))
     .map(([date, t]) => ({
       date,
       label: formatDateLabel(date),
@@ -196,7 +196,7 @@ export function aggregateAgentTokens(rows: DashboardUsageByAgent[]): AgentCostRo
     entry.taskCount += r.task_count;
     map.set(r.agent_id, entry);
   }
-  return [...map.values()].sort((a, b) => b.cost - a.cost);
+  return Array.from(map.values()).toSorted((a, b) => b.cost - a.cost);
 }
 
 export function aggregateLocalRunnerTokens(
@@ -308,7 +308,7 @@ export function mergeAgentDashboardRows(
       taskCount: r.task_count,
     });
   }
-  return [...merged.values()].sort((a, b) => {
+  return Array.from(merged.values()).toSorted((a, b) => {
     if (b.cost !== a.cost) return b.cost - a.cost;
     return b.seconds - a.seconds;
   });
@@ -415,8 +415,7 @@ export function aggregateWeeklyTasks(
 // DailyTimeChart. Sorted ascending so the x-axis reads oldest-to-newest,
 // matching the cost / tokens aggregators.
 export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData[] {
-  return [...rows]
-    .sort((a, b) => a.date.localeCompare(b.date))
+  return rows.toSorted((a, b) => a.date.localeCompare(b.date))
     .map((r) => ({
       date: r.date,
       label: formatDateLabel(r.date),
@@ -428,8 +427,7 @@ export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData
 // counts for the DailyTasksChart's stacked bar (failed_count is a subset
 // of task_count, so completed = task_count - failed_count).
 export function aggregateDailyTasks(rows: DashboardRunTimeDaily[]): DailyTasksData[] {
-  return [...rows]
-    .sort((a, b) => a.date.localeCompare(b.date))
+  return rows.toSorted((a, b) => a.date.localeCompare(b.date))
     .map((r) => {
       const failed = r.failed_count;
       const completed = Math.max(0, r.task_count - failed);

@@ -2,7 +2,10 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
-import { createMarkdownPasteExtension } from "./markdown-paste";
+import {
+  createMarkdownPasteExtension,
+  escapeRawHtmlTagsOutsideCode,
+} from "./markdown-paste";
 
 interface FakeClipboard {
   files: never[];
@@ -149,6 +152,93 @@ describe("markdownPaste — code block context", () => {
     expect(types).toContain("heading");
   });
 
+  it("lets semantic rich HTML paste natively instead of reparsing plain text as Markdown", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    editor.commands.setTextSelection(1);
+    const parseSpy = vi.spyOn(editor.markdown!, "parse");
+
+    const text =
+      "viewFiltersToApiParams(filters) maps to Partial<ListIssuesParams>.";
+    const html =
+      "<p><code>viewFiltersToApiParams(filters)</code> maps to " +
+      "<code>Partial&lt;ListIssuesParams&gt;</code>.</p>";
+
+    const handled = paste(editor, text, html);
+    expect(handled).toBe(false);
+    expect(parseSpy).not.toHaveBeenCalled();
+  });
+
+  it("lets list and emphasis HTML paste natively", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    editor.commands.setTextSelection(1);
+    const parseSpy = vi.spyOn(editor.markdown!, "parse");
+
+    const handled = paste(
+      editor,
+      "Done\nCreated filters.ts",
+      "<ul><li><strong>Done</strong></li><li>Created filters.ts</li></ul>",
+    );
+
+    expect(handled).toBe(false);
+    expect(parseSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not paste rich HTML natively when its text would drop raw tag-like lines", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    editor.commands.setTextSelection(1);
+
+    const text =
+      "<t>\n\n裸 `<tag>` 做转\n\n<tag>\n\n" +
+      "<t>\n\n裸 `<tag>` 做转\n\n<tag>";
+    const html =
+      "<div><t></t></div>" +
+      "<p>裸 <code>&lt;tag&gt;</code> 做转</p>" +
+      "<div><tag></tag></div>" +
+      "<div><t></t></div>" +
+      "<p>裸 <code>&lt;tag&gt;</code> 做转</p>" +
+      "<div><tag></tag></div>";
+
+    const handled = paste(editor, text, html);
+    expect(handled).toBe(true);
+
+    const editorText = editor.getText();
+    expect(editorText.match(/<t>/g)).toHaveLength(2);
+    expect(editorText.match(/<tag>/g)).toHaveLength(4);
+    expect(editorText.match(/裸/g)).toHaveLength(2);
+  });
+
+  it("still parses Markdown when HTML is only a syntax-highlight wrapper", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    editor.commands.setTextSelection(1);
+
+    const handled = paste(
+      editor,
+      "# Heading\n\nbody",
+      '<pre><code><span style="color: #888"># Heading</span><br><br>body</code></pre>',
+    );
+
+    expect(handled).toBe(true);
+    const json = editor.getJSON() as JsonNode;
+    const types = (json.content ?? []).map((n) => n.type);
+    expect(types).toContain("heading");
+  });
+
   it("inserts JSON clipboard text without running the Markdown parser", () => {
     editor = makeEditor({
       type: "doc",
@@ -272,5 +362,64 @@ describe("markdownPaste — code block context", () => {
 
     // markdownPaste should return false (defers to fileUpload which is not loaded in this test)
     expect(handled).toBe(false);
+  });
+});
+
+describe("escapeRawHtmlTagsOutsideCode", () => {
+  it("escapes HTML-like tags", () => {
+    expect(escapeRawHtmlTagsOutsideCode("<T>")).toBe("&lt;T&gt;");
+    expect(escapeRawHtmlTagsOutsideCode("<tag>")).toBe("&lt;tag&gt;");
+    expect(escapeRawHtmlTagsOutsideCode("<MyComponent>")).toBe(
+      "&lt;MyComponent&gt;",
+    );
+    expect(escapeRawHtmlTagsOutsideCode("</tag>")).toBe("&lt;/tag&gt;");
+  });
+
+  it("escapes standard HTML element names too", () => {
+    expect(escapeRawHtmlTagsOutsideCode("<div>")).toBe("&lt;div&gt;");
+    expect(escapeRawHtmlTagsOutsideCode("<br>")).toBe("&lt;br&gt;");
+    expect(escapeRawHtmlTagsOutsideCode("</div>")).toBe("&lt;/div&gt;");
+    expect(escapeRawHtmlTagsOutsideCode('<img src="x">')).toBe(
+      '&lt;img src="x"&gt;',
+    );
+  });
+
+  it("does not escape inside inline code spans", () => {
+    expect(escapeRawHtmlTagsOutsideCode("`<tag>`")).toBe("`<tag>`");
+    expect(escapeRawHtmlTagsOutsideCode("text `<T>` more")).toBe(
+      "text `<T>` more",
+    );
+    expect(escapeRawHtmlTagsOutsideCode("``<tag>``")).toBe("``<tag>``");
+  });
+
+  it("does not escape inside fenced code blocks", () => {
+    expect(escapeRawHtmlTagsOutsideCode("```\n<T>\n```")).toBe(
+      "```\n<T>\n```",
+    );
+    expect(escapeRawHtmlTagsOutsideCode("~~~\n<tag>\n~~~")).toBe(
+      "~~~\n<tag>\n~~~",
+    );
+    expect(escapeRawHtmlTagsOutsideCode("   ```\n<T>\n   ```")).toBe(
+      "   ```\n<T>\n   ```",
+    );
+  });
+
+  it("escapes all tag-like runs in mixed content", () => {
+    expect(escapeRawHtmlTagsOutsideCode("<T> and <div>")).toBe(
+      "&lt;T&gt; and &lt;div&gt;",
+    );
+  });
+
+  it("handles multi-line mixed content", () => {
+    const input = "<t>\n\n裸 `<tag>` 做转\n\n<tag>\n\n<t>";
+    const result = escapeRawHtmlTagsOutsideCode(input);
+    expect(result).toBe(
+      "&lt;t&gt;\n\n裸 `<tag>` 做转\n\n&lt;tag&gt;\n\n&lt;t&gt;",
+    );
+  });
+
+  it("does not touch math expressions", () => {
+    expect(escapeRawHtmlTagsOutsideCode("1 < 2 > 0")).toBe("1 < 2 > 0");
+    expect(escapeRawHtmlTagsOutsideCode("x<y")).toBe("x<y");
   });
 });

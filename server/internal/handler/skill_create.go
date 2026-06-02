@@ -3,9 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type skillCreateInput struct {
@@ -17,6 +19,8 @@ type skillCreateInput struct {
 	Config      any
 	Files       []CreateSkillFileRequest
 }
+
+var errSkillOverwriteForbidden = errors.New("only the skill creator can manage this skill")
 
 // createSkillWithFilesInTx writes a skill plus its supporting files using the
 // provided sqlc Queries handle, which must already be bound to an open
@@ -82,4 +86,82 @@ func (h *Handler) createSkillWithFiles(ctx context.Context, input skillCreateInp
 	}
 
 	return result, nil
+}
+
+func (h *Handler) overwriteSkillWithFiles(ctx context.Context, input skillCreateInput) (SkillWithFilesResponse, error) {
+	existing, err := h.Queries.GetSkillByWorkspaceAndName(ctx, db.GetSkillByWorkspaceAndNameParams{
+		WorkspaceID: input.WorkspaceID,
+		Name:        input.Name,
+	})
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      input.CreatorID,
+		WorkspaceID: input.WorkspaceID,
+	})
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	if !roleAllowed(member.Role, "owner", "admin") && (!existing.CreatedBy.Valid || existing.CreatedBy != input.CreatorID) {
+		return SkillWithFilesResponse{}, errSkillOverwriteForbidden
+	}
+
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := h.Queries.WithTx(tx)
+	config, err := json.Marshal(input.Config)
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	if input.Config == nil {
+		config = []byte("{}")
+	}
+
+	skill, err := qtx.UpdateSkill(ctx, db.UpdateSkillParams{
+		ID:          existing.ID,
+		Name:        pgtype.Text{String: sanitizeNullBytes(input.Name), Valid: true},
+		Description: pgtype.Text{String: sanitizeNullBytes(input.Description), Valid: true},
+		Content:     pgtype.Text{String: sanitizeNullBytes(input.Content), Valid: true},
+		Config:      config,
+	})
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+
+	if err := qtx.DeleteSkillFilesBySkill(ctx, skill.ID); err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	fileResps := make([]SkillFileResponse, 0, len(input.Files))
+	for _, f := range input.Files {
+		sf, err := qtx.UpsertSkillFile(ctx, db.UpsertSkillFileParams{
+			SkillID: skill.ID,
+			Path:    sanitizeNullBytes(f.Path),
+			Content: sanitizeNullBytes(f.Content),
+		})
+		if err != nil {
+			return SkillWithFilesResponse{}, err
+		}
+		fileResps = append(fileResps, skillFileToResponse(sf))
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+
+	return SkillWithFilesResponse{
+		SkillResponse: skillToResponse(skill),
+		Files:         fileResps,
+	}, nil
+}
+
+func skillImportEvent(overwroteExisting bool) string {
+	if overwroteExisting {
+		return protocol.EventSkillUpdated
+	}
+	return protocol.EventSkillCreated
 }
