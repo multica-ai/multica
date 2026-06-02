@@ -92,6 +92,20 @@ type GitHubConnectResponse struct {
 	Configured bool   `json:"configured"`
 }
 
+// GitHubPRReviewResponse is the JSON shape returned by the PR reviews
+// endpoint. One row per (PR, reviewer) with only the latest review state.
+type GitHubPRReviewResponse struct {
+	PrID              string  `json:"pr_id"`
+	ReviewerLogin     string  `json:"reviewer_login"`
+	ReviewerAvatarURL *string `json:"reviewer_avatar_url"`
+	State             string  `json:"state"`
+	SubmittedAt       string  `json:"submitted_at"`
+	RepoOwner         string  `json:"repo_owner"`
+	RepoName          string  `json:"repo_name"`
+	PrNumber          int32   `json:"pr_number"`
+	PrHtmlURL         string  `json:"pr_html_url"`
+}
+
 func githubInstallationToResponse(i db.GithubInstallation) GitHubInstallationResponse {
 	instID := i.InstallationID
 	return GitHubInstallationResponse{
@@ -478,6 +492,39 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 		out = append(out, issuePullRequestRowToResponse(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
+}
+
+// ── List PR reviews (approval badges) for an issue ──────────────────────────
+
+func (h *Handler) ListPRReviewsForIssue(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.GetLatestReviewPerPRByIssue(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list PR reviews")
+		return
+	}
+	out := make([]GitHubPRReviewResponse, 0, len(rows))
+	for _, row := range rows {
+		var avatarURL *string
+		if row.ReviewerAvatarUrl.Valid {
+			avatarURL = &row.ReviewerAvatarUrl.String
+		}
+		out = append(out, GitHubPRReviewResponse{
+			PrID:              uuidToString(row.PrID),
+			ReviewerLogin:     row.ReviewerLogin,
+			ReviewerAvatarURL: avatarURL,
+			State:             row.State,
+			SubmittedAt:       row.SubmittedAt.Time.UTC().Format(time.RFC3339),
+			RepoOwner:         row.RepoOwner,
+			RepoName:          row.RepoName,
+			PrNumber:          row.PrNumber,
+			PrHtmlURL:         row.PrHtmlUrl,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"reviews": out})
 }
 
 // ── Webhook ─────────────────────────────────────────────────────────────────

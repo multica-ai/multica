@@ -97,6 +97,7 @@ import type {
   NotificationPreferenceResponse,
   NotificationPreferences,
   GitHubPullRequest,
+  GitHubPRReview,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
   Squad,
@@ -2014,5 +2015,9 @@ export class ApiClient {
 
   async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
     return this.fetch(`/api/issues/${issueId}/pull-requests`);
+  }
+
+  async listIssuePRReviews(issueId: string): Promise<{ reviews: GitHubPRReview[] }> {
+    return this.fetch(`/api/issues/${issueId}/pr-reviews`);
   }
 }

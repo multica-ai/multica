@@ -92,6 +92,8 @@ export type {
   GitHubPullRequestState,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
+  GitHubPRReview,
+  GitHubPRReviewState,
 } from "./github";
 export type {
   Autopilot,

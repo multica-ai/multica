@@ -219,7 +219,10 @@
     "link_copy_failed": "링크를 복사하지 못했습니다",
     "workdir_path_copied": "작업 디렉터리 경로를 복사했습니다",
     "workdir_path_copy_failed": "작업 디렉터리 경로를 복사하지 못했습니다",
-    "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 이슈를 실행하지 않았습니다"
+    "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 이슈를 실행하지 않았습니다",
+    "pr_review_approved": "Approved",
+    "pr_review_changes_requested": "Changes requested",
+    "pr_review_pending": "Pending review"
   },
   "timeline": {
     "loading": "불러오는 중..."

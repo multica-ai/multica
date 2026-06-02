@@ -12,9 +12,11 @@ import {
   GitPullRequestDraft,
   TriangleAlert,
   XCircle,
+  ShieldCheck,
 } from "lucide-react";
 import {
   issuePullRequestsOptions,
+  issuePRReviewsOptions,
   derivePullRequestStatusKind,
   derivePullRequestProgressSegments,
   shouldShowPullRequestStats,
@@ -25,6 +27,7 @@ import type {
   GitHubPullRequest,
   GitHubPullRequestChecksConclusion,
   GitHubPullRequestState,
+  GitHubPRReview,
 } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
@@ -58,7 +61,16 @@ export function PullRequestList({ issueId }: { issueId: string }) {
   const { t } = useT("issues");
   const [expanded, setExpanded] = useState(false);
   const { data, isLoading } = useQuery(issuePullRequestsOptions(issueId));
+  const { data: reviewsData } = useQuery(issuePRReviewsOptions(issueId));
   const prs = data?.pull_requests ?? [];
+  const reviews = reviewsData?.reviews ?? [];
+  // Build a map: pr_id -> reviews[] for fast lookup in PullRequestRow
+  const reviewsByPrId = new Map<string, GitHubPRReview[]>();
+  for (const r of reviews) {
+    const arr = reviewsByPrId.get(r.pr_id) ?? [];
+    arr.push(r);
+    reviewsByPrId.set(r.pr_id, arr);
+  }
 
   if (isLoading) {
     return <p className="text-xs text-muted-foreground px-2">{t(($) => $.detail.pull_requests_loading)}</p>;
@@ -82,12 +94,12 @@ export function PullRequestList({ issueId }: { issueId: string }) {
   return (
     <div className="space-y-1">
       {expandedHead.map((pr) => (
-        <PullRequestRow key={pr.id} pr={pr} />
+        <PullRequestRow key={pr.id} pr={pr} reviews={reviewsByPrId.get(pr.id) ?? []} />
       ))}
       {useCollapse ? (
         <div className="space-y-1">
           {expanded
-            ? collapsedTail.map((pr) => <PullRequestRow key={pr.id} pr={pr} />)
+            ? collapsedTail.map((pr) => <PullRequestRow key={pr.id} pr={pr} reviews={reviewsByPrId.get(pr.id) ?? []} />)
             : null}
           <button
             type="button"
@@ -104,7 +116,7 @@ export function PullRequestList({ issueId }: { issueId: string }) {
   );
 }
 
-function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
+function PullRequestRow({ pr, reviews }: { pr: GitHubPullRequest; reviews: GitHubPRReview[] }) {
   const { t } = useT("issues");
   const cfg = STATE_ICON[pr.state] ?? { icon: GitPullRequest, className: "" };
   const StateIcon = cfg.icon;
@@ -160,6 +172,7 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
               : statusText
           }
           statusKind={kind}
+          reviews={reviews}
         />
       </div>
     </a>
@@ -172,12 +185,14 @@ function PullRequestRowDetails({
   showStats,
   statusText,
   statusKind,
+  reviews,
 }: {
   pr: GitHubPullRequest;
   segments: PullRequestProgressSegment[] | null;
   showStats: boolean;
   statusText: string;
   statusKind: PullRequestStatusKind;
+  reviews: GitHubPRReview[];
 }) {
   const { t } = useT("issues");
   const checksBadge = getChecksBadge(pr, t);
@@ -199,6 +214,7 @@ function PullRequestRowDetails({
       <span className="truncate">{statusText}</span>
       {showChecksBadge ? <PullRequestBadge badge={checksBadge} /> : null}
       {showConflictsBadge ? <PullRequestBadge badge={conflictsBadge} /> : null}
+      <ApprovalBadge reviews={reviews} t={t} />
     </div>
   );
 }
@@ -255,6 +271,51 @@ function PullRequestBadge({ badge }: { badge: PullRequestBadgeConfig }) {
     <span className="inline-flex items-center gap-1">
       <Icon className={cn("h-3 w-3", badge.className)} />
       {badge.label}
+    </span>
+  );
+}
+
+function ApprovalBadge({
+  reviews,
+  t,
+}: {
+  reviews: GitHubPRReview[];
+  t: IssuesT;
+}) {
+  if (reviews.length === 0) return null;
+
+  const approved = reviews.filter((r) => r.state === "approved").length;
+  const changesRequested = reviews.filter((r) => r.state === "changes_requested").length;
+
+  // Aggregate: if any reviewer requested changes, show that; otherwise if any approved, show approved.
+  if (changesRequested > 0) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <XCircle className="h-3 w-3 text-rose-600 dark:text-rose-400" />
+        <span>
+          {t(($) => $.detail.pr_review_changes_requested)}
+          {approved > 0 ? ` (${approved} ${t(($) => $.detail.pr_review_approved).toLowerCase()})` : ""}
+        </span>
+      </span>
+    );
+  }
+
+  if (approved > 0) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <ShieldCheck className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+        <span>
+          {approved} {t(($) => $.detail.pr_review_approved).toLowerCase()}
+        </span>
+      </span>
+    );
+  }
+
+  // Only commented/dismissed — show as pending
+  return (
+    <span className="inline-flex items-center gap-1">
+      <CircleDashed className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+      <span>{t(($) => $.detail.pr_review_pending)}</span>
     </span>
   );
 }
