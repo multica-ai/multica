@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -1131,6 +1132,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
+		// runtime_config is stored as JSONB and may legitimately be the
+		// empty object `{}` for agents that haven't opted into any
+		// provider-specific tuning. Forward only non-empty payloads so the
+		// daemon's per-provider decoders treat absent-or-empty identically.
+		var runtimeConfig json.RawMessage
+		if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
+			runtimeConfig = json.RawMessage(agent.RuntimeConfig)
+		}
 		resp.Agent = &TaskAgentData{
 			ID:            uuidToString(agent.ID),
 			Name:          agent.Name,
@@ -1141,6 +1150,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			McpConfig:     mcpConfig,
 			Model:         agent.Model.String,
 			ThinkingLevel: agent.ThinkingLevel.String,
+			RuntimeConfig: runtimeConfig,
 		}
 	}
 

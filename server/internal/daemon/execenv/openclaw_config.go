@@ -49,6 +49,62 @@ type OpenclawConfigPrep struct {
 	// Null / empty means inherit the user's global config — same three-state
 	// semantics codex uses (`hasManagedCodexMcpConfig`).
 	McpConfig json.RawMessage
+	// Gateway pins a specific OpenClaw Gateway endpoint inside the per-task
+	// wrapper. Only consulted when the agent is configured for gateway-mode
+	// openclaw (see ExecOptions.OpenclawMode); zero means "inherit whatever
+	// the user's global openclaw.json already configures under `gateway.*`"
+	// — which is the right default when the user already has a working
+	// gateway set up locally. See issue #3260.
+	Gateway OpenclawGatewayPin
+}
+
+// OpenclawGatewayPin describes the Gateway endpoint a per-task openclaw
+// wrapper should pin. Fields mirror OpenClaw's own `gateway.*` config shape
+// (see ~/.openclaw/openclaw.json). All fields are optional; only non-zero
+// fields are emitted into the wrapper so a partial pin (e.g. host+port
+// only, token left to inherit from the user's config) does the right
+// thing under OpenClaw's deep-merge $include semantics.
+type OpenclawGatewayPin struct {
+	Host  string
+	Port  int
+	Token string
+	TLS   bool
+}
+
+// IsZero reports whether every field is zero, i.e. there is nothing to pin.
+func (p OpenclawGatewayPin) IsZero() bool {
+	return p == OpenclawGatewayPin{}
+}
+
+// String masks the bearer token when the pin is rendered as a string —
+// `%v` / `%+v` / direct `fmt.Stringer` use cases all go through here. The
+// raw Token field still exists for the wrapper-config emitter that needs
+// it; this is a belt against a future caller that logs a whole task-prep
+// summary at a level a non-admin can see (issue #3260 CR).
+func (p OpenclawGatewayPin) String() string {
+	tok := ""
+	if p.Token != "" {
+		tok = "***"
+	}
+	return fmt.Sprintf("OpenclawGatewayPin{Host:%q Port:%d Token:%s TLS:%t}", p.Host, p.Port, tok, p.TLS)
+}
+
+// MarshalJSON masks the bearer token in any default JSON dump (debug
+// endpoints, error envelopes, structured-log encoders). The wrapper config
+// writer goes through buildGatewayOverride which assembles a map directly,
+// so it is unaffected by this masking.
+func (p OpenclawGatewayPin) MarshalJSON() ([]byte, error) {
+	type alias struct {
+		Host  string `json:"host,omitempty"`
+		Port  int    `json:"port,omitempty"`
+		Token string `json:"token,omitempty"`
+		TLS   bool   `json:"tls,omitempty"`
+	}
+	masked := alias{Host: p.Host, Port: p.Port, TLS: p.TLS}
+	if p.Token != "" {
+		masked.Token = "***"
+	}
+	return json.Marshal(masked)
 }
 
 // OpenclawConfigResult is what prepareOpenclawConfig returns to its callers
@@ -192,7 +248,7 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 		}
 	}
 
-	cfg := buildPerTaskOpenclawConfig(activePath, exists, snapshotPath, resolvedList, workDir, managedMcp, hasManagedMcp)
+	cfg := buildPerTaskOpenclawConfig(activePath, exists, snapshotPath, resolvedList, workDir, managedMcp, hasManagedMcp, opts.Gateway)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -248,7 +304,7 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 // snapshot $include has already dropped the user's `mcp` block, the
 // resulting view of `mcp.servers` is exactly the managed set — including
 // `{}` for "admin saved no servers" (mirrors `hasManagedCodexMcpConfig`).
-func buildPerTaskOpenclawConfig(activePath string, exists bool, snapshotPath string, resolvedList []any, workDir string, managedMcp map[string]any, hasManagedMcp bool) map[string]any {
+func buildPerTaskOpenclawConfig(activePath string, exists bool, snapshotPath string, resolvedList []any, workDir string, managedMcp map[string]any, hasManagedMcp bool, gateway OpenclawGatewayPin) map[string]any {
 	agents := map[string]any{
 		"defaults": map[string]any{"workspace": workDir},
 	}
@@ -269,6 +325,15 @@ func buildPerTaskOpenclawConfig(activePath string, exists bool, snapshotPath str
 		}
 		cfg["mcp"] = map[string]any{"servers": servers}
 	}
+	// Gateway endpoint pin (issue #3260). Mirrors the user's openclaw.json
+	// `gateway.*` shape so OpenClaw's deep-merge $include semantics produce
+	// the right composed config: anything we set here wins over the user's
+	// global, anything we omit inherits from the user's global. Only emit
+	// fields the multica admin explicitly populated — zero strings/ints
+	// would override the user's value with junk.
+	if gw := buildGatewayOverride(gateway); gw != nil {
+		cfg["gateway"] = gw
+	}
 	switch {
 	case snapshotPath != "":
 		// Sanitized snapshot path; strict-replace flow for managed mcp_config.
@@ -280,6 +345,36 @@ func buildPerTaskOpenclawConfig(activePath string, exists bool, snapshotPath str
 		cfg["$include"] = []any{activePath}
 	}
 	return cfg
+}
+
+// buildGatewayOverride renders the non-zero subset of a Gateway pin into the
+// shape OpenClaw expects under `gateway.*` (see ~/.openclaw/openclaw.json:
+// host, port, tls at the top level and an `auth: {mode, token}` sub-object).
+// Returns nil when nothing is populated so the caller can skip emission.
+func buildGatewayOverride(p OpenclawGatewayPin) map[string]any {
+	if p.IsZero() {
+		return nil
+	}
+	out := map[string]any{}
+	if p.Host != "" {
+		out["host"] = p.Host
+	}
+	if p.Port != 0 {
+		out["port"] = p.Port
+	}
+	if p.TLS {
+		out["tls"] = true
+	}
+	if p.Token != "" {
+		out["auth"] = map[string]any{
+			"mode":  "token",
+			"token": p.Token,
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // rewriteAgentsListWorkspaces copies every entry of the resolved agents.list
