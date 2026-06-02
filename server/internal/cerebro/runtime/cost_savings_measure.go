@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/costmeasure"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/pricing"
@@ -33,7 +34,6 @@ const (
 
 // Metric units (CostSavingMetric in the registry).
 const (
-	metricPlatformCalls = "platform_calls"
 	metricModelCost     = "model_cost"
 	metricContextTokens = "context_tokens"
 )
@@ -91,6 +91,9 @@ type CostSavingRunFacts struct {
 	// comment, chat history) the server inlined into the start prompt this run —
 	// i.e. reads a daemon agent would otherwise have made itself.
 	InlinedContextReads int
+	// InlinedContextChars is the character count of inlined issue/thread context
+	// when known (0 → typical token estimate). FIR-2786.
+	InlinedContextChars int64
 	// ToolResultChars is the total characters of tool-result content carried in
 	// the run transcript — the surface that prune_tool_results targets. Used as
 	// the would-save estimate when the saving is in shadow mode.
@@ -206,23 +209,28 @@ func measureRun(modes map[string]string, f CostSavingRunFacts, cheapModel string
 		switch key {
 		case savingSnapshotPrompt:
 			// Putting the issue + thread in the start prompt removes the per-run
-			// reads the agent would otherwise make. Baseline = those reads;
-			// effective = 0 (none left to make).
+			// reads the agent would otherwise make. Baseline = input tokens those
+			// payloads would have added; effective = 0 (none left to fetch).
 			if f.InlinedContextReads <= 0 {
 				continue
 			}
+			baseline, effective := costmeasure.SnapshotTokensEstimate(int(f.InlinedContextChars))
 			m := base
-			m.Metric, m.Baseline, m.Effective = metricPlatformCalls, int64(f.InlinedContextReads), 0
+			m.Metric, m.Baseline, m.Effective = costmeasure.MetricTokens, baseline, effective
+			m.SavedCents = costmeasure.TokenSavingCentsAtReference(baseline - effective)
 			out = append(out, m)
 
 		case savingBundledRead:
-			// Bundling collapses the separate context reads into a single call.
-			// Baseline = those reads; effective = 1 (the one bundled call).
+			// Bundling collapses separate context reads into one call. Baseline =
+			// tokens from the separate payloads; effective = tokens from the
+			// single bundled response.
 			if f.InlinedContextReads <= 1 {
 				continue
 			}
+			baseline, effective := costmeasure.BundledTokensEstimate()
 			m := base
-			m.Metric, m.Baseline, m.Effective = metricPlatformCalls, int64(f.InlinedContextReads), 1
+			m.Metric, m.Baseline, m.Effective = costmeasure.MetricTokens, baseline, effective
+			m.SavedCents = costmeasure.TokenSavingCentsAtReference(baseline - effective)
 			out = append(out, m)
 
 		case savingModelRouting:

@@ -3,6 +3,7 @@ package runtime
 import (
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/costmeasure"
 	"github.com/multica-ai/multica/server/pkg/pricing"
 )
 
@@ -38,7 +39,7 @@ func TestMeasureRun_SnapshotPromptCountsInlinedReads(t *testing.T) {
 	if m.Applied {
 		t.Errorf("shadow mode must not be applied")
 	}
-	if m.Metric != metricPlatformCalls || m.Baseline != 2 || m.Effective != 0 {
+	if m.Metric != costmeasure.MetricTokens || m.Baseline != costmeasure.SnapshotTypicalTokens() || m.Effective != 0 {
 		t.Errorf("unexpected snapshot measurement: %+v", m)
 	}
 }
@@ -58,7 +59,8 @@ func TestMeasureRun_BundledReadCollapsesToOneCall(t *testing.T) {
 	if !ok {
 		t.Fatalf("bundled_read measurement missing: %+v", got)
 	}
-	if !m.Applied || m.Metric != metricPlatformCalls || m.Baseline != 3 || m.Effective != 1 {
+	baseline, effective := costmeasure.BundledTokensEstimate()
+	if !m.Applied || m.Metric != costmeasure.MetricTokens || m.Baseline != baseline || m.Effective != effective {
 		t.Errorf("unexpected bundled measurement: %+v", m)
 	}
 }

@@ -2,7 +2,11 @@ package handler
 
 // CEREBRO-PATCH(daemon-bundled-saving): tests for bundled_read measurement params (FIR-2384).
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/costmeasure"
+)
 
 // TestBundledReadMeasurementParams: "on" records an applied (real) save,
 // "shadow" a would-save (not applied). Both arms share the same baseline (the
@@ -18,19 +22,22 @@ func TestBundledReadMeasurementParams(t *testing.T) {
 	if !on.Applied || on.HeldOut {
 		t.Fatalf("on mode must be applied and not held out, got applied=%v held=%v", on.Applied, on.HeldOut)
 	}
-	if on.SavingKey != costSavingBundledKey || on.Metric != costMetricPlatformCalls {
+	if on.SavingKey != costSavingBundledKey || on.Metric != costmeasure.MetricTokens {
 		t.Fatalf("unexpected key/metric: %+v", on)
 	}
-	if on.BaselineValue != bundledReadBaseline || on.EffectiveValue != 1 {
-		t.Fatalf("expected baseline=%d effective=1, got baseline=%d effective=%d", bundledReadBaseline, on.BaselineValue, on.EffectiveValue)
+	if on.BaselineValue <= on.EffectiveValue {
+		t.Fatalf("expected baseline > effective, got baseline=%d effective=%d", on.BaselineValue, on.EffectiveValue)
+	}
+	if on.SavedCents <= 0 {
+		t.Fatalf("expected priced token saving, got saved_cents=%d", on.SavedCents)
 	}
 
 	shadow := bundledReadMeasurementParams(ws, task, costSavingModeShadow)
 	if shadow.Applied {
 		t.Fatalf("shadow mode must not be applied, got %+v", shadow)
 	}
-	if shadow.BaselineValue != bundledReadBaseline || shadow.EffectiveValue != 1 {
-		t.Fatalf("shadow would-save must share baseline=%d effective=1, got baseline=%d effective=%d", bundledReadBaseline, shadow.BaselineValue, shadow.EffectiveValue)
+	if shadow.BaselineValue != on.BaselineValue || shadow.EffectiveValue != on.EffectiveValue {
+		t.Fatalf("shadow would-save must match token baseline/effective, got baseline=%d effective=%d", shadow.BaselineValue, shadow.EffectiveValue)
 	}
 }
 

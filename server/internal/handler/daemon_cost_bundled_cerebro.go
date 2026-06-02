@@ -23,6 +23,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/costmeasure"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 
@@ -70,12 +71,12 @@ func (h *Handler) applyBundledReadSaving(ctx context.Context, resp *AgentTaskRes
 }
 
 // bundledReadMeasurementParams builds the measurement row for one run. Baseline
-// is the separate reads the single bundled call replaces; effective is 1 (that
-// one call). "on" is an applied (real) save, "shadow" a would-save. The metric
-// is platform_calls, not dollars: daemon agents bill on a flat subscription, so
-// the honest unit is calls saved. Used by both the claim-time shadow path and
-// the endpoint's real-usage path so the two arms stay identically shaped.
+// is tokens from the separate reads the bundled call replaces; effective is
+// tokens from the single bundled response. Used by both the claim-time shadow
+// path and the endpoint's real-usage path so the two arms stay identically shaped.
 func bundledReadMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
+	baseline, effective := costmeasure.BundledTokensEstimate()
+	savedTokens := baseline - effective
 	return cerebrodb.RecordCerebroCostOptimizationMeasurementParams{
 		WorkspaceID:     workspaceID,
 		TaskID:          taskID,
@@ -83,10 +84,10 @@ func bundledReadMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) 
 		Mode:            mode,
 		Applied:         mode == costSavingModeOn,
 		HeldOut:         false,
-		Metric:          costMetricPlatformCalls,
-		BaselineValue:   bundledReadBaseline,
-		EffectiveValue:  1,
-		SavedCents:      0,
+		Metric:          costmeasure.MetricTokens,
+		BaselineValue:   baseline,
+		EffectiveValue:  effective,
+		SavedCents:      costmeasure.TokenSavingCentsAtReference(savedTokens),
 		ActualCostCents: 0,
 	}
 }
