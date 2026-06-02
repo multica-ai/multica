@@ -60,3 +60,5 @@ data/
 .idea
 .crewpilot/
 *.exe
+.als/
+.cospec/

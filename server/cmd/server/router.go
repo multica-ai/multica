@@ -349,6 +349,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
 
+		// Workflow admins (global, not workspace-scoped)
+		r.Get("/api/workflow-admins", h.ListWorkflowAdmins)
+		r.Put("/api/workflow-admins", h.UpdateWorkflowAdmins)
+		r.Post("/api/workflow-admins/invite", h.InviteWorkflowAdmin)
+
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
 			r.Post("/", h.CreateWorkspace)
@@ -503,6 +508,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetWorkflow)
 					r.Put("/", h.UpdateWorkflow)
 					r.Delete("/", h.DeleteWorkflow)
+					r.Put("/template", h.ToggleWorkflowTemplate)
 					// Nodes
 					r.Get("/nodes", h.ListWorkflowNodes)
 					r.Post("/nodes", h.CreateWorkflowNode)

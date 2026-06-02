@@ -19,7 +19,8 @@
       "active": "Active",
       "draft": "Draft",
       "paused": "Paused",
-      "archived": "Archived"
+      "archived": "Archived",
+      "template": "Templates"
     }
   },
   "status": {

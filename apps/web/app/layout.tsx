@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
 import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
@@ -123,9 +123,12 @@ export default async function RootLayout({
 }) {
   const h = await headers();
   const headerLocale = h.get("x-multica-locale");
+  const cookieLocale = (await cookies()).get("multica-locale")?.value ?? null;
   const locale: SupportedLocale = isSupportedLocale(headerLocale)
     ? headerLocale
-    : DEFAULT_LOCALE;
+    : isSupportedLocale(cookieLocale)
+      ? cookieLocale
+      : DEFAULT_LOCALE;
   const resources = { [locale]: RESOURCES[locale] };
 
   return (

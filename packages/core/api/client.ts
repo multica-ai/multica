@@ -112,6 +112,7 @@ import type {
   ListWorkflowsResponse,
   ListWorkflowRunsResponse,
   MyWorkflowTaskResponse,
+  WorkflowAdmin,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -175,6 +176,8 @@ import {
   EMPTY_WORKFLOW_RUN,
   MyWorkflowTasksResponseSchema,
   EMPTY_MY_WORKFLOW_TASKS_RESPONSE,
+  WorkflowAdminsResponseSchema,
+  EMPTY_WORKFLOW_ADMINS_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1809,8 +1812,10 @@ export class ApiClient {
 
   // ── Workflows ──
 
-  async listWorkflows(wsId: string): Promise<ListWorkflowsResponse> {
-    const raw = await this.fetch<unknown>(`/api/workflows?workspace_id=${wsId}`);
+  async listWorkflows(wsId: string, template?: boolean): Promise<ListWorkflowsResponse> {
+    let url = `/api/workflows?workspace_id=${wsId}`;
+    if (template !== undefined) url += `&template=${template}`;
+    const raw = await this.fetch<unknown>(url);
     return parseWithFallback(raw, ListWorkflowsResponseSchema, EMPTY_LIST_WORKFLOWS_RESPONSE, {
       endpoint: "GET /api/workflows",
     });
@@ -1946,6 +1951,46 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/my-tasks?workspace_id=${wsId}`);
     return parseWithFallback(raw, MyWorkflowTasksResponseSchema, EMPTY_MY_WORKFLOW_TASKS_RESPONSE, {
       endpoint: "GET /api/my-tasks",
+    });
+  }
+
+  async createWorkflowFromTemplate(templateId: string, title: string, description?: string): Promise<Workflow> {
+    return this.fetch("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify({ title, description, template_id: templateId }),
+    });
+  }
+
+  async toggleWorkflowTemplate(id: string, isTemplate: boolean): Promise<Workflow> {
+    return this.fetch(`/api/workflows/${id}/template`, {
+      method: "PUT",
+      body: JSON.stringify({ is_template: isTemplate }),
+    });
+  }
+
+  async listWorkflowAdmins(): Promise<WorkflowAdmin[]> {
+    const raw = await this.fetch<unknown>("/api/workflow-admins");
+    const parsed = parseWithFallback(raw, WorkflowAdminsResponseSchema, EMPTY_WORKFLOW_ADMINS_RESPONSE, {
+      endpoint: "GET /api/workflow-admins",
+    });
+    return parsed.admins;
+  }
+
+  async updateWorkflowAdmins(userIds: string[]): Promise<WorkflowAdmin[]> {
+    const raw = await this.fetch<unknown>("/api/workflow-admins", {
+      method: "PUT",
+      body: JSON.stringify({ user_ids: userIds }),
+    });
+    const parsed = parseWithFallback(raw, WorkflowAdminsResponseSchema, EMPTY_WORKFLOW_ADMINS_RESPONSE, {
+      endpoint: "PUT /api/workflow-admins",
+    });
+    return parsed.admins;
+  }
+
+  async inviteWorkflowAdmin(email: string): Promise<WorkflowAdmin> {
+    return this.fetch("/api/workflow-admins/invite", {
+      method: "POST",
+      body: JSON.stringify({ email }),
     });
   }
 }

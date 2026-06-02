@@ -11,6 +11,7 @@ import {
   FlaskConical,
   Bell,
   Plug,
+  Workflow,
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
@@ -26,14 +27,18 @@ import { GitHubTab } from "./github-tab";
 import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
+import { WorkflowAdminsTab } from "./workflow-admins-tab";
+import { useWorkflowAdmins } from "@multica/core/workflows/queries";
+import { useAuthStore } from "@multica/core/auth";
 import { useT } from "../../i18n";
 
-const ACCOUNT_TAB_KEYS = ["profile", "preferences", "notifications", "tokens"] as const;
+const ACCOUNT_TAB_KEYS = ["profile", "preferences", "notifications", "tokens", "workflow-admins"] as const;
 const ACCOUNT_TAB_ICONS = {
   profile: User,
   preferences: SlidersHorizontal,
   notifications: Bell,
   tokens: Key,
+  "workflow-admins": Workflow,
 } as const;
 
 const WORKSPACE_TAB_KEYS = [
@@ -80,6 +85,9 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   const { t } = useT("settings");
   const workspaceName = useCurrentWorkspace()?.name;
   const navigation = useNavigation();
+  const user = useAuthStore((s) => s.user);
+  const { data: admins = [] } = useWorkflowAdmins();
+  const isWorkflowAdmin = user ? admins.some((a) => a.id === user.id) : false;
 
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
   // the default. Whitelisting also blocks junk like ?tab=<script> from
@@ -87,11 +95,11 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   const validTabs = React.useMemo(
     () =>
       new Set<string>([
-        ...ACCOUNT_TAB_KEYS,
+        ...ACCOUNT_TAB_KEYS.filter((k) => k !== "workflow-admins" || isWorkflowAdmin),
         ...Object.values(WORKSPACE_TAB_VALUES),
         ...(extraAccountTabs?.map((tab) => tab.value) ?? []),
       ]),
-    [extraAccountTabs],
+    [extraAccountTabs, isWorkflowAdmin],
   );
 
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
@@ -121,7 +129,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <span className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">
             {t(($) => $.page.my_account)}
           </span>
-          {ACCOUNT_TAB_KEYS.map((key) => {
+          {ACCOUNT_TAB_KEYS.filter((key) => key !== "workflow-admins" || isWorkflowAdmin).map((key) => {
             const Icon = ACCOUNT_TAB_ICONS[key];
             return (
               <TabsTrigger key={key} value={key}>
@@ -160,6 +168,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="preferences"><PreferencesTab /></TabsContent>
           <TabsContent value="notifications"><NotificationsTab /></TabsContent>
           <TabsContent value="tokens"><TokensTab /></TabsContent>
+          {isWorkflowAdmin && <TabsContent value="workflow-admins"><WorkflowAdminsTab /></TabsContent>}
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="github"><GitHubTab /></TabsContent>

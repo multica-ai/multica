@@ -2973,6 +2973,85 @@ func (h *Handler) syncSubIssueForNodeRun(ctx context.Context, nodeRun db.Multica
 	if err != nil {
 		slog.Warn("syncSubIssueForNodeRun: failed to update sub-issue status", "issue_id", uuidToString(issue.ID), "error", err)
 	}
+
+	// When node completes, inject current node's output into downstream
+	// sub-issue descriptions so the next agents can see what was produced.
+	if status == "done" {
+		h.injectDownstreamContext(ctx, run, nodeRun)
+	}
+}
+
+// injectDownstreamContext appends the current node run's output to downstream
+// sub-issue descriptions so the next agents have context from prior steps.
+func (h *Handler) injectDownstreamContext(ctx context.Context, run db.MulticaWorkflowRun, nodeRun db.MulticaWorkflowNodeRun) {
+	// Only inject if this node has output to share.
+	if len(nodeRun.WorkerOutput) == 0 {
+		return
+	}
+	var output map[string]any
+	if json.Unmarshal(nodeRun.WorkerOutput, &output) != nil {
+		return
+	}
+	text, ok := output["output"].(string)
+	if !ok || text == "" {
+		return
+	}
+	// Truncate long outputs.
+	if len(text) > 2000 {
+		text = text[:2000] + "..."
+	}
+
+	// Find downstream edges.
+	edges, err := h.Queries.ListWorkflowEdgesBySource(ctx, nodeRun.WorkflowNodeID)
+	if err != nil || len(edges) == 0 {
+		return
+	}
+
+	contextBlock := fmt.Sprintf("\n\n---\n\n## %s Output\n\n%s", nodeRun.NodeTitle, text)
+
+	for _, edge := range edges {
+		downstreamNr, err := h.Queries.ListWorkflowNodeRunsByRunAndNode(ctx, db.ListWorkflowNodeRunsByRunAndNodeParams{
+			WorkflowRunID:  run.ID,
+			WorkflowNodeID: edge.TargetNodeID,
+		})
+		if err != nil {
+			continue
+		}
+		issue, err := h.Queries.GetIssueByOrigin(ctx, db.GetIssueByOriginParams{
+			WorkspaceID: run.WorkspaceID,
+			OriginType:  pgtype.Text{String: "workflow", Valid: true},
+			OriginID:    downstreamNr.ID,
+		})
+		if err != nil {
+			continue
+		}
+
+		var currDesc string
+		if issue.Description.Valid {
+			currDesc = issue.Description.String
+		}
+		newDesc := currDesc + contextBlock
+
+		_, err = h.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
+			ID:            issue.ID,
+			Title:         pgtype.Text{String: issue.Title, Valid: true},
+			Description:   pgtype.Text{String: newDesc, Valid: true},
+			Status:        pgtype.Text{String: issue.Status, Valid: true},
+			Priority:      pgtype.Text{String: issue.Priority, Valid: true},
+			AssigneeType:  issue.AssigneeType,
+			AssigneeID:    issue.AssigneeID,
+			Position:      pgtype.Float8{Float64: issue.Position, Valid: true},
+			StartDate:     issue.StartDate,
+			DueDate:       issue.DueDate,
+			ParentIssueID: issue.ParentIssueID,
+			ProjectID:     issue.ProjectID,
+			WorkflowID:    issue.WorkflowID,
+			WorkflowRunID: issue.WorkflowRunID,
+		})
+		if err != nil {
+			slog.Warn("injectDownstreamContext: failed to update downstream sub-issue description", "issue_id", uuidToString(issue.ID), "error", err)
+		}
+	}
 }
 
 // handleWorkflowRunTerminal auto-completes or leaves the parent issue when a

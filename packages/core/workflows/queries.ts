@@ -1,4 +1,4 @@
-import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   CreateWorkflowRequest,
@@ -19,6 +19,8 @@ export const workflowKeys = {
   nodeRuns: (wsId: string, workflowId: string, runId: string) => [...workflowKeys.run(wsId, workflowId, runId), "node-runs"] as const,
   nodeRunsAll: () => ["workflows", "node-runs"] as const,
   myTasks: (wsId: string) => [...workflowKeys.all(wsId), "my-tasks"] as const,
+  templates: () => ["templates"] as const,
+  admins: () => ["workflow-admins"] as const,
 };
 
 // ── Queries ──
@@ -235,6 +237,54 @@ export function useSkipNodeRun(wsId: string) {
     mutationFn: (nodeRunId: string) => api.skipNodeRun(nodeRunId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.myTasks(wsId) });
+    },
+  });
+}
+
+export function workflowTemplateListOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workflowKeys.templates(),
+    queryFn: () => api.listWorkflows(wsId, true),
+  });
+}
+
+export function useCreateWorkflowFromTemplate(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ templateId, title, description }: { templateId: string; title: string; description?: string }) =>
+      api.createWorkflowFromTemplate(templateId, title, description),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.list(wsId) });
+    },
+  });
+}
+
+export function useToggleWorkflowTemplate(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, isTemplate }: { id: string; isTemplate: boolean }) =>
+      api.toggleWorkflowTemplate(id, isTemplate),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.list(wsId) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.detail(wsId, vars.id) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.templates() });
+    },
+  });
+}
+
+export function useWorkflowAdmins() {
+  return useQuery({
+    queryKey: workflowKeys.admins(),
+    queryFn: () => api.listWorkflowAdmins(),
+  });
+}
+
+export function useUpdateWorkflowAdmins() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (userIds: string[]) => api.updateWorkflowAdmins(userIds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.admins() });
     },
   });
 }
