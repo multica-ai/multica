@@ -303,6 +303,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Agent lists can be filtered by runtime machine, so teams can quickly find the agents tied to a device or local service",
           "SMTP relays now support secure SMTPS connections on port 465",
           "OpenCode runtimes can use MCP settings saved on an agent",
+          "OpenCode agents now expose model variants as thinking controls and pass the selected effort through the runtime",
         ],
         improvements: [
           "Mobile Issue headers now use cleaner controls that stay easier to reach on small screens",

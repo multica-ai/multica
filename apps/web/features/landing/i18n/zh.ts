@@ -303,6 +303,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "智能体列表可以按运行机器筛选，更快找到绑定到某台设备或本机运行服务的智能体",
           "邮件发送服务现在支持安全的 465 端口连接",
           "OpenCode 运行环境可以使用智能体里保存的 MCP 设置",
+          "OpenCode 智能体现在会把模型 variant 显示为思考强度控制，并把选择结果传给运行时",
         ],
         improvements: [
           "移动端 Issue 顶部操作更清晰，小屏幕上也更容易点击",

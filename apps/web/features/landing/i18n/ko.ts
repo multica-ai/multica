@@ -278,6 +278,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
             "에이전트 목록을 런타임 머신별로 필터링해 특정 기기나 로컬 서비스에 연결된 에이전트를 더 빨리 찾을 수 있습니다.",
             "메일 발송 설정에서 465번 포트의 보안 SMTP 연결을 사용할 수 있습니다.",
             "OpenCode 런타임이 에이전트에 저장된 MCP 설정을 사용할 수 있습니다.",
+            "OpenCode 에이전트는 모델 variant를 thinking control로 표시하고 선택한 값을 런타임에 전달합니다.",
           ],
           improvements: [
             "모바일 이슈 상단의 조작 버튼이 더 정돈되어 작은 화면에서도 다루기 쉽습니다.",

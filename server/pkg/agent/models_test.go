@@ -284,6 +284,56 @@ nonprefixed-line
 	}
 }
 
+func TestParseOpenCodeModelsVerboseVariants(t *testing.T) {
+	input := `openai/gpt-5
+{
+  "id": "gpt-5",
+  "name": "GPT-5",
+  "reasoning": true,
+  "variants": {
+    "high": { "reasoningEffort": "high" },
+    "low": { "reasoningEffort": "low" },
+    "xhigh": { "reasoningEffort": "xhigh" },
+    "fast-mode": { "reasoningEffort": "low" },
+    "disabled": { "disabled": true }
+  }
+}
+anthropic/claude-sonnet-4-6
+{
+  "id": "claude-sonnet-4-6",
+  "reasoning": true,
+  "variants": {
+    "max": { "thinking": { "type": "enabled", "budgetTokens": 32000 } },
+    "high": { "thinking": { "type": "enabled", "budgetTokens": 16000 } }
+  }
+}
+`
+	models := parseOpenCodeModels(input)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d: %+v", len(models), models)
+	}
+	if models[0].Thinking == nil {
+		t.Fatalf("expected first model to expose thinking variants")
+	}
+	got := make([]string, 0, len(models[0].Thinking.SupportedLevels))
+	for _, lvl := range models[0].Thinking.SupportedLevels {
+		got = append(got, lvl.Value)
+		if lvl.Value == "xhigh" && lvl.Label != "Extra high" {
+			t.Errorf("xhigh label: got %q, want Extra high", lvl.Label)
+		}
+		if lvl.Value == "fast-mode" && lvl.Label != "Fast Mode" {
+			t.Errorf("custom variant label: got %q, want Fast Mode", lvl.Label)
+		}
+	}
+	want := []string{"low", "high", "xhigh", "fast-mode"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("variant order/values: got %v, want %v", got, want)
+	}
+	if models[1].Thinking == nil || len(models[1].Thinking.SupportedLevels) != 2 {
+		t.Fatalf("expected second model variants, got %+v", models[1].Thinking)
+	}
+}
+
 func TestParsePiModels(t *testing.T) {
 	input := `openai:gpt-4o
 anthropic:claude-opus-4-7

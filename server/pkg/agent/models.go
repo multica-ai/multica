@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -82,11 +83,10 @@ const modelCacheTTL = 60 * time.Second
 // openclaw) it shells out with caching and falls back to the static
 // list on failure.
 //
-// For claude and codex, the static catalog is augmented with per-model
-// thinking-level options discovered from the local CLI (see
-// discoverClaudeThinking / discoverCodexThinking). Discovery failures
-// silently leave Thinking == nil on each entry, which the UI treats
-// as "no picker for this model" rather than blocking model selection.
+// For claude, codex, and opencode, the catalog is augmented with per-model
+// thinking-level options discovered from the local CLI. Discovery failures
+// silently leave Thinking == nil on each entry, which the UI treats as
+// "no picker for this model" rather than blocking model selection.
 //
 // executablePath lets the caller point at a non-default binary; pass
 // "" to use the provider's default name on PATH.
@@ -330,9 +330,12 @@ func isOpenAIReasoningSeriesID(id string) bool {
 
 // ── Dynamic discovery ──
 
-// discoverOpenCodeModels runs `opencode models` and parses its tabular
-// output. The CLI prints `provider/model` rows; we emit them verbatim
-// as IDs so what the user sees matches what `--model` accepts.
+// discoverOpenCodeModels runs `opencode models --verbose` and parses its
+// output. The CLI prints `provider/model` rows, followed by JSON metadata
+// when verbose mode is enabled; we emit IDs verbatim so what the user sees
+// matches what `--model` accepts, and project any model `variants` into the
+// thinking-level picker because OpenCode's `run --variant` flag is its
+// provider-specific reasoning-effort surface.
 // On any failure (CLI missing, parse error, timeout) we fall back to
 // an empty list so the creatable UI still works.
 func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model, error) {
@@ -344,51 +347,182 @@ func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, executablePath, "models")
+	cmd := exec.CommandContext(runCtx, executablePath, "models", "--verbose")
 	hideAgentWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
-		return []Model{}, nil
+		cmd = exec.CommandContext(runCtx, executablePath, "models")
+		hideAgentWindow(cmd)
+		out, err = cmd.Output()
+		if err != nil {
+			return []Model{}, nil
+		}
 	}
 	return parseOpenCodeModels(string(out)), nil
 }
 
 // parseOpenCodeModels accepts the `opencode models` text output and
-// extracts IDs. Output format (v0.x): a header row followed by rows
-// whose first whitespace-delimited field is `provider/model`.
+// extracts IDs. Non-verbose output is one `provider/model` row per line.
+// Verbose output appends a pretty-printed JSON object after each ID; when
+// that object contains `variants`, each enabled variant becomes a thinking
+// level that the backend later passes through `opencode run --variant`.
 func parseOpenCodeModels(output string) []Model {
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	var models []Model
-	seen := map[string]bool{}
+	indexByID := map[string]int{}
+	currentID := ""
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
-		first := strings.Fields(line)
-		if len(first) == 0 {
+		if id := parseOpenCodeModelIDLine(line); id != "" {
+			if _, seen := indexByID[id]; seen {
+				currentID = id
+				continue
+			}
+			provider := ""
+			if i := strings.Index(id, "/"); i > 0 {
+				provider = id[:i]
+			}
+			indexByID[id] = len(models)
+			models = append(models, Model{ID: id, Label: id, Provider: provider})
+			currentID = id
 			continue
 		}
-		id := first[0]
-		if !strings.Contains(id, "/") {
+
+		if currentID == "" || !strings.HasPrefix(line, "{") {
 			continue
 		}
-		// Skip the header row (opencode prints e.g. PROVIDER/MODEL in caps).
-		if id == strings.ToUpper(id) {
+		raw := collectOpenCodeModelJSON(scanner, line)
+		if !json.Valid(raw) {
+			currentID = ""
 			continue
 		}
-		if seen[id] {
-			continue
+		if idx, ok := indexByID[currentID]; ok {
+			annotateOpenCodeModelMetadata(&models[idx], raw)
 		}
-		seen[id] = true
-		provider := ""
-		if i := strings.Index(id, "/"); i > 0 {
-			provider = id[:i]
-		}
-		models = append(models, Model{ID: id, Label: id, Provider: provider})
+		currentID = ""
 	}
 	return models
+}
+
+func parseOpenCodeModelIDLine(line string) string {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return ""
+	}
+	id := fields[0]
+	if !strings.Contains(id, "/") {
+		return ""
+	}
+	// Skip header rows such as PROVIDER/MODEL.
+	if id == strings.ToUpper(id) {
+		return ""
+	}
+	return id
+}
+
+func collectOpenCodeModelJSON(scanner *bufio.Scanner, firstLine string) []byte {
+	var b strings.Builder
+	b.WriteString(firstLine)
+	for !json.Valid([]byte(b.String())) && scanner.Scan() {
+		b.WriteByte('\n')
+		b.WriteString(scanner.Text())
+	}
+	return []byte(b.String())
+}
+
+type opencodeModelMetadata struct {
+	Reasoning bool                            `json:"reasoning"`
+	Variants  map[string]opencodeModelVariant `json:"variants"`
+}
+
+type opencodeModelVariant struct {
+	Disabled        bool            `json:"disabled"`
+	ReasoningEffort string          `json:"reasoningEffort"`
+	Thinking        json.RawMessage `json:"thinking"`
+}
+
+var opencodeVariantLabel = map[string]string{
+	"none":    "None",
+	"minimal": "Minimal",
+	"low":     "Low",
+	"medium":  "Medium",
+	"high":    "High",
+	"xhigh":   "Extra high",
+	"max":     "Max",
+}
+
+var opencodeVariantOrder = map[string]int{
+	"none":    0,
+	"minimal": 1,
+	"low":     2,
+	"medium":  3,
+	"high":    4,
+	"xhigh":   5,
+	"max":     6,
+}
+
+func annotateOpenCodeModelMetadata(model *Model, raw []byte) {
+	var meta opencodeModelMetadata
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return
+	}
+	if !meta.Reasoning && !openCodeVariantsLookReasoning(meta.Variants) {
+		return
+	}
+	levels := openCodeThinkingLevelsFromVariants(meta.Variants)
+	if len(levels) == 0 {
+		return
+	}
+	model.Thinking = &ModelThinking{SupportedLevels: levels}
+}
+
+func openCodeVariantsLookReasoning(variants map[string]opencodeModelVariant) bool {
+	for name, variant := range variants {
+		if _, known := opencodeVariantOrder[name]; known {
+			return true
+		}
+		if variant.ReasoningEffort != "" || len(variant.Thinking) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func openCodeThinkingLevelsFromVariants(variants map[string]opencodeModelVariant) []ThinkingLevel {
+	if len(variants) == 0 {
+		return nil
+	}
+	values := make([]string, 0, len(variants))
+	for value, variant := range variants {
+		if value == "" || variant.Disabled {
+			continue
+		}
+		values = append(values, value)
+	}
+	sort.Slice(values, func(i, j int) bool {
+		left, leftKnown := opencodeVariantOrder[values[i]]
+		right, rightKnown := opencodeVariantOrder[values[j]]
+		if leftKnown && rightKnown {
+			return left < right
+		}
+		if leftKnown != rightKnown {
+			return leftKnown
+		}
+		return values[i] < values[j]
+	})
+	levels := make([]ThinkingLevel, 0, len(values))
+	for _, value := range values {
+		label, ok := opencodeVariantLabel[value]
+		if !ok {
+			label = strings.Title(strings.ReplaceAll(value, "-", " ")) //nolint:staticcheck
+		}
+		levels = append(levels, ThinkingLevel{Value: value, Label: label})
+	}
+	return levels
 }
 
 // discoverPiModels runs `pi --list-models` and parses its output.
