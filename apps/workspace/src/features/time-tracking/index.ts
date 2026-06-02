@@ -6,5 +6,6 @@ export { useTimeTrackingSync } from "./hooks/use-time-tracking-sync";
 export { LiveDuration, formatDuration, getElapsedSeconds } from "./components/LiveDuration";
 export { GlobalTimerWidget } from "./components/GlobalTimerWidget";
 export { IssueTimerSection } from "./components/IssueTimerSection";
+export { PomodoroStatusPill } from "./components/PomodoroStatusPill";
 export { TimeEntryEditSheet } from "./components/TimeEntryEditSheet";
 export { TeamTimePage } from "./pages/TeamTimePage";

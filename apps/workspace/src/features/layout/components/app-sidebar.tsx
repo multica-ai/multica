@@ -5,11 +5,8 @@ import {
   LogOut,
   Plus,
   Check,
-  SquarePen,
-  Search,
 } from "lucide-react";
 import { WorkspaceAvatar } from "@/features/workspace";
-import { useIssueDraftStore } from "@/features/issues/stores/draft-store";
 import {
   Sidebar,
   SidebarContent,
@@ -38,20 +35,12 @@ import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
 import { useInboxStore } from "@/features/inbox";
 import { useModalStore } from "@/features/modals";
-import { useSearchStore } from "@/features/search";
 import { Link, usePathname, useRouter } from "@/shared/router";
 import {
   isWorkspaceNavActive,
-  primaryNav,
-  workspaceNav,
+  navigationGroups,
+  workspaceFooterNav,
 } from "../navigation";
-import { GlobalTimerWidget } from "@/features/time-tracking";
-
-function DraftDot() {
-  const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
-  if (!hasDraft) return null;
-  return <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />;
-}
 
 export function AppSidebar() {
   const pathname = usePathname();
@@ -79,166 +68,120 @@ export function AppSidebar() {
   return (
     <Sidebar variant="inset">
       <SidebarHeader className="py-3">
-        <div className="flex items-center gap-4">
-          <SidebarMenu className="min-w-0 flex-1">
-            <SidebarMenuItem>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <SidebarMenuButton aria-label="Workspace menu">
-                      <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
-                      <span className="flex-1 truncate font-medium">
-                        {workspace?.name ?? "Multica"}
-                      </span>
-                      <ChevronDown className="size-3 text-muted-foreground" />
-                    </SidebarMenuButton>
-                  }
-                />
-                <DropdownMenuContent
-                  className="w-52"
-                  align="start"
-                  side="bottom"
-                  sideOffset={4}
-                >
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel className="text-xs text-muted-foreground">
-                      {user?.email}
-                    </DropdownMenuLabel>
-                  </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup className="group/ws-section">
-                    <DropdownMenuLabel className="flex items-center text-xs text-muted-foreground">
-                      Workspaces
-                      <Tooltip>
-                        <TooltipTrigger
-                          className="ml-auto opacity-0 group-hover/ws-section:opacity-100 transition-opacity rounded hover:bg-accent p-0.5"
-                          onClick={() => useModalStore.getState().open("create-workspace")}
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                        </TooltipTrigger>
-                        <TooltipContent side="right">
-                          Create workspace
-                        </TooltipContent>
-                      </Tooltip>
-                    </DropdownMenuLabel>
-                    {workspaces.map((ws) => (
-                      <DropdownMenuItem
-                        key={ws.id}
-                        onClick={() => {
-                          closeMobileSidebar();
-                          if (ws.id !== workspace?.id) {
-                            switchWorkspace(ws.id);
-                          }
-                        }}
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <SidebarMenuButton aria-label="Workspace menu">
+                    <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
+                    <span className="flex-1 truncate font-medium">
+                      {workspace?.name ?? "Multica"}
+                    </span>
+                    <ChevronDown className="size-3 text-muted-foreground" />
+                  </SidebarMenuButton>
+                }
+              />
+              <DropdownMenuContent
+                className="w-52"
+                align="start"
+                side="bottom"
+                sideOffset={4}
+              >
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    {user?.email}
+                  </DropdownMenuLabel>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup className="group/ws-section">
+                  <DropdownMenuLabel className="flex items-center text-xs text-muted-foreground">
+                    Workspaces
+                    <Tooltip>
+                      <TooltipTrigger
+                        className="ml-auto opacity-0 group-hover/ws-section:opacity-100 transition-opacity rounded hover:bg-accent p-0.5"
+                        onClick={() => useModalStore.getState().open("create-workspace")}
                       >
-                        <WorkspaceAvatar name={ws.name} size="sm" />
-                        <span className="flex-1 truncate">{ws.name}</span>
-                        {ws.id === workspace?.id && (
-                          <Check className="h-3.5 w-3.5 text-primary" />
-                        )}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </SidebarMenuItem>
-          </SidebarMenu>
-          <Tooltip>
-            <TooltipTrigger
-              className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-background text-foreground shadow-sm hover:bg-accent"
-              aria-label="Search"
-              onClick={() => {
-                closeMobileSidebar();
-                useSearchStore.getState().open();
-              }}
-            >
-              <Search className="size-3.5" />
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Search (⌘K)</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-background text-foreground shadow-sm hover:bg-accent"
-              aria-label="New issue"
-              onClick={() => {
-                closeMobileSidebar();
-                useModalStore.getState().open("create-issue");
-              }}
-            >
-              <SquarePen className="size-3.5" />
-              <DraftDot />
-            </TooltipTrigger>
-            <TooltipContent side="bottom">New issue</TooltipContent>
-          </Tooltip>
-        </div>
+                        <Plus className="h-3.5 w-3.5" />
+                      </TooltipTrigger>
+                      <TooltipContent side="right">Create workspace</TooltipContent>
+                    </Tooltip>
+                  </DropdownMenuLabel>
+                  {workspaces.map((ws) => (
+                    <DropdownMenuItem
+                      key={ws.id}
+                      onClick={() => {
+                        closeMobileSidebar();
+                        if (ws.id !== workspace?.id) {
+                          switchWorkspace(ws.id);
+                        }
+                      }}
+                    >
+                      <WorkspaceAvatar name={ws.name} size="sm" />
+                      <span className="flex-1 truncate">{ws.name}</span>
+                      {ws.id === workspace?.id && (
+                        <Check className="h-3.5 w-3.5 text-primary" />
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu className="gap-0.5">
-              {primaryNav.map((item) => {
-                const isActive = isWorkspaceNavActive(pathname, item.href);
-                return (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton
-                      isActive={isActive}
-                      render={<Link href={item.href} />}
-                      className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      onClick={closeMobileSidebar}
-                    >
-                      <item.icon />
-                      <span>{item.label}</span>
-                      {item.label === "Inbox" && unreadCount > 0 && (
-                        <span className="ml-auto text-xs">
-                          {unreadCount > 99 ? "99+" : unreadCount}
-                        </span>
-                      )}
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Workspace</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu className="gap-0.5">
-              {workspaceNav.map((item) => {
-                const isActive = isWorkspaceNavActive(pathname, item.href);
-                return (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton
-                      isActive={isActive}
-                      render={<Link href={item.href} />}
-                      className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      onClick={closeMobileSidebar}
-                    >
-                      <item.icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {navigationGroups.map((group) => (
+          <SidebarGroup key={group.label}>
+            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                {group.items.map((item) => {
+                  const isActive = isWorkspaceNavActive(pathname, item.href);
+                  return (
+                    <SidebarMenuItem key={item.href}>
+                      <SidebarMenuButton
+                        isActive={isActive}
+                        render={<Link href={item.href} />}
+                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        onClick={closeMobileSidebar}
+                      >
+                        <item.icon />
+                        <span>{item.label}</span>
+                        {item.label === "Inbox" && unreadCount > 0 && (
+                          <span className="ml-auto text-xs">
+                            {unreadCount > 99 ? "99+" : unreadCount}
+                          </span>
+                        )}
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>
-          <GlobalTimerWidget />
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              className="text-muted-foreground hover:text-destructive"
-              onClick={logout}
-            >
-              <LogOut />
-              <span>Log out</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
+          {workspaceFooterNav.map((item) => (
+            <SidebarMenuItem key={item.href}>
+              <SidebarMenuButton
+                isActive={item.href !== "/logout" && isWorkspaceNavActive(pathname, item.href)}
+                render={item.href !== "/logout" ? <Link href={item.href} /> : undefined}
+                className={
+                  item.href === "/logout"
+                    ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
+                    : "text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                }
+                onClick={item.href === "/logout" ? logout : closeMobileSidebar}
+              >
+                {item.href === "/logout" ? <LogOut /> : <item.icon />}
+                <span>{item.label}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
         </SidebarMenu>
       </SidebarFooter>
       <SidebarRail />
