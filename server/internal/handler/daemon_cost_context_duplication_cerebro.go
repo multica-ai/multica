@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
@@ -17,7 +18,7 @@ import (
 
 const (
 	costSavingContextDuplication = "context_duplication"
-	costMetricTokens           = "tokens"
+	costMetricTokens             = "tokens"
 )
 
 // applyContextDuplicationSaving scores the composed runtime brief for duplicate
@@ -54,10 +55,17 @@ func (h *Handler) applyContextDuplicationSaving(
 		}
 	}
 
-	inspection := execenv.InspectMetaSkill("claude", envCtx)
+	// CEREBRO-PATCH(context-duplication-full-prompt): include repo prompt files in duplication totals.
+	repoURL := ""
+	if len(resp.Repos) > 0 {
+		repoURL = strings.TrimSpace(resp.Repos[0].URL)
+	}
+	repoSnap := execenv.LoadRepoPromptSnapshot(ctx, repoURL, strings.TrimSpace(resp.WorkDir))
+	inspection := execenv.InspectMetaSkill("claude", envCtx, repoSnap)
 	dup := inspection.Duplication
 
 	detail, _ := json.Marshal(map[string]any{
+		"composed_tokens":      inspection.ComposedTokens,
 		"duplicate_pct":        dup.DuplicatePct,
 		"top_overlap_sections": dup.TopOverlapSections,
 	})

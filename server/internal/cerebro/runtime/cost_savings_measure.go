@@ -34,6 +34,7 @@ const (
 // Metric units (CostSavingMetric in the registry).
 const (
 	metricPlatformCalls = "platform_calls"
+	metricInputTokens   = "input_tokens"
 	metricModelCost     = "model_cost"
 	metricContextTokens = "context_tokens"
 )
@@ -205,24 +206,25 @@ func measureRun(modes map[string]string, f CostSavingRunFacts, cheapModel string
 
 		switch key {
 		case savingSnapshotPrompt:
-			// Putting the issue + thread in the start prompt removes the per-run
-			// reads the agent would otherwise make. Baseline = those reads;
-			// effective = 0 (none left to make).
+			// Putting the issue + thread in the start prompt removes per-run tool
+			// fetches. Score as estimated input tokens (≈800 tokens per avoided read).
 			if f.InlinedContextReads <= 0 {
 				continue
 			}
 			m := base
-			m.Metric, m.Baseline, m.Effective = metricPlatformCalls, int64(f.InlinedContextReads), 0
+			avoidedTokens := int64(f.InlinedContextReads) * 800
+			m.Metric, m.Baseline, m.Effective = metricInputTokens, avoidedTokens, 0
 			out = append(out, m)
 
 		case savingBundledRead:
-			// Bundling collapses the separate context reads into a single call.
-			// Baseline = those reads; effective = 1 (the one bundled call).
+			// Bundling collapses separate reads into one call — score token delta.
 			if f.InlinedContextReads <= 1 {
 				continue
 			}
 			m := base
-			m.Metric, m.Baseline, m.Effective = metricPlatformCalls, int64(f.InlinedContextReads), 1
+			baseline := int64(f.InlinedContextReads) * 750
+			effective := int64(2200)
+			m.Metric, m.Baseline, m.Effective = metricInputTokens, baseline, effective
 			out = append(out, m)
 
 		case savingModelRouting:

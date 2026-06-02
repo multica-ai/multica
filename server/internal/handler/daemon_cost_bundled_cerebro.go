@@ -32,6 +32,11 @@ import (
 const (
 	costSavingBundledKey = "bundled_read"
 
+	// CEREBRO-PATCH(cost-optimization-token-metrics): measure bundled_read in estimated input tokens.
+	// Token estimates for separate multica reads vs one bundled issue-context call.
+	estimatedTokensPerSeparateRead = 750
+	estimatedTokensPerBundledCall  = 2200
+
 	// bundledReadBaseline is how many separate platform reads the single
 	// `multica issue context` call replaces: issue get + comment list +
 	// workspace members + issue labels. This mirrors the registry definition
@@ -70,12 +75,12 @@ func (h *Handler) applyBundledReadSaving(ctx context.Context, resp *AgentTaskRes
 }
 
 // bundledReadMeasurementParams builds the measurement row for one run. Baseline
-// is the separate reads the single bundled call replaces; effective is 1 (that
-// one call). "on" is an applied (real) save, "shadow" a would-save. The metric
-// is platform_calls, not dollars: daemon agents bill on a flat subscription, so
-// the honest unit is calls saved. Used by both the claim-time shadow path and
-// the endpoint's real-usage path so the two arms stay identically shaped.
+// is the estimated tokens if the agent made separate reads; effective is the
+// estimated tokens for one bundled call. Used by both shadow (claim-time) and
+// on (endpoint) paths so the two arms stay identically shaped.
 func bundledReadMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) cerebrodb.RecordCerebroCostOptimizationMeasurementParams {
+	baseline := int64(bundledReadBaseline) * estimatedTokensPerSeparateRead
+	effective := int64(estimatedTokensPerBundledCall)
 	return cerebrodb.RecordCerebroCostOptimizationMeasurementParams{
 		WorkspaceID:     workspaceID,
 		TaskID:          taskID,
@@ -83,9 +88,9 @@ func bundledReadMeasurementParams(workspaceID, taskID pgtype.UUID, mode string) 
 		Mode:            mode,
 		Applied:         mode == costSavingModeOn,
 		HeldOut:         false,
-		Metric:          costMetricPlatformCalls,
-		BaselineValue:   bundledReadBaseline,
-		EffectiveValue:  1,
+		Metric:          costMetricInputTokens,
+		BaselineValue:   baseline,
+		EffectiveValue:  effective,
 		SavedCents:      0,
 		ActualCostCents: 0,
 	}

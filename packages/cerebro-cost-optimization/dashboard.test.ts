@@ -189,7 +189,7 @@ describe("appliedValue", () => {
     ).toBe("9,000 tokens ($4.50)");
   });
 
-  it("shows native units for an unpriced applied saving", () => {
+  it("shows estimated tokens for a legacy call-based saving", () => {
     expect(
       appliedValue(
         saving({
@@ -198,6 +198,6 @@ describe("appliedValue", () => {
           applied: { savedUnits: 12, savedCents: 0, runCount: 4 },
         }),
       ),
-    ).toBe("12 platform calls");
+    ).toBe("9,600 tokens (est. from 12 avoided calls)");
   });
 });

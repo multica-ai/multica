@@ -95,25 +95,27 @@ func TestRenderIssueSnapshot_Caps(t *testing.T) {
 func TestSnapshotMeasurementParams(t *testing.T) {
 	t.Parallel()
 
+	// CEREBRO-PATCH(cost-optimization-token-metrics): snapshot_prompt records token deltas.
 	ws := parseUUID("44444444-4444-4444-4444-444444444444")
 	task := parseUUID("55555555-5555-5555-5555-555555555555")
 
-	on := snapshotMeasurementParams(ws, task, costSavingModeOn)
+	snapshot := "Issue #1: Test\n\nSome thread content for token estimate."
+	on := snapshotMeasurementParams(ws, task, costSavingModeOn, snapshot)
 	if !on.Applied || on.HeldOut {
 		t.Fatalf("on mode must be applied and not held out, got applied=%v held=%v", on.Applied, on.HeldOut)
 	}
-	if on.SavingKey != costSavingSnapshotKey || on.Metric != costMetricPlatformCalls {
+	if on.SavingKey != costSavingSnapshotKey || on.Metric != costMetricInputTokens {
 		t.Fatalf("unexpected key/metric: %+v", on)
 	}
-	if on.BaselineValue != snapshotInlinedReads || on.EffectiveValue != 0 {
-		t.Fatalf("expected baseline=%d effective=0, got baseline=%d effective=%d", snapshotInlinedReads, on.BaselineValue, on.EffectiveValue)
+	if on.BaselineValue <= 0 || on.EffectiveValue != 0 {
+		t.Fatalf("expected positive token baseline and effective=0, got baseline=%d effective=%d", on.BaselineValue, on.EffectiveValue)
 	}
 
-	shadow := snapshotMeasurementParams(ws, task, costSavingModeShadow)
+	shadow := snapshotMeasurementParams(ws, task, costSavingModeShadow, snapshot)
 	if shadow.Applied {
 		t.Fatalf("shadow mode must not be applied, got %+v", shadow)
 	}
-	if shadow.BaselineValue != snapshotInlinedReads {
-		t.Fatalf("shadow would-save baseline must still be %d, got %d", snapshotInlinedReads, shadow.BaselineValue)
+	if shadow.BaselineValue != on.BaselineValue {
+		t.Fatalf("shadow would-save baseline must match snapshot tokens, got %d vs %d", shadow.BaselineValue, on.BaselineValue)
 	}
 }
