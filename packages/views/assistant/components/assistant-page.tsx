@@ -1,19 +1,23 @@
 "use client";
 
-import React, { useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import React, { useCallback, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useChatStore } from "@multica/core/chat";
 import { useAuthStore } from "@multica/core/auth";
-import { chatSessionsOptions, chatMessagesOptions, pendingChatTaskOptions } from "@multica/core/chat/queries";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { chatSessionsOptions, chatMessagesOptions, pendingChatTaskOptions, chatKeys } from "@multica/core/chat/queries";
+import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useAgentPresenceDetail } from "@multica/core/agents";
+import { useCreateChatSession } from "@multica/core/chat/mutations";
 import { api } from "@multica/core/api";
 import { ChatMessageList } from "../../chat/components/chat-message-list";
 import { ChatInput } from "../../chat/components/chat-input";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { SessionList } from "./session-list";
+import { NewSessionDialog } from "./new-session-dialog";
 import { createLogger } from "@multica/core/logger";
+import type { ChatMessage } from "@multica/core/types";
 
 const logger = createLogger("assistant.page");
 
@@ -22,6 +26,10 @@ export function AssistantPage() {
   const user = useAuthStore((s) => s.user);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
+  const qc = useQueryClient();
+
+  // 新建会话对话框状态
+  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
 
   // 获取所有会话
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
@@ -41,6 +49,12 @@ export function AssistantPage() {
   // 获取所有 agents
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
 
+  // 获取所有 members
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+
+  // 获取所有运行时
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(runtimeListOptions(wsId));
+
   // 当前会话对应的 agent
   const currentSession = sessions.find((s) => s.id === activeSessionId);
   const currentAgent = agents.find((a) => a.id === currentSession?.agent_id);
@@ -50,6 +64,7 @@ export function AssistantPage() {
   const availability = presenceDetail === "loading" ? undefined : presenceDetail.availability;
 
   const { uploadWithToast } = useFileUpload(api);
+  const createSession = useCreateChatSession();
 
   // 发送消息
   const handleSend = useCallback(
@@ -104,6 +119,34 @@ export function AssistantPage() {
     [setActiveSession],
   );
 
+  // 创建新会话
+  const handleCreateSession = useCallback(
+    async (agentId: string, runtimeId: string) => {
+      logger.info("createSession", { agentId, runtimeId });
+
+      try {
+        const session = await createSession.mutateAsync({
+          agent_id: agentId,
+          title: "",
+        });
+
+        // 预先设置空消息列表，避免加载闪烁
+        qc.setQueryData<ChatMessage[]>(chatKeys.messages(session.id), []);
+
+        // 切换到新会话
+        setActiveSession(session.id);
+
+        // 关闭对话框
+        setShowNewSessionDialog(false);
+
+        logger.info("createSession success", { sessionId: session.id });
+      } catch (error) {
+        logger.error("createSession failed", { error });
+      }
+    },
+    [createSession, qc, setActiveSession],
+  );
+
   const showSkeleton = !!activeSessionId && messagesLoading;
   const hasMessages = messages.length > 0 || !!pendingTaskId;
 
@@ -115,6 +158,7 @@ export function AssistantPage() {
         agents={agents}
         activeSessionId={activeSessionId}
         onSelectSession={handleSelectSession}
+        onNewSession={() => setShowNewSessionDialog(true)}
       />
 
       {/* 右侧消息区域 */}
@@ -150,6 +194,18 @@ export function AssistantPage() {
           </div>
         )}
       </div>
+
+      {/* 新建会话对话框 */}
+      <NewSessionDialog
+        open={showNewSessionDialog}
+        onOpenChange={setShowNewSessionDialog}
+        agents={agents}
+        runtimes={runtimes}
+        runtimesLoading={runtimesLoading}
+        members={members}
+        currentUserId={user?.id ?? null}
+        onCreateSession={handleCreateSession}
+      />
     </div>
   );
 }

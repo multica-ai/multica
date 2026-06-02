@@ -41,6 +41,38 @@ export function AuthInitializer({
   useEffect(() => {
     const api = getApi();
 
+    // 🚀 DEV MODE: Skip authentication in development
+    if (process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_SKIP_AUTH === 'true') {
+      logger.info('DEV MODE: Skipping authentication');
+
+      // Create a mock user
+      const mockUser: User = {
+        id: 'dev-user-1',
+        email: 'dev@localhost',
+        name: 'Dev User',
+        avatar: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      // Create a mock workspace
+      const mockWorkspace = {
+        id: 'dev-workspace-1',
+        name: 'Dev Workspace',
+        slug: 'dev',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      // Set user and workspace
+      useAuthStore.setState({ user: mockUser, isLoading: false });
+      qc.setQueryData(workspaceKeys.list(), [mockWorkspace]);
+      setCurrentWorkspace(mockWorkspace.id, mockWorkspace.slug);
+      onLogin?.();
+
+      return;
+    }
+
     // Stamp attribution before anything else — the signup event (server-side)
     // reads this cookie, so it has to be present before the user hits submit.
     captureSignupSource();

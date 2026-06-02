@@ -12,6 +12,7 @@ interface SessionListProps {
   agents: Agent[];
   activeSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
+  onNewSession: () => void;
 }
 
 export function SessionList({
@@ -19,6 +20,7 @@ export function SessionList({
   agents,
   activeSessionId,
   onSelectSession,
+  onNewSession,
 }: SessionListProps) {
   // 按更新时间倒序排列
   const sortedSessions = [...sessions].sort(
@@ -37,10 +39,7 @@ export function SessionList({
           variant="ghost"
           size="icon-sm"
           className="rounded-full"
-          onClick={() => {
-            // TODO: 创建新会话
-            console.log("Create new session");
-          }}
+          onClick={onNewSession}
         >
           <Plus className="size-4" />
         </Button>
