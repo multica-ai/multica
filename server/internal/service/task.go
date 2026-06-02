@@ -1639,6 +1639,29 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 	})
 }
 
+
+// BroadcastTaskRerouted publishes a task:rerouted event when a task is
+// successfully moved to a fallback runtime during failover.
+func (s *TaskService) BroadcastTaskRerouted(ctx context.Context, task db.AgentTaskQueue) {
+	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
+	if workspaceID == "" {
+		return
+	}
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventTaskRerouted,
+		WorkspaceID: workspaceID,
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: map[string]any{
+			"task_id":        util.UUIDToString(task.ID),
+			"agent_id":       util.UUIDToString(task.AgentID),
+			"issue_id":       util.UUIDToString(task.IssueID),
+			"new_runtime_id": util.UUIDToString(task.RuntimeID),
+			"status":         task.Status,
+		},
+	})
+}
+
 // ResolveTaskWorkspaceID determines the workspace ID for a task.
 // For issue tasks, it comes from the issue. For chat tasks, from the chat session.
 // For autopilot tasks, from the autopilot via its run.

@@ -274,3 +274,37 @@ WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
   AND id NOT IN (SELECT DISTINCT runtime_id FROM agent)
 RETURNING id, workspace_id;
+
+-- name: UpdateRuntimePriority :one
+UPDATE agent_runtime
+SET priority = @priority, updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: UpdateRuntimeFailoverGroup :one
+UPDATE agent_runtime
+SET failover_group_id = @failover_group_id, updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: SelectFailoverCandidates :many
+-- Returns online runtimes in the same failover group as the offline runtime,
+-- ordered by priority DESC (highest priority first). Excludes the offline
+-- runtime itself. Used by the sweeper to find fallback runtimes for re-routing.
+SELECT ar.id, ar.priority, ar.workspace_id
+FROM agent_runtime ar
+WHERE ar.failover_group_id = @failover_group_id
+  AND ar.status = 'online'
+  AND ar.id != @offline_runtime_id
+ORDER BY ar.priority DESC, ar.created_at ASC;
+
+-- name: ReRouteQueuedTasksToRuntime :many
+-- Re-routes queued/dispatched tasks from the offline runtime to a fallback
+-- runtime. Only moves tasks that are still in a re-routable state (queued or
+-- dispatched — NOT running, since those are actively executing).
+UPDATE agent_task_queue
+SET runtime_id = @new_runtime_id,
+    status = 'queued'
+WHERE runtime_id = @offline_runtime_id
+  AND status IN ('queued', 'dispatched')
+RETURNING *;

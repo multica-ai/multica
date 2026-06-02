@@ -39,6 +39,7 @@ const (
 	EventTaskFailed                  = "task:failed"                    // running → failed
 	EventTaskMessage                 = "task:message"
 	EventTaskCancelled               = "task:cancelled"                 // * → cancelled
+	EventTaskRerouted                = "task:rerouted"                  // queued/dispatched → re-routed to fallback runtime
 
 	// Inbox events
 	EventInboxNew           = "inbox:new"

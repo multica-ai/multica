@@ -32,10 +32,12 @@ type AgentRuntimeResponse struct {
 	// Visibility is "private" (default — only the owner / workspace admins
 	// can bind agents) or "public" (any workspace member can). See migration
 	// 083 and canUseRuntimeForAgent.
-	Visibility string  `json:"visibility"`
-	LastSeenAt *string `json:"last_seen_at"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
+	Visibility      string  `json:"visibility"`
+	Priority        int32   `json:"priority"`
+	FailoverGroupID *string `json:"failover_group_id"`
+	LastSeenAt      *string `json:"last_seen_at"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -59,8 +61,10 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		DeviceInfo:   rt.DeviceInfo,
 		Metadata:     metadata,
 		OwnerID:      uuidToPtr(rt.OwnerID),
-		Visibility:   rt.Visibility,
-		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
+		Visibility:      rt.Visibility,
+		Priority:        rt.Priority,
+		FailoverGroupID: uuidToPtr(rt.FailoverGroupID),
+		LastSeenAt:      timestampToPtr(rt.LastSeenAt),
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),
 	}

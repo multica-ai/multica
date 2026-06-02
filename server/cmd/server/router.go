@@ -611,7 +611,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// `runtime_has_active_agents` and the user confirmed the
 					// cascade plan.
 					r.Post("/archive-agents-and-delete", h.ArchiveAgentsAndDeleteRuntime)
+					r.Patch("/priority", h.SetRuntimePriority)
+					r.Get("/failover-status", h.GetRuntimeFailoverStatus)
 				})
+				// Failover groups (workspace-scoped CRUD)
+				r.Get("/failover-groups", h.ListFailoverGroups)
+				r.Post("/failover-groups", h.CreateFailoverGroup)
+				r.Delete("/failover-groups/{groupId}", h.DeleteFailoverGroup)
 			})
 
 
