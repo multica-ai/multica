@@ -82,6 +82,7 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(concurrencyCmd)
 
 	initHelp(rootCmd)
 }

@@ -681,3 +681,35 @@ SET status = CASE WHEN EXISTS (
     updated_at = now()
 WHERE a.id = $1
 RETURNING *;
+
+-- name: GetWorkspaceConcurrencyStats :one
+-- Returns real-time concurrency metrics for a workspace: active (running +
+-- dispatched + waiting), queued, and completed/failed counts over the last
+-- hour. Used by the /api/workspaces/{id}/concurrency monitoring endpoint.
+SELECT
+    COUNT(*) FILTER (WHERE atq.status IN ('running', 'dispatched', 'waiting_local_directory'))::int AS active_count,
+    COUNT(*) FILTER (WHERE atq.status = 'queued')::int AS queued_count,
+    COUNT(*) FILTER (WHERE atq.status = 'completed' AND atq.completed_at > now() - INTERVAL '1 hour')::int AS completed_last_hour,
+    COUNT(*) FILTER (WHERE atq.status = 'failed' AND atq.completed_at > now() - INTERVAL '1 hour')::int AS failed_last_hour
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = $1
+  AND (atq.status IN ('running', 'dispatched', 'waiting_local_directory', 'queued')
+       OR (atq.status IN ('completed', 'failed') AND atq.completed_at > now() - INTERVAL '1 hour'));
+
+-- name: GetWorkspaceAgentConcurrencyDetail :many
+-- Returns per-agent concurrency utilization for a workspace: each agent's
+-- max_concurrent_tasks, current running count, and queued count. Used by
+-- the monitoring endpoint to show which agents are at capacity.
+SELECT
+    a.id AS agent_id,
+    a.name AS agent_name,
+    a.max_concurrent_tasks,
+    COUNT(*) FILTER (WHERE atq.status IN ('running', 'dispatched', 'waiting_local_directory'))::int AS running_count,
+    COUNT(*) FILTER (WHERE atq.status = 'queued')::int AS queued_count
+FROM agent a
+LEFT JOIN agent_task_queue atq ON atq.agent_id = a.id
+    AND atq.status IN ('running', 'dispatched', 'waiting_local_directory', 'queued')
+WHERE a.workspace_id = $1 AND a.archived_at IS NULL
+GROUP BY a.id, a.name, a.max_concurrent_tasks
+ORDER BY a.name;

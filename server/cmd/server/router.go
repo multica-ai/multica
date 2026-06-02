@@ -340,6 +340,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// the handler strips the management handle and adds a
 					// can_manage hint so the UI can gate connect/disconnect.
 					r.Get("/github/installations", h.ListGitHubInstallations)
+				r.Get("/concurrency", h.GetConcurrencyStats)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
